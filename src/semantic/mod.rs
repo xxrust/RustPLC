@@ -483,13 +483,18 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
         return Err(errors);
     };
 
+    let task_defined_steps = collect_task_steps(tasks);
+
     let mut task_on_complete_targets = HashMap::<String, Option<State>>::new();
     for task in &tasks.tasks {
         let on_complete_target = match &task.on_complete {
-            Some(OnCompleteDirective::Goto { step }) => {
-                let line = task.on_complete_line.unwrap_or(task.line);
-                resolve_task_target(step, line, &task_initial_states, &mut errors, "on_complete")
-            }
+            Some(OnCompleteDirective::Goto { target }) => resolve_task_target(
+                target,
+                &task_initial_states,
+                &task_defined_steps,
+                &mut errors,
+                "on_complete",
+            ),
             _ => None,
         };
         task_on_complete_targets.insert(task.name.clone(), on_complete_target);
@@ -516,6 +521,7 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
                     block,
                     completion_target.clone(),
                     &task_initial_states,
+                    &task_defined_steps,
                     &mut errors,
                     analyzed.actions.clone(),
                 );
@@ -531,6 +537,7 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
                     block,
                     completion_target.clone(),
                     &task_initial_states,
+                    &task_defined_steps,
                     &mut errors,
                     analyzed.actions.clone(),
                 );
@@ -538,9 +545,9 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
 
             for goto in &analyzed.gotos {
                 if let Some(target) = resolve_task_target(
-                    &goto.step,
-                    goto.line,
+                    goto,
                     &task_initial_states,
+                    &task_defined_steps,
                     &mut errors,
                     "goto",
                 ) {
@@ -555,13 +562,12 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
             }
 
             for if_else in &analyzed.if_elses {
-                let line = step.line.max(1);
                 let expr = condition_to_expression(&if_else.condition);
 
                 if let Some(then_target) = resolve_task_target(
                     &if_else.then_goto,
-                    line,
                     &task_initial_states,
+                    &task_defined_steps,
                     &mut errors,
                     "if/else then goto",
                 ) {
@@ -578,8 +584,8 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
 
                 if let Some(else_target) = resolve_task_target(
                     &if_else.else_goto,
-                    line,
                     &task_initial_states,
+                    &task_defined_steps,
                     &mut errors,
                     "if/else else goto",
                 ) {
@@ -620,9 +626,9 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
 
             for (timeout_index, timeout) in analyzed.timeouts.iter().enumerate() {
                 if let Some(target) = resolve_task_target(
-                    &timeout.target.step,
-                    timeout.target.line,
+                    &timeout.target,
                     &task_initial_states,
+                    &task_defined_steps,
                     &mut errors,
                     "timeout -> goto",
                 ) {
@@ -747,8 +753,8 @@ struct AnalyzedStatements {
 #[derive(Debug, Clone)]
 struct IfElseSpec {
     condition: ConditionExpression,
-    then_goto: String,
-    else_goto: String,
+    then_goto: GotoDirective,
+    else_goto: GotoDirective,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1248,6 +1254,7 @@ fn build_parallel_block(
     block: &ParallelBlock,
     completion_target: Option<State>,
     task_initial_states: &HashMap<String, State>,
+    task_defined_steps: &HashMap<String, HashSet<String>>,
     errors: &mut Vec<PlcError>,
     parent_actions: Vec<TransitionAction>,
 ) {
@@ -1285,7 +1292,7 @@ fn build_parallel_block(
 
         for goto in &analyzed.gotos {
             if let Some(target) =
-                resolve_task_target(&goto.step, goto.line, task_initial_states, errors, "goto")
+                resolve_task_target(goto, task_initial_states, task_defined_steps, errors, "goto")
             {
                 builder.add_transition(
                     branch_state.clone(),
@@ -1298,13 +1305,12 @@ fn build_parallel_block(
         }
 
         for if_else in &analyzed.if_elses {
-            let line = task.line.max(1);
             let expr = condition_to_expression(&if_else.condition);
 
             if let Some(then_target) = resolve_task_target(
                 &if_else.then_goto,
-                line,
                 task_initial_states,
+                task_defined_steps,
                 errors,
                 "if/else then goto",
             ) {
@@ -1321,8 +1327,8 @@ fn build_parallel_block(
 
             if let Some(else_target) = resolve_task_target(
                 &if_else.else_goto,
-                line,
                 task_initial_states,
+                task_defined_steps,
                 errors,
                 "if/else else goto",
             ) {
@@ -1363,9 +1369,9 @@ fn build_parallel_block(
 
         for (timeout_index, timeout) in analyzed.timeouts.iter().enumerate() {
             if let Some(target) = resolve_task_target(
-                &timeout.target.step,
-                timeout.target.line,
+                &timeout.target,
                 task_initial_states,
+                task_defined_steps,
                 errors,
                 "timeout -> goto",
             ) {
@@ -1418,6 +1424,7 @@ fn build_parallel_block(
                 nested_parallel,
                 Some(join_state.clone()),
                 task_initial_states,
+                task_defined_steps,
                 errors,
                 analyzed.actions.clone(),
             );
@@ -1437,6 +1444,7 @@ fn build_parallel_block(
                 nested_race,
                 Some(join_state.clone()),
                 task_initial_states,
+                task_defined_steps,
                 errors,
                 analyzed.actions.clone(),
             );
@@ -1479,6 +1487,7 @@ fn build_race_block(
     block: &RaceBlock,
     completion_target: Option<State>,
     task_initial_states: &HashMap<String, State>,
+    task_defined_steps: &HashMap<String, HashSet<String>>,
     errors: &mut Vec<PlcError>,
     parent_actions: Vec<TransitionAction>,
 ) {
@@ -1515,9 +1524,9 @@ fn build_race_block(
             .as_ref()
             .and_then(|goto| {
                 resolve_task_target(
-                    &goto.step,
-                    goto.line,
+                    goto,
                     task_initial_states,
+                    task_defined_steps,
                     errors,
                     "race then goto",
                 )
@@ -1526,7 +1535,7 @@ fn build_race_block(
 
         for goto in &analyzed.gotos {
             if let Some(target) =
-                resolve_task_target(&goto.step, goto.line, task_initial_states, errors, "goto")
+                resolve_task_target(goto, task_initial_states, task_defined_steps, errors, "goto")
             {
                 builder.add_transition(
                     branch_state.clone(),
@@ -1539,13 +1548,12 @@ fn build_race_block(
         }
 
         for if_else in &analyzed.if_elses {
-            let line = task.line.max(1);
             let expr = condition_to_expression(&if_else.condition);
 
             if let Some(then_target) = resolve_task_target(
                 &if_else.then_goto,
-                line,
                 task_initial_states,
+                task_defined_steps,
                 errors,
                 "if/else then goto",
             ) {
@@ -1562,8 +1570,8 @@ fn build_race_block(
 
             if let Some(else_target) = resolve_task_target(
                 &if_else.else_goto,
-                line,
                 task_initial_states,
+                task_defined_steps,
                 errors,
                 "if/else else goto",
             ) {
@@ -1606,9 +1614,9 @@ fn build_race_block(
 
         for (timeout_index, timeout) in analyzed.timeouts.iter().enumerate() {
             if let Some(target) = resolve_task_target(
-                &timeout.target.step,
-                timeout.target.line,
+                &timeout.target,
                 task_initial_states,
+                task_defined_steps,
                 errors,
                 "timeout -> goto",
             ) {
@@ -1663,6 +1671,7 @@ fn build_race_block(
                 nested_parallel,
                 branch_completion_target.clone(),
                 task_initial_states,
+                task_defined_steps,
                 errors,
                 analyzed.actions.clone(),
             );
@@ -1682,6 +1691,7 @@ fn build_race_block(
                 nested_race,
                 branch_completion_target.clone(),
                 task_initial_states,
+                task_defined_steps,
                 errors,
                 analyzed.actions.clone(),
             );
@@ -1708,23 +1718,60 @@ fn build_race_block(
 }
 
 fn resolve_task_target(
-    target_task: &str,
-    line: usize,
+    target: &GotoDirective,
     task_initial_states: &HashMap<String, State>,
+    task_defined_steps: &HashMap<String, HashSet<String>>,
     errors: &mut Vec<PlcError>,
     source: &str,
 ) -> Option<State> {
-    let Some(state) = task_initial_states.get(target_task) else {
+    let line = target.line.max(1);
+    let Some(initial_state) = task_initial_states.get(&target.task) else {
         errors.push(PlcError::undefined_reference_with_reason(
             line,
             " task",
-            target_task,
+            &target.task,
             format!("{source} 目标必须是已定义 task 名称"),
         ));
         return None;
     };
 
-    Some(state.clone())
+    let Some(step) = &target.step else {
+        return Some(initial_state.clone());
+    };
+
+    let Some(steps) = task_defined_steps.get(&target.task) else {
+        errors.push(PlcError::undefined_reference_with_reason(
+            line,
+            " task",
+            &target.task,
+            format!("{source} 目标必须是已定义 task 名称"),
+        ));
+        return None;
+    };
+
+    if !steps.contains(step) {
+        let synthetic_hint = step.contains("__parallel_") || step.contains("__race_");
+        if synthetic_hint {
+            errors.push(PlcError::semantic(
+                line,
+                format!(
+                    "{source} 不允许跳转到 parallel/race 内部合成 step {}.{step}",
+                    target.task
+                ),
+            ));
+        } else {
+            errors.push(PlcError::semantic(
+                line,
+                format!("{source} 引用了未定义 step {}.{step}", target.task),
+            ));
+        }
+        return None;
+    }
+
+    Some(State {
+        task_name: target.task.clone(),
+        step_name: step.clone(),
+    })
 }
 
 fn action_to_transition_action(action: &ActionStatement) -> TransitionAction {
@@ -2555,6 +2602,38 @@ task init:
         assert!(
             errors[0].to_string().contains("未定义 task missing_task"),
             "错误消息应包含未定义 task 名称"
+        );
+    }
+
+    #[test]
+    fn rejects_goto_to_synthetic_parallel_step() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task main:
+    step start:
+        parallel:
+            branch_A:
+                action: log "A"
+    step jump:
+        goto main.start__parallel_1_fork
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能成功解析为 AST");
+        let errors = build_state_machine(&program).expect_err("跳转到合成 step 应报语义错误");
+
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("不允许跳转到 parallel/race 内部合成 step"),
+            "应提示不允许跳转到合成 step"
         );
     }
 

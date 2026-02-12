@@ -528,3 +528,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - The current if/else IR encoding uses plain condition strings (`<expr>` / `NOT(<expr>)`), which Safety/Liveness/Timing already handle without additional verifier-specific logic.
 ---
+## [2026-02-13 03:18:10 CST] - US-013
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended `goto` syntax to accept `task.step` targets in the grammar and parser.
+  - Updated AST `GotoDirective` to carry `task` + optional `step`, and propagated this through `timeout -> goto`, `race then goto`, `if/else` branches, and `on_complete: goto ...`.
+  - Enhanced semantic target resolution to support task-scoped step jumps, reject missing steps, and explicitly reject jumps to parallel/race synthetic steps.
+  - Added integration + semantic tests covering `goto task.step`, missing step diagnostics, and synthetic-step rejection.
+- Files changed
+  - `src/parser/plc.pest`, `src/parser/mod.rs`, `src/ast/mod.rs`, `src/semantic/mod.rs`, `tests/examples_integration.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Reuse `GotoDirective` for every jump-like construct (goto/timeout/on_complete/if_else/race then) so semantic resolution stays centralized.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - When extending a core grammar rule (like `goto_statement`), update all downstream AST holders and semantic resolution sites in one sweep to avoid partial feature support.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Synthetic step names contain `__parallel_` / `__race_`; using the original task step set for validation naturally blocks invalid jumps into internal control-flow states.
+---

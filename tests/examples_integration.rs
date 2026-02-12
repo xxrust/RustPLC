@@ -289,6 +289,86 @@ fn parses_if_else_demo_example_into_verified_ir_json() {
 }
 
 #[test]
+fn goto_task_step_jumps_to_named_step() {
+    let source = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task cycle:
+    step prep:
+        action: log "prep"
+    step press_down:
+        action: log "press"
+    on_complete: goto done
+
+task main:
+    step start:
+        goto cycle.press_down
+
+task done:
+    step finish:
+        action: log "done"
+"#;
+
+    let ir_json = compile_source_to_json(source).expect("goto task.step source should compile");
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+    assert!(
+        transitions.iter().any(|transition| {
+            transition["from"]["task_name"] == Value::String("main".to_string())
+                && transition["from"]["step_name"] == Value::String("start".to_string())
+                && transition["to"]["task_name"] == Value::String("cycle".to_string())
+                && transition["to"]["step_name"] == Value::String("press_down".to_string())
+        }),
+        "goto task.step should jump to the named step instead of the task initial step"
+    );
+
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
+fn goto_to_missing_step_reports_semantic_error() {
+    let source = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task cycle:
+    step prep:
+        action: log "prep"
+
+task main:
+    step start:
+        goto cycle.missing_step
+"#;
+
+    let errors = compile_source_to_json(source).expect_err("missing step should be a semantic error");
+    let joined = errors.join("\n");
+    assert!(
+        joined.contains("未定义 step cycle.missing_step"),
+        "error should mention the missing task.step target"
+    );
+}
+
+#[test]
 fn repeat_expansion_produces_same_verification_result_as_manual_unrolling() {
     let repeat_source = r#"
 [topology]

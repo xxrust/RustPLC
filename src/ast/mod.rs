@@ -161,8 +161,8 @@ pub enum StepStatement {
     Wait(WaitStatement),
     IfElse {
         condition: ConditionExpression,
-        then_goto: String,
-        else_goto: String,
+        then_goto: GotoDirective,
+        else_goto: GotoDirective,
     },
     Delay {
         duration_ms: u64,
@@ -240,7 +240,8 @@ pub struct TimeoutDirective {
 pub struct GotoDirective {
     #[serde(default)]
     pub line: usize,
-    pub step: String,
+    pub task: String,
+    pub step: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,6 +268,6 @@ pub struct RaceBranch {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "on_complete", rename_all = "snake_case")]
 pub enum OnCompleteDirective {
-    Goto { step: String },
+    Goto { target: GotoDirective },
     Unreachable,
 }

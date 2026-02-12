@@ -442,9 +442,9 @@ fn parse_if_else_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> 
         match part.as_rule() {
             Rule::simple_condition => condition = Some(parse_simple_condition(part)?),
             Rule::goto_statement if then_goto.is_none() => {
-                then_goto = Some(parse_goto_statement(part)?.step)
+                then_goto = Some(parse_goto_statement(part)?)
             }
-            Rule::goto_statement => else_goto = Some(parse_goto_statement(part)?.step),
+            Rule::goto_statement => else_goto = Some(parse_goto_statement(part)?),
             _ => {}
         }
     }
@@ -689,14 +689,23 @@ fn parse_timeout_statement(pair: Pair<Rule>) -> Result<TimeoutDirective, PlcErro
 
 fn parse_goto_statement(pair: Pair<Rule>) -> Result<GotoDirective, PlcError> {
     let line = line_of(&pair);
-    let step = pair
+    let target = pair
         .into_inner()
         .next()
-        .ok_or_else(|| PlcError::parse(line, "goto 缺少目标 step"))?
+        .ok_or_else(|| PlcError::parse(line, "goto 缺少目标"))?;
+
+    let mut identifiers = target
+        .into_inner()
+        .filter(|part| matches!(part.as_rule(), Rule::identifier));
+
+    let task = identifiers
+        .next()
+        .ok_or_else(|| PlcError::parse(line, "goto 缺少目标 task"))?
         .as_str()
         .to_string();
+    let step = identifiers.next().map(|part| part.as_str().to_string());
 
-    Ok(GotoDirective { line, step })
+    Ok(GotoDirective { line, task, step })
 }
 
 fn parse_parallel_block(pair: Pair<Rule>) -> Result<ParallelBlock, PlcError> {
@@ -800,7 +809,7 @@ fn parse_on_complete_statement(pair: Pair<Rule>) -> Result<OnCompleteDirective, 
     let raw = pair.as_str().to_string();
     if let Some(part) = pair.into_inner().next() {
         let goto = parse_goto_statement(part)?;
-        Ok(OnCompleteDirective::Goto { step: goto.step })
+        Ok(OnCompleteDirective::Goto { target: goto })
     } else {
         if raw.contains("unreachable") {
             Ok(OnCompleteDirective::Unreachable)
@@ -1481,7 +1490,8 @@ task ready:
         assert_eq!(init_task.steps.len(), 4);
         assert!(matches!(
             init_task.on_complete,
-            Some(OnCompleteDirective::Goto { ref step }) if step == "ready"
+            Some(OnCompleteDirective::Goto { ref target })
+                if target.task == "ready" && target.step.is_none()
         ));
 
         assert!(matches!(
@@ -1622,7 +1632,8 @@ task ready:
             .expect("应包含 ready task");
         assert!(matches!(
             ready_task.on_complete,
-            Some(OnCompleteDirective::Goto { ref step }) if step == "search"
+            Some(OnCompleteDirective::Goto { ref target })
+                if target.task == "search" && target.step.is_none()
         ));
     }
 
@@ -1770,10 +1781,48 @@ task main:
                 else_goto,
             } => {
                 assert_eq!(condition.left, "switch_A");
-                assert_eq!(then_goto, "grind_coarse");
-                assert_eq!(else_goto, "grind_fine");
+                assert_eq!(then_goto.task, "grind_coarse");
+                assert!(then_goto.step.is_none());
+                assert_eq!(else_goto.task, "grind_fine");
+                assert!(else_goto.step.is_none());
             }
             other => panic!("期望 IfElse 语句，实际为: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_goto_task_step_statement_into_ast() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task cycle:
+    step press_down:
+        action: log "press"
+
+task main:
+    step start:
+        goto cycle.press_down
+"#;
+
+        let program = parse_plc(input).expect("goto task.step 示例应能解析");
+        let step = &program
+            .tasks
+            .tasks
+            .iter()
+            .find(|task| task.name == "main")
+            .expect("应包含 main task")
+            .steps[0];
+
+        match step.statements.first() {
+            Some(StepStatement::Goto(goto)) => {
+                assert_eq!(goto.task, "cycle");
+                assert_eq!(goto.step.as_deref(), Some("press_down"));
+            }
+            other => panic!("期望 goto 语句，实际为: {other:?}"),
         }
     }
 
