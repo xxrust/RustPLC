@@ -147,41 +147,32 @@ cargo run --release -- examples/<filename>.plc
 - 如果验证失败，阅读错误信息，修复后重新验证，直到全部通过
 - 将最终通过验证的文件展示给工程师做最后确认
 
-**DSL 无延时原语的处理方案：**
+**DSL 延时（delay）与超时（timeout）：**
 
-DSL 没有 `delay` 或 `sleep` 原语。当工程师需要"延时N秒"时，使用以下替代方案（按优先级排列）：
+DSL 支持固定延时：
+- `delay: 2000ms` —— 编译为内部有界等待，Liveness 不会报死锁，Timing 会计入关键路径。
 
-1. **优先方案：用物理传感器替代延时** — 如果有传感器能检测到"动作完成"（如工件离开传感器范围），用 `wait: sensor == false` + `timeout` 保护。这在物理上更可靠。
-2. **等待对立条件 + timeout** — 如果有一个已知为 false 的信号（如选择开关的对立位置），用 `wait: opposite_signal == true` + `timeout: Nms -> goto next_task`。timeout 到期时自然跳转，实现延时效果。额外好处：如果对立条件意外变为 true（如操作员切换了开关），可以提前退出。
-3. **无合适对立条件时** — 创建一个 step，wait 一个永远不会满足的条件，然后用 timeout 跳转。但要注意 liveness 检查器会标记这个 wait。
+常见组合：
+- `timeout: 500ms -> goto fault_handler` —— 保护性上界逃生分支
+- 同一 step 中 `delay` + `timeout` 可以共存：timeout 作为保护性上界（例如 delay 300ms + timeout 1200ms）。
 
-向工程师说明这个限制，让工程师选择方案。
+**DSL repeat N 原语：**
 
-**DSL 无循环原语的处理方案：**
+DSL 支持 `repeat N:`，用于将一段 step 语句在语义阶段展开为 N 个顺序 step（`N` 必须在 `2..=100`）。限制：
+- 不允许嵌套 repeat
+- 不允许在 parallel/race 分支内部使用 repeat（需要时改为手动展开）
 
-DSL 没有 `for`/`while`/`repeat` 循环原语。当工程师需要"重复N次"时（如涂胶3遍、冲压2次），将循环展开为顺序步骤：
-
+示例：
 ```plc
-# 工程师说"涂胶缸来回涂3遍" → 展开为6个步骤
-step glue_1_out:
-    action: extend cyl_glue
-    wait: sensor_glue_ext == true
-    timeout: 300ms -> goto fault_handler
-step glue_1_back:
-    action: retract cyl_glue
-    wait: sensor_glue_ret == true
-    timeout: 300ms -> goto fault_handler
-step glue_2_out:
-    ...（同上）
-step glue_2_back:
-    ...
-step glue_3_out:
-    ...
-step glue_3_back:
-    ...
+step glue_cycle:
+    repeat 3:
+        action: extend cyl_glue
+        wait: sensor_glue_ext == true
+        timeout: 300ms -> goto fault_handler
+        action: retract cyl_glue
+        wait: sensor_glue_ret == true
+        timeout: 300ms -> goto fault_handler
 ```
-
-步骤命名用 `<动作>_<序号>_<方向>` 格式（如 `glue_1_out`, `glue_2_back`），保持清晰。向工程师确认重复次数后再展开。
 
 ---
 
@@ -201,15 +192,23 @@ step glue_3_back:
 |------|------|----------|------------------------------|
 | `digital_output` | 输出端口 (Y0, Y1...) | — | `on`, `off` |
 | `digital_input` | 输入端口 (X0, X1...) | `debounce` | `on`, `off` |
-| `solenoid_valve` | 电磁阀 | `connected_to`, `response_time` | `on`, `off` |
-| `cylinder` | 气缸 | `connected_to`, `stroke_time`, `retract_time` | `extended`, `retracted` |
+| `solenoid_valve` | 电磁阀 | `connected_to`, `response_time`, `states`(可选) | 默认 `on`, `off`（可用 `states: [...]` 自定义） |
+| `cylinder` | 气缸 | `connected_to`, `stroke_time`, `retract_time`, `states`(可选) | 默认 `extended`, `retracted`（可用 `states: [...]` 自定义） |
 | `motor` | 电机 | `connected_to`, `rated_speed`, `ramp_time` | `on`, `off` |
-| `sensor` | 传感器 | `connected_to`, `type`, `detects` | `on`, `off` + `detects` 声明的自定义状态 |
+| `sensor` | 传感器 | `connected_to`, `type`, `detects`, `states`(可选) | 默认 `on`, `off` + `detects` 声明的状态（可用 `states: [...]` 自定义） |
 
 状态在 `safety:` 约束中使用时格式为 `device.state`，例如：
 - `cyl_A.extended` — 气缸伸出状态
 - `motor_conveyor.on` — 电机运转状态
 - 不同类型设备的状态可以混合使用在 `conflicts_with` / `requires` 中
+
+当需要建模超过 2 个状态的设备（如三位电磁阀），在设备属性中声明自定义状态集：
+```plc
+device valve_3pos: solenoid_valve {
+    states: [extend, neutral, retract]
+}
+```
+声明后，该设备在 `safety:` / `detects:` 等需要 `device.state` 的位置将使用自定义状态集合（states 数量 > 8 会输出 warning，非错误）。
 
 ### 连接链规则
 
@@ -232,6 +231,7 @@ safety: cyl_press.extended requires cyl_clamp.extended
 
 # 时序：任务/步骤必须在指定时间内完成
 timing: task.cycle must_complete_within 8000ms
+timing: task.cycle must_complete_within_worst_case 12000ms
 
 # 因果链：信号传播路径必须在拓扑中连通
 causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
@@ -246,10 +246,18 @@ task <名称>:
         action: retract <气缸>         # 缩回
         action: set <设备> on/off      # 开关
         action: log "<消息>"           # 日志
+        delay: 2000ms                  # 固定延时（有界等待）
         wait: <传感器> == true          # 等待条件
-        timeout: 500ms -> goto <任务>   # 超时跳转
+        wait: A == true AND B == true  # AND 条件（不可与 OR 混用）
+        wait: A == true OR B == true   # OR 条件（不可与 AND 混用）
+        timeout: 500ms -> goto <任务>   # 超时跳转（goto 目标同下）
+        goto <任务>                     # 跳转到 task 首步
+        goto <任务>.<step>              # 跳转到 task 内指定 step
+        if: A == true goto T1 else: goto T2  # 条件分支（两条互补守卫）
+        repeat 3:                      # 重复块（2..=100，不允许嵌套/不允许在 parallel/race 内）
+            action: log "tick"
         allow_indefinite_wait: true     # 允许无限等待（仅用于人工操作）
-    on_complete: goto <任务>            # 完成后跳转
+    on_complete: goto <任务>            # 完成后跳转（也支持 task.step）
 
 # 并行（所有分支同时执行，全部完成后继续）
 step do_both:
@@ -273,6 +281,67 @@ step detect:
     timeout: 800ms -> goto fault
 ```
 
+### 新语法完整片段（示例）
+
+```plc
+[topology]
+device mode_switch: digital_input
+
+[constraints]
+
+[tasks]
+task choose:
+    step decide:
+        if: mode_switch == true goto process_A.run else: goto process_B.run
+
+task process_A:
+    step run:
+        action: log "A"
+    on_complete: goto done
+
+task process_B:
+    step run:
+        action: log "B"
+    on_complete: goto done
+
+task done:
+    step finish:
+        action: log "done"
+```
+
+```plc
+[topology]
+device valve_3pos: solenoid_valve {
+    states: [extend, neutral, retract]
+}
+device sensor_a: sensor
+device sensor_b: sensor
+
+[constraints]
+safety: valve_3pos.extend conflicts_with valve_3pos.retract
+timing: task.cycle must_complete_within 3000ms
+timing: task.cycle must_complete_within_worst_case 6000ms
+
+[tasks]
+task cycle:
+    step work:
+        repeat 3:
+            action: log "tick"
+            delay: 200ms
+            wait: sensor_a == true AND sensor_b == true
+            timeout: 1500ms -> goto fault
+    on_complete: goto idle
+
+task idle:
+    step ready:
+        wait: valve_3pos == neutral OR sensor_a == true
+        allow_indefinite_wait: true
+
+task fault:
+    step stop:
+        action: log "fault"
+```
+
 ---
 
 ## 验证规则速查
@@ -289,11 +358,10 @@ step detect:
 - 不能有孤立的死胡同状态
 
 ### Timing（时序）
-- `must_complete_within` 检查最坏关键路径
-- **重要：关键路径使用 timeout 值而非 stroke_time** — 检查器把每个 step 的 timeout 值累加作为最坏路径，而不是设备的实际动作时间。因此如果你给每个 step 设了 500ms~800ms 的 timeout，12 个 step 的总 timeout 可能远超实际动作时间。
-- 设置 `must_complete_within` 时，先手动计算所有 step 的 timeout 之和，确保约束值大于该总和
-- 并行动作取最大值
-- 如果工程师要求的周期时间小于 timeout 总和，需要向工程师说明：要么缩短 timeout（降低容错），要么放宽周期要求
+- `must_complete_within`：基于动作/延时的关键路径估计（忽略 timeout 上界），更贴近“设备实际动作时间 + 固定 delay”。并行动作取最大值。
+- `must_complete_within_worst_case`：将 timeout 作为最坏上界纳入估计（保守），适合把容错超时也算进周期 SLA 的场景。并行动作取最大值。
+- 经验：如果你给每个 step 都加了较大的 timeout（容错），但仍希望约束按真实节拍衡量，用 `must_complete_within`；如果你希望“连超时都算进去仍要满足”，用 `must_complete_within_worst_case`。
+- `delay:` 会计入两种估计中的关键路径。
 
 ### Causality（因果性）
 - 因果链中相邻设备必须通过 `connected_to` 或 `detects` 在拓扑中连通

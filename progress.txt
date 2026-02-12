@@ -562,3 +562,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - Semantic state legality is enforced through `collect_known_states` + `validate_state_reference`, so new state vocabularies only need to hook into that pipeline.
 ---
+## [2026-02-13 03:32:04 CST] - US-015
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Updated the `.claude/skills/plc-gen/SKILL.md` generator guidance to reflect new DSL features: `delay`, `repeat N`, AND/OR wait chains, `if/else`, `goto task.step`, and device `states: [...]` custom state vocabularies.
+  - Added two complete PLC snippets demonstrating the new syntax, including timing constraints using both `must_complete_within` and `must_complete_within_worst_case`.
+  - Refreshed the Timing guidance to match current semantics: `must_complete_within` ignores timeout upper bounds; `must_complete_within_worst_case` includes them.
+- Files changed
+  - `.claude/skills/plc-gen/SKILL.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep skill docs aligned with the compiler semantics (especially timing) to avoid agents generating "valid" DSL that fails verification or misstates guarantees.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - When a DSL gains first-class primitives (delay/repeat), remove obsolete workaround sections to prevent the generator from choosing inferior patterns.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - The skill file is the single source of truth for prompt-level behavior; adding full end-to-end snippets is the fastest way to teach new syntax without ambiguity.
+---
