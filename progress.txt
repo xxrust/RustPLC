@@ -1,5 +1,6 @@
 # Ralph Progress Log
 ## Codebase Patterns
+- For wait AND/OR support, process each sub-condition independently in semantic validation and causality inference; do not collapse to a single inferred sensor/device.
 - WaitStatement.condition is WaitCondition (Single/And/Or); keep downstream code using helpers to render/scan all sub-conditions (do not assume a single left/operator/right).
 - In causality checks, parallel contexts can create invalid cross-branch action/wait pairs; tag statement origin and filter parallel-related pairs unless action->sensor is reachable to avoid false positives.
 - For timing envelopes, include upstream `response_time` along `connected_to` chains and treat incoming `StateMachine` guards as must_start_after lower bounds (`timeout` contributes delay, `always/condition` = 0ms).
@@ -476,4 +477,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - If the grammar only rejects mixed AND/OR at parse time, pest errors are opaque; accepting then validating in parser allows clearer diagnostics.
   - Useful context (e.g., "the evaluation panel is in component X")
     - IR TransitionGuard::Condition still stores a string expression; AND/OR is currently carried through as a formatted string for verifiers/diagnostics.
+---
+## [2026-02-12 19:40:23 CST] - US-010
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added semantic support for wait AND/OR: guard expressions now preserve conjunction/disjunction forms and AND/OR sub-condition device references are validated for undefined devices.
+  - Updated causality analysis to validate each sensor in AND/OR waits independently (no longer only the first inferred sensor).
+  - Added `examples/and_or_wait_demo.plc` plus integration coverage; added causality regression for AND wait with one missing sensor chain; added safety test proving BMC handles AND/OR wait guards.
+- Files changed
+  - src/semantic/mod.rs, src/verification/causality.rs, src/verification/safety.rs, examples/and_or_wait_demo.plc, tests/examples_integration.rs, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Use shared helpers (`wait_condition_terms` / `wait_conditions`) to traverse wait conditions so semantic + verifiers stay aligned as wait syntax expands.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Causality false negatives occur if AND/OR waits only infer one sensor; every sub-condition sensor must generate an action-wait pair.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - AND/OR device-reference semantic validation currently applies to composite waits; single-condition waits keep prior behavior for compatibility.
 ---

@@ -376,6 +376,17 @@ pub fn build_constraint_set_from_ast(
         });
     }
 
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            validate_wait_device_references_in_statements(
+                &step.statements,
+                step.line.max(1),
+                &device_kinds,
+                &mut errors,
+            );
+        }
+    }
+
     if errors.is_empty() {
         Ok(constraint_set)
     } else {
@@ -844,6 +855,96 @@ fn validate_timing_target(
             }
         }
     }
+}
+
+fn validate_wait_device_references_in_statements(
+    statements: &[StepStatement],
+    line: usize,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Wait(wait) => {
+                if matches!(wait.condition, WaitCondition::And(_) | WaitCondition::Or(_)) {
+                    for condition in wait_condition_terms(&wait.condition) {
+                        validate_wait_operand_device(
+                            &condition.left,
+                            line,
+                            "wait 条件左值",
+                            device_kinds,
+                            errors,
+                        );
+                        if let LiteralValue::State(state) = &condition.right {
+                            validate_device_reference(
+                                &state.device,
+                                line,
+                                "wait 条件右值",
+                                device_kinds,
+                                errors,
+                            );
+                        }
+                    }
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                validate_wait_device_references_in_statements(body, line, device_kinds, errors);
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_wait_device_references_in_statements(
+                        &branch.statements,
+                        line,
+                        device_kinds,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_wait_device_references_in_statements(
+                        &branch.statements,
+                        line,
+                        device_kinds,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn wait_condition_terms(condition: &WaitCondition) -> Vec<&ConditionExpression> {
+    match condition {
+        WaitCondition::Single(term) => vec![term],
+        WaitCondition::And(terms) | WaitCondition::Or(terms) => terms.iter().collect(),
+    }
+}
+
+fn validate_wait_operand_device(
+    operand: &str,
+    line: usize,
+    source: &str,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    let candidate = operand
+        .split('.')
+        .next()
+        .map(str::trim)
+        .unwrap_or(operand)
+        .trim();
+
+    if candidate.is_empty() {
+        return;
+    }
+
+    validate_device_reference(candidate, line, source, device_kinds, errors);
 }
 
 fn map_safety_relation(relation: &AstSafetyRelation) -> IrSafetyRelation {
@@ -1962,6 +2063,42 @@ task init:
                 .iter()
                 .any(|err| err.to_string().contains("未定义 task unknown")),
             "应报告未定义 task"
+        );
+    }
+
+    #[test]
+    fn reports_undefined_device_in_and_or_wait_conditions() {
+        let input = r#"
+[topology]
+
+device sensor_A: sensor
+device sensor_C: sensor
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_combo:
+        wait: sensor_A == true AND sensor_B == true
+        wait: sensor_C == true OR sensor_D == true
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let errors = build_constraint_set(&program).expect_err("AND/OR wait 的未定义设备应报错");
+
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("未定义设备 sensor_B"),
+            "应报告 AND 子条件中的未定义设备"
+        );
+        assert!(
+            rendered.contains("未定义设备 sensor_D"),
+            "应报告 OR 子条件中的未定义设备"
         );
     }
 

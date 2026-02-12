@@ -385,9 +385,10 @@ fn collect_items_from_statements(
                 }
             }
             StepStatement::Wait(wait) => {
-                if let Some(sensor) = infer_wait_sensor(wait, sensor_names) {
+                let wait_text = wait_to_text(wait);
+                for sensor in infer_wait_sensors(wait, sensor_names) {
                     waits.push(CollectedWait {
-                        text: wait_to_text(wait),
+                        text: wait_text.clone(),
                         sensor,
                         origin: origin.clone(),
                     });
@@ -460,26 +461,37 @@ fn binary_value_text(value: &BinaryValue) -> &'static str {
     }
 }
 
-fn infer_wait_sensor(wait: &WaitStatement, sensor_names: &HashSet<String>) -> Option<String> {
+fn infer_wait_sensors(wait: &WaitStatement, sensor_names: &HashSet<String>) -> Vec<String> {
+    let mut sensors = Vec::new();
+    let mut seen = HashSet::new();
+
     for condition in wait_conditions(wait) {
         if sensor_names.contains(&condition.left) {
-            return Some(condition.left.clone());
+            if seen.insert(condition.left.clone()) {
+                sensors.push(condition.left.clone());
+            }
+            continue;
         }
 
         if let Some(candidate) = condition.left.split('.').next()
             && sensor_names.contains(candidate)
         {
-            return Some(candidate.to_string());
+            let sensor = candidate.to_string();
+            if seen.insert(sensor.clone()) {
+                sensors.push(sensor);
+            }
+            continue;
         }
 
         if let LiteralValue::State(state) = &condition.right
             && sensor_names.contains(&state.device)
+            && seen.insert(state.device.clone())
         {
-            return Some(state.device.clone());
+            sensors.push(state.device.clone());
         }
     }
 
-    None
+    sensors
 }
 
 fn wait_conditions(wait: &WaitStatement) -> Vec<&ConditionExpression> {
@@ -951,6 +963,78 @@ task main:
                 .iter()
                 .any(|error| error.broken_link == "motor_left -> sensor_left"),
             "错误应包含 parallel 分支内真实断裂链路"
+        );
+    }
+
+    #[test]
+    fn reports_causality_error_when_one_sensor_in_and_wait_lacks_chain() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device X0: digital_input
+device X1: digital_input
+
+device valve_A: solenoid_valve {
+    connected_to: Y0
+}
+
+device valve_B: solenoid_valve {
+    connected_to: Y1
+}
+
+device cyl_A: cylinder {
+    connected_to: valve_A
+    stroke_time: 200ms
+    retract_time: 200ms
+}
+
+device cyl_B: cylinder {
+    connected_to: valve_B
+    stroke_time: 200ms
+    retract_time: 200ms
+}
+
+device sensor_A_ext: sensor {
+    connected_to: X0
+    detects: cyl_A.extended
+}
+
+device sensor_A_ext2: sensor {
+    connected_to: X1
+    detects: cyl_B.extended
+}
+
+[constraints]
+
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
+
+[tasks]
+
+task main:
+    step extend:
+        action: extend cyl_A
+        wait: sensor_A_ext == true AND sensor_A_ext2 == true
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        let errors = verify_causality(&program, &topology, &constraints)
+            .expect_err("AND wait 中某个传感器无链路时应报 causality 错误");
+
+        assert!(
+            errors.iter().any(|error| error.wait.as_deref()
+                == Some("sensor_A_ext == true AND sensor_A_ext2 == true")),
+            "错误应关联 AND wait 条件"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.broken_link == "cyl_A -> sensor_A_ext2"),
+            "错误应定位到缺失链路的传感器"
         );
     }
 }

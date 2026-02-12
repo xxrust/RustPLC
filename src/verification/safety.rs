@@ -1269,4 +1269,70 @@ task press:
             "requires 满足场景应通过 safety"
         );
     }
+
+    #[test]
+    fn handles_and_or_wait_guards_in_bmc_state_exploration() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device X0: digital_input
+device X1: digital_input
+
+device valve_A: solenoid_valve { connected_to: Y0 }
+device valve_B: solenoid_valve { connected_to: Y1 }
+
+device cyl_A: cylinder {
+    connected_to: valve_A
+    stroke_time: 120ms
+    retract_time: 120ms
+}
+
+device cyl_B: cylinder {
+    connected_to: valve_B
+    stroke_time: 120ms
+    retract_time: 120ms
+}
+
+device sensor_A_ext: sensor {
+    connected_to: X0
+    detects: cyl_A.extended
+}
+
+device sensor_B_ext: sensor {
+    connected_to: X1
+    detects: cyl_B.extended
+}
+
+[constraints]
+
+safety: cyl_A.extended conflicts_with cyl_B.extended
+
+[tasks]
+
+task main:
+    step move_a:
+        action: extend cyl_A
+        wait: sensor_A_ext == true AND sensor_B_ext == true
+    step return_a:
+        action: retract cyl_A
+        wait: sensor_A_ext == true OR sensor_B_ext == true
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("AND/OR wait 守卫不应导致 safety BMC 崩溃或误报");
+
+        assert!(
+            matches!(
+                report.level,
+                SafetyProofLevel::Complete | SafetyProofLevel::Bounded
+            ),
+            "含 AND/OR wait 的场景应得到有效 safety 结论"
+        );
+    }
 }
