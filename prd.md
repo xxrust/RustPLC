@@ -2,9 +2,9 @@
 
 ## Product Requirements Document (PRD)
 
-**版本**: 1.0
-**日期**: 2025-02-10
-**状态**: Draft
+**版本**: 2.0
+**日期**: 2026-02-12
+**状态**: V1 Complete / V2 Draft
 
 ---
 
@@ -117,8 +117,11 @@ ERROR [liveness] 潜在死锁
 - 物理上不可能：气缸需要 200ms 才能到位，但要求 100ms 完成
 
 **验证方法**：
-- 收集每个 step 涉及的所有物理动作的时间参数
-- 计算最长完成时间（最坏情况关键路径）
+- 收集每个 step 涉及的所有物理动作时间参数（阀响应 + 机构行程等）
+- 计算最长完成时间（保守最坏情况关键路径）：
+  - 同一 step 内多条 action 并行执行，取最大动作时间
+  - 如果 step 含 `wait + timeout`，则用 timeout 作为该 step 的上界
+  - 含 `allow_indefinite_wait` 的 step 不允许被 `must_complete_within` 约束覆盖（否则无法给出上界，编译报错）
 - 与用户声明的时序约束对比
 - 最长完成时间 > 约束时间 = 编译失败（最坏情况下无法按时完成）
 
@@ -244,7 +247,7 @@ ERROR [causality] 因果链断裂
     |
     v (全部通过)
   [Code Generator]
-    |--- state_table.rs   (查找表: input_snapshot -> output_action)
+    |--- state_table.rs   (查找表: input_snapshot + timeout_events -> output_action)
     |--- runtime.rs       (主循环 + HAL 调用)
     |--- diagnostics.rs   (运行时因果诊断逻辑)
 ```
@@ -373,11 +376,14 @@ device sensor_B_ret: sensor {
 | 电磁阀 | solenoid_valve | connected_to, response_time | type |
 | 气缸 | cylinder | connected_to, stroke_time, retract_time | type, stroke |
 | 传感器 | sensor | connected_to, detects | type |
-| 电机 | motor | connected_to | rated_speed, ramp_time |
+| 电机 | motor | connected_to | rated_speed, ramp_time, positions |
 
-说明：`digital_input` 和 `digital_output` 有两种用法：
-- **裸端口声明**：`device Y0: digital_output` — 仅声明物理端口，无额外属性
-- **别名设备声明**：`device start_button: digital_input { connected_to: X4 }` — 为已声明的裸端口创建语义别名，`connected_to` 指向裸端口名称。别名设备在逻辑中可直接引用（如 `wait: start_button == true`），编译器会自动解析到底层端口
+说明：
+
+- `motor` 的 `positions`（可选）声明可检测的离散位置，自动生成状态 `motor_name.position_<label>` 供 `sensor.detects` 使用
+- `digital_input` 和 `digital_output` 有两种用法：
+  - **裸端口声明**：`device Y0: digital_output` — 仅声明物理端口，无额外属性
+  - **别名设备声明**：`device start_button: digital_input { connected_to: X4 }` — 为已声明的裸端口创建语义别名，`connected_to` 指向裸端口名称。别名设备在逻辑中可直接引用（如 `wait: start_button == true`），编译器会自动解析到底层端口
 
 ### 5.4 约束声明 [constraints]
 
@@ -395,8 +401,11 @@ safety: valve_A.on conflicts_with valve_B.on
 timing: task.init must_complete_within 5000ms
     reason: "初始化超过5秒视为异常"
 
-timing: task.init.step_extend_A must_complete_within 500ms
+timing: task.init.extend_A must_complete_within 500ms
     reason: "单步动作不应超过500ms"
+
+timing: task.init.retract_A must_start_after 100ms
+    reason: "反向动作前需要泄压等待"
 
 # ===== 因果链声明 (Causality) =====
 causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
@@ -415,6 +424,11 @@ causality: Y1 -> valve_B -> cyl_B -> sensor_B_ext
 | timing | X must_complete_within Nms | X 必须在 N 毫秒内完成 |
 | timing | X must_start_after Nms | X 必须在 N 毫秒后才能开始 |
 | causality | A -> B -> C -> D | 从 A 到 D 的物理因果链必须连通 |
+
+**约束作用域**：
+
+- task 级：`task.<task>`
+- step 级：`task.<task>.<step>`
 
 ### 5.5 控制逻辑 [tasks]
 
@@ -525,6 +539,11 @@ task parallel_demo:
 
 注意：如果 cyl_A 和 cyl_B 有 conflicts_with 约束，编译器会在此处报 safety 错误。
 
+**并行语义补充**：
+- `parallel` 内所有分支同时开始，所有分支完成后该 step 才算完成
+- 任一分支触发 `goto`（包含 timeout 跳转）时，整个 `parallel` 立即结束并跳转，其他分支被取消
+- 同周期内多个分支同时触发跳转时，按分支声明顺序优先（编译器提示此优先级）
+
 #### 5.5.5 竞争分支
 
 两个条件谁先满足走谁的分支（典型场景：半圈旋转判断）：
@@ -545,6 +564,11 @@ task search_position:
     on_complete: unreachable          # race 必定跳转，不会走到这里
 ```
 
+**race 语义补充**：
+- 每个分支必须包含 `wait` 与 `then: goto <task>`（可指向 task 内 step）
+- 首个满足 `wait` 的分支获胜并跳转，其余分支取消
+- 同周期多个分支同时满足时，按分支声明顺序优先
+
 #### 5.5.6 流程控制关键词汇总
 
 | 关键词 | 含义 | 示例 |
@@ -557,6 +581,7 @@ task search_position:
 | on_complete | task 正常完成后的跳转 | on_complete: goto ready |
 | parallel | 并行执行多个分支 | parallel: ... |
 | race | 竞争执行，先到先得 | race: ... |
+| then | race 分支成立后的跳转 | then: goto process_A |
 | allow_indefinite_wait | 显式允许无限等待 | allow_indefinite_wait: true |
 | unreachable | 标记不可达的完成点 | on_complete: unreachable |
 
@@ -742,8 +767,10 @@ Phase C: 形式化验证
             强连通分量 (一组状态互相可达但全都没有超时出口)
       C3. Timing 检查
           - 对每个 must_complete_within 约束:
-            计算对应 task/step 的最坏情况关键路径时间
-            关键路径 = 串行 action 最长时间之和 (并行取最大值，同一 step 内多条 action 按并行计算)
+            计算对应 task/step 的最坏情况关键路径时间（保守上界）
+            关键路径 = 串行动作时间之和（同一 step 内多条 action 视为并行取最大值）
+            若 step 含 wait + timeout，则该 step 上界取 timeout
+            若 step 含 allow_indefinite_wait，则不能被 must_complete_within 覆盖，直接报错
             关键路径 > 约束 -> 报错 (最坏情况下无法按时完成)
           - 对每个 must_start_after 约束:
             计算从 task/step 的前驱结束到该 task/step 开始的最短间隔
@@ -760,12 +787,12 @@ Phase D: 代码生成
     输入: 已验证的 IR
     输出:
       - state_table.rs: 状态查找表
-        每个状态 = (当前task, 当前step, 输入快照)
+        每个状态键 = (当前task, 当前step, 输入快照, timeout_events)
         每个转移 = (目标状态, 输出动作集, 定时器操作)
       - runtime.rs: 主循环框架
         loop {
             inputs = hal.read_all();
-            (next_state, outputs, timers) = STATE_TABLE[current_state][inputs];
+            (next_state, outputs, timers) = STATE_TABLE[(current_state, inputs, timeout_events)];
             hal.write_all(outputs);
             current_state = next_state;
             update_timers(timers);
@@ -807,7 +834,7 @@ TimingModel:
 运行时内核极其简单：经过形式化验证的状态查找表保证了确定性，内核只需要做三件事：
 
 1. **读取输入**：从 HAL 读取所有数字输入的当前状态
-2. **查表决策**：用 (当前状态, 输入快照) 查找状态表，得到 (下一状态, 输出动作)
+2. **查表决策**：用 (当前状态, 输入快照, timeout_events) 查找状态表，得到 (下一状态, 输出动作)
 3. **写入输出**：通过 HAL 写入所有数字输出
 
 ### 8.2 硬实时循环
@@ -901,6 +928,7 @@ device motor_ctrl: motor {
     connected_to: Y0
     rated_speed: 60rpm
     ramp_time: 50ms                      # 启动到额定转速时间
+    positions: [A, B]                    # 声明可检测的离散位置
 }
 
 device sensor_A: sensor {
@@ -918,7 +946,7 @@ device sensor_B: sensor {
 [constraints]
 
 # 半圈旋转时间: 60rpm = 1圈/秒, 半圈 = 500ms, 加上启动时间
-timing: task.search.step_detect must_complete_within 800ms
+timing: task.search.detect must_complete_within 800ms
     reason: "半圈旋转加启动不应超过800ms"
 
 causality: Y0 -> motor_ctrl -> sensor_A
@@ -1110,3 +1138,419 @@ task ready:
 | pest | Rust PEG 解析器生成器 |
 | serde | Rust 序列化/反序列化框架 |
 | ethercrab | Rust EtherCAT 主站库 |
+
+---
+
+## 13. V2 迭代：DSL 语言增强（Phase 2.1）
+
+**版本**: 2.0
+**日期**: 2026-02-12
+**来源**: 6 轮三方角色迭代测试（工程师 × AI 智能体 × 程序员），详见 `docs/dsl-defects-analysis.md`
+**状态**: Draft
+
+### 13.1 迭代背景
+
+Phase 1-2 完成后，通过 plc-gen skill 进行了 6 轮真实工控场景测试（钻孔、贴标、装配、打磨、冲压折弯产线、涂胶），暴露了 DSL 在表达力上的 10 项缺陷。其中 8 项可在不破坏形式验证可判定性的前提下修复。
+
+本迭代聚焦于 DSL 语言层面的增强，不涉及代码生成（Phase 3）和硬件接入（Phase 4）。
+
+### 13.2 需求总览
+
+| 编号 | 需求 | 优先级 | 工作量 | 对验证引擎的影响 |
+|------|------|--------|--------|----------------|
+| US-101 | `delay` 延时原语 | P0 | 小 | 无（语法糖） |
+| US-102 | `repeat N` 有界循环 | P0 | 小 | 无（编译期展开） |
+| US-103 | `wait` 支持 AND/OR 组合条件 | P0 | 中 | Causality 小改 |
+| US-104 | Timing 关键路径计算修复 | P0 | 中 | 改善 Timing 准确性 |
+| US-105 | Safety 验证器增加 `requires` 检查 | P0 | 中 | Safety BMC 增加不变式 |
+| US-106 | Parallel 块因果链检查修复 | P1 | 中 | 修复 Causality 准确性 |
+| US-107 | `if/else` 条件分支 | P1 | 中 | Safety BMC 处理条件守卫 |
+| US-108 | `goto` 支持跳到 task 内指定 step | P1 | 小 | 无 |
+| US-109 | 自定义设备状态 | P2 | 中 | BMC 状态空间增大但仍有限 |
+
+### 13.3 各需求详细设计
+
+#### US-101: `delay` 延时原语
+
+**动机**: 工程师经常需要"延时N秒"（传送带送走、电机定时运转、保压），当前只能用"等待对立条件 + timeout"模拟，语义不清晰。
+
+**语法设计**:
+
+```plc
+step wait_dry:
+    delay: 2000ms
+```
+
+**编译语义**: `delay: Nms` 等价于编译器自动生成一个内部 wait + timeout 组合：
+- 创建一个不可满足的内部守卫条件
+- 设置 timeout = N ms，超时后转移到下一个 step（而非 fault_handler）
+- Liveness 检查器识别 delay 为合法的有界等待，不报死锁
+
+**与 timeout 的区别**:
+- `delay: 2000ms` — 正常流程，2秒后继续下一步
+- `timeout: 2000ms -> goto fault_handler` — 异常保护，2秒后跳到故障处理
+
+**delay 也可以与 timeout 组合使用**（delay 期间如果发生外部异常）:
+```plc
+step wait_dry:
+    delay: 2000ms
+    timeout: 5000ms -> goto fault_handler   # 保护性超时（可选）
+```
+
+**验证影响**:
+- Liveness: 识别 delay 为有界等待，通过
+- Timing: 将 delay 值加入关键路径计算
+- Safety / Causality: 无影响
+
+**验收标准**:
+- `delay: 2000ms` 编译通过，Liveness 不报错
+- Timing 关键路径正确包含 delay 值
+- 现有测试不受影响
+
+---
+
+#### US-102: `repeat N` 有界循环
+
+**动机**: 工程师说"涂3遍"、"冲压2次"时，手动展开为 N 份步骤导致代码膨胀且难维护。
+
+**语法设计**:
+
+```plc
+step glue_cycle:
+    repeat 3:
+        action: extend cyl_glue
+        wait: sensor_glue_ext == true
+        timeout: 300ms -> goto fault_handler
+        action: retract cyl_glue
+        wait: sensor_glue_ret == true
+        timeout: 300ms -> goto fault_handler
+```
+
+**编译语义**: `repeat N:` 在 AST → IR 阶段展开为 N 份顺序步骤，步骤名自动加后缀 `_1`, `_2`, ..., `_N`。展开后的 IR 与手动编写完全等价。
+
+**展开示例**:
+```
+repeat 3: { body }
+→ step glue_cycle_1: { body }
+  step glue_cycle_2: { body }
+  step glue_cycle_3: { body }
+```
+
+**约束**:
+- N 必须是编译期常量正整数，范围 2..100
+- repeat 块内不能嵌套 repeat（避免指数膨胀）
+- repeat 块内的 goto 跳出循环是合法的（如 timeout -> goto fault_handler）
+
+**验证影响**: 无。展开后的 IR 与手动编写等价，所有验证引擎无需修改。
+
+**验收标准**:
+- `repeat 3: { ... }` 编译通过，展开为 3 份步骤
+- 展开后的步骤名正确（`_1`, `_2`, `_3`）
+- 验证结果与手动展开一致
+- `repeat 1:` 报错（无意义）
+- `repeat 0:` 报错
+- 嵌套 repeat 报错
+
+---
+
+#### US-103: `wait` 支持 AND/OR 组合条件
+
+**动机**: 装配工位"两个零件都到位才继续"需要 AND 条件；分拣工位"任一传感器触发"需要 OR 条件。当前只能拆成多个顺序 step。
+
+**语法设计**:
+
+```plc
+# AND: 两个条件都满足
+step wait_both:
+    wait: sensor_left == true AND sensor_right == true
+    timeout: 5000ms -> goto fault_handler
+
+# OR: 任一条件满足
+step wait_either:
+    wait: sensor_A == true OR sensor_B == true
+    timeout: 3000ms -> goto fault_handler
+```
+
+**语法规则**:
+- 支持 `AND` 和 `OR` 关键词（大写）
+- 同一个 wait 中只能用一种连接词（不支持混合 AND/OR，避免优先级歧义）
+- 如需混合逻辑，拆成多个 step 或用 race
+
+**编译语义**:
+- AND: 状态机转移守卫为合取条件 `guard = cond_A ∧ cond_B`
+- OR: 状态机转移守卫为析取条件 `guard = cond_A ∨ cond_B`
+
+**验证影响**:
+- Safety: BMC 已追踪多设备状态，组合守卫不增加理论复杂度
+- Liveness: 组合条件的 wait 仍需 timeout，检查逻辑不变
+- Timing: 无影响
+- Causality: 对 AND 中的每个传感器分别检查因果链；对 OR 中的每个传感器分别检查因果链
+
+**验收标准**:
+- `wait: A == true AND B == true` 编译通过
+- `wait: A == true OR B == true` 编译通过
+- `wait: A == true AND B == true OR C == true` 报语法错误（不支持混合）
+- Causality 对组合条件中的每个传感器分别验证因果链
+- 现有单条件 wait 不受影响
+
+---
+
+#### US-104: Timing 关键路径计算修复
+
+**动机**: 当前 timing 检查器对 task 级别的 `must_complete_within` 把每个 step 的 `max(action_time, timeout)` 累加。timeout 值（安全裕量）远大于实际动作时间，导致计算结果严重偏大。
+
+**当前行为**（有问题）:
+```
+step clamp:        action=300ms, timeout=500ms → worst_case=500ms
+step stamp_down:   action=200ms, timeout=400ms → worst_case=400ms
+step stamp_up:     action=200ms, timeout=400ms → worst_case=400ms
+task total = 500+400+400 = 1300ms  ← 用的是 timeout 值
+```
+
+**修复方案**: 区分两种路径：
+
+1. **正常路径时间**（action 实际时间）: 只累加 action 的设备时间（stroke_time + response_time 链）
+2. **最坏路径时间**（timeout 累加）: 保持当前行为
+
+`must_complete_within` 默认检查正常路径时间。新增 `must_complete_within_worst_case` 检查最坏路径。
+
+```
+正常路径: 300+200+200 = 700ms   ← action 实际时间
+最坏路径: 500+400+400 = 1300ms  ← timeout 值
+```
+
+**语法变更**:
+```plc
+# 检查正常路径（默认，改后行为）
+timing: task.cycle must_complete_within 8000ms
+
+# 检查最坏路径（新增，等价于改前行为）
+timing: task.cycle must_complete_within_worst_case 20000ms
+```
+
+**验收标准**:
+- `must_complete_within` 使用 action 实际时间计算
+- `must_complete_within_worst_case` 使用 timeout 值计算
+- 现有 `must_complete_within` 的语义变更需要更新现有示例
+- 无 timeout 的 step（纯 action）两种计算结果一致
+
+---
+
+#### US-105: Safety 验证器增加 `requires` 检查
+
+**动机**: `safety: cyl_press.extended requires cyl_clamp.extended` 声明了"压装时夹紧缸必须保持伸出"，但当前 Safety 验证器跳过 requires，只检查 conflicts_with。
+
+**当前行为**: `src/verification/safety.rs:149` — `if !matches!(rule.relation, SafetyRelation::ConflictsWith) { continue; }`
+
+**修复方案**: 在 BMC 中增加 requires 不变式检查：
+
+- `A requires B` 等价于 `A ∧ ¬B` 是不可达的
+- 即：在所有可达状态中，如果 A 为真，则 B 必须为真
+- 实现：在 BMC 的每一步检查 `state[A] == true && state[B] == false` 是否可达
+- 如果可达，报错并给出违反路径
+
+**错误报告格式**:
+```
+ERROR [safety] requires 约束违反
+  位置: <input>:12:1
+  约束: cyl_press.extended requires cyl_clamp.extended
+  违反路径:
+    1. cycle.clamp -> extend cyl_clamp (cyl_clamp.extended = true)
+    2. cycle.clamp -> timeout -> fault_handler (cyl_clamp 未确认缩回)
+    3. fault_handler -> cycle.press_down -> extend cyl_press
+    4. 此时 cyl_press.extended = true 但 cyl_clamp.extended 状态未知
+  建议: 在 fault_handler 中确保 cyl_clamp 缩回后再允许重新进入 cycle
+```
+
+**验收标准**:
+- `requires` 约束被 Safety 验证器检查
+- 违反 requires 时报错，包含违反路径和修复建议
+- 现有通过验证的示例仍然通过（它们的顺序控制隐式满足 requires）
+- 构造一个违反 requires 的测试用例，验证能正确检出
+
+---
+
+#### US-106: Parallel 块因果链检查修复
+
+**动机**: parallel 块中不同分支操作不同设备，但编译器把所有分支的 action 与 step 级别的 wait 做因果检查，导致误报。
+
+**当前行为**:
+```plc
+step start_both:
+    parallel:
+        branch_left:
+            action: set motor_left on
+        branch_right:
+            action: set motor_right on
+    wait: sensor_left_arrive == true
+# → 编译器检查 motor_right -> sensor_left_arrive，报因果链断裂（误报）
+```
+
+**修复方案**: 因果链推断时，对 parallel 块中的 action-wait 对，只检查"同一因果链上"的关联：
+
+1. 对 step 级别的 wait 中的每个传感器 S，在拓扑图中反向追溯找到其上游设备集合 U(S)
+2. 对 parallel 块中的每个分支 B 的 action 目标设备 D(B)
+3. 只有当 D(B) ∈ U(S) 时，才检查 D(B) → S 的因果链
+4. 如果 D(B) ∉ U(S)，跳过该分支的因果检查
+
+**验收标准**:
+- 上述 parallel 场景不再误报
+- 同一设备的 parallel action + wait 仍然正确检查因果链
+- 现有测试不受影响
+
+---
+
+#### US-107: `if/else` 条件分支
+
+**动机**: 根据设备状态选择不同路径（如选择开关决定加工模式），当前只能用 race 模拟，语义不匹配。
+
+**语法设计**:
+
+```plc
+step check_mode:
+    if: switch_A == true
+        goto grind_coarse
+    else:
+        goto grind_fine
+```
+
+**编译语义**: 编译为两条带互补守卫的状态转移：
+- 转移1: guard = `switch_A == true` → goto grind_coarse
+- 转移2: guard = `switch_A == false` → goto grind_fine
+
+**与 race 的区别**:
+- `race`: 多个条件竞争等待，适合"不知道哪个先发生"的场景
+- `if/else`: 检测已知状态，适合"根据当前状态选择路径"的场景
+- `if/else` 不需要 timeout（条件是即时检测的，不是等待未来事件）
+
+**约束**:
+- if 条件使用与 wait 相同的条件语法（`device == true/false`）
+- 必须有 else 分支（确保完备性，避免死路径）
+- if/else 内只能是 goto，不能是 action（action 应放在目标 task 中）
+
+**验证影响**:
+- Safety: BMC 需处理条件分支的两条转移路径
+- Liveness: if/else 天然有两条出边，不会死锁
+- Timing: if/else 是瞬时判断，不贡献时间
+- Causality: 无影响（if/else 不涉及 action-wait 对）
+
+**验收标准**:
+- `if: ... goto X else: goto Y` 编译通过
+- 缺少 else 报错
+- if 内放 action 报错
+- Safety BMC 正确探索两条分支路径
+
+---
+
+#### US-108: `goto` 支持跳到 task 内指定 step
+
+**动机**: 从 fault_handler 恢复时，可能需要跳到 task 中间的某个步骤而非从头开始。
+
+**语法设计**:
+
+```plc
+# 当前语法（保持兼容）
+timeout: 500ms -> goto fault_handler          # 跳到 fault_handler 的第一个 step
+
+# 新增语法
+timeout: 500ms -> goto cycle.press_down       # 跳到 cycle 任务的 press_down 步骤
+```
+
+**编译语义**: `resolve_task_target()` 支持 `task.step` 格式，返回指定的 (task_name, step_name) 状态。
+
+**约束**:
+- 目标 step 必须存在于目标 task 中
+- 不能跳到 parallel/race 块内部的合成步骤
+
+**验证影响**: 无。状态机已用 (task_name, step_name) 标识状态，所有验证引擎已处理任意状态间转移。
+
+**验收标准**:
+- `goto cycle.press_down` 编译通过
+- 目标 step 不存在时报语义错误
+- 跳到 parallel 内部合成步骤时报错
+- 现有 `goto task_name` 语法不受影响
+
+---
+
+#### US-109: 自定义设备状态
+
+**动机**: 三位电磁阀（伸出/中位/缩回）、多档位开关等设备需要超过 2 个状态。
+
+**语法设计**:
+
+```plc
+device valve_3pos: solenoid_valve {
+    connected_to: Y0
+    response_time: 20ms
+    states: [extend, neutral, retract]
+}
+
+device mode_switch: digital_input {
+    connected_to: X5
+    states: [auto, manual, maintenance]
+}
+```
+
+**编译语义**:
+- 如果设备声明了 `states: [...]`，使用自定义状态集替代默认状态
+- 如果未声明，保持默认行为（cylinder = {extended, retracted}，其他 = {on, off}）
+- 自定义状态可用于 safety 约束和 wait 条件
+
+**验证影响**:
+- Safety BMC: 状态域从 2 扩展到 N，状态空间增大但仍有限
+- 需要评估对 BMC 收敛深度和验证时间的影响
+- 建议限制单设备最大状态数（如 ≤ 8）
+
+**验收标准**:
+- `states: [a, b, c]` 编译通过
+- `safety: device.a conflicts_with device.b` 使用自定义状态
+- `wait: device == a` 使用自定义状态
+- 未声明 states 时保持默认行为
+- 状态数超过上限时报警告
+
+---
+
+### 13.4 实施优先级与依赖关系
+
+```
+P0（必须完成，阻塞后续迭代）:
+  US-101 delay          ← 独立，可先做
+  US-102 repeat         ← 独立，可先做
+  US-104 timing 修复    ← 独立，可先做
+  US-105 requires 验证  ← 独立，可先做
+  US-103 wait AND/OR    ← 依赖 US-106（因果链修复后 AND/OR 的因果检查更准确）
+
+P1（重要改进）:
+  US-106 parallel 因果链 ← 独立，可先做
+  US-107 if/else         ← 独立，可先做
+  US-108 goto step       ← 独立，可先做
+
+P2（锦上添花）:
+  US-109 自定义状态      ← 独立，但需评估对 BMC 性能的影响
+```
+
+建议实施顺序: US-101 → US-102 → US-104 → US-105 → US-106 → US-103 → US-107 → US-108 → US-109
+
+### 13.5 不在本迭代范围内
+
+以下特性因形式验证可判定性约束，不纳入本迭代：
+
+| 特性 | 排除原因 |
+|------|---------|
+| 无界循环 (while/loop) | 状态空间无限，Safety 验证不可判定 |
+| 运行时整数变量/计数器 | 状态空间爆炸，BMC 无法收敛 |
+| 度量时序逻辑 (MTL) | 需要 timed automata，完全不同的验证框架 |
+| 概率验证 | 需要概率模型检查器 (PRISM) |
+| 模拟量 I/O | 工作量大，需要 Z3 实数算术，留待 Phase 2.2 |
+| PID 控制回路 | 需要混成自动机理论，可达性分析不可判定 |
+
+详细分析见 `docs/dsl-defects-analysis.md`。
+
+### 13.6 验收标准（整体）
+
+1. 所有 P0 需求（US-101 ~ US-105）实现并通过测试
+2. 现有 52 个测试全部通过（向后兼容）
+3. 现有 7 个示例 .plc 文件全部验证通过
+4. 为每个新特性至少新增 1 个示例 .plc 文件
+5. plc-gen skill 更新以使用新语法特性
+6. 错误报告保持中文，包含行号和修复建议

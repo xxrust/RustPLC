@@ -1,0 +1,334 @@
+{
+  "project": "RustPLC",
+  "branchName": "ralph/phase1-2-parser-and-verification",
+  "description": "Phase 1+2: DSL 解析器、语义分析器与形式化验证引擎 — 解析 .plc 文件生成 AST，构建 IR（TopologyGraph、StateMachine、ConstraintSet、TimingModel），并完成四项形式化验证（Safety、Liveness、Timing、Causality）",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "初始化 Rust 项目与依赖",
+      "description": "作为开发者，我需要搭建 Rust 项目脚手架并配置所有必要依赖，以便后续故事可以在此基础上构建。",
+      "acceptanceCriteria": [
+        "Cargo.toml 存在，项目名为 'rust_plc'",
+        "依赖包含：pest、pest_derive、petgraph、serde、serde_json、thiserror",
+        "src/main.rs 存在，实现基本 CLI，接受 .plc 文件路径参数",
+        "src/lib.rs 存在，声明模块：parser、ast、ir、semantic、error",
+        "每个模块有占位文件（如 src/parser/mod.rs）",
+        "cargo build 成功",
+        "类型检查通过"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "定义 AST 数据结构",
+      "description": "作为开发者，我需要定义表示所有 DSL 构造的 AST 类型，以便解析器能生成类型化的语法树。",
+      "acceptanceCriteria": [
+        "src/ast/mod.rs 定义结构体：PlcProgram、TopologySection、ConstraintsSection、TasksSection",
+        "设备类型覆盖：digital_output、digital_input、solenoid_valve、cylinder、sensor、motor",
+        "设备属性覆盖：connected_to、response_time、stroke_time、retract_time、stroke、type、detects、debounce、inverted、rated_speed、ramp_time",
+        "约束类型覆盖：safety（conflicts_with、requires）、timing（must_complete_within、must_start_after）、causality（chain）",
+        "任务/步骤/动作类型覆盖：action（extend、retract、set、log）、wait、timeout、goto、on_complete、parallel、race、allow_indefinite_wait、unreachable",
+        "所有 AST 类型派生 Debug、Clone、Serialize、Deserialize",
+        "类型检查通过"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "编写 topology 段的 PEG 语法",
+      "description": "作为开发者，我需要一个 pest 语法来解析 .plc 文件的 [topology] 段。",
+      "acceptanceCriteria": [
+        "src/parser/plc.pest 包含 [topology] 段的语法规则",
+        "解析裸端口声明：'device Y0: digital_output'",
+        "解析带属性块的设备声明：'device valve_A: solenoid_valve { connected_to: Y0, response_time: 15ms }'",
+        "解析所有设备类型：digital_output、digital_input、solenoid_valve、cylinder、sensor、motor",
+        "处理注释（以 # 开头的行）",
+        "处理属性值：标识符、字符串、时间量（如 200ms）、带单位数值（如 100mm、60rpm）",
+        "处理 detects 中的设备状态引用（如 cyl_A.extended）",
+        "单元测试：成功解析 PRD 5.3 节的 topology 示例",
+        "类型检查通过"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "编写 constraints 段的 PEG 语法",
+      "description": "作为开发者，我需要一个 pest 语法来解析 .plc 文件的 [constraints] 段。",
+      "acceptanceCriteria": [
+        "src/parser/plc.pest 扩展 [constraints] 段的语法规则",
+        "解析 safety 约束：'safety: A.state conflicts_with B.state'，带可选 reason",
+        "解析 safety requires：'safety: A.state requires B.state'，带可选 reason",
+        "解析 timing 约束：'timing: task.X must_complete_within Nms' 和 'timing: task.X.step_Y must_complete_within Nms'，带可选 reason",
+        "解析 timing must_start_after：'timing: task.X must_start_after Nms'",
+        "解析因果链：'causality: A -> B -> C -> D'，带可选 reason",
+        "单元测试：成功解析 PRD 5.4 节的 constraints 示例",
+        "类型检查通过"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "编写 tasks 段的 PEG 语法",
+      "description": "作为开发者，我需要一个 pest 语法来解析 .plc 文件的 [tasks] 段。",
+      "acceptanceCriteria": [
+        "src/parser/plc.pest 扩展 [tasks] 段的语法规则",
+        "解析 task 声明及其 step：'task init: step extend_A: ...'",
+        "解析动作：'action: extend cyl_A'、'action: retract cyl_A'、'action: set device on/off'、'action: log \"message\"'",
+        "解析 wait 语句：'wait: sensor_A_ext == true'",
+        "解析 timeout 跳转：'timeout: 600ms -> goto fault_handler'",
+        "解析 on_complete：'on_complete: goto ready' 和 'on_complete: unreachable'",
+        "解析 parallel 并行块及其分支",
+        "解析 race 竞争块及其分支和 then-goto",
+        "解析 allow_indefinite_wait: true",
+        "单元测试：成功解析 PRD 5.5.1 至 5.5.5 节的 tasks 示例",
+        "类型检查通过"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "实现 AST 构建器（解析树转 AST）",
+      "description": "作为开发者，我需要将 pest 解析对（Pairs）转换为类型化的 AST 结构体，以便下游分析可以使用结构化数据。",
+      "acceptanceCriteria": [
+        "src/parser/mod.rs 实现 pub fn parse_plc(input: &str) -> Result<PlcProgram, PlcError>",
+        "将 pest Pairs 转换为 US-002 中定义的 AST 类型",
+        "处理全部三个段落：topology、constraints、tasks",
+        "解析失败时返回包含行号的有意义错误信息",
+        "单元测试：解析 PRD 6.3 节完整示例（AI 翻译输出）为 AST 并验证关键字段",
+        "单元测试：解析 PRD 第 9 节完整示例（半圈旋转判断）为 AST 并验证关键字段",
+        "类型检查通过"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "定义 IR 数据结构",
+      "description": "作为开发者，我需要定义 IR 类型（TopologyGraph、StateMachine、ConstraintSet、TimingModel），以便语义分析器能生成它们。",
+      "acceptanceCriteria": [
+        "src/ir/mod.rs 使用 petgraph::DiGraph 定义 TopologyGraph，节点为 Device，边为 ConnectionType（Electrical、Pneumatic、Logical）",
+        "src/ir/mod.rs 定义 StateMachine，包含 State（task_name、step_name）、Transition（from、to、guard、actions、timers）和初始状态",
+        "src/ir/mod.rs 定义 ConstraintSet，包含 safety（conflicts_with、requires）、timing（must_complete_within、must_start_after）和 causality 链",
+        "src/ir/mod.rs 定义 TimingModel，包含动作到时间区间的映射",
+        "所有 IR 类型派生 Debug、Clone、Serialize、Deserialize",
+        "IR 可序列化为 JSON 用于调试（serde_json::to_string_pretty）",
+        "类型检查通过"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "实现语义分析：AST 转 TopologyGraph",
+      "description": "作为开发者，我需要从 AST 构建 TopologyGraph，以便因果链检查和诊断可以遍历物理连接。",
+      "acceptanceCriteria": [
+        "src/semantic/mod.rs 实现从 AST 构建拓扑图",
+        "每个设备成为 petgraph DiGraph 中的一个节点",
+        "connected_to 关系成为带有相应 ConnectionType 的有向边",
+        "检测未定义的设备引用并报告带行号的错误",
+        "检测类型不兼容的连接（如 sensor connected_to cylinder）并报告错误",
+        "单元测试：从 PRD 5.3 节示例构建拓扑图并验证节点/边数量",
+        "单元测试：验证未定义设备引用时报错",
+        "类型检查通过"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "实现语义分析：AST 转 StateMachine",
+      "description": "作为开发者，我需要从 AST 构建 StateMachine，以便安全性和活性验证可以分析状态转移。",
+      "acceptanceCriteria": [
+        "src/semantic/mod.rs 实现从 AST tasks 构建状态机",
+        "每个 (task, step) 对成为一个 State",
+        "task 内的顺序 step 创建连续状态之间的转移",
+        "goto 语句创建到目标 task 初始状态的转移",
+        "on_complete: goto 从 task 最后一个 step 创建转移",
+        "parallel 块创建 fork/join 状态",
+        "race 块创建带守卫条件的分支状态",
+        "timeout 创建带定时器条件的守卫转移",
+        "检测未定义的 goto 目标并报告带行号的错误",
+        "单元测试：从 PRD 5.5.1 节示例构建状态机并验证状态/转移",
+        "单元测试：从 PRD 第 9 节（race 示例）构建状态机并验证分支",
+        "类型检查通过"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "实现语义分析：AST 转 ConstraintSet 和 TimingModel",
+      "description": "作为开发者，我需要从 AST 提取约束和时序信息，以便验证引擎可以检查它们。",
+      "acceptanceCriteria": [
+        "src/semantic/mod.rs 实现从 AST 提取约束",
+        "收集 safety 约束（conflicts_with、requires）及其状态表达式",
+        "收集 timing 约束（must_complete_within、must_start_after）及其作用域和时长",
+        "收集 causality 链为有序设备列表",
+        "从设备物理属性（stroke_time、retract_time、response_time、ramp_time）构建 TimingModel",
+        "检测约束中引用的未定义设备/状态并报告错误",
+        "单元测试：从 PRD 5.4 节示例提取约束并验证数量和值",
+        "类型检查通过"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "实现错误报告系统",
+      "description": "作为开发者，我需要一个统一的错误报告系统，输出带行号和修复建议的中文错误信息。",
+      "acceptanceCriteria": [
+        "src/error/mod.rs 定义 PlcError 枚举，覆盖：ParseError、SemanticError、UndefinedReference、TypeMismatch、DuplicateDefinition",
+        "每个错误变体携带源位置（文件、行、列）",
+        "Error Display 实现输出符合 PRD 错误格式的中文信息",
+        "错误在适用时包含 'reason' 字段用于修复建议",
+        "单元测试：格式化 ParseError 并验证包含行号和中文信息",
+        "单元测试：格式化 UndefinedReference 错误并验证包含缺失设备名称",
+        "类型检查通过"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "创建示例 .plc 文件和集成测试",
+      "description": "作为开发者，我需要示例 .plc 文件和端到端测试，将它们解析为 IR 并序列化为 JSON。",
+      "acceptanceCriteria": [
+        "examples/two_cylinder.plc 包含 PRD 6.3 节示例（双气缸顺序动作）",
+        "examples/half_rotation.plc 包含 PRD 第 9 节示例（半圈旋转判断）",
+        "examples/error_missing_device.plc 包含一个故意写错的文件（未定义设备引用）",
+        "集成测试：解析 two_cylinder.plc -> AST -> IR -> JSON，验证 JSON 有效且包含预期字段",
+        "集成测试：解析 half_rotation.plc -> AST -> IR -> JSON，验证 JSON 有效",
+        "集成测试：解析 error_missing_device.plc 并验证返回适当错误",
+        "CLI 'cargo run -- examples/two_cylinder.plc' 将 IR 以 JSON 输出到 stdout",
+        "类型检查通过"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "实现因果链检查器（Causality Checker）",
+      "description": "作为开发者，我需要因果链验证，检查物理因果链在拓扑图中是否连通。",
+      "acceptanceCriteria": [
+        "src/verification/causality.rs 实现因果链验证",
+        "对每条 causality 约束（如 Y0 -> valve_A -> cyl_A -> sensor_A_ext），使用 petgraph 可达性验证路径存在",
+        "对 tasks 中的每个 action+wait 对，推断隐式因果链并验证连通性",
+        "失败时：报告断裂的链路、期望链路、实际链路和修复建议（匹配 PRD 3.2.4 节错误格式）",
+        "错误信息为中文，包含行号",
+        "单元测试：验证 PRD 5.4 节示例的因果链通过",
+        "单元测试：验证缺少连接时（如 valve_A 未连接到 cyl_A）因果链失败",
+        "类型检查通过"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "实现时序检查器（Timing Checker）",
+      "description": "作为开发者，我需要时序验证，检查物理动作时间是否满足时序约束。",
+      "acceptanceCriteria": [
+        "src/verification/timing.rs 实现时序包络验证",
+        "对每个 must_complete_within 约束，计算作用域（task 或 step）的最坏情况关键路径时间",
+        "同一 step 内多条 action 按并行计算（取最大值），顺序 step 累加",
+        "因果链中包含设备 response_time：电磁阀 response_time + 气缸 stroke_time",
+        "对每个 must_start_after 约束，计算前驱结束到当前开始的最短间隔",
+        "若最短间隔不足以保证 must_start_after 要求，报错：'无法保证 X 在 Nms 后才开始，当前最短间隔为 Mms'",
+        "失败时：报告约束、分析明细和结论（匹配 PRD 3.2.3 节错误格式）",
+        "错误信息为中文，包含行号",
+        "单元测试：验证 stroke_time(200ms) < 约束(500ms) 时通过",
+        "单元测试：验证 stroke_time(200ms) > 约束(100ms) 时失败",
+        "单元测试：验证 must_start_after 在最短间隔充足时通过",
+        "单元测试：验证 must_start_after 在最短间隔不足时失败",
+        "类型检查通过"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "实现活性检查器（Liveness Checker）",
+      "description": "作为开发者，我需要活性验证，检测状态机中的潜在死锁。",
+      "acceptanceCriteria": [
+        "src/verification/liveness.rs 实现死锁检测",
+        "检查所有 wait 语句是否有 timeout 或 allow_indefinite_wait",
+        "检查非终态状态是否有零出边",
+        "on_complete: goto 形成的循环（如 ready -> init -> ready）是合法的，不算死锁",
+        "on_complete: unreachable 的 task 仅在所有内部路径以 goto 结尾时有效；若存在可到达 on_complete 的路径则报错",
+        "检查是否存在不包含 allow_indefinite_wait 或 timeout 出边的强连通分量",
+        "失败时：报告位置、原因、物理分析和修复建议（匹配 PRD 3.2.2 节错误格式）",
+        "错误信息为中文，包含行号",
+        "单元测试：验证 PRD 5.5.1-5.5.3 节示例（有 timeout 和 allow_indefinite_wait）活性通过",
+        "单元测试：验证 wait 无 timeout 且无 allow_indefinite_wait 时活性失败",
+        "类型检查通过"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "实现安全性检查器（Safety Checker + Z3）",
+      "description": "作为开发者，我需要安全性验证，使用 Z3 SMT 求解器证明状态互斥性质。",
+      "acceptanceCriteria": [
+        "Cargo.toml 添加 z3 crate 依赖",
+        "src/verification/safety.rs 使用 Z3 实现安全性检查",
+        "将状态机转移编码为 Z3 布尔公式",
+        "对每个 conflicts_with 约束，检查两个状态是否可同时可达",
+        "实现分层策略：先尝试 k-induction，失败则回退到 BMC",
+        "BMC 默认最大展开深度 = 状态节点数；若存在 SCC 则至少展开 |SCC| + 1 层",
+        "尊重用户配置的 bmc_max_depth 上限",
+        "超过 bmc_max_depth 时停止搜索并输出有界验证警告：'WARNING: Safety 在深度 N 内未发现反例，但未获得完备证明'",
+        "报告验证结论级别：完备证明（k-induction/穷举）vs 有界验证（仅 BMC）",
+        "失败时：报告约束、违反路径和修复建议（匹配 PRD 3.2.1 节错误格式）",
+        "错误信息为中文，包含行号",
+        "单元测试：验证双气缸顺序逻辑（不会同时伸出）安全性通过",
+        "单元测试：验证 parallel 块同时伸出两个冲突气缸时安全性失败",
+        "单元测试：验证含 SCC 的状态机至少展开 |SCC| + 1 层",
+        "单元测试：验证超过 bmc_max_depth 时输出有界验证警告",
+        "冲突规则：当 bmc_max_depth < |SCC| + 1 时，截断至 bmc_max_depth 并输出有界验证警告（非完备证明）",
+        "单元测试：当 bmc_max_depth < |SCC| + 1 时，验证截断至上限并输出有界验证警告",
+        "类型检查通过"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "集成所有验证并进行端到端测试",
+      "description": "作为开发者，我需要将四项验证集成到编译流水线中，并输出统一的验证报告。",
+      "acceptanceCriteria": [
+        "src/verification/mod.rs 编排四个检查器：Safety、Liveness、Timing、Causality",
+        "CLI 'cargo run -- examples/two_cylinder.plc' 运行完整流水线：解析 -> 语义分析 -> 验证 -> 报告",
+        "全部检查通过时：打印成功摘要，包含每项检查的验证级别",
+        "任一检查失败时：打印所有错误（不仅是第一个），每个错误包含位置、原因、修复建议",
+        "集成测试：two_cylinder.plc 通过全部四项检查",
+        "集成测试：half_rotation.plc 通过全部四项检查",
+        "集成测试：创建一个 .plc 文件触发全部四种错误类型并验证均被报告",
+        "类型检查通过"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
