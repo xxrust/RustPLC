@@ -554,6 +554,47 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
                 }
             }
 
+            for if_else in &analyzed.if_elses {
+                let line = step.line.max(1);
+                let expr = condition_to_expression(&if_else.condition);
+
+                if let Some(then_target) = resolve_task_target(
+                    &if_else.then_goto,
+                    line,
+                    &task_initial_states,
+                    &mut errors,
+                    "if/else then goto",
+                ) {
+                    builder.add_transition(
+                        from_state.clone(),
+                        then_target,
+                        TransitionGuard::Condition {
+                            expression: expr.clone(),
+                        },
+                        analyzed.actions.clone(),
+                        Vec::new(),
+                    );
+                }
+
+                if let Some(else_target) = resolve_task_target(
+                    &if_else.else_goto,
+                    line,
+                    &task_initial_states,
+                    &mut errors,
+                    "if/else else goto",
+                ) {
+                    builder.add_transition(
+                        from_state.clone(),
+                        else_target,
+                        TransitionGuard::Condition {
+                            expression: format!("NOT({expr})"),
+                        },
+                        analyzed.actions.clone(),
+                        Vec::new(),
+                    );
+                }
+            }
+
             for (delay_index, duration_ms) in analyzed.delays_ms.iter().enumerate() {
                 if let Some(target) = completion_target.clone() {
                     builder.add_transition(
@@ -622,6 +663,7 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
             let has_control_flow = !analyzed.waits.is_empty()
                 || !analyzed.delays_ms.is_empty()
                 || !analyzed.gotos.is_empty()
+                || !analyzed.if_elses.is_empty()
                 || !analyzed.parallel_blocks.is_empty()
                 || !analyzed.race_blocks.is_empty();
             if !has_control_flow {
@@ -697,8 +739,16 @@ struct AnalyzedStatements {
     delays_ms: Vec<u64>,
     gotos: Vec<GotoDirective>,
     timeouts: Vec<TimeoutDirective>,
+    if_elses: Vec<IfElseSpec>,
     parallel_blocks: Vec<ParallelBlock>,
     race_blocks: Vec<RaceBlock>,
+}
+
+#[derive(Debug, Clone)]
+struct IfElseSpec {
+    condition: ConditionExpression,
+    then_goto: String,
+    else_goto: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1167,7 +1217,15 @@ fn analyze_statements(statements: &[StepStatement]) -> AnalyzedStatements {
             StepStatement::Wait(wait) => {
                 analyzed.waits.push(wait_to_guard_expression(wait));
             }
-            StepStatement::IfElse { .. } => {}
+            StepStatement::IfElse {
+                condition,
+                then_goto,
+                else_goto,
+            } => analyzed.if_elses.push(IfElseSpec {
+                condition: condition.clone(),
+                then_goto: then_goto.clone(),
+                else_goto: else_goto.clone(),
+            }),
             StepStatement::Delay { duration_ms } => analyzed.delays_ms.push(*duration_ms),
             StepStatement::Repeat { .. } => {}
             StepStatement::Timeout(timeout) => analyzed.timeouts.push(timeout.clone()),
@@ -1233,6 +1291,47 @@ fn build_parallel_block(
                     branch_state.clone(),
                     target,
                     TransitionGuard::Always,
+                    analyzed.actions.clone(),
+                    Vec::new(),
+                );
+            }
+        }
+
+        for if_else in &analyzed.if_elses {
+            let line = task.line.max(1);
+            let expr = condition_to_expression(&if_else.condition);
+
+            if let Some(then_target) = resolve_task_target(
+                &if_else.then_goto,
+                line,
+                task_initial_states,
+                errors,
+                "if/else then goto",
+            ) {
+                builder.add_transition(
+                    branch_state.clone(),
+                    then_target,
+                    TransitionGuard::Condition {
+                        expression: expr.clone(),
+                    },
+                    analyzed.actions.clone(),
+                    Vec::new(),
+                );
+            }
+
+            if let Some(else_target) = resolve_task_target(
+                &if_else.else_goto,
+                line,
+                task_initial_states,
+                errors,
+                "if/else else goto",
+            ) {
+                builder.add_transition(
+                    branch_state.clone(),
+                    else_target,
+                    TransitionGuard::Condition {
+                        expression: format!("NOT({expr})"),
+                    },
                     analyzed.actions.clone(),
                     Vec::new(),
                 );
@@ -1346,6 +1445,7 @@ fn build_parallel_block(
         let has_control_flow = !analyzed.waits.is_empty()
             || !analyzed.delays_ms.is_empty()
             || !analyzed.gotos.is_empty()
+            || !analyzed.if_elses.is_empty()
             || !analyzed.parallel_blocks.is_empty()
             || !analyzed.race_blocks.is_empty();
         if !has_control_flow {
@@ -1432,6 +1532,47 @@ fn build_race_block(
                     branch_state.clone(),
                     target,
                     TransitionGuard::Always,
+                    analyzed.actions.clone(),
+                    Vec::new(),
+                );
+            }
+        }
+
+        for if_else in &analyzed.if_elses {
+            let line = task.line.max(1);
+            let expr = condition_to_expression(&if_else.condition);
+
+            if let Some(then_target) = resolve_task_target(
+                &if_else.then_goto,
+                line,
+                task_initial_states,
+                errors,
+                "if/else then goto",
+            ) {
+                builder.add_transition(
+                    branch_state.clone(),
+                    then_target,
+                    TransitionGuard::Condition {
+                        expression: expr.clone(),
+                    },
+                    analyzed.actions.clone(),
+                    Vec::new(),
+                );
+            }
+
+            if let Some(else_target) = resolve_task_target(
+                &if_else.else_goto,
+                line,
+                task_initial_states,
+                errors,
+                "if/else else goto",
+            ) {
+                builder.add_transition(
+                    branch_state.clone(),
+                    else_target,
+                    TransitionGuard::Condition {
+                        expression: format!("NOT({expr})"),
+                    },
                     analyzed.actions.clone(),
                     Vec::new(),
                 );
@@ -1549,6 +1690,7 @@ fn build_race_block(
         let has_control_flow = !analyzed.waits.is_empty()
             || !analyzed.delays_ms.is_empty()
             || !analyzed.gotos.is_empty()
+            || !analyzed.if_elses.is_empty()
             || !analyzed.parallel_blocks.is_empty()
             || !analyzed.race_blocks.is_empty();
         if !has_control_flow {

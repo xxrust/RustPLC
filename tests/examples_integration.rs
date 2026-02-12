@@ -236,6 +236,59 @@ fn parses_and_or_wait_demo_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_if_else_demo_example_into_verified_ir_json() {
+    let source = read_example("if_else_demo.plc");
+    let ir_json = compile_source_to_json(&source).expect("if_else_demo should compile");
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+
+    let from_decide = transitions
+        .iter()
+        .filter(|transition| {
+            transition["from"]["task_name"] == Value::String("choose".to_string())
+                && transition["from"]["step_name"] == Value::String("decide".to_string())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        from_decide.len(),
+        2,
+        "if_else_demo should create two outgoing transitions for choose.decide"
+    );
+
+    assert!(
+        from_decide.iter().any(|transition| {
+            transition["guard"]["kind"] == Value::String("condition".to_string())
+                && transition["guard"]["expression"]
+                    == Value::String("mode_switch == true".to_string())
+        }),
+        "if_else_demo should include then branch guard"
+    );
+    assert!(
+        from_decide.iter().any(|transition| {
+            transition["guard"]["kind"] == Value::String("condition".to_string())
+                && transition["guard"]["expression"]
+                    == Value::String("NOT(mode_switch == true)".to_string())
+        }),
+        "if_else_demo should include else branch guard"
+    );
+
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
 fn repeat_expansion_produces_same_verification_result_as_manual_unrolling() {
     let repeat_source = r#"
 [topology]

@@ -1,0 +1,26 @@
+[topology]
+
+device mode_switch: digital_input
+
+[constraints]
+
+[tasks]
+
+task choose:
+    step decide:
+        if: mode_switch == true goto process_A else: goto process_B
+
+task process_A:
+    step run:
+        action: log "process A selected"
+    on_complete: goto done
+
+task process_B:
+    step run:
+        action: log "process B selected"
+    on_complete: goto done
+
+task done:
+    step finish:
+        action: log "workflow complete"
+

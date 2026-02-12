@@ -511,3 +511,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - `simple_condition` is shared by wait/if parsing, so condition parsing stays consistent across constructs.
 ---
+## [2026-02-13 02:59:08 CST] - US-012
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Completed if/else semantic lowering: each `if: <cond> goto A else: goto B` now emits two transitions with complementary guards (`cond` and `NOT(cond)`) to their resolved targets.
+  - Added if/else target resolution and semantic error reporting for invalid then/else goto targets in top-level steps and nested parallel/race branches.
+  - Updated control-flow detection to treat if/else as explicit control flow, preventing accidental fallback `Always` transitions.
+  - Added `examples/if_else_demo.plc` plus integration coverage to assert two outgoing branch transitions and full verification pass.
+- Files changed
+  - `src/semantic/mod.rs`, `tests/examples_integration.rs`, `examples/if_else_demo.plc`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Branching statements should emit explicit transitions and also participate in each `has_control_flow` guard, otherwise default fallthrough edges can silently change semantics.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Adding a new control-flow variant requires updates in all three state-machine builders (top-level, parallel branch, race branch), not just the main task loop.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - The current if/else IR encoding uses plain condition strings (`<expr>` / `NOT(<expr>)`), which Safety/Liveness/Timing already handle without additional verifier-specific logic.
+---
