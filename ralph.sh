@@ -39,6 +39,29 @@ PROGRESS_FILE="$SCRIPT_DIR/progress.txt"
 ARCHIVE_DIR="$SCRIPT_DIR/archive"
 LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
 
+all_stories_passed() {
+  if [[ ! -f "$PRD_FILE" ]] || ! command -v python3 >/dev/null 2>&1; then
+    return 1
+  fi
+
+  python3 - "$PRD_FILE" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    stories = data.get("userStories", [])
+    # Empty story lists should not be treated as complete.
+    ok = bool(stories) and all(bool(s.get("passes")) for s in stories)
+except Exception:
+    ok = False
+
+sys.exit(0 if ok else 1)
+PY
+}
+
 # Archive previous run if branch changed
 if [ -f "$PRD_FILE" ] && [ -f "$LAST_BRANCH_FILE" ]; then
   CURRENT_BRANCH=$(jq -r '.branchName // empty' "$PRD_FILE" 2>/dev/null || echo "")
@@ -98,12 +121,17 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     OUTPUT=$(codex exec --dangerously-bypass-approvals-and-sandbox - < "$SCRIPT_DIR/CODEX.md" 2>&1 | tee /dev/stderr) || true
   fi
   
-  # Check for completion signal
-  if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+  # Completion should be based on PRD state; completion token in the prompt can be a false positive.
+  if all_stories_passed; then
     echo ""
     echo "Ralph completed all tasks!"
     echo "Completed at iteration $i of $MAX_ITERATIONS"
     exit 0
+  fi
+
+  # Keep logging a completion token if it appears near the end, but do not terminate on token alone.
+  if echo "$OUTPUT" | tail -n 80 | grep -q "<promise>COMPLETE</promise>"; then
+    echo "Completion token detected, but PRD still has pending stories. Continuing..."
   fi
   
   echo "Iteration $i complete. Continuing..."
