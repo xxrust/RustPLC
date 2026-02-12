@@ -1,0 +1,267 @@
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device Y2: digital_output
+device Y3: digital_output
+device Y4: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
+device X4: digital_input
+device X5: digital_input
+device X6: digital_input
+device X7: digital_input
+device X8: digital_input
+device X9: digital_input
+device X10: digital_input
+device X11: digital_input
+
+device start_button: digital_input {
+    connected_to: X11
+    debounce: 20ms
+}
+
+device motor_conv: motor {
+    connected_to: Y0
+    rated_speed: 30rpm
+    ramp_time: 50ms
+}
+
+device sensor_pos1: sensor {
+    connected_to: X0
+    detects: motor_conv.position_A
+}
+
+device sensor_pos2: sensor {
+    connected_to: X1
+    detects: motor_conv.position_B
+}
+
+device sensor_exit: sensor {
+    connected_to: X2
+    detects: motor_conv.position_C
+}
+
+device valve_clamp1: solenoid_valve {
+    connected_to: Y1
+    response_time: 20ms
+}
+
+device cyl_clamp1: cylinder {
+    connected_to: valve_clamp1
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_clamp1_ext: sensor {
+    connected_to: X3
+    detects: cyl_clamp1.extended
+}
+
+device sensor_clamp1_ret: sensor {
+    connected_to: X4
+    detects: cyl_clamp1.retracted
+}
+
+device valve_stamp: solenoid_valve {
+    connected_to: Y2
+    response_time: 20ms
+}
+
+device cyl_stamp: cylinder {
+    connected_to: valve_stamp
+    stroke_time: 200ms
+    retract_time: 200ms
+}
+
+device sensor_stamp_ext: sensor {
+    connected_to: X5
+    detects: cyl_stamp.extended
+}
+
+device sensor_stamp_ret: sensor {
+    connected_to: X6
+    detects: cyl_stamp.retracted
+}
+
+device valve_clamp2: solenoid_valve {
+    connected_to: Y3
+    response_time: 20ms
+}
+
+device cyl_clamp2: cylinder {
+    connected_to: valve_clamp2
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_clamp2_ext: sensor {
+    connected_to: X7
+    detects: cyl_clamp2.extended
+}
+
+device sensor_clamp2_ret: sensor {
+    connected_to: X8
+    detects: cyl_clamp2.retracted
+}
+
+device valve_bend: solenoid_valve {
+    connected_to: Y4
+    response_time: 20ms
+}
+
+device cyl_bend: cylinder {
+    connected_to: valve_bend
+    stroke_time: 500ms
+    retract_time: 500ms
+}
+
+device sensor_bend_ext: sensor {
+    connected_to: X9
+    detects: cyl_bend.extended
+}
+
+device sensor_bend_ret: sensor {
+    connected_to: X10
+    detects: cyl_bend.retracted
+}
+
+[constraints]
+
+safety: cyl_clamp1.extended conflicts_with motor_conv.on
+    reason: "传送带运转时夹紧缸1不能伸出"
+
+safety: cyl_clamp2.extended conflicts_with motor_conv.on
+    reason: "传送带运转时夹紧缸2不能伸出"
+
+safety: cyl_stamp.extended conflicts_with motor_conv.on
+    reason: "传送带运转时冲压缸不能伸出"
+
+safety: cyl_bend.extended conflicts_with motor_conv.on
+    reason: "传送带运转时折弯缸不能伸出"
+
+safety: cyl_stamp.extended requires cyl_clamp1.extended
+    reason: "冲压时工件必须被夹紧缸1夹住"
+
+safety: cyl_bend.extended requires cyl_clamp2.extended
+    reason: "折弯时工件必须被夹紧缸2夹住"
+
+causality: Y0 -> motor_conv -> sensor_pos1
+    reason: "传送带运转应能被工位1到位传感器检测"
+
+causality: Y0 -> motor_conv -> sensor_pos2
+    reason: "传送带运转应能被工位2到位传感器检测"
+
+causality: Y0 -> motor_conv -> sensor_exit
+    reason: "传送带运转应能被出口传感器检测"
+
+causality: Y1 -> valve_clamp1 -> cyl_clamp1 -> sensor_clamp1_ext
+    reason: "夹紧缸1伸出应能被传感器检测"
+
+causality: Y1 -> valve_clamp1 -> cyl_clamp1 -> sensor_clamp1_ret
+    reason: "夹紧缸1缩回应能被传感器检测"
+
+causality: Y2 -> valve_stamp -> cyl_stamp -> sensor_stamp_ext
+    reason: "冲压缸伸出应能被传感器检测"
+
+causality: Y2 -> valve_stamp -> cyl_stamp -> sensor_stamp_ret
+    reason: "冲压缸缩回应能被传感器检测"
+
+causality: Y3 -> valve_clamp2 -> cyl_clamp2 -> sensor_clamp2_ext
+    reason: "夹紧缸2伸出应能被传感器检测"
+
+causality: Y3 -> valve_clamp2 -> cyl_clamp2 -> sensor_clamp2_ret
+    reason: "夹紧缸2缩回应能被传感器检测"
+
+causality: Y4 -> valve_bend -> cyl_bend -> sensor_bend_ext
+    reason: "折弯缸伸出应能被传感器检测"
+
+causality: Y4 -> valve_bend -> cyl_bend -> sensor_bend_ret
+    reason: "折弯缸缩回应能被传感器检测"
+
+[tasks]
+
+# 工位1：冲压
+task station1:
+    step conv_to_pos1:
+        action: set motor_conv on
+    step wait_pos1:
+        wait: sensor_pos1 == true
+        timeout: 5000ms -> goto fault_handler
+    step stop_conv1:
+        action: set motor_conv off
+    step clamp1:
+        action: extend cyl_clamp1
+        wait: sensor_clamp1_ext == true
+        timeout: 500ms -> goto fault_handler
+    step stamp_down:
+        action: extend cyl_stamp
+        wait: sensor_stamp_ext == true
+        timeout: 400ms -> goto fault_handler
+    step stamp_up:
+        action: retract cyl_stamp
+        wait: sensor_stamp_ret == true
+        timeout: 400ms -> goto fault_handler
+    step unclamp1:
+        action: retract cyl_clamp1
+        wait: sensor_clamp1_ret == true
+        timeout: 500ms -> goto fault_handler
+    on_complete: goto station2
+
+# 工位2：折弯
+task station2:
+    step conv_to_pos2:
+        action: set motor_conv on
+    step wait_pos2:
+        wait: sensor_pos2 == true
+        timeout: 5000ms -> goto fault_handler
+    step stop_conv2:
+        action: set motor_conv off
+    step clamp2:
+        action: extend cyl_clamp2
+        wait: sensor_clamp2_ext == true
+        timeout: 500ms -> goto fault_handler
+    step bend_forward:
+        action: extend cyl_bend
+        wait: sensor_bend_ext == true
+        timeout: 800ms -> goto fault_handler
+    step bend_back:
+        action: retract cyl_bend
+        wait: sensor_bend_ret == true
+        timeout: 800ms -> goto fault_handler
+    step unclamp2:
+        action: retract cyl_clamp2
+        wait: sensor_clamp2_ret == true
+        timeout: 500ms -> goto fault_handler
+    on_complete: goto eject
+
+# 出料
+task eject:
+    step conv_to_exit:
+        action: set motor_conv on
+    step wait_exit:
+        wait: sensor_exit == true
+        timeout: 5000ms -> goto fault_handler
+    step stop_conv_exit:
+        action: set motor_conv off
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_retract:
+        action: retract cyl_stamp
+        action: retract cyl_bend
+        action: retract cyl_clamp1
+        action: retract cyl_clamp2
+    step safe_stop:
+        action: set motor_conv off
+    step alarm:
+        action: log "冲压折弯产线故障：动作超时，请人工确认设备状态"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto station1

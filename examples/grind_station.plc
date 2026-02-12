@@ -1,0 +1,119 @@
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
+device X4: digital_input
+
+device start_button: digital_input {
+    connected_to: X2
+    debounce: 20ms
+}
+
+device switch_A: digital_input {
+    connected_to: X3
+    debounce: 20ms
+}
+
+device switch_B: digital_input {
+    connected_to: X4
+    debounce: 20ms
+}
+
+device motor_grind: motor {
+    connected_to: Y0
+    rated_speed: 3000rpm
+    ramp_time: 50ms
+}
+
+device valve_clamp: solenoid_valve {
+    connected_to: Y1
+    response_time: 20ms
+}
+
+device cyl_clamp: cylinder {
+    connected_to: valve_clamp
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_clamp_ext: sensor {
+    connected_to: X0
+    detects: cyl_clamp.extended
+}
+
+device sensor_clamp_ret: sensor {
+    connected_to: X1
+    detects: cyl_clamp.retracted
+}
+
+[constraints]
+
+safety: motor_grind.on requires cyl_clamp.extended
+    reason: "打磨时工件必须被夹紧"
+
+causality: Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ext
+    reason: "夹紧缸伸出应能被传感器检测"
+
+causality: Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ret
+    reason: "夹紧缸缩回应能被传感器检测"
+
+[tasks]
+
+task cycle:
+    step clamp:
+        action: extend cyl_clamp
+        wait: sensor_clamp_ext == true
+        timeout: 500ms -> goto fault_handler
+    step check_mode:
+        race:
+            branch_coarse:
+                wait: switch_A == true
+                then: goto grind_coarse
+            branch_fine:
+                wait: switch_B == true
+                then: goto grind_fine
+        timeout: 1000ms -> goto fault_handler
+
+task grind_coarse:
+    step start_motor:
+        action: set motor_grind on
+    step wait_coarse:
+        wait: switch_B == true
+        timeout: 3000ms -> goto stop_grind
+    on_complete: goto stop_grind
+
+task grind_fine:
+    step start_motor:
+        action: set motor_grind on
+    step wait_fine:
+        wait: switch_A == true
+        timeout: 5000ms -> goto stop_grind
+    on_complete: goto stop_grind
+
+task stop_grind:
+    step stop_motor:
+        action: set motor_grind off
+    step unclamp:
+        action: retract cyl_clamp
+        wait: sensor_clamp_ret == true
+        timeout: 500ms -> goto fault_handler
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_retract:
+        action: retract cyl_clamp
+    step safe_stop:
+        action: set motor_grind off
+    step alarm:
+        action: log "自动打磨工位故障：动作超时，请人工确认设备状态"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle

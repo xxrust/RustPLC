@@ -1,0 +1,143 @@
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device Y2: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
+device X4: digital_input
+device X5: digital_input
+
+device start_button: digital_input {
+    connected_to: X5
+    debounce: 20ms
+}
+
+device motor_conveyor: motor {
+    connected_to: Y0
+    rated_speed: 30rpm
+    ramp_time: 50ms
+}
+
+device sensor_arrive: sensor {
+    connected_to: X0
+    detects: motor_conveyor.position_A
+}
+
+device valve_lift: solenoid_valve {
+    connected_to: Y1
+    response_time: 20ms
+}
+
+device cyl_lift: cylinder {
+    connected_to: valve_lift
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_lift_ext: sensor {
+    connected_to: X1
+    detects: cyl_lift.extended
+}
+
+device sensor_lift_ret: sensor {
+    connected_to: X2
+    detects: cyl_lift.retracted
+}
+
+device valve_label: solenoid_valve {
+    connected_to: Y2
+    response_time: 20ms
+}
+
+device cyl_label: cylinder {
+    connected_to: valve_label
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_label_ext: sensor {
+    connected_to: X3
+    detects: cyl_label.extended
+}
+
+device sensor_label_ret: sensor {
+    connected_to: X4
+    detects: cyl_label.retracted
+}
+
+[constraints]
+
+safety: cyl_lift.extended conflicts_with motor_conveyor.on
+    reason: "升降缸顶起时传送带不能动，否则产品会歪"
+
+safety: cyl_label.extended requires cyl_lift.extended
+    reason: "贴标时升降缸必须保持顶起，否则贴标位置不准"
+
+causality: Y0 -> motor_conveyor -> sensor_arrive
+    reason: "传送带运转应能被到位传感器检测"
+
+causality: Y1 -> valve_lift -> cyl_lift -> sensor_lift_ext
+    reason: "升降缸伸出应能被传感器检测"
+
+causality: Y1 -> valve_lift -> cyl_lift -> sensor_lift_ret
+    reason: "升降缸缩回应能被传感器检测"
+
+causality: Y2 -> valve_label -> cyl_label -> sensor_label_ext
+    reason: "贴标缸伸出应能被传感器检测"
+
+causality: Y2 -> valve_label -> cyl_label -> sensor_label_ret
+    reason: "贴标缸缩回应能被传感器检测"
+
+[tasks]
+
+task cycle:
+    step start_conveyor:
+        action: set motor_conveyor on
+    step wait_arrive:
+        wait: sensor_arrive == true
+        timeout: 5000ms -> goto fault_handler
+    step stop_conveyor:
+        action: set motor_conveyor off
+    step lift_up:
+        action: extend cyl_lift
+        wait: sensor_lift_ext == true
+        timeout: 500ms -> goto fault_handler
+    step label_forward:
+        action: extend cyl_label
+        wait: sensor_label_ext == true
+        timeout: 500ms -> goto fault_handler
+    step label_back:
+        action: retract cyl_label
+        wait: sensor_label_ret == true
+        timeout: 500ms -> goto fault_handler
+    step lift_down:
+        action: retract cyl_lift
+        wait: sensor_lift_ret == true
+        timeout: 500ms -> goto fault_handler
+    step send_away:
+        action: set motor_conveyor on
+    step wait_leave:
+        wait: sensor_arrive == false
+        timeout: 3000ms -> goto fault_handler
+    step stop_conveyor_final:
+        action: set motor_conveyor off
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_retract:
+        action: retract cyl_label
+        action: retract cyl_lift
+    step safe_stop:
+        action: set motor_conveyor off
+    step alarm:
+        action: log "自动贴标工位故障：动作超时，请人工确认设备状态"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle

@@ -1,0 +1,165 @@
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device Y2: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
+device X4: digital_input
+device X5: digital_input
+
+device start_button: digital_input {
+    connected_to: X5
+    debounce: 20ms
+}
+
+device motor_conv: motor {
+    connected_to: Y0
+    rated_speed: 30rpm
+    ramp_time: 50ms
+}
+
+device sensor_arrive: sensor {
+    connected_to: X0
+    detects: motor_conv.position_A
+}
+
+device valve_clamp: solenoid_valve {
+    connected_to: Y1
+    response_time: 20ms
+}
+
+device cyl_clamp: cylinder {
+    connected_to: valve_clamp
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_clamp_ext: sensor {
+    connected_to: X1
+    detects: cyl_clamp.extended
+}
+
+device sensor_clamp_ret: sensor {
+    connected_to: X2
+    detects: cyl_clamp.retracted
+}
+
+device valve_glue: solenoid_valve {
+    connected_to: Y2
+    response_time: 20ms
+}
+
+device cyl_glue: cylinder {
+    connected_to: valve_glue
+    stroke_time: 150ms
+    retract_time: 150ms
+}
+
+device sensor_glue_ext: sensor {
+    connected_to: X3
+    detects: cyl_glue.extended
+}
+
+device sensor_glue_ret: sensor {
+    connected_to: X4
+    detects: cyl_glue.retracted
+}
+
+[constraints]
+
+safety: cyl_glue.extended requires cyl_clamp.extended
+    reason: "涂胶时工件必须被夹紧"
+
+safety: cyl_clamp.extended conflicts_with motor_conv.on
+    reason: "传送带运转时夹紧缸不能伸出"
+
+safety: cyl_glue.extended conflicts_with motor_conv.on
+    reason: "传送带运转时涂胶缸不能伸出"
+
+causality: Y0 -> motor_conv -> sensor_arrive
+    reason: "传送带运转应能被到位传感器检测"
+
+causality: Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ext
+    reason: "夹紧缸伸出应能被传感器检测"
+
+causality: Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ret
+    reason: "夹紧缸缩回应能被传感器检测"
+
+causality: Y2 -> valve_glue -> cyl_glue -> sensor_glue_ext
+    reason: "涂胶缸伸出应能被传感器检测"
+
+causality: Y2 -> valve_glue -> cyl_glue -> sensor_glue_ret
+    reason: "涂胶缸缩回应能被传感器检测"
+
+[tasks]
+
+task cycle:
+    step start_conv:
+        action: set motor_conv on
+    step wait_arrive:
+        wait: sensor_arrive == true
+        timeout: 5000ms -> goto fault_handler
+    step stop_conv:
+        action: set motor_conv off
+    step clamp:
+        action: extend cyl_clamp
+        wait: sensor_clamp_ext == true
+        timeout: 500ms -> goto fault_handler
+    # 第1遍涂胶
+    step glue_1_out:
+        action: extend cyl_glue
+        wait: sensor_glue_ext == true
+        timeout: 300ms -> goto fault_handler
+    step glue_1_back:
+        action: retract cyl_glue
+        wait: sensor_glue_ret == true
+        timeout: 300ms -> goto fault_handler
+    # 第2遍涂胶
+    step glue_2_out:
+        action: extend cyl_glue
+        wait: sensor_glue_ext == true
+        timeout: 300ms -> goto fault_handler
+    step glue_2_back:
+        action: retract cyl_glue
+        wait: sensor_glue_ret == true
+        timeout: 300ms -> goto fault_handler
+    # 第3遍涂胶
+    step glue_3_out:
+        action: extend cyl_glue
+        wait: sensor_glue_ext == true
+        timeout: 300ms -> goto fault_handler
+    step glue_3_back:
+        action: retract cyl_glue
+        wait: sensor_glue_ret == true
+        timeout: 300ms -> goto fault_handler
+    step unclamp:
+        action: retract cyl_clamp
+        wait: sensor_clamp_ret == true
+        timeout: 500ms -> goto fault_handler
+    step send_away:
+        action: set motor_conv on
+    step wait_leave:
+        wait: sensor_arrive == false
+        timeout: 3000ms -> goto fault_handler
+    step stop_conv_final:
+        action: set motor_conv off
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_retract:
+        action: retract cyl_glue
+        action: retract cyl_clamp
+    step safe_stop:
+        action: set motor_conv off
+    step alarm:
+        action: log "自动涂胶工位故障：动作超时，请人工确认设备状态"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle

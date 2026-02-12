@@ -100,10 +100,13 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
   - （如果推料缸和冲压缸在同一轴线）推料缸伸出与冲压缸伸出冲突
     → safety: cyl_push.extended conflicts_with cyl_press.extended
 
-因果链：
+因果链（每个被 wait 引用的传感器都需要）：
   - Y0 -> valve_push -> cyl_push -> sensor_push_ext
+  - Y0 -> valve_push -> cyl_push -> sensor_push_ret   ← 缩回传感器也需要
   - Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ext
+  - Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ret ← 缩回传感器也需要
   - Y2 -> valve_press -> cyl_press -> sensor_press_ext
+  - Y2 -> valve_press -> cyl_press -> sensor_press_ret ← 缩回传感器也需要
 
 ⚠️ 需要你确认的问题：
   - 推料缸和冲压缸在物理上会干涉吗？
@@ -112,6 +115,25 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 ```
 
 **等待工程师确认后再进入下一阶段。**
+
+**重要：阶段三的约束转化检查清单**
+
+进入阶段四之前，逐条核对：
+- 工程师在阶段三确认的每一条安全关系，是否都已转化为 `safety:` 约束？
+- 所有在 `wait` 语句中引用的传感器，是否都有对应的因果链？（包括 `_ret` 缩回传感器）
+- 因果链不仅要覆盖 `_ext` 伸出传感器，也要覆盖 `_ret` 缩回传感器
+
+**`conflicts_with` vs `requires` 判断指引：**
+
+工程师说"物理干涉"时，需要进一步追问来区分两种情况：
+
+| 工程师的表述 | 真实含义 | 正确约束 |
+|-------------|---------|---------|
+| "A和B不能同时伸出" "A伸出时B绝对不能动" | 两个状态在任何时刻不能共存 | `conflicts_with` |
+| "B动作前A必须先到位" "B工作时A必须保持" | B的状态依赖A的状态 | `requires` |
+| "A和B有干涉"（模糊） | **需要追问**：是"不能同时存在"还是"有先后顺序要求"？ | 追问后决定 |
+
+常见陷阱：工程师说"推缸和压装缸有干涉"，但同时又说"压装时推缸必须保持伸出"。这说明干涉是运动过程中的（通过顺序控制保证），不是最终状态的互斥。此时应该用 `requires`（压装需要推缸到位），而不是 `conflicts_with`。
 
 ### 阶段四：生成 DSL 并验证
 
@@ -125,6 +147,42 @@ cargo run --release -- examples/<filename>.plc
 - 如果验证失败，阅读错误信息，修复后重新验证，直到全部通过
 - 将最终通过验证的文件展示给工程师做最后确认
 
+**DSL 无延时原语的处理方案：**
+
+DSL 没有 `delay` 或 `sleep` 原语。当工程师需要"延时N秒"时，使用以下替代方案（按优先级排列）：
+
+1. **优先方案：用物理传感器替代延时** — 如果有传感器能检测到"动作完成"（如工件离开传感器范围），用 `wait: sensor == false` + `timeout` 保护。这在物理上更可靠。
+2. **等待对立条件 + timeout** — 如果有一个已知为 false 的信号（如选择开关的对立位置），用 `wait: opposite_signal == true` + `timeout: Nms -> goto next_task`。timeout 到期时自然跳转，实现延时效果。额外好处：如果对立条件意外变为 true（如操作员切换了开关），可以提前退出。
+3. **无合适对立条件时** — 创建一个 step，wait 一个永远不会满足的条件，然后用 timeout 跳转。但要注意 liveness 检查器会标记这个 wait。
+
+向工程师说明这个限制，让工程师选择方案。
+
+**DSL 无循环原语的处理方案：**
+
+DSL 没有 `for`/`while`/`repeat` 循环原语。当工程师需要"重复N次"时（如涂胶3遍、冲压2次），将循环展开为顺序步骤：
+
+```plc
+# 工程师说"涂胶缸来回涂3遍" → 展开为6个步骤
+step glue_1_out:
+    action: extend cyl_glue
+    wait: sensor_glue_ext == true
+    timeout: 300ms -> goto fault_handler
+step glue_1_back:
+    action: retract cyl_glue
+    wait: sensor_glue_ret == true
+    timeout: 300ms -> goto fault_handler
+step glue_2_out:
+    ...（同上）
+step glue_2_back:
+    ...
+step glue_3_out:
+    ...
+step glue_3_back:
+    ...
+```
+
+步骤命名用 `<动作>_<序号>_<方向>` 格式（如 `glue_1_out`, `glue_2_back`），保持清晰。向工程师确认重复次数后再展开。
+
 ---
 
 ## DSL 语法参考
@@ -137,16 +195,21 @@ cargo run --release -- examples/<filename>.plc
 [tasks]             # 控制逻辑（状态机）
 ```
 
-### 设备类型
+### 设备类型与可用状态
 
-| 类型 | 用途 | 关键属性 |
-|------|------|----------|
-| `digital_output` | 输出端口 (Y0, Y1...) | — |
-| `digital_input` | 输入端口 (X0, X1...) | `debounce` |
-| `solenoid_valve` | 电磁阀 | `connected_to`, `response_time` |
-| `cylinder` | 气缸 | `connected_to`, `stroke_time`, `retract_time` |
-| `motor` | 电机 | `connected_to`, `rated_speed`, `ramp_time` |
-| `sensor` | 传感器 | `connected_to`, `type`, `detects` |
+| 类型 | 用途 | 关键属性 | 可用状态（用于 safety/wait） |
+|------|------|----------|------------------------------|
+| `digital_output` | 输出端口 (Y0, Y1...) | — | `on`, `off` |
+| `digital_input` | 输入端口 (X0, X1...) | `debounce` | `on`, `off` |
+| `solenoid_valve` | 电磁阀 | `connected_to`, `response_time` | `on`, `off` |
+| `cylinder` | 气缸 | `connected_to`, `stroke_time`, `retract_time` | `extended`, `retracted` |
+| `motor` | 电机 | `connected_to`, `rated_speed`, `ramp_time` | `on`, `off` |
+| `sensor` | 传感器 | `connected_to`, `type`, `detects` | `on`, `off` + `detects` 声明的自定义状态 |
+
+状态在 `safety:` 约束中使用时格式为 `device.state`，例如：
+- `cyl_A.extended` — 气缸伸出状态
+- `motor_conveyor.on` — 电机运转状态
+- 不同类型设备的状态可以混合使用在 `conflicts_with` / `requires` 中
 
 ### 连接链规则
 
@@ -227,13 +290,46 @@ step detect:
 
 ### Timing（时序）
 - `must_complete_within` 检查最坏关键路径
-- 关键路径 = 顺序动作时间之和 + 上游 response_time 链
+- **重要：关键路径使用 timeout 值而非 stroke_time** — 检查器把每个 step 的 timeout 值累加作为最坏路径，而不是设备的实际动作时间。因此如果你给每个 step 设了 500ms~800ms 的 timeout，12 个 step 的总 timeout 可能远超实际动作时间。
+- 设置 `must_complete_within` 时，先手动计算所有 step 的 timeout 之和，确保约束值大于该总和
 - 并行动作取最大值
-- 约束值必须大于计算出的最坏路径
+- 如果工程师要求的周期时间小于 timeout 总和，需要向工程师说明：要么缩短 timeout（降低容错），要么放宽周期要求
 
 ### Causality（因果性）
 - 因果链中相邻设备必须通过 `connected_to` 或 `detects` 在拓扑中连通
 - 链的方向：输出口 → 阀/电机 → 执行机构 → 传感器
+
+**parallel 块的因果链陷阱：**
+
+编译器会把 parallel 块中**所有分支**的 action 与 step 级别的 wait 做因果检查。如果两个分支操作不同设备，但 step 的 wait 只关联其中一个设备的传感器，另一个分支就会报因果链断裂。
+
+例如以下代码会报错：
+```plc
+step start_both:
+    parallel:
+        branch_left:
+            action: set motor_left on    # 操作 motor_left
+        branch_right:
+            action: set motor_right on   # 操作 motor_right
+    wait: sensor_left_arrive == true     # 只等 motor_left 的传感器
+    # → 编译器会检查 motor_right -> sensor_left_arrive，因果链断裂！
+```
+
+**解决方案：** 当多个不同设备需要"同时"启动但各自等待不同传感器时，不要用 parallel，改用顺序 step 分别启动（`set` 动作是瞬时的，顺序启动在物理上等同于同时）：
+```plc
+step start_left:
+    action: set motor_left on
+step start_right:
+    action: set motor_right on
+step wait_left:
+    wait: sensor_left_arrive == true
+    timeout: 5000ms -> goto fault_handler
+step wait_right:
+    wait: sensor_right_arrive == true
+    timeout: 5000ms -> goto fault_handler
+```
+
+parallel 块适合的场景：同类设备同时动作，且 step 的 wait 不需要区分来源（如两个气缸同时伸出，等待任一到位传感器）。
 
 ---
 
@@ -273,10 +369,11 @@ step detect:
 
 每个生成的 `.plc` 文件都必须包含：
 
-1. **fault_handler 任务** — 缩回所有气缸 / 关闭所有电机，输出报警日志
+1. **fault_handler 任务** — 缩回所有气缸 / 关闭所有电机，输出报警日志。注意：fault_handler 中的 retract/set off 动作虽然不强制要求 wait 确认（因为这是紧急恢复），但应在 log 中明确提示操作员需要人工确认设备状态。
 2. **ready 任务** — 等待启动按钮，标记 `allow_indefinite_wait: true`
 3. **所有 wait 都有 timeout** — 指向 fault_handler（人工等待除外）
-4. **所有执行机构的因果链** — 从输出口到传感器
+4. **所有被 wait 引用的传感器的因果链** — 不仅是 `_ext` 伸出传感器，也包括 `_ret` 缩回传感器。规则：如果某个传感器出现在 `wait:` 语句中，就必须有一条从输出口到该传感器的因果链。
+5. **工程师确认的所有安全约束** — 阶段三中工程师确认的每一条安全关系都必须转化为 `safety:` 约束，不能遗漏
 
 ---
 
@@ -380,3 +477,22 @@ task ready:
         allow_indefinite_wait: true
     on_complete: goto search
 ```
+
+---
+
+## 更多参考示例
+
+`examples/` 目录下有多个已通过验证的 `.plc` 文件，生成前务必参考：
+
+| 文件 | 场景 | 涉及模式 |
+|------|------|----------|
+| `two_cylinder.plc` | 双气缸顺序动作 | 基础顺序、conflicts_with |
+| `half_rotation.plc` | 电机+竞争检测 | motor、race、多 task 跳转 |
+| `drill_station.plc` | 传送带+夹紧+钻孔 | motor+cylinder 混合、requires、传感器 false 等待 |
+| `label_station.plc` | 传送带+升降+贴标 | conflicts_with(cylinder vs motor)、完整因果链（含 _ret） |
+| `assembly_station.plc` | 双传送带+推缸+压装+出料 | 多设备顺序启动替代 parallel、requires vs conflicts_with 区分、timing 约束 |
+| `grind_station.plc` | 选择开关+打磨+延时 | race 做模式选择、timeout 模拟延时、对立条件等待、多 task 共享收尾 |
+| `stamp_bend_line.plc` | 冲压+折弯串联产线 | 多工位 task 链、共用传送带多位置传感器、大量 conflicts_with + requires |
+| `glue_station.plc` | 涂胶+循环展开 | 循环动作展开为顺序步骤、同一气缸多次伸缩 |
+
+遇到类似场景时，先读取对应示例文件了解已验证的模式，再生成新文件。

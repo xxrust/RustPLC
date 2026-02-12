@@ -1,0 +1,243 @@
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device Y2: digital_output
+device Y3: digital_output
+device Y4: digital_output
+device Y5: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
+device X4: digital_input
+device X5: digital_input
+device X6: digital_input
+device X7: digital_input
+device X8: digital_input
+device X9: digital_input
+device X10: digital_input
+
+device start_button: digital_input {
+    connected_to: X10
+    debounce: 20ms
+}
+
+device motor_left: motor {
+    connected_to: Y0
+    rated_speed: 30rpm
+    ramp_time: 50ms
+}
+
+device motor_right: motor {
+    connected_to: Y1
+    rated_speed: 30rpm
+    ramp_time: 50ms
+}
+
+device sensor_left_arrive: sensor {
+    connected_to: X0
+    detects: motor_left.position_A
+}
+
+device sensor_right_arrive: sensor {
+    connected_to: X1
+    detects: motor_right.position_A
+}
+
+device valve_push_L: solenoid_valve {
+    connected_to: Y2
+    response_time: 20ms
+}
+
+device cyl_push_L: cylinder {
+    connected_to: valve_push_L
+    stroke_time: 500ms
+    retract_time: 500ms
+}
+
+device sensor_push_L_ext: sensor {
+    connected_to: X2
+    detects: cyl_push_L.extended
+}
+
+device sensor_push_L_ret: sensor {
+    connected_to: X3
+    detects: cyl_push_L.retracted
+}
+
+device valve_push_R: solenoid_valve {
+    connected_to: Y3
+    response_time: 20ms
+}
+
+device cyl_push_R: cylinder {
+    connected_to: valve_push_R
+    stroke_time: 500ms
+    retract_time: 500ms
+}
+
+device sensor_push_R_ext: sensor {
+    connected_to: X4
+    detects: cyl_push_R.extended
+}
+
+device sensor_push_R_ret: sensor {
+    connected_to: X5
+    detects: cyl_push_R.retracted
+}
+
+device valve_press: solenoid_valve {
+    connected_to: Y4
+    response_time: 20ms
+}
+
+device cyl_press: cylinder {
+    connected_to: valve_press
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_press_ext: sensor {
+    connected_to: X6
+    detects: cyl_press.extended
+}
+
+device sensor_press_ret: sensor {
+    connected_to: X7
+    detects: cyl_press.retracted
+}
+
+device valve_eject: solenoid_valve {
+    connected_to: Y5
+    response_time: 20ms
+}
+
+device cyl_eject: cylinder {
+    connected_to: valve_eject
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_eject_ext: sensor {
+    connected_to: X8
+    detects: cyl_eject.extended
+}
+
+device sensor_eject_ret: sensor {
+    connected_to: X9
+    detects: cyl_eject.retracted
+}
+
+[constraints]
+
+# 压装时左右推缸必须保持伸出（requires 而非 conflicts_with）
+# 物理干涉通过顺序控制保证：推缸先到位，压装缸再动
+safety: cyl_press.extended requires cyl_push_L.extended
+    reason: "压装时左推缸必须保持伸出"
+
+safety: cyl_press.extended requires cyl_push_R.extended
+    reason: "压装时右推缸必须保持伸出"
+
+safety: cyl_eject.extended conflicts_with cyl_press.extended
+    reason: "出料缸伸出时压装缸必须缩回"
+
+causality: Y0 -> motor_left -> sensor_left_arrive
+    reason: "左传送带应能被到位传感器检测"
+
+causality: Y1 -> motor_right -> sensor_right_arrive
+    reason: "右传送带应能被到位传感器检测"
+
+causality: Y2 -> valve_push_L -> cyl_push_L -> sensor_push_L_ext
+    reason: "左推缸伸出应能被传感器检测"
+
+causality: Y2 -> valve_push_L -> cyl_push_L -> sensor_push_L_ret
+    reason: "左推缸缩回应能被传感器检测"
+
+causality: Y3 -> valve_push_R -> cyl_push_R -> sensor_push_R_ext
+    reason: "右推缸伸出应能被传感器检测"
+
+causality: Y3 -> valve_push_R -> cyl_push_R -> sensor_push_R_ret
+    reason: "右推缸缩回应能被传感器检测"
+
+causality: Y4 -> valve_press -> cyl_press -> sensor_press_ext
+    reason: "压装缸伸出应能被传感器检测"
+
+causality: Y4 -> valve_press -> cyl_press -> sensor_press_ret
+    reason: "压装缸缩回应能被传感器检测"
+
+causality: Y5 -> valve_eject -> cyl_eject -> sensor_eject_ext
+    reason: "出料缸伸出应能被传感器检测"
+
+causality: Y5 -> valve_eject -> cyl_eject -> sensor_eject_ret
+    reason: "出料缸缩回应能被传感器检测"
+
+[tasks]
+
+task cycle:
+    step start_left:
+        action: set motor_left on
+    step start_right:
+        action: set motor_right on
+    step wait_left_arrive:
+        wait: sensor_left_arrive == true
+        timeout: 5000ms -> goto fault_handler
+    step wait_right_arrive:
+        wait: sensor_right_arrive == true
+        timeout: 5000ms -> goto fault_handler
+    step stop_left:
+        action: set motor_left off
+    step stop_right:
+        action: set motor_right off
+    step push_left:
+        action: extend cyl_push_L
+        wait: sensor_push_L_ext == true
+        timeout: 800ms -> goto fault_handler
+    step push_right:
+        action: extend cyl_push_R
+        wait: sensor_push_R_ext == true
+        timeout: 800ms -> goto fault_handler
+    step press_down:
+        action: extend cyl_press
+        wait: sensor_press_ext == true
+        timeout: 500ms -> goto fault_handler
+    step press_up:
+        action: retract cyl_press
+        wait: sensor_press_ret == true
+        timeout: 500ms -> goto fault_handler
+    step retract_left:
+        action: retract cyl_push_L
+        wait: sensor_push_L_ret == true
+        timeout: 800ms -> goto fault_handler
+    step retract_right:
+        action: retract cyl_push_R
+        wait: sensor_push_R_ret == true
+        timeout: 800ms -> goto fault_handler
+    step eject_out:
+        action: extend cyl_eject
+        wait: sensor_eject_ext == true
+        timeout: 500ms -> goto fault_handler
+    step eject_back:
+        action: retract cyl_eject
+        wait: sensor_eject_ret == true
+        timeout: 500ms -> goto fault_handler
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_retract:
+        action: retract cyl_press
+        action: retract cyl_push_L
+        action: retract cyl_push_R
+        action: retract cyl_eject
+    step safe_stop:
+        action: set motor_left off
+        action: set motor_right off
+    step alarm:
+        action: log "自动装配工位故障：动作超时，请人工确认设备状态"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle
