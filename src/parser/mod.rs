@@ -4,7 +4,7 @@ use crate::ast::{
     DurationValue, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective, ParallelBlock,
     PlcProgram, RaceBlock, RaceBranch, SafetyConstraint, SafetyRelation, StateReference,
     StepDeclaration, StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective,
-    TimingConstraint, TimingRelation, TimingTarget, TopologySection, WaitStatement,
+    TimingConstraint, TimingRelation, TimingTarget, TopologySection, WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use pest::Parser;
@@ -538,6 +538,56 @@ fn parse_binary_value(pair: Pair<Rule>) -> Result<BinaryValue, PlcError> {
 
 fn parse_wait_statement(pair: Pair<Rule>) -> Result<WaitStatement, PlcError> {
     let line = line_of(&pair);
+    let condition_pair = pair
+        .into_inner()
+        .find(|part| part.as_rule() == Rule::wait_condition)
+        .ok_or_else(|| PlcError::parse(line, "wait 缺少条件表达式"))?;
+
+    let mut conditions = Vec::new();
+    let mut relation = None::<&str>;
+
+    for part in condition_pair.into_inner() {
+        match part.as_rule() {
+            Rule::simple_condition => conditions.push(parse_simple_condition(part)?),
+            Rule::logical_operator => {
+                let current = part.as_str();
+                if let Some(existing) = relation {
+                    if existing != current {
+                        return Err(PlcError::parse(
+                            line,
+                            "wait 条件不支持混用 AND/OR，请统一使用 AND 或 OR",
+                        ));
+                    }
+                } else {
+                    relation = Some(current);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let condition = if conditions.is_empty() {
+        return Err(PlcError::parse(line, "wait 缺少条件表达式"));
+    } else if let Some(op) = relation {
+        if op == "AND" {
+            WaitCondition::And(conditions)
+        } else {
+            WaitCondition::Or(conditions)
+        }
+    } else {
+        WaitCondition::Single(
+            conditions
+                .into_iter()
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "wait 缺少条件表达式"))?,
+        )
+    };
+
+    Ok(WaitStatement { condition })
+}
+
+fn parse_simple_condition(pair: Pair<Rule>) -> Result<ConditionExpression, PlcError> {
+    let line = line_of(&pair);
     let mut operand = None;
     let mut operator = None;
     let mut value = None;
@@ -554,12 +604,10 @@ fn parse_wait_statement(pair: Pair<Rule>) -> Result<WaitStatement, PlcError> {
         }
     }
 
-    Ok(WaitStatement {
-        condition: ConditionExpression {
-            left: operand.ok_or_else(|| PlcError::parse(line, "wait 缺少左值"))?,
-            operator: operator.ok_or_else(|| PlcError::parse(line, "wait 缺少比较符"))?,
-            right: value.ok_or_else(|| PlcError::parse(line, "wait 缺少右值"))?,
-        },
+    Ok(ConditionExpression {
+        left: operand.ok_or_else(|| PlcError::parse(line, "wait 缺少左值"))?,
+        operator: operator.ok_or_else(|| PlcError::parse(line, "wait 缺少比较符"))?,
+        right: value.ok_or_else(|| PlcError::parse(line, "wait 缺少右值"))?,
     })
 }
 
@@ -918,7 +966,7 @@ fn map_parse_error(err: pest::error::Error<Rule>) -> PlcError {
 #[cfg(test)]
 mod tests {
     use super::{parse_constraints, parse_plc, parse_tasks, parse_topology};
-    use crate::ast::{ActionStatement, OnCompleteDirective, StepStatement};
+    use crate::ast::{ActionStatement, OnCompleteDirective, StepStatement, WaitCondition};
 
     #[test]
     fn parses_prd_5_3_topology_example() {
@@ -1567,5 +1615,104 @@ safety: cyl_A.extended conflicts_with
 
         let err = parse_plc(bad_input).expect_err("错误输入应返回解析错误");
         assert!(err.line() >= 6);
+    }
+
+    #[test]
+    fn parses_wait_and_or_conditions_and_rejects_mixed() {
+        let and_input = r#"
+[topology]
+device sensor_A: sensor
+device sensor_B: sensor
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_all:
+        wait: sensor_A == true AND sensor_B == true
+"#;
+
+        let ast = parse_plc(and_input).expect("AND wait 应能解析");
+        let step = &ast.tasks.tasks[0].steps[0];
+        match &step.statements[0] {
+            StepStatement::Wait(wait) => match &wait.condition {
+                WaitCondition::And(conditions) => {
+                    assert_eq!(conditions.len(), 2);
+                    assert_eq!(conditions[0].left, "sensor_A");
+                    assert_eq!(conditions[1].left, "sensor_B");
+                }
+                other => panic!("期望 And 条件，实际为: {other:?}"),
+            },
+            other => panic!("期望 wait 语句，实际为: {other:?}"),
+        }
+
+        let or_input = r#"
+[topology]
+device sensor_A: sensor
+device sensor_B: sensor
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_any:
+        wait: sensor_A == true OR sensor_B == true
+"#;
+
+        let ast = parse_plc(or_input).expect("OR wait 应能解析");
+        let step = &ast.tasks.tasks[0].steps[0];
+        match &step.statements[0] {
+            StepStatement::Wait(wait) => match &wait.condition {
+                WaitCondition::Or(conditions) => {
+                    assert_eq!(conditions.len(), 2);
+                    assert_eq!(conditions[0].left, "sensor_A");
+                    assert_eq!(conditions[1].left, "sensor_B");
+                }
+                other => panic!("期望 Or 条件，实际为: {other:?}"),
+            },
+            other => panic!("期望 wait 语句，实际为: {other:?}"),
+        }
+
+        let single_input = r#"
+[topology]
+device sensor_A: sensor
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_one:
+        wait: sensor_A == true
+"#;
+
+        let ast = parse_plc(single_input).expect("单条件 wait 应能解析");
+        let step = &ast.tasks.tasks[0].steps[0];
+        match &step.statements[0] {
+            StepStatement::Wait(wait) => assert!(
+                matches!(wait.condition, WaitCondition::Single(_)),
+                "单条件 wait 应降级为 Single 变体"
+            ),
+            other => panic!("期望 wait 语句，实际为: {other:?}"),
+        }
+
+        let mixed_input = r#"
+[topology]
+device sensor_A: sensor
+device sensor_B: sensor
+device sensor_C: sensor
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_mixed:
+        wait: sensor_A == true AND sensor_B == true OR sensor_C == true
+"#;
+
+        let err = parse_plc(mixed_input).expect_err("混用 AND/OR 应被拒绝");
+        assert!(
+            err.to_string().contains("混用 AND/OR"),
+            "应提示 AND/OR 混用错误"
+        );
     }
 }

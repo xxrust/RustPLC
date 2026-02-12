@@ -1,5 +1,6 @@
 use crate::ast::{
-    ComparisonOperator, LiteralValue, OnCompleteDirective, PlcProgram, StepStatement, WaitStatement,
+    ComparisonOperator, ConditionExpression, LiteralValue, OnCompleteDirective, PlcProgram,
+    StepStatement, WaitCondition, WaitStatement,
 };
 use crate::ir::{StateMachine, TransitionGuard};
 use petgraph::algo::kosaraju_scc;
@@ -453,11 +454,27 @@ fn state_key(task_name: &str, step_name: &str) -> (String, String) {
 }
 
 fn wait_to_text(wait: &WaitStatement) -> String {
+    match &wait.condition {
+        WaitCondition::Single(condition) => condition_to_text(condition),
+        WaitCondition::And(conditions) => conditions
+            .iter()
+            .map(condition_to_text)
+            .collect::<Vec<_>>()
+            .join(" AND "),
+        WaitCondition::Or(conditions) => conditions
+            .iter()
+            .map(condition_to_text)
+            .collect::<Vec<_>>()
+            .join(" OR "),
+    }
+}
+
+fn condition_to_text(condition: &ConditionExpression) -> String {
     format!(
         "{} {} {}",
-        wait.condition.left,
-        comparison_operator_text(&wait.condition.operator),
-        literal_to_text(&wait.condition.right)
+        condition.left,
+        comparison_operator_text(&condition.operator),
+        literal_to_text(&condition.right)
     )
 }
 

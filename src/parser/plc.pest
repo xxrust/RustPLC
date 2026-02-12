@@ -105,7 +105,10 @@ condition_value = {
 }
 
 action_statement = { "action" ~ ":" ~ action_command }
-wait_statement = { "wait" ~ ":" ~ condition_operand ~ comparison_operator ~ condition_value }
+simple_condition = { condition_operand ~ comparison_operator ~ condition_value }
+logical_operator = { "AND" | "OR" }
+wait_condition = { simple_condition ~ (logical_operator ~ simple_condition)* }
+wait_statement = { "wait" ~ ":" ~ wait_condition }
 delay_statement = { "delay" ~ ":" ~ duration_value }
 goto_statement = { "goto" ~ identifier }
 timeout_statement = { "timeout" ~ ":" ~ duration_value ~ "->" ~ goto_statement }

@@ -3,7 +3,8 @@ use crate::ast::{
     ConstraintsSection, DeviceType, DurationValue, GotoDirective, LiteralValue,
     OnCompleteDirective, ParallelBlock, PlcProgram, RaceBlock, SafetyRelation as AstSafetyRelation,
     StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective,
-    TimingRelation as AstTimingRelation, TimingTarget, TopologySection, WaitStatement,
+    TimingRelation as AstTimingRelation, TimingTarget, TopologySection, WaitCondition,
+    WaitStatement,
 };
 use crate::error::PlcError;
 use crate::ir::{
@@ -1500,7 +1501,23 @@ fn action_to_transition_action(action: &ActionStatement) -> TransitionAction {
 }
 
 fn wait_to_guard_expression(wait: &WaitStatement) -> String {
-    condition_to_expression(&wait.condition)
+    wait_condition_to_expression(&wait.condition)
+}
+
+fn wait_condition_to_expression(condition: &WaitCondition) -> String {
+    match condition {
+        WaitCondition::Single(single) => condition_to_expression(single),
+        WaitCondition::And(conditions) => conditions
+            .iter()
+            .map(condition_to_expression)
+            .collect::<Vec<_>>()
+            .join(" AND "),
+        WaitCondition::Or(conditions) => conditions
+            .iter()
+            .map(condition_to_expression)
+            .collect::<Vec<_>>()
+            .join(" OR "),
+    }
 }
 
 fn condition_to_expression(condition: &ConditionExpression) -> String {

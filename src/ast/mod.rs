@@ -191,7 +191,15 @@ pub enum BinaryValue {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaitStatement {
-    pub condition: ConditionExpression,
+    pub condition: WaitCondition,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum WaitCondition {
+    Single(ConditionExpression),
+    And(Vec<ConditionExpression>),
+    Or(Vec<ConditionExpression>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

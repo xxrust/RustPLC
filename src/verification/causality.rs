@@ -1,6 +1,6 @@
 use crate::ast::{
-    ActionStatement, BinaryValue, ComparisonOperator, LiteralValue, PlcProgram, StepStatement,
-    WaitStatement,
+    ActionStatement, BinaryValue, ComparisonOperator, ConditionExpression, LiteralValue,
+    PlcProgram, StepStatement, WaitCondition, WaitStatement,
 };
 use crate::ir::{ConstraintSet, DeviceKind, TopologyGraph};
 use petgraph::algo::has_path_connecting;
@@ -461,31 +461,58 @@ fn binary_value_text(value: &BinaryValue) -> &'static str {
 }
 
 fn infer_wait_sensor(wait: &WaitStatement, sensor_names: &HashSet<String>) -> Option<String> {
-    if sensor_names.contains(&wait.condition.left) {
-        return Some(wait.condition.left.clone());
-    }
+    for condition in wait_conditions(wait) {
+        if sensor_names.contains(&condition.left) {
+            return Some(condition.left.clone());
+        }
 
-    if let Some(candidate) = wait.condition.left.split('.').next()
-        && sensor_names.contains(candidate)
-    {
-        return Some(candidate.to_string());
-    }
+        if let Some(candidate) = condition.left.split('.').next()
+            && sensor_names.contains(candidate)
+        {
+            return Some(candidate.to_string());
+        }
 
-    if let LiteralValue::State(state) = &wait.condition.right
-        && sensor_names.contains(&state.device)
-    {
-        return Some(state.device.clone());
+        if let LiteralValue::State(state) = &condition.right
+            && sensor_names.contains(&state.device)
+        {
+            return Some(state.device.clone());
+        }
     }
 
     None
 }
 
+fn wait_conditions(wait: &WaitStatement) -> Vec<&ConditionExpression> {
+    match &wait.condition {
+        WaitCondition::Single(condition) => vec![condition],
+        WaitCondition::And(conditions) | WaitCondition::Or(conditions) => {
+            conditions.iter().collect()
+        }
+    }
+}
+
 fn wait_to_text(wait: &WaitStatement) -> String {
+    match &wait.condition {
+        WaitCondition::Single(condition) => condition_to_text(condition),
+        WaitCondition::And(conditions) => conditions
+            .iter()
+            .map(condition_to_text)
+            .collect::<Vec<_>>()
+            .join(" AND "),
+        WaitCondition::Or(conditions) => conditions
+            .iter()
+            .map(condition_to_text)
+            .collect::<Vec<_>>()
+            .join(" OR "),
+    }
+}
+
+fn condition_to_text(condition: &ConditionExpression) -> String {
     format!(
         "{} {} {}",
-        wait.condition.left,
-        comparison_operator_text(&wait.condition.operator),
-        literal_to_text(&wait.condition.right)
+        condition.left,
+        comparison_operator_text(&condition.operator),
+        literal_to_text(&condition.right)
     )
 }
 
