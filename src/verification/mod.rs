@@ -77,7 +77,7 @@ pub fn verify_all(
             issues.extend(diagnostics.into_iter().map(|diag| VerificationIssue {
                 checker: "safety".to_string(),
                 line: diag.line.max(1),
-                reason: format!("约束 {} 在可达路径上可同时成立", diag.constraint),
+                reason: format!("约束 {}：{}", diag.constraint, diag.reason),
                 suggestion: diag.suggestion,
                 details: vec![format!("违反路径: {}", diag.violation_path.join(" -> "))],
             }));

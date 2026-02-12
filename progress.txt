@@ -25,6 +25,7 @@
 - Keep Z3-backed safety verification behind the `z3-solver` cargo feature so default `cargo test` stays runnable on toolchains without `cmake`/libz3.
 - Keep machine-readable IR JSON on stdout and print human verification summaries to stderr so automation can parse output while users still get readable reports.
 - If you add a new `TransitionGuard` variant, update verification guard match arms (`liveness`, `timing`, `safety`) so delay/timeout semantics and diagnostics stay consistent.
+- Safety verifier diagnostics should carry relation-specific reasons (e.g., `conflicts_with` vs `requires`) and `verify_all` should reuse that reason instead of hardcoding one wording.
 Started: Wed Feb 11 01:14:39 CST 2026
 ---
 ## [2026-02-11 01:19:50 CST] - US-001
@@ -425,4 +426,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Pest grammar files use `//` for comments; `#` will make the derive parser fail at compile time.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Timing verifier now carries both per-step `nominal_ms` and `worst_case_ms`; task-level estimates sum the corresponding per-step envelope.
+---
+## [2026-02-12 17:31:44 CST] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended Safety verifier to check `requires` constraints using the same BMC reachability model: report a violation when `A` is true while required `B` is not.
+  - Improved Safety diagnostics to include relation-specific reasons (`conflicts_with` vs `requires`), and updated `verify_all` aggregation to reuse that reason text.
+  - Added unit tests for both a deliberate `requires` violation (press without clamp) and a satisfied ordering case (clamp then press).
+- Files changed
+  - `src/verification/safety.rs`, `src/verification/mod.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Safety verification treats `requires` as an implication check during BMC: `left == state` implies `right == state`; violation = left true and right false.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - If you enrich verifier diagnostics, also update `src/verification/mod.rs` so CLI/integration errors include the new fields rather than hardcoded phrasing.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `build_state_machine` executes step actions on transitions; single-step tasks without `on_complete` can produce no action transitions (use at least two steps in minimal Safety tests).
 ---

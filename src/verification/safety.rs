@@ -36,15 +36,17 @@ pub struct SafetyReport {
 pub struct SafetyDiagnostic {
     pub line: usize,
     pub constraint: String,
+    pub reason: String,
     pub violation_path: Vec<String>,
     pub suggestion: String,
 }
 
 impl fmt::Display for SafetyDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "ERROR [safety] 状态互斥违反")?;
+        writeln!(f, "ERROR [safety] 安全约束违反")?;
         writeln!(f, "  位置: <input>:{}:1", self.line)?;
         writeln!(f, "  约束: {}", self.constraint)?;
+        writeln!(f, "  原因: {}", self.reason)?;
         writeln!(f, "  违反路径:")?;
         for (index, step) in self.violation_path.iter().enumerate() {
             writeln!(f, "    {}. {step}", index + 1)?;
@@ -81,8 +83,9 @@ struct SafetyModel {
     max_scc_depth: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct RuleBinding {
+    relation: SafetyRelation,
     left_device: usize,
     left_state: usize,
     right_device: usize,
@@ -146,12 +149,9 @@ pub fn verify_safety_with_config(
     let mut checked_rules = 0usize;
 
     for (index, rule) in constraints.safety.iter().enumerate() {
-        if !matches!(rule.relation, SafetyRelation::ConflictsWith) {
-            continue;
-        }
-
         let Some(binding) = bind_rule(
             &model,
+            rule.relation.clone(),
             &rule.left.device,
             &rule.left.state,
             &rule.right.device,
@@ -161,9 +161,10 @@ pub fn verify_safety_with_config(
         };
 
         checked_rules += 1;
+        let relation = relation_text(&rule.relation);
         let rule_text = format!(
-            "{}.{} conflicts_with {}.{}",
-            rule.left.device, rule.left.state, rule.right.device, rule.right.state
+            "{}.{} {} {}.{}",
+            rule.left.device, rule.left.state, relation, rule.right.device, rule.right.state
         );
 
         let line = program
@@ -175,15 +176,39 @@ pub fn verify_safety_with_config(
 
         let outcome = analyze_rule(&model, binding, depth_plan.effective_depth);
         if let Some(counterexample) = outcome.counterexample {
+            let (reason, suggestion) = match rule.relation {
+                SafetyRelation::ConflictsWith => (
+                    format!(
+                        "{} 与 {} 在可达状态同时成立",
+                        state_expr_text(&rule.left.device, &rule.left.state),
+                        state_expr_text(&rule.right.device, &rule.right.state)
+                    ),
+                    format!(
+                        "请在触发 {} 之前确保 {} 已复位，或调整并行/跳转逻辑避免两者同时成立",
+                        state_expr_text(&rule.right.device, &rule.right.state),
+                        state_expr_text(&rule.left.device, &rule.left.state)
+                    ),
+                ),
+                SafetyRelation::Requires => (
+                    format!(
+                        "{} 成立时 {} 未满足",
+                        state_expr_text(&rule.left.device, &rule.left.state),
+                        state_expr_text(&rule.right.device, &rule.right.state)
+                    ),
+                    format!(
+                        "请在触发 {} 之前先确保 {} 成立，必要时添加 wait 或调整 step 顺序",
+                        state_expr_text(&rule.left.device, &rule.left.state),
+                        state_expr_text(&rule.right.device, &rule.right.state)
+                    ),
+                ),
+            };
+
             diagnostics.push(SafetyDiagnostic {
                 line,
                 constraint: rule_text,
+                reason,
                 violation_path: counterexample.path,
-                suggestion: format!(
-                    "请在触发 {} 之前确保 {} 已复位，或调整并行/跳转逻辑避免两者同时成立",
-                    state_expr_text(&rule.right.device, &rule.right.state),
-                    state_expr_text(&rule.left.device, &rule.left.state)
-                ),
+                suggestion,
             });
             continue;
         }
@@ -584,6 +609,7 @@ fn build_depth_plan(model: &SafetyModel, config: &SafetyConfig) -> DepthPlan {
 
 fn bind_rule(
     model: &SafetyModel,
+    relation: SafetyRelation,
     left_device: &str,
     left_state: &str,
     right_device: &str,
@@ -600,6 +626,7 @@ fn bind_rule(
         .copied()?;
 
     Some(RuleBinding {
+        relation,
         left_device: left_device_id,
         left_state: left_state_id,
         right_device: right_device_id,
@@ -624,8 +651,8 @@ fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> Sea
     while let Some(node_id) = queue.pop_front() {
         let node = nodes[node_id].clone();
 
-        if conflicts(&node.state, rule) {
-            let path = render_path(model, &nodes, node_id, rule);
+        if violates_rule(&node.state, &rule) {
+            let path = render_path(model, &nodes, node_id, &rule);
             return SearchOutcome {
                 counterexample: Some(Counterexample { path }),
                 fully_explored,
@@ -701,16 +728,21 @@ fn apply_edge(edge: &ModelEdge, current: &ConcreteState) -> ConcreteState {
     }
 }
 
-fn conflicts(state: &ConcreteState, rule: RuleBinding) -> bool {
-    state.device_states[rule.left_device] == rule.left_state
-        && state.device_states[rule.right_device] == rule.right_state
+fn violates_rule(state: &ConcreteState, rule: &RuleBinding) -> bool {
+    let left_matches = state.device_states[rule.left_device] == rule.left_state;
+    let right_matches = state.device_states[rule.right_device] == rule.right_state;
+
+    match rule.relation {
+        SafetyRelation::ConflictsWith => left_matches && right_matches,
+        SafetyRelation::Requires => left_matches && !right_matches,
+    }
 }
 
 fn render_path(
     model: &SafetyModel,
     nodes: &[SearchNode],
     terminal_node: usize,
-    rule: RuleBinding,
+    rule: &RuleBinding,
 ) -> Vec<String> {
     let mut order = Vec::new();
     let mut cursor = Some(terminal_node);
@@ -746,14 +778,29 @@ fn render_path(
 
     let conflict_state = &nodes[terminal_node].state;
     let conflict_state_name = state_name(&model.states[conflict_state.control_state]);
-    lines.push(format!(
-        "在 {} 检测到冲突：{}.{} 与 {}.{} 同时为真",
-        conflict_state_name,
+    let left_text = format!(
+        "{}.{}",
         model.devices[rule.left_device].name,
-        model.devices[rule.left_device].states[rule.left_state],
+        model.devices[rule.left_device].states[rule.left_state]
+    );
+    let right_text = format!(
+        "{}.{}",
         model.devices[rule.right_device].name,
-        model.devices[rule.right_device].states[rule.right_state],
-    ));
+        model.devices[rule.right_device].states[rule.right_state]
+    );
+
+    match rule.relation {
+        SafetyRelation::ConflictsWith => {
+            lines.push(format!(
+                "在 {conflict_state_name} 检测到冲突：{left_text} 与 {right_text} 同时为真"
+            ));
+        }
+        SafetyRelation::Requires => {
+            lines.push(format!(
+                "在 {conflict_state_name} 检测到依赖违反：{left_text} 为真但 {right_text} 不为真"
+            ));
+        }
+    }
 
     lines
 }
@@ -764,6 +811,13 @@ fn state_name(state: &State) -> String {
 
 fn state_expr_text(device: &str, state: &str) -> String {
     format!("{device}.{state}")
+}
+
+fn relation_text(relation: &SafetyRelation) -> &'static str {
+    match relation {
+        SafetyRelation::ConflictsWith => "conflicts_with",
+        SafetyRelation::Requires => "requires",
+    }
 }
 
 #[cfg(feature = "z3-solver")]
@@ -1094,6 +1148,125 @@ task loop:
                 .iter()
                 .any(|warning| warning.contains("WARNING: Safety 在深度 2 内未发现反例")),
             "截断后应输出有界验证警告"
+        );
+    }
+
+    #[test]
+    fn reports_requires_violation_when_press_extends_without_clamp() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+
+device valve_clamp: solenoid_valve { connected_to: Y0 }
+device valve_press: solenoid_valve { connected_to: Y1 }
+
+device cyl_clamp: cylinder {
+    connected_to: valve_clamp
+    stroke_time: 120ms
+    retract_time: 120ms
+}
+
+device cyl_press: cylinder {
+    connected_to: valve_press
+    stroke_time: 140ms
+    retract_time: 140ms
+}
+
+[constraints]
+
+safety: cyl_press.extended requires cyl_clamp.extended
+
+[tasks]
+
+task press:
+    step press_down:
+        action: extend cyl_press
+    step retract_press:
+        action: retract cyl_press
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let errors = verify_safety(&program, &constraints, &state_machine)
+            .expect_err("未夹紧即下压时应触发 requires 违反");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.constraint.contains("requires")),
+            "错误应包含 requires 约束文本"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.reason.contains("未满足") || error.reason.contains("不为真")),
+            "错误原因应说明 requires 前置条件未满足"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| !error.violation_path.is_empty() && error.line > 0),
+            "requires 错误应包含路径和位置"
+        );
+    }
+
+    #[test]
+    fn passes_requires_constraint_when_clamp_precedes_press() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+
+device valve_clamp: solenoid_valve { connected_to: Y0 }
+device valve_press: solenoid_valve { connected_to: Y1 }
+
+device cyl_clamp: cylinder {
+    connected_to: valve_clamp
+    stroke_time: 120ms
+    retract_time: 120ms
+}
+
+device cyl_press: cylinder {
+    connected_to: valve_press
+    stroke_time: 140ms
+    retract_time: 140ms
+}
+
+[constraints]
+
+safety: cyl_press.extended requires cyl_clamp.extended
+
+[tasks]
+
+task press:
+    step clamp:
+        action: extend cyl_clamp
+    step press_down:
+        action: extend cyl_press
+    step retract_press:
+        action: retract cyl_press
+    step release_clamp:
+        action: retract cyl_clamp
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("先夹紧后下压应满足 requires 约束");
+
+        assert!(
+            matches!(
+                report.level,
+                SafetyProofLevel::Complete | SafetyProofLevel::Bounded
+            ),
+            "requires 满足场景应通过 safety"
         );
     }
 }
