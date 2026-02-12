@@ -369,6 +369,25 @@ task main:
 }
 
 #[test]
+fn parses_custom_states_demo_example_into_verified_ir_json() {
+    let source = read_example("custom_states_demo.plc");
+    let ir_json = compile_source_to_json(&source).expect("custom_states_demo should compile");
+
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
 fn repeat_expansion_produces_same_verification_result_as_manual_unrolling() {
     let repeat_source = r#"
 [topology]

@@ -784,12 +784,31 @@ fn collect_known_states(
 ) -> HashMap<String, HashSet<String>> {
     let mut known_states = HashMap::new();
 
-    for (name, kind) in device_kinds {
+    for device in &topology.devices {
+        let Some(kind) = device_kinds.get(&device.name) else {
+            continue;
+        };
+
         let mut states = HashSet::new();
-        for state in default_states_for_kind(kind) {
-            states.insert(state.to_string());
+        if let Some(custom_states) = &device.attributes.custom_states {
+            if custom_states.len() > 8 {
+                eprintln!(
+                    "WARNING [semantic] 设备 {} 声明了 {} 个 states（> 8），请确认状态空间规模合理",
+                    device.name,
+                    custom_states.len()
+                );
+            }
+
+            for state in custom_states {
+                states.insert(state.clone());
+            }
+        } else {
+            for state in default_states_for_kind(kind) {
+                states.insert(state.to_string());
+            }
         }
-        known_states.insert(name.clone(), states);
+
+        known_states.insert(device.name.clone(), states);
     }
 
     for device in &topology.devices {

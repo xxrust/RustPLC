@@ -165,6 +165,9 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         "ramp_time" => {
             attributes.ramp_time = Some(expect_duration(value, "ramp_time")?);
         }
+        "states" => {
+            attributes.custom_states = Some(expect_identifier_list(value, "states")?);
+        }
         _ => {
             return Err(PlcError::parse(
                 line,
@@ -974,6 +977,31 @@ fn expect_state_reference(pair: Pair<Rule>, field_name: &str) -> Result<StateRef
     }
 }
 
+fn expect_identifier_list(pair: Pair<Rule>, field_name: &str) -> Result<Vec<String>, PlcError> {
+    let line = line_of(&pair);
+    if pair.as_rule() != Rule::identifier_list {
+        return Err(PlcError::parse(
+            line,
+            format!("属性 {field_name} 需要标识符列表（如 [extend, neutral, retract]）"),
+        ));
+    }
+
+    let values = pair
+        .into_inner()
+        .filter(|part| matches!(part.as_rule(), Rule::identifier))
+        .map(|part| part.as_str().to_string())
+        .collect::<Vec<_>>();
+
+    if values.is_empty() {
+        return Err(PlcError::parse(
+            line,
+            format!("属性 {field_name} 至少需要一个状态"),
+        ));
+    }
+
+    Ok(values)
+}
+
 fn first_inner<'a>(
     pair: Pair<'a, Rule>,
     line: usize,
@@ -1084,6 +1112,44 @@ device sensor_B_ret: sensor {
 "#;
 
         assert!(parse_topology(input).is_ok());
+    }
+
+    #[test]
+    fn parses_custom_states_attribute_into_ast() {
+        let input = r#"
+[topology]
+
+device valve_3pos: solenoid_valve {
+    states: [extend, neutral, retract]
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step start:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("自定义 states 属性应能解析为 AST");
+        let valve = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "valve_3pos")
+            .expect("应包含 valve_3pos 设备");
+
+        let expected = vec![
+            "extend".to_string(),
+            "neutral".to_string(),
+            "retract".to_string(),
+        ];
+        assert_eq!(
+            valve.attributes.custom_states.as_ref(),
+            Some(&expected),
+            "应解析出自定义 states 列表"
+        );
     }
 
     #[test]

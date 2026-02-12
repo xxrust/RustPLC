@@ -1,0 +1,19 @@
+[topology]
+
+device valve_3pos: solenoid_valve {
+    states: [extend, neutral, retract]
+}
+
+[constraints]
+
+safety: valve_3pos.extend conflicts_with valve_3pos.retract reason: "3-position valve should not be both extend and retract"
+
+[tasks]
+
+task main:
+    step wait_extend:
+        wait: valve_3pos == extend
+        allow_indefinite_wait: true
+    step done:
+        action: log "custom states demo complete"
+

@@ -545,3 +545,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - Synthetic step names contain `__parallel_` / `__race_`; using the original task step set for validation naturally blocks invalid jumps into internal control-flow states.
 ---
+## [2026-02-13 03:25:27 CST] - US-014
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `states: [ident, ident, ...]` device attribute support in the grammar and parser, lowering into `DeviceAttributes.custom_states`.
+  - Updated semantic known-state collection to prefer `custom_states` when present (falling back to default 2-state sets), so safety state references validate against user-defined states.
+  - Implemented a non-fatal warning (stderr) when a device declares more than 8 custom states.
+  - Added `examples/custom_states_demo.plc` and integration coverage to ensure the new syntax compiles and all verifiers pass.
+- Files changed
+  - `src/parser/plc.pest`, `src/parser/mod.rs`, `src/ast/mod.rs`, `src/semantic/mod.rs`, `examples/custom_states_demo.plc`, `tests/examples_integration.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Topology attribute extensions belong in the generic `attribute_name`/`attribute_value` grammar + `apply_attribute` mapping, keeping device parsing uniform.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - `parse_topology()` is a grammar-only validator (returns `()`); use `parse_plc()` when tests need access to AST nodes.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Semantic state legality is enforced through `collect_known_states` + `validate_state_reference`, so new state vocabularies only need to hook into that pipeline.
+---

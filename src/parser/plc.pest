@@ -11,6 +11,7 @@ state_reference = @{ identifier ~ "." ~ identifier }
 duration_value = @{ number ~ ("ms" | "s") }
 measured_value = @{ number ~ ASCII_ALPHA+ }
 boolean_value = { "true" | "false" }
+identifier_list = { "[" ~ identifier ~ ("," ~ identifier)* ~ ","? ~ "]" }
 
 section_topology = { "[" ~ "topology" ~ "]" }
 section_constraints = { "[" ~ "constraints" ~ "]" }
@@ -37,6 +38,7 @@ attribute_name = {
     | "inverted"
     | "rated_speed"
     | "ramp_time"
+    | "states"
 }
 
 attribute_value = {
@@ -45,6 +47,7 @@ attribute_value = {
     | measured_value
     | string_literal
     | boolean_value
+    | identifier_list
     | identifier
 }
 

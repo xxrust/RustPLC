@@ -46,6 +46,7 @@ pub struct DeviceAttributes {
     pub inverted: Option<bool>,
     pub rated_speed: Option<MeasuredValue>,
     pub ramp_time: Option<DurationValue>,
+    pub custom_states: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
