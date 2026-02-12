@@ -488,6 +488,7 @@ fn guard_name(guard: &TransitionGuard) -> &'static str {
         TransitionGuard::Always => "always",
         TransitionGuard::Condition { .. } => "condition",
         TransitionGuard::Timeout { .. } => "timeout",
+        TransitionGuard::Delay { .. } => "delay",
     }
 }
 

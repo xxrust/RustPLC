@@ -30,6 +30,7 @@ impl fmt::Display for LivenessDiagnostic {
 struct StepLivenessFacts {
     waits: Vec<String>,
     has_timeout: bool,
+    has_delay: bool,
     has_allow_indefinite_wait: bool,
 }
 
@@ -52,7 +53,7 @@ impl FlowSummary {
 
 #[derive(Debug, Clone, Copy)]
 struct LivenessEdge {
-    is_timeout: bool,
+    is_bounded_wait: bool,
     source_has_allow_wait: bool,
 }
 
@@ -81,7 +82,11 @@ fn check_wait_timeout_or_allow(program: &PlcProgram, diagnostics: &mut Vec<Liven
             let mut facts = StepLivenessFacts::default();
             collect_step_liveness_facts(&step.statements, &mut facts);
 
-            if facts.waits.is_empty() || facts.has_timeout || facts.has_allow_indefinite_wait {
+            if facts.waits.is_empty()
+                || facts.has_timeout
+                || facts.has_delay
+                || facts.has_allow_indefinite_wait
+            {
                 continue;
             }
 
@@ -194,7 +199,10 @@ fn check_strongly_connected_components(
             from_index,
             to_index,
             LivenessEdge {
-                is_timeout: matches!(transition.guard, TransitionGuard::Timeout { .. }),
+                is_bounded_wait: matches!(
+                    transition.guard,
+                    TransitionGuard::Timeout { .. } | TransitionGuard::Delay { .. }
+                ),
                 source_has_allow_wait: allow_wait_states.contains(&from_key),
             },
         );
@@ -213,20 +221,20 @@ fn check_strongly_connected_components(
             continue;
         }
 
-        let mut has_timeout_or_allow = false;
+        let mut has_bounded_wait_or_allow = false;
         for node in &component {
             for edge in graph.edges(*node) {
-                if edge.weight().is_timeout || edge.weight().source_has_allow_wait {
-                    has_timeout_or_allow = true;
+                if edge.weight().is_bounded_wait || edge.weight().source_has_allow_wait {
+                    has_bounded_wait_or_allow = true;
                     break;
                 }
             }
-            if has_timeout_or_allow {
+            if has_bounded_wait_or_allow {
                 break;
             }
         }
 
-        if has_timeout_or_allow {
+        if has_bounded_wait_or_allow {
             continue;
         }
 
@@ -270,6 +278,7 @@ fn collect_step_liveness_facts(statements: &[StepStatement], facts: &mut StepLiv
         match statement {
             StepStatement::Wait(wait) => facts.waits.push(wait_to_text(wait)),
             StepStatement::Timeout(_) => facts.has_timeout = true,
+            StepStatement::Delay { .. } => facts.has_delay = true,
             StepStatement::AllowIndefiniteWait(value) => {
                 if *value {
                     facts.has_allow_indefinite_wait = true;
@@ -285,7 +294,7 @@ fn collect_step_liveness_facts(statements: &[StepStatement], facts: &mut StepLiv
                     collect_step_liveness_facts(&branch.statements, facts);
                 }
             }
-            StepStatement::Action(_) | StepStatement::Delay { .. } | StepStatement::Goto(_) => {}
+            StepStatement::Action(_) | StepStatement::Goto(_) => {}
         }
     }
 }
@@ -655,6 +664,28 @@ task loop:
                 .any(|error| error.to_string().contains("强连通分量")),
             "错误应包含 SCC 死锁风险说明"
         );
+    }
+
+    #[test]
+    fn treats_delay_generated_edges_as_bounded_wait_in_scc_checks() {
+        let source = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task loop:
+    step spin:
+        delay: 120ms
+    on_complete: goto loop
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        verify_liveness(&program, &state_machine)
+            .expect("delay 生成的有界等待边不应被判定为死锁 SCC");
     }
 
     #[test]

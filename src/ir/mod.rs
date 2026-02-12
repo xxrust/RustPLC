@@ -58,8 +58,16 @@ pub struct State {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TransitionGuard {
     Always,
-    Condition { expression: String },
-    Timeout { duration_ms: u64 },
+    Condition {
+        expression: String,
+    },
+    Timeout {
+        duration_ms: u64,
+    },
+    /// Internal bounded wait used by `delay: <duration>` DSL statements.
+    Delay {
+        duration_ms: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

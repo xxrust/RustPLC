@@ -342,6 +342,29 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
                 }
             }
 
+            for (delay_index, duration_ms) in analyzed.delays_ms.iter().enumerate() {
+                if let Some(target) = completion_target.clone() {
+                    builder.add_transition(
+                        from_state.clone(),
+                        target,
+                        TransitionGuard::Delay {
+                            duration_ms: *duration_ms,
+                        },
+                        Vec::new(),
+                        vec![TimerOperation {
+                            timer_name: format!(
+                                "{}.{}.delay_{}",
+                                task.name,
+                                step.name,
+                                delay_index + 1
+                            ),
+                            operation: TimerOperationKind::Start,
+                            duration_ms: Some(*duration_ms),
+                        }],
+                    );
+                }
+            }
+
             for (timeout_index, timeout) in analyzed.timeouts.iter().enumerate() {
                 if let Some(target) = resolve_task_target(
                     &timeout.target.step,
@@ -385,6 +408,7 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
             }
 
             let has_control_flow = !analyzed.waits.is_empty()
+                || !analyzed.delays_ms.is_empty()
                 || !analyzed.gotos.is_empty()
                 || !analyzed.parallel_blocks.is_empty()
                 || !analyzed.race_blocks.is_empty();
@@ -458,6 +482,7 @@ impl StateMachineBuilder {
 struct AnalyzedStatements {
     actions: Vec<TransitionAction>,
     waits: Vec<String>,
+    delays_ms: Vec<u64>,
     gotos: Vec<GotoDirective>,
     timeouts: Vec<TimeoutDirective>,
     parallel_blocks: Vec<ParallelBlock>,
@@ -834,7 +859,7 @@ fn analyze_statements(statements: &[StepStatement]) -> AnalyzedStatements {
             StepStatement::Wait(wait) => {
                 analyzed.waits.push(wait_to_guard_expression(wait));
             }
-            StepStatement::Delay { .. } => {}
+            StepStatement::Delay { duration_ms } => analyzed.delays_ms.push(*duration_ms),
             StepStatement::Timeout(timeout) => analyzed.timeouts.push(timeout.clone()),
             StepStatement::Goto(goto) => analyzed.gotos.push(goto.clone()),
             StepStatement::Parallel(block) => analyzed.parallel_blocks.push(block.clone()),
@@ -902,6 +927,29 @@ fn build_parallel_block(
                     Vec::new(),
                 );
             }
+        }
+
+        for (delay_index, duration_ms) in analyzed.delays_ms.iter().enumerate() {
+            builder.add_transition(
+                branch_state.clone(),
+                join_state.clone(),
+                TransitionGuard::Delay {
+                    duration_ms: *duration_ms,
+                },
+                Vec::new(),
+                vec![TimerOperation {
+                    timer_name: format!(
+                        "{}.{}.parallel_{}_branch_{}.delay_{}",
+                        task.name,
+                        step_name,
+                        block_index + 1,
+                        branch_index + 1,
+                        delay_index + 1
+                    ),
+                    operation: TimerOperationKind::Start,
+                    duration_ms: Some(*duration_ms),
+                }],
+            );
         }
 
         for (timeout_index, timeout) in analyzed.timeouts.iter().enumerate() {
@@ -986,6 +1034,7 @@ fn build_parallel_block(
         }
 
         let has_control_flow = !analyzed.waits.is_empty()
+            || !analyzed.delays_ms.is_empty()
             || !analyzed.gotos.is_empty()
             || !analyzed.parallel_blocks.is_empty()
             || !analyzed.race_blocks.is_empty();
@@ -1079,6 +1128,31 @@ fn build_race_block(
             }
         }
 
+        for (delay_index, duration_ms) in analyzed.delays_ms.iter().enumerate() {
+            if let Some(target) = branch_completion_target.clone() {
+                builder.add_transition(
+                    branch_state.clone(),
+                    target,
+                    TransitionGuard::Delay {
+                        duration_ms: *duration_ms,
+                    },
+                    Vec::new(),
+                    vec![TimerOperation {
+                        timer_name: format!(
+                            "{}.{}.race_{}_branch_{}.delay_{}",
+                            task.name,
+                            step_name,
+                            block_index + 1,
+                            branch_index + 1,
+                            delay_index + 1
+                        ),
+                        operation: TimerOperationKind::Start,
+                        duration_ms: Some(*duration_ms),
+                    }],
+                );
+            }
+        }
+
         for (timeout_index, timeout) in analyzed.timeouts.iter().enumerate() {
             if let Some(target) = resolve_task_target(
                 &timeout.target.step,
@@ -1163,6 +1237,7 @@ fn build_race_block(
         }
 
         let has_control_flow = !analyzed.waits.is_empty()
+            || !analyzed.delays_ms.is_empty()
             || !analyzed.gotos.is_empty()
             || !analyzed.parallel_blocks.is_empty()
             || !analyzed.race_blocks.is_empty();
@@ -1298,7 +1373,10 @@ mod tests {
     use super::{
         build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     };
-    use crate::ir::{ConnectionType, SafetyRelation, TimingRelation, TimingScope, TransitionGuard};
+    use crate::ir::{
+        ConnectionType, SafetyRelation, TimerOperationKind, TimingRelation, TimingScope,
+        TransitionGuard,
+    };
     use crate::parser::parse_plc;
     use petgraph::visit::EdgeRef;
 
@@ -1740,6 +1818,92 @@ task ready:
             has_on_complete_goto,
             "最后一步应能够通过 on_complete 跳转到 ready"
         );
+    }
+
+    #[test]
+    fn lowers_delay_statement_into_bounded_transition_to_next_step() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task init:
+    step warmup:
+        delay: 2000ms
+    step work:
+        action: log "start"
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能成功解析为 AST");
+        let state_machine = build_state_machine(&program).expect("delay 应能降级为状态机转移");
+
+        let delay_transition = state_machine
+            .transitions
+            .iter()
+            .find(|transition| {
+                transition.from.task_name == "init"
+                    && transition.from.step_name == "warmup"
+                    && transition.to.task_name == "init"
+                    && transition.to.step_name == "work"
+                    && matches!(transition.guard, TransitionGuard::Delay { duration_ms } if duration_ms == 2000)
+            })
+            .expect("delay 应生成到下一个 step 的有界等待转移");
+
+        assert!(
+            delay_transition.actions.is_empty(),
+            "delay 转移不应重复执行动作"
+        );
+        assert_eq!(delay_transition.timers.len(), 1);
+        assert_eq!(
+            delay_transition.timers[0].operation,
+            TimerOperationKind::Start
+        );
+        assert_eq!(delay_transition.timers[0].duration_ms, Some(2000));
+    }
+
+    #[test]
+    fn keeps_timeout_as_protective_upper_bound_when_delay_and_timeout_coexist() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task init:
+    step wait_heat:
+        delay: 300ms
+        timeout: 1200ms -> goto fault_handler
+    step run:
+        action: log "running"
+
+task fault_handler:
+    step safe_stop:
+        action: log "fault"
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能成功解析为 AST");
+        let state_machine = build_state_machine(&program).expect("delay + timeout 应可共存");
+
+        let has_delay_to_next = state_machine.transitions.iter().any(|transition| {
+            transition.from.task_name == "init"
+                && transition.from.step_name == "wait_heat"
+                && transition.to.task_name == "init"
+                && transition.to.step_name == "run"
+                && matches!(transition.guard, TransitionGuard::Delay { duration_ms } if duration_ms == 300)
+        });
+        assert!(has_delay_to_next, "delay 应指向当前 task 的下一个 step");
+
+        let has_timeout_escape = state_machine.transitions.iter().any(|transition| {
+            transition.from.task_name == "init"
+                && transition.from.step_name == "wait_heat"
+                && transition.to.task_name == "fault_handler"
+                && transition.to.step_name == "safe_stop"
+                && matches!(transition.guard, TransitionGuard::Timeout { duration_ms } if duration_ms == 1200)
+        });
+        assert!(has_timeout_escape, "timeout 应保留为保护性上界跳转");
     }
 
     #[test]

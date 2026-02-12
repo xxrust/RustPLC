@@ -358,7 +358,9 @@ fn shortest_predecessor_interval_ms(
 
 fn transition_guard_min_interval_ms(guard: &TransitionGuard) -> u64 {
     match guard {
-        TransitionGuard::Timeout { duration_ms } => *duration_ms,
+        TransitionGuard::Timeout { duration_ms } | TransitionGuard::Delay { duration_ms } => {
+            *duration_ms
+        }
         TransitionGuard::Always | TransitionGuard::Condition { .. } => 0,
     }
 }
@@ -368,6 +370,7 @@ fn transition_guard_name(guard: &TransitionGuard) -> String {
         TransitionGuard::Always => "always".to_string(),
         TransitionGuard::Condition { expression } => format!("condition({expression})"),
         TransitionGuard::Timeout { duration_ms } => format!("timeout({duration_ms}ms)"),
+        TransitionGuard::Delay { duration_ms } => format!("delay({duration_ms}ms)"),
     }
 }
 

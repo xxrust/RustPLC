@@ -19,6 +19,7 @@
 - Liveness checks should combine AST metadata (`allow_indefinite_wait`, `on_complete`) with StateMachine transitions; IR guards alone cannot reconstruct all wait exemptions.
 - Keep Z3-backed safety verification behind the `z3-solver` cargo feature so default `cargo test` stays runnable on toolchains without `cmake`/libz3.
 - Keep machine-readable IR JSON on stdout and print human verification summaries to stderr so automation can parse output while users still get readable reports.
+- If you add a new `TransitionGuard` variant, update verification guard match arms (`liveness`, `timing`, `safety`) so delay/timeout semantics and diagnostics stay consistent.
 Started: Wed Feb 11 01:14:39 CST 2026
 ---
 ## [2026-02-11 01:19:50 CST] - US-001
@@ -333,4 +334,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - This repo does not have `jq` installed; use `python3` scripts for PRD/progress automation.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Delay is normalized to milliseconds in parser output, so downstream semantic/verification stages can consume a single unit.
+---
+## [2026-02-12 16:03:02 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added semantic lowering for `delay: Nms` so it emits a dedicated bounded-wait state-machine transition (`TransitionGuard::Delay`) to the step completion target, with timer metadata carrying `duration_ms`.
+  - Kept `timeout` directives active as protective upper-bound branches even when delay exists in the same step; both delay-to-next-step and timeout-to-fault transitions are emitted.
+  - Updated liveness/timing/safety verification handling for the new guard so delay edges are recognized as bounded waits (non-deadlock) and contribute correct timing predecessor intervals/reporting.
+  - Added unit tests covering delay lowering, delay+timeout coexistence, and SCC liveness acceptance for delay-generated bounded-wait cycles.
+- Files changed
+  - `src/ir/mod.rs`, `src/semantic/mod.rs`, `src/verification/liveness.rs`, `src/verification/timing.rs`, `src/verification/safety.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Delay semantics are modeled in IR as guard-level bounded waits (`TransitionGuard::Delay`) plus timer metadata, instead of piggybacking on `timeout` fault branches.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - When delay introduces control flow in a step, include it in `has_control_flow` checks or fallback `always` transitions will be emitted and change behavior.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Liveness SCC checks now treat both `timeout` and `delay` guard edges as bounded-wait exits; timing predecessor calculations also read both guards.
 ---
