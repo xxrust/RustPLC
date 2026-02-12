@@ -1,5 +1,6 @@
 # Ralph Progress Log
 ## Codebase Patterns
+- In causality checks, parallel contexts can create invalid cross-branch action/wait pairs; tag statement origin and filter parallel-related pairs unless action->sensor is reachable to avoid false positives.
 - For timing envelopes, include upstream `response_time` along `connected_to` chains and treat incoming `StateMachine` guards as must_start_after lower bounds (`timeout` contributes delay, `always/condition` = 0ms).
 - `must_complete_within` critical-path estimates must include `delay:` durations (step worst-case should consider action time + bounded waits like delay/timeout).
 - TopologyGraph JSON 调试依赖 `petgraph` 的 `serde-1` feature；若缺失会导致 DiGraph 无法序列化。
@@ -442,4 +443,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - If you enrich verifier diagnostics, also update `src/verification/mod.rs` so CLI/integration errors include the new fields rather than hardcoded phrasing.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `build_state_machine` executes step actions on transitions; single-step tasks without `on_complete` can produce no action transitions (use at least two steps in minimal Safety tests).
+---
+## [2026-02-12 19:15:33 CST] - US-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Fixed causality verification for parallel contexts: action/wait pairs now carry origin metadata, and parallel-related combinations are filtered unless action -> sensor is reachable.
+  - Preserved same-branch checks so real causality breaks inside a parallel branch are still reported.
+  - Added regression tests for both scenarios: previous false positive (left/right motors + left sensor wait) and true positive (broken chain inside a branch).
+- Files changed
+  - src/verification/causality.rs, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - The parser drops branch labels in AST, so verifier-side branch identity should use per-block branch index during traversal.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Without an upstream reachability guard, fallback causality inference can reconstruct non-physical paths and emit false positives for unrelated branch devices.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Origin tagging only needs to distinguish step-level vs parallel-branch contexts to address the D6 false-positive class.
 ---

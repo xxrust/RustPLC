@@ -98,6 +98,15 @@ pub fn verify_causality(
             continue;
         }
 
+        // `parallel` 块会让不同分支的 action 与 step 级 wait 产生组合。
+        // 对于这类组合，只对位于传感器上游集合（action -> sensor 可达）的 action→sensor 对做推断检查，
+        // 以避免跨分支误报。
+        if pair.involves_parallel()
+            && !runtime_graph.path_exists(&pair.action_target, &pair.wait_sensor)
+        {
+            continue;
+        }
+
         let source_path =
             shortest_output_path_to_target(&runtime_graph, &output_ports, &pair.action_target);
         let feedback_path = shortest_path(&runtime_graph, &pair.action_target, &pair.wait_sensor);
@@ -137,6 +146,38 @@ struct ActionWaitPair {
     action_target: String,
     wait: String,
     wait_sensor: String,
+    action_origin: StatementOrigin,
+    wait_origin: StatementOrigin,
+}
+
+#[derive(Debug, Clone)]
+struct CollectedAction {
+    text: String,
+    target: String,
+    origin: StatementOrigin,
+}
+
+#[derive(Debug, Clone)]
+struct CollectedWait {
+    text: String,
+    sensor: String,
+    origin: StatementOrigin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StatementOrigin {
+    StepLevel,
+    ParallelBranch {
+        block_id: usize,
+        branch_index: usize,
+    },
+}
+
+impl ActionWaitPair {
+    fn involves_parallel(&self) -> bool {
+        !matches!(self.action_origin, StatementOrigin::StepLevel)
+            || !matches!(self.wait_origin, StatementOrigin::StepLevel)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +310,7 @@ fn collect_action_wait_pairs(
     sensor_names: &HashSet<String>,
 ) -> Vec<ActionWaitPair> {
     let mut pairs = Vec::new();
+    let mut next_parallel_block_id = 0usize;
 
     for task in &program.tasks.tasks {
         for step in &task.steps {
@@ -276,6 +318,7 @@ fn collect_action_wait_pairs(
                 &step.statements,
                 step.line.max(1),
                 sensor_names,
+                &mut next_parallel_block_id,
                 &mut pairs,
             );
         }
@@ -288,49 +331,112 @@ fn collect_pairs_from_statements(
     statements: &[StepStatement],
     line: usize,
     sensor_names: &HashSet<String>,
+    next_parallel_block_id: &mut usize,
     pairs: &mut Vec<ActionWaitPair>,
 ) {
     let mut actions = Vec::new();
     let mut waits = Vec::new();
 
+    collect_items_from_statements(
+        statements,
+        line,
+        sensor_names,
+        StatementOrigin::StepLevel,
+        next_parallel_block_id,
+        &mut actions,
+        &mut waits,
+        pairs,
+    );
+
+    for action in &actions {
+        for wait in &waits {
+            pairs.push(ActionWaitPair {
+                line,
+                action: action.text.clone(),
+                action_target: action.target.clone(),
+                wait: wait.text.clone(),
+                wait_sensor: wait.sensor.clone(),
+                action_origin: action.origin.clone(),
+                wait_origin: wait.origin.clone(),
+            });
+        }
+    }
+}
+
+fn collect_items_from_statements(
+    statements: &[StepStatement],
+    line: usize,
+    sensor_names: &HashSet<String>,
+    origin: StatementOrigin,
+    next_parallel_block_id: &mut usize,
+    actions: &mut Vec<CollectedAction>,
+    waits: &mut Vec<CollectedWait>,
+    pairs: &mut Vec<ActionWaitPair>,
+) {
     for statement in statements {
         match statement {
             StepStatement::Action(action) => {
                 if let Some((action_text, target)) = action_to_text_and_target(action) {
-                    actions.push((action_text, target));
+                    actions.push(CollectedAction {
+                        text: action_text,
+                        target,
+                        origin: origin.clone(),
+                    });
                 }
             }
             StepStatement::Wait(wait) => {
                 if let Some(sensor) = infer_wait_sensor(wait, sensor_names) {
-                    waits.push((wait_to_text(wait), sensor));
+                    waits.push(CollectedWait {
+                        text: wait_to_text(wait),
+                        sensor,
+                        origin: origin.clone(),
+                    });
                 }
             }
             StepStatement::Repeat { body, .. } => {
-                collect_pairs_from_statements(body, line, sensor_names, pairs);
+                collect_items_from_statements(
+                    body,
+                    line,
+                    sensor_names,
+                    origin.clone(),
+                    next_parallel_block_id,
+                    actions,
+                    waits,
+                    pairs,
+                );
             }
             StepStatement::Parallel(block) => {
-                for branch in &block.branches {
-                    collect_pairs_from_statements(&branch.statements, line, sensor_names, pairs);
+                let block_id = *next_parallel_block_id;
+                *next_parallel_block_id += 1;
+                for (branch_index, branch) in block.branches.iter().enumerate() {
+                    let branch_origin = StatementOrigin::ParallelBranch {
+                        block_id,
+                        branch_index,
+                    };
+                    collect_items_from_statements(
+                        &branch.statements,
+                        line,
+                        sensor_names,
+                        branch_origin,
+                        next_parallel_block_id,
+                        actions,
+                        waits,
+                        pairs,
+                    );
                 }
             }
             StepStatement::Race(block) => {
                 for branch in &block.branches {
-                    collect_pairs_from_statements(&branch.statements, line, sensor_names, pairs);
+                    collect_pairs_from_statements(
+                        &branch.statements,
+                        line,
+                        sensor_names,
+                        next_parallel_block_id,
+                        pairs,
+                    );
                 }
             }
             _ => {}
-        }
-    }
-
-    for (action_text, action_target) in &actions {
-        for (wait_text, wait_sensor) in &waits {
-            pairs.push(ActionWaitPair {
-                line,
-                action: action_text.clone(),
-                action_target: action_target.clone(),
-                wait: wait_text.clone(),
-                wait_sensor: wait_sensor.clone(),
-            });
         }
     }
 }
@@ -707,6 +813,117 @@ task init:
         assert!(
             errors.iter().all(|error| error.line > 0),
             "所有错误都应包含有效行号"
+        );
+    }
+
+    #[test]
+    fn skips_cross_branch_false_positive_for_parallel_action_and_step_wait() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device X0: digital_input
+device X1: digital_input
+
+device motor_left: motor {
+    connected_to: Y0
+}
+
+device motor_right: motor {
+    connected_to: Y1
+}
+
+device sensor_left: sensor {
+    connected_to: X0
+    detects: motor_left.on
+}
+
+device sensor_right: sensor {
+    connected_to: X1
+    detects: motor_right.on
+}
+
+[constraints]
+
+causality: Y0 -> motor_left -> sensor_left
+causality: Y1 -> motor_right -> sensor_right
+
+[tasks]
+
+task main:
+    step start_both:
+        parallel:
+            branch_left:
+                action: set motor_left on
+            branch_right:
+                action: set motor_right on
+        wait: sensor_left == true
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        verify_causality(&program, &topology, &constraints)
+            .expect("parallel 分支跨设备组合不应误报 motor_right -> sensor_left 因果链错误");
+    }
+
+    #[test]
+    fn still_reports_real_broken_chain_inside_parallel_branch() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device Y2: digital_output
+device X0: digital_input
+
+device motor_left: motor {
+    connected_to: Y0
+}
+
+device motor_right: motor {
+    connected_to: Y1
+}
+
+device motor_aux: motor {
+    connected_to: Y2
+}
+
+device sensor_left: sensor {
+    connected_to: X0
+    detects: motor_aux.on
+}
+
+[constraints]
+
+causality: Y0 -> motor_left -> sensor_left
+
+[tasks]
+
+task main:
+    step run_parallel:
+        parallel:
+            branch_left:
+                action: set motor_left on
+                wait: sensor_left == true
+            branch_right:
+                action: set motor_right on
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        let errors = verify_causality(&program, &topology, &constraints)
+            .expect_err("parallel 分支内真实链路断裂应被检出");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.broken_link == "motor_left -> sensor_left"),
+            "错误应包含 parallel 分支内真实断裂链路"
         );
     }
 }
