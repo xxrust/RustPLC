@@ -22,20 +22,218 @@ struct DeviceNode {
     kind: DeviceKind,
 }
 
+/// Expand syntax sugar in the AST before semantic lowering.
+///
+/// Currently this performs compile-time `repeat N:` expansion by rewriting it into `N` sequential
+/// steps named with `_1.._N` suffixes.
+pub fn preprocess_program(program: &PlcProgram) -> Result<PlcProgram, Vec<PlcError>> {
+    let expanded_tasks = expand_repeat_blocks(&program.tasks)?;
+    let mut rewritten = program.clone();
+    rewritten.tasks = expanded_tasks;
+    Ok(rewritten)
+}
+
+fn expand_repeat_blocks(tasks: &TasksSection) -> Result<TasksSection, Vec<PlcError>> {
+    let mut rewritten_tasks = Vec::new();
+    let mut errors = Vec::new();
+
+    for task in &tasks.tasks {
+        let mut expanded_steps = Vec::new();
+
+        for step in &task.steps {
+            let top_level_repeat_indices = step
+                .statements
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, statement)| match statement {
+                    StepStatement::Repeat { .. } => Some(idx),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+
+            // Reject repeat blocks that appear in nested statement contexts (e.g., parallel/race).
+            for statement in &step.statements {
+                if contains_nested_repeat(statement) {
+                    errors.push(PlcError::semantic(
+                        step.line.max(1),
+                        format!(
+                            "step {}.{} 的 repeat 只能写在 step 顶层，不能嵌套在 parallel/race 等块内",
+                            task.name, step.name
+                        ),
+                    ));
+                    break;
+                }
+            }
+
+            match top_level_repeat_indices.len() {
+                0 => expanded_steps.push(step.clone()),
+                1 => {
+                    let repeat_index = top_level_repeat_indices[0];
+                    let (prefix, repeat_statement, suffix) = split_repeat_step(step, repeat_index);
+
+                    let StepStatement::Repeat { count, body } = repeat_statement else {
+                        // split_repeat_step guarantees this index points at a repeat.
+                        expanded_steps.push(step.clone());
+                        continue;
+                    };
+
+                    if *count <= 1 {
+                        errors.push(PlcError::semantic(
+                            step.line.max(1),
+                            format!(
+                                "repeat 次数必须在 2..=100 之间，当前为 {count}（step {}.{}）",
+                                task.name, step.name
+                            ),
+                        ));
+                        continue;
+                    }
+
+                    if *count > 100 {
+                        errors.push(PlcError::semantic(
+                            step.line.max(1),
+                            format!(
+                                "repeat 次数超过上限 100，当前为 {count}（step {}.{}）",
+                                task.name, step.name
+                            ),
+                        ));
+                        continue;
+                    }
+
+                    if body.iter().any(statement_contains_repeat) {
+                        errors.push(PlcError::semantic(
+                            step.line.max(1),
+                            format!(
+                                "repeat 块内不允许嵌套 repeat（step {}.{}）",
+                                task.name, step.name
+                            ),
+                        ));
+                        continue;
+                    }
+
+                    for iteration in 1..=(*count as usize) {
+                        let mut statements = Vec::new();
+                        if iteration == 1 {
+                            statements.extend_from_slice(prefix);
+                        }
+                        statements.extend(body.clone());
+                        if iteration == *count as usize {
+                            statements.extend_from_slice(suffix);
+                        }
+
+                        expanded_steps.push(crate::ast::StepDeclaration {
+                            line: step.line,
+                            name: format!("{}_{}", step.name, iteration),
+                            statements,
+                        });
+                    }
+                }
+                _ => {
+                    errors.push(PlcError::semantic(
+                        step.line.max(1),
+                        format!(
+                            "step {}.{} 同时包含多个 repeat 块，当前版本只支持一个 repeat",
+                            task.name, step.name
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // Ensure step names remain unique inside the task after expansion.
+        let mut seen = HashSet::<String>::new();
+        for step in &expanded_steps {
+            if !seen.insert(step.name.clone()) {
+                errors.push(PlcError::duplicate_definition_with_reason(
+                    step.line.max(1),
+                    "step",
+                    &format!("{}.{}", task.name, step.name),
+                    "repeat 展开后产生了重复 step 名称，请重命名原始 step 或调整 repeat 使用方式",
+                ));
+            }
+        }
+
+        let mut rewritten_task = task.clone();
+        rewritten_task.steps = expanded_steps;
+        rewritten_tasks.push(rewritten_task);
+    }
+
+    if errors.is_empty() {
+        Ok(TasksSection {
+            tasks: rewritten_tasks,
+        })
+    } else {
+        Err(errors)
+    }
+}
+
+fn split_repeat_step(
+    step: &crate::ast::StepDeclaration,
+    repeat_index: usize,
+) -> (&[StepStatement], &StepStatement, &[StepStatement]) {
+    let prefix = &step.statements[..repeat_index];
+    let repeat_statement = &step.statements[repeat_index];
+    let suffix = &step.statements[repeat_index + 1..];
+    (prefix, repeat_statement, suffix)
+}
+
+fn contains_nested_repeat(statement: &StepStatement) -> bool {
+    match statement {
+        // Top-level repeats are handled separately; nested repeats are rejected.
+        StepStatement::Repeat { .. } => false,
+        StepStatement::Parallel(block) => block
+            .branches
+            .iter()
+            .any(|branch| branch.statements.iter().any(statement_contains_repeat)),
+        StepStatement::Race(block) => block
+            .branches
+            .iter()
+            .any(|branch| branch.statements.iter().any(statement_contains_repeat)),
+        StepStatement::Action(_)
+        | StepStatement::Wait(_)
+        | StepStatement::Delay { .. }
+        | StepStatement::Timeout(_)
+        | StepStatement::Goto(_)
+        | StepStatement::AllowIndefiniteWait(_) => false,
+    }
+}
+
+fn statement_contains_repeat(statement: &StepStatement) -> bool {
+    match statement {
+        StepStatement::Repeat { .. } => true,
+        StepStatement::Parallel(block) => block
+            .branches
+            .iter()
+            .any(|branch| branch.statements.iter().any(statement_contains_repeat)),
+        StepStatement::Race(block) => block
+            .branches
+            .iter()
+            .any(|branch| branch.statements.iter().any(statement_contains_repeat)),
+        StepStatement::Action(_)
+        | StepStatement::Wait(_)
+        | StepStatement::Delay { .. }
+        | StepStatement::Timeout(_)
+        | StepStatement::Goto(_)
+        | StepStatement::AllowIndefiniteWait(_) => false,
+    }
+}
+
 pub fn build_topology_graph(program: &PlcProgram) -> Result<TopologyGraph, Vec<PlcError>> {
     build_topology_from_ast(&program.topology)
 }
 
 pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<PlcError>> {
-    build_state_machine_from_ast(&program.tasks)
+    let expanded = preprocess_program(program)?;
+    build_state_machine_from_ast(&expanded.tasks)
 }
 
 pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<PlcError>> {
-    build_constraint_set_from_ast(&program.topology, &program.constraints, &program.tasks)
+    let expanded = preprocess_program(program)?;
+    build_constraint_set_from_ast(&expanded.topology, &expanded.constraints, &expanded.tasks)
 }
 
 pub fn build_timing_model(program: &PlcProgram) -> Result<TimingModel, Vec<PlcError>> {
-    build_timing_model_from_ast(&program.topology, &program.tasks)
+    let expanded = preprocess_program(program)?;
+    build_timing_model_from_ast(&expanded.topology, &expanded.tasks)
 }
 
 pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGraph, Vec<PlcError>> {
@@ -2026,6 +2224,142 @@ task init:
         assert!(
             errors[0].to_string().contains("未定义 task missing_task"),
             "错误消息应包含未定义 task 名称"
+        );
+    }
+
+    #[test]
+    fn expands_repeat_block_into_sequential_steps_with_suffixes() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task init:
+    step glue_cycle:
+        repeat 3:
+            action: log "tick"
+"#;
+
+        let program = parse_plc(input).expect("repeat 示例应能成功解析为 AST");
+        let state_machine = build_state_machine(&program).expect("repeat 应在语义阶段展开");
+
+        for suffix in ["glue_cycle_1", "glue_cycle_2", "glue_cycle_3"] {
+            assert!(
+                state_machine
+                    .states
+                    .iter()
+                    .any(|state| { state.task_name == "init" && state.step_name == suffix }),
+                "repeat 展开后应包含 step {suffix}"
+            );
+        }
+
+        let has_1_to_2 = state_machine.transitions.iter().any(|transition| {
+            transition.from.task_name == "init"
+                && transition.from.step_name == "glue_cycle_1"
+                && transition.to.task_name == "init"
+                && transition.to.step_name == "glue_cycle_2"
+                && matches!(transition.guard, TransitionGuard::Always)
+        });
+        assert!(has_1_to_2, "glue_cycle_1 应顺序链接到 glue_cycle_2");
+
+        let has_2_to_3 = state_machine.transitions.iter().any(|transition| {
+            transition.from.task_name == "init"
+                && transition.from.step_name == "glue_cycle_2"
+                && transition.to.task_name == "init"
+                && transition.to.step_name == "glue_cycle_3"
+                && matches!(transition.guard, TransitionGuard::Always)
+        });
+        assert!(has_2_to_3, "glue_cycle_2 应顺序链接到 glue_cycle_3");
+    }
+
+    #[test]
+    fn reports_semantic_error_for_repeat_count_zero_or_one() {
+        for count in [0, 1] {
+            let input = format!(
+                r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task init:
+    step glue_cycle:
+        repeat {count}:
+            action: log "tick"
+"#
+            );
+
+            let program = parse_plc(&input).expect("repeat 语法应能解析");
+            let errors = build_state_machine(&program).expect_err("repeat 0/1 应报语义错误");
+            let joined = errors
+                .iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                joined.contains("repeat 次数必须在 2..=100 之间"),
+                "应包含 repeat 次数范围错误提示"
+            );
+        }
+    }
+
+    #[test]
+    fn reports_semantic_error_for_repeat_count_over_limit() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task init:
+    step glue_cycle:
+        repeat 101:
+            action: log "tick"
+"#;
+
+        let program = parse_plc(input).expect("repeat 语法应能解析");
+        let errors = build_state_machine(&program).expect_err("repeat > 100 应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("repeat 次数超过上限 100"),
+            "应包含 repeat 次数上限错误提示"
+        );
+    }
+
+    #[test]
+    fn reports_semantic_error_for_nested_repeat_blocks() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task init:
+    step glue_cycle:
+        repeat 2:
+            repeat 2:
+                action: log "tick"
+"#;
+
+        let program = parse_plc(input).expect("嵌套 repeat 语法应能解析");
+        let errors = build_state_machine(&program).expect_err("嵌套 repeat 应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("不允许嵌套 repeat"),
+            "应包含嵌套 repeat 错误提示"
         );
     }
 }

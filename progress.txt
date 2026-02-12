@@ -7,6 +7,7 @@
 - When introducing a new `StepStatement` variant, update all semantic/verification `match` arms (and tests) so builds remain exhaustive.
 - For new step-level statements, update all grammar “statement lists” (`step_statement`, `parallel_branch_statement`, `race_branch_statement`) so the syntax works both at top-level steps and inside blocks.
 - Keep parser stage focused on syntax shape; range/business checks (e.g., `repeat` count bounds/nesting limits) should be enforced in semantic lowering.
+- For syntax sugar that changes control-flow shape (e.g., `repeat N:` expanding into N steps), add a semantic preprocessor and ensure both IR lowering and verification run on the expanded program so step-based analyses remain consistent.
 - Keep public module declarations centralized in `src/lib.rs`; implementation files live at `src/<module>/mod.rs`.
 - For early story scaffolding, keep module placeholders compiling so CLI and library can evolve incrementally without breaking builds.
 - Model DSL enums with `serde(rename_all = "snake_case")` and tagged enums so serialized AST tokens stay aligned with DSL keywords.
@@ -387,4 +388,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `repeat` count/range checks should stay out of parser logic; parser should keep accepting syntactically valid integers and let semantic stories enforce bounds/nesting rules.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `parse_repeat_block` reuses `parse_step_statement_wrapper`, so nested repeat bodies are already represented as recursive `StepStatement` trees for upcoming expansion work.
+---
+
+## [2026-02-12 16:56:39 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Implemented semantic preprocessor `preprocess_program` that expands `repeat N:` into `N` sequential steps named with `_1.._N` suffixes.
+  - Added semantic validation for repeat constraints: reject `repeat 0/1`, `repeat > 100`, nested repeats, and repeat usage inside nested blocks (e.g., parallel/race branches).
+  - Updated CLI + integration compilation pipeline to preprocess before semantic lowering and pass the expanded program into verifiers to keep step-based analyses consistent.
+  - Added `examples/repeat_demo.plc` (3-cycle glue workflow) and tests covering repeat expansion, semantic errors, demo compilation, and equivalence vs manual unrolling.
+- Files changed
+  - `src/semantic/mod.rs`, `src/main.rs`, `tests/examples_integration.rs`, `examples/repeat_demo.plc`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - A single semantic preprocessor step is a good place to host syntax-sugar expansions so IR builders + verifiers can share a consistent step graph.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - If you expand steps during semantic lowering, you must also feed the expanded AST into verification; otherwise timing/liveness analyses that iterate `program.tasks.steps` will drift from the state machine.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - The integration test `repeat_expansion_produces_same_verification_result_as_manual_unrolling` provides a regression baseline for future wait/if/goto semantics changes.
 ---

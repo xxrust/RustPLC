@@ -2,6 +2,7 @@ use rust_plc::error::PlcError;
 use rust_plc::parser::parse_plc;
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
+    preprocess_program,
 };
 use rust_plc::verification::verify_all;
 use serde_json::{Value, json};
@@ -33,12 +34,18 @@ fn collect_stage<T>(result: Result<T, Vec<PlcError>>, errors: &mut Vec<PlcError>
 
 fn compile_source_to_json(source: &str) -> Result<Value, Vec<String>> {
     let program = parse_plc(source).map_err(|err| vec![err.to_string()])?;
+    let expanded_program = preprocess_program(&program).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+    })?;
 
     let mut errors = Vec::new();
-    let topology = collect_stage(build_topology_graph(&program), &mut errors);
-    let state_machine = collect_stage(build_state_machine(&program), &mut errors);
-    let constraints = collect_stage(build_constraint_set(&program), &mut errors);
-    let timing_model = collect_stage(build_timing_model(&program), &mut errors);
+    let topology = collect_stage(build_topology_graph(&expanded_program), &mut errors);
+    let state_machine = collect_stage(build_state_machine(&expanded_program), &mut errors);
+    let constraints = collect_stage(build_constraint_set(&expanded_program), &mut errors);
+    let timing_model = collect_stage(build_timing_model(&expanded_program), &mut errors);
 
     if !errors.is_empty() {
         return Err(errors.into_iter().map(|error| error.to_string()).collect());
@@ -49,8 +56,8 @@ fn compile_source_to_json(source: &str) -> Result<Value, Vec<String>> {
     let constraints = constraints.expect("constraints exist when semantic errors are empty");
     let timing_model = timing_model.expect("timing model exists when semantic errors are empty");
 
-    let verification =
-        verify_all(&program, &topology, &constraints, &state_machine).map_err(|diagnostics| {
+    let verification = verify_all(&expanded_program, &topology, &constraints, &state_machine)
+        .map_err(|diagnostics| {
             diagnostics
                 .into_iter()
                 .map(|diagnostic| diagnostic.to_string())
@@ -171,6 +178,182 @@ fn parses_delay_demo_example_into_verified_ir_json() {
     assert_eq!(
         ir_json["verification"]["causality"]["level"],
         Value::String("通过".to_string())
+    );
+}
+
+#[test]
+fn parses_repeat_demo_example_into_verified_ir_json() {
+    let source = read_example("repeat_demo.plc");
+    let ir_json = compile_source_to_json(&source).expect("repeat_demo example should compile");
+
+    let states = ir_json["state_machine"]["states"]
+        .as_array()
+        .expect("state machine should include states array");
+    assert!(
+        states
+            .iter()
+            .any(|state| state["step_name"] == Value::String("glue_cycle_1".to_string())),
+        "repeat_demo should include expanded glue_cycle_1 step"
+    );
+    assert!(
+        states
+            .iter()
+            .any(|state| state["step_name"] == Value::String("glue_cycle_3".to_string())),
+        "repeat_demo should include expanded glue_cycle_3 step"
+    );
+
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
+fn repeat_expansion_produces_same_verification_result_as_manual_unrolling() {
+    let repeat_source = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device X1: digital_input
+
+device valve_glue: solenoid_valve {
+    connected_to: Y0,
+    response_time: 15ms
+}
+
+device cyl_glue: cylinder {
+    connected_to: valve_glue,
+    type: double_acting,
+    stroke: 50mm,
+    stroke_time: 120ms,
+    retract_time: 110ms
+}
+
+device sensor_glue_ext: sensor {
+    connected_to: X0,
+    detects: cyl_glue.extended
+}
+
+device sensor_glue_ret: sensor {
+    connected_to: X1,
+    detects: cyl_glue.retracted
+}
+
+[constraints]
+
+causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ext
+causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ret
+
+[tasks]
+
+task glue:
+    step glue_cycle:
+        repeat 3:
+            action: extend cyl_glue
+            wait: sensor_glue_ext == true
+            timeout: 300ms -> goto fault_handler
+            action: retract cyl_glue
+            wait: sensor_glue_ret == true
+            timeout: 300ms -> goto fault_handler
+    on_complete: goto idle
+
+task idle:
+    step ready:
+        action: log "glue done"
+
+task fault_handler:
+    step safe:
+        action: retract cyl_glue
+    on_complete: goto idle
+"#;
+
+    let manual_source = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device X1: digital_input
+
+device valve_glue: solenoid_valve {
+    connected_to: Y0,
+    response_time: 15ms
+}
+
+device cyl_glue: cylinder {
+    connected_to: valve_glue,
+    type: double_acting,
+    stroke: 50mm,
+    stroke_time: 120ms,
+    retract_time: 110ms
+}
+
+device sensor_glue_ext: sensor {
+    connected_to: X0,
+    detects: cyl_glue.extended
+}
+
+device sensor_glue_ret: sensor {
+    connected_to: X1,
+    detects: cyl_glue.retracted
+}
+
+[constraints]
+
+causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ext
+causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ret
+
+[tasks]
+
+task glue:
+    step glue_cycle_1:
+        action: extend cyl_glue
+        wait: sensor_glue_ext == true
+        timeout: 300ms -> goto fault_handler
+        action: retract cyl_glue
+        wait: sensor_glue_ret == true
+        timeout: 300ms -> goto fault_handler
+    step glue_cycle_2:
+        action: extend cyl_glue
+        wait: sensor_glue_ext == true
+        timeout: 300ms -> goto fault_handler
+        action: retract cyl_glue
+        wait: sensor_glue_ret == true
+        timeout: 300ms -> goto fault_handler
+    step glue_cycle_3:
+        action: extend cyl_glue
+        wait: sensor_glue_ext == true
+        timeout: 300ms -> goto fault_handler
+        action: retract cyl_glue
+        wait: sensor_glue_ret == true
+        timeout: 300ms -> goto fault_handler
+    on_complete: goto idle
+
+task idle:
+    step ready:
+        action: log "glue done"
+
+task fault_handler:
+    step safe:
+        action: retract cyl_glue
+    on_complete: goto idle
+"#;
+
+    let repeat_ir = compile_source_to_json(repeat_source).expect("repeat source should compile");
+    let manual_ir =
+        compile_source_to_json(manual_source).expect("manual unrolled source should compile");
+
+    assert_eq!(
+        repeat_ir["verification"], manual_ir["verification"],
+        "repeat and manual unrolling should produce identical verification results"
     );
 }
 

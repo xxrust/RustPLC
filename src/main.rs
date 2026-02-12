@@ -3,6 +3,7 @@ use rust_plc::ir::{ConstraintSet, StateMachine, TimingModel, TopologyGraph};
 use rust_plc::parser::parse_plc;
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
+    preprocess_program,
 };
 use rust_plc::verification::{VerificationSummary, verify_all};
 use serde::Serialize;
@@ -72,12 +73,18 @@ fn main() {
 
 fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
     let program = parse_plc(source).map_err(|err| vec![err.to_string()])?;
+    let expanded_program = preprocess_program(&program).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+    })?;
 
     let mut errors = Vec::new();
-    let topology = collect_stage(build_topology_graph(&program), &mut errors);
-    let state_machine = collect_stage(build_state_machine(&program), &mut errors);
-    let constraints = collect_stage(build_constraint_set(&program), &mut errors);
-    let timing_model = collect_stage(build_timing_model(&program), &mut errors);
+    let topology = collect_stage(build_topology_graph(&expanded_program), &mut errors);
+    let state_machine = collect_stage(build_state_machine(&expanded_program), &mut errors);
+    let constraints = collect_stage(build_constraint_set(&expanded_program), &mut errors);
+    let timing_model = collect_stage(build_timing_model(&expanded_program), &mut errors);
 
     if !errors.is_empty() {
         return Err(errors.into_iter().map(|error| error.to_string()).collect());
@@ -88,8 +95,8 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
     let constraints = constraints.expect("constraints exist when semantic errors are empty");
     let timing_model = timing_model.expect("timing model exists when semantic errors are empty");
 
-    let verification =
-        verify_all(&program, &topology, &constraints, &state_machine).map_err(|issues| {
+    let verification = verify_all(&expanded_program, &topology, &constraints, &state_machine)
+        .map_err(|issues| {
             issues
                 .into_iter()
                 .map(|issue| issue.to_string())
