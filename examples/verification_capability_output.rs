@@ -7,27 +7,22 @@ use rust_plc::verification::verify_all;
 fn full_pipeline(source: &str) -> Result<serde_json::Value, Vec<String>> {
     let program = parse_plc(source).map_err(|e| vec![e.to_string()])?;
 
-    let topology = build_topology_graph(&program).map_err(|errs| {
-        errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>()
-    })?;
-    let state_machine = build_state_machine(&program).map_err(|errs| {
-        errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>()
-    })?;
-    let constraints = build_constraint_set(&program).map_err(|errs| {
-        errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>()
-    })?;
-    let _timing_model = build_timing_model(&program).map_err(|errs| {
-        errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>()
-    })?;
+    let topology = build_topology_graph(&program)
+        .map_err(|errs| errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>())?;
+    let state_machine = build_state_machine(&program)
+        .map_err(|errs| errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>())?;
+    let constraints = build_constraint_set(&program)
+        .map_err(|errs| errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>())?;
+    let _timing_model = build_timing_model(&program)
+        .map_err(|errs| errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>())?;
 
-    let summary = verify_all(&program, &topology, &constraints, &state_machine).map_err(
-        |issues| {
+    let summary =
+        verify_all(&program, &topology, &constraints, &state_machine).map_err(|issues| {
             issues
                 .into_iter()
                 .map(|issue| issue.to_string())
                 .collect::<Vec<_>>()
-        },
-    )?;
+        })?;
 
     serde_json::to_value(&summary).map_err(|e| vec![e.to_string()])
 }

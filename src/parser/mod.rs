@@ -412,6 +412,10 @@ fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
         Rule::delay_statement => Ok(StepStatement::Delay {
             duration_ms: parse_delay_statement(pair)?,
         }),
+        Rule::repeat_block => {
+            let (count, body) = parse_repeat_block(pair)?;
+            Ok(StepStatement::Repeat { count, body })
+        }
         Rule::timeout_statement => Ok(StepStatement::Timeout(parse_timeout_statement(pair)?)),
         Rule::goto_statement => Ok(StepStatement::Goto(parse_goto_statement(pair)?)),
         Rule::parallel_statement => Ok(StepStatement::Parallel(parse_parallel_block(pair)?)),
@@ -424,6 +428,33 @@ fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
             format!("不支持的 step 语句: {rule:?}"),
         )),
     }
+}
+
+fn parse_repeat_block(pair: Pair<Rule>) -> Result<(u64, Vec<StepStatement>), PlcError> {
+    let line = line_of(&pair);
+    let mut count = None;
+    let mut body = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::integer => {
+                let parsed = part
+                    .as_str()
+                    .parse::<u64>()
+                    .map_err(|_| PlcError::parse(line, "repeat 次数必须是非负整数"))?;
+                count = Some(parsed);
+            }
+            Rule::step_statement => body.push(parse_step_statement_wrapper(part)?),
+            _ => {}
+        }
+    }
+
+    let count = count.ok_or_else(|| PlcError::parse(line, "repeat 缺少次数"))?;
+    if body.is_empty() {
+        return Err(PlcError::parse(line, "repeat 块至少需要一条语句"));
+    }
+
+    Ok((count, body))
 }
 
 fn parse_delay_statement(pair: Pair<Rule>) -> Result<u64, PlcError> {
@@ -1137,6 +1168,67 @@ task init:
         assert!(matches!(
             statements.get(1),
             Some(StepStatement::Delay { duration_ms: 0 })
+        ));
+    }
+
+    #[test]
+    fn parses_repeat_block_into_ast() {
+        let input = r#"
+[topology]
+device Y0: digital_output
+device X0: digital_input
+device valve_glue: solenoid_valve { connected_to: Y0 }
+device cyl_glue: cylinder { connected_to: valve_glue, stroke_time: 200ms, retract_time: 180ms }
+device sensor_glue_ext: sensor { connected_to: X0, detects: cyl_glue.extended }
+
+[constraints]
+causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ext
+
+[tasks]
+task glue:
+    step glue_cycle:
+        repeat 3:
+            action: extend cyl_glue
+            wait: sensor_glue_ext == true
+            timeout: 300ms -> goto fault_handler
+"#;
+
+        let ast = parse_plc(input).expect("包含 repeat 的 PLC 应能构建 AST");
+        let statements = &ast.tasks.tasks[0].steps[0].statements;
+
+        let repeat = statements.first().expect("repeat 语句应位于 step 首条语句");
+        match repeat {
+            StepStatement::Repeat { count, body } => {
+                assert_eq!(*count, 3);
+                assert!(matches!(body.first(), Some(StepStatement::Action(_))));
+                assert!(matches!(body.get(1), Some(StepStatement::Wait(_))));
+                assert!(matches!(body.get(2), Some(StepStatement::Timeout(_))));
+            }
+            other => panic!("期望 repeat 语句，实际为: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_repeat_zero_count_in_syntax_stage() {
+        let input = r#"
+[topology]
+device Y0: digital_output
+device valve_glue: solenoid_valve { connected_to: Y0 }
+device cyl_glue: cylinder { connected_to: valve_glue, stroke_time: 200ms, retract_time: 180ms }
+
+[constraints]
+
+[tasks]
+task glue:
+    step glue_cycle:
+        repeat 0:
+            action: extend cyl_glue
+"#;
+
+        let ast = parse_plc(input).expect("repeat 0 在语法阶段应可解析");
+        assert!(matches!(
+            ast.tasks.tasks[0].steps[0].statements.first(),
+            Some(StepStatement::Repeat { count: 0, .. })
         ));
     }
 

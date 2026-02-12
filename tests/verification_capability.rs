@@ -14,27 +14,22 @@ use rust_plc::verification::verify_all;
 fn full_pipeline(source: &str) -> Result<serde_json::Value, Vec<String>> {
     let program = parse_plc(source).map_err(|e| vec![e.to_string()])?;
 
-    let topology = build_topology_graph(&program).map_err(|errs| {
-        errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>()
-    })?;
-    let state_machine = build_state_machine(&program).map_err(|errs| {
-        errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>()
-    })?;
-    let constraints = build_constraint_set(&program).map_err(|errs| {
-        errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>()
-    })?;
-    let _timing_model = build_timing_model(&program).map_err(|errs| {
-        errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>()
-    })?;
+    let topology = build_topology_graph(&program)
+        .map_err(|errs| errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>())?;
+    let state_machine = build_state_machine(&program)
+        .map_err(|errs| errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>())?;
+    let constraints = build_constraint_set(&program)
+        .map_err(|errs| errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>())?;
+    let _timing_model = build_timing_model(&program)
+        .map_err(|errs| errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>())?;
 
-    let summary = verify_all(&program, &topology, &constraints, &state_machine).map_err(
-        |issues| {
+    let summary =
+        verify_all(&program, &topology, &constraints, &state_machine).map_err(|issues| {
             issues
                 .into_iter()
                 .map(|issue| issue.to_string())
                 .collect::<Vec<_>>()
-        },
-    )?;
+        })?;
 
     serde_json::to_value(&summary).map_err(|e| vec![e.to_string()])
 }
@@ -225,26 +220,17 @@ task par:
     let errors = full_pipeline(source).expect_err("并行伸出冲突气缸应触发 safety 错误");
     let joined = errors.join("\n");
 
-    assert!(
-        joined.contains("ERROR [safety]"),
-        "应报告 safety 错误"
-    );
-    assert!(
-        joined.contains("conflicts_with"),
-        "错误应包含冲突约束名称"
-    );
-    assert!(
-        joined.contains("位置:"),
-        "错误应包含源码位置"
-    );
-    assert!(
-        joined.contains("建议:"),
-        "错误应包含修复建议"
-    );
+    assert!(joined.contains("ERROR [safety]"), "应报告 safety 错误");
+    assert!(joined.contains("conflicts_with"), "错误应包含冲突约束名称");
+    assert!(joined.contains("位置:"), "错误应包含源码位置");
+    assert!(joined.contains("建议:"), "错误应包含修复建议");
 
     assert_all_errors_have_location_and_suggestion(&errors);
 
-    let safety_count = errors.iter().filter(|e| e.contains("ERROR [safety]")).count();
+    let safety_count = errors
+        .iter()
+        .filter(|e| e.contains("ERROR [safety]"))
+        .count();
     assert!(
         safety_count >= 1,
         "并行冲突场景应至少产生 1 个 safety 错误，实际: {safety_count}"
@@ -384,10 +370,7 @@ task cooldown:
     let joined = errors.join("\n");
 
     // Timing must_complete_within 违反
-    assert!(
-        joined.contains("ERROR [timing]"),
-        "应报告 timing 错误"
-    );
+    assert!(joined.contains("ERROR [timing]"), "应报告 timing 错误");
     assert!(
         joined.contains("无法在 100ms 内完成") || joined.contains("must_complete_within"),
         "timing 错误应指出超限"
@@ -409,7 +392,10 @@ task cooldown:
         "应报告 must_start_after 违反"
     );
 
-    let timing_count = errors.iter().filter(|e| e.contains("ERROR [timing]")).count();
+    let timing_count = errors
+        .iter()
+        .filter(|e| e.contains("ERROR [timing]"))
+        .count();
     let causality_count = errors
         .iter()
         .filter(|e| e.contains("ERROR [causality]"))

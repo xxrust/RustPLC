@@ -158,7 +158,13 @@ pub struct StepDeclaration {
 pub enum StepStatement {
     Action(ActionStatement),
     Wait(WaitStatement),
-    Delay { duration_ms: u64 },
+    Delay {
+        duration_ms: u64,
+    },
+    Repeat {
+        count: u64,
+        body: Vec<StepStatement>,
+    },
     Timeout(TimeoutDirective),
     Goto(GotoDirective),
     Parallel(ParallelBlock),

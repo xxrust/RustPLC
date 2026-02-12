@@ -711,6 +711,7 @@ fn collect_actions(statements: &[StepStatement], actions: &mut Vec<ActionStateme
     for statement in statements {
         match statement {
             StepStatement::Action(action) => actions.push(action.clone()),
+            StepStatement::Repeat { body, .. } => collect_actions(body, actions),
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
                     collect_actions(&branch.statements, actions);
@@ -860,6 +861,7 @@ fn analyze_statements(statements: &[StepStatement]) -> AnalyzedStatements {
                 analyzed.waits.push(wait_to_guard_expression(wait));
             }
             StepStatement::Delay { duration_ms } => analyzed.delays_ms.push(*duration_ms),
+            StepStatement::Repeat { .. } => {}
             StepStatement::Timeout(timeout) => analyzed.timeouts.push(timeout.clone()),
             StepStatement::Goto(goto) => analyzed.gotos.push(goto.clone()),
             StepStatement::Parallel(block) => analyzed.parallel_blocks.push(block.clone()),

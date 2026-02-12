@@ -4,6 +4,7 @@ COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
 
 identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
 number = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
+integer = @{ ASCII_DIGIT+ }
 
 string_literal = @{ "\"" ~ ("\\\"" | !"\"" ~ ANY)* ~ "\"" }
 state_reference = @{ identifier ~ "." ~ identifier }
@@ -110,6 +111,8 @@ timeout_statement = { "timeout" ~ ":" ~ duration_value ~ "->" ~ goto_statement }
 allow_indefinite_wait_statement = { "allow_indefinite_wait" ~ ":" ~ boolean_value }
 then_goto_statement = { "then" ~ ":" ~ goto_statement }
 
+repeat_block = { "repeat" ~ integer ~ ":" ~ step_statement+ }
+
 parallel_branch_statement = {
     action_statement
     | wait_statement
@@ -117,6 +120,7 @@ parallel_branch_statement = {
     | timeout_statement
     | allow_indefinite_wait_statement
     | goto_statement
+    | repeat_block
 }
 parallel_branch = { identifier ~ ":" ~ parallel_branch_statement+ }
 parallel_statement = { "parallel" ~ ":" ~ parallel_branch+ }
@@ -128,6 +132,7 @@ race_branch_statement = {
     | timeout_statement
     | allow_indefinite_wait_statement
     | goto_statement
+    | repeat_block
 }
 race_branch = { identifier ~ ":" ~ race_branch_statement+ ~ then_goto_statement }
 race_statement = { "race" ~ ":" ~ race_branch+ }
@@ -141,6 +146,7 @@ step_statement = {
     | parallel_statement
     | race_statement
     | allow_indefinite_wait_statement
+    | repeat_block
 }
 step_declaration = { "step" ~ identifier ~ ":" ~ step_statement* }
 

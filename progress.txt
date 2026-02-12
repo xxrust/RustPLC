@@ -5,6 +5,8 @@
 - TopologyGraph JSON 调试依赖 `petgraph` 的 `serde-1` feature；若缺失会导致 DiGraph 无法序列化。
 - In parser-to-AST lowering, unwrap wrapper PEG rules (e.g., `constraint_declaration`, `step_statement`) before matching concrete rule kinds, or valid nodes can be silently skipped.
 - When introducing a new `StepStatement` variant, update all semantic/verification `match` arms (and tests) so builds remain exhaustive.
+- For new step-level statements, update all grammar “statement lists” (`step_statement`, `parallel_branch_statement`, `race_branch_statement`) so the syntax works both at top-level steps and inside blocks.
+- Keep parser stage focused on syntax shape; range/business checks (e.g., `repeat` count bounds/nesting limits) should be enforced in semantic lowering.
 - Keep public module declarations centralized in `src/lib.rs`; implementation files live at `src/<module>/mod.rs`.
 - For early story scaffolding, keep module placeholders compiling so CLI and library can evolve incrementally without breaking builds.
 - Model DSL enums with `serde(rename_all = "snake_case")` and tagged enums so serialized AST tokens stay aligned with DSL keywords.
@@ -368,4 +370,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - If `delay:` is omitted from step worst-case estimates, timing constraints can silently pass even when delays dominate the real schedule.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Integration tests use `compile_source_to_json` + `verify_all` to assert verifier pass/fail while still validating the IR JSON schema.
+---
+## [2026-02-12 16:34:12 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `repeat_block` grammar support (`repeat <integer>:` + body statements) and wired it into top-level step statements plus `parallel`/`race` branch statement lists.
+  - Extended AST `StepStatement` with `Repeat { count, body }` and implemented parser lowering that captures repeat count/body into the new AST variant.
+  - Added parser tests covering `repeat 3:` AST construction (action/wait/timeout body) and syntax-stage acceptance of `repeat 0:` for later semantic validation.
+  - Updated semantic/timing/liveness/causality statement walkers to recognize the new `Repeat` variant so builds remain exhaustive and recursive collectors can traverse nested statement bodies safely.
+- Files changed
+  - `src/parser/plc.pest`, `src/ast/mod.rs`, `src/parser/mod.rs`, `src/semantic/mod.rs`, `src/verification/timing.rs`, `src/verification/liveness.rs`, `src/verification/causality.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - When introducing a new step statement, update all grammar statement-list rules (`step_statement` + branch statement rules) together to avoid syntax gaps between top-level and branch contexts.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `repeat` count/range checks should stay out of parser logic; parser should keep accepting syntactically valid integers and let semantic stories enforce bounds/nesting rules.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `parse_repeat_block` reuses `parse_step_statement_wrapper`, so nested repeat bodies are already represented as recursive `StepStatement` trees for upcoming expansion work.
 ---

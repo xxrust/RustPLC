@@ -305,6 +305,9 @@ fn collect_pairs_from_statements(
                     waits.push((wait_to_text(wait), sensor));
                 }
             }
+            StepStatement::Repeat { body, .. } => {
+                collect_pairs_from_statements(body, line, sensor_names, pairs);
+            }
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
                     collect_pairs_from_statements(&branch.statements, line, sensor_names, pairs);

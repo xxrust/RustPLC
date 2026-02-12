@@ -279,6 +279,7 @@ fn collect_step_liveness_facts(statements: &[StepStatement], facts: &mut StepLiv
             StepStatement::Wait(wait) => facts.waits.push(wait_to_text(wait)),
             StepStatement::Timeout(_) => facts.has_timeout = true,
             StepStatement::Delay { .. } => facts.has_delay = true,
+            StepStatement::Repeat { body, .. } => collect_step_liveness_facts(body, facts),
             StepStatement::AllowIndefiniteWait(value) => {
                 if *value {
                     facts.has_allow_indefinite_wait = true;
@@ -316,6 +317,10 @@ fn summarize_statements(statements: &[StepStatement], completion_is_jump: bool) 
                 } else {
                     summary.has_non_jump_path = true;
                 }
+            }
+            StepStatement::Repeat { body, .. } => {
+                has_control_flow = true;
+                summary.merge(summarize_statements(body, completion_is_jump));
             }
             StepStatement::Parallel(block) => {
                 has_control_flow = true;
