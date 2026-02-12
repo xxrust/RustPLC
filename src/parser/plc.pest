@@ -117,6 +117,8 @@ then_goto_statement = { "then" ~ ":" ~ goto_statement }
 
 repeat_block = { "repeat" ~ integer ~ ":" ~ step_statement+ }
 
+if_else_statement = { "if" ~ ":" ~ simple_condition ~ goto_statement ~ "else" ~ ":" ~ goto_statement }
+
 parallel_branch_statement = {
     action_statement
     | wait_statement
@@ -124,6 +126,7 @@ parallel_branch_statement = {
     | timeout_statement
     | allow_indefinite_wait_statement
     | goto_statement
+    | if_else_statement
     | repeat_block
 }
 parallel_branch = { identifier ~ ":" ~ parallel_branch_statement+ }
@@ -136,6 +139,7 @@ race_branch_statement = {
     | timeout_statement
     | allow_indefinite_wait_statement
     | goto_statement
+    | if_else_statement
     | repeat_block
 }
 race_branch = { identifier ~ ":" ~ race_branch_statement+ ~ then_goto_statement }
@@ -147,6 +151,7 @@ step_statement = {
     | delay_statement
     | timeout_statement
     | goto_statement
+    | if_else_statement
     | parallel_statement
     | race_statement
     | allow_indefinite_wait_statement

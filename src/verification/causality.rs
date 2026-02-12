@@ -394,6 +394,7 @@ fn collect_items_from_statements(
                     });
                 }
             }
+            StepStatement::IfElse { .. } => {}
             StepStatement::Repeat { body, .. } => {
                 collect_items_from_statements(
                     body,

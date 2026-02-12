@@ -159,6 +159,11 @@ pub struct StepDeclaration {
 pub enum StepStatement {
     Action(ActionStatement),
     Wait(WaitStatement),
+    IfElse {
+        condition: ConditionExpression,
+        then_goto: String,
+        else_goto: String,
+    },
     Delay {
         duration_ms: u64,
     },

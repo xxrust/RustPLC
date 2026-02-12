@@ -1,5 +1,6 @@
 # Ralph Progress Log
 ## Codebase Patterns
+- New control-flow statements (e.g., IfElse) must be added to all statement walkers (semantic + timing/liveness/causality) to keep recursion/exhaustiveness correct, even if semantics land in a later story.
 - For wait AND/OR support, process each sub-condition independently in semantic validation and causality inference; do not collapse to a single inferred sensor/device.
 - WaitStatement.condition is WaitCondition (Single/And/Or); keep downstream code using helpers to render/scan all sub-conditions (do not assume a single left/operator/right).
 - In causality checks, parallel contexts can create invalid cross-branch action/wait pairs; tag statement origin and filter parallel-related pairs unless action->sensor is reachable to avoid false positives.
@@ -493,4 +494,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Causality false negatives occur if AND/OR waits only infer one sensor; every sub-condition sensor must generate an action-wait pair.
   - Useful context (e.g., "the evaluation panel is in component X")
     - AND/OR device-reference semantic validation currently applies to composite waits; single-condition waits keep prior behavior for compatibility.
+---
+## [2026-02-13 02:39:51 CST] - US-011
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `if/else` statement grammar (`if: <condition> goto <X> else: goto <Y>`) and integrated it into step statements and parallel/race branches.
+  - Extended AST `StepStatement` with `IfElse { condition, then_goto, else_goto }` and implemented parser lowering from pest pairs.
+  - Added parser tests for a valid if/else and for rejecting a missing else branch.
+- Files changed
+  - src/parser/plc.pest, src/ast/mod.rs, src/parser/mod.rs, src/semantic/mod.rs, src/verification/{timing,liveness,causality}.rs, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Grammar-level enforcement (requiring else) keeps parse-time errors simple; semantic phase can focus on target resolution/verification logic.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Even when semantics are deferred (US-012), adding a new StepStatement variant requires updating all match arms/walkers to avoid compile breakage.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `simple_condition` is shared by wait/if parsing, so condition parsing stays consistent across constructs.
 ---

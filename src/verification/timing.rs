@@ -449,6 +449,7 @@ fn collect_actions(statements: &[StepStatement], actions: &mut Vec<ActionStateme
     for statement in statements {
         match statement {
             StepStatement::Action(action) => actions.push(action.clone()),
+            StepStatement::IfElse { .. } => {}
             StepStatement::Repeat { body, .. } => collect_actions(body, actions),
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
@@ -477,6 +478,7 @@ fn max_timeout_ms(statements: &[StepStatement]) -> u64 {
             StepStatement::Timeout(timeout) => {
                 timeout_max_ms = timeout_max_ms.max(duration_value_to_ms(&timeout.duration));
             }
+            StepStatement::IfElse { .. } => {}
             StepStatement::Repeat { body, .. } => {
                 timeout_max_ms = timeout_max_ms.max(max_timeout_ms(body));
             }
@@ -509,6 +511,7 @@ fn max_delay_ms(statements: &[StepStatement]) -> u64 {
             StepStatement::Delay { duration_ms } => {
                 delay_max_ms = delay_max_ms.max(*duration_ms);
             }
+            StepStatement::IfElse { .. } => {}
             StepStatement::Repeat { body, .. } => {
                 delay_max_ms = delay_max_ms.max(max_delay_ms(body));
             }

@@ -191,6 +191,7 @@ fn contains_nested_repeat(statement: &StepStatement) -> bool {
             .any(|branch| branch.statements.iter().any(statement_contains_repeat)),
         StepStatement::Action(_)
         | StepStatement::Wait(_)
+        | StepStatement::IfElse { .. }
         | StepStatement::Delay { .. }
         | StepStatement::Timeout(_)
         | StepStatement::Goto(_)
@@ -211,6 +212,7 @@ fn statement_contains_repeat(statement: &StepStatement) -> bool {
             .any(|branch| branch.statements.iter().any(statement_contains_repeat)),
         StepStatement::Action(_)
         | StepStatement::Wait(_)
+        | StepStatement::IfElse { .. }
         | StepStatement::Delay { .. }
         | StepStatement::Timeout(_)
         | StepStatement::Goto(_)
@@ -887,6 +889,7 @@ fn validate_wait_device_references_in_statements(
                     }
                 }
             }
+            StepStatement::IfElse { .. } => {}
             StepStatement::Repeat { body, .. } => {
                 validate_wait_device_references_in_statements(body, line, device_kinds, errors);
             }
@@ -1014,6 +1017,7 @@ fn collect_actions(statements: &[StepStatement], actions: &mut Vec<ActionStateme
     for statement in statements {
         match statement {
             StepStatement::Action(action) => actions.push(action.clone()),
+            StepStatement::IfElse { .. } => {}
             StepStatement::Repeat { body, .. } => collect_actions(body, actions),
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
@@ -1163,6 +1167,7 @@ fn analyze_statements(statements: &[StepStatement]) -> AnalyzedStatements {
             StepStatement::Wait(wait) => {
                 analyzed.waits.push(wait_to_guard_expression(wait));
             }
+            StepStatement::IfElse { .. } => {}
             StepStatement::Delay { duration_ms } => analyzed.delays_ms.push(*duration_ms),
             StepStatement::Repeat { .. } => {}
             StepStatement::Timeout(timeout) => analyzed.timeouts.push(timeout.clone()),

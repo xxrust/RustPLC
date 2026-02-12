@@ -410,6 +410,7 @@ fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
     match pair.as_rule() {
         Rule::action_statement => Ok(StepStatement::Action(parse_action_statement(pair)?)),
         Rule::wait_statement => Ok(StepStatement::Wait(parse_wait_statement(pair)?)),
+        Rule::if_else_statement => Ok(parse_if_else_statement(pair)?),
         Rule::delay_statement => Ok(StepStatement::Delay {
             duration_ms: parse_delay_statement(pair)?,
         }),
@@ -429,6 +430,30 @@ fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
             format!("不支持的 step 语句: {rule:?}"),
         )),
     }
+}
+
+fn parse_if_else_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
+    let line = line_of(&pair);
+    let mut condition = None;
+    let mut then_goto = None;
+    let mut else_goto = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::simple_condition => condition = Some(parse_simple_condition(part)?),
+            Rule::goto_statement if then_goto.is_none() => {
+                then_goto = Some(parse_goto_statement(part)?.step)
+            }
+            Rule::goto_statement => else_goto = Some(parse_goto_statement(part)?.step),
+            _ => {}
+        }
+    }
+
+    Ok(StepStatement::IfElse {
+        condition: condition.ok_or_else(|| PlcError::parse(line, "if 缺少条件表达式"))?,
+        then_goto: then_goto.ok_or_else(|| PlcError::parse(line, "if 缺少 goto 分支"))?,
+        else_goto: else_goto.ok_or_else(|| PlcError::parse(line, "else 缺少 goto 分支"))?,
+    })
 }
 
 fn parse_repeat_block(pair: Pair<Rule>) -> Result<(u64, Vec<StepStatement>), PlcError> {
@@ -1714,5 +1739,60 @@ task main:
             err.to_string().contains("混用 AND/OR"),
             "应提示 AND/OR 混用错误"
         );
+    }
+
+    #[test]
+    fn parses_if_else_statement_into_ast() {
+        let input = r#"
+[topology]
+device switch_A: digital_input
+
+[constraints]
+
+[tasks]
+
+task main:
+    step choose:
+        if: switch_A == true
+            goto grind_coarse
+        else:
+            goto grind_fine
+"#;
+
+        let program = parse_plc(input).expect("if/else 示例应能解析为 AST");
+        let step = &program.tasks.tasks[0].steps[0];
+        let statement = step.statements.first().expect("step 应包含语句");
+
+        match statement {
+            StepStatement::IfElse {
+                condition,
+                then_goto,
+                else_goto,
+            } => {
+                assert_eq!(condition.left, "switch_A");
+                assert_eq!(then_goto, "grind_coarse");
+                assert_eq!(else_goto, "grind_fine");
+            }
+            other => panic!("期望 IfElse 语句，实际为: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_if_without_else_branch() {
+        let input = r#"
+[topology]
+device switch_A: digital_input
+
+[constraints]
+
+[tasks]
+
+task main:
+    step choose:
+        if: switch_A == true
+            goto grind_coarse
+"#;
+
+        assert!(parse_plc(input).is_err(), "缺少 else 分支时应报解析错误");
     }
 }
