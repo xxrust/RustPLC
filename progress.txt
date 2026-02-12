@@ -1,6 +1,7 @@
 # Ralph Progress Log
 ## Codebase Patterns
 - For timing envelopes, include upstream `response_time` along `connected_to` chains and treat incoming `StateMachine` guards as must_start_after lower bounds (`timeout` contributes delay, `always/condition` = 0ms).
+- `must_complete_within` critical-path estimates must include `delay:` durations (step worst-case should consider action time + bounded waits like delay/timeout).
 - TopologyGraph JSON 调试依赖 `petgraph` 的 `serde-1` feature；若缺失会导致 DiGraph 无法序列化。
 - In parser-to-AST lowering, unwrap wrapper PEG rules (e.g., `constraint_declaration`, `step_statement`) before matching concrete rule kinds, or valid nodes can be silently skipped.
 - When introducing a new `StepStatement` variant, update all semantic/verification `match` arms (and tests) so builds remain exhaustive.
@@ -351,4 +352,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - When delay introduces control flow in a step, include it in `has_control_flow` checks or fallback `always` transitions will be emitted and change behavior.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Liveness SCC checks now treat both `timeout` and `delay` guard edges as bounded-wait exits; timing predecessor calculations also read both guards.
+---
+## [2026-02-12 16:17:21 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Updated Timing verifier to include `delay:` durations in step/task must_complete_within critical-path estimates.
+  - Added `examples/delay_demo.plc` exercising delay in a conveyor-style workflow and ensured it compiles + passes all four verifiers.
+  - Added test coverage: a timing unit test that fails when delay exceeds must_complete_within, plus an integration test that asserts delay guard is present in compiled IR JSON.
+- Files changed
+  - `src/verification/timing.rs`, `examples/delay_demo.plc`, `tests/examples_integration.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Timing `must_complete_within` logic is AST-driven (step envelopes), so new time-based statements must be reflected there to affect critical-path checks.
+  - Gotchas encountered (e.g., "don\x27t forget to update Z when changing W")
+    - If `delay:` is omitted from step worst-case estimates, timing constraints can silently pass even when delays dominate the real schedule.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Integration tests use `compile_source_to_json` + `verify_all` to assert verifier pass/fail while still validating the IR JSON schema.
 ---

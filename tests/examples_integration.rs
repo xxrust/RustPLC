@@ -145,6 +145,36 @@ fn parses_half_rotation_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_delay_demo_example_into_verified_ir_json() {
+    let source = read_example("delay_demo.plc");
+    let ir_json = compile_source_to_json(&source).expect("delay_demo example should compile");
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+    assert!(
+        transitions.iter().any(|transition| {
+            transition["guard"]["kind"] == Value::String("delay".to_string())
+                && transition["guard"]["duration_ms"] == Value::Number(2000u64.into())
+        }),
+        "delay_demo should include a delay guard transition"
+    );
+
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
 fn reports_undefined_device_for_error_example() {
     let source = read_example("error_missing_device.plc");
     let errors = compile_source_to_json(&source)

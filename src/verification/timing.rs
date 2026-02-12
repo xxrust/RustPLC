@@ -35,6 +35,7 @@ struct DeviceTimingProfile {
 #[derive(Debug, Clone, Default)]
 struct StepTimingEstimate {
     action_max_ms: u64,
+    delay_max_ms: u64,
     timeout_max_ms: u64,
     worst_case_ms: u64,
     action_details: Vec<String>,
@@ -79,8 +80,11 @@ pub fn verify_timing(
                         let key = step_key(task, step);
                         let estimate = step_estimates.get(&key).cloned().unwrap_or_default();
                         let mut analysis = format!(
-                            "step {task}.{step} 的最坏关键路径时间 = {}ms（同 step 动作并行取最大值 {}ms，timeout 上界 {}ms）",
-                            estimate.worst_case_ms, estimate.action_max_ms, estimate.timeout_max_ms
+                            "step {task}.{step} 的最坏关键路径时间 = {}ms（同 step 动作并行取最大值 {}ms，delay 固定等待最大值 {}ms，timeout 上界 {}ms）",
+                            estimate.worst_case_ms,
+                            estimate.action_max_ms,
+                            estimate.delay_max_ms,
+                            estimate.timeout_max_ms
                         );
                         if !estimate.action_details.is_empty() {
                             analysis.push_str("；动作明细: ");
@@ -263,13 +267,15 @@ fn build_step_estimates(
                 }
             }
 
+            let delay_max_ms = max_delay_ms(&step.statements);
             let timeout_max_ms = max_timeout_ms(&step.statements);
-            let worst_case_ms = action_max_ms.max(timeout_max_ms);
+            let worst_case_ms = action_max_ms.max(delay_max_ms).max(timeout_max_ms);
 
             estimates.insert(
                 step_key(&task.name, &step.name),
                 StepTimingEstimate {
                     action_max_ms,
+                    delay_max_ms,
                     timeout_max_ms,
                     worst_case_ms,
                     action_details,
@@ -424,6 +430,35 @@ fn max_timeout_ms(statements: &[StepStatement]) -> u64 {
     }
 
     timeout_max_ms
+}
+
+fn max_delay_ms(statements: &[StepStatement]) -> u64 {
+    let mut delay_max_ms = 0;
+
+    for statement in statements {
+        match statement {
+            StepStatement::Delay { duration_ms } => {
+                delay_max_ms = delay_max_ms.max(*duration_ms);
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    delay_max_ms = delay_max_ms.max(max_delay_ms(&branch.statements));
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    delay_max_ms = delay_max_ms.max(max_delay_ms(&branch.statements));
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+
+    delay_max_ms
 }
 
 fn step_key(task: &str, step: &str) -> String {
@@ -585,6 +620,44 @@ task init:
                 .any(|error| error.to_string().contains("220ms")),
             "错误分析应体现上游 response_time + stroke_time 的链路时间"
         );
+    }
+
+    #[test]
+    fn fails_when_delay_exceeds_must_complete_within_constraint() {
+        let source = r#"
+[topology]
+
+[constraints]
+
+timing: task.cooldown must_complete_within 3000ms
+
+[tasks]
+
+task cooldown:
+    step wait:
+        delay: 5000ms
+    step done:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应构建成功");
+        let constraints = build_constraint_set(&program).expect("约束应构建成功");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        let errors = verify_timing(&program, &topology, &constraints, &state_machine)
+            .expect_err("delay 5000ms 超过 must_complete_within 3000ms 时应报时序错误");
+
+        let joined = errors
+            .iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert!(
+            joined.contains("无法在 3000ms 内完成"),
+            "错误结论应指出 must_complete_within 违反"
+        );
+        assert!(joined.contains("5000ms"), "错误分析/结论应体现 delay 时长");
     }
 
     #[test]
