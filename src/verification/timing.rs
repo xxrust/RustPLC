@@ -386,6 +386,7 @@ fn collect_actions(statements: &[StepStatement], actions: &mut Vec<ActionStateme
                 }
             }
             StepStatement::Wait(_)
+            | StepStatement::Delay { .. }
             | StepStatement::Timeout(_)
             | StepStatement::Goto(_)
             | StepStatement::AllowIndefiniteWait(_) => {}
@@ -413,6 +414,7 @@ fn max_timeout_ms(statements: &[StepStatement]) -> u64 {
             }
             StepStatement::Action(_)
             | StepStatement::Wait(_)
+            | StepStatement::Delay { .. }
             | StepStatement::Goto(_)
             | StepStatement::AllowIndefiniteWait(_) => {}
         }

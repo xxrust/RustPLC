@@ -3,6 +3,7 @@
 - For timing envelopes, include upstream `response_time` along `connected_to` chains and treat incoming `StateMachine` guards as must_start_after lower bounds (`timeout` contributes delay, `always/condition` = 0ms).
 - TopologyGraph JSON 调试依赖 `petgraph` 的 `serde-1` feature；若缺失会导致 DiGraph 无法序列化。
 - In parser-to-AST lowering, unwrap wrapper PEG rules (e.g., `constraint_declaration`, `step_statement`) before matching concrete rule kinds, or valid nodes can be silently skipped.
+- When introducing a new `StepStatement` variant, update all semantic/verification `match` arms (and tests) so builds remain exhaustive.
 - Keep public module declarations centralized in `src/lib.rs`; implementation files live at `src/<module>/mod.rs`.
 - For early story scaffolding, keep module placeholders compiling so CLI and library can evolve incrementally without breaking builds.
 - Model DSL enums with `serde(rename_all = "snake_case")` and tagged enums so serialized AST tokens stay aligned with DSL keywords.
@@ -316,4 +317,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Keep success summaries out of stdout (use stderr) when stdout is consumed as JSON by tests/tools.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `verify_all` already maps checker-specific diagnostics into a unified format, so future verifiers can plug in by only adding one conversion path in `src/verification/mod.rs`.
+---
+## [2026-02-12 15:44:34 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `delay: <duration>` to the DSL grammar and parser lowering.
+  - Extended AST `StepStatement` with `Delay { duration_ms: u64 }` and converted `delay:` duration values into milliseconds during parsing.
+  - Added unit test coverage to ensure `delay: 2000ms` and `delay: 0ms` parse correctly and do not break existing task parsing.
+- Files changed
+  - `src/ast/mod.rs`, `src/parser/plc.pest`, `src/parser/mod.rs`, `src/semantic/mod.rs`, `src/verification/liveness.rs`, `src/verification/timing.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Adding a new `StepStatement` variant requires updating semantic and verification match arms so builds remain exhaustive.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - This repo does not have `jq` installed; use `python3` scripts for PRD/progress automation.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Delay is normalized to milliseconds in parser output, so downstream semantic/verification stages can consume a single unit.
 ---

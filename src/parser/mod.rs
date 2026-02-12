@@ -409,6 +409,9 @@ fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
     match pair.as_rule() {
         Rule::action_statement => Ok(StepStatement::Action(parse_action_statement(pair)?)),
         Rule::wait_statement => Ok(StepStatement::Wait(parse_wait_statement(pair)?)),
+        Rule::delay_statement => Ok(StepStatement::Delay {
+            duration_ms: parse_delay_statement(pair)?,
+        }),
         Rule::timeout_statement => Ok(StepStatement::Timeout(parse_timeout_statement(pair)?)),
         Rule::goto_statement => Ok(StepStatement::Goto(parse_goto_statement(pair)?)),
         Rule::parallel_statement => Ok(StepStatement::Parallel(parse_parallel_block(pair)?)),
@@ -421,6 +424,17 @@ fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
             format!("不支持的 step 语句: {rule:?}"),
         )),
     }
+}
+
+fn parse_delay_statement(pair: Pair<Rule>) -> Result<u64, PlcError> {
+    let line = line_of(&pair);
+    let duration_pair = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| PlcError::parse(line, "delay 缺少时长"))?;
+    let duration = parse_duration_value(duration_pair)?;
+
+    Ok(duration_value_to_ms(&duration))
 }
 
 fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError> {
@@ -734,6 +748,13 @@ fn parse_duration_value(pair: Pair<Rule>) -> Result<DurationValue, PlcError> {
         value: value as u64,
         unit,
     })
+}
+
+fn duration_value_to_ms(duration: &DurationValue) -> u64 {
+    match duration.unit {
+        TimeUnit::Ms => duration.value,
+        TimeUnit::S => duration.value.saturating_mul(1000),
+    }
 }
 
 fn parse_measured_value(pair: Pair<Rule>) -> Result<MeasuredValue, PlcError> {
@@ -1083,6 +1104,40 @@ task ready:
 "#;
 
         assert!(parse_tasks(input).is_ok());
+    }
+
+    #[test]
+    fn parses_delay_statement_into_ast_milliseconds() {
+        let input = r#"
+[topology]
+device Y0: digital_output
+device X0: digital_input
+device valve_A: solenoid_valve { connected_to: Y0 }
+device cyl_A: cylinder { connected_to: valve_A, stroke_time: 200ms, retract_time: 180ms }
+device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
+
+[constraints]
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
+
+[tasks]
+task init:
+    step settle:
+        delay: 2000ms
+        delay: 0ms
+        wait: sensor_A_ext == true
+"#;
+
+        let ast = parse_plc(input).expect("包含 delay 的 PLC 应能构建 AST");
+        let statements = &ast.tasks.tasks[0].steps[0].statements;
+
+        assert!(matches!(
+            statements.first(),
+            Some(StepStatement::Delay { duration_ms: 2000 })
+        ));
+        assert!(matches!(
+            statements.get(1),
+            Some(StepStatement::Delay { duration_ms: 0 })
+        ));
     }
 
     #[test]

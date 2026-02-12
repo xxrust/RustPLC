@@ -285,7 +285,7 @@ fn collect_step_liveness_facts(statements: &[StepStatement], facts: &mut StepLiv
                     collect_step_liveness_facts(&branch.statements, facts);
                 }
             }
-            StepStatement::Action(_) | StepStatement::Goto(_) => {}
+            StepStatement::Action(_) | StepStatement::Delay { .. } | StepStatement::Goto(_) => {}
         }
     }
 }
@@ -325,7 +325,9 @@ fn summarize_statements(statements: &[StepStatement], completion_is_jump: bool) 
                     ));
                 }
             }
-            StepStatement::Action(_) | StepStatement::AllowIndefiniteWait(_) => {}
+            StepStatement::Action(_)
+            | StepStatement::Delay { .. }
+            | StepStatement::AllowIndefiniteWait(_) => {}
         }
     }
 

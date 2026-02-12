@@ -14,11 +14,11 @@
         "包含 `delay: 2000ms` 的 .plc 文件能正确解析为正确的 AST",
         "包含 `delay: 0ms` 的 .plc 文件能正确解析（校验在语义阶段进行）",
         "不含 delay 的现有 .plc 文件仍能正确解析",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -31,8 +31,8 @@
         "Delay step 标记一个标志，使 Liveness 检查器识别为有界等待（非死锁）",
         "如果 delay 与 timeout 出现在同一 step 中，timeout 作为保护性上界",
         "IR JSON 输出包含 delay 生成的转移及正确的时序信息",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 2,
       "passes": false,
@@ -49,8 +49,8 @@
         "添加示例文件 examples/delay_demo.plc，包含使用 delay 的传送带场景",
         "添加集成测试，验证 delay_demo.plc 通过全部四个验证引擎",
         "添加测试：task 中 delay: 5000ms 配合 must_complete_within 3000ms 触发 timing 错误",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 3,
       "passes": false,
@@ -66,8 +66,8 @@
         "解析器将 repeat_block pest pair 转换为包含 count 和 body 语句的 AST Repeat 节点",
         "包含 `repeat 3:` 块（含 action/wait/timeout）的 .plc 文件能正确解析",
         "不含 repeat 的现有 .plc 文件仍能正确解析",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 4,
       "passes": false,
@@ -86,8 +86,8 @@
         "添加示例文件 examples/repeat_demo.plc，包含 3 次涂胶循环场景",
         "添加集成测试，验证 repeat_demo.plc 通过全部四个验证引擎",
         "添加测试，验证 repeat 展开与手动展开产生相同的验证结果",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 5,
       "passes": false,
@@ -108,12 +108,12 @@
         "添加测试：task 的 action_time=700ms、timeout_sum=1300ms，must_complete_within 1000ms 通过（700 < 1000）",
         "添加测试：同一 task 的 must_complete_within_worst_case 1000ms 失败（1300 > 1000）",
         "所有现有测试通过（如 timing 语义变更则更新期望值）",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 6,
       "passes": false,
-      "notes": "此变更改变了 must_complete_within 的语义。现有测试可能需要更新期望值。"
+      "notes": ""
     },
     {
       "id": "US-007",
@@ -127,12 +127,12 @@
         "现有包含 requires 约束的示例仍然通过（其顺序控制隐式满足 requires）",
         "添加测试：故意违反 requires — 在 cyl_clamp 未伸出时伸出 cyl_press",
         "添加测试：正确的 requires 场景（先夹紧再压装）通过验证",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 7,
       "passes": false,
-      "notes": "关键修改在 safety.rs 约第 149 行，当前跳过了 requires。"
+      "notes": ""
     },
     {
       "id": "US-008",
@@ -144,8 +144,8 @@
         "parallel 块中同一设备的 action 和 wait 分布在 step 和 branch 之间时，仍正确检查因果链",
         "添加测试：双电机 parallel 场景，此前会产生误报的因果链错误",
         "添加测试：parallel 分支中真正的因果链断裂仍能被检出",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 8,
       "passes": false,
@@ -163,8 +163,8 @@
         "解析器正确将 `wait: A == true OR B == true` 解析为 Or 变体",
         "解析器拒绝混合 AND/OR：`wait: A == true AND B == true OR C == true`，附带清晰错误信息",
         "现有单条件 wait 语句仍能正确解析（作为 Single 变体）",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 9,
       "passes": false,
@@ -184,8 +184,8 @@
         "添加示例文件 examples/and_or_wait_demo.plc，包含 AND 和 OR 两种场景",
         "添加集成测试，验证 and_or_wait_demo.plc 通过全部四个验证引擎",
         "添加测试：AND wait 中某个传感器缺少因果链时触发 causality 错误",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 10,
       "passes": false,
@@ -202,8 +202,8 @@
         "包含 `if: switch_A == true` / `goto grind_coarse` / `else:` / `goto grind_fine` 的 .plc 文件能正确解析",
         "缺少 else 分支时产生解析错误",
         "不含 if/else 的现有 .plc 文件仍能正确解析",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 11,
       "passes": false,
@@ -222,8 +222,8 @@
         "Safety BMC 正确探索两条分支路径",
         "添加示例文件 examples/if_else_demo.plc，包含模式选择场景",
         "添加集成测试，验证 if_else_demo.plc 通过全部四个验证引擎",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 12,
       "passes": false,
@@ -242,8 +242,8 @@
         "现有 `goto task_name` 语法仍然有效（指向首步）",
         "添加测试：goto 到 task 中间 step，编译和验证均正确",
         "添加测试：goto 到不存在的 step 产生语义错误",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 13,
       "passes": false,
@@ -263,12 +263,12 @@
         "状态数 > 8 时产生警告（非错误）",
         "添加示例文件 examples/custom_states_demo.plc，包含三位电磁阀场景",
         "添加集成测试，验证 custom_states_demo.plc 通过全部四个验证引擎",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 14,
       "passes": false,
-      "notes": "P2 优先级。更多设备状态会增大 BMC 状态空间，但仍然有限。"
+      "notes": ""
     },
     {
       "id": "US-015",
@@ -278,12 +278,12 @@
         "更新 .claude/skills/plc-gen/SKILL.md，补充 delay/repeat/AND/OR wait/if-else/goto task.step/custom states 语法说明",
         "在 skill 示例中加入至少 2 个使用新语法的完整 plc 片段",
         "更新提示/约束，提醒使用 must_complete_within_worst_case 与新的 timing 语义",
-        "测试通过",
-        "类型检查通过（cargo check）"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 15,
       "passes": false,
-      "notes": "来源: PRD 13.6 5) plc-gen skill 更新"
+      "notes": ""
     }
   ]
 }

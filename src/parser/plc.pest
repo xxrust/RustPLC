@@ -104,6 +104,7 @@ condition_value = {
 
 action_statement = { "action" ~ ":" ~ action_command }
 wait_statement = { "wait" ~ ":" ~ condition_operand ~ comparison_operator ~ condition_value }
+delay_statement = { "delay" ~ ":" ~ duration_value }
 goto_statement = { "goto" ~ identifier }
 timeout_statement = { "timeout" ~ ":" ~ duration_value ~ "->" ~ goto_statement }
 allow_indefinite_wait_statement = { "allow_indefinite_wait" ~ ":" ~ boolean_value }
@@ -112,6 +113,7 @@ then_goto_statement = { "then" ~ ":" ~ goto_statement }
 parallel_branch_statement = {
     action_statement
     | wait_statement
+    | delay_statement
     | timeout_statement
     | allow_indefinite_wait_statement
     | goto_statement
@@ -122,6 +124,7 @@ parallel_statement = { "parallel" ~ ":" ~ parallel_branch+ }
 race_branch_statement = {
     action_statement
     | wait_statement
+    | delay_statement
     | timeout_statement
     | allow_indefinite_wait_statement
     | goto_statement
@@ -132,6 +135,7 @@ race_statement = { "race" ~ ":" ~ race_branch+ }
 step_statement = {
     action_statement
     | wait_statement
+    | delay_statement
     | timeout_statement
     | goto_statement
     | parallel_statement

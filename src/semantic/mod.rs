@@ -697,6 +697,7 @@ fn collect_actions(statements: &[StepStatement], actions: &mut Vec<ActionStateme
                 }
             }
             StepStatement::Wait(_)
+            | StepStatement::Delay { .. }
             | StepStatement::Timeout(_)
             | StepStatement::Goto(_)
             | StepStatement::AllowIndefiniteWait(_) => {}
@@ -833,6 +834,7 @@ fn analyze_statements(statements: &[StepStatement]) -> AnalyzedStatements {
             StepStatement::Wait(wait) => {
                 analyzed.waits.push(wait_to_guard_expression(wait));
             }
+            StepStatement::Delay { .. } => {}
             StepStatement::Timeout(timeout) => analyzed.timeouts.push(timeout.clone()),
             StepStatement::Goto(goto) => analyzed.gotos.push(goto.clone()),
             StepStatement::Parallel(block) => analyzed.parallel_blocks.push(block.clone()),

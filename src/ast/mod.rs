@@ -158,6 +158,7 @@ pub struct StepDeclaration {
 pub enum StepStatement {
     Action(ActionStatement),
     Wait(WaitStatement),
+    Delay { duration_ms: u64 },
     Timeout(TimeoutDirective),
     Goto(GotoDirective),
     Parallel(ParallelBlock),
