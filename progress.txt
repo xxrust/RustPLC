@@ -12,6 +12,7 @@
 - For early story scaffolding, keep module placeholders compiling so CLI and library can evolve incrementally without breaking builds.
 - Model DSL enums with `serde(rename_all = "snake_case")` and tagged enums so serialized AST tokens stay aligned with DSL keywords.
 - In pest grammars, define silent `WHITESPACE` and `COMMENT` rules so inline `#` comments and multiline section formatting parse without extra boilerplate.
+- In PEG/pest ordered-choice rules, put longer keywords before shorter prefix keywords (e.g., `must_complete_within_worst_case` before `must_complete_within`) to avoid prefix-match parse failures.
 - For block-style DSL sections, parse optional `reason: "..."` clauses directly in each declaration rule so indented multiline annotations remain valid without separate line handling.
 - In nested `parallel`/`race` grammar, require branch bodies to consume concrete statements so step-level directives are not misparsed as branch labels.
 - In semantic topology lowering, treat `connected_to` as upstream linkage (`target -> current`) so causality traversals follow physical flow direction.
@@ -406,4 +407,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - If you expand steps during semantic lowering, you must also feed the expanded AST into verification; otherwise timing/liveness analyses that iterate `program.tasks.steps` will drift from the state machine.
   - Useful context (e.g., "the evaluation panel is in component X")
     - The integration test `repeat_expansion_produces_same_verification_result_as_manual_unrolling` provides a regression baseline for future wait/if/goto semantics changes.
+---
+## [2026-02-12 17:20:39 CST] - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `must_complete_within_worst_case` timing relation end-to-end (grammar -> AST -> IR -> semantic mapping).
+  - Fixed Timing critical-path estimation:
+    - `must_complete_within` now uses action/delay critical path and ignores `timeout` upper bounds.
+    - `must_complete_within_worst_case` uses the previous behavior (includes `timeout` bounds).
+  - Added tests to prove the semantic split: a task can satisfy `must_complete_within` while failing `must_complete_within_worst_case` when timeouts dominate.
+- Files changed
+  - `src/parser/plc.pest`, `src/ast/mod.rs`, `src/ir/mod.rs`, `src/parser/mod.rs`, `src/semantic/mod.rs`, `src/verification/timing.rs`, `src/verification/mod.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - In PEG rules, ordered alternatives must list longer prefix-sharing keywords first to avoid partial matches.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Pest grammar files use `//` for comments; `#` will make the derive parser fail at compile time.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Timing verifier now carries both per-step `nominal_ms` and `worst_case_ms`; task-level estimates sum the corresponding per-step envelope.
 ---

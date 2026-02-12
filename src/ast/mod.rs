@@ -111,6 +111,7 @@ pub struct TimingConstraint {
 #[serde(rename_all = "snake_case")]
 pub enum TimingRelation {
     MustCompleteWithin,
+    MustCompleteWithinWorstCase,
     MustStartAfter,
 }
 

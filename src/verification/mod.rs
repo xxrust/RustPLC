@@ -151,7 +151,9 @@ pub fn verify_all(
 }
 
 fn timing_suggestion(constraint: &str) -> String {
-    if constraint.contains("must_complete_within") {
+    if constraint.contains("must_complete_within_worst_case") {
+        "请放宽 must_complete_within_worst_case 阈值，或下调相关 step 的 timeout 上界".to_string()
+    } else if constraint.contains("must_complete_within") {
         "请放宽 must_complete_within 阈值，或缩短动作响应/行程时间".to_string()
     } else {
         "请调整流程顺序、增加必要延时，或放宽 must_start_after 约束".to_string()

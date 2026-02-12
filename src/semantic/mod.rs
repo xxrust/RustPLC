@@ -865,6 +865,9 @@ fn map_timing_scope(target: &TimingTarget) -> TimingScope {
 fn map_timing_relation(relation: &AstTimingRelation) -> IrTimingRelation {
     match relation {
         AstTimingRelation::MustCompleteWithin => IrTimingRelation::MustCompleteWithin,
+        AstTimingRelation::MustCompleteWithinWorstCase => {
+            IrTimingRelation::MustCompleteWithinWorstCase
+        }
         AstTimingRelation::MustStartAfter => IrTimingRelation::MustStartAfter,
     }
 }
@@ -1869,6 +1872,33 @@ task ready:
         assert_eq!(timing_model.intervals[extend_key].interval.max_ms, 200);
         assert_eq!(timing_model.intervals[retract_key].interval.min_ms, 180);
         assert_eq!(timing_model.intervals[motor_key].interval.min_ms, 50);
+    }
+
+    #[test]
+    fn builds_constraint_set_with_must_complete_within_worst_case_relation() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+timing: task.init must_complete_within_worst_case 1000ms
+
+[tasks]
+
+task init:
+    step start:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let constraints = build_constraint_set(&program).expect("应能构建约束集合");
+
+        assert_eq!(constraints.timing.len(), 1);
+        assert!(matches!(
+            constraints.timing[0].relation,
+            TimingRelation::MustCompleteWithinWorstCase
+        ));
+        assert_eq!(constraints.timing[0].duration_ms, 1000);
     }
 
     #[test]

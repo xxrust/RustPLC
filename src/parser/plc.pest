@@ -62,7 +62,8 @@ safety_constraint = {
 }
 
 timing_scope = { "task" ~ "." ~ identifier ~ ("." ~ identifier)? }
-timing_relation = { "must_complete_within" | "must_start_after" }
+// Order matters: `must_complete_within` is a prefix of `must_complete_within_worst_case`.
+timing_relation = { "must_complete_within_worst_case" | "must_complete_within" | "must_start_after" }
 timing_constraint = {
     "timing" ~ ":" ~ timing_scope ~ timing_relation ~ duration_value ~ reason_clause?
 }

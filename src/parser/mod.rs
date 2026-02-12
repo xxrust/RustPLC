@@ -289,6 +289,7 @@ fn parse_timing_relation(pair: Pair<Rule>) -> Result<TimingRelation, PlcError> {
     let line = line_of(&pair);
     match pair.as_str() {
         "must_complete_within" => Ok(TimingRelation::MustCompleteWithin),
+        "must_complete_within_worst_case" => Ok(TimingRelation::MustCompleteWithinWorstCase),
         "must_start_after" => Ok(TimingRelation::MustStartAfter),
         other => Err(PlcError::parse(line, format!("未知 timing 关系: {other}"))),
     }
@@ -1085,6 +1086,17 @@ causality: Y1 -> valve_B -> cyl_B -> sensor_B_ext
 safety: sensor_A_ext.on requires valve_A.on
 timing: task.ready must_start_after 120ms
 causality: X0 -> relay_A -> valve_A
+"#;
+
+        assert!(parse_constraints(input).is_ok());
+    }
+
+    #[test]
+    fn parses_must_complete_within_worst_case_constraints() {
+        let input = r#"
+[constraints]
+
+timing: task.ready must_complete_within_worst_case 120ms
 "#;
 
         assert!(parse_constraints(input).is_ok());

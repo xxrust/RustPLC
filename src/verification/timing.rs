@@ -37,6 +37,7 @@ struct StepTimingEstimate {
     action_max_ms: u64,
     delay_max_ms: u64,
     timeout_max_ms: u64,
+    nominal_ms: u64,
     worst_case_ms: u64,
     action_details: Vec<String>,
 }
@@ -56,6 +57,7 @@ pub fn verify_timing(
 ) -> Result<(), Vec<TimingDiagnostic>> {
     let context = TimingContext::from_inputs(program, topology);
     let step_estimates = build_step_estimates(program, &context);
+    let task_nominal_case = build_task_nominal_case(program, &step_estimates);
     let task_worst_case = build_task_worst_case(program, &step_estimates);
 
     let mut diagnostics = Vec::new();
@@ -68,11 +70,52 @@ pub fn verify_timing(
             TimingRelation::MustCompleteWithin => {
                 let (observed_ms, analysis) = match &rule.scope {
                     TimingScope::Task { task } => {
+                        let observed = task_nominal_case.get(task).copied().unwrap_or(0);
+                        (
+                            observed,
+                            format!(
+                                "task {task} 的动作关键路径时间 = {observed}ms（顺序 step 累加，忽略 timeout 上界）"
+                            ),
+                        )
+                    }
+                    TimingScope::Step { task, step } => {
+                        let key = step_key(task, step);
+                        let estimate = step_estimates.get(&key).cloned().unwrap_or_default();
+                        let mut analysis = format!(
+                            "step {task}.{step} 的动作关键路径时间 = {}ms（同 step 动作并行取最大值 {}ms，delay 固定等待最大值 {}ms，timeout 上界 {}ms 仅用于 worst_case 约束）",
+                            estimate.nominal_ms,
+                            estimate.action_max_ms,
+                            estimate.delay_max_ms,
+                            estimate.timeout_max_ms
+                        );
+                        if !estimate.action_details.is_empty() {
+                            analysis.push_str("；动作明细: ");
+                            analysis.push_str(&estimate.action_details.join("；"));
+                        }
+                        (estimate.nominal_ms, analysis)
+                    }
+                };
+
+                if observed_ms > rule.duration_ms {
+                    diagnostics.push(TimingDiagnostic {
+                        line,
+                        constraint: constraint_text,
+                        analysis,
+                        conclusion: format!(
+                            "最坏情况下无法在 {}ms 内完成，当前关键路径为 {}ms",
+                            rule.duration_ms, observed_ms
+                        ),
+                    });
+                }
+            }
+            TimingRelation::MustCompleteWithinWorstCase => {
+                let (observed_ms, analysis) = match &rule.scope {
+                    TimingScope::Task { task } => {
                         let observed = task_worst_case.get(task).copied().unwrap_or(0);
                         (
                             observed,
                             format!(
-                                "task {task} 的最坏关键路径时间 = {observed}ms（顺序 step 累加）"
+                                "task {task} 的最坏关键路径时间 = {observed}ms（顺序 step 累加，包含 timeout 上界）"
                             ),
                         )
                     }
@@ -269,6 +312,7 @@ fn build_step_estimates(
 
             let delay_max_ms = max_delay_ms(&step.statements);
             let timeout_max_ms = max_timeout_ms(&step.statements);
+            let nominal_ms = action_max_ms.max(delay_max_ms);
             let worst_case_ms = action_max_ms.max(delay_max_ms).max(timeout_max_ms);
 
             estimates.insert(
@@ -277,6 +321,7 @@ fn build_step_estimates(
                     action_max_ms,
                     delay_max_ms,
                     timeout_max_ms,
+                    nominal_ms,
                     worst_case_ms,
                     action_details,
                 },
@@ -285,6 +330,26 @@ fn build_step_estimates(
     }
 
     estimates
+}
+
+fn build_task_nominal_case(
+    program: &PlcProgram,
+    step_estimates: &HashMap<String, StepTimingEstimate>,
+) -> HashMap<String, u64> {
+    let mut task_nominal_case = HashMap::new();
+
+    for task in &program.tasks.tasks {
+        let total = task.steps.iter().fold(0u64, |acc, step| {
+            let step_nominal = step_estimates
+                .get(&step_key(&task.name, &step.name))
+                .map(|estimate| estimate.nominal_ms)
+                .unwrap_or(0);
+            acc.saturating_add(step_nominal)
+        });
+        task_nominal_case.insert(task.name.clone(), total);
+    }
+
+    task_nominal_case
 }
 
 fn build_task_worst_case(
@@ -491,6 +556,7 @@ fn format_scope(scope: &TimingScope) -> String {
 fn format_relation(relation: &TimingRelation) -> &'static str {
     match relation {
         TimingRelation::MustCompleteWithin => "must_complete_within",
+        TimingRelation::MustCompleteWithinWorstCase => "must_complete_within_worst_case",
         TimingRelation::MustStartAfter => "must_start_after",
     }
 }
@@ -665,6 +731,125 @@ task cooldown:
             "错误结论应指出 must_complete_within 违反"
         );
         assert!(joined.contains("5000ms"), "错误分析/结论应体现 delay 时长");
+    }
+
+    #[test]
+    fn must_complete_within_uses_action_path_while_worst_case_uses_timeout_upper_bound() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+
+device valve_A: solenoid_valve {
+    connected_to: Y0,
+    response_time: 50ms
+}
+
+device valve_B: solenoid_valve {
+    connected_to: Y1,
+    response_time: 50ms
+}
+
+device cyl_A: cylinder {
+    connected_to: valve_A,
+    stroke_time: 300ms,
+    retract_time: 200ms
+}
+
+device cyl_B: cylinder {
+    connected_to: valve_B,
+    stroke_time: 300ms,
+    retract_time: 200ms
+}
+
+[constraints]
+
+timing: task.prod must_complete_within 1000ms
+timing: task.prod must_complete_within_worst_case 1000ms
+
+[tasks]
+
+task prod:
+    step a:
+        action: extend cyl_A
+        timeout: 600ms -> goto fault
+    step b:
+        action: extend cyl_B
+        timeout: 700ms -> goto fault
+
+task fault:
+    step stop:
+        action: log "fault"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应构建成功");
+        let constraints = build_constraint_set(&program).expect("约束应构建成功");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        let errors = verify_timing(&program, &topology, &constraints, &state_machine)
+            .expect_err("worst_case 应在 timeout 累加上界 1300ms 场景下报错");
+
+        assert_eq!(errors.len(), 1, "仅 worst_case 约束应失败");
+        let rendered = errors[0].to_string();
+        assert!(
+            rendered.contains("must_complete_within_worst_case 1000ms"),
+            "失败约束应指向 must_complete_within_worst_case"
+        );
+        assert!(
+            rendered.contains("1300ms"),
+            "错误分析应体现 timeout 上界关键路径 1300ms"
+        );
+    }
+
+    #[test]
+    fn must_complete_and_worst_case_match_when_no_timeout_exists() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+
+device valve_A: solenoid_valve {
+    connected_to: Y0,
+    response_time: 20ms
+}
+
+device cyl_A: cylinder {
+    connected_to: valve_A,
+    stroke_time: 200ms,
+    retract_time: 180ms
+}
+
+[constraints]
+
+timing: task.init must_complete_within 200ms
+timing: task.init must_complete_within_worst_case 200ms
+
+[tasks]
+
+task init:
+    step extend:
+        action: extend cyl_A
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应构建成功");
+        let constraints = build_constraint_set(&program).expect("约束应构建成功");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        let errors = verify_timing(&program, &topology, &constraints, &state_machine)
+            .expect_err("无 timeout 时，两条约束都应基于相同动作关键路径失败");
+
+        assert_eq!(errors.len(), 2, "两条约束都应失败");
+        let joined = errors
+            .iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert!(joined.contains("must_complete_within 200ms"));
+        assert!(joined.contains("must_complete_within_worst_case 200ms"));
+        assert!(joined.contains("220ms"), "两条约束应共享相同关键路径 220ms");
     }
 
     #[test]

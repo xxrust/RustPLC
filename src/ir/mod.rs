@@ -149,6 +149,7 @@ pub enum TimingScope {
 #[serde(rename_all = "snake_case")]
 pub enum TimingRelation {
     MustCompleteWithin,
+    MustCompleteWithinWorstCase,
     MustStartAfter,
 }
 
