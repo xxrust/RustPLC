@@ -289,6 +289,45 @@ ERROR [causality] 因果链断裂
 
 任何设备都可通过 `states: [...]` 自定义状态集（如三位阀 `states: [extend, neutral, retract]`）。
 
+### 设备连接链路
+
+工业控制中，信号从 PLC 输出端口出发，经过电磁阀驱动执行器（气缸/电机），最终由传感器反馈状态。DSL 通过 `connected_to` 和 `detects` 声明这条物理链路，编译器据此自动推断因果可达性并累加时序参数：
+
+```
+digital_output (Y0)          ← PLC 输出口，发出电信号
+    ↓ connected_to
+solenoid_valve (valve_A)     ← 电磁阀，将电信号转为气压信号（response_time: 20ms）
+    ↓ connected_to
+cylinder (cyl_A)             ← 气缸，将气压转为机械运动（stroke_time: 300ms）
+    ↓ detects
+sensor (sensor_A_ext)        ← 传感器，检测气缸到位状态（detects: cyl_A.extended）
+    ↓ connected_to
+digital_input (X0)           ← PLC 输入口，读取传感器信号
+```
+
+对应的 DSL 声明：
+
+```plc
+device Y0: digital_output
+device valve_A: solenoid_valve { connected_to: Y0, response_time: 20ms }
+device cyl_A: cylinder { connected_to: valve_A, stroke_time: 300ms, retract_time: 300ms }
+device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
+device X0: digital_input
+```
+
+这条链路有三个作用：
+
+1. **因果验证**：编译器沿 `connected_to` + `detects` 做 BFS，验证 `action: extend cyl_A` 的信号能否传播到 `wait: sensor_A_ext == true`。链路断裂（如 `cyl_A` 缺少 `connected_to: valve_A`）会触发 causality 错误。
+2. **时序计算**：编译器沿链路累加 `response_time`（20ms）+ `stroke_time`（300ms）= 320ms 作为该动作的最小执行时间，用于 `must_complete_within` 验证。
+3. **安全检查**：`conflicts_with` / `requires` 约束中引用的 `cyl_A.extended` 状态，其语义由链路中的设备类型决定。
+
+电机的链路类似，只是执行器不同：
+
+```
+digital_output (Y0) → motor (motor_conv) → sensor (sensor_pos)
+                         ↑ ramp_time: 50ms     ↑ detects: motor_conv.position_A
+```
+
 ### 约束类型
 
 ```plc

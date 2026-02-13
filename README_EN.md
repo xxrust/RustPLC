@@ -192,6 +192,45 @@ A `.plc` file has three sections:
 
 Any device supports custom states via `states: [...]` (e.g., 3-position valve: `states: [extend, neutral, retract]`).
 
+### Device Connection Chain
+
+In industrial control, signals flow from PLC output ports through solenoid valves to actuators (cylinders/motors), with sensors feeding back status. The DSL declares this physical chain via `connected_to` and `detects`. The compiler uses it to infer causal reachability and accumulate timing parameters:
+
+```
+digital_output (Y0)          ← PLC output port, sends electrical signal
+    ↓ connected_to
+solenoid_valve (valve_A)     ← Converts electrical signal to pneumatic (response_time: 20ms)
+    ↓ connected_to
+cylinder (cyl_A)             ← Converts pneumatic to mechanical motion (stroke_time: 300ms)
+    ↓ detects
+sensor (sensor_A_ext)        ← Detects cylinder position (detects: cyl_A.extended)
+    ↓ connected_to
+digital_input (X0)           ← PLC input port, reads sensor signal
+```
+
+Corresponding DSL declaration:
+
+```plc
+device Y0: digital_output
+device valve_A: solenoid_valve { connected_to: Y0, response_time: 20ms }
+device cyl_A: cylinder { connected_to: valve_A, stroke_time: 300ms, retract_time: 300ms }
+device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
+device X0: digital_input
+```
+
+This chain serves three purposes:
+
+1. **Causality verification**: The compiler performs BFS along `connected_to` + `detects` edges, verifying that the signal from `action: extend cyl_A` can reach `wait: sensor_A_ext == true`. A broken chain (e.g., `cyl_A` missing `connected_to: valve_A`) triggers a causality error.
+2. **Timing calculation**: The compiler accumulates `response_time` (20ms) + `stroke_time` (300ms) = 320ms as the minimum execution time for that action, used in `must_complete_within` verification.
+3. **Safety checking**: States like `cyl_A.extended` referenced in `conflicts_with` / `requires` constraints derive their semantics from the device type in the chain.
+
+Motor chains are similar, just with a different actuator:
+
+```
+digital_output (Y0) → motor (motor_conv) → sensor (sensor_pos)
+                         ↑ ramp_time: 50ms     ↑ detects: motor_conv.position_A
+```
+
 ### Control Flow Statements
 
 | Statement | Purpose |
