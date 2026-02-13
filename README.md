@@ -223,6 +223,26 @@ flowchart TD
 
 四个引擎并行运行，一次编译暴露所有问题。
 
+### 数学基础
+
+RustPLC 的验证不是"跑测试碰运气"，而是基于成熟的形式化方法，在有限状态空间上给出数学证明。
+
+**Safety — 有界模型检查（BMC）+ k-归纳**
+
+将控制逻辑建模为有限状态转换系统 `M = (S, S₀, T, L)`，其中 S 是状态集合（控制位置 × 设备状态向量），T 是转换关系。对于安全性质 P（如 `¬(cyl_A.extended ∧ cyl_B.extended)`），BMC 从初始状态 S₀ 出发做 BFS，在深度 k 内穷举所有可达状态，检查是否存在反例。搜索深度 k 由 Kosaraju SCC 分析自动确定：`k = max(|SCC|) + 1`，确保每个强连通分量内的循环至少被完整遍历一次。若深度 k 内穷尽所有可达状态且无反例，则获得完备证明（等价于 k-归纳的归纳步成立）。
+
+**Liveness — Tarjan SCC + 可达性分析**
+
+死锁检测基于图论：在状态机转换图上运行 Tarjan 强连通分量算法，识别所有 SCC。若某个 SCC 内的所有 wait 边都缺少 timeout 且未标记 `allow_indefinite_wait`，则该 SCC 构成潜在活锁。零出度状态（无后继转换且无 `on_complete`）构成死锁。这是对 CTL 性质 `AG(EF done)` 的保守近似检查。
+
+**Timing — 最坏关键路径**
+
+将每个 step 的执行时间建模为加权有向无环图（DAG），权重来自设备物理参数（`stroke_time + response_time`）和显式 `delay`。通过 DAG 最长路径算法计算最坏执行时间，与 `must_complete_within` 约束比较。`must_complete_within_worst_case` 变体将 timeout 上界也纳入路径权重。parallel 分支取各分支最大值。
+
+**Causality — 拓扑图 BFS 可达性**
+
+设备连接关系构成有向图 G = (V, E)，其中 `connected_to` 和 `detects` 定义边。对于声明的因果链 `Y0 → valve → cyl → sensor`，编译器在 G 上做 BFS 验证每一跳的可达性。这保证了物理信号能从输出端口沿实际接线传播到传感器。
+
 验证失败时，错误信息精确定位问题并给出建议：
 
 ```
@@ -291,23 +311,20 @@ causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
 
 ### 控制流语句
 
-```mermaid
-flowchart TD
-    S["step 内可用语句"]
+`step` 内可用的语句：
 
-    S --> A["action<br>extend / retract<br>set on|off / log"]
-    S --> W["wait<br>单条件 / AND / OR"]
-    S --> D["delay<br>固定延时"]
-    S --> T["timeout<br>超时跳转保护"]
-
-    S --> IF["if/else<br>条件分支跳转"]
-    S --> G["goto<br>task 或 task.step"]
-    S --> R["repeat N<br>编译期循环展开<br>(2~100次)"]
-
-    S --> P["parallel<br>并行分支<br>全部完成后继续"]
-    S --> RC["race<br>竞争分支<br>先到先得"]
-    S --> AIW["allow_indefinite_wait<br>人工等待豁免"]
-```
+| 语句 | 作用 |
+|------|------|
+| `action: extend / retract / set / log` | 驱动执行器或记录日志 |
+| `wait: ... == true` | 等待条件满足（支持 AND / OR，不可混用） |
+| `delay: Nms` | 固定延时，纳入时序验证 |
+| `timeout: Nms -> goto ...` | 超时保护跳转 |
+| `if: ... goto ... else: goto ...` | 条件分支 |
+| `goto task` / `goto task.step` | 跳转到指定 task 或 step |
+| `repeat N: ...` | 编译期展开为 N 份顺序步骤（2~100） |
+| `parallel: branch_A: ... branch_B: ...` | 并行分支，全部完成后继续 |
+| `race: branch_A: ... then: goto ...` | 竞争分支，先完成者决定跳转 |
+| `allow_indefinite_wait: true` | 人工操作等待豁免（跳过 liveness 检查） |
 
 语句用法速查：
 
@@ -578,6 +595,26 @@ flowchart TD
 | **Causality** | Signal chain integrity (output → actuator → sensor) | Topology BFS |
 
 All four engines run in parallel. One compilation exposes all issues.
+
+### Mathematical Foundations
+
+RustPLC's verification is not testing — it is mathematical proof over finite state spaces, built on established formal methods.
+
+**Safety — Bounded Model Checking (BMC) + k-induction**
+
+Control logic is modeled as a finite state transition system `M = (S, S₀, T, L)`, where S is the state set (control location × device state vector) and T is the transition relation. For a safety property P (e.g., `¬(cyl_A.extended ∧ cyl_B.extended)`), BMC performs BFS from initial state S₀, exhaustively enumerating all reachable states up to depth k. The depth k is automatically determined by Kosaraju SCC analysis: `k = max(|SCC|) + 1`, ensuring every cycle in every strongly connected component is fully traversed. If all reachable states are exhausted within depth k with no counterexample, a complete proof is obtained (equivalent to the inductive step of k-induction holding).
+
+**Liveness — Tarjan SCC + reachability analysis**
+
+Deadlock detection is graph-theoretic: Tarjan's algorithm identifies all strongly connected components in the state machine transition graph. If every wait-edge within an SCC lacks a timeout and is not marked `allow_indefinite_wait`, that SCC constitutes a potential livelock. Zero-outdegree states (no successor transitions and no `on_complete`) constitute deadlocks. This is a conservative approximation of the CTL property `AG(EF done)`.
+
+**Timing — worst-case critical path**
+
+Each step's execution time is modeled as a weighted DAG, with weights derived from physical device parameters (`stroke_time + response_time`) and explicit `delay` values. The longest path algorithm computes worst-case execution time, compared against `must_complete_within` constraints. The `must_complete_within_worst_case` variant includes timeout upper bounds in path weights. Parallel branches take the maximum across branches.
+
+**Causality — topology BFS reachability**
+
+Device connections form a directed graph G = (V, E), where `connected_to` and `detects` define edges. For a declared causal chain `Y0 → valve → cyl → sensor`, the compiler performs BFS on G to verify reachability at each hop — ensuring physical signals can propagate from output ports to sensors along actual wiring.
 
 ## DSL Reference
 
