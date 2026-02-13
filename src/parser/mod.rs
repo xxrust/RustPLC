@@ -2,9 +2,10 @@ use crate::ast::{
     ActionStatement, BinaryValue, Branch, CausalityConstraint, ComparisonOperator,
     ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType,
     DurationValue, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective, ParallelBlock,
-    PlcProgram, RaceBlock, RaceBranch, SafetyConstraint, SafetyRelation, StateReference,
-    StepDeclaration, StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective,
-    TimingConstraint, TimingRelation, TimingTarget, TopologySection, WaitCondition, WaitStatement,
+    PlcProgram, RaceBlock, RaceBranch, SafetyConstraint, SafetyOperand, SafetyRelation,
+    StateReference, StepDeclaration, StepStatement, TaskDeclaration, TasksSection, TimeUnit,
+    TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget, TopologySection,
+    WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use pest::Parser;
@@ -101,6 +102,8 @@ fn parse_device_type(pair: Pair<Rule>) -> Result<DeviceType, PlcError> {
         "cylinder" => Ok(DeviceType::Cylinder),
         "sensor" => Ok(DeviceType::Sensor),
         "motor" => Ok(DeviceType::Motor),
+        "analog_input" => Ok(DeviceType::AnalogInput),
+        "analog_output" => Ok(DeviceType::AnalogOutput),
         other => Err(PlcError::parse(line, format!("未知设备类型: {other}"))),
     }
 }
@@ -168,6 +171,12 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         "states" => {
             attributes.custom_states = Some(expect_identifier_list(value, "states")?);
         }
+        "range" => {
+            attributes.range = Some(parse_range_value(value)?);
+        }
+        "unit" => {
+            attributes.unit = Some(expect_string(value, "unit")?);
+        }
         _ => {
             return Err(PlcError::parse(
                 line,
@@ -215,9 +224,9 @@ fn parse_safety_constraint(pair: Pair<Rule>) -> Result<SafetyConstraint, PlcErro
 
     for part in pair.into_inner() {
         match part.as_rule() {
-            Rule::state_reference if left.is_none() => left = Some(parse_state_reference(part)?),
+            Rule::safety_operand if left.is_none() => left = Some(parse_safety_operand(part)?),
             Rule::safety_relation => relation = Some(parse_safety_relation(part)?),
-            Rule::state_reference => right = Some(parse_state_reference(part)?),
+            Rule::safety_operand => right = Some(parse_safety_operand(part)?),
             Rule::reason_clause => reason = Some(parse_reason_clause(part)?),
             _ => {}
         }
@@ -225,11 +234,48 @@ fn parse_safety_constraint(pair: Pair<Rule>) -> Result<SafetyConstraint, PlcErro
 
     Ok(SafetyConstraint {
         line,
-        left: left.ok_or_else(|| PlcError::parse(line, "safety 约束缺少左侧状态"))?,
+        left: left.ok_or_else(|| PlcError::parse(line, "safety 约束缺少左侧操作数"))?,
         relation: relation.ok_or_else(|| PlcError::parse(line, "safety 约束缺少关系符"))?,
-        right: right.ok_or_else(|| PlcError::parse(line, "safety 约束缺少右侧状态"))?,
+        right: right.ok_or_else(|| PlcError::parse(line, "safety 约束缺少右侧操作数"))?,
         reason,
     })
+}
+
+fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
+    let line = line_of(&pair);
+    let inner = first_inner(pair, line, "safety 操作数")?;
+    match inner.as_rule() {
+        Rule::analog_condition => {
+            let mut device = None;
+            let mut operator = None;
+            let mut value = None;
+            for part in inner.into_inner() {
+                match part.as_rule() {
+                    Rule::identifier => device = Some(part.as_str().to_string()),
+                    Rule::comparison_operator => operator = Some(parse_comparison_operator(part)?),
+                    Rule::number => {
+                        value = Some(part.as_str().parse::<f64>().map_err(|_| {
+                            PlcError::parse(line, "analog_condition 数值解析失败")
+                        })?);
+                    }
+                    _ => {}
+                }
+            }
+            Ok(SafetyOperand::Threshold {
+                device: device
+                    .ok_or_else(|| PlcError::parse(line, "analog_condition 缺少设备名"))?,
+                operator: operator
+                    .ok_or_else(|| PlcError::parse(line, "analog_condition 缺少比较符"))?,
+                value: value
+                    .ok_or_else(|| PlcError::parse(line, "analog_condition 缺少阈值"))?,
+            })
+        }
+        Rule::state_reference => Ok(SafetyOperand::State(parse_state_reference(inner)?)),
+        rule => Err(PlcError::parse(
+            line,
+            format!("不支持的 safety 操作数类型: {rule:?}"),
+        )),
+    }
 }
 
 fn parse_safety_relation(pair: Pair<Rule>) -> Result<SafetyRelation, PlcError> {
@@ -524,6 +570,22 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
                 .to_string();
             Ok(ActionStatement::Retract { target })
         }
+        Rule::action_set_analog => {
+            let mut parts = action.into_inner();
+            let target = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "set_analog 缺少目标设备"))?
+                .as_str()
+                .to_string();
+            let value_pair = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "set_analog 缺少数值"))?;
+            let value = value_pair
+                .as_str()
+                .parse::<f64>()
+                .map_err(|_| PlcError::parse(line, "set_analog 数值解析失败"))?;
+            Ok(ActionStatement::SetAnalog { target, value })
+        }
         Rule::action_set => {
             let mut parts = action.into_inner();
             let target = parts
@@ -644,6 +706,10 @@ fn parse_comparison_operator(pair: Pair<Rule>) -> Result<ComparisonOperator, Plc
     match pair.as_str() {
         "==" => Ok(ComparisonOperator::Eq),
         "!=" => Ok(ComparisonOperator::Neq),
+        ">" => Ok(ComparisonOperator::Gt),
+        "<" => Ok(ComparisonOperator::Lt),
+        ">=" => Ok(ComparisonOperator::Gte),
+        "<=" => Ok(ComparisonOperator::Lte),
         other => Err(PlcError::parse(line, format!("不支持的比较符: {other}"))),
     }
 }
@@ -903,6 +969,40 @@ fn parse_string_literal(pair: Pair<Rule>) -> Result<String, PlcError> {
     }
 
     Ok(raw[1..raw.len() - 1].replace("\\\"", "\""))
+}
+
+fn parse_range_value(pair: Pair<Rule>) -> Result<crate::ast::AnalogRange, PlcError> {
+    let line = line_of(&pair);
+    if pair.as_rule() == Rule::range_value {
+        let raw = pair.as_str();
+        let (min_str, max_str) = raw
+            .split_once("..")
+            .ok_or_else(|| PlcError::parse(line, format!("range 格式错误: {raw}")))?;
+        let min = min_str
+            .parse::<f64>()
+            .map_err(|_| PlcError::parse(line, format!("range 最小值解析失败: {min_str}")))?;
+        let max = max_str
+            .parse::<f64>()
+            .map_err(|_| PlcError::parse(line, format!("range 最大值解析失败: {max_str}")))?;
+        Ok(crate::ast::AnalogRange { min, max })
+    } else {
+        Err(PlcError::parse(
+            line,
+            format!("属性 range 需要范围值（如 0..100），实际为: {:?}", pair.as_rule()),
+        ))
+    }
+}
+
+fn expect_string(pair: Pair<Rule>, field_name: &str) -> Result<String, PlcError> {
+    let line = line_of(&pair);
+    if pair.as_rule() == Rule::string_literal {
+        parse_string_literal(pair)
+    } else {
+        Err(PlcError::parse(
+            line,
+            format!("属性 {field_name} 需要字符串值"),
+        ))
+    }
 }
 
 fn expect_identifier(pair: Pair<Rule>, field_name: &str) -> Result<String, PlcError> {

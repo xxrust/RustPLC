@@ -24,6 +24,8 @@ device_type = {
     | "cylinder"
     | "sensor"
     | "motor"
+    | "analog_output"
+    | "analog_input"
 }
 
 attribute_name = {
@@ -39,11 +41,16 @@ attribute_name = {
     | "rated_speed"
     | "ramp_time"
     | "states"
+    | "range"
+    | "unit"
 }
+
+range_value = @{ number ~ ".." ~ number }
 
 attribute_value = {
     state_reference
     | duration_value
+    | range_value
     | measured_value
     | string_literal
     | boolean_value
@@ -60,8 +67,10 @@ topology_section = { section_topology ~ device_declaration* }
 topology_file = { SOI ~ topology_section ~ EOI }
 
 safety_relation = { "conflicts_with" | "requires" }
+analog_condition = { identifier ~ comparison_operator ~ number }
+safety_operand = { analog_condition | state_reference }
 safety_constraint = {
-    "safety" ~ ":" ~ state_reference ~ safety_relation ~ state_reference ~ reason_clause?
+    "safety" ~ ":" ~ safety_operand ~ safety_relation ~ safety_operand ~ reason_clause?
 }
 
 timing_scope = { "task" ~ "." ~ identifier ~ ("." ~ identifier)? }
@@ -88,17 +97,19 @@ constraints_file = { SOI ~ constraints_section ~ EOI }
 action_extend = { "extend" ~ identifier }
 action_retract = { "retract" ~ identifier }
 binary_output_value = { "on" | "off" }
+action_set_analog = { "set_analog" ~ identifier ~ number }
 action_set = { "set" ~ identifier ~ binary_output_value }
 action_log = { "log" ~ string_literal }
 action_command = {
     action_extend
     | action_retract
+    | action_set_analog
     | action_set
     | action_log
 }
 
 condition_operand = { state_reference | identifier }
-comparison_operator = { "==" | "!=" }
+comparison_operator = { ">=" | "<=" | "==" | "!=" | ">" | "<" }
 condition_value = {
     boolean_value
     | number

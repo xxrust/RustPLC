@@ -1,6 +1,6 @@
 use crate::ast::{DeviceType, PlcProgram};
 use crate::ir::{
-    ConstraintSet, SafetyRelation, State, StateMachine, Transition, TransitionAction,
+    ConstraintSet, SafetyExpr, SafetyRelation, State, StateMachine, Transition, TransitionAction,
     TransitionGuard,
 };
 use petgraph::algo::kosaraju_scc;
@@ -149,23 +149,15 @@ pub fn verify_safety_with_config(
     let mut checked_rules = 0usize;
 
     for (index, rule) in constraints.safety.iter().enumerate() {
-        let Some(binding) = bind_rule(
-            &model,
-            rule.relation.clone(),
-            &rule.left.device,
-            &rule.left.state,
-            &rule.right.device,
-            &rule.right.state,
-        ) else {
+        let Some(binding) = bind_safety_expr_rule(&model, rule) else {
             continue;
         };
 
         checked_rules += 1;
         let relation = relation_text(&rule.relation);
-        let rule_text = format!(
-            "{}.{} {} {}.{}",
-            rule.left.device, rule.left.state, relation, rule.right.device, rule.right.state
-        );
+        let left_text = safety_expr_text(&rule.left);
+        let right_text = safety_expr_text(&rule.right);
+        let rule_text = format!("{left_text} {relation} {right_text}");
 
         let line = program
             .constraints
@@ -180,25 +172,21 @@ pub fn verify_safety_with_config(
                 SafetyRelation::ConflictsWith => (
                     format!(
                         "{} 与 {} 在可达状态同时成立",
-                        state_expr_text(&rule.left.device, &rule.left.state),
-                        state_expr_text(&rule.right.device, &rule.right.state)
+                        left_text, right_text
                     ),
                     format!(
                         "请在触发 {} 之前确保 {} 已复位，或调整并行/跳转逻辑避免两者同时成立",
-                        state_expr_text(&rule.right.device, &rule.right.state),
-                        state_expr_text(&rule.left.device, &rule.left.state)
+                        right_text, left_text
                     ),
                 ),
                 SafetyRelation::Requires => (
                     format!(
                         "{} 成立时 {} 未满足",
-                        state_expr_text(&rule.left.device, &rule.left.state),
-                        state_expr_text(&rule.right.device, &rule.right.state)
+                        left_text, right_text
                     ),
                     format!(
                         "请在触发 {} 之前先确保 {} 成立，必要时添加 wait 或调整 step 顺序",
-                        state_expr_text(&rule.left.device, &rule.left.state),
-                        state_expr_text(&rule.right.device, &rule.right.state)
+                        left_text, right_text
                     ),
                 ),
             };
@@ -399,10 +387,14 @@ fn collect_device_domains(
             | DeviceType::SolenoidValve
             | DeviceType::Sensor
             | DeviceType::Motor => vec!["on".to_string(), "off".to_string()],
+            DeviceType::AnalogInput | DeviceType::AnalogOutput => {
+                vec!["analog_active".to_string()]
+            }
         };
 
         let default_state_name = match device.device_type {
             DeviceType::Cylinder => "retracted",
+            DeviceType::AnalogInput | DeviceType::AnalogOutput => "analog_active",
             _ => "off",
         };
 
@@ -421,15 +413,17 @@ fn collect_device_domains(
     }
 
     for rule in &constraints.safety {
-        let Some(left_device) = device_index.get(&rule.left.device).copied() else {
-            continue;
-        };
-        ensure_device_state(&mut devices[left_device], &rule.left.state);
+        if let SafetyExpr::State(ref expr) = rule.left {
+            if let Some(left_device) = device_index.get(&expr.device).copied() {
+                ensure_device_state(&mut devices[left_device], &expr.state);
+            }
+        }
 
-        let Some(right_device) = device_index.get(&rule.right.device).copied() else {
-            continue;
-        };
-        ensure_device_state(&mut devices[right_device], &rule.right.state);
+        if let SafetyExpr::State(ref expr) = rule.right {
+            if let Some(right_device) = device_index.get(&expr.device).copied() {
+                ensure_device_state(&mut devices[right_device], &expr.state);
+            }
+        }
     }
 
     let mut state_index = Vec::with_capacity(devices.len());
@@ -489,6 +483,7 @@ fn action_effect(action: &TransitionAction) -> Option<(&str, &str)> {
             };
             Some((target.as_str(), state))
         }
+        TransitionAction::SetAnalog { target, .. } => Some((target.as_str(), "analog_active")),
         TransitionAction::Log { .. } => None,
     }
 }
@@ -529,6 +524,9 @@ fn action_name(action: &TransitionAction) -> Option<String> {
                 crate::ir::BinaryValue::Off => "off",
             }
         )),
+        TransitionAction::SetAnalog { target, value_raw } => {
+            Some(format!("set_analog {target} {value_raw}"))
+        }
         TransitionAction::Log { message } => Some(format!("log \"{message}\"")),
     }
 }
@@ -632,6 +630,44 @@ fn bind_rule(
         right_device: right_device_id,
         right_state: right_state_id,
     })
+}
+
+fn bind_safety_expr_rule(
+    model: &SafetyModel,
+    rule: &crate::ir::SafetyRule,
+) -> Option<RuleBinding> {
+    let (left_device, left_state) = safety_expr_device_state(&rule.left)?;
+    let (right_device, right_state) = safety_expr_device_state(&rule.right)?;
+    bind_rule(
+        model,
+        rule.relation.clone(),
+        left_device,
+        left_state,
+        right_device,
+        right_state,
+    )
+}
+
+fn safety_expr_device_state(expr: &SafetyExpr) -> Option<(&str, &str)> {
+    match expr {
+        SafetyExpr::State(state_expr) => Some((state_expr.device.as_str(), state_expr.state.as_str())),
+        SafetyExpr::Threshold { .. } => {
+            // Analog threshold constraints are not yet tracked in BMC state space.
+            // Skip them gracefully so discrete rules still work.
+            None
+        }
+    }
+}
+
+fn safety_expr_text(expr: &SafetyExpr) -> String {
+    match expr {
+        SafetyExpr::State(state_expr) => format!("{}.{}", state_expr.device, state_expr.state),
+        SafetyExpr::Threshold {
+            device,
+            operator,
+            value,
+        } => format!("{device} {operator} {value}"),
+    }
 }
 
 fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> SearchOutcome {
@@ -809,9 +845,7 @@ fn state_name(state: &State) -> String {
     format!("{}.{}", state.task_name, state.step_name)
 }
 
-fn state_expr_text(device: &str, state: &str) -> String {
-    format!("{device}.{state}")
-}
+
 
 fn relation_text(relation: &SafetyRelation) -> &'static str {
     match relation {

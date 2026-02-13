@@ -604,3 +604,66 @@ fn cli_prints_verified_json_and_summary_for_two_cylinder_example() {
         "CLI summary should include safety proof level"
     );
 }
+
+#[test]
+fn parses_analog_pressure_demo_example_into_verified_ir_json() {
+    let source = read_example("analog_pressure_demo.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("analog_pressure_demo example should compile");
+
+    assert!(ir_json.get("topology").is_some());
+    assert!(ir_json.get("state_machine").is_some());
+    assert!(ir_json.get("constraints").is_some());
+    assert!(ir_json.get("timing_model").is_some());
+
+    // Verify analog device types appear in topology
+    let nodes = ir_json["topology"]["graph"]["nodes"]
+        .as_array()
+        .expect("topology should have nodes");
+    let kinds: Vec<&str> = nodes
+        .iter()
+        .filter_map(|n| n["kind"].as_str())
+        .collect();
+    assert!(kinds.contains(&"analog_input"), "should contain analog_input device");
+    assert!(kinds.contains(&"analog_output"), "should contain analog_output device");
+
+    // Verify set_analog actions appear in transitions
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should have transitions");
+    let has_set_analog = transitions.iter().any(|t| {
+        t["actions"]
+            .as_array()
+            .map(|actions| actions.iter().any(|a| a["action"] == "set_analog"))
+            .unwrap_or(false)
+    });
+    assert!(has_set_analog, "transitions should include set_analog actions");
+
+    // Verify analog connection type in edges
+    let edges = ir_json["topology"]["graph"]["edges"]
+        .as_array()
+        .expect("topology should have edges");
+    let has_analog_edge = edges.iter().any(|e| e[2] == "analog");
+    assert!(has_analog_edge, "topology should have analog connection type");
+
+    // All four verifiers pass
+    let safety_level = ir_json["verification"]["safety"]["level"]
+        .as_str()
+        .expect("verification.safety.level should be present");
+    assert!(
+        matches!(safety_level, "完备证明" | "有界验证"),
+        "safety level should report proof quality"
+    );
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}

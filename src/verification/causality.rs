@@ -291,7 +291,12 @@ fn collect_sensor_names(program: &PlcProgram) -> HashSet<String> {
         .topology
         .devices
         .iter()
-        .filter(|device| matches!(device.device_type, crate::ast::DeviceType::Sensor))
+        .filter(|device| {
+            matches!(
+                device.device_type,
+                crate::ast::DeviceType::Sensor | crate::ast::DeviceType::AnalogInput
+            )
+        })
         .map(|device| device.name.clone())
         .collect()
 }
@@ -300,7 +305,12 @@ fn collect_output_ports(topology: &TopologyGraph) -> Vec<String> {
     topology
         .graph
         .node_indices()
-        .filter(|index| matches!(topology.graph[*index].kind, DeviceKind::DigitalOutput))
+        .filter(|index| {
+            matches!(
+                topology.graph[*index].kind,
+                DeviceKind::DigitalOutput | DeviceKind::AnalogOutput
+            )
+        })
         .map(|index| topology.graph[index].name.clone())
         .collect()
 }
@@ -451,6 +461,9 @@ fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String
             format!("set {target} {}", binary_value_text(value)),
             target.clone(),
         )),
+        ActionStatement::SetAnalog { target, value } => {
+            Some((format!("set_analog {target} {value}"), target.clone()))
+        }
         ActionStatement::Log { .. } => None,
     }
 }
@@ -533,6 +546,10 @@ fn comparison_operator_text(operator: &ComparisonOperator) -> &'static str {
     match operator {
         ComparisonOperator::Eq => "==",
         ComparisonOperator::Neq => "!=",
+        ComparisonOperator::Gt => ">",
+        ComparisonOperator::Lt => "<",
+        ComparisonOperator::Gte => ">=",
+        ComparisonOperator::Lte => "<=",
     }
 }
 

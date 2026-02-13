@@ -354,7 +354,7 @@ fn parse_error_missing_tasks_section() {
 fn parse_error_unknown_device_type() {
     let source = r#"
 [topology]
-device A0: analog_input
+device A0: thermocouple
 
 [constraints]
 

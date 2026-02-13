@@ -30,6 +30,8 @@ pub enum DeviceType {
     Cylinder,
     Sensor,
     Motor,
+    AnalogInput,
+    AnalogOutput,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -47,6 +49,8 @@ pub struct DeviceAttributes {
     pub rated_speed: Option<MeasuredValue>,
     pub ramp_time: Option<DurationValue>,
     pub custom_states: Option<Vec<String>>,
+    pub range: Option<AnalogRange>,
+    pub unit: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +73,12 @@ pub struct MeasuredValue {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalogRange {
+    pub min: f64,
+    pub max: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateReference {
     pub device: String,
     pub state: String,
@@ -85,10 +95,21 @@ pub struct ConstraintsSection {
 pub struct SafetyConstraint {
     #[serde(default)]
     pub line: usize,
-    pub left: StateReference,
+    pub left: SafetyOperand,
     pub relation: SafetyRelation,
-    pub right: StateReference,
+    pub right: SafetyOperand,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SafetyOperand {
+    State(StateReference),
+    Threshold {
+        device: String,
+        operator: ComparisonOperator,
+        value: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +206,7 @@ pub enum ActionStatement {
     Extend { target: String },
     Retract { target: String },
     Set { target: String, value: BinaryValue },
+    SetAnalog { target: String, value: f64 },
     Log { message: String },
 }
 
@@ -220,6 +242,10 @@ pub struct ConditionExpression {
 pub enum ComparisonOperator {
     Eq,
     Neq,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

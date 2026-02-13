@@ -1,18 +1,18 @@
 use crate::ast::{
     ActionStatement, BinaryValue as AstBinaryValue, ComparisonOperator, ConditionExpression,
     ConstraintsSection, DeviceType, DurationValue, GotoDirective, LiteralValue,
-    OnCompleteDirective, ParallelBlock, PlcProgram, RaceBlock, SafetyRelation as AstSafetyRelation,
-    StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective,
-    TimingRelation as AstTimingRelation, TimingTarget, TopologySection, WaitCondition,
-    WaitStatement,
+    OnCompleteDirective, ParallelBlock, PlcProgram, RaceBlock, SafetyOperand,
+    SafetyRelation as AstSafetyRelation, StepStatement, TaskDeclaration, TasksSection, TimeUnit,
+    TimeoutDirective, TimingRelation as AstTimingRelation, TimingTarget, TopologySection,
+    WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use crate::ir::{
     ActionKind, ActionRef, ActionTiming, BinaryValue as IrBinaryValue, CausalityChain,
-    ConnectionType, ConstraintSet, Device, DeviceKind, SafetyRelation as IrSafetyRelation,
-    SafetyRule, State, StateExpr, StateMachine, TimeInterval, TimerOperation, TimerOperationKind,
-    TimingModel, TimingRelation as IrTimingRelation, TimingRule, TimingScope, TopologyGraph,
-    Transition, TransitionAction, TransitionGuard,
+    ConnectionType, ConstraintSet, Device, DeviceKind, SafetyExpr,
+    SafetyRelation as IrSafetyRelation, SafetyRule, State, StateExpr, StateMachine, TimeInterval,
+    TimerOperation, TimerOperationKind, TimingModel, TimingRelation as IrTimingRelation,
+    TimingRule, TimingScope, TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
 use petgraph::graph::NodeIndex;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -252,6 +252,22 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
         });
 
         device_nodes.insert(device.name.clone(), DeviceNode { index, kind });
+
+        // Analog devices must declare range
+        if matches!(
+            device.device_type,
+            DeviceType::AnalogInput | DeviceType::AnalogOutput
+        ) && device.attributes.range.is_none()
+        {
+            errors.push(PlcError::semantic_with_reason(
+                device.line,
+                format!(
+                    "模拟量设备 {} 必须声明 range 属性",
+                    device.name
+                ),
+                "请添加 range: min..max 属性，例如 range: 0..100",
+            ));
+        }
     }
 
     for device in &topology.devices {
@@ -315,7 +331,7 @@ pub fn build_constraint_set_from_ast(
     let task_steps = collect_task_steps(tasks);
 
     for safety in &constraints.safety {
-        validate_state_reference(
+        validate_safety_operand(
             &safety.left,
             safety.line,
             "safety 左侧",
@@ -323,7 +339,7 @@ pub fn build_constraint_set_from_ast(
             &known_states,
             &mut errors,
         );
-        validate_state_reference(
+        validate_safety_operand(
             &safety.right,
             safety.line,
             "safety 右侧",
@@ -333,15 +349,9 @@ pub fn build_constraint_set_from_ast(
         );
 
         constraint_set.safety.push(SafetyRule {
-            left: StateExpr {
-                device: safety.left.device.clone(),
-                state: safety.left.state.clone(),
-            },
+            left: map_safety_operand(&safety.left),
             relation: map_safety_relation(&safety.relation),
-            right: StateExpr {
-                device: safety.right.device.clone(),
-                state: safety.right.state.clone(),
-            },
+            right: map_safety_operand(&safety.right),
             reason: safety.reason.clone(),
         });
     }
@@ -378,12 +388,21 @@ pub fn build_constraint_set_from_ast(
         });
     }
 
+    let device_ranges = collect_device_ranges(topology);
+
     for task in &tasks.tasks {
         for step in &task.steps {
             validate_wait_device_references_in_statements(
                 &step.statements,
                 step.line.max(1),
                 &device_kinds,
+                &mut errors,
+            );
+            validate_analog_actions_in_statements(
+                &step.statements,
+                step.line.max(1),
+                &device_kinds,
+                &device_ranges,
                 &mut errors,
             );
         }
@@ -934,6 +953,88 @@ fn validate_timing_target(
     }
 }
 
+fn collect_device_ranges(topology: &TopologySection) -> HashMap<String, (f64, f64)> {
+    topology
+        .devices
+        .iter()
+        .filter_map(|device| {
+            device
+                .attributes
+                .range
+                .as_ref()
+                .map(|r| (device.name.clone(), (r.min, r.max)))
+        })
+        .collect()
+}
+
+fn validate_analog_actions_in_statements(
+    statements: &[StepStatement],
+    line: usize,
+    device_kinds: &HashMap<String, DeviceKind>,
+    device_ranges: &HashMap<String, (f64, f64)>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::SetAnalog { target, value }) => {
+                if let Some(kind) = device_kinds.get(target) {
+                    if *kind != DeviceKind::AnalogOutput && *kind != DeviceKind::Motor {
+                        errors.push(PlcError::type_mismatch_with_reason(
+                            line,
+                            "analog_output 或 motor",
+                            device_kind_name(kind),
+                            format!("set_analog {target}"),
+                            "set_analog 只能用于 analog_output 或 motor 类型设备",
+                        ));
+                    }
+                }
+                if let Some((min, max)) = device_ranges.get(target) {
+                    if *value < *min || *value > *max {
+                        errors.push(PlcError::semantic_with_reason(
+                            line,
+                            format!(
+                                "set_analog {target} {value} 超出声明范围 {min}..{max}",
+                            ),
+                            "请确保 set_analog 值在设备声明的 range 范围内",
+                        ));
+                    }
+                }
+            }
+            StepStatement::Action(ActionStatement::Set { target, .. }) => {
+                if let Some(kind) = device_kinds.get(target) {
+                    if *kind == DeviceKind::AnalogOutput || *kind == DeviceKind::AnalogInput {
+                        errors.push(PlcError::type_mismatch_with_reason(
+                            line,
+                            "digital_output 或 solenoid_valve 等离散设备",
+                            device_kind_name(kind),
+                            format!("set {target} on/off"),
+                            "模拟量设备请使用 set_analog 指令",
+                        ));
+                    }
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                validate_analog_actions_in_statements(body, line, device_kinds, device_ranges, errors);
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_analog_actions_in_statements(
+                        &branch.statements, line, device_kinds, device_ranges, errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_analog_actions_in_statements(
+                        &branch.statements, line, device_kinds, device_ranges, errors,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn validate_wait_device_references_in_statements(
     statements: &[StepStatement],
     line: usize,
@@ -1032,6 +1133,53 @@ fn map_safety_relation(relation: &AstSafetyRelation) -> IrSafetyRelation {
     }
 }
 
+fn validate_safety_operand(
+    operand: &SafetyOperand,
+    line: usize,
+    source: &str,
+    device_kinds: &HashMap<String, DeviceKind>,
+    known_states: &HashMap<String, HashSet<String>>,
+    errors: &mut Vec<PlcError>,
+) {
+    match operand {
+        SafetyOperand::State(state_ref) => {
+            validate_state_reference(state_ref, line, source, device_kinds, known_states, errors);
+        }
+        SafetyOperand::Threshold { device, .. } => {
+            validate_device_reference(device, line, source, device_kinds, errors);
+        }
+    }
+}
+
+fn map_safety_operand(operand: &SafetyOperand) -> SafetyExpr {
+    match operand {
+        SafetyOperand::State(state_ref) => SafetyExpr::State(StateExpr {
+            device: state_ref.device.clone(),
+            state: state_ref.state.clone(),
+        }),
+        SafetyOperand::Threshold {
+            device,
+            operator,
+            value,
+        } => SafetyExpr::Threshold {
+            device: device.clone(),
+            operator: comparison_operator_to_string(operator).to_string(),
+            value: value.to_string(),
+        },
+    }
+}
+
+fn comparison_operator_to_string(op: &ComparisonOperator) -> &'static str {
+    match op {
+        ComparisonOperator::Eq => "==",
+        ComparisonOperator::Neq => "!=",
+        ComparisonOperator::Gt => ">",
+        ComparisonOperator::Lt => "<",
+        ComparisonOperator::Gte => ">=",
+        ComparisonOperator::Lte => "<=",
+    }
+}
+
 fn map_timing_scope(target: &TimingTarget) -> TimingScope {
     match target {
         TimingTarget::Task { task } => TimingScope::Task { task: task.clone() },
@@ -1125,6 +1273,9 @@ fn action_to_timing(
         ActionStatement::Extend { target } => (ActionKind::Extend, Some(target.as_str())),
         ActionStatement::Retract { target } => (ActionKind::Retract, Some(target.as_str())),
         ActionStatement::Set { target, .. } => (ActionKind::Set, Some(target.as_str())),
+        ActionStatement::SetAnalog { target, .. } => {
+            (ActionKind::SetAnalog, Some(target.as_str()))
+        }
         ActionStatement::Log { .. } => (ActionKind::Log, None),
     };
 
@@ -1151,7 +1302,7 @@ fn action_to_timing(
             .retract_ms
             .or(profile.response_ms)
             .or(profile.ramp_ms),
-        ActionKind::Set => profile.ramp_ms.or(profile.response_ms),
+        ActionKind::Set | ActionKind::SetAnalog => profile.ramp_ms.or(profile.response_ms),
         ActionKind::Log => None,
     }?;
 
@@ -1198,6 +1349,7 @@ fn action_kind_name(action_kind: &ActionKind) -> &'static str {
         ActionKind::Extend => "extend",
         ActionKind::Retract => "retract",
         ActionKind::Set => "set",
+        ActionKind::SetAnalog => "set_analog",
         ActionKind::Log => "log",
     }
 }
@@ -1210,6 +1362,7 @@ fn default_states_for_kind(kind: &DeviceKind) -> &'static [&'static str] {
         | DeviceKind::SolenoidValve
         | DeviceKind::Sensor
         | DeviceKind::Motor => &["on", "off"],
+        DeviceKind::AnalogInput | DeviceKind::AnalogOutput => &[],
     }
 }
 
@@ -1808,6 +1961,10 @@ fn action_to_transition_action(action: &ActionStatement) -> TransitionAction {
                 AstBinaryValue::Off => IrBinaryValue::Off,
             },
         },
+        ActionStatement::SetAnalog { target, value } => TransitionAction::SetAnalog {
+            target: target.clone(),
+            value_raw: value.to_string(),
+        },
         ActionStatement::Log { message } => TransitionAction::Log {
             message: message.clone(),
         },
@@ -1838,6 +1995,10 @@ fn condition_to_expression(condition: &ConditionExpression) -> String {
     let operator = match condition.operator {
         ComparisonOperator::Eq => "==",
         ComparisonOperator::Neq => "!=",
+        ComparisonOperator::Gt => ">",
+        ComparisonOperator::Lt => "<",
+        ComparisonOperator::Gte => ">=",
+        ComparisonOperator::Lte => "<=",
     };
 
     format!(
@@ -1876,6 +2037,8 @@ fn ast_type_to_ir_kind(device_type: &DeviceType) -> DeviceKind {
         DeviceType::Cylinder => DeviceKind::Cylinder,
         DeviceType::Sensor => DeviceKind::Sensor,
         DeviceType::Motor => DeviceKind::Motor,
+        DeviceType::AnalogInput => DeviceKind::AnalogInput,
+        DeviceType::AnalogOutput => DeviceKind::AnalogOutput,
     }
 }
 
@@ -1887,6 +2050,9 @@ fn connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<ConnectionT
         (DeviceKind::SolenoidValve, DeviceKind::Cylinder) => Some(ConnectionType::Pneumatic),
         (DeviceKind::DigitalInput, DeviceKind::DigitalInput)
         | (DeviceKind::DigitalOutput, DeviceKind::DigitalOutput) => Some(ConnectionType::Logical),
+        (DeviceKind::AnalogInput, DeviceKind::Sensor)
+        | (DeviceKind::AnalogOutput, DeviceKind::SolenoidValve)
+        | (DeviceKind::AnalogOutput, DeviceKind::Motor) => Some(ConnectionType::Analog),
         _ => None,
     }
 }
@@ -1899,6 +2065,8 @@ fn device_kind_name(kind: &DeviceKind) -> &'static str {
         DeviceKind::Cylinder => "cylinder",
         DeviceKind::Sensor => "sensor",
         DeviceKind::Motor => "motor",
+        DeviceKind::AnalogInput => "analog_input",
+        DeviceKind::AnalogOutput => "analog_output",
     }
 }
 
@@ -2174,8 +2342,13 @@ task ready:
             constraints.safety[0].relation,
             SafetyRelation::ConflictsWith
         ));
-        assert_eq!(constraints.safety[0].left.device, "cyl_A");
-        assert_eq!(constraints.safety[0].left.state, "extended");
+        match &constraints.safety[0].left {
+            crate::ir::SafetyExpr::State(expr) => {
+                assert_eq!(expr.device, "cyl_A");
+                assert_eq!(expr.state, "extended");
+            }
+            other => panic!("期望 State 变体，实际为: {other:?}"),
+        }
 
         assert!(matches!(
             constraints.timing[0].scope,

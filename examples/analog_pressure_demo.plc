@@ -1,0 +1,77 @@
+# ============================================================
+# 液压站比例阀压力控制示例
+# 演示 analog_input / analog_output / set_analog / 阈值比较
+# ============================================================
+
+[topology]
+
+# ===== 控制器端口 =====
+device Y0: digital_output               # 比例阀数字控制
+device X0: digital_input                 # 启动按钮输入
+
+# ===== 模拟量 I/O =====
+device AI0: analog_input  { range: 0..100, unit: "bar" }
+device AO0: analog_output { range: 0..10, ramp_time: 500ms }
+
+# ===== 执行器与传感器 =====
+device prop_valve: solenoid_valve {
+    connected_to: Y0,
+    response_time: 30ms
+}
+
+device pressure_sensor: sensor {
+    connected_to: AI0,
+    detects: prop_valve.on
+}
+
+device start_button: digital_input {
+    connected_to: X0,
+    debounce: 20ms
+}
+
+[constraints]
+
+# ===== 时序约束 =====
+timing: task.main must_complete_within 10000ms
+    reason: "主流程不应超过 10 秒"
+
+# ===== 因果链 =====
+causality: Y0 -> prop_valve -> pressure_sensor
+    reason: "数字输出驱动比例阀，压力传感器检测反馈"
+
+[tasks]
+
+task main:
+    step set_output:
+        action: set_analog AO0 7.5
+        action: log "设置模拟输出 7.5V"
+
+    step open_valve:
+        action: set prop_valve on
+        wait: pressure_sensor == true
+        timeout: 5000ms -> goto fault
+
+    step hold_pressure:
+        action: log "压力已达标，保持运行"
+        delay: 2000ms
+
+    step shutdown:
+        action: set_analog AO0 0
+        action: set prop_valve off
+        action: log "系统关闭"
+
+    on_complete: goto ready
+
+task fault:
+    step emergency_stop:
+        action: set_analog AO0 0
+        action: set prop_valve off
+    step alarm:
+        action: log "压力升压超时，请检查比例阀和压力传感器"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto main

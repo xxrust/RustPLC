@@ -17,6 +17,8 @@ pub enum DeviceKind {
     Cylinder,
     Sensor,
     Motor,
+    AnalogInput,
+    AnalogOutput,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -25,6 +27,7 @@ pub enum ConnectionType {
     Electrical,
     Pneumatic,
     Logical,
+    Analog,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -76,6 +79,7 @@ pub enum TransitionAction {
     Extend { target: String },
     Retract { target: String },
     Set { target: String, value: BinaryValue },
+    SetAnalog { target: String, value_raw: String },
     Log { message: String },
 }
 
@@ -131,10 +135,21 @@ pub enum SafetyRelation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SafetyExpr {
+    State(StateExpr),
+    Threshold {
+        device: String,
+        operator: String,
+        value: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SafetyRule {
-    pub left: StateExpr,
+    pub left: SafetyExpr,
     pub relation: SafetyRelation,
-    pub right: StateExpr,
+    pub right: SafetyExpr,
     pub reason: Option<String>,
 }
 
@@ -180,6 +195,7 @@ pub enum ActionKind {
     Extend,
     Retract,
     Set,
+    SetAnalog,
     Log,
 }
 
@@ -298,15 +314,15 @@ mod tests {
 
         let constraints = ConstraintSet {
             safety: vec![SafetyRule {
-                left: StateExpr {
+                left: SafetyExpr::State(StateExpr {
                     device: "cyl_A".to_string(),
                     state: "extended".to_string(),
-                },
+                }),
                 relation: SafetyRelation::ConflictsWith,
-                right: StateExpr {
+                right: SafetyExpr::State(StateExpr {
                     device: "cyl_B".to_string(),
                     state: "extended".to_string(),
-                },
+                }),
                 reason: Some("避免机械冲突".to_string()),
             }],
             timing: vec![TimingRule {

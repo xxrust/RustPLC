@@ -483,6 +483,10 @@ fn comparison_operator_text(operator: &ComparisonOperator) -> &'static str {
     match operator {
         ComparisonOperator::Eq => "==",
         ComparisonOperator::Neq => "!=",
+        ComparisonOperator::Gt => ">",
+        ComparisonOperator::Lt => "<",
+        ComparisonOperator::Gte => ">=",
+        ComparisonOperator::Lte => "<=",
     }
 }
 
