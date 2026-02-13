@@ -17,11 +17,11 @@
 
 ```mermaid
 flowchart TD
-    A["工程师用自然语言\n描述工艺流程"] --> B["AI (Claude / Codex)\n通过 plc-gen skill\n多轮对话生成 .plc"]
-    B --> C["RustPLC 编译器\n四大引擎形式化验证"]
+    A["工程师用自然语言<br>描述工艺流程"] --> B["AI (Claude / Codex)<br>通过 plc-gen skill<br>多轮对话生成 .plc"]
+    B --> C["RustPLC 编译器<br>四大引擎形式化验证"]
     C --> D{"验证通过?"}
-    D -- "是" --> E["输出 JSON IR\n可用于代码生成 / 仿真"]
-    D -- "否" --> F["精确错误报告\n行号 + 修复建议"]
+    D -- "是" --> E["输出 JSON IR<br>可用于代码生成 / 仿真"]
+    D -- "否" --> F["精确错误报告<br>行号 + 修复建议"]
     F --> B
 ```
 
@@ -186,14 +186,14 @@ flowchart TD
     A[".plc 源文件"]
     A --> B["Parser (pest PEG)"]
     B --> C["AST"]
-    C --> D["预处理器\nrepeat/delay 展开"]
+    C --> D["预处理器<br>repeat/delay 展开"]
     D --> E["语义分析"]
     E --> F["IR 中间表示"]
 
-    F --> G["Safety 引擎\nBMC + k-归纳"]
-    F --> H["Liveness 引擎\nSCC + 可达性"]
-    F --> I["Timing 引擎\n关键路径计算"]
-    F --> J["Causality 引擎\n拓扑 BFS"]
+    F --> G["Safety 引擎<br>BMC + k-归纳"]
+    F --> H["Liveness 引擎<br>SCC + 可达性"]
+    F --> I["Timing 引擎<br>关键路径计算"]
+    F --> J["Causality 引擎<br>拓扑 BFS"]
 
     G --> K["JSON IR 输出"]
     H --> K
@@ -206,10 +206,10 @@ IR 包含四个核心数据结构：
 ```mermaid
 flowchart TD
     IR["IR 中间表示"]
-    IR --> TG["TopologyGraph\npetgraph 有向图\n设备节点 + 连接边"]
-    IR --> SM["StateMachine\n状态 + 转换 + 守卫条件"]
-    IR --> CS["ConstraintSet\nsafety / timing / causality"]
-    IR --> TM["TimingModel\n时间包络 + 关键路径"]
+    IR --> TG["TopologyGraph<br>petgraph 有向图<br>设备节点 + 连接边"]
+    IR --> SM["StateMachine<br>状态 + 转换 + 守卫条件"]
+    IR --> CS["ConstraintSet<br>safety / timing / causality"]
+    IR --> TM["TimingModel<br>时间包络 + 关键路径"]
 ```
 
 ## 四大验证引擎
@@ -295,18 +295,18 @@ causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
 flowchart TD
     S["step 内可用语句"]
 
-    S --> A["action\nextend / retract\nset on|off / log"]
-    S --> W["wait\n单条件 / AND / OR"]
-    S --> D["delay\n固定延时"]
-    S --> T["timeout\n超时跳转保护"]
+    S --> A["action<br>extend / retract<br>set on|off / log"]
+    S --> W["wait<br>单条件 / AND / OR"]
+    S --> D["delay<br>固定延时"]
+    S --> T["timeout<br>超时跳转保护"]
 
-    S --> IF["if/else\n条件分支跳转"]
-    S --> G["goto\ntask 或 task.step"]
-    S --> R["repeat N\n编译期循环展开\n(2~100次)"]
+    S --> IF["if/else<br>条件分支跳转"]
+    S --> G["goto<br>task 或 task.step"]
+    S --> R["repeat N<br>编译期循环展开<br>(2~100次)"]
 
-    S --> P["parallel\n并行分支\n全部完成后继续"]
-    S --> RC["race\n竞争分支\n先到先得"]
-    S --> AIW["allow_indefinite_wait\n人工等待豁免"]
+    S --> P["parallel<br>并行分支<br>全部完成后继续"]
+    S --> RC["race<br>竞争分支<br>先到先得"]
+    S --> AIW["allow_indefinite_wait<br>人工等待豁免"]
 ```
 
 语句用法速查：
@@ -381,19 +381,19 @@ allow_indefinite_wait: true
 ```mermaid
 flowchart TD
     subgraph 编译器["src/"]
-        main["main.rs\nCLI 入口"]
-        parser["parser/\npest PEG 语法"]
-        ast["ast/\nAST 类型定义"]
-        semantic["semantic/\n预处理 + IR 降级"]
-        ir["ir/\nIR 类型 (petgraph)"]
-        error["error/\n结构化诊断"]
+        main["main.rs<br>CLI 入口"]
+        parser["parser/<br>pest PEG 语法"]
+        ast["ast/<br>AST 类型定义"]
+        semantic["semantic/<br>预处理 + IR 降级"]
+        ir["ir/<br>IR 类型 (petgraph)"]
+        error["error/<br>结构化诊断"]
     end
 
     subgraph 验证引擎["verification/"]
-        safety["safety.rs\nBMC + k-归纳"]
-        liveness["liveness.rs\nSCC + 可达性"]
-        timing["timing.rs\n关键路径"]
-        causality["causality.rs\n拓扑 BFS"]
+        safety["safety.rs<br>BMC + k-归纳"]
+        liveness["liveness.rs<br>SCC + 可达性"]
+        timing["timing.rs<br>关键路径"]
+        causality["causality.rs<br>拓扑 BFS"]
     end
 
     main --> parser
@@ -553,14 +553,14 @@ flowchart TD
     A[".plc source"]
     A --> B["Parser (pest PEG)"]
     B --> C["AST"]
-    C --> D["Preprocessor\nrepeat/delay expansion"]
+    C --> D["Preprocessor<br>repeat/delay expansion"]
     D --> E["Semantic Analysis"]
     E --> F["IR"]
 
-    F --> G["Safety Engine\nBMC + k-induction"]
-    F --> H["Liveness Engine\nSCC + reachability"]
-    F --> I["Timing Engine\ncritical path"]
-    F --> J["Causality Engine\ntopology BFS"]
+    F --> G["Safety Engine<br>BMC + k-induction"]
+    F --> H["Liveness Engine<br>SCC + reachability"]
+    F --> I["Timing Engine<br>critical path"]
+    F --> J["Causality Engine<br>topology BFS"]
 
     G --> K["JSON IR output"]
     H --> K
