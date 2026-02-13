@@ -7,6 +7,15 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 
 从工程师的自然语言工艺描述，经过多轮对话确认，生成可通过 RustPLC 编译器四大验证引擎的 `.plc` 文件。
 
+## 维护说明（自测）
+
+本 skill 不仅是“生成 DSL”，还要对 **生成物可验证性** 负责。仓库内提供了该 skill 的自测夹具：
+
+- 夹具目录：`.codex/skills/plc-gen/fixtures/valid/*.plc`
+- 运行自测：`cargo test -q`
+
+当你修改本 `SKILL.md` 的流程/规则时，应同步新增或更新一个 fixture，用来覆盖该规则的典型场景，避免“写了规则但从未验证”。
+
 ---
 
 ## 核心理念
@@ -49,6 +58,13 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 - "有没有哪些动作是可以同时进行的？"（比如冲压缸缩回的同时压紧缸可以缩回？）
 - "有没有我遗漏的动作或状态？"
 
+**阶段一最小提问清单（缺一不可，不能凭空假设）：**
+- 启动方式：按钮/信号？是否需要复位/急停？
+- 循环模式：单次/自动循环？循环结束停在哪里（全部缩回/保持夹紧/保持到位）？
+- 初始状态：上电后各执行器默认位置（尤其是气缸是否要求“全部回原位”）？
+- 人工介入点：是否存在人工装料/取料/确认按钮？对应等待是否允许无限等待？
+- 同步关系：是否允许并行动作？哪些动作必须互锁（互斥/依赖）？
+
 **等待工程师确认后再进入下一阶段。**
 
 ### 阶段二：推理设备拓扑
@@ -85,6 +101,10 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 - "时序参数需要调整吗？比如某个缸行程特别长？"
 - "I/O 口分配需要和实际接线一致吗？如果是，请告诉我实际分配。"
 
+**I/O 未知时的约定（避免编造）：**
+- 如果工程师没有给出真实 I/O，对外展示时明确标注“占位分配”，例如 `Y?`/`X?` 或按顺序 `Y0..` `X0..`。
+- fixture/示例代码中允许使用按顺序分配的 I/O（用于验证 DSL 语义），但在工程落地时必须替换为真实接线表。
+
 **等待工程师确认后再进入下一阶段。**
 
 ### 阶段三：推导约束
@@ -100,13 +120,10 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
   - （如果推料缸和冲压缸在同一轴线）推料缸伸出与冲压缸伸出冲突
     → safety: cyl_push.extended conflicts_with cyl_press.extended
 
-因果链（每个被 wait 引用的传感器都需要）：
+因果链（可选，仅用于文档可读性；编译器会从拓扑自动推断）：
   - Y0 -> valve_push -> cyl_push -> sensor_push_ext
-  - Y0 -> valve_push -> cyl_push -> sensor_push_ret   ← 缩回传感器也需要
-  - Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ext
-  - Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ret ← 缩回传感器也需要
-  - Y2 -> valve_press -> cyl_press -> sensor_press_ext
-  - Y2 -> valve_press -> cyl_press -> sensor_press_ret ← 缩回传感器也需要
+  - Y0 -> valve_push -> cyl_push -> sensor_push_ret
+  - ...（其余类推）
 
 ⚠️ 需要你确认的问题：
   - 推料缸和冲压缸在物理上会干涉吗？
@@ -119,9 +136,8 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 **重要：阶段三的约束转化检查清单**
 
 进入阶段四之前，逐条核对：
-- 工程师在阶段三确认的每一条安全关系，是否都已转化为 `safety:` 约束？
-- 所有在 `wait` 语句中引用的传感器，是否都有对应的因果链？（包括 `_ret` 缩回传感器）
-- 因果链不仅要覆盖 `_ext` 伸出传感器，也要覆盖 `_ret` 缩回传感器
+- 工程师确认的每一条安全关系，是否都已转化为 `safety:` 约束？
+- 拓扑中 `connected_to` 和 `detects` 链是否完整？（编译器会自动从拓扑推断因果可达性，无需显式写 `causality:` 约束。显式声明仅用于文档可读性。）
 
 **`conflicts_with` vs `requires` 判断指引：**
 
@@ -354,7 +370,7 @@ task fault:
 ### Liveness（活性）
 - 每个 `wait` 必须有 `timeout`，除非标记了 `allow_indefinite_wait: true`
 - `allow_indefinite_wait` 仅用于人工触发的等待（如启动按钮）
-- 每个 task 必须有 `on_complete`
+- 每个 task 需要 `on_complete`。若最后一步的所有路径都通过 goto 离开（if/else 两分支都 goto、race 所有分支都有 then: goto 且有 timeout -> goto），可省略。
 - 不能有孤立的死胡同状态
 
 ### Timing（时序）
@@ -364,40 +380,50 @@ task fault:
 - `delay:` 会计入两种估计中的关键路径。
 
 ### Causality（因果性）
-- 因果链中相邻设备必须通过 `connected_to` 或 `detects` 在拓扑中连通
-- 链的方向：输出口 → 阀/电机 → 执行机构 → 传感器
+- 编译器自动从拓扑图（`connected_to` + `detects`）推断 action→sensor 的因果可达性
+- 只要拓扑声明完整，**不需要**显式写 `causality:` 约束（显式声明仅用于文档可读性）
+- `wait: sensor == false` 与 `== true` 的因果检查完全相同
+- AND/OR wait 中的每个传感器都会被独立检查
+- parallel 块中跨分支的无关因果配对会被自动跳过（不会误报）
 
-**parallel 块的因果链陷阱：**
+**race 块注意事项：**
+- 每个 branch 需要 `wait:` + `then: goto`，step 级需要 `timeout:`
+- action 应在 race 之前的 step 中完成，race 内部只放 wait
+- 参考：`half_rotation.plc`、`grind_station.plc`
 
-编译器会把 parallel 块中**所有分支**的 action 与 step 级别的 wait 做因果检查。如果两个分支操作不同设备，但 step 的 wait 只关联其中一个设备的传感器，另一个分支就会报因果链断裂。
+**`goto task.step`：** 可跳转到目标 task 的指定 step。目标 step 必须存在。`on_complete` 必须是 task 最后一行，不能在其后再写 step。
 
-例如以下代码会报错：
+---
+
+## 推荐的“可验证任务骨架”（模板）
+
+当工程师没有提供更复杂的状态机需求时，优先使用这个骨架，能显著降低 Liveness/Timing/Causality 的失败概率：
+
+- `ready`：只做人工启动等待（`allow_indefinite_wait: true`）
+- `cycle`：完整自动流程，每个 `wait` 必带 `timeout`
+- `fault_handler`：收回到安全位 + 报警日志 + 回到 `ready`
+
+示例结构（仅示意，不要原样照抄，按你的设备名替换）：
 ```plc
-step start_both:
-    parallel:
-        branch_left:
-            action: set motor_left on    # 操作 motor_left
-        branch_right:
-            action: set motor_right on   # 操作 motor_right
-    wait: sensor_left_arrive == true     # 只等 motor_left 的传感器
-    # → 编译器会检查 motor_right -> sensor_left_arrive，因果链断裂！
-```
+[tasks]
+task cycle:
+    step do_something:
+        # action + wait + timeout
+    on_complete: goto ready
 
-**解决方案：** 当多个不同设备需要"同时"启动但各自等待不同传感器时，不要用 parallel，改用顺序 step 分别启动（`set` 动作是瞬时的，顺序启动在物理上等同于同时）：
-```plc
-step start_left:
-    action: set motor_left on
-step start_right:
-    action: set motor_right on
-step wait_left:
-    wait: sensor_left_arrive == true
-    timeout: 5000ms -> goto fault_handler
-step wait_right:
-    wait: sensor_right_arrive == true
-    timeout: 5000ms -> goto fault_handler
-```
+task fault_handler:
+    step safe:
+        # retract / stop motor
+    step alarm:
+        action: log "fault"
+    on_complete: goto ready
 
-parallel 块适合的场景：同类设备同时动作，且 step 的 wait 不需要区分来源（如两个气缸同时伸出，等待任一到位传感器）。
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+```
 
 ---
 
@@ -437,114 +463,24 @@ parallel 块适合的场景：同类设备同时动作，且 step 的 wait 不�
 
 每个生成的 `.plc` 文件都必须包含：
 
-1. **fault_handler 任务** — 缩回所有气缸 / 关闭所有电机，输出报警日志。注意：fault_handler 中的 retract/set off 动作虽然不强制要求 wait 确认（因为这是紧急恢复），但应在 log 中明确提示操作员需要人工确认设备状态。
+1. **fault_handler 任务** — 缩回所有气缸 / 关闭所有电机，输出报警日志，提示操作员人工确认设备状态
 2. **ready 任务** — 等待启动按钮，标记 `allow_indefinite_wait: true`
 3. **所有 wait 都有 timeout** — 指向 fault_handler（人工等待除外）
-4. **所有被 wait 引用的传感器的因果链** — 不仅是 `_ext` 伸出传感器，也包括 `_ret` 缩回传感器。规则：如果某个传感器出现在 `wait:` 语句中，就必须有一条从输出口到该传感器的因果链。
-5. **工程师确认的所有安全约束** — 阶段三中工程师确认的每一条安全关系都必须转化为 `safety:` 约束，不能遗漏
+4. **工程师确认的所有安全约束** — 不能遗漏
+5. **完整的拓扑连接链** — 每个设备的 `connected_to` 和传感器的 `detects` 必须正确声明（编译器据此自动推断因果性）
+6. **每个气缸都应有 _ext 和 _ret 两个传感器** — 即使当前流程中某个方向没有 `wait` 确认
 
 ---
 
 ## 完整示例
 
-**工程师输入：**
-> "电机转动，转到A位置或B位置停下来，分别做不同的处理。有启动按钮。"
+完整的阶段一→四对话示例，参见 `examples/half_rotation.plc`（电机+竞争检测+多 task 跳转）。
 
-**阶段一回复：**
-
-我理解的工艺流程：
-1. 按下启动按钮
-2. 电机开始旋转
-3. 竞争检测：先到A位置传感器 → 执行A工艺；先到B位置传感器 → 执行B工艺
-4. 处理完成后停机，等待下次启动
-
-需要确认：
-- 电机旋转超时（比如转了一圈还没检测到）怎么处理？我建议加一个超时故障处理。
-- A工艺和B工艺具体做什么？还是目前只需要记录日志占位？
-
-**（工程师确认后，经过阶段二、三，最终生成：）**
-
-```plc
-[topology]
-
-device Y0: digital_output
-device X0: digital_input
-device X1: digital_input
-device X2: digital_input
-
-device start_button: digital_input {
-    connected_to: X2
-    debounce: 20ms
-}
-
-device motor_ctrl: motor {
-    connected_to: Y0
-    rated_speed: 60rpm
-    ramp_time: 50ms
-}
-
-device sensor_A: sensor {
-    type: proximity
-    connected_to: X0
-    detects: motor_ctrl.position_A
-}
-
-device sensor_B: sensor {
-    type: proximity
-    connected_to: X1
-    detects: motor_ctrl.position_B
-}
-
-[constraints]
-
-timing: task.search.detect must_complete_within 800ms
-    reason: "旋转加启动不应超过800ms"
-
-causality: Y0 -> motor_ctrl -> sensor_A
-causality: Y0 -> motor_ctrl -> sensor_B
-
-[tasks]
-
-task search:
-    step start_motor:
-        action: set motor_ctrl on
-    step detect:
-        race:
-            branch_A:
-                wait: sensor_A == true
-                then: goto process_A
-            branch_B:
-                wait: sensor_B == true
-                then: goto process_B
-        timeout: 800ms -> goto motor_fault
-
-task process_A:
-    step stop_motor:
-        action: set motor_ctrl off
-    step do_work_A:
-        action: log "工件在A位置，执行A工艺"
-    on_complete: goto ready
-
-task process_B:
-    step stop_motor:
-        action: set motor_ctrl off
-    step do_work_B:
-        action: log "工件在B位置，执行B工艺"
-    on_complete: goto ready
-
-task motor_fault:
-    step emergency_stop:
-        action: set motor_ctrl off
-    step alarm:
-        action: log "电机旋转超时"
-    on_complete: goto ready
-
-task ready:
-    step wait_start:
-        wait: start_button == true
-        allow_indefinite_wait: true
-    on_complete: goto search
-```
+该示例展示了：
+- 阶段一：从"电机转动，转到A或B位置停下来"提取动作流程
+- 阶段二：推理出 motor + 2 个 position sensor + start_button 的拓扑
+- 阶段三：timing 约束 + causality 链
+- 阶段四：race 块检测位置 + 多 task 分支处理 + fault_handler + ready
 
 ---
 
@@ -564,3 +500,16 @@ task ready:
 | `glue_station.plc` | 涂胶+循环展开 | 循环动作展开为顺序步骤、同一气缸多次伸缩 |
 
 遇到类似场景时，先读取对应示例文件了解已验证的模式，再生成新文件。
+
+---
+
+## 生成覆盖度自检
+
+生成 .plc 文件后，对照以下清单确认：
+
+- [ ] 所有气缸是否都有 _ext 和 _ret 传感器，且 `detects` 声明正确？
+- [ ] 所有设备的 `connected_to` 链是否完整？（编译器据此推断因果性）
+- [ ] 所有 wait 是否都有 timeout？（人工等待除外）
+- [ ] fault_handler 是否覆盖了所有执行器的安全复位？
+- [ ] 是否需要 `race`/`parallel`/`repeat`/`if-else`/`goto task.step`？
+- [ ] 是否有时序约束？
