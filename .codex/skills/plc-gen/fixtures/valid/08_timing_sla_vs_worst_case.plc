@@ -1,0 +1,60 @@
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device X1: digital_input
+
+device start_button: digital_input {
+    connected_to: X1
+    debounce: 20ms
+}
+
+device valve_act: solenoid_valve {
+    connected_to: Y0
+    response_time: 20ms
+}
+
+device cyl_act: cylinder {
+    connected_to: valve_act
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_ext: sensor {
+    connected_to: X0
+    detects: cyl_act.extended
+}
+
+[constraints]
+
+timing: task.cycle must_complete_within 1200ms
+timing: task.cycle must_complete_within_worst_case 3000ms
+
+causality: Y0 -> valve_act -> cyl_act -> sensor_ext
+
+[tasks]
+
+task cycle:
+    step start:
+        action: extend cyl_act
+        wait: sensor_ext == true
+        timeout: 2000ms -> goto fault_handler
+    step settle:
+        delay: 200ms
+    step back:
+        action: retract cyl_act
+    on_complete: goto ready
+
+task fault_handler:
+    step safe:
+        action: retract cyl_act
+    step alarm:
+        action: log "fault: timing/timeout"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+

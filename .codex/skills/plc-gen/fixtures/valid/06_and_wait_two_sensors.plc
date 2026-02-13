@@ -1,0 +1,83 @@
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
+
+device start_button: digital_input {
+    connected_to: X3
+    debounce: 20ms
+}
+
+device valve_A: solenoid_valve {
+    connected_to: Y0
+    response_time: 20ms
+}
+
+device valve_B: solenoid_valve {
+    connected_to: Y1
+    response_time: 20ms
+}
+
+device cyl_A: cylinder {
+    connected_to: valve_A
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device cyl_B: cylinder {
+    connected_to: valve_B
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_A_ext: sensor {
+    connected_to: X0
+    detects: cyl_A.extended
+}
+
+device sensor_B_ext: sensor {
+    connected_to: X1
+    detects: cyl_B.extended
+}
+
+device sensor_ok: sensor {
+    connected_to: X2
+    detects: cyl_A.extended
+}
+
+[constraints]
+
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
+causality: Y1 -> valve_B -> cyl_B -> sensor_B_ext
+
+[tasks]
+
+task cycle:
+    step extend_both:
+        action: extend cyl_A
+        action: extend cyl_B
+    step wait_both:
+        wait: sensor_A_ext == true AND sensor_B_ext == true
+        timeout: 1200ms -> goto fault_handler
+    step finish:
+        wait: sensor_ok == true
+        timeout: 1200ms -> goto fault_handler
+    on_complete: goto ready
+
+task fault_handler:
+    step safe:
+        action: retract cyl_A
+        action: retract cyl_B
+    step alarm:
+        action: log "fault: AND wait timeout"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle

@@ -1,0 +1,82 @@
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+
+device start_button: digital_input {
+    connected_to: X2
+    debounce: 20ms
+}
+
+device motor_conveyor: motor {
+    connected_to: Y0
+    rated_speed: 30rpm
+    ramp_time: 50ms
+}
+
+device sensor_index: sensor {
+    connected_to: X0
+    detects: motor_conveyor.position_index
+}
+
+device valve_stopper: solenoid_valve {
+    connected_to: Y1
+    response_time: 20ms
+}
+
+device cyl_stopper: cylinder {
+    connected_to: valve_stopper
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_stop_ext: sensor {
+    connected_to: X1
+    detects: cyl_stopper.extended
+}
+
+[constraints]
+
+safety: cyl_stopper.extended conflicts_with motor_conveyor.on
+    reason: "挡停缸伸出时禁止传送带运行"
+
+causality: Y0 -> motor_conveyor -> sensor_index
+causality: Y1 -> valve_stopper -> cyl_stopper -> sensor_stop_ext
+
+[tasks]
+
+task cycle:
+    step start_conveyor:
+        action: set motor_conveyor on
+    step wait_index:
+        wait: sensor_index == true
+        timeout: 5000ms -> goto fault_handler
+    step stop_conveyor:
+        action: set motor_conveyor off
+    step settle:
+        delay: 200ms
+    step extend_stopper:
+        action: extend cyl_stopper
+        wait: sensor_stop_ext == true
+        timeout: 1200ms -> goto fault_handler
+    step release_stopper:
+        action: retract cyl_stopper
+    on_complete: goto ready
+
+task fault_handler:
+    step safe:
+        action: set motor_conveyor off
+        action: retract cyl_stopper
+    step alarm:
+        action: log "fault: conveyor/index timeout"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+

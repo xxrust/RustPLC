@@ -1,0 +1,134 @@
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device Y2: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
+device X4: digital_input
+device X5: digital_input
+device X6: digital_input
+
+device start_button: digital_input {
+    connected_to: X6
+    debounce: 20ms
+}
+
+device valve_push: solenoid_valve {
+    connected_to: Y0
+    response_time: 20ms
+}
+
+device valve_clamp: solenoid_valve {
+    connected_to: Y1
+    response_time: 20ms
+}
+
+device valve_press: solenoid_valve {
+    connected_to: Y2
+    response_time: 20ms
+}
+
+device cyl_push: cylinder {
+    connected_to: valve_push
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device cyl_clamp: cylinder {
+    connected_to: valve_clamp
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device cyl_press: cylinder {
+    connected_to: valve_press
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_push_ext: sensor {
+    connected_to: X0
+    detects: cyl_push.extended
+}
+
+device sensor_push_ret: sensor {
+    connected_to: X1
+    detects: cyl_push.retracted
+}
+
+device sensor_clamp_ext: sensor {
+    connected_to: X2
+    detects: cyl_clamp.extended
+}
+
+device sensor_clamp_ret: sensor {
+    connected_to: X3
+    detects: cyl_clamp.retracted
+}
+
+device sensor_press_ext: sensor {
+    connected_to: X4
+    detects: cyl_press.extended
+}
+
+device sensor_press_ret: sensor {
+    connected_to: X5
+    detects: cyl_press.retracted
+}
+
+[constraints]
+
+safety: cyl_press.extended requires cyl_clamp.extended
+    reason: "冲压缸动作时必须保持压紧"
+
+causality: Y0 -> valve_push -> cyl_push -> sensor_push_ext
+causality: Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ext
+causality: Y2 -> valve_press -> cyl_press -> sensor_press_ext
+
+[tasks]
+
+task cycle:
+    step push_out:
+        action: extend cyl_push
+        wait: sensor_push_ext == true
+        timeout: 1200ms -> goto fault_handler
+    step clamp_down:
+        action: extend cyl_clamp
+        wait: sensor_clamp_ext == true
+        timeout: 1200ms -> goto fault_handler
+    step press_out:
+        action: extend cyl_press
+        wait: sensor_press_ext == true
+        timeout: 1200ms -> goto fault_handler
+    step press_back:
+        action: retract cyl_press
+        wait: sensor_press_ret == true
+        timeout: 1200ms -> goto fault_handler
+    step unclamp:
+        action: retract cyl_clamp
+        wait: sensor_clamp_ret == true
+        timeout: 1200ms -> goto fault_handler
+    step push_back:
+        action: retract cyl_push
+        wait: sensor_push_ret == true
+        timeout: 1200ms -> goto fault_handler
+    on_complete: goto ready
+
+task fault_handler:
+    step safe:
+        action: retract cyl_press
+        action: retract cyl_clamp
+        action: retract cyl_push
+    step alarm:
+        action: log "fault: timeout"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+

@@ -1,0 +1,72 @@
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
+
+device start_button: digital_input {
+    connected_to: X3
+    debounce: 20ms
+}
+
+device confirm_button: digital_input {
+    connected_to: X2
+    debounce: 20ms
+}
+
+device valve_lift: solenoid_valve {
+    connected_to: Y0
+    response_time: 20ms
+}
+
+device cyl_lift: cylinder {
+    connected_to: valve_lift
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_lift_ext: sensor {
+    connected_to: X0
+    detects: cyl_lift.extended
+}
+
+device sensor_lift_ret: sensor {
+    connected_to: X1
+    detects: cyl_lift.retracted
+}
+
+[constraints]
+
+causality: Y0 -> valve_lift -> cyl_lift -> sensor_lift_ext
+
+[tasks]
+
+task cycle:
+    step lift_up:
+        action: extend cyl_lift
+        wait: sensor_lift_ext == true
+        timeout: 1200ms -> goto fault_handler
+    step wait_operator_confirm:
+        wait: confirm_button == true
+        allow_indefinite_wait: true
+    step lift_down:
+        action: retract cyl_lift
+        wait: sensor_lift_ret == true
+        timeout: 1200ms -> goto fault_handler
+    on_complete: goto ready
+
+task fault_handler:
+    step safe:
+        action: retract cyl_lift
+    step alarm:
+        action: log "fault: lift timeout"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+

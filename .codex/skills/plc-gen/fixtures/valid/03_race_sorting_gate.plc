@@ -1,0 +1,90 @@
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+
+device start_button: digital_input {
+    connected_to: X2
+    debounce: 20ms
+}
+
+device motor_conv: motor {
+    connected_to: Y0
+    rated_speed: 20rpm
+    ramp_time: 50ms
+}
+
+device sensor_A: sensor {
+    connected_to: X0
+    detects: motor_conv.position_A
+}
+
+device sensor_B: sensor {
+    connected_to: X1
+    detects: motor_conv.position_B
+}
+
+device valve_gate: solenoid_valve {
+    connected_to: Y1
+    response_time: 20ms
+}
+
+device cyl_gate: cylinder {
+    connected_to: valve_gate
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+[constraints]
+
+timing: task.search.detect must_complete_within 1200ms
+
+causality: Y0 -> motor_conv -> sensor_A
+causality: Y0 -> motor_conv -> sensor_B
+
+[tasks]
+
+task search:
+    step start_conv:
+        action: set motor_conv on
+    step detect:
+        race:
+            branch_A:
+                wait: sensor_A == true
+                then: goto process_A
+            branch_B:
+                wait: sensor_B == true
+                then: goto process_B
+        timeout: 1200ms -> goto fault_handler
+
+task process_A:
+    step stop_conv:
+        action: set motor_conv off
+    step gate_to_A:
+        action: retract cyl_gate
+    on_complete: goto ready
+
+task process_B:
+    step stop_conv:
+        action: set motor_conv off
+    step gate_to_B:
+        action: extend cyl_gate
+    on_complete: goto ready
+
+task fault_handler:
+    step safe:
+        action: set motor_conv off
+        action: retract cyl_gate
+    step alarm:
+        action: log "fault: race timeout"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto search
+

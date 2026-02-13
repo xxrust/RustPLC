@@ -1,0 +1,103 @@
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
+device X4: digital_input
+
+device start_button: digital_input {
+    connected_to: X4
+    debounce: 20ms
+}
+
+device valve_hold: solenoid_valve {
+    connected_to: Y0
+    response_time: 20ms
+}
+
+device valve_work: solenoid_valve {
+    connected_to: Y1
+    response_time: 20ms
+}
+
+device cyl_hold: cylinder {
+    connected_to: valve_hold
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device cyl_work: cylinder {
+    connected_to: valve_work
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_hold_ext: sensor {
+    connected_to: X0
+    detects: cyl_hold.extended
+}
+
+device sensor_hold_ret: sensor {
+    connected_to: X1
+    detects: cyl_hold.retracted
+}
+
+device sensor_work_ext: sensor {
+    connected_to: X2
+    detects: cyl_work.extended
+}
+
+device sensor_work_ret: sensor {
+    connected_to: X3
+    detects: cyl_work.retracted
+}
+
+[constraints]
+
+safety: cyl_work.extended requires cyl_hold.extended
+    reason: "工艺缸动作要求夹紧保持"
+
+safety: cyl_work.extended conflicts_with cyl_hold.retracted
+    reason: "同一约束的另一种写法：工作时夹紧不能缩回"
+
+causality: Y0 -> valve_hold -> cyl_hold -> sensor_hold_ext
+causality: Y1 -> valve_work -> cyl_work -> sensor_work_ext
+
+[tasks]
+
+task cycle:
+    step hold:
+        action: extend cyl_hold
+        wait: sensor_hold_ext == true
+        timeout: 1200ms -> goto fault_handler
+    step work:
+        action: extend cyl_work
+        wait: sensor_work_ext == true
+        timeout: 1200ms -> goto fault_handler
+    step back:
+        action: retract cyl_work
+        wait: sensor_work_ret == true
+        timeout: 1200ms -> goto fault_handler
+    step release:
+        action: retract cyl_hold
+        wait: sensor_hold_ret == true
+        timeout: 1200ms -> goto fault_handler
+    on_complete: goto ready
+
+task fault_handler:
+    step safe:
+        action: retract cyl_work
+        action: retract cyl_hold
+    step alarm:
+        action: log "fault: interlock violated or timeout"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+
