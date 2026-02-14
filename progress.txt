@@ -4,6 +4,7 @@
 - For `#![no_std]` crates that still want unit tests/doctests, add `#[cfg(test)] extern crate std;`.
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
+- Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
 - For human-friendly YAML parse errors, use `serde_path_to_error` so errors include a field path (e.g., `inputs[0].set.digital_inputs`).
 - `src/runtime_bridge.rs` builds `runtime-core::Program<'static>` by leaking boxed slices/strings (`Box::leak`) to keep the runtime API simple for now; treat this as OK for CLI/tests but avoid in long-lived processes.
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
@@ -111,4 +112,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `runtime-core::Runtime<'a>` ties its lifetime to the borrowed `Program`, so test helpers should avoid forcing `Runtime<'static>` unless you truly have a `'static` borrow.
   - Useful context (e.g., "the evaluation panel is in component X")
     - This bridge currently returns `Program<'static>` by leaking allocations (`Box::leak`) to avoid self-referential owned program plumbing; revisit if you need long-running processes.
+---
+
+## [2026-02-15 01:07:22 CST] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added deterministic waveform exports in `crates/sim`: VCD for digital inputs/outputs, plus CSV/JSONL exporters for analog output edges.
+  - Extended `rust_plc sim` to write `wave.vcd` and `analog.csv` alongside the trace (paths configurable via new flags).
+  - Added tests covering VCD contents (signal names + at least one edge) and CLI artifact generation.
+- Files changed
+  - `crates/sim/src/lib.rs`, `crates/sim/src/waveform.rs`, `src/main.rs`, `tests/sim_cli.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep waveform output deterministic: stable signal ordering + stable event sorting (time, then signal index) makes regression diffs reliable.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - If you derive output directories from `--out`, also ensure you `create_dir_all()` for each artifact path (trace/VCD/CSV) to avoid partial output failures.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `SimIo` now records digital input edges when scheduled changes are applied, which makes it possible to export DI waveforms without sampling every tick.
 ---

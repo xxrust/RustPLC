@@ -9,7 +9,7 @@ use rust_plc::verification::{VerificationSummary, verify_all};
 use serde::Serialize;
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use io_traits::{DigitalInputId, DigitalOutputId};
 use runtime_core::{Action, Instr, Program, Runtime, Step, StepId, Task};
@@ -125,17 +125,19 @@ fn main() {
 fn print_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!("  {program} <file.plc>");
-    eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>]");
+    eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>]");
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let Some(scenario_path) = args.next() else {
         return Err(format!(
-            "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>]"
+            "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>]"
         ));
     };
 
     let mut out_path: Option<String> = None;
+    let mut vcd_out_path: Option<String> = None;
+    let mut analog_out_path: Option<String> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => {
@@ -143,9 +145,19 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
                     "Missing value for --out <trace.jsonl>".to_string()
                 })?);
             }
+            "--vcd-out" => {
+                vcd_out_path = Some(args.next().ok_or_else(|| {
+                    "Missing value for --vcd-out <wave.vcd>".to_string()
+                })?);
+            }
+            "--analog-out" => {
+                analog_out_path = Some(args.next().ok_or_else(|| {
+                    "Missing value for --analog-out <analog.csv>".to_string()
+                })?);
+            }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>]"
+                    "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>]"
                 ));
             }
             other => {
@@ -165,12 +177,35 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
         .apply_to_simio(&mut io)
         .map_err(|err| format!("Failed to apply scenario to SimIo: {err}"))?;
 
-    let out_path = out_path.unwrap_or_else(|| "out/trace.jsonl".to_string());
-    let out_path = Path::new(&out_path);
-    if let Some(parent) = out_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .map_err(|err| format!("Failed to create output directory {parent:?}: {err}"))?;
+    let out_path = out_path.map(PathBuf::from);
+    let base_dir = out_path
+        .as_deref()
+        .and_then(|p| p.parent())
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            if out_path.is_some() {
+                PathBuf::from(".")
+            } else {
+                PathBuf::from("out")
+            }
+        });
+
+    let out_path = out_path.unwrap_or_else(|| base_dir.join("trace.jsonl"));
+    let vcd_out_path = vcd_out_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| base_dir.join("wave.vcd"));
+    let analog_out_path = analog_out_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| base_dir.join("analog.csv"));
+
+    for p in [&out_path, &vcd_out_path, &analog_out_path] {
+        if let Some(parent) = p.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent).map_err(|err| {
+                    format!("Failed to create output directory {parent:?}: {err}")
+                })?;
+            }
         }
     }
 
@@ -185,8 +220,16 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
         }
     }
 
-    fs::write(out_path, trace.into_string())
+    fs::write(&out_path, trace.into_string())
         .map_err(|err| format!("Failed to write trace file {out_path:?}: {err}"))?;
+
+    let vcd = sim::export_vcd_digital(&io, scenario.tick_ms);
+    fs::write(&vcd_out_path, vcd)
+        .map_err(|err| format!("Failed to write VCD file {vcd_out_path:?}: {err}"))?;
+
+    let analog_csv = sim::export_analog_outputs_csv(&io, scenario.tick_ms);
+    fs::write(&analog_out_path, analog_csv)
+        .map_err(|err| format!("Failed to write analog CSV file {analog_out_path:?}: {err}"))?;
 
     Ok(())
 }

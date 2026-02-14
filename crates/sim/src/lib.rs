@@ -9,7 +9,9 @@ use runtime_core::{TraceEvent, TransitionReason};
 use serde::Serialize;
 
 mod scenario;
+mod waveform;
 pub use scenario::{Scenario, ScenarioError, InputEvent, InputSet};
+pub use waveform::{export_analog_outputs_csv, export_analog_outputs_jsonl, export_vcd_digital};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DigitalEdge {
@@ -23,6 +25,13 @@ pub struct AnalogEdge {
     pub tick: Tick,
     pub id: AnalogOutputId,
     pub value: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DigitalInputEdge {
+    pub tick: Tick,
+    pub id: DigitalInputId,
+    pub value: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -53,6 +62,7 @@ pub struct SimIo {
 
     digital_edges: Vec<DigitalEdge>,
     analog_edges: Vec<AnalogEdge>,
+    digital_input_edges: Vec<DigitalInputEdge>,
 }
 
 impl SimIo {
@@ -71,6 +81,7 @@ impl SimIo {
             scheduled: BTreeMap::new(),
             digital_edges: Vec::new(),
             analog_edges: Vec::new(),
+            digital_input_edges: Vec::new(),
         };
         s.apply_scheduled_for_current_tick();
         s
@@ -110,8 +121,24 @@ impl SimIo {
         &self.digital_edges
     }
 
+    pub fn digital_input_edges(&self) -> &[DigitalInputEdge] {
+        &self.digital_input_edges
+    }
+
     pub fn analog_output_edges(&self) -> &[AnalogEdge] {
         &self.analog_edges
+    }
+
+    pub fn num_digital_inputs(&self) -> usize {
+        self.di.len()
+    }
+
+    pub fn num_digital_outputs(&self) -> usize {
+        self.do_.len()
+    }
+
+    pub fn num_analog_outputs(&self) -> usize {
+        self.ao.len()
     }
 
     fn apply_scheduled_for_current_tick(&mut self) {
@@ -121,8 +148,17 @@ impl SimIo {
         for c in changes {
             match *c {
                 InputChange::Digital { id, value } => {
-                    if let Some(slot) = self.di.get_mut(id.0 as usize) {
+                    let idx = id.0 as usize;
+                    if let Some(slot) = self.di.get_mut(idx) {
+                        let prev = *slot;
                         *slot = value;
+                        if prev != value {
+                            self.digital_input_edges.push(DigitalInputEdge {
+                                tick: self.tick,
+                                id,
+                                value,
+                            });
+                        }
                     }
                 }
                 InputChange::Analog { id, value } => {

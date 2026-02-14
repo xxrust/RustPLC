@@ -2,7 +2,7 @@ use std::fs;
 use std::process::Command;
 
 #[test]
-fn cli_sim_writes_a_non_empty_jsonl_trace_file() {
+fn cli_sim_writes_trace_and_waveforms() {
     let base = std::env::temp_dir().join(format!(
         "rust_plc_sim_test_{}_{}",
         std::process::id(),
@@ -15,6 +15,8 @@ fn cli_sim_writes_a_non_empty_jsonl_trace_file() {
 
     let scenario_path = base.join("scenario.yaml");
     let out_path = base.join("trace.jsonl");
+    let vcd_out_path = base.join("wave.vcd");
+    let analog_out_path = base.join("analog.csv");
 
     // Tick 0: DI0 false; tick 1: DI0 true -> program unblocks and emits trace events.
     let yaml = r#"
@@ -33,6 +35,10 @@ inputs:
         .arg(&scenario_path)
         .arg("--out")
         .arg(&out_path)
+        .arg("--vcd-out")
+        .arg(&vcd_out_path)
+        .arg("--analog-out")
+        .arg(&analog_out_path)
         .output()
         .expect("should run rust_plc sim");
 
@@ -53,5 +59,18 @@ inputs:
     assert!(v.get("from_step").is_some());
     assert!(v.get("to_step").is_some());
     assert!(v.get("reason").is_some());
-}
 
+    let vcd = fs::read_to_string(&vcd_out_path).expect("read vcd");
+    assert!(vcd.contains("di0"));
+    assert!(vcd.contains("do0"));
+    assert!(
+        vcd.contains("1\""),
+        "expected at least one edge on do0 in VCD, got:\n{vcd}"
+    );
+
+    let analog_csv = fs::read_to_string(&analog_out_path).expect("read analog csv");
+    assert!(
+        analog_csv.starts_with("time_ms,tick,ao_id,value"),
+        "analog csv should at least have a header, got:\n{analog_csv}"
+    );
+}
