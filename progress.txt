@@ -6,6 +6,7 @@
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
 - For human-friendly YAML parse errors, use `serde_path_to_error` so errors include a field path (e.g., `inputs[0].set.digital_inputs`).
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
+- CLI integration tests in this repo should invoke the compiled binary via `env!("CARGO_BIN_EXE_rust_plc")` and verify artifacts on disk.
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
@@ -76,4 +77,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - If `at_ms` is not aligned to `tick_ms`, you must choose rounding semantics; this implementation validates alignment to avoid silent shifts.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `Scenario::apply_to_simio()` schedules tick-based changes so they follow `SimIo` semantics (changes at tick N are visible during tick N evaluation).
+---
+
+## [2026-02-15 00:39:12 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended the root `rust_plc` CLI to support a `sim` subcommand while keeping the original `rust_plc <file.plc>` behavior unchanged.
+  - Implemented `rust_plc sim <scenario.yaml> [--out <trace.jsonl>]` to run a tiny `runtime-core` Program with `sim::SimIo` and write a JSONL trace (via `sim::JsonlTraceRecorder`).
+  - Added an integration test that runs the compiled `rust_plc` binary and asserts the trace file exists and is non-empty.
+- Files changed
+  - `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `tests/sim_cli.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Integration tests can run the compiled CLI via `env!("CARGO_BIN_EXE_rust_plc")` and validate file outputs without adding extra test deps.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - When the root is both `[package]` and `[workspace]`, remember to run `cargo test --workspace` so member-crate tests are included.
 ---

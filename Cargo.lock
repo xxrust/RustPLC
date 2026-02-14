@@ -355,11 +355,14 @@ dependencies = [
 name = "rust_plc"
 version = "0.1.0"
 dependencies = [
+ "io-traits",
  "pest",
  "pest_derive",
  "petgraph",
+ "runtime-core",
  "serde",
  "serde_json",
+ "sim",
  "thiserror",
  "z3",
 ]
