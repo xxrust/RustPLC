@@ -2,7 +2,7 @@ use core::fmt;
 use std::collections::BTreeMap;
 
 use io_traits::{AnalogInputId, DigitalInputId, Tick};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::SimIo;
 
@@ -42,6 +42,10 @@ pub struct Scenario {
     /// Scripted input changes over time.
     #[serde(default)]
     pub inputs: Vec<InputEvent>,
+
+    /// Scripted fault injections over time.
+    #[serde(default)]
+    pub faults: Vec<FaultEvent>,
 }
 
 impl Scenario {
@@ -98,6 +102,27 @@ impl Scenario {
             let tick = ev.at_ms / self.tick_ms;
             ev.set.apply(io, Tick(tick));
         }
+
+        for (idx, fault) in self.faults.iter().enumerate() {
+            let (at_ms, path_prefix) = (fault.at_ms(), format!("faults[{idx}]"));
+            if at_ms >= self.duration_ms && self.duration_ms != 0 {
+                return Err(ScenarioError::Validation {
+                    path: format!("{path_prefix}.at_ms"),
+                    message: format!("must be < duration_ms ({})", self.duration_ms),
+                });
+            }
+            if at_ms % self.tick_ms != 0 {
+                return Err(ScenarioError::Validation {
+                    path: format!("{path_prefix}.at_ms"),
+                    message: format!(
+                        "must be aligned to tick_ms ({}); got {}",
+                        self.tick_ms, at_ms
+                    ),
+                });
+            }
+            let tick = at_ms / self.tick_ms;
+            fault.apply(io, Tick(tick));
+        }
         Ok(())
     }
 
@@ -137,6 +162,29 @@ impl InputSet {
             io.schedule_analog_input(tick, AnalogInputId(*id), *value);
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct FaultEvent {
+    pub sensor_stuck: SensorStuckFault,
+}
+
+impl FaultEvent {
+    fn at_ms(&self) -> u64 {
+        self.sensor_stuck.at_ms
+    }
+
+    fn apply(&self, io: &mut SimIo, tick: Tick) {
+        io.schedule_sensor_stuck(tick, DigitalInputId(self.sensor_stuck.target), self.sensor_stuck.value);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SensorStuckFault {
+    pub at_ms: u64,
+    /// Digital input id (e.g. `0` for DI0).
+    pub target: u16,
+    pub value: bool,
 }
 
 #[cfg(test)]
@@ -222,5 +270,30 @@ inputs:
         assert_eq!(e1[0].id, DigitalOutputId(0));
         assert_eq!(e1[0].value, true);
     }
-}
 
+    #[test]
+    fn scenario_yaml_parses_sensor_stuck_faults() {
+        let yaml = r#"
+seed: 42
+tick_ms: 10
+duration_ms: 30
+inputs:
+  - at_ms: 10
+    set:
+      digital_inputs:
+        0: true
+faults:
+  - sensor_stuck:
+      at_ms: 0
+      target: 0
+      value: false
+"#;
+
+        let scenario = Scenario::from_yaml_str(yaml).unwrap();
+        assert_eq!(scenario.seed, Some(42));
+        assert_eq!(scenario.tick_ms, 10);
+        assert_eq!(scenario.duration_ms, 30);
+        assert_eq!(scenario.inputs.len(), 1);
+        assert_eq!(scenario.faults.len(), 1);
+    }
+}

@@ -7,11 +7,28 @@
 - For `crates/sim` plant-style dynamics, keep the plant as a deterministic tick-step that *returns* input updates, and call it from `SimIo::advance_tick()` (after applying scenario inputs) to avoid borrow-checker pitfalls with `&mut self` callbacks.
 - Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
 - For human-friendly YAML parse errors, use `serde_path_to_error` so errors include a field path (e.g., `inputs[0].set.digital_inputs`).
+- `serde_yaml` enum representations can be surprising (it expects YAML tags like `!Variant`); for author-friendly scenario files prefer struct-shaped keys like `faults: - sensor_stuck: { at_ms, target, value }`.
 - `src/runtime_bridge.rs` builds `runtime-core::Program<'static>` by leaking boxed slices/strings (`Box::leak`) to keep the runtime API simple for now; treat this as OK for CLI/tests but avoid in long-lived processes.
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
 - CLI integration tests in this repo should invoke the compiled binary via `env!("CARGO_BIN_EXE_rust_plc")` and verify artifacts on disk.
 
 Started: Sat Feb 14 23:50:11 CST 2026
+---
+## [2026-02-15 01:34:30 CST] - US-009
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended scenario YAML to support `faults` with `sensor_stuck` (target/value/at_ms) and applied it via `SimIo::schedule_sensor_stuck`.
+  - Added `sim` report generation (`SimReport`) that records the first timeout as a structured failure (kind/message/at_ms/task/step) and includes seed + scenario summary.
+  - Updated `rust_plc sim` to write `report.json` (and added a CLI integration assertion), plus unit tests covering the stuck-sensor timeout case.
+- Files changed
+  - `crates/sim/src/lib.rs`, `crates/sim/src/scenario.rs`, `crates/sim/src/report.rs`, `crates/sim/src/runner.rs`, `src/main.rs`, `tests/sim_cli.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `serde_yaml` expects YAML tags for enums; for author-friendly config files, model "kinds" as explicit mapping keys (e.g., `sensor_stuck: { ... }`) instead of enums.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Apply faults after scenario inputs/plant updates for the tick so stuck values deterministically override normal behavior.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `sim::run_program_for_scenario()` is a convenient single entrypoint for CLI/tests to get both JSONL trace and `SimReport`.
 ---
 
 ## [2026-02-15 00:16:45 CST] - US-002

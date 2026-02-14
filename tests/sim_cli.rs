@@ -17,6 +17,7 @@ fn cli_sim_writes_trace_and_waveforms() {
     let out_path = base.join("trace.jsonl");
     let vcd_out_path = base.join("wave.vcd");
     let analog_out_path = base.join("analog.csv");
+    let report_out_path = base.join("report.json");
 
     // Tick 0: DI0 false; tick 1: DI0 true -> program unblocks and emits trace events.
     let yaml = r#"
@@ -39,6 +40,8 @@ inputs:
         .arg(&vcd_out_path)
         .arg("--analog-out")
         .arg(&analog_out_path)
+        .arg("--report-out")
+        .arg(&report_out_path)
         .output()
         .expect("should run rust_plc sim");
 
@@ -73,4 +76,9 @@ inputs:
         analog_csv.starts_with("time_ms,tick,ao_id,value"),
         "analog csv should at least have a header, got:\n{analog_csv}"
     );
+
+    let report = fs::read_to_string(&report_out_path).expect("read report json");
+    let v: serde_json::Value =
+        serde_json::from_str(&report).expect("report should be valid JSON");
+    assert!(v.get("scenario").is_some());
 }

@@ -11,9 +11,13 @@ use serde::Serialize;
 mod scenario;
 mod waveform;
 mod plant;
+mod report;
+mod runner;
 pub use scenario::{Scenario, ScenarioError, InputEvent, InputSet};
 pub use waveform::{export_analog_outputs_csv, export_analog_outputs_jsonl, export_vcd_digital};
 pub use plant::{Plant, SolenoidValveConfig, LimitKind, LimitSensorConfig, CylinderConfig};
+pub use report::{ScenarioSummary, SimFailure, SimReport};
+pub use runner::{run_program_for_scenario, SimRunError, SimRunOutput};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DigitalEdge {
@@ -42,6 +46,11 @@ pub enum InputChange {
     Analog { id: AnalogInputId, value: f32 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FaultChange {
+    SensorStuck { id: DigitalInputId, value: bool },
+}
+
 /// A simple deterministic in-memory `Io` implementation for SIL.
 ///
 /// - Inputs can be scheduled to change at specific ticks.
@@ -61,6 +70,8 @@ pub struct SimIo {
     ao: Vec<f32>,
 
     scheduled: BTreeMap<u64, Vec<InputChange>>,
+    scheduled_faults: BTreeMap<u64, Vec<FaultChange>>,
+    stuck_di: BTreeMap<u16, bool>,
 
     plant: Option<Plant>,
 
@@ -83,6 +94,8 @@ impl SimIo {
             ai: vec![0.0; num_analog_inputs],
             ao: vec![0.0; num_analog_outputs],
             scheduled: BTreeMap::new(),
+            scheduled_faults: BTreeMap::new(),
+            stuck_di: BTreeMap::new(),
             plant: None,
             digital_edges: Vec::new(),
             analog_edges: Vec::new(),
@@ -116,6 +129,16 @@ impl SimIo {
             .push(InputChange::Digital { id, value });
         if tick.0 == self.tick.0 {
             self.apply_scheduled_for_current_tick();
+        }
+    }
+
+    pub fn schedule_sensor_stuck(&mut self, tick: Tick, id: DigitalInputId, value: bool) {
+        self.scheduled_faults
+            .entry(tick.0)
+            .or_default()
+            .push(FaultChange::SensorStuck { id, value });
+        if tick.0 == self.tick.0 {
+            self.apply_faults_for_current_tick();
         }
     }
 
@@ -171,7 +194,23 @@ impl SimIo {
         }
     }
 
+    fn apply_faults_for_current_tick(&mut self) {
+        let Some(changes) = self.scheduled_faults.remove(&self.tick.0) else {
+            return;
+        };
+        for c in changes {
+            match c {
+                FaultChange::SensorStuck { id, value } => {
+                    self.stuck_di.insert(id.0, value);
+                    // Enforce the stuck value immediately (so it also affects tick-0).
+                    self.set_digital_input(id, value);
+                }
+            }
+        }
+    }
+
     fn set_digital_input(&mut self, id: DigitalInputId, value: bool) {
+        let value = self.stuck_di.get(&id.0).copied().unwrap_or(value);
         let idx = id.0 as usize;
         if let Some(slot) = self.di.get_mut(idx) {
             let prev = *slot;
@@ -209,9 +248,14 @@ impl Io for SimIo {
         self.apply_scheduled_for_current_tick();
         // Let the plant update sensor inputs for the new tick.
         self.apply_plant_for_current_tick(prev);
+        // Faults override any normal input updates for the tick.
+        self.apply_faults_for_current_tick();
     }
 
     fn read_digital_input(&self, id: DigitalInputId) -> bool {
+        if let Some(v) = self.stuck_di.get(&id.0) {
+            return *v;
+        }
         self.di.get(id.0 as usize).copied().unwrap_or(false)
     }
 

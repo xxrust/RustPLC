@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use io_traits::{DigitalInputId, DigitalOutputId};
-use runtime_core::{Action, Instr, Program, Runtime, Step, StepId, Task};
+use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 
 #[derive(Debug, Serialize)]
 struct IrBundle {
@@ -125,19 +125,20 @@ fn main() {
 fn print_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!("  {program} <file.plc>");
-    eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>]");
+    eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]");
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let Some(scenario_path) = args.next() else {
         return Err(format!(
-            "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>]"
+            "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
         ));
     };
 
     let mut out_path: Option<String> = None;
     let mut vcd_out_path: Option<String> = None;
     let mut analog_out_path: Option<String> = None;
+    let mut report_out_path: Option<String> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => {
@@ -155,9 +156,14 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
                     "Missing value for --analog-out <analog.csv>".to_string()
                 })?);
             }
+            "--report-out" => {
+                report_out_path = Some(args.next().ok_or_else(|| {
+                    "Missing value for --report-out <report.json>".to_string()
+                })?);
+            }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>]"
+                    "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
                 ));
             }
             other => {
@@ -171,11 +177,6 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
     })?;
     let scenario = sim::Scenario::from_yaml_str(&scenario_yaml)
         .map_err(|err| format!("Failed to parse scenario YAML: {err}"))?;
-
-    let mut io = sim::SimIo::new(1, 1, 0, 0);
-    scenario
-        .apply_to_simio(&mut io)
-        .map_err(|err| format!("Failed to apply scenario to SimIo: {err}"))?;
 
     let out_path = out_path.map(PathBuf::from);
     let base_dir = out_path
@@ -198,8 +199,11 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
     let analog_out_path = analog_out_path
         .map(PathBuf::from)
         .unwrap_or_else(|| base_dir.join("analog.csv"));
+    let report_out_path = report_out_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| base_dir.join("report.json"));
 
-    for p in [&out_path, &vcd_out_path, &analog_out_path] {
+    for p in [&out_path, &vcd_out_path, &analog_out_path, &report_out_path] {
         if let Some(parent) = p.parent() {
             if !parent.as_os_str().is_empty() {
                 fs::create_dir_all(parent).map_err(|err| {
@@ -209,18 +213,11 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
         }
     }
 
-    let mut rt = Runtime::new(&SIM_PROGRAM).map_err(|err| format!("Runtime init failed: {err:?}"))?;
-    let mut trace = sim::JsonlTraceRecorder::new();
-    for _ in 0..scenario.duration_ticks() {
-        rt.tick_with_trace(&mut io, |e| trace.record(e))
-            .map_err(|err| format!("Runtime tick failed: {err:?}"))?;
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let run = sim::run_program_for_scenario(&SIM_PROGRAM, &scenario, &mut io)
+        .map_err(|err| format!("Simulation failed: {err}"))?;
 
-        if is_halted(&rt) {
-            break;
-        }
-    }
-
-    fs::write(&out_path, trace.into_string())
+    fs::write(&out_path, run.trace.into_string())
         .map_err(|err| format!("Failed to write trace file {out_path:?}: {err}"))?;
 
     let vcd = sim::export_vcd_digital(&io, scenario.tick_ms);
@@ -231,18 +228,13 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
     fs::write(&analog_out_path, analog_csv)
         .map_err(|err| format!("Failed to write analog CSV file {analog_out_path:?}: {err}"))?;
 
-    Ok(())
-}
+    let mut report_json = serde_json::to_string_pretty(&run.report)
+        .map_err(|err| format!("Failed to serialize report JSON: {err}"))?;
+    report_json.push('\n');
+    fs::write(&report_out_path, report_json)
+        .map_err(|err| format!("Failed to write report file {report_out_path:?}: {err}"))?;
 
-fn is_halted(rt: &Runtime<'static>) -> bool {
-    let loc = rt.location();
-    let Ok(task) = SIM_PROGRAM.task(loc.task) else {
-        return false;
-    };
-    let Some(step) = task.step(loc.step) else {
-        return false;
-    };
-    matches!(step.instr, Instr::Halt)
+    Ok(())
 }
 
 fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
