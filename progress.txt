@@ -4,6 +4,7 @@
 - For `#![no_std]` crates that still want unit tests/doctests, add `#[cfg(test)] extern crate std;`.
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
+- For human-friendly YAML parse errors, use `serde_path_to_error` so errors include a field path (e.g., `inputs[0].set.digital_inputs`).
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
 
 Started: Sat Feb 14 23:50:11 CST 2026
@@ -58,4 +59,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - If you want a scripted input to be visible at tick 0, you must apply it at construction time (or before the first `Runtime::tick*()` call); later application happens on `advance_tick()`.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `JsonlTraceRecorder` records one JSON object per transition; use `into_string()` to write it as newline-terminated JSONL.
+---
+
+## [2026-02-15 00:30:56 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added YAML scenario parsing in `crates/sim` (`Scenario`: seed/tick_ms/duration_ms + inputs at_ms/set).
+  - Implemented deterministic ms->tick mapping + `Scenario::apply_to_simio()` to schedule scripted input changes onto `SimIo`.
+  - Added a unit test verifying scripted input timing and trace/output determinism (reproducible run-to-run).
+- Files changed
+  - `crates/sim/Cargo.toml`, `crates/sim/src/lib.rs`, `crates/sim/src/scenario.rs`, `Cargo.lock`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `serde_path_to_error` + `serde_yaml::Deserializer` yields YAML errors with a field path, which is good for scenario authoring UX.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - If `at_ms` is not aligned to `tick_ms`, you must choose rounding semantics; this implementation validates alignment to avoid silent shifts.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `Scenario::apply_to_simio()` schedules tick-based changes so they follow `SimIo` semantics (changes at tick N are visible during tick N evaluation).
 ---

@@ -8,6 +8,9 @@ use io_traits::{
 use runtime_core::{TraceEvent, TransitionReason};
 use serde::Serialize;
 
+mod scenario;
+pub use scenario::{Scenario, ScenarioError, InputEvent, InputSet};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DigitalEdge {
     pub tick: Tick,
@@ -385,4 +388,3 @@ mod tests {
         }
     }
 }
-
