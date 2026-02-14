@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use io_traits::{DigitalInputId, DigitalOutputId};
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
+use rust_plc::sim_regress::{run_sim_regress, SimRegressSummary};
 
 #[derive(Debug, Serialize)]
 struct IrBundle {
@@ -78,6 +79,13 @@ fn main() {
         }
         return;
     }
+    if first == "sim-regress" {
+        if let Err(msg) = run_sim_regress_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let path = first;
     if args.next().is_some() {
@@ -126,6 +134,7 @@ fn print_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!("  {program} <file.plc>");
     eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]");
+    eprintln!("  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]");
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -234,6 +243,92 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
     fs::write(&report_out_path, report_json)
         .map_err(|err| format!("Failed to write report file {report_out_path:?}: {err}"))?;
 
+    Ok(())
+}
+
+fn run_sim_regress_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let mut plc_dir: Option<PathBuf> = None;
+    let mut scenario_dir: Option<PathBuf> = None;
+    let mut artifacts_dir: Option<PathBuf> = None;
+    let mut summary_out: Option<PathBuf> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--plc-dir" => {
+                plc_dir = Some(PathBuf::from(
+                    args.next().ok_or_else(|| {
+                        "Missing value for --plc-dir <dir>".to_string()
+                    })?,
+                ));
+            }
+            "--scenario-dir" => {
+                scenario_dir = Some(PathBuf::from(
+                    args.next().ok_or_else(|| {
+                        "Missing value for --scenario-dir <dir>".to_string()
+                    })?,
+                ));
+            }
+            "--artifacts-dir" => {
+                artifacts_dir = Some(PathBuf::from(
+                    args.next().ok_or_else(|| {
+                        "Missing value for --artifacts-dir <dir>".to_string()
+                    })?,
+                ));
+            }
+            "--summary-out" => {
+                summary_out = Some(PathBuf::from(
+                    args.next().ok_or_else(|| {
+                        "Missing value for --summary-out <summary.json>".to_string()
+                    })?,
+                ));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]"
+                ));
+            }
+            other => {
+                return Err(format!("Unknown argument for sim-regress: {other}"));
+            }
+        }
+    }
+
+    let plc_dir = plc_dir.ok_or_else(|| {
+        format!(
+            "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]"
+        )
+    })?;
+    let scenario_dir = scenario_dir.ok_or_else(|| {
+        format!(
+            "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]"
+        )
+    })?;
+
+    let artifacts_dir = artifacts_dir.unwrap_or_else(|| PathBuf::from("out/sim-regress"));
+    let summary_out = summary_out.unwrap_or_else(|| artifacts_dir.join("summary.json"));
+
+    if let Some(parent) = summary_out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!("Failed to create output directory {parent:?}: {err}")
+            })?;
+        }
+    }
+
+    let summary =
+        run_sim_regress(&plc_dir, &scenario_dir, &artifacts_dir).map_err(|e| format!("sim-regress failed: {e}"))?;
+    write_sim_regress_summary(&summary_out, &summary)?;
+    Ok(())
+}
+
+fn write_sim_regress_summary(path: &Path, summary: &SimRegressSummary) -> Result<(), String> {
+    let mut json = serde_json::to_string_pretty(summary)
+        .map_err(|err| format!("Failed to serialize summary JSON: {err}"))?;
+    json.push('\n');
+    fs::write(path, json).map_err(|err| format!("Failed to write summary file {path:?}: {err}"))?;
     Ok(())
 }
 

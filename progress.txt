@@ -11,9 +11,27 @@
 - `src/runtime_bridge.rs` builds `runtime-core::Program<'static>` by leaking boxed slices/strings (`Box::leak`) to keep the runtime API simple for now; treat this as OK for CLI/tests but avoid in long-lived processes.
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
 - CLI integration tests in this repo should invoke the compiled binary via `env!("CARGO_BIN_EXE_rust_plc")` and verify artifacts on disk.
+- Batch SIL regress runs live in `rust_plc::sim_regress`: it scans `.plc`/scenario YAMLs recursively, writes per-case `trace.jsonl`/`report.json` under `out/sim-regress/case_XXXX`, and emits a summary JSON.
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-15 01:46:15 CST] - US-010
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `sim-regress` subcommand that scans a PLC directory + scenario directory, runs all combinations via the existing compiler->runtime bridge, and writes a JSON summary (pass/fail counts + failures with repro params and artifact paths).
+  - Added `rust_plc::sim_regress::run_sim_regress()` as a reusable entrypoint; per-case artifacts include `trace.jsonl` + `report.json`.
+  - Added an integration test covering one pass + one timeout failure and asserting summary counts + failure list.
+- Files changed
+  - `src/sim_regress.rs`, `src/lib.rs`, `src/main.rs`, `tests/sim_regress.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For SIL batching, keep the directory scan + run loop deterministic by sorting paths and using stable `case_XXXX` artifact folders.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `SimIo` must be sized to cover the maximum I/O IDs referenced by both the bridged `Program` and the scenario input/fault scripts; otherwise reads default to `false` and can change behavior.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `sim::run_program_for_scenario()` already produces a `SimReport` with the first timeout captured as a structured failure; `sim-regress` just aggregates those reports.
+---
+
 ## [2026-02-15 01:34:30 CST] - US-009
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
