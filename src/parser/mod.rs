@@ -257,9 +257,10 @@ fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
                     Rule::identifier => device = Some(part.as_str().to_string()),
                     Rule::comparison_operator => operator = Some(parse_comparison_operator(part)?),
                     Rule::number => {
-                        value = Some(part.as_str().parse::<f64>().map_err(|_| {
-                            PlcError::parse(line, "analog_condition 数值解析失败")
-                        })?);
+                        value =
+                            Some(part.as_str().parse::<f64>().map_err(|_| {
+                                PlcError::parse(line, "analog_condition 数值解析失败")
+                            })?);
                     }
                     _ => {}
                 }
@@ -269,8 +270,7 @@ fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
                     .ok_or_else(|| PlcError::parse(line, "analog_condition 缺少设备名"))?,
                 operator: operator
                     .ok_or_else(|| PlcError::parse(line, "analog_condition 缺少比较符"))?,
-                value: value
-                    .ok_or_else(|| PlcError::parse(line, "analog_condition 缺少阈值"))?,
+                value: value.ok_or_else(|| PlcError::parse(line, "analog_condition 缺少阈值"))?,
             })
         }
         Rule::state_reference => Ok(SafetyOperand::State(parse_state_reference(inner)?)),
@@ -991,7 +991,10 @@ fn parse_range_value(pair: Pair<Rule>) -> Result<crate::ast::AnalogRange, PlcErr
     } else {
         Err(PlcError::parse(
             line,
-            format!("属性 range 需要范围值（如 0..100），实际为: {:?}", pair.as_rule()),
+            format!(
+                "属性 range 需要范围值（如 0..100），实际为: {:?}",
+                pair.as_rule()
+            ),
         ))
     }
 }

@@ -1,6 +1,6 @@
 use crate::ast::{
-    ActionStatement, BinaryValue, ComparisonOperator, ConditionExpression, DeviceType, LiteralValue,
-    PlcProgram, StepStatement, WaitCondition, WaitStatement,
+    ActionStatement, BinaryValue, ComparisonOperator, ConditionExpression, DeviceType,
+    LiteralValue, PlcProgram, StepStatement, WaitCondition, WaitStatement,
 };
 use crate::ir::{ConstraintSet, DeviceKind, TopologyGraph};
 use petgraph::algo::has_path_connecting;

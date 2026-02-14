@@ -645,3 +645,82 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - Analog-input waits without declared causality chains are treated like sensor waits unless `external: true` is set.
 ---
+---
+## [2026-02-14 11:00:32 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added analog region abstraction for Safety BMC: compute regions from thresholds, waits, and set_analog values; map analog devices to region states.
+  - Expanded safety rule binding to map threshold expressions onto region-state sets and evaluate overlaps instead of skipping analog rules.
+  - Mapped set_analog actions to region states and expanded transitions to cover analog_input region possibilities.
+  - Added safety tests for analog threshold conflicts, set_analog region mapping, and updated the analog threshold fixture to remain verifiable.
+- Files changed
+  - `src/verification/safety.rs`
+  - `.codex/skills/plc-gen/fixtures/valid/11_analog_threshold_wait.plc`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Safety BMC can model analog thresholds by mapping expressions onto region-state sets and checking set intersections during search.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Introducing analog region states can change existing safety fixtures; update fixtures or expectations to keep validation green.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Analog inputs are now expanded as region assignments during transition expansion, so conflicts can surface without explicit set_analog actions.
+---
+## [2026-02-14 23:31:20 CST] - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Bound analog threshold safety rules to region-state sets (instead of silently skipping), so Safety BMC actually checks analog constraints.
+  - Ensured warnings are only emitted when a threshold rule cannot be modeled (e.g., missing range/regions).
+  - Kept unit tests covering both analog threshold conflict and pass cases green.
+- Files changed
+  - `src/verification/safety.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Threshold rules become checkable once both sides are represented as sets of discrete region states and the verifier checks set membership/intersections.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - If a device has no computed regions (e.g., missing range), threshold binding should fail fast so US-001 warnings/level downgrade remain accurate.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - This story largely builds on the region abstraction introduced in US-005; binding is a small but crucial step to avoid silent ignore.
+---
+## [2026-02-14 23:31:50 CST] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Updated semantic wait guard rendering so analog waits are converted into discrete region predicates (e.g., `AI0 in {region_1, region_2}`) to match the analog region abstraction.
+  - Added tests:
+    - Semantic test asserts analog wait transitions use `region_`-based guard expressions.
+    - Liveness tests ensure analog waits without timeout still trigger the same liveness warning behavior, and with timeout pass.
+  - Fixed an unrelated test warning by removing an unused import.
+- Files changed
+  - `src/semantic/mod.rs`
+  - `src/verification/liveness.rs`
+  - `tests/verification_capability.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - State-machine guard expressions are treated as strings by verifiers; keeping them aligned with discrete modeling improves explainability without requiring verifier changes.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - `build_state_machine_from_ast` lacks topology context; keep it as a compatibility wrapper and apply analog-specific rendering in `build_state_machine(program)`.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Region partitioning for waits reuses the same threshold collection approach (from safety constraints + wait conditions) so guard text remains consistent across checks.
+---
+## [2026-02-14 23:36:20 CST] - US-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Updated `examples/analog_pressure_demo.plc` to demonstrate `external: true` on an analog_input and an analog wait threshold (`wait: AI0 > 80`).
+  - Updated `README.md` to document `external: true` (external inputs vs feedback sensors) and the analog wait threshold/discrete region predicate behavior.
+  - Verified integration tests still compile and verify the updated example.
+- Files changed
+  - `examples/analog_pressure_demo.plc`
+  - `README.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Marking raw analog channels as `external: true` avoids causality false positives when the physical process chain is not explicitly modeled in topology.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - If an example switches from discrete `sensor` waits to raw analog waits, keep `timeout` branches to satisfy liveness.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `tests/examples_integration.rs` already covers `analog_pressure_demo.plc`, so documentation/example updates are quickly regression-checked by `cargo test`.

@@ -1,6 +1,6 @@
 # ============================================================
 # 液压站比例阀压力控制示例
-# 演示 analog_input / analog_output / set_analog / 阈值比较
+# 演示 analog_input / analog_output / set_analog / 阈值比较 + external 输入标记
 # ============================================================
 
 [topology]
@@ -10,7 +10,7 @@ device Y0: digital_output               # 比例阀数字控制
 device X0: digital_input                 # 启动按钮输入
 
 # ===== 模拟量 I/O =====
-device AI0: analog_input  { range: 0..100, unit: "bar" }
+device AI0: analog_input  { range: 0..100, unit: "bar", external: true }
 device AO0: analog_output { range: 0..10, ramp_time: 500ms }
 
 # ===== 执行器与传感器 =====
@@ -48,7 +48,7 @@ task main:
 
     step open_valve:
         action: set prop_valve on
-        wait: pressure_sensor == true
+        wait: AI0 > 80
         timeout: 5000ms -> goto fault
 
     step hold_pressure:

@@ -253,11 +253,7 @@ impl TimingContext {
             ActionStatement::SetAnalog { target, value } => {
                 let profile = self.profiles.get(target)?;
                 let own = profile.ramp_ms.or(profile.response_ms)?;
-                (
-                    target.as_str(),
-                    format!("set_analog {target} {value}"),
-                    own,
-                )
+                (target.as_str(), format!("set_analog {target} {value}"), own)
             }
             ActionStatement::Log { .. } => return None,
         };

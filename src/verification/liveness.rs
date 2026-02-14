@@ -598,6 +598,66 @@ task ready:
     }
 
     #[test]
+    fn fails_for_analog_wait_without_timeout() {
+        let source = r#"
+[topology]
+
+device AI0: analog_input { range: 0..10 }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_pressure:
+        wait: AI0 > 5
+    step done:
+        action: log "done"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        let errors =
+            verify_liveness(&program, &state_machine).expect_err("模拟量 wait 无 timeout 时应报错");
+
+        assert!(
+            errors.iter().any(|error| error.to_string().contains("AI0")
+                && error.to_string().contains("缺少 timeout")),
+            "错误应包含模拟量 wait 条件文本"
+        );
+    }
+
+    #[test]
+    fn accepts_analog_wait_with_timeout() {
+        let source = r#"
+[topology]
+
+device AI0: analog_input { range: 0..10 }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_pressure:
+        wait: AI0 > 5
+        timeout: 100ms -> goto fault
+    step done:
+        action: log "done"
+
+task fault:
+    step alarm:
+        action: log "fault"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        verify_liveness(&program, &state_machine).expect("带 timeout 的模拟量 wait 应通过活性检查");
+    }
+
+    #[test]
     fn accepts_on_complete_goto_cycle_as_non_deadlock() {
         let source = r#"
 [topology]

@@ -226,7 +226,8 @@ pub fn build_topology_graph(program: &PlcProgram) -> Result<TopologyGraph, Vec<P
 
 pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
-    build_state_machine_from_ast(&expanded.tasks)
+    let wait_ctx = WaitExpressionContext::for_program(&expanded);
+    build_state_machine_from_ast_with_context(&expanded.tasks, &wait_ctx)
 }
 
 pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<PlcError>> {
@@ -237,6 +238,124 @@ pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<P
 pub fn build_timing_model(program: &PlcProgram) -> Result<TimingModel, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
     build_timing_model_from_ast(&expanded.topology, &expanded.tasks)
+}
+
+#[derive(Debug, Clone, Default)]
+struct WaitExpressionContext {
+    analog_input_regions: HashMap<String, Vec<(f64, f64)>>,
+}
+
+impl WaitExpressionContext {
+    fn for_program(program: &PlcProgram) -> Self {
+        Self {
+            analog_input_regions: compute_analog_input_regions(program),
+        }
+    }
+}
+
+fn compute_analog_input_regions(program: &PlcProgram) -> HashMap<String, Vec<(f64, f64)>> {
+    let mut values_by_device: HashMap<String, Vec<f64>> = HashMap::new();
+
+    for constraint in &program.constraints.safety {
+        for operand in [&constraint.left, &constraint.right] {
+            if let SafetyOperand::Threshold { device, value, .. } = operand {
+                values_by_device
+                    .entry(device.clone())
+                    .or_default()
+                    .push(*value);
+            }
+        }
+    }
+
+    for task in &program.tasks.tasks {
+        for step in &task.steps {
+            collect_threshold_values_from_statements(&step.statements, &mut values_by_device);
+        }
+    }
+
+    let mut regions_by_device = HashMap::new();
+    for device in &program.topology.devices {
+        if !matches!(device.device_type, DeviceType::AnalogInput) {
+            continue;
+        }
+
+        let Some(range) = &device.attributes.range else {
+            continue;
+        };
+
+        let (min, max) = if range.min <= range.max {
+            (range.min, range.max)
+        } else {
+            (range.max, range.min)
+        };
+
+        let mut bounds = vec![min, max];
+        if let Some(values) = values_by_device.get(&device.name) {
+            for value in values {
+                if *value >= min && *value <= max {
+                    bounds.push(*value);
+                }
+            }
+        }
+
+        bounds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        bounds.dedup_by(|a, b| (*a - *b).abs() <= f64::EPSILON);
+
+        let mut regions = Vec::new();
+        for window in bounds.windows(2) {
+            regions.push((window[0], window[1]));
+        }
+        if regions.is_empty() {
+            regions.push((min, max));
+        }
+
+        regions_by_device.insert(device.name.clone(), regions);
+    }
+
+    regions_by_device
+}
+
+fn collect_threshold_values_from_statements(
+    statements: &[StepStatement],
+    values_by_device: &mut HashMap<String, Vec<f64>>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Wait(wait) => {
+                let terms: Vec<&ConditionExpression> = match &wait.condition {
+                    WaitCondition::Single(condition) => vec![condition],
+                    WaitCondition::And(conditions) | WaitCondition::Or(conditions) => {
+                        conditions.iter().collect()
+                    }
+                };
+
+                for condition in terms {
+                    if let LiteralValue::Number(value) = &condition.right {
+                        if let Some(device_name) = wait_operand_device_name(&condition.left) {
+                            values_by_device
+                                .entry(device_name.to_string())
+                                .or_default()
+                                .push(*value);
+                        }
+                    }
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                collect_threshold_values_from_statements(body, values_by_device);
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    collect_threshold_values_from_statements(&branch.statements, values_by_device);
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    collect_threshold_values_from_statements(&branch.statements, values_by_device);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGraph, Vec<PlcError>> {
@@ -261,10 +380,7 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
         {
             errors.push(PlcError::semantic_with_reason(
                 device.line,
-                format!(
-                    "模拟量设备 {} 必须声明 range 属性",
-                    device.name
-                ),
+                format!("模拟量设备 {} 必须声明 range 属性", device.name),
                 "请添加 range: min..max 属性，例如 range: 0..100",
             ));
         }
@@ -453,6 +569,13 @@ pub fn build_timing_model_from_ast(
 }
 
 pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine, Vec<PlcError>> {
+    build_state_machine_from_ast_with_context(tasks, &WaitExpressionContext::default())
+}
+
+fn build_state_machine_from_ast_with_context(
+    tasks: &TasksSection,
+    wait_ctx: &WaitExpressionContext,
+) -> Result<StateMachine, Vec<PlcError>> {
     let mut builder = StateMachineBuilder::default();
     let mut errors = Vec::new();
 
@@ -530,7 +653,7 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
             let completion_target =
                 completion_target_for_step(task, step_index, &task_on_complete_targets);
 
-            let analyzed = analyze_statements(&step.statements);
+            let analyzed = analyze_statements(&step.statements, wait_ctx);
 
             for (block_index, block) in analyzed.parallel_blocks.iter().enumerate() {
                 build_parallel_block(
@@ -545,6 +668,7 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
                     &task_defined_steps,
                     &mut errors,
                     analyzed.actions.clone(),
+                    wait_ctx,
                 );
             }
 
@@ -561,6 +685,7 @@ pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine
                     &task_defined_steps,
                     &mut errors,
                     analyzed.actions.clone(),
+                    wait_ctx,
                 );
             }
 
@@ -994,9 +1119,7 @@ fn validate_analog_actions_in_statements(
                     if *value < *min || *value > *max {
                         errors.push(PlcError::semantic_with_reason(
                             line,
-                            format!(
-                                "set_analog {target} {value} 超出声明范围 {min}..{max}",
-                            ),
+                            format!("set_analog {target} {value} 超出声明范围 {min}..{max}",),
                             "请确保 set_analog 值在设备声明的 range 范围内",
                         ));
                     }
@@ -1016,19 +1139,33 @@ fn validate_analog_actions_in_statements(
                 }
             }
             StepStatement::Repeat { body, .. } => {
-                validate_analog_actions_in_statements(body, line, device_kinds, device_ranges, errors);
+                validate_analog_actions_in_statements(
+                    body,
+                    line,
+                    device_kinds,
+                    device_ranges,
+                    errors,
+                );
             }
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
                     validate_analog_actions_in_statements(
-                        &branch.statements, line, device_kinds, device_ranges, errors,
+                        &branch.statements,
+                        line,
+                        device_kinds,
+                        device_ranges,
+                        errors,
                     );
                 }
             }
             StepStatement::Race(block) => {
                 for branch in &block.branches {
                     validate_analog_actions_in_statements(
-                        &branch.statements, line, device_kinds, device_ranges, errors,
+                        &branch.statements,
+                        line,
+                        device_kinds,
+                        device_ranges,
+                        errors,
                     );
                 }
             }
@@ -1144,11 +1281,7 @@ fn validate_wait_operand_device(
 }
 
 fn wait_operand_device_name(operand: &str) -> Option<&str> {
-    let candidate = operand
-        .split('.')
-        .next()
-        .unwrap_or(operand)
-        .trim();
+    let candidate = operand.split('.').next().unwrap_or(operand).trim();
 
     if candidate.is_empty() {
         None
@@ -1177,9 +1310,7 @@ fn validate_safety_operand(
         SafetyOperand::State(state_ref) => {
             validate_state_reference(state_ref, line, source, device_kinds, known_states, errors);
         }
-        SafetyOperand::Threshold {
-            device, value, ..
-        } => {
+        SafetyOperand::Threshold { device, value, .. } => {
             validate_device_reference(device, line, source, device_kinds, errors);
             validate_analog_threshold_comparison(
                 device,
@@ -1358,9 +1489,7 @@ fn action_to_timing(
         ActionStatement::Extend { target } => (ActionKind::Extend, Some(target.as_str())),
         ActionStatement::Retract { target } => (ActionKind::Retract, Some(target.as_str())),
         ActionStatement::Set { target, .. } => (ActionKind::Set, Some(target.as_str())),
-        ActionStatement::SetAnalog { target, .. } => {
-            (ActionKind::SetAnalog, Some(target.as_str()))
-        }
+        ActionStatement::SetAnalog { target, .. } => (ActionKind::SetAnalog, Some(target.as_str())),
         ActionStatement::Log { .. } => (ActionKind::Log, None),
     };
 
@@ -1469,7 +1598,10 @@ fn completion_target_for_step(
         .unwrap_or(None)
 }
 
-fn analyze_statements(statements: &[StepStatement]) -> AnalyzedStatements {
+fn analyze_statements(
+    statements: &[StepStatement],
+    wait_ctx: &WaitExpressionContext,
+) -> AnalyzedStatements {
     let mut analyzed = AnalyzedStatements::default();
 
     for statement in statements {
@@ -1478,7 +1610,9 @@ fn analyze_statements(statements: &[StepStatement]) -> AnalyzedStatements {
                 analyzed.actions.push(action_to_transition_action(action));
             }
             StepStatement::Wait(wait) => {
-                analyzed.waits.push(wait_to_guard_expression(wait));
+                analyzed
+                    .waits
+                    .push(wait_to_guard_expression(wait, wait_ctx));
             }
             StepStatement::IfElse {
                 condition,
@@ -1514,6 +1648,7 @@ fn build_parallel_block(
     task_defined_steps: &HashMap<String, HashSet<String>>,
     errors: &mut Vec<PlcError>,
     parent_actions: Vec<TransitionAction>,
+    wait_ctx: &WaitExpressionContext,
 ) {
     let fork_state_name = format!("{step_name}__parallel_{}_fork", block_index + 1);
     let join_state_name = format!("{step_name}__parallel_{}_join", block_index + 1);
@@ -1545,12 +1680,16 @@ fn build_parallel_block(
             Vec::new(),
         );
 
-        let analyzed = analyze_statements(&branch.statements);
+        let analyzed = analyze_statements(&branch.statements, wait_ctx);
 
         for goto in &analyzed.gotos {
-            if let Some(target) =
-                resolve_task_target(goto, task_initial_states, task_defined_steps, errors, "goto")
-            {
+            if let Some(target) = resolve_task_target(
+                goto,
+                task_initial_states,
+                task_defined_steps,
+                errors,
+                "goto",
+            ) {
                 builder.add_transition(
                     branch_state.clone(),
                     target,
@@ -1684,6 +1823,7 @@ fn build_parallel_block(
                 task_defined_steps,
                 errors,
                 analyzed.actions.clone(),
+                wait_ctx,
             );
         }
 
@@ -1704,6 +1844,7 @@ fn build_parallel_block(
                 task_defined_steps,
                 errors,
                 analyzed.actions.clone(),
+                wait_ctx,
             );
         }
 
@@ -1747,6 +1888,7 @@ fn build_race_block(
     task_defined_steps: &HashMap<String, HashSet<String>>,
     errors: &mut Vec<PlcError>,
     parent_actions: Vec<TransitionAction>,
+    wait_ctx: &WaitExpressionContext,
 ) {
     let decision_state_name = format!("{step_name}__race_{}_decision", block_index + 1);
     let decision_state = builder.add_state(&task.name, &decision_state_name);
@@ -1775,7 +1917,7 @@ fn build_race_block(
             Vec::new(),
         );
 
-        let analyzed = analyze_statements(&branch.statements);
+        let analyzed = analyze_statements(&branch.statements, wait_ctx);
         let branch_completion_target = branch
             .then_goto
             .as_ref()
@@ -1791,9 +1933,13 @@ fn build_race_block(
             .or_else(|| completion_target.clone());
 
         for goto in &analyzed.gotos {
-            if let Some(target) =
-                resolve_task_target(goto, task_initial_states, task_defined_steps, errors, "goto")
-            {
+            if let Some(target) = resolve_task_target(
+                goto,
+                task_initial_states,
+                task_defined_steps,
+                errors,
+                "goto",
+            ) {
                 builder.add_transition(
                     branch_state.clone(),
                     target,
@@ -1931,6 +2077,7 @@ fn build_race_block(
                 task_defined_steps,
                 errors,
                 analyzed.actions.clone(),
+                wait_ctx,
             );
         }
 
@@ -1951,6 +2098,7 @@ fn build_race_block(
                 task_defined_steps,
                 errors,
                 analyzed.actions.clone(),
+                wait_ctx,
             );
         }
 
@@ -2056,24 +2204,94 @@ fn action_to_transition_action(action: &ActionStatement) -> TransitionAction {
     }
 }
 
-fn wait_to_guard_expression(wait: &WaitStatement) -> String {
-    wait_condition_to_expression(&wait.condition)
+fn wait_to_guard_expression(wait: &WaitStatement, wait_ctx: &WaitExpressionContext) -> String {
+    wait_condition_to_expression(&wait.condition, wait_ctx)
 }
 
-fn wait_condition_to_expression(condition: &WaitCondition) -> String {
+fn wait_condition_to_expression(
+    condition: &WaitCondition,
+    wait_ctx: &WaitExpressionContext,
+) -> String {
     match condition {
-        WaitCondition::Single(single) => condition_to_expression(single),
+        WaitCondition::Single(single) => wait_term_to_expression(single, wait_ctx),
         WaitCondition::And(conditions) => conditions
             .iter()
-            .map(condition_to_expression)
+            .map(|condition| wait_term_to_expression(condition, wait_ctx))
             .collect::<Vec<_>>()
             .join(" AND "),
         WaitCondition::Or(conditions) => conditions
             .iter()
-            .map(condition_to_expression)
+            .map(|condition| wait_term_to_expression(condition, wait_ctx))
             .collect::<Vec<_>>()
             .join(" OR "),
     }
+}
+
+fn analog_region_state_name(index: usize) -> String {
+    format!("region_{index}")
+}
+
+#[derive(Clone, Copy)]
+enum ComparisonOp {
+    Eq,
+    Neq,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+}
+
+fn comparison_op_from_ast(op: &ComparisonOperator) -> ComparisonOp {
+    match op {
+        ComparisonOperator::Eq => ComparisonOp::Eq,
+        ComparisonOperator::Neq => ComparisonOp::Neq,
+        ComparisonOperator::Gt => ComparisonOp::Gt,
+        ComparisonOperator::Lt => ComparisonOp::Lt,
+        ComparisonOperator::Gte => ComparisonOp::Gte,
+        ComparisonOperator::Lte => ComparisonOp::Lte,
+    }
+}
+
+fn region_intersects(op: ComparisonOp, value: f64, min: f64, max: f64) -> bool {
+    match op {
+        ComparisonOp::Eq => value >= min && value <= max,
+        ComparisonOp::Neq => !(min == max && value == min),
+        ComparisonOp::Gt => max > value,
+        ComparisonOp::Gte => max >= value,
+        ComparisonOp::Lt => min < value,
+        ComparisonOp::Lte => min <= value,
+    }
+}
+
+fn wait_term_to_expression(
+    condition: &ConditionExpression,
+    wait_ctx: &WaitExpressionContext,
+) -> String {
+    if let LiteralValue::Number(value) = &condition.right {
+        if let Some(device_name) = wait_operand_device_name(&condition.left) {
+            if let Some(regions) = wait_ctx.analog_input_regions.get(device_name) {
+                let op = comparison_op_from_ast(&condition.operator);
+                let mut matching = Vec::new();
+
+                for (index, (min, max)) in regions.iter().enumerate() {
+                    if region_intersects(op, *value, *min, *max) {
+                        matching.push(index);
+                    }
+                }
+
+                if !matching.is_empty() {
+                    let rendered = matching
+                        .into_iter()
+                        .map(analog_region_state_name)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return format!("{device_name} in {{{rendered}}}");
+                }
+            }
+        }
+    }
+
+    condition_to_expression(condition)
 }
 
 fn condition_to_expression(condition: &ConditionExpression) -> String {
@@ -2658,6 +2876,37 @@ task main:
             rendered.contains("期望 analog_input"),
             "应报告 wait 条件使用非 analog_input 设备"
         );
+    }
+
+    #[test]
+    fn maps_analog_wait_conditions_to_region_predicates() {
+        let input = r#"
+[topology]
+
+device AI0: analog_input { range: 0..10 }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_pressure:
+        wait: AI0 > 5
+    step done:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let state_machine = build_state_machine(&program).expect("应能构建状态机");
+
+        let has_region_guard = state_machine.transitions.iter().any(|transition| {
+            matches!(
+                transition.guard,
+                TransitionGuard::Condition { ref expression }
+                    if expression.contains("AI0") && expression.contains("region_")
+            )
+        });
+        assert!(has_region_guard, "模拟量 wait 应映射为 region 谓词表达式");
     }
 
     #[test]
