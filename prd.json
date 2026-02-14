@@ -1,21 +1,18 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/dsl-v2-enhancements",
-  "description": "DSL V2 语言增强 - 添加 delay、repeat、AND/OR wait、timing 修复、requires 验证、parallel 因果链修复、if/else、goto step、自定义设备状态",
+  "branchName": "ralph/sil-loop-rp2040-pico",
+  "description": "SIL 闭环优先：为 RustPLC 增加确定性运行时 + SimIO/场景回归/报告 + 可复现失败用例，并以 Raspberry Pi Pico（RP2040）作为首个 ARM 目标板做最小 no_std 落地。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "delay 原语 - 语法与解析",
-      "description": "作为 DSL 用户，我希望在 step 中编写 `delay: 2000ms`，以便无需变通方案即可表达定时等待。本故事添加语法规则、AST 节点和解析器支持。",
+      "title": "建立 Cargo workspace 并新增 io-traits crate",
+      "description": "作为开发者，我希望在保持现有编译器 crate 不迁移的前提下，引入 workspace 并新增独立的 I/O trait crate，为 SIL 与板级后端提供稳定接口。",
       "acceptanceCriteria": [
-        "在 plc.pest 语法中添加 `delay_statement` 规则：`delay_statement = { \"delay\" ~ \":\" ~ duration }`",
-        "在 ast/mod.rs 的 StepStatement 中添加 `Delay { duration_ms: u64 }` 变体",
-        "解析器将 delay_statement pest pair 转换为 AST Delay 节点",
-        "包含 `delay: 2000ms` 的 .plc 文件能正确解析为正确的 AST",
-        "包含 `delay: 0ms` 的 .plc 文件能正确解析（校验在语义阶段进行）",
-        "不含 delay 的现有 .plc 文件仍能正确解析",
-        "Tests pass",
-        "Typecheck passes"
+        "根目录 Cargo.toml 同时包含现有 [package] 与新增 [workspace]，workspace members 至少包含 crates/io-traits",
+        "新增 crates/io-traits crate，定义最小接口：读取 digital/analog input、写入 digital/analog output、获取/推进 tick（可用 trait/struct 表达）",
+        "新增 crates/io-traits 的单元测试或 doctest，展示 trait 的最小实现方式",
+        "Typecheck passes",
+        "cargo test passes"
       ],
       "priority": 1,
       "passes": true,
@@ -23,266 +20,155 @@
     },
     {
       "id": "US-002",
-      "title": "delay 原语 - 语义分析与 IR 生成",
-      "description": "作为编译器开发者，我需要将 delay 语句降级到 IR 状态机中，以便验证引擎能对其进行推理。delay: Nms 编译为内部不可满足守卫 + timeout=N，转移到下一个 step（而非 fault_handler）。",
+      "title": "新增 runtime-core crate：确定性 tick 执行器（最小可测试子集）",
+      "description": "作为开发者，我希望有一个与平台无关的确定性 runtime，能够在 tick 驱动下执行最小指令子集并产生可比对的 step 轨迹。",
       "acceptanceCriteria": [
-        "semantic/mod.rs 在 step 处理中处理 Delay AST 节点",
-        "Delay 生成状态机转移：不可满足守卫、timeout=N ms、目标=下一个 step",
-        "Delay step 标记一个标志，使 Liveness 检查器识别为有界等待（非死锁）",
-        "如果 delay 与 timeout 出现在同一 step 中，timeout 作为保护性上界",
-        "IR JSON 输出包含 delay 生成的转移及正确的时序信息",
-        "Tests pass",
-        "Typecheck passes"
+        "新增 crates/runtime-core crate，依赖 crates/io-traits",
+        "实现最小执行模型（可先硬编码 Program/Task/Step 表达）：支持 action(set on/off、extend/retract 映射为输出)、wait(读输入)、delay、timeout->goto、goto",
+        "runtime 的执行是确定性的：同一 Program + 同一输入序列 => 完全相同的 step 轨迹",
+        "新增单元测试：构造一个最小 Program，验证 delay/timeout/goto 的边界行为（包含/不包含当前 tick）",
+        "Typecheck passes",
+        "cargo test passes"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "delay 原语 - 验证引擎适配与测试",
-      "description": "作为 DSL 用户，我希望 delay step 能正确通过全部四个验证引擎。Liveness 不应报死锁，Timing 应将 delay 纳入关键路径计算。",
+      "title": "新增 sim crate：SimIO + 轨迹记录（JSONL）",
+      "description": "作为用户，我希望在 PC 上用 SimIO 跑 runtime 并记录可回放的轨迹，以便自动调试与回归对比。",
       "acceptanceCriteria": [
-        "Liveness 检查器识别 delay 生成的转移为有界等待，不报死锁",
-        "Timing 检查器将 delay 时长纳入 must_complete_within 的关键路径计算",
-        "Safety 和 Causality 检查器不受 delay step 影响",
-        "添加示例文件 examples/delay_demo.plc，包含使用 delay 的传送带场景",
-        "添加集成测试，验证 delay_demo.plc 通过全部四个验证引擎",
-        "添加测试：task 中 delay: 5000ms 配合 must_complete_within 3000ms 触发 timing 错误",
-        "Tests pass",
-        "Typecheck passes"
+        "新增 crates/sim crate，依赖 crates/runtime-core 与 crates/io-traits",
+        "实现 SimIO：可脚本化地在指定 tick 修改输入；记录输出变化边沿",
+        "实现轨迹记录（建议 JSONL）：至少包含 tick、当前 task/step、触发原因（wait 满足/timeout/delay 到期）",
+        "新增测试：用 SimIO 驱动一个最小 Program，断言输出边沿与轨迹事件数量/顺序符合预期",
+        "Typecheck passes",
+        "cargo test passes"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "repeat N 原语 - 语法与解析",
-      "description": "作为 DSL 用户，我希望编写 `repeat 3:` 块，以便无需手动复制粘贴即可表达有界循环。本故事添加语法、AST 和解析器支持。",
+      "title": "SIL 场景文件：支持 YAML 场景输入脚本与 seed 固化",
+      "description": "作为用户，我希望用可版本化的场景文件驱动外部输入与扰动，并通过 seed 固化实现可复现失败用例。",
       "acceptanceCriteria": [
-        "在 plc.pest 语法中添加 `repeat_block` 规则：`repeat_block = { \"repeat\" ~ integer ~ \":\" ~ NEWLINE ~ (INDENT ~ step_body_statement ~ NEWLINE)+ }`",
-        "在 ast/mod.rs 的 StepStatement 中添加 `Repeat { count: u64, body: Vec<StepStatement> }` 变体",
-        "解析器将 repeat_block pest pair 转换为包含 count 和 body 语句的 AST Repeat 节点",
-        "包含 `repeat 3:` 块（含 action/wait/timeout）的 .plc 文件能正确解析",
-        "不含 repeat 的现有 .plc 文件仍能正确解析",
-        "Tests pass",
-        "Typecheck passes"
+        "在 crates/sim 中新增场景解析（建议 serde_yaml）：支持 seed、tick_ms、duration_ms、inputs(at_ms/set) 的最小集合",
+        "场景解析失败时返回可读错误信息（包含字段路径）",
+        "新增测试：给定固定 YAML 场景，SimIO 按指定时间点改变输入，轨迹可复现",
+        "Typecheck passes",
+        "cargo test passes"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "repeat N 原语 - 编译期展开与验证",
-      "description": "作为编译器开发者，我需要在 AST→IR 降级阶段将 repeat 块展开为 N 个顺序步骤。展开后的步骤必须与手写等价物通过完全相同的验证。",
+      "title": "CLI：新增 rustplc sim 子命令（先跑 runtime-core 的最小 Program）",
+      "description": "作为用户，我希望通过命令行一键运行 SIL 仿真并生成报告/轨迹文件，即使第一版暂时只支持最小 Program 子集。",
       "acceptanceCriteria": [
-        "semantic/mod.rs 将 repeat N 展开为 N 份 body 步骤副本，名称加后缀（_1, _2, ..., _N）",
-        "repeat 0 和 repeat 1 产生语义错误，附带清晰的错误信息",
-        "嵌套 repeat 块产生语义错误",
-        "repeat 次数 > 100 产生语义错误",
-        "展开后的步骤生成正确的状态机转移（每份副本链接到下一份）",
-        "添加示例文件 examples/repeat_demo.plc，包含 3 次涂胶循环场景",
-        "添加集成测试，验证 repeat_demo.plc 通过全部四个验证引擎",
-        "添加测试，验证 repeat 展开与手动展开产生相同的验证结果",
-        "Tests pass",
-        "Typecheck passes"
+        "扩展现有 src/main.rs 为子命令风格（至少增加 sim 子命令，不破坏原有用法 rust_plc <file.plc>）",
+        "实现 sim 子命令：读取场景 YAML，运行一个最小 Program，并输出轨迹文件到 out/（或用户指定路径）",
+        "新增集成测试（tests/）：运行 sim 子命令的核心逻辑（可绕开真实 CLI 解析），断言产物文件存在且非空",
+        "Typecheck passes",
+        "cargo test passes"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Timing 关键路径计算修复",
-      "description": "作为 DSL 用户，我希望 must_complete_within 基于实际动作时间（而非 timeout 值）进行检查，使时序约束更实用。新增 must_complete_within_worst_case 用于基于 timeout 的检查。",
+      "title": "桥接编译器到 runtime：把 .plc 编译产物降级为可执行 Program（子集支持）",
+      "description": "作为用户，我希望对一个受限子集的 .plc 文件能直接做 SIL：从 .plc 走现有编译流水线，再转换为 runtime 可执行 Program。",
       "acceptanceCriteria": [
-        "在 plc.pest 语法中添加 `must_complete_within_worst_case` 关键词",
-        "在 timing 约束的 AST 和 IR 中添加 `MustCompleteWithinWorstCase` 变体",
-        "解析器同时处理 `must_complete_within` 和 `must_complete_within_worst_case`",
-        "timing.rs：`must_complete_within` 使用动作设备时间（stroke_time + response_time）计算关键路径，而非 timeout 值",
-        "timing.rs：`must_complete_within_worst_case` 使用 timeout 值计算关键路径（保留旧行为）",
-        "对于无 timeout 的 step（纯 action），两种计算结果一致",
-        "如果现有示例 .plc 文件的 timing 约束需要因新语义调整，则更新之",
-        "添加测试：task 的 action_time=700ms、timeout_sum=1300ms，must_complete_within 1000ms 通过（700 < 1000）",
-        "添加测试：同一 task 的 must_complete_within_worst_case 1000ms 失败（1300 > 1000）",
-        "所有现有测试通过（如 timing 语义变更则更新期望值）",
-        "Tests pass",
-        "Typecheck passes"
+        "新增转换模块：把现有语义层/IR 的状态机表示转换为 crates/runtime-core 的 Program（只需覆盖最小语句子集：action set/extend/retract、wait、delay、timeout、goto）",
+        "遇到未支持语句（parallel/race/repeat 等）时，返回明确错误并包含 DSL 行号（若可得）或 step 名称",
+        "新增集成测试：挑选一个最小 .plc fixture（可新增），通过编译+转换后在 sim 中跑通并得到稳定轨迹",
+        "Typecheck passes",
+        "cargo test passes"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Safety 验证器增加 requires 检查",
-      "description": "作为 DSL 用户，我希望 `safety: A requires B` 约束能被 Safety 检查器实际验证，以便在编译期捕获依赖违反。",
+      "title": "波形与对比：导出 VCD（数字量）与 CSV/JSONL（模拟量）",
+      "description": "作为用户，我希望把 I/O 波形导出为标准格式，以便用 GTKWave 等工具查看并做回归对比。",
       "acceptanceCriteria": [
-        "safety.rs 不再跳过 requires 约束（移除 `if !matches!(ConflictsWith) { continue }` 守卫）",
-        "对每条 `A requires B` 约束，BMC 检查是否存在可达状态使得 A=true 且 B=false",
-        "如发现违反，错误报告包含：约束位置、违反路径（状态序列）和修复建议",
-        "错误信息格式与其他检查器使用的中文错误报告风格一致",
-        "现有包含 requires 约束的示例仍然通过（其顺序控制隐式满足 requires）",
-        "添加测试：故意违反 requires — 在 cyl_clamp 未伸出时伸出 cyl_press",
-        "添加测试：正确的 requires 场景（先夹紧再压装）通过验证",
-        "Tests pass",
-        "Typecheck passes"
+        "在 crates/sim 中实现数字量 VCD 导出（至少覆盖 digital_input/digital_output）",
+        "为模拟量输出提供最小导出（CSV 或 JSONL），包含时间戳与数值",
+        "在 sim 命令中增加输出参数（或默认输出）生成 waveform 文件",
+        "新增测试：运行一个最小 Program，断言生成的 VCD 文件包含预期信号名与至少一次边沿变更",
+        "Typecheck passes",
+        "cargo test passes"
       ],
       "priority": 7,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Parallel 块因果链检查修复",
-      "description": "作为 DSL 用户，我希望 parallel 块中不同分支操作不同设备时不会触发误报的因果链错误。Causality 检查器应仅检查同一因果链上的 action-wait 对。",
+      "title": "Plant v1（最小）：气缸/阀/传感器链路的时间动态仿真",
+      "description": "作为用户，我希望不手工脚本化所有传感器输入，而是由 plant 根据拓扑参数自动产生传感器反馈，实现更接近真实设备的 SIL。",
       "acceptanceCriteria": [
-        "causality.rs：对 parallel 块，仅检查 action 设备在拓扑图中属于传感器上游集合的 action→sensor 对",
-        "parallel 块中 branch_left 操作 motor_left、branch_right 操作 motor_right，后续 wait sensor_left 时，不报 motor_right→sensor_left 的因果链错误",
-        "parallel 块中同一设备的 action 和 wait 分布在 step 和 branch 之间时，仍正确检查因果链",
-        "添加测试：双电机 parallel 场景，此前会产生误报的因果链错误",
-        "添加测试：parallel 分支中真正的因果链断裂仍能被检出",
-        "Tests pass",
-        "Typecheck passes"
+        "在 crates/sim 中新增最小 plant 模型：solenoid_valve + cylinder + sensor（基于 response_time、stroke_time/retract_time 生成状态变化）",
+        "支持传感器去抖的最小实现（固定 debounce tick 或时间窗）",
+        "新增测试：给定一个最小拓扑（阀->缸->限位传感器），运行 action extend 后在预期时间窗内 wait 条件满足",
+        "Typecheck passes",
+        "cargo test passes"
       ],
       "priority": 8,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-009",
-      "title": "wait AND/OR 组合条件 - 语法与解析",
-      "description": "作为 DSL 用户，我希望编写 `wait: sensor_A == true AND sensor_B == true`，以便表达多条件等待。本故事为 wait 语句添加 AND/OR 的语法和解析器支持。",
+      "title": "故障注入 v1：sensor_stuck 与动作超时场景可复现",
+      "description": "作为用户，我希望通过场景文件注入常见故障并得到可复现的失败报告，用于逼近“一次即可用”的最坏情况覆盖。",
       "acceptanceCriteria": [
-        "扩展 plc.pest 中的 `wait_statement` 规则以支持：`condition (AND condition)* | condition (OR condition)*`",
-        "在 AST 中添加 `WaitCondition` 枚举：`Single(condition)`、`And(Vec<condition>)`、`Or(Vec<condition>)`",
-        "更新 Wait AST 节点，使用 WaitCondition 替代单一条件",
-        "解析器正确将 `wait: A == true AND B == true` 解析为 And 变体",
-        "解析器正确将 `wait: A == true OR B == true` 解析为 Or 变体",
-        "解析器拒绝混合 AND/OR：`wait: A == true AND B == true OR C == true`，附带清晰错误信息",
-        "现有单条件 wait 语句仍能正确解析（作为 Single 变体）",
-        "Tests pass",
-        "Typecheck passes"
+        "扩展场景 YAML：支持 faults（至少 sensor_stuck: target/value/at_ms）",
+        "sim 报告在失败时输出 failure 对象（kind/message/at_ms/task/step），并包含用于复现的 seed 与场景摘要",
+        "新增测试：注入 sensor_stuck 导致 wait 永不满足，timeout 分支触发且报告包含对应 step 与时间点",
+        "Typecheck passes",
+        "cargo test passes"
       ],
       "priority": 9,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-010",
-      "title": "wait AND/OR 组合条件 - 语义分析、IR 与验证",
-      "description": "作为编译器开发者，我需要 AND/OR wait 条件生成正确的状态机守卫并通过全部验证引擎。AND 变为合取守卫，OR 变为析取守卫。",
+      "title": "sim-regress：批量运行场景并生成汇总报告",
+      "description": "作为开发者，我希望在 CI/本地一键跑批量场景并生成汇总报告，从而把 SIL 变成可持续的回归门禁。",
       "acceptanceCriteria": [
-        "semantic/mod.rs 为 AND 条件生成合取守卫",
-        "semantic/mod.rs 为 OR 条件生成析取守卫",
-        "AND/OR 条件中的所有设备引用均经过校验（未定义设备 = 语义错误）",
-        "Causality 检查器对 AND/OR 条件中的每个传感器独立验证因果链",
-        "Liveness 检查器对 AND/OR wait 的处理与单条件 wait 相同（必须有 timeout 或 allow_indefinite_wait）",
-        "Safety BMC 在状态探索中正确处理多条件守卫",
-        "添加示例文件 examples/and_or_wait_demo.plc，包含 AND 和 OR 两种场景",
-        "添加集成测试，验证 and_or_wait_demo.plc 通过全部四个验证引擎",
-        "添加测试：AND wait 中某个传感器缺少因果链时触发 causality 错误",
-        "Tests pass",
-        "Typecheck passes"
+        "新增 sim-regress 子命令：对多个 .plc 与多个场景组合跑批（可先支持目录扫描）",
+        "输出汇总报告（JSON）：包含通过/失败计数、失败列表（含复现参数与产物路径）",
+        "新增测试：构造两个最小用例（一个 pass 一个 fail），断言汇总报告计数与失败列表正确",
+        "Typecheck passes",
+        "cargo test passes"
       ],
       "priority": 10,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-011",
-      "title": "if/else 条件分支 - 语法与解析",
-      "description": "作为 DSL 用户，我希望在 step 中编写 `if: condition goto X else: goto Y`，以便无需滥用 race 块即可表达条件分支。",
+      "title": "RP2040（Pico）最小工程：no_std 固件可编译并具备 tick 与日志骨架",
+      "description": "作为开发者，我希望先把 Pico 的最小板级工程跑通（可编译、可运行的入口/时钟/tick/日志），为后续将 runtime 下沉到板上做准备。",
       "acceptanceCriteria": [
-        "在 plc.pest 语法中添加 `if_else_statement` 规则",
-        "在 ast/mod.rs 的 StepStatement 中添加 `IfElse { condition, then_goto: String, else_goto: String }` 变体",
-        "解析器将 if/else pest pair 转换为 AST IfElse 节点",
-        "包含 `if: switch_A == true` / `goto grind_coarse` / `else:` / `goto grind_fine` 的 .plc 文件能正确解析",
-        "缺少 else 分支时产生解析错误",
-        "不含 if/else 的现有 .plc 文件仍能正确解析",
-        "Tests pass",
-        "Typecheck passes"
+        "新增 crates/board-rp2040 crate（或等效目录），提供 thumbv6m-none-eabi 目标的 no_std 二进制入口",
+        "提供最小 tick 源（例如定时器/循环）与日志输出骨架（defmt RTT 或串口二选一即可）",
+        "在 docs/roadmap_autosim_arduino.md 或单独文档中补充：如何构建该固件（cargo build 命令）",
+        "Typecheck passes",
+        "cargo build -p board-rp2040 succeeds"
       ],
       "priority": 11,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-012",
-      "title": "if/else 条件分支 - 语义分析与验证",
-      "description": "作为编译器开发者，我需要 if/else 在状态机中生成两条互补守卫的转移，并正确通过全部验证引擎。",
-      "acceptanceCriteria": [
-        "semantic/mod.rs 从 if/else 生成两条转移：guard=condition→then_goto，guard=NOT(condition)→else_goto",
-        "两个 goto 目标均经过校验（未定义 task/step = 语义错误）",
-        "if/else 内部放 action（而非 goto）时产生语义错误",
-        "Liveness 检查器：if/else step 有两条出边，不会死锁",
-        "Timing 检查器：if/else 为瞬时判断，对关键路径贡献 0ms",
-        "Safety BMC 正确探索两条分支路径",
-        "添加示例文件 examples/if_else_demo.plc，包含模式选择场景",
-        "添加集成测试，验证 if_else_demo.plc 通过全部四个验证引擎",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-013",
-      "title": "goto 支持跳到 task 内指定 step",
-      "description": "作为 DSL 用户，我希望编写 `goto cycle.press_down` 跳转到 task 内的指定 step，而非仅能跳到 task 的首步。",
-      "acceptanceCriteria": [
-        "扩展 plc.pest 中的 goto 解析以接受 `identifier ~ \".\" ~ identifier` 格式（task.step）",
-        "更新 AST Goto 节点，可选包含目标 step 名称",
-        "semantic/mod.rs 的 resolve_task_target() 支持 task.step 格式，返回 (task_name, step_name) 状态",
-        "有效 task 中不存在的 step 产生语义错误，附带清晰信息",
-        "goto 指向 parallel/race 内部合成步骤时产生语义错误",
-        "现有 `goto task_name` 语法仍然有效（指向首步）",
-        "添加测试：goto 到 task 中间 step，编译和验证均正确",
-        "添加测试：goto 到不存在的 step 产生语义错误",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-014",
-      "title": "自定义设备状态",
-      "description": "作为 DSL 用户，我希望在设备上声明 `states: [extend, neutral, retract]`，以便建模超过 2 个状态的设备（如三位电磁阀）。",
-      "acceptanceCriteria": [
-        "扩展 plc.pest 中的设备属性解析以接受 `states: [ident, ident, ...]`",
-        "在设备 AST 节点中添加 `custom_states: Option<Vec<String>>` 字段",
-        "semantic/mod.rs：如果设备有 custom_states，使用自定义状态替代默认 2 状态集",
-        "semantic/mod.rs：如果未声明 custom_states，保持默认行为（cylinder={extended,retracted}，其他={on,off}）",
-        "自定义状态可用于 safety 约束：`safety: device.extend conflicts_with device.neutral`",
-        "自定义状态可用于 wait 条件：`wait: device == extend`",
-        "状态数 > 8 时产生警告（非错误）",
-        "添加示例文件 examples/custom_states_demo.plc，包含三位电磁阀场景",
-        "添加集成测试，验证 custom_states_demo.plc 通过全部四个验证引擎",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 14,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-015",
-      "title": "plc-gen skill 更新以支持新语法",
-      "description": "作为现场调试人员，我希望 plc-gen 能生成包含新 DSL 语法的示例，以便用自然语言触发 delay/repeat/AND/OR wait/if-else/goto task.step/custom states 等能力。",
-      "acceptanceCriteria": [
-        "更新 .claude/skills/plc-gen/SKILL.md，补充 delay/repeat/AND/OR wait/if-else/goto task.step/custom states 语法说明",
-        "在 skill 示例中加入至少 2 个使用新语法的完整 plc 片段",
-        "更新提示/约束，提醒使用 must_complete_within_worst_case 与新的 timing 语义",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 15,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]

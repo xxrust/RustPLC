@@ -15,3 +15,9 @@ z3 = { version = "0.12", features = ["static-link-z3"], optional = true }
 [features]
 default = []
 z3-solver = ["dep:z3"]
+
+[workspace]
+resolver = "2"
+members = [
+  "crates/io-traits",
+]
