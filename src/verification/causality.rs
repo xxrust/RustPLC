@@ -1,5 +1,5 @@
 use crate::ast::{
-    ActionStatement, BinaryValue, ComparisonOperator, ConditionExpression, LiteralValue,
+    ActionStatement, BinaryValue, ComparisonOperator, ConditionExpression, DeviceType, LiteralValue,
     PlcProgram, StepStatement, WaitCondition, WaitStatement,
 };
 use crate::ir::{ConstraintSet, DeviceKind, TopologyGraph};
@@ -291,13 +291,17 @@ fn collect_sensor_names(program: &PlcProgram) -> HashSet<String> {
         .topology
         .devices
         .iter()
-        .filter(|device| {
-            matches!(
-                device.device_type,
-                crate::ast::DeviceType::Sensor | crate::ast::DeviceType::AnalogInput
-            )
+        .filter_map(|device| match device.device_type {
+            DeviceType::Sensor => Some(device.name.clone()),
+            DeviceType::AnalogInput => {
+                if device.attributes.external.unwrap_or(false) {
+                    None
+                } else {
+                    Some(device.name.clone())
+                }
+            }
+            _ => None,
         })
-        .map(|device| device.name.clone())
         .collect()
 }
 
@@ -1054,5 +1058,79 @@ task main:
                 .any(|error| error.broken_link == "cyl_A -> sensor_A_ext2"),
             "错误应定位到缺失链路的传感器"
         );
+    }
+
+    #[test]
+    fn infers_causality_for_analog_input_by_default() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+
+device motor_A: motor {
+    connected_to: Y0
+}
+
+device pressure_in: analog_input {
+    range: 0..10
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step run:
+        action: set motor_A on
+        wait: pressure_in > 5
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        let errors = verify_causality(&program, &topology, &constraints)
+            .expect_err("analog_input 默认参与因果推断，应报缺失链路错误");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.broken_link == "motor_A -> pressure_in"),
+            "错误应包含 analog_input 缺失链路"
+        );
+    }
+
+    #[test]
+    fn skips_external_analog_input_from_causality_inference() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+
+device motor_A: motor {
+    connected_to: Y0
+}
+
+device pressure_in: analog_input {
+    range: 0..10,
+    external: true
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step run:
+        action: set motor_A on
+        wait: pressure_in > 5
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        verify_causality(&program, &topology, &constraints)
+            .expect("external analog_input 应跳过因果推断");
     }
 }

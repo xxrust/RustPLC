@@ -1,6 +1,7 @@
 # Ralph Progress Log
 ## Codebase Patterns
 - Adding a topology attribute requires updating `parser/plc.pest` `attribute_name`, `parser/mod.rs` `apply_attribute`, and adding a parser test to lock in AST mapping.
+- Causality inference includes `sensor` devices and `analog_input` devices unless `external: true` is set.
 - If safety verification skips an unmodeled rule (e.g., analog threshold), emit a warning and downgrade proof level to Bounded.
 - New control-flow statements (e.g., IfElse) must be added to all statement walkers (semantic + timing/liveness/causality) to keep recursion/exhaustiveness correct, even if semantics land in a later story.
 - For wait AND/OR support, process each sub-condition independently in semantic validation and causality inference; do not collapse to a single inferred sensor/device.
@@ -628,4 +629,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - None.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `DeviceAttributes` defaults come from `Default`; new optional attributes stay `None` unless explicitly parsed.
+---
+## [2026-02-14 10:02:45 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Updated causality sensor collection to exclude `analog_input` marked `external: true` while keeping sensors included.
+  - Added causality tests covering default analog_input inference and external exclusion.
+- Files changed
+  - `src/verification/causality.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Causality inference uses `collect_sensor_names` to decide which waits participate, so exclusions belong there.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - `cargo test` currently emits an unrelated unused import warning from `tests/verification_capability.rs`.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Analog-input waits without declared causality chains are treated like sensor waits unless `external: true` is set.
 ---
