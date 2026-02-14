@@ -1,0 +1,119 @@
+{
+  "project": "RustPLC",
+  "branchName": "ralph/analog-verification-consistency",
+  "description": "模拟量验证一致性与外部输入标记 -- 消除阈值规则静默跳过、增加语义校验、外部输入因果豁免",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Safety 对跳过的模拟量阈值规则输出告警并降级证明等级",
+      "description": "作为用户，我希望 Safety 在跳过模拟量阈值规则时输出明确告警，并将证明等级降级，避免误导。",
+      "acceptanceCriteria": [
+        "SafetyReport / SafetySummary 新增 warnings 字段 Vec<String>，用于收集告警信息",
+        "verify_safety_with_config 中，当 bind_safety_expr_rule 因 Threshold 返回 None 时，向 warnings 追加一条告警，内容包含被跳过的规则文本",
+        "当存在被跳过的阈值规则时，SafetySummary.level 不再输出完备证明，改为有界验证（模拟量规则未覆盖）",
+        "无阈值规则的现有 .plc 文件行为不变，仍可输出完备证明",
+        "新增单元测试：构造含 SafetyExpr::Threshold 的 SafetyRule，验证 warnings 非空且 level 已降级",
+        "cargo test 通过"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "最关键的安全修补。只改 src/verification/safety.rs 和 src/verification/mod.rs。"
+    },
+    {
+      "id": "US-002",
+      "title": "safety 约束中阈值比较的语义校验（设备类型 + range）",
+      "description": "作为开发者，我希望 safety 约束中的 SafetyOperand::Threshold 进行设备类型和 range 校验，拒绝非模拟量设备或超范围阈值。",
+      "acceptanceCriteria": [
+        "validate_safety_operand 对 Threshold 变体校验：设备必须是 analog_input 或 analog_output，否则报 type_mismatch 错误",
+        "validate_safety_operand 对 Threshold 变体校验：若设备声明了 range，阈值必须在 min..max 范围内，否则报 semantic 错误",
+        "validate_safety_operand 对 Threshold 变体校验：若设备是 analog_input 或 analog_output 但未声明 range，报 semantic 错误提示需要 range",
+        "新增单元测试：非模拟量设备使用阈值比较报错、阈值超出 range 报错、缺少 range 报错",
+        "现有测试全部通过，cargo test 通过"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "只改 src/semantic/mod.rs 中的 validate_safety_operand 函数。阈值比较仅允许 analog_input 和 analog_output，不允许 sensor 等离散设备。"
+    },
+    {
+      "id": "US-003",
+      "title": "PEG 语法与 AST 支持 external 属性",
+      "description": "作为控制工程师，我希望在 digital_input 和 analog_input 上声明 external: true，标记为外部输入。",
+      "acceptanceCriteria": [
+        "plc.pest 的 attribute_name 新增 external",
+        "DeviceAttributes 新增 external: Option<bool> 字段",
+        "parser/mod.rs 的 apply_attribute 处理 external 属性，解析 boolean_value",
+        "新增解析器单元测试：解析 device X0: digital_input { external: true } 成功，attributes.external == Some(true)",
+        "现有 .plc 文件不含 external 属性时 attributes.external == None，行为不变",
+        "cargo test 通过"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "只改 plc.pest、ast/mod.rs、parser/mod.rs。为 US-004 做准备。"
+    },
+    {
+      "id": "US-004",
+      "title": "因果推断对 external 输入跳过动作到传感器推断",
+      "description": "作为控制工程师，我希望标记为 external: true 的输入设备不参与因果推断的传感器集合，减少误报。",
+      "acceptanceCriteria": [
+        "causality.rs 的 collect_sensor_names 接收 topology 信息，读取设备的 external 属性",
+        "仅当设备标记 external: true 时才跳过传感器集合；未标记 external 的 analog_input 和 sensor 仍正常参与因果推断",
+        "digital_input 标记 external: true 时也跳过传感器集合",
+        "新增测试：analog_input { external: true } 的设备不触发因果链断裂误报",
+        "新增测试：未标记 external 的 analog_input 仍参与因果推断",
+        "新增测试：sensor { connected_to: AI0, detects: valve.on } 仍正常参与因果推断",
+        "现有因果测试全部通过，cargo test 通过"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "改 src/verification/causality.rs 的 collect_sensor_names 签名和逻辑。需要传入 program.topology 以读取 external 属性。依赖 US-003。"
+    },
+    {
+      "id": "US-005",
+      "title": "Safety BMC 阈值离散抽象 -- 区间分区与状态空间扩展",
+      "description": "作为用户，我希望 Safety 引擎能通过阈值离散抽象实际验证模拟量安全规则，而非跳过。",
+      "acceptanceCriteria": [
+        "新增函数 compute_analog_regions：从 ConstraintSet 的 SafetyExpr::Threshold 和程序中的 set_analog 值收集所有阈值，结合设备 range 切分为有限区间",
+        "DeviceDomain 新增 is_analog: bool 和 region_bounds: Option<Vec<(f64, f64)>> 字段",
+        "collect_device_domains 对 analog_output 设备使用区间标签作为 states，区间边界存入 region_bounds",
+        "action_effect 对 SetAnalog 解析 value_raw 为 f64，查找所属区间，返回区间索引对应的状态名",
+        "bind_safety_expr_rule 对 SafetyExpr::Threshold 不再返回 None，而是解析阈值条件映射到满足该条件的区间集合",
+        "新增测试：set_analog 值映射到正确区间、模拟量 safety conflicts_with 检测到违反、模拟量 safety 通过场景",
+        "US-001 的告警逻辑仅在无法建模时触发，有区间抽象的规则不再告警",
+        "cargo test 通过"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "最复杂的故事，集中在 src/verification/safety.rs。需要新增区间计算逻辑、扩展 DeviceDomain、修改 bind/violates 逻辑。依赖 US-001 的 warnings 基础设施。"
+    },
+    {
+      "id": "US-006",
+      "title": "wait 中模拟量阈值条件映射为离散谓词",
+      "description": "作为用户，我希望 wait 中的模拟量比较在状态机中可表示为离散谓词，使活性和时序检查一致。",
+      "acceptanceCriteria": [
+        "semantic/mod.rs 的 wait_to_guard_expression 对模拟量比较生成基于区间的离散谓词字符串",
+        "Liveness 引擎将模拟量 wait 视为普通条件边，与离散 wait 一致，不做特殊处理",
+        "含模拟量 wait 且无 timeout 的步骤仍触发 liveness 告警，与离散行为一致",
+        "新增测试：模拟量 wait 无 timeout 报 liveness 错误、有 timeout 通过",
+        "cargo test 通过"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "改 src/semantic/mod.rs 的 wait 处理逻辑。Liveness 引擎本身不需要改，模拟量 wait 已经生成条件边，主要确保语义一致性。"
+    },
+    {
+      "id": "US-007",
+      "title": "更新示例与文档覆盖外部输入和模拟量验证",
+      "description": "作为用户，我希望有文档与示例说明 external 标记的用法与模拟量验证限制。",
+      "acceptanceCriteria": [
+        "更新 examples/analog_pressure_demo.plc：AI0 添加 external: true 属性",
+        "新增或更新示例展示 safety 阈值约束被实际验证的场景",
+        "CLAUDE.md 的 DSL 结构段落补充 external 属性说明",
+        "集成测试覆盖更新后的示例文件",
+        "cargo test 通过"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "改 examples/analog_pressure_demo.plc、CLAUDE.md、tests/examples_integration.rs。"
+    }
+  ]
+}

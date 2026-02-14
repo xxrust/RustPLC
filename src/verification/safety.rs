@@ -147,24 +147,31 @@ pub fn verify_safety_with_config(
     let mut diagnostics = Vec::new();
     let mut all_complete = true;
     let mut checked_rules = 0usize;
+    let mut skipped_threshold_rules = Vec::new();
 
     for (index, rule) in constraints.safety.iter().enumerate() {
-        let Some(binding) = bind_safety_expr_rule(&model, rule) else {
-            continue;
-        };
-
-        checked_rules += 1;
         let relation = relation_text(&rule.relation);
         let left_text = safety_expr_text(&rule.left);
         let right_text = safety_expr_text(&rule.right);
         let rule_text = format!("{left_text} {relation} {right_text}");
-
         let line = program
             .constraints
             .safety
             .get(index)
             .map(|node| node.line.max(1))
             .unwrap_or(1);
+
+        let Some(binding) = bind_safety_expr_rule(&model, rule) else {
+            if safety_rule_has_threshold(rule) {
+                skipped_threshold_rules.push(format!(
+                    "WARNING: Safety 规则 <input>:{} {} 含模拟量阈值，当前未建模，已跳过验证",
+                    line, rule_text
+                ));
+            }
+            continue;
+        };
+
+        checked_rules += 1;
 
         let outcome = analyze_rule(&model, binding, depth_plan.effective_depth);
         if let Some(counterexample) = outcome.counterexample {
@@ -214,14 +221,19 @@ pub fn verify_safety_with_config(
         return Err(diagnostics);
     }
 
+    let has_skipped_thresholds = !skipped_threshold_rules.is_empty();
     let mut warnings = depth_plan.warnings;
-    let level = if checked_rules == 0 || all_complete {
+    warnings.extend(skipped_threshold_rules.into_iter());
+
+    let level = if !has_skipped_thresholds && (checked_rules == 0 || all_complete) {
         SafetyProofLevel::Complete
     } else {
-        warnings.push(format!(
-            "WARNING: Safety 在深度 {} 内未发现反例，但未获得完备证明。建议增大 bmc_max_depth 以提升有界覆盖，或调整模型以帮助 k-induction 收敛",
-            depth_plan.effective_depth
-        ));
+        if !all_complete {
+            warnings.push(format!(
+                "WARNING: Safety 在深度 {} 内未发现反例，但未获得完备证明。建议增大 bmc_max_depth 以提升有界覆盖，或调整模型以帮助 k-induction 收敛",
+                depth_plan.effective_depth
+            ));
+        }
         SafetyProofLevel::Bounded
     };
 
@@ -668,6 +680,11 @@ fn safety_expr_text(expr: &SafetyExpr) -> String {
             value,
         } => format!("{device} {operator} {value}"),
     }
+}
+
+fn safety_rule_has_threshold(rule: &crate::ir::SafetyRule) -> bool {
+    matches!(rule.left, SafetyExpr::Threshold { .. })
+        || matches!(rule.right, SafetyExpr::Threshold { .. })
 }
 
 fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> SearchOutcome {
@@ -1367,6 +1384,62 @@ task main:
                 SafetyProofLevel::Complete | SafetyProofLevel::Bounded
             ),
             "含 AND/OR wait 的场景应得到有效 safety 结论"
+        );
+    }
+
+    #[test]
+    fn warns_and_downgrades_when_analog_threshold_rules_are_skipped() {
+        let source = r#"
+[topology]
+
+device pressure_sensor: analog_input { range: 0..100, unit: "bar" }
+
+device Y0: digital_output
+device valve_A: solenoid_valve { connected_to: Y0 }
+device cyl_A: cylinder {
+    connected_to: valve_A
+    stroke_time: 120ms
+    retract_time: 120ms
+}
+
+[constraints]
+
+safety: pressure_sensor > 50 conflicts_with pressure_sensor < 10
+
+[tasks]
+
+task demo:
+    step extend:
+        action: extend cyl_A
+    step retract:
+        action: retract cyl_A
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("含模拟量阈值规则的场景应返回可用 safety 结果");
+
+        assert_eq!(
+            report.level,
+            SafetyProofLevel::Bounded,
+            "跳过阈值规则时 safety 证明等级应降级为有界验证"
+        );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("pressure_sensor > 50 conflicts_with pressure_sensor < 10")),
+            "warnings 应记录被跳过的阈值规则"
+        );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("阈值")),
+            "warnings 应说明阈值规则被跳过"
         );
     }
 }

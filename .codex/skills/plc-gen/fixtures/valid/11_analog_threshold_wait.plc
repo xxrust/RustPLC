@@ -1,0 +1,45 @@
+# ============================================================
+# 模拟量阈值等待（analog_input 数值比较）
+# ============================================================
+
+[topology]
+
+device Y0: digital_output
+
+device AI0: analog_input { range: 0..100, unit: "bar" }
+
+device valve_main: solenoid_valve {
+    connected_to: Y0,
+    response_time: 30ms
+}
+
+[constraints]
+
+# 当压力过高时禁止保持阀门开启
+safety: AI0 > 90 conflicts_with valve_main.on
+    reason: "压力过高时必须关闭阀门"
+
+[tasks]
+
+task main:
+    step open_valve:
+        action: set valve_main on
+
+    step wait_pressure:
+        wait: AI0 >= 60
+        timeout: 5000ms -> goto fault
+
+    step stop:
+        action: set valve_main off
+    on_complete: goto idle
+
+task fault:
+    step shutdown:
+        action: set valve_main off
+    on_complete: goto idle
+
+task idle:
+    step wait_start:
+        wait: Y0 == false
+        allow_indefinite_wait: true
+    on_complete: goto main

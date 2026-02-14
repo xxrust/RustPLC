@@ -1,5 +1,6 @@
 # Ralph Progress Log
 ## Codebase Patterns
+- If safety verification skips an unmodeled rule (e.g., analog threshold), emit a warning and downgrade proof level to Bounded.
 - New control-flow statements (e.g., IfElse) must be added to all statement walkers (semantic + timing/liveness/causality) to keep recursion/exhaustiveness correct, even if semantics land in a later story.
 - For wait AND/OR support, process each sub-condition independently in semantic validation and causality inference; do not collapse to a single inferred sensor/device.
 - WaitStatement.condition is WaitCondition (Single/And/Or); keep downstream code using helpers to render/scan all sub-conditions (do not assume a single left/operator/right).
@@ -577,4 +578,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - When a DSL gains first-class primitives (delay/repeat), remove obsolete workaround sections to prevent the generator from choosing inferior patterns.
   - Useful context (e.g., "the evaluation panel is in component X")
     - The skill file is the single source of truth for prompt-level behavior; adding full end-to-end snippets is the fastest way to teach new syntax without ambiguity.
+---
+## [2026-02-14 09:41:10 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added safety verifier warnings when analog threshold rules are skipped, including rule/line context.
+  - Downgraded safety proof level to Bounded when any analog threshold rules are skipped.
+  - Added a unit test covering warning emission and proof downgrade for skipped threshold rules.
+- Files changed
+  - src/verification/safety.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Safety verification should surface skipped rule types via warnings and downgrade proof level to avoid misleading "complete" results.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - None.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Safety summary warnings are printed by CLI in `print_success_summary`.
 ---

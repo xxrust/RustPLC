@@ -582,3 +582,389 @@ task error_recovery:
         unique_checkers
     );
 }
+
+#[test]
+fn test_analog_safety_constraint_parses_and_builds_ir() {
+    use rust_plc::parser::parse_plc;
+    use rust_plc::semantic::{preprocess_program, build_constraint_set};
+
+    let source = r#"
+[topology]
+device pressure_sensor: analog_input { range: 0..100, unit: "bar" }
+device heater: digital_output
+
+[constraints]
+safety: pressure_sensor > 80 conflicts_with heater.on
+    reason: "High pressure conflicts with heater operation"
+
+[tasks]
+task main:
+    step s1:
+        action: log "test"
+"#;
+
+    // Parse the source
+    let program = parse_plc(source).expect("should parse");
+    
+    // Preprocess (expand repeat/delay)
+    let expanded = preprocess_program(&program).expect("should preprocess");
+    
+    // Build constraint set
+    let constraints = build_constraint_set(&expanded).expect("should build constraints");
+    
+    // Verify the safety constraint was built
+    assert_eq!(constraints.safety.len(), 1, "should have one safety constraint");
+    
+    let rule = &constraints.safety[0];
+    
+    // Check left operand is Threshold
+    match &rule.left {
+        rust_plc::ir::SafetyExpr::Threshold { device, operator, value } => {
+            assert_eq!(device, "pressure_sensor");
+            assert_eq!(operator, ">");
+            assert_eq!(value, "80");
+        }
+        _ => panic!("left operand should be Threshold"),
+    }
+    
+    // Check right operand is State
+    match &rule.right {
+        rust_plc::ir::SafetyExpr::State(state_expr) => {
+            assert_eq!(state_expr.device, "heater");
+            assert_eq!(state_expr.state, "on");
+        }
+        _ => panic!("right operand should be State"),
+    }
+    
+    // Check relation
+    assert_eq!(rule.relation, rust_plc::ir::SafetyRelation::ConflictsWith);
+}
+
+#[test]
+fn test_analog_safety_constraint_with_requires_relation() {
+    use rust_plc::parser::parse_plc;
+    use rust_plc::semantic::{preprocess_program, build_constraint_set};
+
+    let source = r#"
+[topology]
+device temperature: analog_input { range: 0..200, unit: "C" }
+device pump: digital_output
+
+[constraints]
+safety: pump.on requires temperature < 150
+    reason: "Pump requires temperature below 150C"
+
+[tasks]
+task main:
+    step s1:
+        action: log "test"
+"#;
+
+    let program = parse_plc(source).expect("should parse");
+    let expanded = preprocess_program(&program).expect("should preprocess");
+    let constraints = build_constraint_set(&expanded).expect("should build constraints");
+    
+    assert_eq!(constraints.safety.len(), 1);
+    let rule = &constraints.safety[0];
+    
+    // Check left operand is State
+    match &rule.left {
+        rust_plc::ir::SafetyExpr::State(state_expr) => {
+            assert_eq!(state_expr.device, "pump");
+            assert_eq!(state_expr.state, "on");
+        }
+        _ => panic!("left operand should be State"),
+    }
+    
+    // Check right operand is Threshold
+    match &rule.right {
+        rust_plc::ir::SafetyExpr::Threshold { device, operator, value } => {
+            assert_eq!(device, "temperature");
+            assert_eq!(operator, "<");
+            assert_eq!(value, "150");
+        }
+        _ => panic!("right operand should be Threshold"),
+    }
+    
+    assert_eq!(rule.relation, rust_plc::ir::SafetyRelation::Requires);
+}
+
+#[test]
+fn test_analog_safety_constraint_both_sides_threshold() {
+    use rust_plc::parser::parse_plc;
+    use rust_plc::semantic::{preprocess_program, build_constraint_set};
+
+    let source = r#"
+[topology]
+device pressure1: analog_input { range: 0..100, unit: "bar" }
+device pressure2: analog_input { range: 0..100, unit: "bar" }
+
+[constraints]
+safety: pressure1 > 80 conflicts_with pressure2 > 80
+    reason: "Both pressures cannot exceed 80 simultaneously"
+
+[tasks]
+task main:
+    step s1:
+        action: log "test"
+"#;
+
+    let program = parse_plc(source).expect("should parse");
+    let expanded = preprocess_program(&program).expect("should preprocess");
+    let constraints = build_constraint_set(&expanded).expect("should build constraints");
+    
+    assert_eq!(constraints.safety.len(), 1);
+    let rule = &constraints.safety[0];
+    
+    // Both sides should be Threshold
+    match &rule.left {
+        rust_plc::ir::SafetyExpr::Threshold { device, operator, value } => {
+            assert_eq!(device, "pressure1");
+            assert_eq!(operator, ">");
+            assert_eq!(value, "80");
+        }
+        _ => panic!("left operand should be Threshold"),
+    }
+    
+    match &rule.right {
+        rust_plc::ir::SafetyExpr::Threshold { device, operator, value } => {
+            assert_eq!(device, "pressure2");
+            assert_eq!(operator, ">");
+            assert_eq!(value, "80");
+        }
+        _ => panic!("right operand should be Threshold"),
+    }
+}
+
+#[test]
+fn test_analog_safety_constraint_all_comparison_operators() {
+    use rust_plc::parser::parse_plc;
+    use rust_plc::semantic::{preprocess_program, build_constraint_set};
+
+    let operators = vec![
+        ("pressure > 80", ">"),
+        ("pressure < 20", "<"),
+        ("pressure >= 75", ">="),
+        ("pressure <= 25", "<="),
+        ("pressure == 50", "=="),
+        ("pressure != 50", "!="),
+    ];
+
+    for (condition, expected_op) in operators {
+        let source = format!(
+            r#"
+[topology]
+device pressure: analog_input {{ range: 0..100, unit: "bar" }}
+device heater: digital_output
+
+[constraints]
+safety: {condition} conflicts_with heater.on
+
+[tasks]
+task main:
+    step s1:
+        action: log "test"
+"#
+        );
+
+        let program = parse_plc(&source).expect(&format!("should parse {}", condition));
+        let expanded = preprocess_program(&program).expect("should preprocess");
+        let constraints = build_constraint_set(&expanded).expect("should build constraints");
+        
+        assert_eq!(constraints.safety.len(), 1);
+        let rule = &constraints.safety[0];
+        
+        match &rule.left {
+            rust_plc::ir::SafetyExpr::Threshold { operator, .. } => {
+                assert_eq!(operator, expected_op, "operator mismatch for {}", condition);
+            }
+            _ => panic!("left operand should be Threshold for {}", condition),
+        }
+    }
+}
+
+#[test]
+fn test_analog_safety_constraint_produces_correct_ir_json() {
+    use rust_plc::parser::parse_plc;
+    use rust_plc::semantic::{preprocess_program, build_constraint_set};
+    use serde_json::json;
+
+    let source = r#"
+[topology]
+device pressure_sensor: analog_input { range: 0..100, unit: "bar" }
+device heater: digital_output
+
+[constraints]
+safety: pressure_sensor > 80 conflicts_with heater.on
+    reason: "High pressure conflicts with heater operation"
+
+[tasks]
+task main:
+    step s1:
+        action: log "test"
+"#;
+
+    let program = parse_plc(source).expect("should parse");
+    let expanded = preprocess_program(&program).expect("should preprocess");
+    let constraints = build_constraint_set(&expanded).expect("should build constraints");
+    
+    // Serialize to JSON to verify structure
+    let json = serde_json::to_value(&constraints).expect("should serialize to JSON");
+    
+    assert!(json["safety"].is_array());
+    assert_eq!(json["safety"].as_array().unwrap().len(), 1);
+    
+    let safety_rule = &json["safety"][0];
+    
+    // Verify left side is Threshold
+    assert_eq!(safety_rule["left"]["kind"], "threshold");
+    assert_eq!(safety_rule["left"]["device"], "pressure_sensor");
+    assert_eq!(safety_rule["left"]["operator"], ">");
+    assert_eq!(safety_rule["left"]["value"], "80");
+    
+    // Verify right side is State
+    assert_eq!(safety_rule["right"]["kind"], "state");
+    assert_eq!(safety_rule["right"]["device"], "heater");
+    assert_eq!(safety_rule["right"]["state"], "on");
+    
+    // Verify relation
+    assert_eq!(safety_rule["relation"], "conflicts_with");
+    
+    // Verify reason
+    assert_eq!(safety_rule["reason"], "High pressure conflicts with heater operation");
+}
+
+#[test]
+fn test_analog_safety_constraint_mixed_operands_in_json() {
+    use rust_plc::parser::parse_plc;
+    use rust_plc::semantic::{preprocess_program, build_constraint_set};
+
+    let source = r#"
+[topology]
+device temp: analog_input { range: 0..200, unit: "C" }
+device pump: digital_output
+
+[constraints]
+safety: pump.on requires temp < 150
+
+[tasks]
+task main:
+    step s1:
+        action: log "test"
+"#;
+
+    let program = parse_plc(source).expect("should parse");
+    let expanded = preprocess_program(&program).expect("should preprocess");
+    let constraints = build_constraint_set(&expanded).expect("should build constraints");
+    
+    let json = serde_json::to_value(&constraints).expect("should serialize to JSON");
+    let safety_rule = &json["safety"][0];
+    
+    // Left: State
+    assert_eq!(safety_rule["left"]["kind"], "state");
+    assert_eq!(safety_rule["left"]["device"], "pump");
+    assert_eq!(safety_rule["left"]["state"], "on");
+    
+    // Right: Threshold
+    assert_eq!(safety_rule["right"]["kind"], "threshold");
+    assert_eq!(safety_rule["right"]["device"], "temp");
+    assert_eq!(safety_rule["right"]["operator"], "<");
+    assert_eq!(safety_rule["right"]["value"], "150");
+    
+    assert_eq!(safety_rule["relation"], "requires");
+}
+
+#[test]
+fn test_analog_safety_constraint_validation_checks_device_exists() {
+    use rust_plc::parser::parse_plc;
+    use rust_plc::semantic::{preprocess_program, build_constraint_set};
+
+    let source = r#"
+[topology]
+device heater: digital_output
+
+[constraints]
+safety: undefined_sensor > 80 conflicts_with heater.on
+
+[tasks]
+task main:
+    step s1:
+        action: log "test"
+"#;
+
+    let program = parse_plc(source).expect("should parse");
+    let expanded = preprocess_program(&program).expect("should preprocess");
+    let result = build_constraint_set(&expanded);
+    
+    // Should fail because undefined_sensor doesn't exist
+    assert!(result.is_err(), "should fail validation for undefined device");
+    let errors = result.unwrap_err();
+    assert!(!errors.is_empty());
+    let error_msg = errors[0].to_string();
+    assert!(error_msg.contains("undefined_sensor") || error_msg.contains("未定义"), 
+            "error should mention undefined device: {}", error_msg);
+}
+
+#[test]
+fn test_analog_safety_constraint_parser_handles_decimal_values() {
+    use rust_plc::parser::parse_plc;
+    use rust_plc::semantic::{preprocess_program, build_constraint_set};
+
+    let source = r#"
+[topology]
+device voltage: analog_input { range: 0..24, unit: "V" }
+device relay: digital_output
+
+[constraints]
+safety: voltage > 12.5 conflicts_with relay.on
+
+[tasks]
+task main:
+    step s1:
+        action: log "test"
+"#;
+
+    let program = parse_plc(source).expect("should parse");
+    let expanded = preprocess_program(&program).expect("should preprocess");
+    let constraints = build_constraint_set(&expanded).expect("should build constraints");
+    
+    let rule = &constraints.safety[0];
+    match &rule.left {
+        rust_plc::ir::SafetyExpr::Threshold { value, .. } => {
+            assert_eq!(value, "12.5", "should preserve decimal value");
+        }
+        _ => panic!("should be Threshold"),
+    }
+}
+
+#[test]
+fn test_analog_safety_constraint_parser_handles_large_numbers() {
+    use rust_plc::parser::parse_plc;
+    use rust_plc::semantic::{preprocess_program, build_constraint_set};
+
+    let source = r#"
+[topology]
+device counter: analog_input { range: 0..10000, unit: "count" }
+device alarm: digital_output
+
+[constraints]
+safety: counter > 9999 conflicts_with alarm.on
+
+[tasks]
+task main:
+    step s1:
+        action: log "test"
+"#;
+
+    let program = parse_plc(source).expect("should parse");
+    let expanded = preprocess_program(&program).expect("should preprocess");
+    let constraints = build_constraint_set(&expanded).expect("should build constraints");
+    
+    let rule = &constraints.safety[0];
+    match &rule.left {
+        rust_plc::ir::SafetyExpr::Threshold { value, .. } => {
+            assert_eq!(value, "9999");
+        }
+        _ => panic!("should be Threshold"),
+    }
+}
