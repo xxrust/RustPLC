@@ -2,9 +2,27 @@
 ## Codebase Patterns
 - When the repo root is both `[package]` and `[workspace]`, use `cargo test --workspace` to run member-crate tests (plain `cargo test` only targets the default package).
 - For `#![no_std]` crates that still want unit tests/doctests, add `#[cfg(test)] extern crate std;`.
+- In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
 
 Started: Sat Feb 14 23:50:11 CST 2026
+---
+
+## [2026-02-15 00:16:45 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added new `crates/runtime-core` crate implementing a minimal deterministic tick-driven executor.
+  - Implemented a small Program/Task/Step model with `Action`, `WaitDigital` (with optional timeout->goto), `Delay`, `Goto`, and `Halt`.
+  - Added unit tests covering delay/timeout boundary semantics and same-tick goto chaining with trace events.
+- Files changed
+  - `Cargo.toml`, `crates/runtime-core/Cargo.toml`, `crates/runtime-core/src/lib.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Tick semantics for `Delay`/`Timeout` should be expressed in terms of `elapsed = now - entered_at` to keep behavior deterministic and easy to test.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Within a single tick, immediate transitions can loop forever if you build a goto-cycle; `runtime-core` guards with a per-tick transition cap.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `Runtime::tick*()` advances `Io` by exactly one tick (`Io::advance_tick()`), so callers should not advance ticks separately.
 ---
 
 ## [2026-02-15 00:07:11 CST] - US-001

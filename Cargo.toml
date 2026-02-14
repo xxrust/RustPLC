@@ -20,4 +20,5 @@ z3-solver = ["dep:z3"]
 resolver = "2"
 members = [
   "crates/io-traits",
+  "crates/runtime-core",
 ]
