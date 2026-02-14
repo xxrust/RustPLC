@@ -329,6 +329,7 @@ pub fn build_constraint_set_from_ast(
     let device_kinds = collect_device_kinds(topology);
     let known_states = collect_known_states(topology, &device_kinds);
     let task_steps = collect_task_steps(tasks);
+    let device_ranges = collect_device_ranges(topology);
 
     for safety in &constraints.safety {
         validate_safety_operand(
@@ -337,6 +338,7 @@ pub fn build_constraint_set_from_ast(
             "safety 左侧",
             &device_kinds,
             &known_states,
+            &device_ranges,
             &mut errors,
         );
         validate_safety_operand(
@@ -345,6 +347,7 @@ pub fn build_constraint_set_from_ast(
             "safety 右侧",
             &device_kinds,
             &known_states,
+            &device_ranges,
             &mut errors,
         );
 
@@ -388,14 +391,13 @@ pub fn build_constraint_set_from_ast(
         });
     }
 
-    let device_ranges = collect_device_ranges(topology);
-
     for task in &tasks.tasks {
         for step in &task.steps {
             validate_wait_device_references_in_statements(
                 &step.statements,
                 step.line.max(1),
                 &device_kinds,
+                &device_ranges,
                 &mut errors,
             );
             validate_analog_actions_in_statements(
@@ -1039,13 +1041,16 @@ fn validate_wait_device_references_in_statements(
     statements: &[StepStatement],
     line: usize,
     device_kinds: &HashMap<String, DeviceKind>,
+    device_ranges: &HashMap<String, (f64, f64)>,
     errors: &mut Vec<PlcError>,
 ) {
     for statement in statements {
         match statement {
             StepStatement::Wait(wait) => {
-                if matches!(wait.condition, WaitCondition::And(_) | WaitCondition::Or(_)) {
-                    for condition in wait_condition_terms(&wait.condition) {
+                let should_validate_references =
+                    matches!(wait.condition, WaitCondition::And(_) | WaitCondition::Or(_));
+                for condition in wait_condition_terms(&wait.condition) {
+                    if should_validate_references {
                         validate_wait_operand_device(
                             &condition.left,
                             line,
@@ -1063,11 +1068,30 @@ fn validate_wait_device_references_in_statements(
                             );
                         }
                     }
+                    if let LiteralValue::Number(value) = &condition.right {
+                        if let Some(device) = wait_operand_device_name(&condition.left) {
+                            validate_analog_threshold_comparison(
+                                device,
+                                *value,
+                                line,
+                                "wait 条件阈值比较",
+                                device_kinds,
+                                device_ranges,
+                                errors,
+                            );
+                        }
+                    }
                 }
             }
             StepStatement::IfElse { .. } => {}
             StepStatement::Repeat { body, .. } => {
-                validate_wait_device_references_in_statements(body, line, device_kinds, errors);
+                validate_wait_device_references_in_statements(
+                    body,
+                    line,
+                    device_kinds,
+                    device_ranges,
+                    errors,
+                );
             }
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
@@ -1075,6 +1099,7 @@ fn validate_wait_device_references_in_statements(
                         &branch.statements,
                         line,
                         device_kinds,
+                        device_ranges,
                         errors,
                     );
                 }
@@ -1085,6 +1110,7 @@ fn validate_wait_device_references_in_statements(
                         &branch.statements,
                         line,
                         device_kinds,
+                        device_ranges,
                         errors,
                     );
                 }
@@ -1112,18 +1138,23 @@ fn validate_wait_operand_device(
     device_kinds: &HashMap<String, DeviceKind>,
     errors: &mut Vec<PlcError>,
 ) {
+    if let Some(candidate) = wait_operand_device_name(operand) {
+        validate_device_reference(candidate, line, source, device_kinds, errors);
+    }
+}
+
+fn wait_operand_device_name(operand: &str) -> Option<&str> {
     let candidate = operand
         .split('.')
         .next()
-        .map(str::trim)
         .unwrap_or(operand)
         .trim();
 
     if candidate.is_empty() {
-        return;
+        None
+    } else {
+        Some(candidate)
     }
-
-    validate_device_reference(candidate, line, source, device_kinds, errors);
 }
 
 fn map_safety_relation(relation: &AstSafetyRelation) -> IrSafetyRelation {
@@ -1139,15 +1170,69 @@ fn validate_safety_operand(
     source: &str,
     device_kinds: &HashMap<String, DeviceKind>,
     known_states: &HashMap<String, HashSet<String>>,
+    device_ranges: &HashMap<String, (f64, f64)>,
     errors: &mut Vec<PlcError>,
 ) {
     match operand {
         SafetyOperand::State(state_ref) => {
             validate_state_reference(state_ref, line, source, device_kinds, known_states, errors);
         }
-        SafetyOperand::Threshold { device, .. } => {
+        SafetyOperand::Threshold {
+            device, value, ..
+        } => {
             validate_device_reference(device, line, source, device_kinds, errors);
+            validate_analog_threshold_comparison(
+                device,
+                *value,
+                line,
+                "safety 阈值比较",
+                device_kinds,
+                device_ranges,
+                errors,
+            );
         }
+    }
+}
+
+fn validate_analog_threshold_comparison(
+    device: &str,
+    value: f64,
+    line: usize,
+    source: &str,
+    device_kinds: &HashMap<String, DeviceKind>,
+    device_ranges: &HashMap<String, (f64, f64)>,
+    errors: &mut Vec<PlcError>,
+) {
+    let Some(kind) = device_kinds.get(device) else {
+        return;
+    };
+
+    if *kind != DeviceKind::AnalogInput {
+        errors.push(PlcError::type_mismatch_with_reason(
+            line,
+            "analog_input",
+            device_kind_name(kind),
+            format!("{source} {device}"),
+            "阈值比较仅支持 analog_input 设备",
+        ));
+        return;
+    }
+
+    let Some((min, max)) = device_ranges.get(device) else {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!("模拟量输入 {device} 缺少 range，无法进行阈值比较"),
+            "请在 [topology] 段为该设备声明 range: min..max",
+        ));
+        return;
+    };
+
+    if value < *min || value > *max {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!("阈值 {value} 超出 {device} 的 range {min}..{max}"),
+            "请调整阈值或更新 range 范围",
+        ));
     }
 }
 
@@ -2485,6 +2570,93 @@ task main:
         assert!(
             rendered.contains("未定义设备 sensor_D"),
             "应报告 OR 子条件中的未定义设备"
+        );
+    }
+
+    #[test]
+    fn reports_invalid_analog_thresholds_in_safety() {
+        let input = r#"
+[topology]
+
+device pressure_ok: analog_input { range: 0..10 }
+device pressure_missing: analog_input
+device button: digital_input
+
+[constraints]
+
+safety: pressure_ok > 11 conflicts_with button.on
+safety: pressure_missing > 5 conflicts_with button.on
+safety: button > 1 conflicts_with button.on
+
+[tasks]
+
+task main:
+    step start:
+        wait: button == true
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let errors = build_constraint_set(&program).expect_err("无效阈值比较应报错");
+
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("pressure_ok") && rendered.contains("超出"),
+            "应报告阈值超出范围"
+        );
+        assert!(
+            rendered.contains("pressure_missing") && rendered.contains("缺少 range"),
+            "应报告缺少 range 的模拟量输入"
+        );
+        assert!(
+            rendered.contains("期望 analog_input"),
+            "应报告非 analog_input 的阈值比较"
+        );
+    }
+
+    #[test]
+    fn reports_invalid_analog_thresholds_in_wait_conditions() {
+        let input = r#"
+[topology]
+
+device temp_ok: analog_input { range: 0..100 }
+device temp_missing: analog_input
+device start_button: digital_input
+
+[constraints]
+
+[tasks]
+
+task main:
+    step check:
+        wait: temp_ok > 120
+        wait: temp_missing < 10
+        wait: start_button > 1
+        wait: start_button == true
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let errors = build_constraint_set(&program).expect_err("无效 wait 阈值比较应报错");
+
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("temp_ok") && rendered.contains("超出"),
+            "应报告 wait 阈值超出范围"
+        );
+        assert!(
+            rendered.contains("temp_missing") && rendered.contains("缺少 range"),
+            "应报告 wait 条件缺少 range 的模拟量输入"
+        );
+        assert!(
+            rendered.contains("期望 analog_input"),
+            "应报告 wait 条件使用非 analog_input 设备"
         );
     }
 

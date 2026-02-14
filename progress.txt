@@ -597,3 +597,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - Safety summary warnings are printed by CLI in `print_success_summary`.
 ---
+## [2026-02-14 09:52:27 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added semantic validation for safety/wait analog threshold comparisons (analog_input-only, range required, range bounds).
+  - Extended wait validation to check analog thresholds without changing single-wait undefined-device behavior.
+  - Added unit tests for safety and wait threshold validation.
+- Files changed
+  - `src/semantic/mod.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Analog threshold validation lives in semantic constraint building and uses device range metadata.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Single wait conditions intentionally avoid undefined-device validation; only AND/OR waits enforce device references.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Threshold checks are shared by safety and wait via a common helper to keep error messaging consistent.
+---
