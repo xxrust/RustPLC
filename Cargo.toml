@@ -21,4 +21,5 @@ resolver = "2"
 members = [
   "crates/io-traits",
   "crates/runtime-core",
+  "crates/sim",
 ]
