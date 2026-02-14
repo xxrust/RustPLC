@@ -162,6 +162,9 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         "inverted" => {
             attributes.inverted = Some(expect_boolean(value, "inverted")?);
         }
+        "external" => {
+            attributes.external = Some(expect_boolean(value, "external")?);
+        }
         "rated_speed" => {
             attributes.rated_speed = Some(expect_measured(value, "rated_speed")?);
         }
@@ -1249,6 +1252,55 @@ task main:
             valve.attributes.custom_states.as_ref(),
             Some(&expected),
             "应解析出自定义 states 列表"
+        );
+    }
+
+    #[test]
+    fn parses_external_attribute_into_ast() {
+        let input = r#"
+[topology]
+
+device X1: digital_input {
+    external: true
+}
+
+device pressure_in: analog_input {
+    range: 0..10,
+    external: true
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step start:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("external 属性应能解析为 AST");
+        let digital = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "X1")
+            .expect("应包含 X1 设备");
+        let analog = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "pressure_in")
+            .expect("应包含 pressure_in 设备");
+
+        assert_eq!(
+            digital.attributes.external,
+            Some(true),
+            "digital_input external 应解析为 true"
+        );
+        assert_eq!(
+            analog.attributes.external,
+            Some(true),
+            "analog_input external 应解析为 true"
         );
     }
 

@@ -1,5 +1,6 @@
 # Ralph Progress Log
 ## Codebase Patterns
+- Adding a topology attribute requires updating `parser/plc.pest` `attribute_name`, `parser/mod.rs` `apply_attribute`, and adding a parser test to lock in AST mapping.
 - If safety verification skips an unmodeled rule (e.g., analog threshold), emit a warning and downgrade proof level to Bounded.
 - New control-flow statements (e.g., IfElse) must be added to all statement walkers (semantic + timing/liveness/causality) to keep recursion/exhaustiveness correct, even if semantics land in a later story.
 - For wait AND/OR support, process each sub-condition independently in semantic validation and causality inference; do not collapse to a single inferred sensor/device.
@@ -612,4 +613,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Single wait conditions intentionally avoid undefined-device validation; only AND/OR waits enforce device references.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Threshold checks are shared by safety and wait via a common helper to keep error messaging consistent.
+---
+## [2026-02-14 09:57:16 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `external` as a supported topology attribute, stored in AST, and parsed into `DeviceAttributes`.
+  - Added parser test to ensure `external: true` is captured for digital_input and analog_input devices.
+- Files changed
+  - `src/ast/mod.rs`, `src/parser/plc.pest`, `src/parser/mod.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Topology attributes are validated by `attribute_name` in the grammar and mapped in `apply_attribute`; add new attributes in both places plus a focused parser test.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - None.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `DeviceAttributes` defaults come from `Default`; new optional attributes stay `None` unless explicitly parsed.
 ---
