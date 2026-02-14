@@ -10,8 +10,10 @@ use serde::Serialize;
 
 mod scenario;
 mod waveform;
+mod plant;
 pub use scenario::{Scenario, ScenarioError, InputEvent, InputSet};
 pub use waveform::{export_analog_outputs_csv, export_analog_outputs_jsonl, export_vcd_digital};
+pub use plant::{Plant, SolenoidValveConfig, LimitKind, LimitSensorConfig, CylinderConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DigitalEdge {
@@ -60,6 +62,8 @@ pub struct SimIo {
 
     scheduled: BTreeMap<u64, Vec<InputChange>>,
 
+    plant: Option<Plant>,
+
     digital_edges: Vec<DigitalEdge>,
     analog_edges: Vec<AnalogEdge>,
     digital_input_edges: Vec<DigitalInputEdge>,
@@ -79,12 +83,20 @@ impl SimIo {
             ai: vec![0.0; num_analog_inputs],
             ao: vec![0.0; num_analog_outputs],
             scheduled: BTreeMap::new(),
+            plant: None,
             digital_edges: Vec::new(),
             analog_edges: Vec::new(),
             digital_input_edges: Vec::new(),
         };
         s.apply_scheduled_for_current_tick();
         s
+    }
+
+    pub fn with_plant(mut self, plant: Plant) -> Self {
+        self.plant = Some(plant);
+        // Ensure tick-0 plant state is applied to inputs before the first runtime tick.
+        self.apply_plant_for_current_tick(Tick(0));
+        self
     }
 
     pub fn with_scheduled_changes(mut self, tick: Tick, changes: impl IntoIterator<Item = InputChange>) -> Self {
@@ -142,24 +154,13 @@ impl SimIo {
     }
 
     fn apply_scheduled_for_current_tick(&mut self) {
-        let Some(changes) = self.scheduled.get(&self.tick.0) else {
+        let Some(changes) = self.scheduled.remove(&self.tick.0) else {
             return;
         };
         for c in changes {
-            match *c {
+            match c {
                 InputChange::Digital { id, value } => {
-                    let idx = id.0 as usize;
-                    if let Some(slot) = self.di.get_mut(idx) {
-                        let prev = *slot;
-                        *slot = value;
-                        if prev != value {
-                            self.digital_input_edges.push(DigitalInputEdge {
-                                tick: self.tick,
-                                id,
-                                value,
-                            });
-                        }
-                    }
+                    self.set_digital_input(id, value);
                 }
                 InputChange::Analog { id, value } => {
                     if let Some(slot) = self.ai.get_mut(id.0 as usize) {
@@ -167,6 +168,32 @@ impl SimIo {
                     }
                 }
             }
+        }
+    }
+
+    fn set_digital_input(&mut self, id: DigitalInputId, value: bool) {
+        let idx = id.0 as usize;
+        if let Some(slot) = self.di.get_mut(idx) {
+            let prev = *slot;
+            *slot = value;
+            if prev != value {
+                self.digital_input_edges.push(DigitalInputEdge {
+                    tick: self.tick,
+                    id,
+                    value,
+                });
+            }
+        }
+    }
+
+    fn apply_plant_for_current_tick(&mut self, prev_tick: Tick) {
+        let now = self.tick;
+        let Some(plant) = self.plant.as_mut() else {
+            return;
+        };
+        let updates = plant.advance_tick(prev_tick, now, &self.do_);
+        for u in updates {
+            self.set_digital_input(u.id, u.value);
         }
     }
 }
@@ -177,8 +204,11 @@ impl Io for SimIo {
     }
 
     fn advance_tick(&mut self) {
+        let prev = self.tick;
         self.tick.0 += 1;
         self.apply_scheduled_for_current_tick();
+        // Let the plant update sensor inputs for the new tick.
+        self.apply_plant_for_current_tick(prev);
     }
 
     fn read_digital_input(&self, id: DigitalInputId) -> bool {

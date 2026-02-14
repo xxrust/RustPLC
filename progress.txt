@@ -4,6 +4,7 @@
 - For `#![no_std]` crates that still want unit tests/doctests, add `#[cfg(test)] extern crate std;`.
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
+- For `crates/sim` plant-style dynamics, keep the plant as a deterministic tick-step that *returns* input updates, and call it from `SimIo::advance_tick()` (after applying scenario inputs) to avoid borrow-checker pitfalls with `&mut self` callbacks.
 - Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
 - For human-friendly YAML parse errors, use `serde_path_to_error` so errors include a field path (e.g., `inputs[0].set.digital_inputs`).
 - `src/runtime_bridge.rs` builds `runtime-core::Program<'static>` by leaking boxed slices/strings (`Box::leak`) to keep the runtime API simple for now; treat this as OK for CLI/tests but avoid in long-lived processes.
@@ -129,4 +130,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - If you derive output directories from `--out`, also ensure you `create_dir_all()` for each artifact path (trace/VCD/CSV) to avoid partial output failures.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `SimIo` now records digital input edges when scheduled changes are applied, which makes it possible to export DI waveforms without sampling every tick.
+---
+
+## [2026-02-15 01:19:50 CST] - US-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a minimal deterministic plant model in `crates/sim` (solenoid valve -> cylinder -> limit sensor) with response time, stroke/retract time, and sensor debounce.
+  - Integrated the plant into `SimIo` so sensor inputs update automatically on `advance_tick()`.
+  - Added a unit test that drives a tiny `runtime-core` program and asserts the wait is satisfied at the expected tick window (response + stroke).
+- Files changed
+  - `crates/sim/src/lib.rs`, `crates/sim/src/plant.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Returning `Vec<DigitalInputUpdate>` from the plant step avoids borrow-checker issues compared to passing `&mut SimIo` callbacks.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Avoid iterating `self.scheduled.get()` while mutating inputs; `remove()` the tick's entry to take ownership of changes.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Plant observes final output values at the end of `prev_tick` and models command changes as happening on `prev_tick`; response time is `prev_tick + response_ticks`.
 ---
