@@ -5,6 +5,7 @@
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
 - For human-friendly YAML parse errors, use `serde_path_to_error` so errors include a field path (e.g., `inputs[0].set.digital_inputs`).
+- `src/runtime_bridge.rs` builds `runtime-core::Program<'static>` by leaking boxed slices/strings (`Box::leak`) to keep the runtime API simple for now; treat this as OK for CLI/tests but avoid in long-lived processes.
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
 - CLI integration tests in this repo should invoke the compiled binary via `env!("CARGO_BIN_EXE_rust_plc")` and verify artifacts on disk.
 
@@ -92,4 +93,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Integration tests can run the compiled CLI via `env!("CARGO_BIN_EXE_rust_plc")` and validate file outputs without adding extra test deps.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
     - When the root is both `[package]` and `[workspace]`, remember to run `cargo test --workspace` so member-crate tests are included.
+---
+
+## [2026-02-15 00:57:00 CST] - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `rust_plc::runtime_bridge` to convert a compiled IR `StateMachine` into a minimal `runtime-core` `Program` (subset: set/extend/retract, wait, delay, timeout->goto, goto).
+  - Implemented deterministic topology-based resolution from device names to physical `Xn`/`Yn` IDs by walking upstream `connected_to` edges.
+  - Added integration tests that compile a small `.plc` fixture, bridge it, run it with `sim::SimIo`, and assert deterministic JSONL trace + output edges (including timeout branch).
+- Files changed
+  - `src/lib.rs`, `src/runtime_bridge.rs`, `tests/runtime_bridge_us006.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Bridging from IR to `runtime-core` is easiest when you normalize durations to ticks (`duration_ms % tick_ms == 0`) and keep guard parsing intentionally strict.
+    - Mapping “logical” devices (cylinder/sensor/button) to physical I/O can be done by traversing upstream edges in `TopologyGraph` and selecting a unique `Xn`/`Yn` terminal.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `runtime-core::Runtime<'a>` ties its lifetime to the borrowed `Program`, so test helpers should avoid forcing `Runtime<'static>` unless you truly have a `'static` borrow.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - This bridge currently returns `Program<'static>` by leaking allocations (`Box::leak`) to avoid self-referential owned program plumbing; revisit if you need long-running processes.
 ---
