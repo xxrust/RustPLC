@@ -7,4 +7,5 @@ pub mod parser;
 pub mod runtime_bridge;
 pub mod semantic;
 pub mod sim_regress;
+pub mod trace_diff;
 pub mod verification;

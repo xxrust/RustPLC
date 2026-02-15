@@ -309,3 +309,13 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - Current tick source is a busy-wait skeleton (`cortex_m::asm::delay`) intended only as a minimal bring-up baseline; later stories can switch to timer/IRQ ticks.
 ---
+
+## [2026-02-15 21:55:22 CST] - US-008 (Trace Diff)
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `rust_plc::trace_diff` module to compare SIL `trace.jsonl` and board `trace.jsonl` and produce a structured mismatch report (first mismatch + type + context window).
+  - Added CLI `trace-diff` subcommand to generate `report.json` from two trace files.
+  - Added unit + CLI integration tests covering both matching traces and a reason-mismatch case.
+- Files changed
+  - `src/trace_diff.rs`, `src/lib.rs`, `src/main.rs`, `tests/trace_diff.rs`, `prd.json`, `progress.txt`
+---

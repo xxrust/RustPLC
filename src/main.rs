@@ -111,6 +111,13 @@ fn main() {
         }
         return;
     }
+    if first == "trace-diff" {
+        if let Err(msg) = run_trace_diff_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let path = first;
     if args.next().is_some() {
@@ -163,6 +170,7 @@ fn print_usage(program: &str) {
     eprintln!("  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]");
     eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
     eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
+    eprintln!("  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]");
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -691,6 +699,88 @@ fn run_trace_parse_subcommand(
         jsonl.push_str(&line);
     }
     fs::write(&out, jsonl).map_err(|err| format!("Failed to write {out:?}: {err}"))?;
+    Ok(())
+}
+
+fn run_trace_diff_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let mut sil: Option<PathBuf> = None;
+    let mut board: Option<PathBuf> = None;
+    let mut out: Option<PathBuf> = None;
+    let mut context_window: usize = 3;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--sil" => {
+                sil = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --sil <trace.jsonl>".to_string())?,
+                ));
+            }
+            "--board" => {
+                board = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --board <trace.jsonl>".to_string())?,
+                ));
+            }
+            "--out" => {
+                out = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --out <report.json>".to_string())?,
+                ));
+            }
+            "--context" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --context <n>".to_string())?;
+                context_window = raw
+                    .parse::<usize>()
+                    .map_err(|_| format!("Invalid --context value (expected usize): {raw}"))?;
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+                ));
+            }
+            other => return Err(format!("Unknown argument for trace-diff: {other}")),
+        }
+    }
+
+    let sil = sil.ok_or_else(|| format!(
+        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+    ))?;
+    let board = board.ok_or_else(|| format!(
+        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+    ))?;
+    let out = out.ok_or_else(|| format!(
+        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+    ))?;
+
+    let sil_text = fs::read_to_string(&sil)
+        .map_err(|err| format!("Failed to read SIL trace {sil:?}: {err}"))?;
+    let board_text = fs::read_to_string(&board)
+        .map_err(|err| format!("Failed to read board trace {board:?}: {err}"))?;
+
+    let sil_events = rust_plc::trace_diff::parse_trace_jsonl(&sil_text)
+        .map_err(|err| format!("Failed to parse SIL trace JSONL: {err}"))?;
+    let board_events = rust_plc::trace_diff::parse_trace_jsonl(&board_text)
+        .map_err(|err| format!("Failed to parse board trace JSONL: {err}"))?;
+
+    let report = rust_plc::trace_diff::diff_traces(&sil_events, &board_events, context_window);
+
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create output dir {parent:?}: {err}"))?;
+        }
+    }
+
+    let mut json = serde_json::to_string_pretty(&report)
+        .map_err(|err| format!("Failed to serialize report JSON: {err}"))?;
+    json.push('\n');
+    fs::write(&out, json).map_err(|err| format!("Failed to write {out:?}: {err}"))?;
     Ok(())
 }
 
