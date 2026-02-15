@@ -12,7 +12,7 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 本 skill 不仅是“生成 DSL”，还要对 **生成物可验证性** 负责。仓库内提供了该 skill 的自测夹具：
 
 - 夹具目录：`.codex/skills/plc-gen/fixtures/valid/*.plc`
-- 运行自测：`cargo test -q`
+- 运行自测：`cargo test --workspace -q`
 
 当你修改本 `SKILL.md` 的流程/规则时，应同步新增或更新一个 fixture，用来覆盖该规则的典型场景，避免“写了规则但从未验证”。
 
@@ -171,6 +171,14 @@ cargo run --release -- examples/<filename>.plc
 - 如果验证通过，展示结果给工程师
 - 如果验证失败，阅读错误信息，修复后重新验证，直到全部通过
 - 将最终通过验证的文件展示给工程师做最后确认
+
+**可选（推荐）：SIL 仿真做一次“软件在环”冒烟测试**
+
+在不接硬件的情况下，用内置 SIL 运行一次场景，尽早暴露超时/死锁/点位脚本问题（需要你准备一个 scenario YAML）：
+
+```bash
+cargo run --release -- sim examples/<filename>.plc --scenario scenarios/<scenario>.yaml --out out/<run>/
+```
 
 **DSL 延时（delay）与超时（timeout）：**
 

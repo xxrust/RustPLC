@@ -495,7 +495,7 @@ flowchart TD
 ## 测试
 
 ```bash
-cargo test    # 131 个测试（69 单元 + 14 集成 + 31 压力/覆盖 + 1 fixture + 6 端到端 + 10 验证能力）
+cargo test --workspace
 ```
 
 ### 可选：启用 Z3 求解器
@@ -521,6 +521,7 @@ cargo build --release --features z3-solver
 - [x] DSL v2：delay / repeat / wait AND|OR / if-else / goto task.step / 自定义状态
 - [x] AI 辅助生成（plc-gen skill）
 - [x] 模拟量 I/O（analog_input / analog_output / set_analog / 阈值比较）
+- [x] SIL 仿真闭环（SimIO / Plant / 故障注入 / 波形导出 / 批量回归）
 - [ ] 代码生成 → 确定性 Rust 执行内核
 - [ ] 硬件抽象层（EtherCAT / Modbus / GPIO）
 - [ ] PID 控制

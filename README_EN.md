@@ -488,7 +488,7 @@ flowchart TD
 ## Tests
 
 ```bash
-cargo test    # 131 tests (69 unit + 14 integration + 31 stress/coverage + 1 fixture + 6 e2e + 10 verification)
+cargo test --workspace
 ```
 
 ### Optional: Enable Z3 Solver
@@ -514,6 +514,7 @@ Enables Z3 SMT solver for stronger mutual exclusion proofs in the Safety engine.
 - [x] DSL v2: delay / repeat / wait AND|OR / if-else / goto task.step / custom states
 - [x] AI-assisted generation (plc-gen skill)
 - [x] Analog I/O (analog_input / analog_output / set_analog / threshold comparison)
+- [x] SIL loop (SimIO / Plant / fault injection / waveform export / batch regression)
 - [ ] Code generation → deterministic Rust execution kernel
 - [ ] Hardware abstraction layer (EtherCAT / Modbus / GPIO)
 - [ ] PID control
