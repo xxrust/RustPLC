@@ -1,726 +1,185 @@
 # Ralph Progress Log
 ## Codebase Patterns
-- Adding a topology attribute requires updating `parser/plc.pest` `attribute_name`, `parser/mod.rs` `apply_attribute`, and adding a parser test to lock in AST mapping.
-- Causality inference includes `sensor` devices and `analog_input` devices unless `external: true` is set.
-- If safety verification skips an unmodeled rule (e.g., analog threshold), emit a warning and downgrade proof level to Bounded.
-- New control-flow statements (e.g., IfElse) must be added to all statement walkers (semantic + timing/liveness/causality) to keep recursion/exhaustiveness correct, even if semantics land in a later story.
-- For wait AND/OR support, process each sub-condition independently in semantic validation and causality inference; do not collapse to a single inferred sensor/device.
-- WaitStatement.condition is WaitCondition (Single/And/Or); keep downstream code using helpers to render/scan all sub-conditions (do not assume a single left/operator/right).
-- In causality checks, parallel contexts can create invalid cross-branch action/wait pairs; tag statement origin and filter parallel-related pairs unless action->sensor is reachable to avoid false positives.
-- For timing envelopes, include upstream `response_time` along `connected_to` chains and treat incoming `StateMachine` guards as must_start_after lower bounds (`timeout` contributes delay, `always/condition` = 0ms).
-- `must_complete_within` critical-path estimates must include `delay:` durations (step worst-case should consider action time + bounded waits like delay/timeout).
-- TopologyGraph JSON 调试依赖 `petgraph` 的 `serde-1` feature；若缺失会导致 DiGraph 无法序列化。
-- In parser-to-AST lowering, unwrap wrapper PEG rules (e.g., `constraint_declaration`, `step_statement`) before matching concrete rule kinds, or valid nodes can be silently skipped.
-- When introducing a new `StepStatement` variant, update all semantic/verification `match` arms (and tests) so builds remain exhaustive.
-- For new step-level statements, update all grammar “statement lists” (`step_statement`, `parallel_branch_statement`, `race_branch_statement`) so the syntax works both at top-level steps and inside blocks.
-- Keep parser stage focused on syntax shape; range/business checks (e.g., `repeat` count bounds/nesting limits) should be enforced in semantic lowering.
-- For syntax sugar that changes control-flow shape (e.g., `repeat N:` expanding into N steps), add a semantic preprocessor and ensure both IR lowering and verification run on the expanded program so step-based analyses remain consistent.
-- Keep public module declarations centralized in `src/lib.rs`; implementation files live at `src/<module>/mod.rs`.
-- For early story scaffolding, keep module placeholders compiling so CLI and library can evolve incrementally without breaking builds.
-- Model DSL enums with `serde(rename_all = "snake_case")` and tagged enums so serialized AST tokens stay aligned with DSL keywords.
-- In pest grammars, define silent `WHITESPACE` and `COMMENT` rules so inline `#` comments and multiline section formatting parse without extra boilerplate.
-- In PEG/pest ordered-choice rules, put longer keywords before shorter prefix keywords (e.g., `must_complete_within_worst_case` before `must_complete_within`) to avoid prefix-match parse failures.
-- For block-style DSL sections, parse optional `reason: "..."` clauses directly in each declaration rule so indented multiline annotations remain valid without separate line handling.
-- In nested `parallel`/`race` grammar, require branch bodies to consume concrete statements so step-level directives are not misparsed as branch labels.
-- In semantic topology lowering, treat `connected_to` as upstream linkage (`target -> current`) so causality traversals follow physical flow direction.
-- Preserve directive line metadata in AST (e.g., `GotoDirective.line`, `TaskDeclaration.on_complete_line`) so semantic passes can report precise line-numbered errors without reparsing source text.
-- For constraint semantic validation, seed known device states from device-type defaults plus `sensor.detects` references before checking `safety` state expressions.
-- Use `PlcError` constructors (`undefined_reference` / `type_mismatch` / `duplicate_definition`) so diagnostics share unified ERROR blocks with `位置/原因/建议` fields.
-- For end-to-end compilation paths (CLI/tests), run all four semantic builders and aggregate their errors so users get complete diagnostics in one run.
-- For causality verification, augment TopologyGraph with logical edges from `detects.device -> sensor` before running reachability, otherwise output-to-sensor chains may appear disconnected.
-- Liveness checks should combine AST metadata (`allow_indefinite_wait`, `on_complete`) with StateMachine transitions; IR guards alone cannot reconstruct all wait exemptions.
-- Keep Z3-backed safety verification behind the `z3-solver` cargo feature so default `cargo test` stays runnable on toolchains without `cmake`/libz3.
-- Keep machine-readable IR JSON on stdout and print human verification summaries to stderr so automation can parse output while users still get readable reports.
-- If you add a new `TransitionGuard` variant, update verification guard match arms (`liveness`, `timing`, `safety`) so delay/timeout semantics and diagnostics stay consistent.
-- Safety verifier diagnostics should carry relation-specific reasons (e.g., `conflicts_with` vs `requires`) and `verify_all` should reuse that reason instead of hardcoding one wording.
-Started: Wed Feb 11 01:14:39 CST 2026
----
-## [2026-02-11 01:19:50 CST] - US-001
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Initialized Cargo project `rust_plc` with required dependencies (`pest`, `pest_derive`, `petgraph`, `serde`, `serde_json`, `thiserror`).
-  - Added `src/lib.rs` module exports and placeholder module files for `parser`, `ast`, `ir`, `semantic`, and `error`.
-  - Replaced default CLI with argument validation that accepts exactly one `.plc` file path.
-- Files changed
-  - `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `src/lib.rs`, `src/parser/mod.rs`, `src/ast/mod.rs`, `src/ir/mod.rs`, `src/semantic/mod.rs`, `src/error/mod.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Library-facing modules are declared in `src/lib.rs` even when implementation is still a placeholder.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `python` shim is unavailable in this environment; use `python3` for JSON/text automation scripts.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - This story established the baseline crate structure; subsequent parser/AST stories can add logic directly in existing module files.
----
-## [2026-02-11 01:31:17 CST] - US-002
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Replaced the AST placeholder with typed syntax tree models for topology, constraints, and tasks sections.
-  - Added device/constraint/task enums and structs covering all required DSL categories (device types, attributes, safety/timing/causality constraints, actions, wait/timeout/goto/on_complete/parallel/race/allow_indefinite_wait/unreachable).
-  - Derived `Debug`, `Clone`, `Serialize`, and `Deserialize` for all AST-facing data structures to support parser output and downstream serialization.
-- Files changed
-  - `src/ast/mod.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Keeping AST enums `snake_case` via serde attributes avoids ad-hoc keyword conversion once parser lowering starts.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `cargo clippy` is unavailable in this toolchain unless the clippy component is installed (`rustup component add clippy`).
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `StepStatement` is modeled as a tagged enum, so parser work can map each DSL statement kind directly without extra wrapper types.
----
-## [2026-02-11 01:39:19 CST] - US-003
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added `src/parser/plc.pest` with topology-section PEG rules covering `[topology]`, bare port declarations, attribute blocks, all required device types, and all required topology attribute keys.
-  - Added parser entrypoint `parse_topology` in `src/parser/mod.rs` using `pest_derive::Parser` against `parser/plc.pest`.
-  - Added parser unit tests for the PRD 5.3 topology sample and an additional topology case that exercises every supported device type plus identifier/string/duration/measured/state-reference value forms.
-- Files changed
-  - `src/parser/plc.pest`, `src/parser/mod.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Defining topology grammar values as a prioritized union (`state_reference` before `identifier`) avoids partial matches when parsing dotted tokens like `cyl_A.extended`.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - Keep keyword-limited `attribute_name` and `device_type` rules explicit in PEG so unsupported topology keys/types fail fast instead of being accepted as generic identifiers.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `parse_topology` currently validates syntax only; AST lowering for topology/constraints/tasks is expected in a later parser story.
----
-## [2026-02-11 01:44:22 CST] - US-004
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Extended `src/parser/plc.pest` with `[constraints]` grammar coverage for `safety` (`conflicts_with` + `requires`), `timing` (`must_complete_within` + `must_start_after`), and `causality` chain declarations.
-  - Added shared grammar primitives for `timing_scope`, causality arrows, and optional `reason: "..."` clauses so both inline and indented reason annotations parse correctly.
-  - Added parser API `parse_constraints` and unit tests for the PRD 5.4 constraints sample plus a focused case covering `requires` and `must_start_after`.
-- Files changed
-  - `src/parser/plc.pest`, `src/parser/mod.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Keeping section-specific parse entrypoints (`parse_topology`, `parse_constraints`) makes it easy to ship grammar stories incrementally while preserving isolated test coverage.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `timing` scopes are intentionally constrained to `task.<name>` or `task.<name>.<step>`; broad identifier chains would over-accept invalid DSL forms.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Constraint parsing is still syntax-only; semantic validation for device/task existence and chain connectivity is deferred to later semantic/verification stories.
----
-## [2026-02-11 07:26:44 CST] - US-005
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Extended `src/parser/plc.pest` with `[tasks]` grammar for task/step declarations, action/wait/timeout/goto statements, `on_complete`, and `allow_indefinite_wait`.
-  - Added nested control-flow grammar support for `parallel` and `race` blocks, including branch parsing and `then: goto` handling in race branches.
-  - Added `parse_tasks` in `src/parser/mod.rs` plus parser unit tests covering PRD sections 5.5.1 through 5.5.5.
-- Files changed
-  - `src/parser/plc.pest`, `src/parser/mod.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Task grammar entrypoints follow the same section-scoped API pattern as existing parser functions (`parse_topology`/`parse_constraints`), which keeps parser stories independently testable.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - In PEG branch grammars, letting branch bodies be empty can cause tokens like `timeout:` to be accidentally treated as new branch labels; require concrete branch content to avoid this.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Current task parsing remains syntax-only; AST lowering for task statements is still pending the dedicated parser-to-AST story.
----
-## [2026-02-11 08:53:35 CST] - US-006
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added full parser-to-AST builder entrypoint `parse_plc` that parses `[topology]`, `[constraints]`, and `[tasks]` into `PlcProgram` with typed AST nodes.
-  - Implemented detailed lowering helpers for devices/attributes, safety-timing-causality constraints, task-step statements, nested `parallel`/`race` branches, and directives (`timeout`, `goto`, `on_complete`, `allow_indefinite_wait`).
-  - Added parser error mapping to `PlcError` with line-numbered Chinese diagnostics and added a regression test to assert line reporting on syntax failures.
-  - Added end-to-end AST construction tests for PRD 6.3 and PRD 9 complete PLC examples with key field assertions.
-- Files changed
-  - `.ralph_logs/iter_4.log`, `.ralph_logs/iter_5.log`, `.ralph_logs/iter_6.log`, `src/parser/mod.rs`, `src/parser/plc.pest`, `src/error/mod.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Parser lowering is most robust when each grammar wrapper rule is unwrapped immediately, then dispatched by concrete sub-rule for AST conversion.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `Pair::into_inner()` consumes the pair; preserve `pair.as_str()` beforehand when fallback logic needs original token text (e.g., `on_complete: unreachable`).
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Causality chains in current AST are stored as `Vec<StateReference>` using device names with empty `state`; downstream IR/semantic stories should normalize this to explicit device-chain representation.
----
-## [2026-02-11 09:02:01 CST] - US-007
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Replaced `src/ir/mod.rs` placeholder with concrete IR definitions for `TopologyGraph`, `StateMachine`, `ConstraintSet`, and `TimingModel`.
-  - Implemented `TopologyGraph` on top of `petgraph::DiGraph<Device, ConnectionType>` with helper APIs for adding devices and connections.
-  - Added typed state machine/constraint/timing structures plus `to_pretty_json` helper so IR objects can be serialized with `serde_json::to_string_pretty` for debugging.
-  - Added IR unit tests that verify graph node/edge behavior and pretty-JSON serialization/deserialization for all core IR models.
-  - Enabled `petgraph`'s `serde-1` feature in Cargo dependencies so graph serialization works.
-- Files changed
-  - `Cargo.toml`, `Cargo.lock`, `src/ir/mod.rs`, `prd.json`, `progress.txt`, `.ralph_logs/iter_6.log`, `.ralph_logs/iter_7.log`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Keep IR enums `snake_case` with serde tags to make debug JSON stable and easy to diff against DSL keywords.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `petgraph::DiGraph` serialization requires the crate feature `serde-1`; adding derives alone is not enough.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `TimingModel` currently stores action timing intervals keyed by deterministic strings (`task.step.action.target`) for straightforward lookup in upcoming semantic stories.
----
-## [2026-02-11 09:16:45 CST] - US-008
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Implemented semantic topology lowering in `src/semantic/mod.rs` via `build_topology_graph`/`build_topology_from_ast`, converting AST devices into `TopologyGraph` nodes and `connected_to` relations into typed directed edges.
-  - Added topology semantic validation for undefined `connected_to` references and incompatible device-type connections, both returning Chinese semantic diagnostics with source line numbers.
-  - Extended AST device declarations with source line metadata and wired parser lowering to populate it, enabling semantic error reports to point to exact topology lines.
-  - Added semantic unit tests covering PRD 5.3 topology graph construction (node/edge counts + edge kinds) and both required failure paths (undefined reference, incompatible connection).
-- Files changed
-  - `src/semantic/mod.rs`, `src/ast/mod.rs`, `src/parser/mod.rs`, `src/error/mod.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Topology semantic checks use AST-carried `DeviceDeclaration.line` values for diagnostics; new semantic passes should keep line metadata on AST nodes they validate.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `connected_to` type compatibility is asymmetric in this model (`target -> current`), so validation must inspect `(target_kind, current_kind)` rather than `(current_kind, target_kind)`.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Current semantic API returns `Result<TopologyGraph, Vec<PlcError>>`, which is ready for future aggregation with StateMachine/ConstraintSet/TimingModel semantic errors.
----
+- When the repo root is both `[package]` and `[workspace]`, use `cargo test --workspace` to run member-crate tests (plain `cargo test` only targets the default package).
+- For `#![no_std]` crates that still want unit tests/doctests, add `#[cfg(test)] extern crate std;`.
+- In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
+- In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
+- For `crates/sim` plant-style dynamics, keep the plant as a deterministic tick-step that *returns* input updates, and call it from `SimIo::advance_tick()` (after applying scenario inputs) to avoid borrow-checker pitfalls with `&mut self` callbacks.
+- Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
+- For human-friendly YAML parse errors, use `serde_path_to_error` so errors include a field path (e.g., `inputs[0].set.digital_inputs`).
+- `serde_yaml` enum representations can be surprising (it expects YAML tags like `!Variant`); for author-friendly scenario files prefer struct-shaped keys like `faults: - sensor_stuck: { at_ms, target, value }`.
+- `src/runtime_bridge.rs` builds `runtime-core::Program<'static>` by leaking boxed slices/strings (`Box::leak`) to keep the runtime API simple for now; treat this as OK for CLI/tests but avoid in long-lived processes.
+- The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
+- CLI integration tests in this repo should invoke the compiled binary via `env!("CARGO_BIN_EXE_rust_plc")` and verify artifacts on disk.
+- Batch SIL regress runs live in `rust_plc::sim_regress`: it scans `.plc`/scenario YAMLs recursively, writes per-case `trace.jsonl`/`report.json` under `out/sim-regress/case_XXXX`, and emits a summary JSON.
 
-## [2026-02-11 09:31:45 CST] - US-009
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Implemented semantic state-machine lowering via `build_state_machine` / `build_state_machine_from_ast`, covering task/step states, sequential transitions, goto/on_complete jumps, timeout guards, plus synthetic fork/join and race branch states.
-  - Added goto target validation against known task entry states, returning line-numbered semantic errors for unresolved `goto`, `timeout -> goto`, `race then goto`, and `on_complete` targets.
-  - Extended AST/parser task metadata with source line tracking (`TaskDeclaration.line`, `TaskDeclaration.on_complete_line`, `StepDeclaration.line`, `GotoDirective.line`) to support accurate semantic diagnostics.
-  - Added semantic unit tests for PRD 5.5.1 sequence state-machine construction, PRD 9 race branching behavior, and undefined goto line reporting.
-- Files changed
-  - `src/semantic/mod.rs`, `src/ast/mod.rs`, `src/parser/mod.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Semantic lowering now follows a reusable two-phase approach: build task-entry index first, then resolve all control-flow directives (`goto`/`on_complete`/`then`) against that index.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - If you add semantic checks for control-flow directives, ensure parser captures directive line numbers in AST; otherwise diagnostics regress to coarse task-level line reporting.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Parallel/race lowering introduces synthetic state names (e.g., `step__parallel_1_fork`, `step__race_1_branch_2`) inside the same task namespace, so downstream verifiers should treat `State.step_name` as an opaque identifier rather than a DSL step token.
+Started: Sat Feb 14 23:50:11 CST 2026
 ---
-
-## [2026-02-11 09:49:05 CST] - US-010
+## [2026-02-15 01:46:15 CST] - US-010
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
-  - Implemented `build_constraint_set` / `build_constraint_set_from_ast` to lower AST constraints into IR `ConstraintSet` (safety, timing, causality) with semantic validation.
-  - Added constraint reference checks for undefined devices, undefined states, and undefined timing task/step scopes, returning Chinese line-numbered diagnostics.
-  - Implemented `build_timing_model` / `build_timing_model_from_ast` to derive action timing intervals from topology physical attributes (`stroke_time`, `retract_time`, `response_time`, `ramp_time`), including nested parallel/race actions.
-  - Extended AST + parser constraint nodes with line metadata (`SafetyConstraint.line`, `TimingConstraint.line`, `CausalityConstraint.line`) so constraint diagnostics can point to exact source lines.
-  - Added semantic unit tests covering PRD 5.4 constraint extraction/timing-model values and undefined reference error reporting.
+  - Added `sim-regress` subcommand that scans a PLC directory + scenario directory, runs all combinations via the existing compiler->runtime bridge, and writes a JSON summary (pass/fail counts + failures with repro params and artifact paths).
+  - Added `rust_plc::sim_regress::run_sim_regress()` as a reusable entrypoint; per-case artifacts include `trace.jsonl` + `report.json`.
+  - Added an integration test covering one pass + one timeout failure and asserting summary counts + failure list.
 - Files changed
-  - `src/semantic/mod.rs`, `src/ast/mod.rs`, `src/parser/mod.rs`, `prd.json`, `progress.txt`, `.ralph_logs/iter_9.log`, `.ralph_logs/iter_10.log`
+  - `src/sim_regress.rs`, `src/lib.rs`, `src/main.rs`, `tests/sim_regress.rs`, `prd.json`, `progress.txt`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Constraint validation is most stable when state legality is inferred from both device-type defaults and topology `detects` declarations.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - If semantic errors must report constraint line numbers, parser must persist line metadata on each constraint AST node (not only on tasks/topology).
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `TimingModel` extraction now recursively traverses `parallel`/`race` branch statements, so action timing coverage is no longer limited to top-level step statements.
----
-## [2026-02-11 10:02:12 CST] - US-011
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Rebuilt `src/error/mod.rs` into a unified error-reporting system with `PlcError` variants covering `ParseError` / `SemanticError` / `UndefinedReference` / `TypeMismatch` / `DuplicateDefinition`.
-  - Added structured source location (`file`, `line`, `column`) and optional `reason` fields to every error variant, plus helper constructors for consistent creation.
-  - Implemented custom `Display` output in Chinese using a consistent multiline format (`ERROR [code]` + `位置` + `原因` + optional `建议`) aligned with PRD error-reporting goals.
-  - Updated parser parse-failure mapping to capture both line and column from pest parse errors, and updated semantic checks to emit typed `UndefinedReference` / `TypeMismatch` / `DuplicateDefinition` errors where appropriate.
-  - Added unit tests that verify formatted ParseError content (line/Chinese text) and UndefinedReference content (missing device name + suggestion).
-- Files changed
-  - `src/error/mod.rs`, `src/parser/mod.rs`, `src/semantic/mod.rs`, `prd.json`, `progress.txt`, `.ralph_logs/iter_10.log`, `.ralph_logs/iter_11.log`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Prefer `PlcError` typed constructors over ad-hoc semantic strings so all diagnostics share one output contract and future verifier stages can plug in directly.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - If parser errors need precise columns, map `pest::error::LineColLocation` explicitly; line-only helpers silently lose column info.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Existing semantic tests assert Chinese substrings (e.g., undefined task/device phrases), so new error variants should preserve recognizable wording in rendered output.
----
-
-## [2026-02-11 10:13:24 CST] - US-012
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added `examples/two_cylinder.plc` (PRD 6.3 double-cylinder sequence), `examples/half_rotation.plc` (PRD 9 half-rotation workflow), and `examples/error_missing_device.plc` (intentional undefined-device reference).
-  - Replaced the CLI placeholder with a real compile pipeline in `src/main.rs`: read `.plc`, parse to AST, run all semantic lowerings (topology/state machine/constraints/timing model), and print pretty JSON IR to stdout.
-  - Added integration tests in `tests/examples_integration.rs` to validate the two valid examples compile to JSON IR, the error example returns an undefined-device diagnostic, and `cargo run -- examples/two_cylinder.plc` emits JSON on stdout.
-- Files changed
-  - `src/main.rs`, `examples/two_cylinder.plc`, `examples/half_rotation.plc`, `examples/error_missing_device.plc`, `tests/examples_integration.rs`, `prd.json`, `progress.txt`, `.ralph_logs/iter_11.log`, `.ralph_logs/iter_12.log`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - End-to-end compile paths are most useful when they collect errors from every semantic stage instead of failing fast on the first stage.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - The half-rotation timing scope must reference the actual step name (`task.search.detect`), otherwise timing semantic validation reports an undefined step.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Integration tests can invoke the built CLI binary via `env!("CARGO_BIN_EXE_rust_plc")` to assert real stdout behavior.
----
-
-## [2026-02-11 12:00:41 CST] - US-013
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added causality verification module `src/verification/causality.rs` with `verify_causality`, using petgraph reachability over an augmented runtime graph (topology edges + `detects` logical edges) to validate every declared causality chain.
-  - Implemented implicit action+wait causality inference from task steps (including nested `parallel`/`race` branches) and connectivity checks from output ports through action targets to waited sensors.
-  - Added Chinese causality diagnostics with line numbers, broken-link details, expected/actual chain output, and repair suggestions matching PRD 3.2.4 style.
-  - Added unit tests for PRD 5.4 passing chains and missing `valve_A -> cyl_A` connection failure.
-  - Exposed verification module via `src/verification/mod.rs` and `src/lib.rs`.
-- Files changed
-  - `src/verification/causality.rs`, `src/verification/mod.rs`, `src/lib.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Causality checks should run on an augmented graph that includes `sensor.detects` logical feedback edges, not only raw `connected_to` edges.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `StepStatement` currently does not carry per-action/per-wait line metadata, so implicit causality diagnostics should fall back to `StepDeclaration.line` until finer-grained line fields are added.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `verify_causality` accepts both AST (`PlcProgram`) and IR (`TopologyGraph`/`ConstraintSet`) so future verifier orchestrators can reuse semantic outputs while preserving source-line context.
----
-
-## [2026-02-11 12:17:38 CST] - US-014
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added `src/verification/timing.rs` with `verify_timing` to validate `must_complete_within` and `must_start_after` timing rules against topology/constraints/state machine IR.
-  - Implemented worst-case timing envelopes: same-step actions are treated as parallel (max duration), step timeouts provide upper bounds, and task-level checks sum ordered step envelopes.
-  - Added physical chain timing inference that augments action duration with upstream device `response_time` along `connected_to` links (e.g., valve response + cylinder stroke).
-  - Added Chinese timing diagnostics with line numbers and structured `约束/分析/结论` output for both timing violation classes.
-  - Added four unit tests covering pass/fail cases for `must_complete_within` and `must_start_after`.
-- Files changed
-  - `src/verification/mod.rs`, `src/verification/timing.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - `must_start_after` is most robust when computed from inbound `StateMachine` transitions to the scoped task/step, using guard-implied minimum delay rather than AST-only heuristics.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - Timing scope diagnostics need AST line metadata from `program.constraints.timing[index].line`; IR `TimingRule` currently does not carry source line numbers.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Timing verifier APIs currently accept both semantic IR and the original AST program so error reports can preserve source-location precision.
----
-
-## [2026-02-11 12:34:08 CST] - US-015
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added `src/verification/liveness.rs` with `verify_liveness`, implementing deadlock-focused checks for missing wait escape paths, invalid `on_complete: unreachable`, non-terminal zero out-degree states, and SCC loops lacking timeout/allow-indefinite exits.
-  - Introduced Chinese liveness diagnostics that follow PRD 3.2.2 style (`ERROR [liveness]` + `位置/原因/物理分析/建议`) with line-numbered reporting.
-  - Added six liveness unit tests covering PRD 5.5.1-5.5.3 passing flow, missing-timeout failure, legal `on_complete: goto` loops, invalid `on_complete: unreachable`, SCC risk detection, and valid race+unreachable patterns.
-  - Exposed the new verifier through `src/verification/mod.rs`.
-- Files changed
-  - `src/verification/liveness.rs`, `src/verification/mod.rs`, `prd.json`, `progress.txt`, `.ralph_logs/iter_15.log`, `.ralph_logs/iter_16.log`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Liveness validation needs both AST context and IR transitions because `allow_indefinite_wait` is not encoded as a dedicated transition guard.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `on_complete: unreachable` cannot be validated from transition counts alone; you must analyze whether the final step still has non-jump control-flow paths.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Current line mapping for synthetic parallel/race states reuses the parent step line by splitting synthetic names at `__`, which keeps diagnostics stable for nested control-flow checks.
----
-## [2026-02-11 13:39:32 CST] - US-016
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added `src/verification/safety.rs` implementing the Safety Checker for `conflicts_with` rules with bounded reachability analysis, Chinese diagnostics, and proof-level reporting (`Complete` vs `Bounded`).
-  - Added SCC-aware depth planning and `bmc_max_depth` truncation warnings, including bounded-proof warning output when depth caps prevent complete reasoning.
-  - Modeled parallel branch concurrency by merging sibling branch effects at synthetic `__parallel_*_join` states so simultaneous branch actions are evaluated as combined physical outcomes.
-  - Added optional Z3 integration scaffold behind cargo feature `z3-solver` and made `z3` an optional dependency so the default toolchain can run quality checks without local `cmake`.
-  - Added/kept unit tests for sequential-safe and parallel-conflict cases, SCC depth floor behavior, and bounded-depth warning behavior.
-- Files changed
-  - `Cargo.toml`, `Cargo.lock`, `src/verification/mod.rs`, `src/verification/safety.rs`, `prd.json`, `progress.txt`, `.ralph_logs/iter_16.log`, `.ralph_logs/iter_17.log`, `.ralph_logs/iter_18.log`, `.ralph_logs/iter_19.log`, `.ralph_logs/iter_20.log`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Parallel safety checks should aggregate all branch action effects at the synthetic parallel join state; branch-local transitions alone under-approximate true concurrent actuator outcomes.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `z3` with `static-link-z3` requires `cmake`; if the environment lacks it, keep solver usage feature-gated and ensure default checks run without optional native toolchain dependencies.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Safety checker returns `SafetyReport { level, explored_depth, warnings }`, which future verification orchestration (US-017) can surface directly in aggregated CLI verification output.
----
-
-## [2026-02-11 16:48:24 CST] - US-017
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Extended `src/verification/mod.rs` into a unified verification orchestrator (`verify_all`) that runs Safety/Liveness/Timing/Causality in one pass, collects all failures, and normalizes each issue into `位置/原因/分析/建议` output.
-  - Updated CLI pipeline in `src/main.rs` to execute full flow `解析 -> 语义分析 -> 验证 -> 报告`; success now prints a verification summary (including safety proof level) while still emitting machine-readable JSON IR.
-  - Added `verification` payload to CLI JSON output so downstream tooling can read Safety proof level (`完备证明`/`有界验证`) plus each checker status.
-  - Added `examples/error_all_verifiers.plc` to intentionally trigger safety + liveness + timing + causality violations in one file for end-to-end aggregated error verification.
-  - Updated integration tests to cover: two valid examples passing all four checks, CLI success summary + JSON output, and combined-error example reporting all four verifier types.
-- Files changed
-  - `src/verification/mod.rs`, `src/main.rs`, `tests/examples_integration.rs`, `examples/error_all_verifiers.plc`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Verification orchestration should run all checkers even after the first failure so users receive a complete diagnostic set in a single compile.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - Keep success summaries out of stdout (use stderr) when stdout is consumed as JSON by tests/tools.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `verify_all` already maps checker-specific diagnostics into a unified format, so future verifiers can plug in by only adding one conversion path in `src/verification/mod.rs`.
----
-## [2026-02-12 15:44:34 CST] - US-001
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added `delay: <duration>` to the DSL grammar and parser lowering.
-  - Extended AST `StepStatement` with `Delay { duration_ms: u64 }` and converted `delay:` duration values into milliseconds during parsing.
-  - Added unit test coverage to ensure `delay: 2000ms` and `delay: 0ms` parse correctly and do not break existing task parsing.
-- Files changed
-  - `src/ast/mod.rs`, `src/parser/plc.pest`, `src/parser/mod.rs`, `src/semantic/mod.rs`, `src/verification/liveness.rs`, `src/verification/timing.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Adding a new `StepStatement` variant requires updating semantic and verification match arms so builds remain exhaustive.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - This repo does not have `jq` installed; use `python3` scripts for PRD/progress automation.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Delay is normalized to milliseconds in parser output, so downstream semantic/verification stages can consume a single unit.
----
-## [2026-02-12 16:03:02 CST] - US-002
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added semantic lowering for `delay: Nms` so it emits a dedicated bounded-wait state-machine transition (`TransitionGuard::Delay`) to the step completion target, with timer metadata carrying `duration_ms`.
-  - Kept `timeout` directives active as protective upper-bound branches even when delay exists in the same step; both delay-to-next-step and timeout-to-fault transitions are emitted.
-  - Updated liveness/timing/safety verification handling for the new guard so delay edges are recognized as bounded waits (non-deadlock) and contribute correct timing predecessor intervals/reporting.
-  - Added unit tests covering delay lowering, delay+timeout coexistence, and SCC liveness acceptance for delay-generated bounded-wait cycles.
-- Files changed
-  - `src/ir/mod.rs`, `src/semantic/mod.rs`, `src/verification/liveness.rs`, `src/verification/timing.rs`, `src/verification/safety.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Delay semantics are modeled in IR as guard-level bounded waits (`TransitionGuard::Delay`) plus timer metadata, instead of piggybacking on `timeout` fault branches.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - When delay introduces control flow in a step, include it in `has_control_flow` checks or fallback `always` transitions will be emitted and change behavior.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Liveness SCC checks now treat both `timeout` and `delay` guard edges as bounded-wait exits; timing predecessor calculations also read both guards.
----
-## [2026-02-12 16:17:21 CST] - US-003
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Updated Timing verifier to include `delay:` durations in step/task must_complete_within critical-path estimates.
-  - Added `examples/delay_demo.plc` exercising delay in a conveyor-style workflow and ensured it compiles + passes all four verifiers.
-  - Added test coverage: a timing unit test that fails when delay exceeds must_complete_within, plus an integration test that asserts delay guard is present in compiled IR JSON.
-- Files changed
-  - `src/verification/timing.rs`, `examples/delay_demo.plc`, `tests/examples_integration.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Timing `must_complete_within` logic is AST-driven (step envelopes), so new time-based statements must be reflected there to affect critical-path checks.
-  - Gotchas encountered (e.g., "don\x27t forget to update Z when changing W")
-    - If `delay:` is omitted from step worst-case estimates, timing constraints can silently pass even when delays dominate the real schedule.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Integration tests use `compile_source_to_json` + `verify_all` to assert verifier pass/fail while still validating the IR JSON schema.
----
-## [2026-02-12 16:34:12 CST] - US-004
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added `repeat_block` grammar support (`repeat <integer>:` + body statements) and wired it into top-level step statements plus `parallel`/`race` branch statement lists.
-  - Extended AST `StepStatement` with `Repeat { count, body }` and implemented parser lowering that captures repeat count/body into the new AST variant.
-  - Added parser tests covering `repeat 3:` AST construction (action/wait/timeout body) and syntax-stage acceptance of `repeat 0:` for later semantic validation.
-  - Updated semantic/timing/liveness/causality statement walkers to recognize the new `Repeat` variant so builds remain exhaustive and recursive collectors can traverse nested statement bodies safely.
-- Files changed
-  - `src/parser/plc.pest`, `src/ast/mod.rs`, `src/parser/mod.rs`, `src/semantic/mod.rs`, `src/verification/timing.rs`, `src/verification/liveness.rs`, `src/verification/causality.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - When introducing a new step statement, update all grammar statement-list rules (`step_statement` + branch statement rules) together to avoid syntax gaps between top-level and branch contexts.
+    - For SIL batching, keep the directory scan + run loop deterministic by sorting paths and using stable `case_XXXX` artifact folders.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-    - `repeat` count/range checks should stay out of parser logic; parser should keep accepting syntactically valid integers and let semantic stories enforce bounds/nesting rules.
+    - `SimIo` must be sized to cover the maximum I/O IDs referenced by both the bridged `Program` and the scenario input/fault scripts; otherwise reads default to `false` and can change behavior.
   - Useful context (e.g., "the evaluation panel is in component X")
-    - `parse_repeat_block` reuses `parse_step_statement_wrapper`, so nested repeat bodies are already represented as recursive `StepStatement` trees for upcoming expansion work.
+    - `sim::run_program_for_scenario()` already produces a `SimReport` with the first timeout captured as a structured failure; `sim-regress` just aggregates those reports.
 ---
 
-## [2026-02-12 16:56:39 CST] - US-005
+## [2026-02-15 01:34:30 CST] - US-009
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
-  - Implemented semantic preprocessor `preprocess_program` that expands `repeat N:` into `N` sequential steps named with `_1.._N` suffixes.
-  - Added semantic validation for repeat constraints: reject `repeat 0/1`, `repeat > 100`, nested repeats, and repeat usage inside nested blocks (e.g., parallel/race branches).
-  - Updated CLI + integration compilation pipeline to preprocess before semantic lowering and pass the expanded program into verifiers to keep step-based analyses consistent.
-  - Added `examples/repeat_demo.plc` (3-cycle glue workflow) and tests covering repeat expansion, semantic errors, demo compilation, and equivalence vs manual unrolling.
+  - Extended scenario YAML to support `faults` with `sensor_stuck` (target/value/at_ms) and applied it via `SimIo::schedule_sensor_stuck`.
+  - Added `sim` report generation (`SimReport`) that records the first timeout as a structured failure (kind/message/at_ms/task/step) and includes seed + scenario summary.
+  - Updated `rust_plc sim` to write `report.json` (and added a CLI integration assertion), plus unit tests covering the stuck-sensor timeout case.
 - Files changed
-  - `src/semantic/mod.rs`, `src/main.rs`, `tests/examples_integration.rs`, `examples/repeat_demo.plc`, `prd.json`, `progress.txt`
+  - `crates/sim/src/lib.rs`, `crates/sim/src/scenario.rs`, `crates/sim/src/report.rs`, `crates/sim/src/runner.rs`, `src/main.rs`, `tests/sim_cli.rs`, `prd.json`, `progress.txt`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-    - A single semantic preprocessor step is a good place to host syntax-sugar expansions so IR builders + verifiers can share a consistent step graph.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - If you expand steps during semantic lowering, you must also feed the expanded AST into verification; otherwise timing/liveness analyses that iterate `program.tasks.steps` will drift from the state machine.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - The integration test `repeat_expansion_produces_same_verification_result_as_manual_unrolling` provides a regression baseline for future wait/if/goto semantics changes.
----
-## [2026-02-12 17:20:39 CST] - US-006
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added `must_complete_within_worst_case` timing relation end-to-end (grammar -> AST -> IR -> semantic mapping).
-  - Fixed Timing critical-path estimation:
-    - `must_complete_within` now uses action/delay critical path and ignores `timeout` upper bounds.
-    - `must_complete_within_worst_case` uses the previous behavior (includes `timeout` bounds).
-  - Added tests to prove the semantic split: a task can satisfy `must_complete_within` while failing `must_complete_within_worst_case` when timeouts dominate.
-- Files changed
-  - `src/parser/plc.pest`, `src/ast/mod.rs`, `src/ir/mod.rs`, `src/parser/mod.rs`, `src/semantic/mod.rs`, `src/verification/timing.rs`, `src/verification/mod.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - In PEG rules, ordered alternatives must list longer prefix-sharing keywords first to avoid partial matches.
+    - `serde_yaml` expects YAML tags for enums; for author-friendly config files, model "kinds" as explicit mapping keys (e.g., `sensor_stuck: { ... }`) instead of enums.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-    - Pest grammar files use `//` for comments; `#` will make the derive parser fail at compile time.
+    - Apply faults after scenario inputs/plant updates for the tick so stuck values deterministically override normal behavior.
   - Useful context (e.g., "the evaluation panel is in component X")
-    - Timing verifier now carries both per-step `nominal_ms` and `worst_case_ms`; task-level estimates sum the corresponding per-step envelope.
+    - `sim::run_program_for_scenario()` is a convenient single entrypoint for CLI/tests to get both JSONL trace and `SimReport`.
 ---
-## [2026-02-12 17:31:44 CST] - US-007
+
+## [2026-02-15 00:16:45 CST] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
-  - Extended Safety verifier to check `requires` constraints using the same BMC reachability model: report a violation when `A` is true while required `B` is not.
-  - Improved Safety diagnostics to include relation-specific reasons (`conflicts_with` vs `requires`), and updated `verify_all` aggregation to reuse that reason text.
-  - Added unit tests for both a deliberate `requires` violation (press without clamp) and a satisfied ordering case (clamp then press).
+  - Added new `crates/runtime-core` crate implementing a minimal deterministic tick-driven executor.
+  - Implemented a small Program/Task/Step model with `Action`, `WaitDigital` (with optional timeout->goto), `Delay`, `Goto`, and `Halt`.
+  - Added unit tests covering delay/timeout boundary semantics and same-tick goto chaining with trace events.
 - Files changed
-  - `src/verification/safety.rs`, `src/verification/mod.rs`, `prd.json`, `progress.txt`
+  - `Cargo.toml`, `crates/runtime-core/Cargo.toml`, `crates/runtime-core/src/lib.rs`, `prd.json`, `progress.txt`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Safety verification treats `requires` as an implication check during BMC: `left == state` implies `right == state`; violation = left true and right false.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - If you enrich verifier diagnostics, also update `src/verification/mod.rs` so CLI/integration errors include the new fields rather than hardcoded phrasing.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `build_state_machine` executes step actions on transitions; single-step tasks without `on_complete` can produce no action transitions (use at least two steps in minimal Safety tests).
----
-## [2026-02-12 19:15:33 CST] - US-008
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Fixed causality verification for parallel contexts: action/wait pairs now carry origin metadata, and parallel-related combinations are filtered unless action -> sensor is reachable.
-  - Preserved same-branch checks so real causality breaks inside a parallel branch are still reported.
-  - Added regression tests for both scenarios: previous false positive (left/right motors + left sensor wait) and true positive (broken chain inside a branch).
-- Files changed
-  - src/verification/causality.rs, prd.json, progress.txt
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - The parser drops branch labels in AST, so verifier-side branch identity should use per-block branch index during traversal.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - Without an upstream reachability guard, fallback causality inference can reconstruct non-physical paths and emit false positives for unrelated branch devices.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Origin tagging only needs to distinguish step-level vs parallel-branch contexts to address the D6 false-positive class.
----
-## [2026-02-12 19:28:36 CST] - US-009
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Extended wait syntax to support AND/OR chains: wait: cond AND cond ... and wait: cond OR cond ...
-  - Added AST WaitCondition enum (Single/And/Or) and updated WaitStatement to use it.
-  - Parser rejects mixed AND/OR in one wait with a clear error message.
-- Files changed
-  - src/parser/plc.pest, src/ast/mod.rs, src/parser/mod.rs, src/semantic/mod.rs, src/verification/causality.rs, src/verification/liveness.rs, prd.json, progress.txt
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Keep wait rendering/sensor inference operating on a list of sub-conditions so future AND/OR semantics (US-010) can check each sub-condition independently.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - If the grammar only rejects mixed AND/OR at parse time, pest errors are opaque; accepting then validating in parser allows clearer diagnostics.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - IR TransitionGuard::Condition still stores a string expression; AND/OR is currently carried through as a formatted string for verifiers/diagnostics.
----
-## [2026-02-12 19:40:23 CST] - US-010
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added semantic support for wait AND/OR: guard expressions now preserve conjunction/disjunction forms and AND/OR sub-condition device references are validated for undefined devices.
-  - Updated causality analysis to validate each sensor in AND/OR waits independently (no longer only the first inferred sensor).
-  - Added `examples/and_or_wait_demo.plc` plus integration coverage; added causality regression for AND wait with one missing sensor chain; added safety test proving BMC handles AND/OR wait guards.
-- Files changed
-  - src/semantic/mod.rs, src/verification/causality.rs, src/verification/safety.rs, examples/and_or_wait_demo.plc, tests/examples_integration.rs, prd.json, progress.txt
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Use shared helpers (`wait_condition_terms` / `wait_conditions`) to traverse wait conditions so semantic + verifiers stay aligned as wait syntax expands.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - Causality false negatives occur if AND/OR waits only infer one sensor; every sub-condition sensor must generate an action-wait pair.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - AND/OR device-reference semantic validation currently applies to composite waits; single-condition waits keep prior behavior for compatibility.
----
-## [2026-02-13 02:39:51 CST] - US-011
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added `if/else` statement grammar (`if: <condition> goto <X> else: goto <Y>`) and integrated it into step statements and parallel/race branches.
-  - Extended AST `StepStatement` with `IfElse { condition, then_goto, else_goto }` and implemented parser lowering from pest pairs.
-  - Added parser tests for a valid if/else and for rejecting a missing else branch.
-- Files changed
-  - src/parser/plc.pest, src/ast/mod.rs, src/parser/mod.rs, src/semantic/mod.rs, src/verification/{timing,liveness,causality}.rs, prd.json, progress.txt
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Grammar-level enforcement (requiring else) keeps parse-time errors simple; semantic phase can focus on target resolution/verification logic.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - Even when semantics are deferred (US-012), adding a new StepStatement variant requires updating all match arms/walkers to avoid compile breakage.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `simple_condition` is shared by wait/if parsing, so condition parsing stays consistent across constructs.
----
-## [2026-02-13 02:59:08 CST] - US-012
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Completed if/else semantic lowering: each `if: <cond> goto A else: goto B` now emits two transitions with complementary guards (`cond` and `NOT(cond)`) to their resolved targets.
-  - Added if/else target resolution and semantic error reporting for invalid then/else goto targets in top-level steps and nested parallel/race branches.
-  - Updated control-flow detection to treat if/else as explicit control flow, preventing accidental fallback `Always` transitions.
-  - Added `examples/if_else_demo.plc` plus integration coverage to assert two outgoing branch transitions and full verification pass.
-- Files changed
-  - `src/semantic/mod.rs`, `tests/examples_integration.rs`, `examples/if_else_demo.plc`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Branching statements should emit explicit transitions and also participate in each `has_control_flow` guard, otherwise default fallthrough edges can silently change semantics.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - Adding a new control-flow variant requires updates in all three state-machine builders (top-level, parallel branch, race branch), not just the main task loop.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - The current if/else IR encoding uses plain condition strings (`<expr>` / `NOT(<expr>)`), which Safety/Liveness/Timing already handle without additional verifier-specific logic.
----
-## [2026-02-13 03:18:10 CST] - US-013
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Extended `goto` syntax to accept `task.step` targets in the grammar and parser.
-  - Updated AST `GotoDirective` to carry `task` + optional `step`, and propagated this through `timeout -> goto`, `race then goto`, `if/else` branches, and `on_complete: goto ...`.
-  - Enhanced semantic target resolution to support task-scoped step jumps, reject missing steps, and explicitly reject jumps to parallel/race synthetic steps.
-  - Added integration + semantic tests covering `goto task.step`, missing step diagnostics, and synthetic-step rejection.
-- Files changed
-  - `src/parser/plc.pest`, `src/parser/mod.rs`, `src/ast/mod.rs`, `src/semantic/mod.rs`, `tests/examples_integration.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Reuse `GotoDirective` for every jump-like construct (goto/timeout/on_complete/if_else/race then) so semantic resolution stays centralized.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - When extending a core grammar rule (like `goto_statement`), update all downstream AST holders and semantic resolution sites in one sweep to avoid partial feature support.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Synthetic step names contain `__parallel_` / `__race_`; using the original task step set for validation naturally blocks invalid jumps into internal control-flow states.
----
-## [2026-02-13 03:25:27 CST] - US-014
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added `states: [ident, ident, ...]` device attribute support in the grammar and parser, lowering into `DeviceAttributes.custom_states`.
-  - Updated semantic known-state collection to prefer `custom_states` when present (falling back to default 2-state sets), so safety state references validate against user-defined states.
-  - Implemented a non-fatal warning (stderr) when a device declares more than 8 custom states.
-  - Added `examples/custom_states_demo.plc` and integration coverage to ensure the new syntax compiles and all verifiers pass.
-- Files changed
-  - `src/parser/plc.pest`, `src/parser/mod.rs`, `src/ast/mod.rs`, `src/semantic/mod.rs`, `examples/custom_states_demo.plc`, `tests/examples_integration.rs`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Topology attribute extensions belong in the generic `attribute_name`/`attribute_value` grammar + `apply_attribute` mapping, keeping device parsing uniform.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `parse_topology()` is a grammar-only validator (returns `()`); use `parse_plc()` when tests need access to AST nodes.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Semantic state legality is enforced through `collect_known_states` + `validate_state_reference`, so new state vocabularies only need to hook into that pipeline.
----
-## [2026-02-13 03:32:04 CST] - US-015
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Updated the `.claude/skills/plc-gen/SKILL.md` generator guidance to reflect new DSL features: `delay`, `repeat N`, AND/OR wait chains, `if/else`, `goto task.step`, and device `states: [...]` custom state vocabularies.
-  - Added two complete PLC snippets demonstrating the new syntax, including timing constraints using both `must_complete_within` and `must_complete_within_worst_case`.
-  - Refreshed the Timing guidance to match current semantics: `must_complete_within` ignores timeout upper bounds; `must_complete_within_worst_case` includes them.
-- Files changed
-  - `.claude/skills/plc-gen/SKILL.md`, `prd.json`, `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Keep skill docs aligned with the compiler semantics (especially timing) to avoid agents generating "valid" DSL that fails verification or misstates guarantees.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - When a DSL gains first-class primitives (delay/repeat), remove obsolete workaround sections to prevent the generator from choosing inferior patterns.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - The skill file is the single source of truth for prompt-level behavior; adding full end-to-end snippets is the fastest way to teach new syntax without ambiguity.
----
-## [2026-02-14 09:41:10 CST] - US-001
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Added safety verifier warnings when analog threshold rules are skipped, including rule/line context.
-  - Downgraded safety proof level to Bounded when any analog threshold rules are skipped.
-  - Added a unit test covering warning emission and proof downgrade for skipped threshold rules.
-- Files changed
-  - src/verification/safety.rs
-  - prd.json
-  - progress.txt
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Safety verification should surface skipped rule types via warnings and downgrade proof level to avoid misleading "complete" results.
+    - Tick semantics for `Delay`/`Timeout` should be expressed in terms of `elapsed = now - entered_at` to keep behavior deterministic and easy to test.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-    - None.
+    - Within a single tick, immediate transitions can loop forever if you build a goto-cycle; `runtime-core` guards with a per-tick transition cap.
   - Useful context (e.g., "the evaluation panel is in component X")
-    - Safety summary warnings are printed by CLI in `print_success_summary`.
+    - `Runtime::tick*()` advances `Io` by exactly one tick (`Io::advance_tick()`), so callers should not advance ticks separately.
 ---
-## [2026-02-14 09:52:27 CST] - US-002
+
+## [2026-02-15 00:07:11 CST] - US-001
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
-  - Added semantic validation for safety/wait analog threshold comparisons (analog_input-only, range required, range bounds).
-  - Extended wait validation to check analog thresholds without changing single-wait undefined-device behavior.
-  - Added unit tests for safety and wait threshold validation.
+  - Added a Cargo workspace at the repo root (without migrating the existing compiler crate).
+  - Added new `crates/io-traits` crate with a minimal, no_std-friendly `Io` trait (digital/analog in/out + tick).
+  - Added a doctest and a unit test demonstrating a minimal in-memory `Io` implementation.
 - Files changed
-  - `src/semantic/mod.rs`, `prd.json`, `progress.txt`
+  - `Cargo.toml`, `crates/io-traits/Cargo.toml`, `crates/io-traits/src/lib.rs`, `prd.json`, `progress.txt`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Analog threshold validation lives in semantic constraint building and uses device range metadata.
+    - Workspaces that also have a root package may require explicit `--workspace` when you want member crates covered by tests.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - `cargo clippy` isn't installed in the default toolchain here; use `cargo check`/`cargo test` unless you install it via `rustup component add clippy`.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - The new IO surface is intentionally tick-based (not wall-clock) to keep deterministic runtimes platform-agnostic.
+---
+
+## [2026-02-15 00:23:16 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added new `crates/sim` crate with `SimIo` (scriptable digital/analog inputs by tick) and output edge recording.
+  - Added minimal JSONL trace recording via `JsonlTraceRecorder` for `runtime-core` transition events.
+  - Added a unit test driving a minimal `runtime-core` Program with `SimIo`, asserting output edges and trace event order/count.
+- Files changed
+  - `Cargo.toml`, `Cargo.lock`, `crates/sim/Cargo.toml`, `crates/sim/src/lib.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Applying scheduled input changes in `Io::advance_tick()` is a clean way to make “tick N change is visible during tick N evaluation” without mutating inside `Io::tick()`.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-    - Single wait conditions intentionally avoid undefined-device validation; only AND/OR waits enforce device references.
+    - If you want a scripted input to be visible at tick 0, you must apply it at construction time (or before the first `Runtime::tick*()` call); later application happens on `advance_tick()`.
   - Useful context (e.g., "the evaluation panel is in component X")
-    - Threshold checks are shared by safety and wait via a common helper to keep error messaging consistent.
+    - `JsonlTraceRecorder` records one JSON object per transition; use `into_string()` to write it as newline-terminated JSONL.
 ---
-## [2026-02-14 09:57:16 CST] - US-003
+
+## [2026-02-15 00:30:56 CST] - US-004
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
-  - Added `external` as a supported topology attribute, stored in AST, and parsed into `DeviceAttributes`.
-  - Added parser test to ensure `external: true` is captured for digital_input and analog_input devices.
+  - Added YAML scenario parsing in `crates/sim` (`Scenario`: seed/tick_ms/duration_ms + inputs at_ms/set).
+  - Implemented deterministic ms->tick mapping + `Scenario::apply_to_simio()` to schedule scripted input changes onto `SimIo`.
+  - Added a unit test verifying scripted input timing and trace/output determinism (reproducible run-to-run).
 - Files changed
-  - `src/ast/mod.rs`, `src/parser/plc.pest`, `src/parser/mod.rs`, `prd.json`, `progress.txt`
+  - `crates/sim/Cargo.toml`, `crates/sim/src/lib.rs`, `crates/sim/src/scenario.rs`, `Cargo.lock`, `prd.json`, `progress.txt`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Topology attributes are validated by `attribute_name` in the grammar and mapped in `apply_attribute`; add new attributes in both places plus a focused parser test.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - None.
+    - `serde_path_to_error` + `serde_yaml::Deserializer` yields YAML errors with a field path, which is good for scenario authoring UX.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - If `at_ms` is not aligned to `tick_ms`, you must choose rounding semantics; this implementation validates alignment to avoid silent shifts.
   - Useful context (e.g., "the evaluation panel is in component X")
-    - `DeviceAttributes` defaults come from `Default`; new optional attributes stay `None` unless explicitly parsed.
+    - `Scenario::apply_to_simio()` schedules tick-based changes so they follow `SimIo` semantics (changes at tick N are visible during tick N evaluation).
 ---
-## [2026-02-14 10:02:45 CST] - US-004
+
+## [2026-02-15 00:39:12 CST] - US-005
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
-  - Updated causality sensor collection to exclude `analog_input` marked `external: true` while keeping sensors included.
-  - Added causality tests covering default analog_input inference and external exclusion.
+  - Extended the root `rust_plc` CLI to support a `sim` subcommand while keeping the original `rust_plc <file.plc>` behavior unchanged.
+  - Implemented `rust_plc sim <scenario.yaml> [--out <trace.jsonl>]` to run a tiny `runtime-core` Program with `sim::SimIo` and write a JSONL trace (via `sim::JsonlTraceRecorder`).
+  - Added an integration test that runs the compiled `rust_plc` binary and asserts the trace file exists and is non-empty.
 - Files changed
-  - `src/verification/causality.rs`, `prd.json`, `progress.txt`
+  - `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `tests/sim_cli.rs`, `prd.json`, `progress.txt`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Causality inference uses `collect_sensor_names` to decide which waits participate, so exclusions belong there.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `cargo test` currently emits an unrelated unused import warning from `tests/verification_capability.rs`.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Analog-input waits without declared causality chains are treated like sensor waits unless `external: true` is set.
+    - Integration tests can run the compiled CLI via `env!("CARGO_BIN_EXE_rust_plc")` and validate file outputs without adding extra test deps.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - When the root is both `[package]` and `[workspace]`, remember to run `cargo test --workspace` so member-crate tests are included.
 ---
----
-## [2026-02-14 11:00:32 CST] - US-005
+
+## [2026-02-15 00:57:00 CST] - US-006
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
-  - Added analog region abstraction for Safety BMC: compute regions from thresholds, waits, and set_analog values; map analog devices to region states.
-  - Expanded safety rule binding to map threshold expressions onto region-state sets and evaluate overlaps instead of skipping analog rules.
-  - Mapped set_analog actions to region states and expanded transitions to cover analog_input region possibilities.
-  - Added safety tests for analog threshold conflicts, set_analog region mapping, and updated the analog threshold fixture to remain verifiable.
+  - Added `rust_plc::runtime_bridge` to convert a compiled IR `StateMachine` into a minimal `runtime-core` `Program` (subset: set/extend/retract, wait, delay, timeout->goto, goto).
+  - Implemented deterministic topology-based resolution from device names to physical `Xn`/`Yn` IDs by walking upstream `connected_to` edges.
+  - Added integration tests that compile a small `.plc` fixture, bridge it, run it with `sim::SimIo`, and assert deterministic JSONL trace + output edges (including timeout branch).
 - Files changed
-  - `src/verification/safety.rs`
-  - `.codex/skills/plc-gen/fixtures/valid/11_analog_threshold_wait.plc`
-  - `prd.json`
-  - `progress.txt`
+  - `src/lib.rs`, `src/runtime_bridge.rs`, `tests/runtime_bridge_us006.rs`, `prd.json`, `progress.txt`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Safety BMC can model analog thresholds by mapping expressions onto region-state sets and checking set intersections during search.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - Introducing analog region states can change existing safety fixtures; update fixtures or expectations to keep validation green.
+    - Bridging from IR to `runtime-core` is easiest when you normalize durations to ticks (`duration_ms % tick_ms == 0`) and keep guard parsing intentionally strict.
+    - Mapping “logical” devices (cylinder/sensor/button) to physical I/O can be done by traversing upstream edges in `TopologyGraph` and selecting a unique `Xn`/`Yn` terminal.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `runtime-core::Runtime<'a>` ties its lifetime to the borrowed `Program`, so test helpers should avoid forcing `Runtime<'static>` unless you truly have a `'static` borrow.
   - Useful context (e.g., "the evaluation panel is in component X")
-    - Analog inputs are now expanded as region assignments during transition expansion, so conflicts can surface without explicit set_analog actions.
+    - This bridge currently returns `Program<'static>` by leaking allocations (`Box::leak`) to avoid self-referential owned program plumbing; revisit if you need long-running processes.
 ---
-## [2026-02-14 23:31:20 CST] - US-006
+
+## [2026-02-15 01:07:22 CST] - US-007
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
-  - Bound analog threshold safety rules to region-state sets (instead of silently skipping), so Safety BMC actually checks analog constraints.
-  - Ensured warnings are only emitted when a threshold rule cannot be modeled (e.g., missing range/regions).
-  - Kept unit tests covering both analog threshold conflict and pass cases green.
+  - Added deterministic waveform exports in `crates/sim`: VCD for digital inputs/outputs, plus CSV/JSONL exporters for analog output edges.
+  - Extended `rust_plc sim` to write `wave.vcd` and `analog.csv` alongside the trace (paths configurable via new flags).
+  - Added tests covering VCD contents (signal names + at least one edge) and CLI artifact generation.
 - Files changed
-  - `src/verification/safety.rs`
-  - `prd.json`
-  - `progress.txt`
+  - `crates/sim/src/lib.rs`, `crates/sim/src/waveform.rs`, `src/main.rs`, `tests/sim_cli.rs`, `prd.json`, `progress.txt`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Threshold rules become checkable once both sides are represented as sets of discrete region states and the verifier checks set membership/intersections.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - If a device has no computed regions (e.g., missing range), threshold binding should fail fast so US-001 warnings/level downgrade remain accurate.
+    - Keep waveform output deterministic: stable signal ordering + stable event sorting (time, then signal index) makes regression diffs reliable.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - If you derive output directories from `--out`, also ensure you `create_dir_all()` for each artifact path (trace/VCD/CSV) to avoid partial output failures.
   - Useful context (e.g., "the evaluation panel is in component X")
-    - This story largely builds on the region abstraction introduced in US-005; binding is a small but crucial step to avoid silent ignore.
+    - `SimIo` now records digital input edges when scheduled changes are applied, which makes it possible to export DI waveforms without sampling every tick.
 ---
-## [2026-02-14 23:31:50 CST] - US-007
+
+## [2026-02-15 01:19:50 CST] - US-008
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
-  - Updated semantic wait guard rendering so analog waits are converted into discrete region predicates (e.g., `AI0 in {region_1, region_2}`) to match the analog region abstraction.
-  - Added tests:
-    - Semantic test asserts analog wait transitions use `region_`-based guard expressions.
-    - Liveness tests ensure analog waits without timeout still trigger the same liveness warning behavior, and with timeout pass.
-  - Fixed an unrelated test warning by removing an unused import.
+  - Added a minimal deterministic plant model in `crates/sim` (solenoid valve -> cylinder -> limit sensor) with response time, stroke/retract time, and sensor debounce.
+  - Integrated the plant into `SimIo` so sensor inputs update automatically on `advance_tick()`.
+  - Added a unit test that drives a tiny `runtime-core` program and asserts the wait is satisfied at the expected tick window (response + stroke).
 - Files changed
-  - `src/semantic/mod.rs`
-  - `src/verification/liveness.rs`
-  - `tests/verification_capability.rs`
-  - `prd.json`
-  - `progress.txt`
+  - `crates/sim/src/lib.rs`, `crates/sim/src/plant.rs`, `prd.json`, `progress.txt`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-    - State-machine guard expressions are treated as strings by verifiers; keeping them aligned with discrete modeling improves explainability without requiring verifier changes.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - `build_state_machine_from_ast` lacks topology context; keep it as a compatibility wrapper and apply analog-specific rendering in `build_state_machine(program)`.
+    - Returning `Vec<DigitalInputUpdate>` from the plant step avoids borrow-checker issues compared to passing `&mut SimIo` callbacks.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Avoid iterating `self.scheduled.get()` while mutating inputs; `remove()` the tick's entry to take ownership of changes.
   - Useful context (e.g., "the evaluation panel is in component X")
-    - Region partitioning for waits reuses the same threshold collection approach (from safety constraints + wait conditions) so guard text remains consistent across checks.
+    - Plant observes final output values at the end of `prev_tick` and models command changes as happening on `prev_tick`; response time is `prev_tick + response_ticks`.
 ---
-## [2026-02-14 23:36:20 CST] - US-008
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Updated `examples/analog_pressure_demo.plc` to demonstrate `external: true` on an analog_input and an analog wait threshold (`wait: AI0 > 80`).
-  - Updated `README.md` to document `external: true` (external inputs vs feedback sensors) and the analog wait threshold/discrete region predicate behavior.
-  - Verified integration tests still compile and verify the updated example.
-- Files changed
-  - `examples/analog_pressure_demo.plc`
-  - `README.md`
-  - `prd.json`
-  - `progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Marking raw analog channels as `external: true` avoids causality false positives when the physical process chain is not explicitly modeled in topology.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - If an example switches from discrete `sensor` waits to raw analog waits, keep `timeout` branches to satisfy liveness.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `tests/examples_integration.rs` already covers `analog_pressure_demo.plc`, so documentation/example updates are quickly regression-checked by `cargo test`.
