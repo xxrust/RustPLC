@@ -8,6 +8,8 @@ publish = false
 # It also builds on host targets (prints build guidance), so workspace builds stay green.
 
 [dependencies]
+io-traits = { path = "../io-traits" }
+runtime-core = { path = "../runtime-core" }
 
 [target.'cfg(target_os = "none")'.dependencies]
 cortex-m = "0.7"
@@ -17,4 +19,7 @@ defmt-rtt = "0.4"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 rp-pico = "0.9"
 rp2040-boot2 = "0.3"
+embedded-hal = "0.2.7"
 
+[build-dependencies]
+toml = "0.8"

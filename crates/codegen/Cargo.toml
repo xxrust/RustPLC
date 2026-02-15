@@ -1,0 +1,12 @@
+[package]
+name = "codegen"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+runtime-core = { path = "../runtime-core" }
+
+[dev-dependencies]
+io-traits = { path = "../io-traits" }
+syn = { version = "2", features = ["full"] }

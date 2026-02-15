@@ -1,18 +1,19 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/sil-loop-rp2040-pico",
-  "description": "SIL 闭环优先：为 RustPLC 增加确定性运行时 + SimIO/场景回归/报告 + 可复现失败用例，并以 Raspberry Pi Pico（RP2040）作为首个 ARM 目标板做最小 no_std 落地。",
+  "branchName": "ralph/post-sil-rp2040-build-flash",
+  "description": "SIL 主线已完成后，进入 RP2040 下沉阶段：优先打通 IR->固件生成、I/O 映射合同、自动装载（UF2）和板级可观测性闭环，形成可重复构建与可比对的端到端链路。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "建立 Cargo workspace 并新增 io-traits crate",
-      "description": "作为开发者，我希望在保持现有编译器 crate 不迁移的前提下，引入 workspace 并新增独立的 I/O trait crate，为 SIL 与板级后端提供稳定接口。",
+      "title": "新增 codegen crate：将 runtime Program 生成可嵌入 Rust 静态模块",
+      "description": "作为开发者，我希望把已支持子集的 Program 生成 `no_std` 可用的静态 Rust 模块（steps/tasks/actions 常量），以便 board-rp2040 无需动态分配即可运行控制逻辑。",
       "acceptanceCriteria": [
-        "根目录 Cargo.toml 同时包含现有 [package] 与新增 [workspace]，workspace members 至少包含 crates/io-traits",
-        "新增 crates/io-traits crate，定义最小接口：读取 digital/analog input、写入 digital/analog output、获取/推进 tick（可用 trait/struct 表达）",
-        "新增 crates/io-traits 的单元测试或 doctest，展示 trait 的最小实现方式",
+        "新增 `crates/codegen` crate，提供 `generate_program_module(...)` 或等效 API",
+        "输入为 runtime-bridge 可产出的 Program（当前支持子集），输出为可编译 Rust 源码字符串",
+        "生成代码不使用堆分配，使用 `static`/常量数组表达 Program",
+        "新增单元测试：对最小 Program 生成源码并通过 `syn` 解析或等效语法校验",
         "Typecheck passes",
-        "cargo test passes"
+        "cargo test --workspace passes"
       ],
       "priority": 1,
       "passes": true,
@@ -20,15 +21,16 @@
     },
     {
       "id": "US-002",
-      "title": "新增 runtime-core crate：确定性 tick 执行器（最小可测试子集）",
-      "description": "作为开发者，我希望有一个与平台无关的确定性 runtime，能够在 tick 驱动下执行最小指令子集并产生可比对的 step 轨迹。",
+      "title": "CLI 新增 build-rp2040：.plc -> 验证 -> 生成固件工程输入",
+      "description": "作为用户，我希望通过一条命令把 `.plc` 走完编译与验证，并产出 RP2040 固件所需的生成文件与元数据，以便后续自动构建与烧录。",
       "acceptanceCriteria": [
-        "新增 crates/runtime-core crate，依赖 crates/io-traits",
-        "实现最小执行模型（可先硬编码 Program/Task/Step 表达）：支持 action(set on/off、extend/retract 映射为输出)、wait(读输入)、delay、timeout->goto、goto",
-        "runtime 的执行是确定性的：同一 Program + 同一输入序列 => 完全相同的 step 轨迹",
-        "新增单元测试：构造一个最小 Program，验证 delay/timeout/goto 的边界行为（包含/不包含当前 tick）",
+        "在 `src/main.rs` 新增 `build-rp2040` 子命令（不破坏既有命令）",
+        "`build-rp2040 <file.plc> --out <dir>` 会执行现有编译+验证流程，失败时非 0 返回并输出错误",
+        "成功时输出至少 3 个产物：`generated_program.rs`、`build_meta.json`、`io_map.template.toml`（或等效命名）",
+        "`build_meta.json` 包含 `plc_sha256`、`generated_at`、`tool_version`、`runtime_semver` 字段",
+        "新增 CLI 集成测试：断言产物存在且关键字段完整",
         "Typecheck passes",
-        "cargo test passes"
+        "cargo test --workspace passes"
       ],
       "priority": 2,
       "passes": true,
@@ -36,15 +38,15 @@
     },
     {
       "id": "US-003",
-      "title": "新增 sim crate：SimIO + 轨迹记录（JSONL）",
-      "description": "作为用户，我希望在 PC 上用 SimIO 跑 runtime 并记录可回放的轨迹，以便自动调试与回归对比。",
+      "title": "board-rp2040 接入“生成 Program”并运行真实控制逻辑（子集）",
+      "description": "作为开发者，我希望 Pico 固件不再只跑示例 tick，而是能编译并执行来自 `.plc` 的生成 Program，从而建立真实下沉路径。",
       "acceptanceCriteria": [
-        "新增 crates/sim crate，依赖 crates/runtime-core 与 crates/io-traits",
-        "实现 SimIO：可脚本化地在指定 tick 修改输入；记录输出变化边沿",
-        "实现轨迹记录（建议 JSONL）：至少包含 tick、当前 task/step、触发原因（wait 满足/timeout/delay 到期）",
-        "新增测试：用 SimIO 驱动一个最小 Program，断言输出边沿与轨迹事件数量/顺序符合预期",
+        "`crates/board-rp2040` 可通过 feature 或 include 路径接入 `generated_program.rs`",
+        "固件主循环调用 runtime-core 执行生成 Program，而不是硬编码 demo Program",
+        "保留 host-stub 构建路径（`cfg(not(target_os = \"none\"))`）以保证 workspace 测试稳定",
+        "新增最小编译测试或脚本化校验：`cargo build -p board-rp2040 --target thumbv6m-none-eabi` 成功",
         "Typecheck passes",
-        "cargo test passes"
+        "cargo test --workspace passes"
       ],
       "priority": 3,
       "passes": true,
@@ -52,14 +54,15 @@
     },
     {
       "id": "US-004",
-      "title": "SIL 场景文件：支持 YAML 场景输入脚本与 seed 固化",
-      "description": "作为用户，我希望用可版本化的场景文件驱动外部输入与扰动，并通过 seed 固化实现可复现失败用例。",
+      "title": "I/O 映射合同 v1：逻辑点位到 RP2040 GPIO 的配置与校验",
+      "description": "作为开发者，我希望用配置文件定义 Y/X 到 GPIO 的映射并在构建期校验，从而把接线假设显式化、可追踪、可复现。",
       "acceptanceCriteria": [
-        "在 crates/sim 中新增场景解析（建议 serde_yaml）：支持 seed、tick_ms、duration_ms、inputs(at_ms/set) 的最小集合",
-        "场景解析失败时返回可读错误信息（包含字段路径）",
-        "新增测试：给定固定 YAML 场景，SimIO 按指定时间点改变输入，轨迹可复现",
+        "定义映射文件格式（建议 TOML）：至少覆盖 digital inputs / digital outputs",
+        "新增映射解析与验证模块，校验重复分配、非法引脚、缺失必需点位",
+        "`build-rp2040` 支持 `--io-map <file>`，并把解析后的映射写入构建元数据",
+        "新增单元测试覆盖：合法映射、重复引脚、缺失映射、非法编号",
         "Typecheck passes",
-        "cargo test passes"
+        "cargo test --workspace passes"
       ],
       "priority": 4,
       "passes": true,
@@ -67,14 +70,15 @@
     },
     {
       "id": "US-005",
-      "title": "CLI：新增 rustplc sim 子命令（先跑 runtime-core 的最小 Program）",
-      "description": "作为用户，我希望通过命令行一键运行 SIL 仿真并生成报告/轨迹文件，即使第一版暂时只支持最小 Program 子集。",
+      "title": "RP2040 HAL 适配层 v1：把 runtime-core 的 Io trait 接到真实 GPIO",
+      "description": "作为用户，我希望固件可以按映射表读写 Pico GPIO，让 runtime 在板上驱动真实引脚。",
       "acceptanceCriteria": [
-        "扩展现有 src/main.rs 为子命令风格（至少增加 sim 子命令，不破坏原有用法 rust_plc <file.plc>）",
-        "实现 sim 子命令：读取场景 YAML，运行一个最小 Program，并输出轨迹文件到 out/（或用户指定路径）",
-        "新增集成测试（tests/）：运行 sim 子命令的核心逻辑（可绕开真实 CLI 解析），断言产物文件存在且非空",
-        "Typecheck passes",
-        "cargo test passes"
+        "在 `board-rp2040` 中新增 `PicoIo`（或等效）实现 `io_traits::Io` 的数字 I/O 方法",
+        "支持从映射配置初始化输入/输出引脚方向",
+        "tick 推进与循环周期有明确来源（busy-loop 可接受，后续可替换定时器）",
+        "固件日志至少输出启动信息、tick 计数和关键 step 迁移摘要",
+        "cargo build -p board-rp2040 --target thumbv6m-none-eabi succeeds",
+        "Typecheck passes"
       ],
       "priority": 5,
       "passes": true,
@@ -82,14 +86,15 @@
     },
     {
       "id": "US-006",
-      "title": "桥接编译器到 runtime：把 .plc 编译产物降级为可执行 Program（子集支持）",
-      "description": "作为用户，我希望对一个受限子集的 .plc 文件能直接做 SIL：从 .plc 走现有编译流水线，再转换为 runtime 可执行 Program。",
+      "title": "CLI 新增 flash-rp2040：UF2 自动装载（含 dry-run）",
+      "description": "作为用户，我希望通过命令行自动把固件装载到 Pico，并在无法自动识别设备时得到清晰提示。",
       "acceptanceCriteria": [
-        "新增转换模块：把现有语义层/IR 的状态机表示转换为 crates/runtime-core 的 Program（只需覆盖最小语句子集：action set/extend/retract、wait、delay、timeout、goto）",
-        "遇到未支持语句（parallel/race/repeat 等）时，返回明确错误并包含 DSL 行号（若可得）或 step 名称",
-        "新增集成测试：挑选一个最小 .plc fixture（可新增），通过编译+转换后在 sim 中跑通并得到稳定轨迹",
+        "新增 `flash-rp2040` 子命令，支持 `--uf2 <file>` 与 `--mount <path>`",
+        "支持 `--dry-run`：只打印将执行的检测/复制动作，不实际写入",
+        "当 mount 点不存在、不可写或 UF2 文件缺失时，返回非 0 并输出可操作错误",
+        "新增集成测试（可使用临时目录模拟 mount 点）覆盖成功和失败路径",
         "Typecheck passes",
-        "cargo test passes"
+        "cargo test --workspace passes"
       ],
       "priority": 6,
       "passes": true,
@@ -97,15 +102,15 @@
     },
     {
       "id": "US-007",
-      "title": "波形与对比：导出 VCD（数字量）与 CSV/JSONL（模拟量）",
-      "description": "作为用户，我希望把 I/O 波形导出为标准格式，以便用 GTKWave 等工具查看并做回归对比。",
+      "title": "板级可观测性 v1：统一 Trace 事件格式并落盘",
+      "description": "作为开发者，我希望板上运行产生的关键轨迹可被主机侧解析并与 SIL 结果对比，降低实机调试成本。",
       "acceptanceCriteria": [
-        "在 crates/sim 中实现数字量 VCD 导出（至少覆盖 digital_input/digital_output）",
-        "为模拟量输出提供最小导出（CSV 或 JSONL），包含时间戳与数值",
-        "在 sim 命令中增加输出参数（或默认输出）生成 waveform 文件",
-        "新增测试：运行一个最小 Program，断言生成的 VCD 文件包含预期信号名与至少一次边沿变更",
+        "定义最小统一事件格式（tick/task/step/reason/timestamp_ms）",
+        "board-rp2040 日志输出该事件格式（defmt 或串口文本均可）",
+        "新增主机侧解析工具（CLI 子命令或库函数）将日志转换为 JSONL",
+        "新增测试：给定样例日志可稳定解析为结构化事件序列",
         "Typecheck passes",
-        "cargo test passes"
+        "cargo test --workspace passes"
       ],
       "priority": 7,
       "passes": true,
@@ -113,61 +118,17 @@
     },
     {
       "id": "US-008",
-      "title": "Plant v1（最小）：气缸/阀/传感器链路的时间动态仿真",
-      "description": "作为用户，我希望不手工脚本化所有传感器输入，而是由 plant 根据拓扑参数自动产生传感器反馈，实现更接近真实设备的 SIL。",
+      "title": "SIL vs 板级对比工具 v1：关键边沿与 step 轨迹差异报告",
+      "description": "作为用户，我希望自动比较 SIL 与板级运行结果，并定位首个偏差 tick 与对应 step，快速判断是模型问题还是硬件时序差异。",
       "acceptanceCriteria": [
-        "在 crates/sim 中新增最小 plant 模型：solenoid_valve + cylinder + sensor（基于 response_time、stroke_time/retract_time 生成状态变化）",
-        "支持传感器去抖的最小实现（固定 debounce tick 或时间窗）",
-        "新增测试：给定一个最小拓扑（阀->缸->限位传感器），运行 action extend 后在预期时间窗内 wait 条件满足",
+        "新增对比模块：输入 SIL trace.jsonl 与 board trace.jsonl，输出差异报告 JSON",
+        "报告包含：是否一致、首个偏差 tick、偏差类型（step/reason/edge）、上下文窗口",
+        "提供 CLI 入口（建议 `trace-diff` 子命令）",
+        "新增测试：构造一组一致与一组不一致样例，断言报告字段正确",
         "Typecheck passes",
-        "cargo test passes"
+        "cargo test --workspace passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-009",
-      "title": "故障注入 v1：sensor_stuck 与动作超时场景可复现",
-      "description": "作为用户，我希望通过场景文件注入常见故障并得到可复现的失败报告，用于逼近“一次即可用”的最坏情况覆盖。",
-      "acceptanceCriteria": [
-        "扩展场景 YAML：支持 faults（至少 sensor_stuck: target/value/at_ms）",
-        "sim 报告在失败时输出 failure 对象（kind/message/at_ms/task/step），并包含用于复现的 seed 与场景摘要",
-        "新增测试：注入 sensor_stuck 导致 wait 永不满足，timeout 分支触发且报告包含对应 step 与时间点",
-        "Typecheck passes",
-        "cargo test passes"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-010",
-      "title": "sim-regress：批量运行场景并生成汇总报告",
-      "description": "作为开发者，我希望在 CI/本地一键跑批量场景并生成汇总报告，从而把 SIL 变成可持续的回归门禁。",
-      "acceptanceCriteria": [
-        "新增 sim-regress 子命令：对多个 .plc 与多个场景组合跑批（可先支持目录扫描）",
-        "输出汇总报告（JSON）：包含通过/失败计数、失败列表（含复现参数与产物路径）",
-        "新增测试：构造两个最小用例（一个 pass 一个 fail），断言汇总报告计数与失败列表正确",
-        "Typecheck passes",
-        "cargo test passes"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-011",
-      "title": "RP2040（Pico）最小工程：no_std 固件可编译并具备 tick 与日志骨架",
-      "description": "作为开发者，我希望先把 Pico 的最小板级工程跑通（可编译、可运行的入口/时钟/tick/日志），为后续将 runtime 下沉到板上做准备。",
-      "acceptanceCriteria": [
-        "新增 crates/board-rp2040 crate（或等效目录），提供 thumbv6m-none-eabi 目标的 no_std 二进制入口",
-        "提供最小 tick 源（例如定时器/循环）与日志输出骨架（defmt RTT 或串口二选一即可）",
-        "在 docs/roadmap_autosim_arduino.md 或单独文档中补充：如何构建该固件（cargo build 命令）",
-        "Typecheck passes",
-        "cargo build -p board-rp2040 succeeds"
-      ],
-      "priority": 11,
       "passes": true,
       "notes": ""
     }

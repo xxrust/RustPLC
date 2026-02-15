@@ -11,9 +11,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 io-traits = { path = "crates/io-traits" }
 runtime-core = { path = "crates/runtime-core" }
+codegen = { path = "crates/codegen" }
 sim = { path = "crates/sim" }
 thiserror = "1"
 z3 = { version = "0.12", features = ["static-link-z3"], optional = true }
+sha2 = "0.10"
+hex = "0.4"
+time = { version = "0.3", features = ["formatting"] }
+toml = "0.8"
 
 [features]
 default = []
@@ -26,4 +31,5 @@ members = [
   "crates/runtime-core",
   "crates/sim",
   "crates/board-rp2040",
+  "crates/codegen",
 ]

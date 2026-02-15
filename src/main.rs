@@ -14,6 +14,10 @@ use std::path::{Path, PathBuf};
 use io_traits::{DigitalInputId, DigitalOutputId};
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::sim_regress::{run_sim_regress, SimRegressSummary};
+use rust_plc::runtime_bridge::state_machine_to_runtime_program;
+use rust_plc::io_map::{IoMap, IoUsage};
+use sha2::{Digest, Sha256};
+use time::format_description::well_known::Rfc3339;
 
 #[derive(Debug, Serialize)]
 struct IrBundle {
@@ -86,6 +90,34 @@ fn main() {
         }
         return;
     }
+    if first == "build-rp2040" {
+        if let Err(msg) = run_build_rp2040_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if first == "flash-rp2040" {
+        if let Err(msg) = run_flash_rp2040_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if first == "trace-parse" {
+        if let Err(msg) = run_trace_parse_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if first == "trace-diff" {
+        if let Err(msg) = run_trace_diff_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let path = first;
     if args.next().is_some() {
@@ -135,6 +167,10 @@ fn print_usage(program: &str) {
     eprintln!("  {program} <file.plc>");
     eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]");
     eprintln!("  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]");
+    eprintln!("  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]");
+    eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
+    eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
+    eprintln!("  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]");
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -324,11 +360,427 @@ fn run_sim_regress_subcommand(
     Ok(())
 }
 
+#[derive(Debug, Serialize)]
+struct BuildMeta<'a> {
+    plc_sha256: &'a str,
+    generated_at: &'a str,
+    tool_version: &'a str,
+    runtime_semver: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    io_map: Option<IoMap>,
+}
+
+fn run_build_rp2040_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!("Usage: {program} build-rp2040 <file.plc> --out <dir>"));
+    };
+
+    let mut out_dir: Option<PathBuf> = None;
+    let mut io_map_path: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--out" => {
+                out_dir = Some(PathBuf::from(
+                    args.next().ok_or_else(|| "Missing value for --out <dir>".to_string())?,
+                ));
+            }
+            "--io-map" => {
+                io_map_path = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --io-map <file>".to_string())?,
+                ));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]"
+                ));
+            }
+            other => return Err(format!("Unknown argument for build-rp2040: {other}")),
+        }
+    }
+
+    let out_dir = out_dir.ok_or_else(|| {
+        format!("Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]")
+    })?;
+    fs::create_dir_all(&out_dir)
+        .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
+
+    if Path::new(&plc_path).extension().and_then(|ext| ext.to_str()) != Some("plc") {
+        return Err(format!("Expected a .plc file path, got: {plc_path}"));
+    }
+
+    let plc_bytes = fs::read(&plc_path)
+        .map_err(|err| format!("Failed to read PLC file {plc_path}: {err}"))?;
+    let plc_source = String::from_utf8(plc_bytes.clone())
+        .map_err(|err| format!("PLC file is not valid UTF-8: {err}"))?;
+
+    let sha256 = {
+        let mut h = Sha256::new();
+        h.update(&plc_bytes);
+        hex::encode(h.finalize())
+    };
+
+    let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
+
+    // For build artifacts we use 1ms ticks so ms-based DSL durations are always aligned.
+    let runtime_program = state_machine_to_runtime_program(&ir_bundle.topology, &ir_bundle.state_machine, 1)
+        .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
+
+    let usage = io_usage_for_program(&runtime_program);
+    let io_map = match io_map_path {
+        None => None,
+        Some(path) => {
+            let toml_str = fs::read_to_string(&path)
+                .map_err(|err| format!("Failed to read io map {path:?}: {err}"))?;
+            let m = IoMap::from_toml_str(&toml_str)
+                .map_err(|err| format!("Failed to parse io map TOML: {err}"))?;
+            m.validate_for_usage(usage)
+                .map_err(|err| format!("Invalid io map for this program: {err}"))?;
+            Some(m)
+        }
+    };
+
+    let generated_src = codegen::generate_program_module(&runtime_program, "generated")
+        .map_err(|err| format!("Codegen failed: {err:?}"))?;
+
+    let mut generated_src = generated_src;
+    if !generated_src.ends_with('\n') {
+        generated_src.push('\n');
+    }
+
+    let generated_path = out_dir.join("generated_program.rs");
+    fs::write(&generated_path, generated_src)
+        .map_err(|err| format!("Failed to write {generated_path:?}: {err}"))?;
+
+    let iomap_path = out_dir.join("io_map.template.toml");
+    let iomap = io_map_template_for_program(&runtime_program);
+    fs::write(&iomap_path, iomap)
+        .map_err(|err| format!("Failed to write {iomap_path:?}: {err}"))?;
+
+    let generated_at = time::OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    let meta = BuildMeta {
+        plc_sha256: &sha256,
+        generated_at: &generated_at,
+        tool_version: env!("CARGO_PKG_VERSION"),
+        runtime_semver: runtime_core::VERSION,
+        io_map,
+    };
+    let mut meta_json =
+        serde_json::to_string_pretty(&meta).map_err(|err| format!("Failed to serialize build_meta.json: {err}"))?;
+    meta_json.push('\n');
+    let meta_path = out_dir.join("build_meta.json");
+    fs::write(&meta_path, meta_json)
+        .map_err(|err| format!("Failed to write {meta_path:?}: {err}"))?;
+
+    Ok(())
+}
+
+fn io_map_template_for_program(program: &Program<'_>) -> String {
+    use std::collections::BTreeSet;
+
+    let mut dis = BTreeSet::<u16>::new();
+    let mut dos = BTreeSet::<u16>::new();
+    for task in program.tasks {
+        for step in task.steps {
+            match step.instr {
+                Instr::WaitDigital { id, .. } => {
+                    dis.insert(id.0);
+                }
+                Instr::Action { actions, .. } => {
+                    for a in actions {
+                        match *a {
+                            Action::SetDigital { id, .. } => {
+                                dos.insert(id.0);
+                            }
+                            Action::Extend { output } | Action::Retract { output } => {
+                                dos.insert(output.0);
+                            }
+                            Action::SetAnalog { .. } => {}
+                        }
+                    }
+                }
+                Instr::Delay { .. } | Instr::Goto { .. } | Instr::Halt => {}
+            }
+        }
+    }
+
+    let mut out = String::new();
+    out.push_str("# RP2040 I/O map template (fill in GPIO numbers for your wiring)\n");
+    out.push_str("# This file is a template; it may be incomplete by design.\n\n");
+
+    out.push_str("[digital_inputs]\n");
+    if dis.is_empty() {
+        out.push_str("# di0 = 2\n");
+    } else {
+        for id in dis {
+            out.push_str(&format!("# di{id} = 2\n"));
+        }
+    }
+    out.push('\n');
+
+    out.push_str("[digital_outputs]\n");
+    if dos.is_empty() {
+        out.push_str("# do0 = 16\n");
+    } else {
+        for id in dos {
+            out.push_str(&format!("# do{id} = 16\n"));
+        }
+    }
+    out
+}
+
+fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
+    use std::collections::BTreeSet;
+
+    let mut dis = BTreeSet::<u16>::new();
+    let mut dos = BTreeSet::<u16>::new();
+    for task in program.tasks {
+        for step in task.steps {
+            match step.instr {
+                Instr::WaitDigital { id, .. } => {
+                    dis.insert(id.0);
+                }
+                Instr::Action { actions, .. } => {
+                    for a in actions {
+                        match *a {
+                            Action::SetDigital { id, .. } => {
+                                dos.insert(id.0);
+                            }
+                            Action::Extend { output } | Action::Retract { output } => {
+                                dos.insert(output.0);
+                            }
+                            Action::SetAnalog { .. } => {}
+                        }
+                    }
+                }
+                Instr::Delay { .. } | Instr::Goto { .. } | Instr::Halt => {}
+            }
+        }
+    }
+
+    // `IoUsage` is a tiny borrowed wrapper; we leak the sets to keep build-rp2040 code simple.
+    let dis: &'static [u16] = Box::leak(dis.into_iter().collect::<Vec<_>>().into_boxed_slice());
+    let dos: &'static [u16] = Box::leak(dos.into_iter().collect::<Vec<_>>().into_boxed_slice());
+    IoUsage {
+        digital_inputs: dis,
+        digital_outputs: dos,
+    }
+}
+
 fn write_sim_regress_summary(path: &Path, summary: &SimRegressSummary) -> Result<(), String> {
     let mut json = serde_json::to_string_pretty(summary)
         .map_err(|err| format!("Failed to serialize summary JSON: {err}"))?;
     json.push('\n');
     fs::write(path, json).map_err(|err| format!("Failed to write summary file {path:?}: {err}"))?;
+    Ok(())
+}
+
+fn run_flash_rp2040_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let mut uf2: Option<PathBuf> = None;
+    let mut mount: Option<PathBuf> = None;
+    let mut dry_run = false;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--uf2" => {
+                uf2 = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --uf2 <file.uf2>".to_string())?,
+                ));
+            }
+            "--mount" => {
+                mount = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --mount <path>".to_string())?,
+                ));
+            }
+            "--dry-run" => dry_run = true,
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]"
+                ));
+            }
+            other => return Err(format!("Unknown argument for flash-rp2040: {other}")),
+        }
+    }
+
+    let uf2 = uf2.ok_or_else(|| {
+        format!("Usage: {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]")
+    })?;
+    let mount = mount.ok_or_else(|| {
+        format!("Usage: {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]")
+    })?;
+
+    if !uf2.exists() {
+        return Err(format!("UF2 file does not exist: {uf2:?}"));
+    }
+    if !mount.exists() {
+        return Err(format!("Mount path does not exist: {mount:?}"));
+    }
+    if !mount.is_dir() {
+        return Err(format!("Mount path is not a directory: {mount:?}"));
+    }
+
+    let file_name = uf2
+        .file_name()
+        .ok_or_else(|| format!("Invalid UF2 path (no file name): {uf2:?}"))?;
+    let dest = mount.join(file_name);
+
+    if dry_run {
+        eprintln!("dry-run: would copy {uf2:?} -> {dest:?}");
+        return Ok(());
+    }
+
+    fs::copy(&uf2, &dest).map_err(|err| {
+        format!("Failed to copy UF2 to mount (src={uf2:?}, dest={dest:?}): {err}")
+    })?;
+    Ok(())
+}
+
+fn run_trace_parse_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let mut input: Option<PathBuf> = None;
+    let mut out: Option<PathBuf> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--in" => {
+                input = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --in <log.txt>".to_string())?,
+                ));
+            }
+            "--out" => {
+                out = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --out <trace.jsonl>".to_string())?,
+                ));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} trace-parse --in <log.txt> --out <trace.jsonl>"
+                ));
+            }
+            other => return Err(format!("Unknown argument for trace-parse: {other}")),
+        }
+    }
+
+    let input = input.ok_or_else(|| format!("Usage: {program} trace-parse --in <log.txt> --out <trace.jsonl>"))?;
+    let out = out.ok_or_else(|| format!("Usage: {program} trace-parse --in <log.txt> --out <trace.jsonl>"))?;
+
+    let text = fs::read_to_string(&input)
+        .map_err(|err| format!("Failed to read trace log {input:?}: {err}"))?;
+    let rows = rust_plc::board_trace::parse_trace_text(&text)
+        .map_err(|err| format!("Failed to parse trace log: {err}"))?;
+
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create output dir {parent:?}: {err}"))?;
+        }
+    }
+
+    let mut jsonl = String::new();
+    for r in rows {
+        let mut line = serde_json::to_string(&r)
+            .map_err(|err| format!("Failed to serialize trace row JSON: {err}"))?;
+        line.push('\n');
+        jsonl.push_str(&line);
+    }
+    fs::write(&out, jsonl).map_err(|err| format!("Failed to write {out:?}: {err}"))?;
+    Ok(())
+}
+
+fn run_trace_diff_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let mut sil: Option<PathBuf> = None;
+    let mut board: Option<PathBuf> = None;
+    let mut out: Option<PathBuf> = None;
+    let mut context_window: usize = 3;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--sil" => {
+                sil = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --sil <trace.jsonl>".to_string())?,
+                ));
+            }
+            "--board" => {
+                board = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --board <trace.jsonl>".to_string())?,
+                ));
+            }
+            "--out" => {
+                out = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --out <report.json>".to_string())?,
+                ));
+            }
+            "--context" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --context <n>".to_string())?;
+                context_window = raw
+                    .parse::<usize>()
+                    .map_err(|_| format!("Invalid --context value (expected usize): {raw}"))?;
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+                ));
+            }
+            other => return Err(format!("Unknown argument for trace-diff: {other}")),
+        }
+    }
+
+    let sil = sil.ok_or_else(|| format!(
+        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+    ))?;
+    let board = board.ok_or_else(|| format!(
+        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+    ))?;
+    let out = out.ok_or_else(|| format!(
+        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+    ))?;
+
+    let sil_text = fs::read_to_string(&sil)
+        .map_err(|err| format!("Failed to read SIL trace {sil:?}: {err}"))?;
+    let board_text = fs::read_to_string(&board)
+        .map_err(|err| format!("Failed to read board trace {board:?}: {err}"))?;
+
+    let sil_events = rust_plc::trace_diff::parse_trace_jsonl(&sil_text)
+        .map_err(|err| format!("Failed to parse SIL trace JSONL: {err}"))?;
+    let board_events = rust_plc::trace_diff::parse_trace_jsonl(&board_text)
+        .map_err(|err| format!("Failed to parse board trace JSONL: {err}"))?;
+
+    let report = rust_plc::trace_diff::diff_traces(&sil_events, &board_events, context_window);
+
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create output dir {parent:?}: {err}"))?;
+        }
+    }
+
+    let mut json = serde_json::to_string_pretty(&report)
+        .map_err(|err| format!("Failed to serialize report JSON: {err}"))?;
+    json.push('\n');
+    fs::write(&out, json).map_err(|err| format!("Failed to write {out:?}: {err}"))?;
     Ok(())
 }
 

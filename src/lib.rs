@@ -1,8 +1,11 @@
 pub mod ast;
+pub mod board_trace;
 pub mod error;
+pub mod io_map;
 pub mod ir;
 pub mod parser;
 pub mod runtime_bridge;
 pub mod semantic;
 pub mod sim_regress;
+pub mod trace_diff;
 pub mod verification;

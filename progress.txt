@@ -50,6 +50,113 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `sim::run_program_for_scenario()` is a convenient single entrypoint for CLI/tests to get both JSONL trace and `SimReport`.
 ---
 
+## [2026-02-15 20:57:53 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added new `crates/codegen` crate with `generate_program_module()` to emit a `'static` `runtime_core::Program` module as plain Rust source (static arrays only, no heap allocations).
+  - Implemented minimal validation for referenced `StepId`s so generated code doesn't index out of bounds at runtime.
+  - Added a unit test that generates a tiny Program and verifies the generated source parses via `syn`.
+- Files changed
+  - `Cargo.toml`, `Cargo.lock`, `crates/codegen/Cargo.toml`, `crates/codegen/src/lib.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Codegen can stay dependency-light by outputting plain Rust and validating it via `syn::parse_file()` in tests.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - When formatting numeric literals for generated code, keep `f32` values explicit (`1.0`, `f32::NAN`) to avoid type inference surprises.
+---
+
+## [2026-02-15 21:03:20 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `build-rp2040` CLI subcommand that compiles + verifies `.plc`, bridges to `runtime-core::Program`, runs codegen, and emits build artifacts.
+  - The command now writes `generated_program.rs`, `build_meta.json`, and `io_map.template.toml` into `--out <dir>`.
+  - Added build metadata fields required by PRD: `plc_sha256`, `generated_at` (RFC3339), `tool_version`, and `runtime_semver`.
+  - Added integration test `tests/build_rp2040.rs` to validate successful artifact generation and metadata shape.
+- Files changed
+  - `Cargo.toml`, `Cargo.lock`, `crates/runtime-core/src/lib.rs`, `src/main.rs`, `tests/build_rp2040.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Reusing `compile_pipeline` + `runtime_bridge` keeps CLI build artifacts aligned with the same semantic/verification path used by existing commands.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - For stable build metadata, expose runtime version from `runtime-core` (`pub const VERSION`) instead of duplicating literals in CLI code.
+---
+
+## [2026-02-15 21:17:00 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Updated `crates/board-rp2040` to execute a generated (or default) `runtime-core::Program` via `Runtime::tick_with_trace()` instead of a hardcoded tick counter loop.
+  - Added build-time injection of `generated_program.rs` via `RUST_PLC_GENERATED_PROGRAM_RS` (copied into OUT_DIR by `build.rs` and `include!()`'d by firmware).
+  - Kept host-stub build path intact and added a hint for the injection environment variable.
+- Files changed
+  - `crates/board-rp2040/Cargo.toml`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/src/main.rs`, `crates/codegen/src/lib.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Prefer outer attributes (`#[allow(...)]`) in generated files so they can be safely `include!()`'d inside other modules/crates (inner `#![...]` may fail).
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `include!()`-d sources are not crate roots; inner attributes like `#![allow(...)]` are rejected unless they annotate the enclosing module.
+---
+
+## [2026-02-15 21:21:42 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Defined RP2040 digital I/O map contract as TOML: `[digital_inputs] di<N>=<gpio>` and `[digital_outputs] do<N>=<gpio>`.
+  - Added `rust_plc::io_map::IoMap` with TOML parsing + validation (duplicate GPIO, illegal range 0..=29, missing required ids).
+  - Extended `build-rp2040` with optional `--io-map <file>`; when provided, it validates against the generated Program's referenced DI/DO ids and embeds the parsed map into `build_meta.json`.
+  - Added unit tests covering parse/validate success and common failure cases.
+- Files changed
+  - `Cargo.toml`, `Cargo.lock`, `src/lib.rs`, `src/io_map.rs`, `src/main.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep mapping files author-friendly by using stable keys (`di0`, `do0`) and validating them against actual Program IO usage at build time.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `toml::Value` parsing keeps error messages clear without inventing custom deserializers for key prefixes.
+---
+
+## [2026-02-15 21:32:22 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added RP2040 `PicoIo` in `board-rp2040` implementing `io_traits::Io` digital I/O methods and tick progression.
+  - Added compile-time IO map embedding in `board-rp2040/build.rs` via optional `RUST_PLC_IO_MAP_TOML` (fallback to default empty map).
+  - Firmware now initializes pin directions from embedded map (`DI -> SIO input`, `DO -> SIO output`) and drives runtime ticks with trace logging.
+  - Added startup/tick/trace logs in firmware loop to satisfy minimal board observability requirements for runtime step transitions.
+- Files changed
+  - `crates/board-rp2040/Cargo.toml`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/src/main.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For dynamic RP2040 pin routing, convert typed board pins to dynamic pins once, then apply function/pull/OE at runtime from generated config.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `rp-pico` board aliases are not always `gpioNN` field names (`led`, `b_power_save`, `vbus_detect`, `voltage_monitor`); mapping code must use board-specific names.
+---
+
+## [2026-02-15 21:35:13 CST] - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `flash-rp2040` CLI subcommand to copy a UF2 image onto a user-provided mount directory.
+  - Implemented `--dry-run` mode to preview the copy action without writing.
+  - Added integration tests using a temp directory as a simulated mount point (copy + dry-run behaviors).
+- Files changed
+  - `src/main.rs`, `tests/flash_rp2040.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep flashing automation explicit and testable by requiring `--mount <path>` instead of trying to auto-detect OS-specific RP2040 volumes.
+---
+
+## [2026-02-15 21:39:55 CST] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Standardized board trace line format in `board-rp2040` firmware logs:
+    - `TICK tick=<...> ts_ms=<...>`
+    - `TRACE tick=<...> task=<...> from=<...> to=<...> reason=<...> ts_ms=<...>`
+  - Added host-side parser module `rust_plc::board_trace` to convert text logs into structured rows.
+  - Added `trace-parse` CLI subcommand to read board logs and emit JSONL structured trace events.
+  - Added parser unit test and CLI integration test for deterministic conversion behavior.
+- Files changed
+  - `crates/board-rp2040/src/main.rs`, `src/lib.rs`, `src/board_trace.rs`, `src/main.rs`, `tests/trace_parse.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep board trace messages key-value structured from day one; host-side tooling then only needs lightweight parsing and can evolve independently.
+---
+
 ## [2026-02-15 00:16:45 CST] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
@@ -201,4 +308,14 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `rp-pico` clock frequency helpers are trait-based; for `get_freq()` you must import `rp_pico::hal::clocks::ClockSource` explicitly.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Current tick source is a busy-wait skeleton (`cortex_m::asm::delay`) intended only as a minimal bring-up baseline; later stories can switch to timer/IRQ ticks.
+---
+
+## [2026-02-15 21:55:22 CST] - US-008 (Trace Diff)
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `rust_plc::trace_diff` module to compare SIL `trace.jsonl` and board `trace.jsonl` and produce a structured mismatch report (first mismatch + type + context window).
+  - Added CLI `trace-diff` subcommand to generate `report.json` from two trace files.
+  - Added unit + CLI integration tests covering both matching traces and a reason-mismatch case.
+- Files changed
+  - `src/trace_diff.rs`, `src/lib.rs`, `src/main.rs`, `tests/trace_diff.rs`, `prd.json`, `progress.txt`
 ---
