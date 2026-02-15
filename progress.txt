@@ -128,6 +128,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `rp-pico` board aliases are not always `gpioNN` field names (`led`, `b_power_save`, `vbus_detect`, `voltage_monitor`); mapping code must use board-specific names.
 ---
 
+## [2026-02-15 21:35:13 CST] - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `flash-rp2040` CLI subcommand to copy a UF2 image onto a user-provided mount directory.
+  - Implemented `--dry-run` mode to preview the copy action without writing.
+  - Added integration tests using a temp directory as a simulated mount point (copy + dry-run behaviors).
+- Files changed
+  - `src/main.rs`, `tests/flash_rp2040.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep flashing automation explicit and testable by requiring `--mount <path>` instead of trying to auto-detect OS-specific RP2040 volumes.
+---
+
 ## [2026-02-15 00:16:45 CST] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented

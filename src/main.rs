@@ -97,6 +97,13 @@ fn main() {
         }
         return;
     }
+    if first == "flash-rp2040" {
+        if let Err(msg) = run_flash_rp2040_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let path = first;
     if args.next().is_some() {
@@ -147,6 +154,7 @@ fn print_usage(program: &str) {
     eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]");
     eprintln!("  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]");
     eprintln!("  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]");
+    eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -554,6 +562,71 @@ fn write_sim_regress_summary(path: &Path, summary: &SimRegressSummary) -> Result
         .map_err(|err| format!("Failed to serialize summary JSON: {err}"))?;
     json.push('\n');
     fs::write(path, json).map_err(|err| format!("Failed to write summary file {path:?}: {err}"))?;
+    Ok(())
+}
+
+fn run_flash_rp2040_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let mut uf2: Option<PathBuf> = None;
+    let mut mount: Option<PathBuf> = None;
+    let mut dry_run = false;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--uf2" => {
+                uf2 = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --uf2 <file.uf2>".to_string())?,
+                ));
+            }
+            "--mount" => {
+                mount = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --mount <path>".to_string())?,
+                ));
+            }
+            "--dry-run" => dry_run = true,
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]"
+                ));
+            }
+            other => return Err(format!("Unknown argument for flash-rp2040: {other}")),
+        }
+    }
+
+    let uf2 = uf2.ok_or_else(|| {
+        format!("Usage: {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]")
+    })?;
+    let mount = mount.ok_or_else(|| {
+        format!("Usage: {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]")
+    })?;
+
+    if !uf2.exists() {
+        return Err(format!("UF2 file does not exist: {uf2:?}"));
+    }
+    if !mount.exists() {
+        return Err(format!("Mount path does not exist: {mount:?}"));
+    }
+    if !mount.is_dir() {
+        return Err(format!("Mount path is not a directory: {mount:?}"));
+    }
+
+    let file_name = uf2
+        .file_name()
+        .ok_or_else(|| format!("Invalid UF2 path (no file name): {uf2:?}"))?;
+    let dest = mount.join(file_name);
+
+    if dry_run {
+        eprintln!("dry-run: would copy {uf2:?} -> {dest:?}");
+        return Ok(());
+    }
+
+    fs::copy(&uf2, &dest).map_err(|err| {
+        format!("Failed to copy UF2 to mount (src={uf2:?}, dest={dest:?}): {err}")
+    })?;
     Ok(())
 }
 
