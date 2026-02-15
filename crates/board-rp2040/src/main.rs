@@ -16,9 +16,8 @@ fn main() {
 // Embedded firmware build (thumbv6m-none-eabi, target_os = "none").
 #[cfg(target_os = "none")]
 mod firmware {
-    use defmt::Debug2Format;
     use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
-    use runtime_core::Runtime;
+    use runtime_core::{Runtime, TransitionReason};
 
     use embedded_hal::digital::v2::{InputPin, OutputPin};
     use cortex_m_rt::entry;
@@ -234,13 +233,33 @@ mod firmware {
 
         // Minimal "tick" source: we drive the runtime in a loop paced by a crude busy-wait.
         // Later stories can replace this with a timer interrupt and real GPIO-backed Io.
+        const TICK_MS: u64 = 1;
         loop {
-            defmt::info!("tick={}", io.tick().0);
+            let tick = io.tick().0;
+            defmt::info!("TICK tick={} ts_ms={}", tick, tick.saturating_mul(TICK_MS));
             rt.tick_with_trace(&mut io, |e| {
-                defmt::info!("trace={:?}", Debug2Format(&e));
+                defmt::info!(
+                    "TRACE tick={} task={} from={} to={} reason={} ts_ms={}",
+                    e.tick.0,
+                    e.task,
+                    e.from.0,
+                    e.to.0,
+                    reason_str(e.reason),
+                    e.tick.0.saturating_mul(TICK_MS)
+                );
             })
             .unwrap();
             cortex_m::asm::delay(12_000_000);
+        }
+    }
+
+    fn reason_str(r: TransitionReason) -> &'static str {
+        match r {
+            TransitionReason::Action => "action",
+            TransitionReason::DelayElapsed => "delay_elapsed",
+            TransitionReason::WaitSatisfied => "wait_satisfied",
+            TransitionReason::Timeout => "timeout",
+            TransitionReason::Goto => "goto",
         }
     }
 }

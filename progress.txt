@@ -141,6 +141,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Keep flashing automation explicit and testable by requiring `--mount <path>` instead of trying to auto-detect OS-specific RP2040 volumes.
 ---
 
+## [2026-02-15 21:39:55 CST] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Standardized board trace line format in `board-rp2040` firmware logs:
+    - `TICK tick=<...> ts_ms=<...>`
+    - `TRACE tick=<...> task=<...> from=<...> to=<...> reason=<...> ts_ms=<...>`
+  - Added host-side parser module `rust_plc::board_trace` to convert text logs into structured rows.
+  - Added `trace-parse` CLI subcommand to read board logs and emit JSONL structured trace events.
+  - Added parser unit test and CLI integration test for deterministic conversion behavior.
+- Files changed
+  - `crates/board-rp2040/src/main.rs`, `src/lib.rs`, `src/board_trace.rs`, `src/main.rs`, `tests/trace_parse.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep board trace messages key-value structured from day one; host-side tooling then only needs lightweight parsing and can evolve independently.
+---
+
 ## [2026-02-15 00:16:45 CST] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
