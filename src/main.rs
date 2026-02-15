@@ -14,6 +14,9 @@ use std::path::{Path, PathBuf};
 use io_traits::{DigitalInputId, DigitalOutputId};
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::sim_regress::{run_sim_regress, SimRegressSummary};
+use rust_plc::runtime_bridge::state_machine_to_runtime_program;
+use sha2::{Digest, Sha256};
+use time::format_description::well_known::Rfc3339;
 
 #[derive(Debug, Serialize)]
 struct IrBundle {
@@ -86,6 +89,13 @@ fn main() {
         }
         return;
     }
+    if first == "build-rp2040" {
+        if let Err(msg) = run_build_rp2040_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let path = first;
     if args.next().is_some() {
@@ -135,6 +145,7 @@ fn print_usage(program: &str) {
     eprintln!("  {program} <file.plc>");
     eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]");
     eprintln!("  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]");
+    eprintln!("  {program} build-rp2040 <file.plc> --out <dir>");
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -322,6 +333,153 @@ fn run_sim_regress_subcommand(
         run_sim_regress(&plc_dir, &scenario_dir, &artifacts_dir).map_err(|e| format!("sim-regress failed: {e}"))?;
     write_sim_regress_summary(&summary_out, &summary)?;
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct BuildMeta<'a> {
+    plc_sha256: &'a str,
+    generated_at: &'a str,
+    tool_version: &'a str,
+    runtime_semver: &'a str,
+}
+
+fn run_build_rp2040_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!("Usage: {program} build-rp2040 <file.plc> --out <dir>"));
+    };
+
+    let mut out_dir: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--out" => {
+                out_dir = Some(PathBuf::from(
+                    args.next().ok_or_else(|| "Missing value for --out <dir>".to_string())?,
+                ));
+            }
+            "-h" | "--help" => {
+                return Err(format!("Usage: {program} build-rp2040 <file.plc> --out <dir>"));
+            }
+            other => return Err(format!("Unknown argument for build-rp2040: {other}")),
+        }
+    }
+
+    let out_dir = out_dir.ok_or_else(|| format!("Usage: {program} build-rp2040 <file.plc> --out <dir>"))?;
+    fs::create_dir_all(&out_dir)
+        .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
+
+    if Path::new(&plc_path).extension().and_then(|ext| ext.to_str()) != Some("plc") {
+        return Err(format!("Expected a .plc file path, got: {plc_path}"));
+    }
+
+    let plc_bytes = fs::read(&plc_path)
+        .map_err(|err| format!("Failed to read PLC file {plc_path}: {err}"))?;
+    let plc_source = String::from_utf8(plc_bytes.clone())
+        .map_err(|err| format!("PLC file is not valid UTF-8: {err}"))?;
+
+    let sha256 = {
+        let mut h = Sha256::new();
+        h.update(&plc_bytes);
+        hex::encode(h.finalize())
+    };
+
+    let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
+
+    // For build artifacts we use 1ms ticks so ms-based DSL durations are always aligned.
+    let runtime_program = state_machine_to_runtime_program(&ir_bundle.topology, &ir_bundle.state_machine, 1)
+        .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
+
+    let generated_src = codegen::generate_program_module(&runtime_program, "generated")
+        .map_err(|err| format!("Codegen failed: {err:?}"))?;
+
+    let mut generated_src = generated_src;
+    if !generated_src.ends_with('\n') {
+        generated_src.push('\n');
+    }
+
+    let generated_path = out_dir.join("generated_program.rs");
+    fs::write(&generated_path, generated_src)
+        .map_err(|err| format!("Failed to write {generated_path:?}: {err}"))?;
+
+    let iomap_path = out_dir.join("io_map.template.toml");
+    let iomap = io_map_template_for_program(&runtime_program);
+    fs::write(&iomap_path, iomap)
+        .map_err(|err| format!("Failed to write {iomap_path:?}: {err}"))?;
+
+    let generated_at = time::OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    let meta = BuildMeta {
+        plc_sha256: &sha256,
+        generated_at: &generated_at,
+        tool_version: env!("CARGO_PKG_VERSION"),
+        runtime_semver: runtime_core::VERSION,
+    };
+    let mut meta_json =
+        serde_json::to_string_pretty(&meta).map_err(|err| format!("Failed to serialize build_meta.json: {err}"))?;
+    meta_json.push('\n');
+    let meta_path = out_dir.join("build_meta.json");
+    fs::write(&meta_path, meta_json)
+        .map_err(|err| format!("Failed to write {meta_path:?}: {err}"))?;
+
+    Ok(())
+}
+
+fn io_map_template_for_program(program: &Program<'_>) -> String {
+    use std::collections::BTreeSet;
+
+    let mut dis = BTreeSet::<u16>::new();
+    let mut dos = BTreeSet::<u16>::new();
+    for task in program.tasks {
+        for step in task.steps {
+            match step.instr {
+                Instr::WaitDigital { id, .. } => {
+                    dis.insert(id.0);
+                }
+                Instr::Action { actions, .. } => {
+                    for a in actions {
+                        match *a {
+                            Action::SetDigital { id, .. } => {
+                                dos.insert(id.0);
+                            }
+                            Action::Extend { output } | Action::Retract { output } => {
+                                dos.insert(output.0);
+                            }
+                            Action::SetAnalog { .. } => {}
+                        }
+                    }
+                }
+                Instr::Delay { .. } | Instr::Goto { .. } | Instr::Halt => {}
+            }
+        }
+    }
+
+    let mut out = String::new();
+    out.push_str("# RP2040 I/O map template (fill in GPIO numbers for your wiring)\n");
+    out.push_str("# This file is a template; it may be incomplete by design.\n\n");
+
+    out.push_str("[digital_inputs]\n");
+    if dis.is_empty() {
+        out.push_str("# di0 = 2\n");
+    } else {
+        for id in dis {
+            out.push_str(&format!("# di{id} = 2\n"));
+        }
+    }
+    out.push('\n');
+
+    out.push_str("[digital_outputs]\n");
+    if dos.is_empty() {
+        out.push_str("# do0 = 16\n");
+    } else {
+        for id in dos {
+            out.push_str(&format!("# do{id} = 16\n"));
+        }
+    }
+    out
 }
 
 fn write_sim_regress_summary(path: &Path, summary: &SimRegressSummary) -> Result<(), String> {

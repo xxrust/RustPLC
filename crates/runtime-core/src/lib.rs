@@ -6,6 +6,8 @@ extern crate std;
 
 use io_traits::{AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
 
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StepId(pub u16);
 
@@ -435,4 +437,3 @@ mod tests {
         );
     }
 }
-

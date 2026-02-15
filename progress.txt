@@ -65,6 +65,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - When formatting numeric literals for generated code, keep `f32` values explicit (`1.0`, `f32::NAN`) to avoid type inference surprises.
 ---
 
+## [2026-02-15 21:03:20 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `build-rp2040` CLI subcommand that compiles + verifies `.plc`, bridges to `runtime-core::Program`, runs codegen, and emits build artifacts.
+  - The command now writes `generated_program.rs`, `build_meta.json`, and `io_map.template.toml` into `--out <dir>`.
+  - Added build metadata fields required by PRD: `plc_sha256`, `generated_at` (RFC3339), `tool_version`, and `runtime_semver`.
+  - Added integration test `tests/build_rp2040.rs` to validate successful artifact generation and metadata shape.
+- Files changed
+  - `Cargo.toml`, `Cargo.lock`, `crates/runtime-core/src/lib.rs`, `src/main.rs`, `tests/build_rp2040.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Reusing `compile_pipeline` + `runtime_bridge` keeps CLI build artifacts aligned with the same semantic/verification path used by existing commands.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - For stable build metadata, expose runtime version from `runtime-core` (`pub const VERSION`) instead of duplicating literals in CLI code.
+---
+
 ## [2026-02-15 00:16:45 CST] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
