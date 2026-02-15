@@ -12,6 +12,7 @@
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
 - CLI integration tests in this repo should invoke the compiled binary via `env!("CARGO_BIN_EXE_rust_plc")` and verify artifacts on disk.
 - Batch SIL regress runs live in `rust_plc::sim_regress`: it scans `.plc`/scenario YAMLs recursively, writes per-case `trace.jsonl`/`report.json` under `out/sim-regress/case_XXXX`, and emits a summary JSON.
+- For embedded workspace crates, keep a host-stub `main()` behind `cfg(not(target_os = "none"))` so `cargo test --workspace` stays green while firmware code is `cfg(target_os = "none")`.
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
@@ -182,4 +183,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Avoid iterating `self.scheduled.get()` while mutating inputs; `remove()` the tick's entry to take ownership of changes.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Plant observes final output values at the end of `prev_tick` and models command changes as happening on `prev_tick`; response time is `prev_tick + response_ticks`.
+---
+
+## [2026-02-15 20:37:48 CST] - US-011
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added new `crates/board-rp2040` no_std firmware crate for Raspberry Pi Pico (RP2040), with `thumbv6m-none-eabi` entrypoint, clock init, RTT defmt logging, and a minimal tick loop.
+  - Added host-stub build path (`cfg(not(target_os = "none"))`) so workspace checks/tests continue to pass on non-embedded hosts.
+  - Added linker/runtime support files: crate-level `memory.x`, `build.rs` linker search setup, and workspace `.cargo/config.toml` target rustflags (`link.x` + `defmt.x`).
+  - Added build guide doc at `docs/board_rp2040.md` with exact `rustup target add` and `cargo build -p board-rp2040 --target thumbv6m-none-eabi` steps.
+- Files changed
+  - `Cargo.toml`, `Cargo.lock`, `.cargo/config.toml`, `crates/board-rp2040/Cargo.toml`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/memory.x`, `crates/board-rp2040/src/main.rs`, `docs/board_rp2040.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Embedded crates inside this workspace should provide a host fallback entrypoint so `cargo check/test --workspace` doesn't require cross-target compilation.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `rp-pico` clock frequency helpers are trait-based; for `get_freq()` you must import `rp_pico::hal::clocks::ClockSource` explicitly.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Current tick source is a busy-wait skeleton (`cortex_m::asm::delay`) intended only as a minimal bring-up baseline; later stories can switch to timer/IRQ ticks.
 ---

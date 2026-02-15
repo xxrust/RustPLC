@@ -168,7 +168,7 @@
         "cargo build -p board-rp2040 succeeds"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
