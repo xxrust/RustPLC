@@ -50,6 +50,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `sim::run_program_for_scenario()` is a convenient single entrypoint for CLI/tests to get both JSONL trace and `SimReport`.
 ---
 
+## [2026-02-15 20:57:53 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added new `crates/codegen` crate with `generate_program_module()` to emit a `'static` `runtime_core::Program` module as plain Rust source (static arrays only, no heap allocations).
+  - Implemented minimal validation for referenced `StepId`s so generated code doesn't index out of bounds at runtime.
+  - Added a unit test that generates a tiny Program and verifies the generated source parses via `syn`.
+- Files changed
+  - `Cargo.toml`, `Cargo.lock`, `crates/codegen/Cargo.toml`, `crates/codegen/src/lib.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Codegen can stay dependency-light by outputting plain Rust and validating it via `syn::parse_file()` in tests.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - When formatting numeric literals for generated code, keep `f32` values explicit (`1.0`, `f32::NAN`) to avoid type inference surprises.
+---
+
 ## [2026-02-15 00:16:45 CST] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented

@@ -144,6 +144,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "codegen"
+version = "0.1.0"
+dependencies = [
+ "io-traits",
+ "runtime-core",
+ "syn 2.0.114",
+]
+
+[[package]]
 name = "cortex-m"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

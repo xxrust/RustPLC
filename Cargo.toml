@@ -26,4 +26,5 @@ members = [
   "crates/runtime-core",
   "crates/sim",
   "crates/board-rp2040",
+  "crates/codegen",
 ]
