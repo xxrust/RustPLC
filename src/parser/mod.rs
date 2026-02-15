@@ -162,6 +162,9 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         "inverted" => {
             attributes.inverted = Some(expect_boolean(value, "inverted")?);
         }
+        "external" => {
+            attributes.external = Some(expect_boolean(value, "external")?);
+        }
         "rated_speed" => {
             attributes.rated_speed = Some(expect_measured(value, "rated_speed")?);
         }
@@ -254,9 +257,10 @@ fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
                     Rule::identifier => device = Some(part.as_str().to_string()),
                     Rule::comparison_operator => operator = Some(parse_comparison_operator(part)?),
                     Rule::number => {
-                        value = Some(part.as_str().parse::<f64>().map_err(|_| {
-                            PlcError::parse(line, "analog_condition 数值解析失败")
-                        })?);
+                        value =
+                            Some(part.as_str().parse::<f64>().map_err(|_| {
+                                PlcError::parse(line, "analog_condition 数值解析失败")
+                            })?);
                     }
                     _ => {}
                 }
@@ -266,8 +270,7 @@ fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
                     .ok_or_else(|| PlcError::parse(line, "analog_condition 缺少设备名"))?,
                 operator: operator
                     .ok_or_else(|| PlcError::parse(line, "analog_condition 缺少比较符"))?,
-                value: value
-                    .ok_or_else(|| PlcError::parse(line, "analog_condition 缺少阈值"))?,
+                value: value.ok_or_else(|| PlcError::parse(line, "analog_condition 缺少阈值"))?,
             })
         }
         Rule::state_reference => Ok(SafetyOperand::State(parse_state_reference(inner)?)),
@@ -988,7 +991,10 @@ fn parse_range_value(pair: Pair<Rule>) -> Result<crate::ast::AnalogRange, PlcErr
     } else {
         Err(PlcError::parse(
             line,
-            format!("属性 range 需要范围值（如 0..100），实际为: {:?}", pair.as_rule()),
+            format!(
+                "属性 range 需要范围值（如 0..100），实际为: {:?}",
+                pair.as_rule()
+            ),
         ))
     }
 }
@@ -1249,6 +1255,55 @@ task main:
             valve.attributes.custom_states.as_ref(),
             Some(&expected),
             "应解析出自定义 states 列表"
+        );
+    }
+
+    #[test]
+    fn parses_external_attribute_into_ast() {
+        let input = r#"
+[topology]
+
+device X1: digital_input {
+    external: true
+}
+
+device pressure_in: analog_input {
+    range: 0..10,
+    external: true
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step start:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("external 属性应能解析为 AST");
+        let digital = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "X1")
+            .expect("应包含 X1 设备");
+        let analog = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "pressure_in")
+            .expect("应包含 pressure_in 设备");
+
+        assert_eq!(
+            digital.attributes.external,
+            Some(true),
+            "digital_input external 应解析为 true"
+        );
+        assert_eq!(
+            analog.attributes.external,
+            Some(true),
+            "analog_input external 应解析为 true"
         );
     }
 

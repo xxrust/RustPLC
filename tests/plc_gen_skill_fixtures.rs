@@ -73,13 +73,14 @@ fn compile_and_verify(source: &str) -> Result<(), Vec<String>> {
     let state_machine = state_machine.expect("state machine exists when semantic errors are empty");
     let constraints = constraints.expect("constraints exist when semantic errors are empty");
 
-    let summary = verify_all(&expanded_program, &topology, &constraints, &state_machine)
-        .map_err(|diagnostics| {
+    let summary = verify_all(&expanded_program, &topology, &constraints, &state_machine).map_err(
+        |diagnostics| {
             diagnostics
                 .into_iter()
                 .map(|diagnostic| diagnostic.to_string())
                 .collect::<Vec<_>>()
-        })?;
+        },
+    )?;
 
     assert!(
         matches!(summary.safety.level.as_str(), "完备证明" | "有界验证"),
@@ -114,11 +115,7 @@ fn plc_gen_skill_valid_fixtures_compile_and_verify() {
         };
 
         if let Err(errors) = compile_and_verify(&source) {
-            failures.push(format!(
-                "{}:\n{}",
-                file.display(),
-                errors.join("\n")
-            ));
+            failures.push(format!("{}:\n{}", file.display(), errors.join("\n")));
         }
     }
 
@@ -128,4 +125,3 @@ fn plc_gen_skill_valid_fixtures_compile_and_verify() {
         failures.join("\n\n")
     );
 }
-

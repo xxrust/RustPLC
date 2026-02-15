@@ -1,4 +1,7 @@
-use crate::ast::{DeviceType, PlcProgram};
+use crate::ast::{
+    ActionStatement, ConditionExpression, DeviceType, LiteralValue, PlcProgram, StepStatement,
+    WaitCondition, WaitStatement,
+};
 use crate::ir::{
     ConstraintSet, SafetyExpr, SafetyRelation, State, StateMachine, Transition, TransitionAction,
     TransitionGuard,
@@ -60,6 +63,8 @@ struct DeviceDomain {
     name: String,
     states: Vec<String>,
     default_state: usize,
+    is_analog: bool,
+    region_bounds: Option<Vec<(f64, f64)>>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,9 +92,9 @@ struct SafetyModel {
 struct RuleBinding {
     relation: SafetyRelation,
     left_device: usize,
-    left_state: usize,
+    left_states: Vec<usize>,
     right_device: usize,
-    right_state: usize,
+    right_states: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -147,18 +152,13 @@ pub fn verify_safety_with_config(
     let mut diagnostics = Vec::new();
     let mut all_complete = true;
     let mut checked_rules = 0usize;
+    let mut skipped_threshold_rules = Vec::new();
 
     for (index, rule) in constraints.safety.iter().enumerate() {
-        let Some(binding) = bind_safety_expr_rule(&model, rule) else {
-            continue;
-        };
-
-        checked_rules += 1;
         let relation = relation_text(&rule.relation);
         let left_text = safety_expr_text(&rule.left);
         let right_text = safety_expr_text(&rule.right);
         let rule_text = format!("{left_text} {relation} {right_text}");
-
         let line = program
             .constraints
             .safety
@@ -166,24 +166,30 @@ pub fn verify_safety_with_config(
             .map(|node| node.line.max(1))
             .unwrap_or(1);
 
+        let Some(binding) = bind_safety_expr_rule(&model, rule) else {
+            if safety_rule_has_threshold(rule) {
+                skipped_threshold_rules.push(format!(
+                    "WARNING: Safety 规则 <input>:{} {} 含模拟量阈值，当前未建模，已跳过验证",
+                    line, rule_text
+                ));
+            }
+            continue;
+        };
+
+        checked_rules += 1;
+
         let outcome = analyze_rule(&model, binding, depth_plan.effective_depth);
         if let Some(counterexample) = outcome.counterexample {
             let (reason, suggestion) = match rule.relation {
                 SafetyRelation::ConflictsWith => (
-                    format!(
-                        "{} 与 {} 在可达状态同时成立",
-                        left_text, right_text
-                    ),
+                    format!("{} 与 {} 在可达状态同时成立", left_text, right_text),
                     format!(
                         "请在触发 {} 之前确保 {} 已复位，或调整并行/跳转逻辑避免两者同时成立",
                         right_text, left_text
                     ),
                 ),
                 SafetyRelation::Requires => (
-                    format!(
-                        "{} 成立时 {} 未满足",
-                        left_text, right_text
-                    ),
+                    format!("{} 成立时 {} 未满足", left_text, right_text),
                     format!(
                         "请在触发 {} 之前先确保 {} 成立，必要时添加 wait 或调整 step 顺序",
                         left_text, right_text
@@ -214,14 +220,19 @@ pub fn verify_safety_with_config(
         return Err(diagnostics);
     }
 
+    let has_skipped_thresholds = !skipped_threshold_rules.is_empty();
     let mut warnings = depth_plan.warnings;
-    let level = if checked_rules == 0 || all_complete {
+    warnings.extend(skipped_threshold_rules.into_iter());
+
+    let level = if !has_skipped_thresholds && (checked_rules == 0 || all_complete) {
         SafetyProofLevel::Complete
     } else {
-        warnings.push(format!(
-            "WARNING: Safety 在深度 {} 内未发现反例，但未获得完备证明。建议增大 bmc_max_depth 以提升有界覆盖，或调整模型以帮助 k-induction 收敛",
-            depth_plan.effective_depth
-        ));
+        if !all_complete {
+            warnings.push(format!(
+                "WARNING: Safety 在深度 {} 内未发现反例，但未获得完备证明。建议增大 bmc_max_depth 以提升有界覆盖，或调整模型以帮助 k-induction 收敛",
+                depth_plan.effective_depth
+            ));
+        }
         SafetyProofLevel::Bounded
     };
 
@@ -262,6 +273,8 @@ impl SafetyModel {
         let mut edges = Vec::new();
         let mut outgoing = vec![Vec::new(); states.len()];
 
+        let analog_inputs = collect_analog_input_states(program, &device_index, &devices);
+
         for transition in &state_machine.transitions {
             let Some(from) = state_index
                 .get(&(
@@ -282,15 +295,21 @@ impl SafetyModel {
                 continue;
             };
 
-            let effects = transition_effects(transition, &device_index, &device_state_index);
-            let edge_index = edges.len();
-            edges.push(ModelEdge {
-                from,
-                to,
-                effects,
-                label: transition_label(transition),
-            });
-            outgoing[from].push(edge_index);
+            let effects =
+                transition_effects(transition, &device_index, &device_state_index, &devices);
+            let expanded_effects = expand_analog_input_effects(effects, &analog_inputs);
+            let label = transition_label(transition);
+
+            for effects in expanded_effects {
+                let edge_index = edges.len();
+                edges.push(ModelEdge {
+                    from,
+                    to,
+                    effects,
+                    label: label.clone(),
+                });
+                outgoing[from].push(edge_index);
+            }
         }
 
         for state_id in 0..states.len() {
@@ -368,6 +387,138 @@ fn is_parallel_join_state(state: Option<&State>) -> bool {
     })
 }
 
+fn analog_region_state_name(index: usize) -> String {
+    format!("region_{index}")
+}
+
+fn compute_analog_regions(
+    program: &PlcProgram,
+    constraints: &ConstraintSet,
+) -> HashMap<String, Vec<(f64, f64)>> {
+    let mut values_by_device: HashMap<String, Vec<f64>> = HashMap::new();
+
+    for rule in &constraints.safety {
+        for expr in [&rule.left, &rule.right] {
+            if let SafetyExpr::Threshold { device, value, .. } = expr {
+                if let Ok(parsed) = value.parse::<f64>() {
+                    add_threshold_value(&mut values_by_device, device, parsed);
+                }
+            }
+        }
+    }
+
+    for task in &program.tasks.tasks {
+        for step in &task.steps {
+            collect_threshold_values_from_statements(&step.statements, &mut values_by_device);
+        }
+    }
+
+    let mut regions_by_device = HashMap::new();
+
+    for device in &program.topology.devices {
+        if !matches!(
+            device.device_type,
+            DeviceType::AnalogInput | DeviceType::AnalogOutput
+        ) {
+            continue;
+        }
+
+        let Some(range) = &device.attributes.range else {
+            continue;
+        };
+
+        let (min, max) = if range.min <= range.max {
+            (range.min, range.max)
+        } else {
+            (range.max, range.min)
+        };
+
+        let mut bounds = vec![min, max];
+        if let Some(values) = values_by_device.get(&device.name) {
+            for value in values {
+                if *value >= min && *value <= max {
+                    bounds.push(*value);
+                }
+            }
+        }
+
+        bounds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        bounds.dedup_by(|a, b| (*a - *b).abs() <= f64::EPSILON);
+
+        if bounds.len() < 2 {
+            bounds.push(max);
+        }
+
+        let mut regions = Vec::new();
+        for window in bounds.windows(2) {
+            regions.push((window[0], window[1]));
+        }
+
+        if regions.is_empty() {
+            regions.push((min, max));
+        }
+
+        regions_by_device.insert(device.name.clone(), regions);
+    }
+
+    regions_by_device
+}
+
+fn add_threshold_value(values_by_device: &mut HashMap<String, Vec<f64>>, device: &str, value: f64) {
+    values_by_device
+        .entry(device.to_string())
+        .or_default()
+        .push(value);
+}
+
+fn collect_threshold_values_from_statements(
+    statements: &[StepStatement],
+    values_by_device: &mut HashMap<String, Vec<f64>>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Wait(wait) => {
+                collect_threshold_values_from_wait(wait, values_by_device);
+            }
+            StepStatement::Action(ActionStatement::SetAnalog { target, value }) => {
+                add_threshold_value(values_by_device, target, *value);
+            }
+            StepStatement::Repeat { body, .. } => {
+                collect_threshold_values_from_statements(body, values_by_device);
+            }
+            StepStatement::Parallel(parallel) => {
+                for branch in &parallel.branches {
+                    collect_threshold_values_from_statements(&branch.statements, values_by_device);
+                }
+            }
+            StepStatement::Race(race) => {
+                for branch in &race.branches {
+                    collect_threshold_values_from_statements(&branch.statements, values_by_device);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_threshold_values_from_wait(
+    wait: &WaitStatement,
+    values_by_device: &mut HashMap<String, Vec<f64>>,
+) {
+    let terms: Vec<&ConditionExpression> = match &wait.condition {
+        WaitCondition::Single(condition) => vec![condition],
+        WaitCondition::And(conditions) | WaitCondition::Or(conditions) => {
+            conditions.iter().collect()
+        }
+    };
+
+    for condition in terms {
+        if let LiteralValue::Number(value) = &condition.right {
+            add_threshold_value(values_by_device, &condition.left, *value);
+        }
+    }
+}
+
 fn collect_device_domains(
     program: &PlcProgram,
     constraints: &ConstraintSet,
@@ -376,38 +527,52 @@ fn collect_device_domains(
     HashMap<String, usize>,
     Vec<HashMap<String, usize>>,
 ) {
+    let analog_regions = compute_analog_regions(program, constraints);
     let mut devices = Vec::<DeviceDomain>::new();
     let mut device_index = HashMap::<String, usize>::new();
 
     for device in &program.topology.devices {
-        let states = match device.device_type {
-            DeviceType::Cylinder => vec!["extended".to_string(), "retracted".to_string()],
+        let (states, default_state, is_analog, region_bounds) = match device.device_type {
+            DeviceType::Cylinder => {
+                let states = vec!["extended".to_string(), "retracted".to_string()];
+                let default_state = states
+                    .iter()
+                    .position(|state| state == "retracted")
+                    .unwrap_or(0);
+                (states, default_state, false, None)
+            }
             DeviceType::DigitalOutput
             | DeviceType::DigitalInput
             | DeviceType::SolenoidValve
             | DeviceType::Sensor
-            | DeviceType::Motor => vec!["on".to_string(), "off".to_string()],
+            | DeviceType::Motor => {
+                let states = vec!["on".to_string(), "off".to_string()];
+                let default_state = states.iter().position(|state| state == "off").unwrap_or(0);
+                (states, default_state, false, None)
+            }
             DeviceType::AnalogInput | DeviceType::AnalogOutput => {
-                vec!["analog_active".to_string()]
+                let regions = analog_regions.get(&device.name);
+                if let Some(regions) = regions {
+                    let states = regions
+                        .iter()
+                        .enumerate()
+                        .map(|(index, _)| analog_region_state_name(index))
+                        .collect::<Vec<_>>();
+                    (states, 0, true, Some(regions.clone()))
+                } else {
+                    let states = vec!["analog_active".to_string()];
+                    (states, 0, true, None)
+                }
             }
         };
-
-        let default_state_name = match device.device_type {
-            DeviceType::Cylinder => "retracted",
-            DeviceType::AnalogInput | DeviceType::AnalogOutput => "analog_active",
-            _ => "off",
-        };
-
-        let default_state = states
-            .iter()
-            .position(|state| state == default_state_name)
-            .unwrap_or(0);
 
         let index = devices.len();
         devices.push(DeviceDomain {
             name: device.name.clone(),
             states,
             default_state,
+            is_analog,
+            region_bounds,
         });
         device_index.insert(device.name.clone(), index);
     }
@@ -438,6 +603,68 @@ fn collect_device_domains(
     (devices, device_index, state_index)
 }
 
+fn collect_analog_input_states(
+    program: &PlcProgram,
+    device_index: &HashMap<String, usize>,
+    devices: &[DeviceDomain],
+) -> Vec<(usize, Vec<usize>)> {
+    let mut inputs = Vec::new();
+
+    for device in &program.topology.devices {
+        if !matches!(device.device_type, DeviceType::AnalogInput) {
+            continue;
+        }
+
+        let Some(device_id) = device_index.get(&device.name).copied() else {
+            continue;
+        };
+
+        let state_count = devices
+            .get(device_id)
+            .map(|domain| domain.states.len())
+            .unwrap_or(0);
+
+        if state_count == 0 {
+            continue;
+        }
+
+        let states = (0..state_count).collect::<Vec<_>>();
+        inputs.push((device_id, states));
+    }
+
+    inputs
+}
+
+fn expand_analog_input_effects(
+    base_effects: HashMap<usize, usize>,
+    analog_inputs: &[(usize, Vec<usize>)],
+) -> Vec<HashMap<usize, usize>> {
+    let mut expanded = vec![base_effects];
+
+    for (device_id, states) in analog_inputs {
+        if states.is_empty() {
+            continue;
+        }
+
+        let mut next = Vec::new();
+        for effects in expanded {
+            if effects.contains_key(device_id) {
+                next.push(effects);
+                continue;
+            }
+
+            for state_id in states {
+                let mut cloned = effects.clone();
+                cloned.insert(*device_id, *state_id);
+                next.push(cloned);
+            }
+        }
+        expanded = next;
+    }
+
+    expanded
+}
+
 fn ensure_device_state(domain: &mut DeviceDomain, state_name: &str) {
     if domain.states.iter().any(|state| state == state_name) {
         return;
@@ -450,23 +677,39 @@ fn transition_effects(
     transition: &Transition,
     device_index: &HashMap<String, usize>,
     device_state_index: &[HashMap<String, usize>],
+    device_domains: &[DeviceDomain],
 ) -> HashMap<usize, usize> {
     let mut effects = HashMap::<usize, usize>::new();
 
     for action in &transition.actions {
-        let Some((target_device, target_state)) = action_effect(action) else {
-            continue;
-        };
+        match action {
+            TransitionAction::SetAnalog { target, value_raw } => {
+                let Some(device_id) = device_index.get(target).copied() else {
+                    continue;
+                };
+                let Some(state_id) = analog_state_for_value(device_domains, device_id, value_raw)
+                else {
+                    continue;
+                };
+                effects.insert(device_id, state_id);
+            }
+            _ => {
+                let Some((target_device, target_state)) = action_effect(action) else {
+                    continue;
+                };
 
-        let Some(device_id) = device_index.get(target_device).copied() else {
-            continue;
-        };
+                let Some(device_id) = device_index.get(target_device).copied() else {
+                    continue;
+                };
 
-        let Some(state_id) = device_state_index[device_id].get(target_state).copied() else {
-            continue;
-        };
+                let Some(state_id) = device_state_index[device_id].get(target_state).copied()
+                else {
+                    continue;
+                };
 
-        effects.insert(device_id, state_id);
+                effects.insert(device_id, state_id);
+            }
+        }
     }
 
     effects
@@ -483,9 +726,30 @@ fn action_effect(action: &TransitionAction) -> Option<(&str, &str)> {
             };
             Some((target.as_str(), state))
         }
-        TransitionAction::SetAnalog { target, .. } => Some((target.as_str(), "analog_active")),
+        TransitionAction::SetAnalog { .. } => None,
         TransitionAction::Log { .. } => None,
     }
+}
+
+fn analog_state_for_value(
+    device_domains: &[DeviceDomain],
+    device_id: usize,
+    value_raw: &str,
+) -> Option<usize> {
+    let domain = device_domains.get(device_id)?;
+    if !domain.is_analog {
+        return None;
+    }
+    let bounds = domain.region_bounds.as_ref()?;
+    let value = value_raw.parse::<f64>().ok()?;
+
+    bounds.iter().enumerate().find_map(|(index, (min, max))| {
+        if value >= *min && value <= *max {
+            Some(index)
+        } else {
+            None
+        }
+    })
 }
 
 fn transition_label(transition: &Transition) -> String {
@@ -605,57 +869,91 @@ fn build_depth_plan(model: &SafetyModel, config: &SafetyConfig) -> DepthPlan {
     }
 }
 
-fn bind_rule(
-    model: &SafetyModel,
-    relation: SafetyRelation,
-    left_device: &str,
-    left_state: &str,
-    right_device: &str,
-    right_state: &str,
-) -> Option<RuleBinding> {
-    let left_device_id = model.device_index.get(left_device).copied()?;
-    let right_device_id = model.device_index.get(right_device).copied()?;
-
-    let left_state_id = model.device_state_index[left_device_id]
-        .get(left_state)
-        .copied()?;
-    let right_state_id = model.device_state_index[right_device_id]
-        .get(right_state)
-        .copied()?;
+fn bind_safety_expr_rule(model: &SafetyModel, rule: &crate::ir::SafetyRule) -> Option<RuleBinding> {
+    let (left_device, left_states) = safety_expr_states(model, &rule.left)?;
+    let (right_device, right_states) = safety_expr_states(model, &rule.right)?;
 
     Some(RuleBinding {
-        relation,
-        left_device: left_device_id,
-        left_state: left_state_id,
-        right_device: right_device_id,
-        right_state: right_state_id,
+        relation: rule.relation.clone(),
+        left_device,
+        left_states,
+        right_device,
+        right_states,
     })
 }
 
-fn bind_safety_expr_rule(
-    model: &SafetyModel,
-    rule: &crate::ir::SafetyRule,
-) -> Option<RuleBinding> {
-    let (left_device, left_state) = safety_expr_device_state(&rule.left)?;
-    let (right_device, right_state) = safety_expr_device_state(&rule.right)?;
-    bind_rule(
-        model,
-        rule.relation.clone(),
-        left_device,
-        left_state,
-        right_device,
-        right_state,
-    )
+fn safety_expr_states(model: &SafetyModel, expr: &SafetyExpr) -> Option<(usize, Vec<usize>)> {
+    match expr {
+        SafetyExpr::State(state_expr) => {
+            let device_id = model.device_index.get(&state_expr.device).copied()?;
+            let state_id = model.device_state_index[device_id]
+                .get(&state_expr.state)
+                .copied()?;
+            Some((device_id, vec![state_id]))
+        }
+        SafetyExpr::Threshold {
+            device,
+            operator,
+            value,
+        } => {
+            let device_id = model.device_index.get(device).copied()?;
+            let states = threshold_states_for_expr(model, device_id, operator, value)?;
+            Some((device_id, states))
+        }
+    }
 }
 
-fn safety_expr_device_state(expr: &SafetyExpr) -> Option<(&str, &str)> {
-    match expr {
-        SafetyExpr::State(state_expr) => Some((state_expr.device.as_str(), state_expr.state.as_str())),
-        SafetyExpr::Threshold { .. } => {
-            // Analog threshold constraints are not yet tracked in BMC state space.
-            // Skip them gracefully so discrete rules still work.
-            None
+#[derive(Clone, Copy)]
+enum ComparisonOp {
+    Eq,
+    Neq,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+}
+
+fn comparison_op_from_str(op: &str) -> Option<ComparisonOp> {
+    match op {
+        "==" => Some(ComparisonOp::Eq),
+        "!=" => Some(ComparisonOp::Neq),
+        ">" => Some(ComparisonOp::Gt),
+        "<" => Some(ComparisonOp::Lt),
+        ">=" => Some(ComparisonOp::Gte),
+        "<=" => Some(ComparisonOp::Lte),
+        _ => None,
+    }
+}
+
+fn threshold_states_for_expr(
+    model: &SafetyModel,
+    device_id: usize,
+    operator: &str,
+    value: &str,
+) -> Option<Vec<usize>> {
+    let domain = model.devices.get(device_id)?;
+    let bounds = domain.region_bounds.as_ref()?;
+    let op = comparison_op_from_str(operator)?;
+    let value = value.parse::<f64>().ok()?;
+
+    let mut states = Vec::new();
+    for (index, (min, max)) in bounds.iter().enumerate() {
+        if region_intersects(op, value, *min, *max) {
+            states.push(index);
         }
+    }
+
+    Some(states)
+}
+
+fn region_intersects(op: ComparisonOp, value: f64, min: f64, max: f64) -> bool {
+    match op {
+        ComparisonOp::Eq => value >= min && value <= max,
+        ComparisonOp::Neq => !(min == max && value == min),
+        ComparisonOp::Gt => max > value,
+        ComparisonOp::Gte => max >= value,
+        ComparisonOp::Lt => min < value,
+        ComparisonOp::Lte => min <= value,
     }
 }
 
@@ -668,6 +966,11 @@ fn safety_expr_text(expr: &SafetyExpr) -> String {
             value,
         } => format!("{device} {operator} {value}"),
     }
+}
+
+fn safety_rule_has_threshold(rule: &crate::ir::SafetyRule) -> bool {
+    matches!(rule.left, SafetyExpr::Threshold { .. })
+        || matches!(rule.right, SafetyExpr::Threshold { .. })
 }
 
 fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> SearchOutcome {
@@ -765,8 +1068,10 @@ fn apply_edge(edge: &ModelEdge, current: &ConcreteState) -> ConcreteState {
 }
 
 fn violates_rule(state: &ConcreteState, rule: &RuleBinding) -> bool {
-    let left_matches = state.device_states[rule.left_device] == rule.left_state;
-    let right_matches = state.device_states[rule.right_device] == rule.right_state;
+    let left_state = state.device_states[rule.left_device];
+    let right_state = state.device_states[rule.right_device];
+    let left_matches = rule.left_states.contains(&left_state);
+    let right_matches = rule.right_states.contains(&right_state);
 
     match rule.relation {
         SafetyRelation::ConflictsWith => left_matches && right_matches,
@@ -814,15 +1119,16 @@ fn render_path(
 
     let conflict_state = &nodes[terminal_node].state;
     let conflict_state_name = state_name(&model.states[conflict_state.control_state]);
+    let left_state_id = conflict_state.device_states[rule.left_device];
+    let right_state_id = conflict_state.device_states[rule.right_device];
     let left_text = format!(
         "{}.{}",
-        model.devices[rule.left_device].name,
-        model.devices[rule.left_device].states[rule.left_state]
+        model.devices[rule.left_device].name, model.devices[rule.left_device].states[left_state_id]
     );
     let right_text = format!(
         "{}.{}",
         model.devices[rule.right_device].name,
-        model.devices[rule.right_device].states[rule.right_state]
+        model.devices[rule.right_device].states[right_state_id]
     );
 
     match rule.relation {
@@ -845,8 +1151,6 @@ fn state_name(state: &State) -> String {
     format!("{}.{}", state.task_name, state.step_name)
 }
 
-
-
 fn relation_text(relation: &SafetyRelation) -> &'static str {
     match relation {
         SafetyRelation::ConflictsWith => "conflicts_with",
@@ -868,7 +1172,10 @@ fn z3_sanity_probe() {
 
 #[cfg(test)]
 mod tests {
-    use super::{SafetyConfig, SafetyProofLevel, verify_safety, verify_safety_with_config};
+    use super::{
+        SafetyConfig, SafetyModel, SafetyProofLevel, analog_state_for_value, verify_safety,
+        verify_safety_with_config,
+    };
     use crate::parser::parse_plc;
     use crate::semantic::{build_constraint_set, build_state_machine};
 
@@ -1368,5 +1675,128 @@ task main:
             ),
             "含 AND/OR wait 的场景应得到有效 safety 结论"
         );
+    }
+
+    #[test]
+    fn models_analog_threshold_rules_with_region_abstraction() {
+        let source = r#"
+[topology]
+
+device pressure_sensor: analog_input { range: 0..100, unit: "bar" }
+
+device Y0: digital_output
+device valve_A: solenoid_valve { connected_to: Y0 }
+device cyl_A: cylinder {
+    connected_to: valve_A
+    stroke_time: 120ms
+    retract_time: 120ms
+}
+
+[constraints]
+
+safety: pressure_sensor > 50 conflicts_with pressure_sensor < 10
+
+[tasks]
+
+task demo:
+    step extend:
+        action: extend cyl_A
+    step retract:
+        action: retract cyl_A
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("含模拟量阈值规则的场景应返回可用 safety 结果");
+
+        assert!(
+            report
+                .warnings
+                .iter()
+                .all(|warning| !warning.contains("阈值") && !warning.contains("未建模")),
+            "阈值规则已纳入离散抽象时不应输出跳过告警"
+        );
+        assert!(
+            matches!(
+                report.level,
+                SafetyProofLevel::Complete | SafetyProofLevel::Bounded
+            ),
+            "阈值规则纳入建模后应产生有效证明等级"
+        );
+    }
+
+    #[test]
+    fn detects_conflict_for_overlapping_analog_thresholds() {
+        let source = r#"
+[topology]
+
+device AI0: analog_input { range: 0..100 }
+
+[constraints]
+
+safety: AI0 > 50 conflicts_with AI0 > 60
+
+[tasks]
+
+task main:
+    step s1:
+        action: log "tick"
+    step s2:
+        action: log "tick"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let errors = verify_safety(&program, &constraints, &state_machine)
+            .expect_err("重叠的模拟量阈值应触发冲突");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.constraint.contains("AI0 > 50")),
+            "错误应包含模拟量阈值冲突描述"
+        );
+    }
+
+    #[test]
+    fn maps_set_analog_to_region_state() {
+        let source = r#"
+[topology]
+
+device AO0: analog_output { range: 0..10 }
+device Y0: digital_output
+device valve: solenoid_valve { connected_to: Y0 }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step set:
+        action: set_analog AO0 7.5
+    step done:
+        action: log "done"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+        let model = SafetyModel::from_inputs(&program, &constraints, &state_machine);
+
+        let device_id = *model.device_index.get("AO0").expect("AO0 应注册为设备");
+        let target_state =
+            analog_state_for_value(&model.devices, device_id, "7.5").expect("应找到区间状态");
+
+        let has_effect = model
+            .edges
+            .iter()
+            .any(|edge| edge.effects.get(&device_id).copied() == Some(target_state));
+
+        assert!(has_effect, "set_analog 应映射到对应区间状态");
     }
 }

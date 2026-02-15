@@ -38,6 +38,7 @@ attribute_name = {
     | "detects"
     | "debounce"
     | "inverted"
+    | "external"
     | "rated_speed"
     | "ramp_time"
     | "states"

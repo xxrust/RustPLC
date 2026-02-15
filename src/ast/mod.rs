@@ -46,6 +46,7 @@ pub struct DeviceAttributes {
     pub detects: Option<StateReference>,
     pub debounce: Option<DurationValue>,
     pub inverted: Option<bool>,
+    pub external: Option<bool>,
     pub rated_speed: Option<MeasuredValue>,
     pub ramp_time: Option<DurationValue>,
     pub custom_states: Option<Vec<String>>,

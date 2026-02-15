@@ -141,9 +141,18 @@ fn large_example_stamp_bend_line_compiles_and_has_nontrivial_ir() {
     assert!(ir["topology"]["graph"]["nodes"].as_array().unwrap().len() >= 30);
     assert!(ir["state_machine"]["states"].as_array().unwrap().len() >= 15);
     assert!(ir["state_machine"]["transitions"].as_array().unwrap().len() >= 20);
-    assert_eq!(ir["verification"]["liveness"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir["verification"]["timing"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir["verification"]["causality"]["level"], Value::String("通过".to_string()));
+    assert_eq!(
+        ir["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
 }
 
 #[test]
@@ -267,7 +276,8 @@ task main:
 "#
     );
 
-    let summary = compile_and_verify(&source).expect("many-device topology should compile and verify");
+    let summary =
+        compile_and_verify(&source).expect("many-device topology should compile and verify");
     assert_verification_passes(&summary);
 }
 
@@ -291,7 +301,9 @@ task main:
         .as_array()
         .expect("state_machine.states should be array");
     assert!(
-        states.iter().any(|state| state["step_name"] == Value::String("loop_80".to_string())),
+        states
+            .iter()
+            .any(|state| state["step_name"] == Value::String("loop_80".to_string())),
         "repeat expansion should include loop_80"
     );
 }

@@ -67,6 +67,15 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 
 **等待工程师确认后再进入下一阶段。**
 
+### 模拟量与数值比较指引（新增）
+
+当工艺描述涉及“压力/温度/位置/流量”等数值比较时：
+- 使用 `analog_input` 建模，并**必须声明 `range` 与 `unit`**。
+- 数值比较直接写在 `wait` 或 `safety` 中，例如：`wait: pressure >= 60`。
+- **避免 `==`**，用区间或容差带代替（例如 `>= 58 AND <= 62`）。
+- 传感器（`sensor`）只用于离散反馈信号（on/off），不承担数值语义。
+- 若输入来自操作员设定值/上位系统，标记为 `external: true`（避免因果误报）。
+
 ### 阶段二：推理设备拓扑
 
 根据确认后的动作序列，推理出完整的设备清单。展示给工程师：

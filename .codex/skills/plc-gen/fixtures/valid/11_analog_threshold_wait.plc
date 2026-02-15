@@ -1,0 +1,45 @@
+# ============================================================
+# 模拟量阈值等待（analog_input 数值比较）
+# ============================================================
+
+[topology]
+
+device Y0: digital_output
+
+device AI0: analog_input { range: 0..100, unit: "bar" }
+
+device valve_main: solenoid_valve {
+    connected_to: Y0,
+    response_time: 30ms
+}
+
+[constraints]
+
+# 压力过高与过低不能同时成立
+safety: AI0 > 90 conflicts_with AI0 < 10
+    reason: "压力值不应同时处于高压与低压区间"
+
+[tasks]
+
+task main:
+    step open_valve:
+        action: set valve_main on
+
+    step wait_pressure:
+        wait: AI0 >= 60
+        timeout: 5000ms -> goto fault
+
+    step stop:
+        action: set valve_main off
+    on_complete: goto idle
+
+task fault:
+    step shutdown:
+        action: set valve_main off
+    on_complete: goto idle
+
+task idle:
+    step wait_start:
+        wait: Y0 == false
+        allow_indefinite_wait: true
+    on_complete: goto main

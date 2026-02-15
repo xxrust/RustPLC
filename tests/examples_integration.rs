@@ -360,7 +360,8 @@ task main:
         goto cycle.missing_step
 "#;
 
-    let errors = compile_source_to_json(source).expect_err("missing step should be a semantic error");
+    let errors =
+        compile_source_to_json(source).expect_err("missing step should be a semantic error");
     let joined = errors.join("\n");
     assert!(
         joined.contains("未定义 step cycle.missing_step"),
@@ -620,12 +621,15 @@ fn parses_analog_pressure_demo_example_into_verified_ir_json() {
     let nodes = ir_json["topology"]["graph"]["nodes"]
         .as_array()
         .expect("topology should have nodes");
-    let kinds: Vec<&str> = nodes
-        .iter()
-        .filter_map(|n| n["kind"].as_str())
-        .collect();
-    assert!(kinds.contains(&"analog_input"), "should contain analog_input device");
-    assert!(kinds.contains(&"analog_output"), "should contain analog_output device");
+    let kinds: Vec<&str> = nodes.iter().filter_map(|n| n["kind"].as_str()).collect();
+    assert!(
+        kinds.contains(&"analog_input"),
+        "should contain analog_input device"
+    );
+    assert!(
+        kinds.contains(&"analog_output"),
+        "should contain analog_output device"
+    );
 
     // Verify set_analog actions appear in transitions
     let transitions = ir_json["state_machine"]["transitions"]
@@ -637,14 +641,20 @@ fn parses_analog_pressure_demo_example_into_verified_ir_json() {
             .map(|actions| actions.iter().any(|a| a["action"] == "set_analog"))
             .unwrap_or(false)
     });
-    assert!(has_set_analog, "transitions should include set_analog actions");
+    assert!(
+        has_set_analog,
+        "transitions should include set_analog actions"
+    );
 
     // Verify analog connection type in edges
     let edges = ir_json["topology"]["graph"]["edges"]
         .as_array()
         .expect("topology should have edges");
     let has_analog_edge = edges.iter().any(|e| e[2] == "analog");
-    assert!(has_analog_edge, "topology should have analog connection type");
+    assert!(
+        has_analog_edge,
+        "topology should have analog connection type"
+    );
 
     // All four verifiers pass
     let safety_level = ir_json["verification"]["safety"]["level"]

@@ -1,21 +1,18 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/dsl-v2-enhancements",
-  "description": "DSL V2 语言增强 - 添加 delay、repeat、AND/OR wait、timing 修复、requires 验证、parallel 因果链修复、if/else、goto step、自定义设备状态",
+  "branchName": "ralph/analog-verification-consistency",
+  "description": "模拟量验证一致性与外部输入处理：消除阈值规则静默跳过与因果误报。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "delay 原语 - 语法与解析",
-      "description": "作为 DSL 用户，我希望在 step 中编写 `delay: 2000ms`，以便无需变通方案即可表达定时等待。本故事添加语法规则、AST 节点和解析器支持。",
+      "title": "模拟量阈值跳过时告警并降级证明等级",
+      "description": "作为用户，我希望当模拟量阈值规则被跳过时能看到明确告警，并降级证明等级以避免误导。",
       "acceptanceCriteria": [
-        "在 plc.pest 语法中添加 `delay_statement` 规则：`delay_statement = { \"delay\" ~ \":\" ~ duration }`",
-        "在 ast/mod.rs 的 StepStatement 中添加 `Delay { duration_ms: u64 }` 变体",
-        "解析器将 delay_statement pest pair 转换为 AST Delay 节点",
-        "包含 `delay: 2000ms` 的 .plc 文件能正确解析为正确的 AST",
-        "包含 `delay: 0ms` 的 .plc 文件能正确解析（校验在语义阶段进行）",
-        "不含 delay 的现有 .plc 文件仍能正确解析",
-        "Tests pass",
-        "Typecheck passes"
+        "SafetySummary 包含 warnings 字段并记录被跳过的阈值规则",
+        "存在被跳过阈值规则时，证明等级从“完备证明”降级",
+        "单元测试覆盖告警与等级降级",
+        "测试通过",
+        "Typecheck 通过"
       ],
       "priority": 1,
       "passes": true,
@@ -23,16 +20,16 @@
     },
     {
       "id": "US-002",
-      "title": "delay 原语 - 语义分析与 IR 生成",
-      "description": "作为编译器开发者，我需要将 delay 语句降级到 IR 状态机中，以便验证引擎能对其进行推理。delay: Nms 编译为内部不可满足守卫 + timeout=N，转移到下一个 step（而非 fault_handler）。",
+      "title": "安全与等待中的阈值比较语义校验",
+      "description": "作为开发者，我希望 safety 与 wait 中的阈值比较进行设备类型与 range 校验，避免无效规则进入验证。",
       "acceptanceCriteria": [
-        "semantic/mod.rs 在 step 处理中处理 Delay AST 节点",
-        "Delay 生成状态机转移：不可满足守卫、timeout=N ms、目标=下一个 step",
-        "Delay step 标记一个标志，使 Liveness 检查器识别为有界等待（非死锁）",
-        "如果 delay 与 timeout 出现在同一 step 中，timeout 作为保护性上界",
-        "IR JSON 输出包含 delay 生成的转移及正确的时序信息",
-        "Tests pass",
-        "Typecheck passes"
+        "safety 的阈值比较仅允许 analog_input 设备",
+        "wait 的阈值比较仅允许 analog_input 设备",
+        "analog_input 未声明 range 时使用阈值比较应报错",
+        "阈值超出 range 时应报错",
+        "单元测试覆盖 safety 与 wait 的校验错误",
+        "测试通过",
+        "Typecheck 通过"
       ],
       "priority": 2,
       "passes": true,
@@ -40,17 +37,15 @@
     },
     {
       "id": "US-003",
-      "title": "delay 原语 - 验证引擎适配与测试",
-      "description": "作为 DSL 用户，我希望 delay step 能正确通过全部四个验证引擎。Liveness 不应报死锁，Timing 应将 delay 纳入关键路径计算。",
+      "title": "语法与 AST 支持 external 属性",
+      "description": "作为控制工程师，我希望在 digital_input 与 analog_input 上声明 external: true，以标记外部输入。",
       "acceptanceCriteria": [
-        "Liveness 检查器识别 delay 生成的转移为有界等待，不报死锁",
-        "Timing 检查器将 delay 时长纳入 must_complete_within 的关键路径计算",
-        "Safety 和 Causality 检查器不受 delay step 影响",
-        "添加示例文件 examples/delay_demo.plc，包含使用 delay 的传送带场景",
-        "添加集成测试，验证 delay_demo.plc 通过全部四个验证引擎",
-        "添加测试：task 中 delay: 5000ms 配合 must_complete_within 3000ms 触发 timing 错误",
-        "Tests pass",
-        "Typecheck passes"
+        "语法支持 external 属性",
+        "AST 保存 external 为可选布尔值",
+        "解析器正确解析 external: true",
+        "解析器单元测试覆盖 external 属性",
+        "测试通过",
+        "Typecheck 通过"
       ],
       "priority": 3,
       "passes": true,
@@ -58,16 +53,15 @@
     },
     {
       "id": "US-004",
-      "title": "repeat N 原语 - 语法与解析",
-      "description": "作为 DSL 用户，我希望编写 `repeat 3:` 块，以便无需手动复制粘贴即可表达有界循环。本故事添加语法、AST 和解析器支持。",
+      "title": "external 输入跳过因果推断",
+      "description": "作为控制工程师，我希望 external 输入不参与动作→传感器因果推断，从而减少误报。",
       "acceptanceCriteria": [
-        "在 plc.pest 语法中添加 `repeat_block` 规则：`repeat_block = { \"repeat\" ~ integer ~ \":\" ~ NEWLINE ~ (INDENT ~ step_body_statement ~ NEWLINE)+ }`",
-        "在 ast/mod.rs 的 StepStatement 中添加 `Repeat { count: u64, body: Vec<StepStatement> }` 变体",
-        "解析器将 repeat_block pest pair 转换为包含 count 和 body 语句的 AST Repeat 节点",
-        "包含 `repeat 3:` 块（含 action/wait/timeout）的 .plc 文件能正确解析",
-        "不含 repeat 的现有 .plc 文件仍能正确解析",
-        "Tests pass",
-        "Typecheck passes"
+        "collect_sensor_names 读取 external 属性",
+        "analog_input 默认参与因果推断，external: true 时排除",
+        "sensor 设备不受 external 影响，仍参与因果推断",
+        "测试覆盖 external 的排除与默认包含",
+        "测试通过",
+        "Typecheck 通过"
       ],
       "priority": 4,
       "passes": true,
@@ -75,19 +69,15 @@
     },
     {
       "id": "US-005",
-      "title": "repeat N 原语 - 编译期展开与验证",
-      "description": "作为编译器开发者，我需要在 AST→IR 降级阶段将 repeat 块展开为 N 个顺序步骤。展开后的步骤必须与手写等价物通过完全相同的验证。",
+      "title": "模拟量区间分区与 set_analog 映射",
+      "description": "作为开发者，我希望将模拟量输入离散为区间状态，并将 set_analog 映射到对应区间，以支持安全验证。",
       "acceptanceCriteria": [
-        "semantic/mod.rs 将 repeat N 展开为 N 份 body 步骤副本，名称加后缀（_1, _2, ..., _N）",
-        "repeat 0 和 repeat 1 产生语义错误，附带清晰的错误信息",
-        "嵌套 repeat 块产生语义错误",
-        "repeat 次数 > 100 产生语义错误",
-        "展开后的步骤生成正确的状态机转移（每份副本链接到下一份）",
-        "添加示例文件 examples/repeat_demo.plc，包含 3 次涂胶循环场景",
-        "添加集成测试，验证 repeat_demo.plc 通过全部四个验证引擎",
-        "添加测试，验证 repeat 展开与手动展开产生相同的验证结果",
-        "Tests pass",
-        "Typecheck passes"
+        "从 safety 与 wait 的阈值条件及 range 生成模拟量区间",
+        "analog_input 使用区间状态进入安全模型",
+        "set_analog 数值映射到正确区间状态",
+        "单元测试覆盖区间生成与 set_analog 映射",
+        "测试通过",
+        "Typecheck 通过"
       ],
       "priority": 5,
       "passes": true,
@@ -95,21 +85,15 @@
     },
     {
       "id": "US-006",
-      "title": "Timing 关键路径计算修复",
-      "description": "作为 DSL 用户，我希望 must_complete_within 基于实际动作时间（而非 timeout 值）进行检查，使时序约束更实用。新增 must_complete_within_worst_case 用于基于 timeout 的检查。",
+      "title": "Safety BMC 绑定模拟量阈值规则",
+      "description": "作为用户，我希望模拟量阈值规则能被安全验证器实际检查，而非被静默忽略。",
       "acceptanceCriteria": [
-        "在 plc.pest 语法中添加 `must_complete_within_worst_case` 关键词",
-        "在 timing 约束的 AST 和 IR 中添加 `MustCompleteWithinWorstCase` 变体",
-        "解析器同时处理 `must_complete_within` 和 `must_complete_within_worst_case`",
-        "timing.rs：`must_complete_within` 使用动作设备时间（stroke_time + response_time）计算关键路径，而非 timeout 值",
-        "timing.rs：`must_complete_within_worst_case` 使用 timeout 值计算关键路径（保留旧行为）",
-        "对于无 timeout 的 step（纯 action），两种计算结果一致",
-        "如果现有示例 .plc 文件的 timing 约束需要因新语义调整，则更新之",
-        "添加测试：task 的 action_time=700ms、timeout_sum=1300ms，must_complete_within 1000ms 通过（700 < 1000）",
-        "添加测试：同一 task 的 must_complete_within_worst_case 1000ms 失败（1300 > 1000）",
-        "所有现有测试通过（如 timing 语义变更则更新期望值）",
-        "Tests pass",
-        "Typecheck passes"
+        "阈值规则绑定到满足条件的区间集合",
+        "安全验证基于区间状态检查阈值规则",
+        "仅当无法建模时才输出告警",
+        "单元测试覆盖模拟量阈值冲突与通过场景",
+        "测试通过",
+        "Typecheck 通过"
       ],
       "priority": 6,
       "passes": true,
@@ -117,18 +101,15 @@
     },
     {
       "id": "US-007",
-      "title": "Safety 验证器增加 requires 检查",
-      "description": "作为 DSL 用户，我希望 `safety: A requires B` 约束能被 Safety 检查器实际验证，以便在编译期捕获依赖违反。",
+      "title": "模拟量 wait 条件映射为离散谓词",
+      "description": "作为用户，我希望模拟量 wait 条件能映射为离散谓词，以保持活性与时序检查一致。",
       "acceptanceCriteria": [
-        "safety.rs 不再跳过 requires 约束（移除 `if !matches!(ConflictsWith) { continue }` 守卫）",
-        "对每条 `A requires B` 约束，BMC 检查是否存在可达状态使得 A=true 且 B=false",
-        "如发现违反，错误报告包含：约束位置、违反路径（状态序列）和修复建议",
-        "错误信息格式与其他检查器使用的中文错误报告风格一致",
-        "现有包含 requires 约束的示例仍然通过（其顺序控制隐式满足 requires）",
-        "添加测试：故意违反 requires — 在 cyl_clamp 未伸出时伸出 cyl_press",
-        "添加测试：正确的 requires 场景（先夹紧再压装）通过验证",
-        "Tests pass",
-        "Typecheck passes"
+        "模拟量 wait 比较被转换为区间谓词表达式",
+        "Liveness 将模拟量 wait 视为普通条件边",
+        "无 timeout 的模拟量 wait 仍触发活性告警",
+        "单元测试覆盖模拟量 wait 的活性行为",
+        "测试通过",
+        "Typecheck 通过"
       ],
       "priority": 7,
       "passes": true,
@@ -136,152 +117,16 @@
     },
     {
       "id": "US-008",
-      "title": "Parallel 块因果链检查修复",
-      "description": "作为 DSL 用户，我希望 parallel 块中不同分支操作不同设备时不会触发误报的因果链错误。Causality 检查器应仅检查同一因果链上的 action-wait 对。",
+      "title": "更新文档与示例",
+      "description": "作为用户，我希望文档与示例清晰说明 external 输入与模拟量阈值的使用方式。",
       "acceptanceCriteria": [
-        "causality.rs：对 parallel 块，仅检查 action 设备在拓扑图中属于传感器上游集合的 action→sensor 对",
-        "parallel 块中 branch_left 操作 motor_left、branch_right 操作 motor_right，后续 wait sensor_left 时，不报 motor_right→sensor_left 的因果链错误",
-        "parallel 块中同一设备的 action 和 wait 分布在 step 和 branch 之间时，仍正确检查因果链",
-        "添加测试：双电机 parallel 场景，此前会产生误报的因果链错误",
-        "添加测试：parallel 分支中真正的因果链断裂仍能被检出",
-        "Tests pass",
-        "Typecheck passes"
+        "analog_pressure_demo.plc 展示 external 的用法",
+        "文档说明外部输入与反馈传感器的区别，以及模拟量阈值比较方式",
+        "集成测试覆盖更新后的示例",
+        "测试通过",
+        "Typecheck 通过"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-009",
-      "title": "wait AND/OR 组合条件 - 语法与解析",
-      "description": "作为 DSL 用户，我希望编写 `wait: sensor_A == true AND sensor_B == true`，以便表达多条件等待。本故事为 wait 语句添加 AND/OR 的语法和解析器支持。",
-      "acceptanceCriteria": [
-        "扩展 plc.pest 中的 `wait_statement` 规则以支持：`condition (AND condition)* | condition (OR condition)*`",
-        "在 AST 中添加 `WaitCondition` 枚举：`Single(condition)`、`And(Vec<condition>)`、`Or(Vec<condition>)`",
-        "更新 Wait AST 节点，使用 WaitCondition 替代单一条件",
-        "解析器正确将 `wait: A == true AND B == true` 解析为 And 变体",
-        "解析器正确将 `wait: A == true OR B == true` 解析为 Or 变体",
-        "解析器拒绝混合 AND/OR：`wait: A == true AND B == true OR C == true`，附带清晰错误信息",
-        "现有单条件 wait 语句仍能正确解析（作为 Single 变体）",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-010",
-      "title": "wait AND/OR 组合条件 - 语义分析、IR 与验证",
-      "description": "作为编译器开发者，我需要 AND/OR wait 条件生成正确的状态机守卫并通过全部验证引擎。AND 变为合取守卫，OR 变为析取守卫。",
-      "acceptanceCriteria": [
-        "semantic/mod.rs 为 AND 条件生成合取守卫",
-        "semantic/mod.rs 为 OR 条件生成析取守卫",
-        "AND/OR 条件中的所有设备引用均经过校验（未定义设备 = 语义错误）",
-        "Causality 检查器对 AND/OR 条件中的每个传感器独立验证因果链",
-        "Liveness 检查器对 AND/OR wait 的处理与单条件 wait 相同（必须有 timeout 或 allow_indefinite_wait）",
-        "Safety BMC 在状态探索中正确处理多条件守卫",
-        "添加示例文件 examples/and_or_wait_demo.plc，包含 AND 和 OR 两种场景",
-        "添加集成测试，验证 and_or_wait_demo.plc 通过全部四个验证引擎",
-        "添加测试：AND wait 中某个传感器缺少因果链时触发 causality 错误",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-011",
-      "title": "if/else 条件分支 - 语法与解析",
-      "description": "作为 DSL 用户，我希望在 step 中编写 `if: condition goto X else: goto Y`，以便无需滥用 race 块即可表达条件分支。",
-      "acceptanceCriteria": [
-        "在 plc.pest 语法中添加 `if_else_statement` 规则",
-        "在 ast/mod.rs 的 StepStatement 中添加 `IfElse { condition, then_goto: String, else_goto: String }` 变体",
-        "解析器将 if/else pest pair 转换为 AST IfElse 节点",
-        "包含 `if: switch_A == true` / `goto grind_coarse` / `else:` / `goto grind_fine` 的 .plc 文件能正确解析",
-        "缺少 else 分支时产生解析错误",
-        "不含 if/else 的现有 .plc 文件仍能正确解析",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 11,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-012",
-      "title": "if/else 条件分支 - 语义分析与验证",
-      "description": "作为编译器开发者，我需要 if/else 在状态机中生成两条互补守卫的转移，并正确通过全部验证引擎。",
-      "acceptanceCriteria": [
-        "semantic/mod.rs 从 if/else 生成两条转移：guard=condition→then_goto，guard=NOT(condition)→else_goto",
-        "两个 goto 目标均经过校验（未定义 task/step = 语义错误）",
-        "if/else 内部放 action（而非 goto）时产生语义错误",
-        "Liveness 检查器：if/else step 有两条出边，不会死锁",
-        "Timing 检查器：if/else 为瞬时判断，对关键路径贡献 0ms",
-        "Safety BMC 正确探索两条分支路径",
-        "添加示例文件 examples/if_else_demo.plc，包含模式选择场景",
-        "添加集成测试，验证 if_else_demo.plc 通过全部四个验证引擎",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-013",
-      "title": "goto 支持跳到 task 内指定 step",
-      "description": "作为 DSL 用户，我希望编写 `goto cycle.press_down` 跳转到 task 内的指定 step，而非仅能跳到 task 的首步。",
-      "acceptanceCriteria": [
-        "扩展 plc.pest 中的 goto 解析以接受 `identifier ~ \".\" ~ identifier` 格式（task.step）",
-        "更新 AST Goto 节点，可选包含目标 step 名称",
-        "semantic/mod.rs 的 resolve_task_target() 支持 task.step 格式，返回 (task_name, step_name) 状态",
-        "有效 task 中不存在的 step 产生语义错误，附带清晰信息",
-        "goto 指向 parallel/race 内部合成步骤时产生语义错误",
-        "现有 `goto task_name` 语法仍然有效（指向首步）",
-        "添加测试：goto 到 task 中间 step，编译和验证均正确",
-        "添加测试：goto 到不存在的 step 产生语义错误",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-014",
-      "title": "自定义设备状态",
-      "description": "作为 DSL 用户，我希望在设备上声明 `states: [extend, neutral, retract]`，以便建模超过 2 个状态的设备（如三位电磁阀）。",
-      "acceptanceCriteria": [
-        "扩展 plc.pest 中的设备属性解析以接受 `states: [ident, ident, ...]`",
-        "在设备 AST 节点中添加 `custom_states: Option<Vec<String>>` 字段",
-        "semantic/mod.rs：如果设备有 custom_states，使用自定义状态替代默认 2 状态集",
-        "semantic/mod.rs：如果未声明 custom_states，保持默认行为（cylinder={extended,retracted}，其他={on,off}）",
-        "自定义状态可用于 safety 约束：`safety: device.extend conflicts_with device.neutral`",
-        "自定义状态可用于 wait 条件：`wait: device == extend`",
-        "状态数 > 8 时产生警告（非错误）",
-        "添加示例文件 examples/custom_states_demo.plc，包含三位电磁阀场景",
-        "添加集成测试，验证 custom_states_demo.plc 通过全部四个验证引擎",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 14,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-015",
-      "title": "plc-gen skill 更新以支持新语法",
-      "description": "作为现场调试人员，我希望 plc-gen 能生成包含新 DSL 语法的示例，以便用自然语言触发 delay/repeat/AND/OR wait/if-else/goto task.step/custom states 等能力。",
-      "acceptanceCriteria": [
-        "更新 .claude/skills/plc-gen/SKILL.md，补充 delay/repeat/AND/OR wait/if-else/goto task.step/custom states 语法说明",
-        "在 skill 示例中加入至少 2 个使用新语法的完整 plc 片段",
-        "更新提示/约束，提醒使用 must_complete_within_worst_case 与新的 timing 语义",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 15,
       "passes": true,
       "notes": ""
     }

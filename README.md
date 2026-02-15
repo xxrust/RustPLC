@@ -274,6 +274,10 @@ PLC 输入口 (digital_input)
 | `analog_input` | 模拟量输入 AI0, AI1... | `range`, `unit` | —（连续值域） |
 | `analog_output` | 模拟量输出 AO0, AO1... | `range`, `ramp_time`, `unit` | —（连续值域） |
 
+`digital_input` / `analog_input` 支持可选属性 `external: true`：
+- **用途**：标记“外部输入”（操作员设定值、上位机命令、ADC 原始通道等），在因果推断中跳过“动作 -> 输入”的链路要求，减少误报。
+- **建议**：对于由执行器驱动、可明确关联的反馈信号，优先建模为 `sensor { detects: ... }`，这样因果链更清晰且可验证。
+
 任何设备都可通过 `states: [...]` 自定义状态集（如三位阀 `states: [extend, neutral, retract]`）。
 
 ### [constraints] — 声明安全红线
@@ -329,6 +333,7 @@ action: log "message"             # 日志
 wait: sensor_A == true                                  # 单条件
 wait: sensor_A == true AND sensor_B == true             # AND（不可与 OR 混用）
 wait: sensor_A == true OR sensor_B == true              # OR
+wait: AI0 > 80                                          # 模拟量阈值比较（会离散为 region_* 谓词，仍需 timeout/allow_indefinite_wait）
 
 # 延时与超时
 delay: 2000ms                                           # 固定延时
