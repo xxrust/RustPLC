@@ -81,6 +81,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - For stable build metadata, expose runtime version from `runtime-core` (`pub const VERSION`) instead of duplicating literals in CLI code.
 ---
 
+## [2026-02-15 21:17:00 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Updated `crates/board-rp2040` to execute a generated (or default) `runtime-core::Program` via `Runtime::tick_with_trace()` instead of a hardcoded tick counter loop.
+  - Added build-time injection of `generated_program.rs` via `RUST_PLC_GENERATED_PROGRAM_RS` (copied into OUT_DIR by `build.rs` and `include!()`'d by firmware).
+  - Kept host-stub build path intact and added a hint for the injection environment variable.
+- Files changed
+  - `crates/board-rp2040/Cargo.toml`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/src/main.rs`, `crates/codegen/src/lib.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Prefer outer attributes (`#[allow(...)]`) in generated files so they can be safely `include!()`'d inside other modules/crates (inner `#![...]` may fail).
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `include!()`-d sources are not crate roots; inner attributes like `#![allow(...)]` are rejected unless they annotate the enclosing module.
+---
+
 ## [2026-02-15 00:16:45 CST] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
