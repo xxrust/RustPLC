@@ -1,0 +1,20 @@
+[package]
+name = "board-rp2040"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# This package is a tiny firmware skeleton for Raspberry Pi Pico (RP2040).
+# It also builds on host targets (prints build guidance), so workspace builds stay green.
+
+[dependencies]
+
+[target.'cfg(target_os = "none")'.dependencies]
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+rp-pico = "0.9"
+rp2040-boot2 = "0.3"
+
