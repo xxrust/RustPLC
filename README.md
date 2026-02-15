@@ -224,6 +224,52 @@ cargo run --release -- your_file.plc
 
 验证通过后，编译器输出完整的 IR（JSON 格式到 stdout），包含拓扑图、状态机、约束集、时序模型和验证摘要。
 
+### 补充验证：SIL（Software-in-the-Loop）仿真与回归
+
+形式化验证证明的是“模型满足约束”；SIL 则把**同一份控制逻辑**（不论来自 AI 生成还是人工编写）放进一个**确定性运行时**，用可脚本化的输入/故障（以及可选的 Plant 模型）把程序“跑起来”，产出可复现的**轨迹**与**波形**，用于回归与调试。
+
+- `sim`：读取一个场景 YAML，跑一个内置最小 Program，用于验证仿真管线（场景 → trace/VCD/report）。
+- `sim-regress`：对 `--plc-dir` 下的 `.plc`（AI/手写均可）与 `--scenario-dir` 下的 `.yaml/.yml` 做**笛卡尔积**跑批：编译 `.plc` → 转为 runtime Program → 运行场景/故障 → 输出每个用例制品与汇总报告（适合作为回归门禁）。
+
+场景文件（YAML）最小例子：
+
+```yaml
+tick_ms: 10
+duration_ms: 2000
+inputs:
+  - at_ms: 0
+    set:
+      digital_inputs:
+        0: false
+  - at_ms: 100
+    set:
+      digital_inputs:
+        0: true
+faults:
+  - sensor_stuck:
+      at_ms: 500
+      target: 2
+      value: false
+```
+
+约束：`at_ms` 必须与 `tick_ms` 对齐，且 `< duration_ms`。
+
+把上面内容保存为 `scenarios/basic.yaml` 后，运行单场景（会默认写到 `out/`）：
+
+```bash
+cargo run --release -- sim scenarios/basic.yaml
+```
+
+跑批回归（制品默认写到 `out/sim-regress/`，并生成 `summary.json`）：
+
+```bash
+cargo run --release -- sim-regress --plc-dir examples --scenario-dir scenarios
+```
+
+更多背景与设计取舍见：
+- [`docs/roadmap_autosim_arduino.md`](docs/roadmap_autosim_arduino.md)（SIL/Plant/回归闭环路线图）
+- [`docs/dsl-sil-verification.md`](docs/dsl-sil-verification.md)（为什么 DSL 静态验证后仍值得做 SIL）
+
 ## 为什么需要 RustPLC
 
 传统 PLC 编程（梯形图 / ST / FBD）依赖工程师的经验来保证安全性。当系统复杂度上升，人工审查的可靠性急剧下降——气缸碰撞、死锁、超时这些问题往往在现场调试时才暴露。

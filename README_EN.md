@@ -222,6 +222,52 @@ cargo run --release -- your_file.plc
 
 On success, the compiler outputs full IR (JSON to stdout) with topology graph, state machine, constraint set, timing model, and verification summary.
 
+### Supplementary Validation: SIL (Software-in-the-Loop) Simulation & Regression
+
+Formal verification proves that the *model* satisfies constraints; SIL runs the **same control logic** (whether AI-generated or handwritten) in a **deterministic runtime** with scriptable inputs/faults (and an optional Plant model), producing reproducible **traces** and **waveforms** for debugging and regression.
+
+- `sim`: reads one scenario YAML and runs a built-in tiny Program to validate the simulation pipeline (scenario → trace/VCD/report).
+- `sim-regress`: batch-runs the **Cartesian product** of `.plc` files under `--plc-dir` (AI or handwritten) and scenario `.yaml/.yml` files under `--scenario-dir`: compile `.plc` → lower to a runtime Program → run with scenario/faults → emit per-case artifacts plus a summary (good as a regression gate).
+
+Minimal scenario file (YAML):
+
+```yaml
+tick_ms: 10
+duration_ms: 2000
+inputs:
+  - at_ms: 0
+    set:
+      digital_inputs:
+        0: false
+  - at_ms: 100
+    set:
+      digital_inputs:
+        0: true
+faults:
+  - sensor_stuck:
+      at_ms: 500
+      target: 2
+      value: false
+```
+
+Constraint: `at_ms` must be aligned to `tick_ms` and `< duration_ms`.
+
+Save the YAML above as `scenarios/basic.yaml`, then run a single scenario (defaults to writing under `out/`):
+
+```bash
+cargo run --release -- sim scenarios/basic.yaml
+```
+
+Batch regression (defaults to writing under `out/sim-regress/` and generates `summary.json`):
+
+```bash
+cargo run --release -- sim-regress --plc-dir examples --scenario-dir scenarios
+```
+
+More background:
+- [`docs/roadmap_autosim_arduino.md`](docs/roadmap_autosim_arduino.md) (SIL/Plant/regression roadmap)
+- [`docs/dsl-sil-verification.md`](docs/dsl-sil-verification.md) (why SIL still helps after DSL static checks)
+
 ## Why RustPLC
 
 Traditional PLC programming (ladder logic / ST / FBD) relies on engineer experience for safety. As system complexity grows, manual review reliability drops sharply — cylinder collisions, deadlocks, and timeouts are often discovered only during commissioning.
