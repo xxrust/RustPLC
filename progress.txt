@@ -96,6 +96,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `include!()`-d sources are not crate roots; inner attributes like `#![allow(...)]` are rejected unless they annotate the enclosing module.
 ---
 
+## [2026-02-15 21:21:42 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Defined RP2040 digital I/O map contract as TOML: `[digital_inputs] di<N>=<gpio>` and `[digital_outputs] do<N>=<gpio>`.
+  - Added `rust_plc::io_map::IoMap` with TOML parsing + validation (duplicate GPIO, illegal range 0..=29, missing required ids).
+  - Extended `build-rp2040` with optional `--io-map <file>`; when provided, it validates against the generated Program's referenced DI/DO ids and embeds the parsed map into `build_meta.json`.
+  - Added unit tests covering parse/validate success and common failure cases.
+- Files changed
+  - `Cargo.toml`, `Cargo.lock`, `src/lib.rs`, `src/io_map.rs`, `src/main.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep mapping files author-friendly by using stable keys (`di0`, `do0`) and validating them against actual Program IO usage at build time.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `toml::Value` parsing keeps error messages clear without inventing custom deserializers for key prefixes.
+---
+
 ## [2026-02-15 00:16:45 CST] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented

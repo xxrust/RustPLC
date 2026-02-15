@@ -15,6 +15,7 @@ use io_traits::{DigitalInputId, DigitalOutputId};
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::sim_regress::{run_sim_regress, SimRegressSummary};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
+use rust_plc::io_map::{IoMap, IoUsage};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -145,7 +146,7 @@ fn print_usage(program: &str) {
     eprintln!("  {program} <file.plc>");
     eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]");
     eprintln!("  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]");
-    eprintln!("  {program} build-rp2040 <file.plc> --out <dir>");
+    eprintln!("  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]");
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -341,6 +342,8 @@ struct BuildMeta<'a> {
     generated_at: &'a str,
     tool_version: &'a str,
     runtime_semver: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    io_map: Option<IoMap>,
 }
 
 fn run_build_rp2040_subcommand(
@@ -352,6 +355,7 @@ fn run_build_rp2040_subcommand(
     };
 
     let mut out_dir: Option<PathBuf> = None;
+    let mut io_map_path: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => {
@@ -359,14 +363,24 @@ fn run_build_rp2040_subcommand(
                     args.next().ok_or_else(|| "Missing value for --out <dir>".to_string())?,
                 ));
             }
+            "--io-map" => {
+                io_map_path = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --io-map <file>".to_string())?,
+                ));
+            }
             "-h" | "--help" => {
-                return Err(format!("Usage: {program} build-rp2040 <file.plc> --out <dir>"));
+                return Err(format!(
+                    "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]"
+                ));
             }
             other => return Err(format!("Unknown argument for build-rp2040: {other}")),
         }
     }
 
-    let out_dir = out_dir.ok_or_else(|| format!("Usage: {program} build-rp2040 <file.plc> --out <dir>"))?;
+    let out_dir = out_dir.ok_or_else(|| {
+        format!("Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]")
+    })?;
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
 
@@ -390,6 +404,20 @@ fn run_build_rp2040_subcommand(
     // For build artifacts we use 1ms ticks so ms-based DSL durations are always aligned.
     let runtime_program = state_machine_to_runtime_program(&ir_bundle.topology, &ir_bundle.state_machine, 1)
         .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
+
+    let usage = io_usage_for_program(&runtime_program);
+    let io_map = match io_map_path {
+        None => None,
+        Some(path) => {
+            let toml_str = fs::read_to_string(&path)
+                .map_err(|err| format!("Failed to read io map {path:?}: {err}"))?;
+            let m = IoMap::from_toml_str(&toml_str)
+                .map_err(|err| format!("Failed to parse io map TOML: {err}"))?;
+            m.validate_for_usage(usage)
+                .map_err(|err| format!("Invalid io map for this program: {err}"))?;
+            Some(m)
+        }
+    };
 
     let generated_src = codegen::generate_program_module(&runtime_program, "generated")
         .map_err(|err| format!("Codegen failed: {err:?}"))?;
@@ -417,6 +445,7 @@ fn run_build_rp2040_subcommand(
         generated_at: &generated_at,
         tool_version: env!("CARGO_PKG_VERSION"),
         runtime_semver: runtime_core::VERSION,
+        io_map,
     };
     let mut meta_json =
         serde_json::to_string_pretty(&meta).map_err(|err| format!("Failed to serialize build_meta.json: {err}"))?;
@@ -480,6 +509,44 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
         }
     }
     out
+}
+
+fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
+    use std::collections::BTreeSet;
+
+    let mut dis = BTreeSet::<u16>::new();
+    let mut dos = BTreeSet::<u16>::new();
+    for task in program.tasks {
+        for step in task.steps {
+            match step.instr {
+                Instr::WaitDigital { id, .. } => {
+                    dis.insert(id.0);
+                }
+                Instr::Action { actions, .. } => {
+                    for a in actions {
+                        match *a {
+                            Action::SetDigital { id, .. } => {
+                                dos.insert(id.0);
+                            }
+                            Action::Extend { output } | Action::Retract { output } => {
+                                dos.insert(output.0);
+                            }
+                            Action::SetAnalog { .. } => {}
+                        }
+                    }
+                }
+                Instr::Delay { .. } | Instr::Goto { .. } | Instr::Halt => {}
+            }
+        }
+    }
+
+    // `IoUsage` is a tiny borrowed wrapper; we leak the sets to keep build-rp2040 code simple.
+    let dis: &'static [u16] = Box::leak(dis.into_iter().collect::<Vec<_>>().into_boxed_slice());
+    let dos: &'static [u16] = Box::leak(dos.into_iter().collect::<Vec<_>>().into_boxed_slice());
+    IoUsage {
+        digital_inputs: dis,
+        digital_outputs: dos,
+    }
 }
 
 fn write_sim_regress_summary(path: &Path, summary: &SimRegressSummary) -> Result<(), String> {

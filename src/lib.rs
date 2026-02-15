@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod error;
+pub mod io_map;
 pub mod ir;
 pub mod parser;
 pub mod runtime_bridge;
