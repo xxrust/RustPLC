@@ -112,6 +112,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `toml::Value` parsing keeps error messages clear without inventing custom deserializers for key prefixes.
 ---
 
+## [2026-02-15 21:32:22 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added RP2040 `PicoIo` in `board-rp2040` implementing `io_traits::Io` digital I/O methods and tick progression.
+  - Added compile-time IO map embedding in `board-rp2040/build.rs` via optional `RUST_PLC_IO_MAP_TOML` (fallback to default empty map).
+  - Firmware now initializes pin directions from embedded map (`DI -> SIO input`, `DO -> SIO output`) and drives runtime ticks with trace logging.
+  - Added startup/tick/trace logs in firmware loop to satisfy minimal board observability requirements for runtime step transitions.
+- Files changed
+  - `crates/board-rp2040/Cargo.toml`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/src/main.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For dynamic RP2040 pin routing, convert typed board pins to dynamic pins once, then apply function/pull/OE at runtime from generated config.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `rp-pico` board aliases are not always `gpioNN` field names (`led`, `b_power_save`, `vbus_detect`, `voltage_monitor`); mapping code must use board-specific names.
+---
+
 ## [2026-02-15 00:16:45 CST] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented

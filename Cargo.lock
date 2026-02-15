@@ -87,11 +87,13 @@ dependencies = [
  "cortex-m-rt",
  "defmt 0.3.100",
  "defmt-rtt",
+ "embedded-hal 0.2.7",
  "io-traits",
  "panic-probe",
  "rp-pico",
  "rp2040-boot2",
  "runtime-core",
+ "toml",
 ]
 
 [[package]]
