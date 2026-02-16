@@ -465,7 +465,7 @@ pub mod generated {
     Task { name: "main", steps: &STEPS, entry: StepId(0) },
   ];
 
-  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
 }
 "#
 }

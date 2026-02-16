@@ -26,6 +26,7 @@ device_type = {
     | "motor"
     | "analog_output"
     | "analog_input"
+    | "pid"
 }
 
 attribute_name = {
@@ -44,6 +45,15 @@ attribute_name = {
     | "states"
     | "range"
     | "unit"
+    // PID minimal loop
+    | "pv"
+    | "sp"
+    | "kp"
+    | "ki"
+    | "kd"
+    | "out"
+    | "period_ms"
+    | "limit"
 }
 
 range_value = @{ number ~ ".." ~ number }
@@ -53,6 +63,8 @@ attribute_value = {
     | duration_value
     | range_value
     | measured_value
+    | number
+    | integer
     | string_literal
     | boolean_value
     | identifier_list

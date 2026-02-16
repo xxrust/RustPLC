@@ -44,6 +44,7 @@ pub enum RuntimeError {
     InvalidTaskIndex { task: usize },
     InvalidStepId { task: usize, step: StepId },
     TooManyTransitionsInOneTick,
+    TooManyPidLoops { configured: usize, max: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -92,6 +93,31 @@ pub struct AnalogRange {
     pub max: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AntiWindup {
+    /// Conditional integration (a.k.a. "integrator clamping"):
+    /// - If the controller output is saturated and the error would push it further into saturation,
+    ///   the integrator is not updated for that cycle.
+    ConditionalIntegration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PidConfig {
+    pub pv: AnalogInputId,
+    pub out: AnalogOutputId,
+    pub sp: f32,
+    pub kp: f32,
+    pub ki: f32,
+    pub kd: f32,
+    /// Discrete integration/derivative timestep in seconds.
+    pub dt_s: f32,
+    /// Execute controller when `now_tick - last_tick >= period_ticks`.
+    pub period_ticks: u64,
+    pub limit_min: f32,
+    pub limit_max: f32,
+    pub anti_windup: AntiWindup,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instr<'a> {
     Action {
@@ -136,6 +162,7 @@ pub struct Task<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Program<'a> {
     pub tasks: &'a [Task<'a>],
+    pub pid_loops: &'a [PidConfig],
 }
 
 impl<'a> Program<'a> {
@@ -166,12 +193,19 @@ pub struct Runtime<'a> {
     program: &'a Program<'a>,
     loc: Location,
     step_entered_at: Option<Tick>,
+    pid_states: [PidState; MAX_PID_LOOPS],
 }
 
 impl<'a> Runtime<'a> {
     pub fn new(program: &'a Program<'a>) -> Result<Self, RuntimeError> {
         if program.tasks.is_empty() {
             return Err(RuntimeError::ProgramHasNoTasks);
+        }
+        if program.pid_loops.len() > MAX_PID_LOOPS {
+            return Err(RuntimeError::TooManyPidLoops {
+                configured: program.pid_loops.len(),
+                max: MAX_PID_LOOPS,
+            });
         }
 
         let entry = program.task(0)?.entry;
@@ -182,6 +216,7 @@ impl<'a> Runtime<'a> {
                 step: entry,
             },
             step_entered_at: None,
+            pid_states: [PidState::default(); MAX_PID_LOOPS],
         })
     }
 
@@ -211,6 +246,10 @@ impl<'a> Runtime<'a> {
         if self.step_entered_at.is_none() {
             self.step_entered_at = Some(now);
         }
+
+        // PID loops are executed once per tick before state-machine evaluation. This keeps the
+        // execution deterministic, and allows task actions to override the output when needed.
+        self.update_pid_loops(now, io);
 
         let mut transitions = 0usize;
         loop {
@@ -338,6 +377,101 @@ impl<'a> Runtime<'a> {
     }
 }
 
+const MAX_PID_LOOPS: usize = 8;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PidState {
+    integral: f32,
+    prev_error: f32,
+    last_updated: Option<Tick>,
+}
+
+impl Default for PidState {
+    fn default() -> Self {
+        Self {
+            integral: 0.0,
+            prev_error: 0.0,
+            last_updated: None,
+        }
+    }
+}
+
+impl<'a> Runtime<'a> {
+    fn update_pid_loops<IO: Io>(&mut self, now: Tick, io: &mut IO) {
+        // Keep this branch-free for the common case: no PID loops.
+        if self.program.pid_loops.is_empty() {
+            return;
+        }
+
+        for (idx, cfg) in self.program.pid_loops.iter().enumerate() {
+            if idx >= MAX_PID_LOOPS {
+                break;
+            }
+            let state = &mut self.pid_states[idx];
+            if !pid_should_run(now, state.last_updated, cfg.period_ticks) {
+                continue;
+            }
+            let out = pid_step(cfg, state, io.read_analog_input(cfg.pv));
+            io.write_analog_output(cfg.out, out);
+            state.last_updated = Some(now);
+        }
+    }
+}
+
+fn pid_should_run(now: Tick, last: Option<Tick>, period_ticks: u64) -> bool {
+    if period_ticks == 0 {
+        return false;
+    }
+    match last {
+        None => true,
+        Some(t) => now.0.saturating_sub(t.0) >= period_ticks,
+    }
+}
+
+fn pid_step(cfg: &PidConfig, state: &mut PidState, pv: f32) -> f32 {
+    let sp = cfg.sp;
+    let error = sp - pv;
+
+    // Defensive: keep dt strictly positive to avoid NaN in derivative.
+    let dt = if cfg.dt_s > 0.0 { cfg.dt_s } else { 1e-6 };
+
+    let derivative = (error - state.prev_error) / dt;
+
+    // Candidate integral update.
+    let integral_candidate = state.integral + error * dt;
+    let mut u_unsat = cfg.kp * error + cfg.ki * integral_candidate + cfg.kd * derivative;
+    // Anti-windup: conditionally accept the integrator update.
+    let integral = match cfg.anti_windup {
+        AntiWindup::ConditionalIntegration => {
+            if u_unsat > cfg.limit_max && error > 0.0 {
+                state.integral
+            } else if u_unsat < cfg.limit_min && error < 0.0 {
+                state.integral
+            } else {
+                integral_candidate
+            }
+        }
+    };
+
+    u_unsat = cfg.kp * error + cfg.ki * integral + cfg.kd * derivative;
+    let out = clamp_f32(u_unsat, cfg.limit_min, cfg.limit_max);
+
+    state.integral = integral;
+    state.prev_error = error;
+
+    out
+}
+
+fn clamp_f32(v: f32, min: f32, max: f32) -> f32 {
+    if v < min {
+        min
+    } else if v > max {
+        max
+    } else {
+        v
+    }
+}
+
 fn analog_in_selected_ranges(value: f32, ranges: &[AnalogRange]) -> bool {
     ranges.iter().any(|r| value >= r.min && value <= r.max)
 }
@@ -417,7 +551,7 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
@@ -477,7 +611,7 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
@@ -524,7 +658,7 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
@@ -570,7 +704,7 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
 
         let mut io = MemIo::new();
         io.ai[0] = 90.0;
@@ -614,7 +748,7 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
@@ -632,5 +766,96 @@ mod tests {
         assert_eq!(logs[0].message, "fault timeout");
         assert_eq!(traces.len(), 1);
         assert_eq!(traces[0].reason, TransitionReason::Action);
+    }
+
+    #[test]
+    fn pid_output_is_bounded_and_first_order_step_response_converges() {
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "halt",
+            instr: Instr::Halt,
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PID: [PidConfig; 1] = [PidConfig {
+            pv: AnalogInputId(0),
+            out: AnalogOutputId(0),
+            sp: 1.0,
+            kp: 2.0,
+            ki: 0.8,
+            kd: 0.0,
+            dt_s: 0.1,
+            period_ticks: 1,
+            limit_min: 0.0,
+            limit_max: 1.0,
+            anti_windup: AntiWindup::ConditionalIntegration,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &PID,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+
+        // Simple first-order plant model: y[k+1] = y[k] + alpha*(u[k]-y[k]).
+        let alpha = 0.2_f32;
+        let mut pv_hist = std::vec::Vec::new();
+        let mut u_hist = std::vec::Vec::new();
+
+        for _ in 0..80 {
+            rt.tick(&mut io).unwrap();
+            let u = io.ao[0];
+            io.ai[0] = io.ai[0] + alpha * (u - io.ai[0]);
+            pv_hist.push(io.ai[0]);
+            u_hist.push(u);
+        }
+
+        assert!(
+            u_hist.iter().all(|u| *u >= 0.0 && *u <= 1.0),
+            "PID output must stay in configured clamp range"
+        );
+        let initial_err = (1.0 - pv_hist[0]).abs();
+        let final_err = (1.0 - pv_hist[pv_hist.len() - 1]).abs();
+        assert!(
+            final_err < initial_err,
+            "step response should move toward setpoint (initial_err={initial_err}, final_err={final_err})"
+        );
+        assert!(
+            pv_hist[pv_hist.len() - 1] > 0.8,
+            "first-order response should converge near setpoint under this tuning"
+        );
+    }
+
+    #[test]
+    fn pid_conditional_integration_prevents_windup_after_saturation() {
+        let cfg = PidConfig {
+            pv: AnalogInputId(0),
+            out: AnalogOutputId(0),
+            sp: 10.0,
+            kp: 0.0,
+            ki: 1.0,
+            kd: 0.0,
+            dt_s: 0.1,
+            period_ticks: 1,
+            limit_min: 0.0,
+            limit_max: 1.0,
+            anti_windup: AntiWindup::ConditionalIntegration,
+        };
+        let mut state = PidState::default();
+
+        // Large positive error; I-term-only controller hits clamp and should stop integrating.
+        for _ in 0..20 {
+            let _ = pid_step(&cfg, &mut state, 0.0);
+        }
+
+        // With conditional integration and ki=1.0, integrator should clamp near limit_max.
+        assert!(
+            (state.integral - 1.0).abs() < 1e-6,
+            "integrator should clamp once output saturates (integral={})",
+            state.integral
+        );
     }
 }

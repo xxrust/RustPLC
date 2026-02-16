@@ -19,6 +19,22 @@ pub enum DeviceKind {
     Motor,
     AnalogInput,
     AnalogOutput,
+    Pid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PidLoop {
+    pub name: String,
+    pub pv: String,
+    pub sp: String,
+    pub kp: String,
+    pub ki: String,
+    pub kd: String,
+    pub out: String,
+    pub period_ms: u64,
+    pub limit_min: String,
+    pub limit_max: String,
+    pub anti_windup: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -33,12 +49,15 @@ pub enum ConnectionType {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TopologyGraph {
     pub graph: DiGraph<Device, ConnectionType>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pid_loops: Vec<PidLoop>,
 }
 
 impl TopologyGraph {
     pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
+            pid_loops: Vec::new(),
         }
     }
 

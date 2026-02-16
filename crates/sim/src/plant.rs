@@ -437,7 +437,7 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
 
         let mut io = SimIo::new(1, 1, 0, 0).with_plant(plant);
         let mut rt = Runtime::new(&PROGRAM).unwrap();

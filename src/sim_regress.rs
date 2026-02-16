@@ -682,6 +682,10 @@ fn io_sizes_for_program_and_scenario(
             }
         }
     }
+    for pid in program.pid_loops {
+        max_ai = Some(max_ai.map_or(pid.pv.0, |m| m.max(pid.pv.0)));
+        max_ao = Some(max_ao.map_or(pid.out.0, |m| m.max(pid.out.0)));
+    }
 
     // Scenario inputs/faults may reference additional inputs beyond what the program reads.
     for ev in &scenario.inputs {

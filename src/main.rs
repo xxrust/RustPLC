@@ -143,7 +143,7 @@ static SIM_TASKS: [Task<'static>; 1] = [Task {
     entry: StepId(0),
 }];
 
-static SIM_PROGRAM: Program<'static> = Program { tasks: &SIM_TASKS };
+static SIM_PROGRAM: Program<'static> = Program { tasks: &SIM_TASKS, pid_loops: &[] };
 
 fn main() {
     let mut args = env::args();
@@ -1484,6 +1484,10 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
             }
         }
     }
+    for pid in program.pid_loops {
+        ais.insert(pid.pv.0);
+        aos.insert(pid.out.0);
+    }
 
     let mut out = String::new();
     out.push_str("# RP2040 I/O map template (fill in GPIO numbers for your wiring)\n");
@@ -1566,6 +1570,10 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                 Instr::Delay { .. } | Instr::Goto { .. } | Instr::Halt => {}
             }
         }
+    }
+    for pid in program.pid_loops {
+        ais.insert(pid.pv.0);
+        aos.insert(pid.out.0);
     }
 
     // `IoUsage` is a tiny borrowed wrapper; we leak the sets to keep build-rp2040 code simple.
@@ -2292,6 +2300,10 @@ fn io_sizes_for_program_and_scenario(
                 _ => {}
             }
         }
+    }
+    for pid in program.pid_loops {
+        max_ai = Some(max_ai.map_or(pid.pv.0, |m| m.max(pid.pv.0)));
+        max_ao = Some(max_ao.map_or(pid.out.0, |m| m.max(pid.out.0)));
     }
 
     for ev in &scenario.inputs {

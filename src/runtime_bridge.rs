@@ -5,7 +5,9 @@ use crate::ir::{
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
 use petgraph::Direction;
 use petgraph::graph::NodeIndex;
-use runtime_core::{Action, AnalogRange, Instr, Program, Step, StepId, Task, Timeout};
+use runtime_core::{
+    Action, AnalogRange, AntiWindup, Instr, PidConfig, Program, Step, StepId, Task, Timeout,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, thiserror::Error)]
@@ -68,6 +70,20 @@ pub enum BridgeError {
 
     #[error("analog input {device} has no region table in state machine (state {state})")]
     MissingAnalogRegions { state: String, device: String },
+
+    #[error("pid loop {pid} period_ms={period_ms} is not aligned to tick_ms={tick_ms}")]
+    PidPeriodNotAligned {
+        pid: String,
+        period_ms: u64,
+        tick_ms: u64,
+    },
+
+    #[error("pid loop {pid} has invalid literal for {field}: {value}")]
+    InvalidPidLiteral {
+        pid: String,
+        field: String,
+        value: String,
+    },
 }
 
 /// Convert a compiler/semantic `StateMachine` IR into a minimal `runtime-core` `Program`.
@@ -162,9 +178,65 @@ pub fn state_machine_to_runtime_program(
         entry: initial_id,
     };
     let leaked_tasks: &'static [Task<'static>] = Box::leak(vec![task].into_boxed_slice());
+
+    let leaked_pid_loops: &'static [PidConfig] =
+        Box::leak(build_pid_configs(&resolver, topology, tick_ms)?.into_boxed_slice());
     Ok(Program {
         tasks: leaked_tasks,
+        pid_loops: leaked_pid_loops,
     })
+}
+
+fn build_pid_configs(
+    resolver: &TopologyResolver,
+    topology: &TopologyGraph,
+    tick_ms: u64,
+) -> Result<Vec<PidConfig>, BridgeError> {
+    let mut out = Vec::new();
+
+    for loop_spec in &topology.pid_loops {
+        let pid_name = loop_spec.name.clone();
+        let ctx = format!("pid:{pid_name}");
+
+        let period_ticks = if loop_spec.period_ms % tick_ms != 0 {
+            return Err(BridgeError::PidPeriodNotAligned {
+                pid: pid_name,
+                period_ms: loop_spec.period_ms,
+                tick_ms,
+            });
+        } else {
+            (loop_spec.period_ms / tick_ms).max(1)
+        };
+
+        let parse = |field: &str, value: &str| -> Result<f32, BridgeError> {
+            value.parse::<f32>().map_err(|_| BridgeError::InvalidPidLiteral {
+                pid: pid_name.clone(),
+                field: field.to_string(),
+                value: value.to_string(),
+            })
+        };
+
+        let pv = resolver.resolve_analog_input_id(&ctx, &loop_spec.pv)?;
+        let out_id = resolver.resolve_analog_output_id(&ctx, &loop_spec.out)?;
+
+        let cfg = PidConfig {
+            pv,
+            out: out_id,
+            sp: parse("sp", &loop_spec.sp)?,
+            kp: parse("kp", &loop_spec.kp)?,
+            ki: parse("ki", &loop_spec.ki)?,
+            kd: parse("kd", &loop_spec.kd)?,
+            dt_s: (loop_spec.period_ms as f32) / 1000.0,
+            period_ticks,
+            limit_min: parse("limit_min", &loop_spec.limit_min)?,
+            limit_max: parse("limit_max", &loop_spec.limit_max)?,
+            anti_windup: AntiWindup::ConditionalIntegration,
+        };
+
+        out.push(cfg);
+    }
+
+    Ok(out)
 }
 
 fn convert_state_outgoing(

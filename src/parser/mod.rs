@@ -104,6 +104,7 @@ fn parse_device_type(pair: Pair<Rule>) -> Result<DeviceType, PlcError> {
         "motor" => Ok(DeviceType::Motor),
         "analog_input" => Ok(DeviceType::AnalogInput),
         "analog_output" => Ok(DeviceType::AnalogOutput),
+        "pid" => Ok(DeviceType::Pid),
         other => Err(PlcError::parse(line, format!("未知设备类型: {other}"))),
     }
 }
@@ -179,6 +180,30 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         }
         "unit" => {
             attributes.unit = Some(expect_string(value, "unit")?);
+        }
+        "pv" => {
+            attributes.pv = Some(expect_identifier(value, "pv")?);
+        }
+        "sp" => {
+            attributes.sp = Some(expect_pid_setpoint(value, "sp")?);
+        }
+        "kp" => {
+            attributes.kp = Some(expect_number(value, "kp")?);
+        }
+        "ki" => {
+            attributes.ki = Some(expect_number(value, "ki")?);
+        }
+        "kd" => {
+            attributes.kd = Some(expect_number(value, "kd")?);
+        }
+        "out" => {
+            attributes.out = Some(expect_identifier(value, "out")?);
+        }
+        "period_ms" => {
+            attributes.period_ms = Some(expect_u64(value, "period_ms")?);
+        }
+        "limit" => {
+            attributes.limit = Some(parse_range_value(value)?);
         }
         _ => {
             return Err(PlcError::parse(
@@ -1006,6 +1031,59 @@ fn parse_range_value(pair: Pair<Rule>) -> Result<crate::ast::AnalogRange, PlcErr
     }
 }
 
+fn expect_number(pair: Pair<Rule>, field_name: &str) -> Result<f64, PlcError> {
+    let line = line_of(&pair);
+    if matches!(pair.as_rule(), Rule::number | Rule::integer) {
+        pair.as_str().parse::<f64>().map_err(|_| {
+            PlcError::parse(line, format!("属性 {field_name} 数值解析失败: {}", pair.as_str()))
+        })
+    } else {
+        Err(PlcError::parse(
+            line,
+            format!("属性 {field_name} 需要数字值"),
+        ))
+    }
+}
+
+fn expect_u64(pair: Pair<Rule>, field_name: &str) -> Result<u64, PlcError> {
+    let line = line_of(&pair);
+    if matches!(pair.as_rule(), Rule::integer | Rule::number) {
+        let raw = pair.as_str();
+        if raw.contains('.') {
+            return Err(PlcError::parse(
+                line,
+                format!("属性 {field_name} 需要整数值，实际为: {raw}"),
+            ));
+        }
+        raw.parse::<u64>().map_err(|_| {
+            PlcError::parse(line, format!("属性 {field_name} 整数解析失败: {raw}"))
+        })
+    } else {
+        Err(PlcError::parse(line, format!("属性 {field_name} 需要整数值")))
+    }
+}
+
+fn expect_pid_setpoint(pair: Pair<Rule>, field_name: &str) -> Result<LiteralValue, PlcError> {
+    let line = line_of(&pair);
+    match pair.as_rule() {
+        Rule::number | Rule::integer => {
+            let value = pair
+                .as_str()
+                .parse::<f64>()
+                .map_err(|_| PlcError::parse(line, format!("属性 {field_name} 数值解析失败")))?;
+            Ok(LiteralValue::Number(value))
+        }
+        Rule::measured_value => {
+            let measured = parse_measured_value(pair)?;
+            Ok(LiteralValue::Measured(measured))
+        }
+        _ => Err(PlcError::parse(
+            line,
+            format!("属性 {field_name} 需要 number 或 measured_value"),
+        )),
+    }
+}
+
 fn expect_string(pair: Pair<Rule>, field_name: &str) -> Result<String, PlcError> {
     let line = line_of(&pair);
     if pair.as_rule() == Rule::string_literal {
@@ -1141,7 +1219,7 @@ fn map_parse_error(err: pest::error::Error<Rule>) -> PlcError {
 #[cfg(test)]
 mod tests {
     use super::{parse_constraints, parse_plc, parse_tasks, parse_topology};
-    use crate::ast::{ActionStatement, OnCompleteDirective, StepStatement, WaitCondition};
+    use crate::ast::{ActionStatement, LiteralValue, OnCompleteDirective, StepStatement, WaitCondition};
 
     #[test]
     fn parses_prd_5_3_topology_example() {
@@ -1312,6 +1390,54 @@ task main:
             Some(true),
             "analog_input external 应解析为 true"
         );
+    }
+
+    #[test]
+    fn parses_pid_device_declaration_minimal_fields() {
+        let input = r#"
+[topology]
+
+device AI0: analog_input { range: 0..100, unit: "bar" }
+device AO0: analog_output { range: 0..100, unit: "%" }
+device loop_pressure: pid {
+    pv: AI0,
+    sp: 50bar,
+    kp: 2.0,
+    ki: 0.3,
+    kd: 0.05,
+    out: AO0,
+    period_ms: 100,
+    limit: 0..100
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step hold:
+"#;
+
+        let program = parse_plc(input).expect("PID 设备声明应能解析");
+        let pid = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "loop_pressure")
+            .expect("应包含 loop_pressure PID");
+        assert!(matches!(pid.device_type, crate::ast::DeviceType::Pid));
+        assert_eq!(pid.attributes.pv.as_deref(), Some("AI0"));
+        assert_eq!(pid.attributes.out.as_deref(), Some("AO0"));
+        assert_eq!(pid.attributes.period_ms, Some(100));
+        assert_eq!(pid.attributes.kp, Some(2.0));
+        assert_eq!(pid.attributes.ki, Some(0.3));
+        assert_eq!(pid.attributes.kd, Some(0.05));
+        match pid.attributes.sp.as_ref() {
+            Some(LiteralValue::Measured(measured)) => {
+                assert!((measured.value - 50.0).abs() < f64::EPSILON);
+                assert_eq!(measured.unit, "bar");
+            }
+            other => panic!("sp 应解析为 measured literal, got {other:?}"),
+        }
     }
 
     #[test]

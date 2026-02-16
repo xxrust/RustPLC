@@ -661,7 +661,8 @@ fn collect_device_domains(
             | DeviceType::DigitalInput
             | DeviceType::SolenoidValve
             | DeviceType::Sensor
-            | DeviceType::Motor => {
+            | DeviceType::Motor
+            | DeviceType::Pid => {
                 let states = vec!["on".to_string(), "off".to_string()];
                 let default_state = states.iter().position(|state| state == "off").unwrap_or(0);
                 (states, default_state, false, None)

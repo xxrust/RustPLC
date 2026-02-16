@@ -9,10 +9,11 @@ use crate::ast::{
 use crate::error::PlcError;
 use crate::ir::{
     ActionKind, ActionRef, ActionTiming, BinaryValue as IrBinaryValue, CausalityChain,
-    ConnectionType, ConstraintSet, Device, DeviceKind, SafetyExpr,
+    ConnectionType, ConstraintSet, Device, DeviceKind, PidLoop as IrPidLoop, SafetyExpr,
     SafetyRelation as IrSafetyRelation, SafetyRule, State, StateExpr, StateMachine, TimeInterval,
-    TimerOperation, TimerOperationKind, TimingModel, TimingRelation as IrTimingRelation,
-    TimingRule, TimingScope, TopologyGraph, Transition, TransitionAction, TransitionGuard,
+    TimerOperation, TimerOperationKind, TimingModel,
+    TimingRelation as IrTimingRelation, TimingRule, TimingScope, TopologyGraph, Transition,
+    TransitionAction, TransitionGuard,
 };
 use petgraph::graph::NodeIndex;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -370,6 +371,7 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
     let mut topology_graph = TopologyGraph::new();
     let mut device_nodes = HashMap::<String, DeviceNode>::new();
     let mut errors = Vec::new();
+    let pid_loops = extract_pid_loops(topology, &mut errors);
 
     for device in &topology.devices {
         let kind = ast_type_to_ir_kind(&device.device_type);
@@ -435,11 +437,151 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
         topology_graph.add_connection(target_node.index, current_node.index, connection_type);
     }
 
+    topology_graph.pid_loops = pid_loops;
+
     if errors.is_empty() {
         Ok(topology_graph)
     } else {
         Err(errors)
     }
+}
+
+fn extract_pid_loops(topology: &TopologySection, errors: &mut Vec<PlcError>) -> Vec<IrPidLoop> {
+    let device_ranges = collect_device_ranges(topology);
+    let device_units = collect_device_units(topology);
+    let analog_inputs = topology
+        .devices
+        .iter()
+        .filter(|d| matches!(d.device_type, DeviceType::AnalogInput))
+        .map(|d| d.name.as_str())
+        .collect::<HashSet<_>>();
+    let analog_outputs = topology
+        .devices
+        .iter()
+        .filter(|d| matches!(d.device_type, DeviceType::AnalogOutput))
+        .map(|d| d.name.as_str())
+        .collect::<HashSet<_>>();
+
+    let mut pid_loops = Vec::new();
+    for device in &topology.devices {
+        if !matches!(device.device_type, DeviceType::Pid) {
+            continue;
+        }
+        let line = device.line.max(1);
+        let Some(pv) = device.attributes.pv.as_ref() else {
+            errors.push(PlcError::semantic(line, format!("PID {} 缺少 pv 属性", device.name)));
+            continue;
+        };
+        let Some(sp) = device.attributes.sp.as_ref() else {
+            errors.push(PlcError::semantic(line, format!("PID {} 缺少 sp 属性", device.name)));
+            continue;
+        };
+        let Some(sp_numeric) = format_numeric_literal_from_literal(sp) else {
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 的 sp 必须是 number 或 measured_value", device.name),
+            ));
+            continue;
+        };
+        let Some(kp) = device.attributes.kp else {
+            errors.push(PlcError::semantic(line, format!("PID {} 缺少 kp 属性", device.name)));
+            continue;
+        };
+        let Some(ki) = device.attributes.ki else {
+            errors.push(PlcError::semantic(line, format!("PID {} 缺少 ki 属性", device.name)));
+            continue;
+        };
+        let Some(kd) = device.attributes.kd else {
+            errors.push(PlcError::semantic(line, format!("PID {} 缺少 kd 属性", device.name)));
+            continue;
+        };
+        let Some(out) = device.attributes.out.as_ref() else {
+            errors.push(PlcError::semantic(line, format!("PID {} 缺少 out 属性", device.name)));
+            continue;
+        };
+        let Some(period_ms) = device.attributes.period_ms else {
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 缺少 period_ms 属性", device.name),
+            ));
+            continue;
+        };
+        let Some(limit) = device.attributes.limit.as_ref() else {
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 缺少 limit 属性", device.name),
+            ));
+            continue;
+        };
+        if period_ms == 0 {
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 的 period_ms 必须 > 0", device.name),
+            ));
+        }
+        if !analog_inputs.contains(pv.as_str()) {
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 的 pv={} 不是 analog_input", device.name, pv),
+            ));
+        }
+        if !analog_outputs.contains(out.as_str()) {
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 的 out={} 不是 analog_output", device.name, out),
+            ));
+        }
+
+        let (limit_min, limit_max) = if limit.min <= limit.max {
+            (limit.min, limit.max)
+        } else {
+            (limit.max, limit.min)
+        };
+
+        if let Some((out_min, out_max)) = device_ranges.get(out).copied() {
+            if limit_min < out_min || limit_max > out_max {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "PID {} 的 limit {}..{} 超出了输出 {} 的 range {}..{}",
+                        device.name, limit_min, limit_max, out, out_min, out_max
+                    ),
+                    "请将 limit 约束在 analog_output 的 range 之内（或调整输出 range）",
+                ));
+            }
+        }
+
+        // If pv declares a unit and sp is measured, require them to match.
+        if let Some(pv_unit) = device_units.get(pv) {
+            if let LiteralValue::Measured(measured) = sp {
+                if measured.unit != *pv_unit {
+                    errors.push(PlcError::semantic_with_reason(
+                        line,
+                        format!(
+                            "PID {} 的 sp 单位 {} 与 pv={} 单位 {} 不一致",
+                            device.name, measured.unit, pv, pv_unit
+                        ),
+                        "请确保 sp 与 pv 使用相同 unit（或调整 pv 的 unit）",
+                    ));
+                }
+            }
+        }
+
+        pid_loops.push(IrPidLoop {
+            name: device.name.clone(),
+            pv: pv.clone(),
+            sp: sp_numeric,
+            kp: format_numeric_literal(kp),
+            ki: format_numeric_literal(ki),
+            kd: format_numeric_literal(kd),
+            out: out.clone(),
+            period_ms,
+            limit_min: format_numeric_literal(limit_min),
+            limit_max: format_numeric_literal(limit_max),
+            anti_windup: "conditional_integration".to_string(),
+        });
+    }
+    pid_loops
 }
 
 pub fn build_constraint_set_from_ast(
@@ -876,6 +1018,16 @@ fn format_numeric_literal(v: f64) -> String {
         format!("{v:.1}")
     } else {
         v.to_string()
+    }
+}
+
+fn format_numeric_literal_from_literal(literal: &LiteralValue) -> Option<String> {
+    match literal {
+        LiteralValue::Number(v) => Some(format_numeric_literal(*v)),
+        LiteralValue::Measured(measured) => Some(format_numeric_literal(measured.value)),
+        LiteralValue::Boolean(_)
+        | LiteralValue::String(_)
+        | LiteralValue::State(_) => None,
     }
 }
 
@@ -1656,7 +1808,7 @@ fn default_states_for_kind(kind: &DeviceKind) -> &'static [&'static str] {
         | DeviceKind::SolenoidValve
         | DeviceKind::Sensor
         | DeviceKind::Motor => &["on", "off"],
-        DeviceKind::AnalogInput | DeviceKind::AnalogOutput => &[],
+        DeviceKind::AnalogInput | DeviceKind::AnalogOutput | DeviceKind::Pid => &[],
     }
 }
 
@@ -2431,6 +2583,7 @@ fn ast_type_to_ir_kind(device_type: &DeviceType) -> DeviceKind {
         DeviceType::Motor => DeviceKind::Motor,
         DeviceType::AnalogInput => DeviceKind::AnalogInput,
         DeviceType::AnalogOutput => DeviceKind::AnalogOutput,
+        DeviceType::Pid => DeviceKind::Pid,
     }
 }
 
@@ -2445,6 +2598,7 @@ fn connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<ConnectionT
         (DeviceKind::AnalogInput, DeviceKind::Sensor)
         | (DeviceKind::AnalogOutput, DeviceKind::SolenoidValve)
         | (DeviceKind::AnalogOutput, DeviceKind::Motor) => Some(ConnectionType::Analog),
+        (DeviceKind::Pid, DeviceKind::Pid) => Some(ConnectionType::Logical),
         _ => None,
     }
 }
@@ -2459,6 +2613,7 @@ fn device_kind_name(kind: &DeviceKind) -> &'static str {
         DeviceKind::Motor => "motor",
         DeviceKind::AnalogInput => "analog_input",
         DeviceKind::AnalogOutput => "analog_output",
+        DeviceKind::Pid => "pid",
     }
 }
 
@@ -2578,6 +2733,41 @@ device sensor_B_ret: sensor {
             source == "Y0" && target == "valve_A" && edge.weight() == &ConnectionType::Electrical
         });
         assert!(has_electrical_edge, "应包含 Y0 -> valve_A 电气连接");
+    }
+
+    #[test]
+    fn topology_extracts_pid_loop_with_conditional_integration_strategy() {
+        let input = r#"
+[topology]
+device AI0: analog_input { range: 0..100, unit: "bar" }
+device AO0: analog_output { range: 0..100, unit: "%" }
+device loop_pressure: pid {
+    pv: AI0,
+    sp: 50bar,
+    kp: 2.0,
+    ki: 0.4,
+    kd: 0.05,
+    out: AO0,
+    period_ms: 100,
+    limit: 0..100
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step hold:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let topology = build_topology_graph(&program).expect("build topology");
+        assert_eq!(topology.pid_loops.len(), 1);
+        let pid = &topology.pid_loops[0];
+        assert_eq!(pid.name, "loop_pressure");
+        assert_eq!(pid.pv, "AI0");
+        assert_eq!(pid.out, "AO0");
+        assert_eq!(pid.period_ms, 100);
+        assert_eq!(pid.anti_windup, "conditional_integration");
     }
 
     #[test]

@@ -130,7 +130,7 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
 
         let yaml = r#"
 seed: 123

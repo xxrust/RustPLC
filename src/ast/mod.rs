@@ -32,6 +32,7 @@ pub enum DeviceType {
     Motor,
     AnalogInput,
     AnalogOutput,
+    Pid,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -52,6 +53,18 @@ pub struct DeviceAttributes {
     pub custom_states: Option<Vec<String>>,
     pub range: Option<AnalogRange>,
     pub unit: Option<String>,
+
+    // ===== PID minimal loop (DeviceType::Pid) =====
+    // These are intentionally stored on `DeviceAttributes` so PID loops can be declared as devices
+    // inside `[topology]` while keeping the DSL surface small.
+    pub pv: Option<String>,
+    pub sp: Option<LiteralValue>,
+    pub kp: Option<f64>,
+    pub ki: Option<f64>,
+    pub kd: Option<f64>,
+    pub out: Option<String>,
+    pub period_ms: Option<u64>,
+    pub limit: Option<AnalogRange>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

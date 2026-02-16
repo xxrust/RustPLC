@@ -85,7 +85,7 @@ pub fn generate_program_module(
     out.push_str(
         "  use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, AnalogOutputId};\n",
     );
-    out.push_str("  use runtime_core::{Action, AnalogRange, Instr, Program, Step, StepId, Task, Timeout};\n\n");
+    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, Instr, PidConfig, Program, Step, StepId, Task, Timeout};\n\n");
 
     // Emit actions arrays, then steps, then tasks, then program.
     for (tidx, task) in program.tasks.iter().enumerate() {
@@ -145,7 +145,22 @@ pub fn generate_program_module(
         ));
     }
     out.push_str("  ];\n\n");
-    out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS };\n");
+
+    if program.pid_loops.is_empty() {
+        out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };\n");
+    } else {
+        out.push_str(&format!(
+            "  static PID_LOOPS: [PidConfig; {}] = [\n",
+            program.pid_loops.len()
+        ));
+        for cfg in program.pid_loops {
+            out.push_str("    ");
+            out.push_str(&format_pid_config(cfg));
+            out.push_str(",\n");
+        }
+        out.push_str("  ];\n\n");
+        out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &PID_LOOPS };\n");
+    }
     out.push_str("}\n");
 
     Ok(out)
@@ -266,6 +281,27 @@ fn format_f32(v: f32) -> String {
     }
 }
 
+fn format_pid_config(cfg: &runtime_core::PidConfig) -> String {
+    let aw = match cfg.anti_windup {
+        runtime_core::AntiWindup::ConditionalIntegration => "AntiWindup::ConditionalIntegration",
+    };
+
+    format!(
+        "PidConfig {{ pv: AnalogInputId({}), out: AnalogOutputId({}), sp: {}, kp: {}, ki: {}, kd: {}, dt_s: {}, period_ticks: {}, limit_min: {}, limit_max: {}, anti_windup: {} }}",
+        cfg.pv.0,
+        cfg.out.0,
+        format_f32(cfg.sp),
+        format_f32(cfg.kp),
+        format_f32(cfg.ki),
+        format_f32(cfg.kd),
+        format_f32(cfg.dt_s),
+        cfg.period_ticks,
+        format_f32(cfg.limit_min),
+        format_f32(cfg.limit_max),
+        aw
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,7 +340,7 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
 
         let src = generate_program_module(&PROGRAM, "gen").expect("codegen ok");
         // Parse the generated source. We treat it as a standalone item file.

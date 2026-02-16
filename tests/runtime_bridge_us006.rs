@@ -1,4 +1,4 @@
-use io_traits::{DigitalInputId, DigitalOutputId, Tick};
+use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use runtime_core::Runtime;
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
@@ -218,5 +218,70 @@ fn bridge_supports_analog_wait_guard_mapped_to_regions() {
     assert!(
         out.contains("\"reason\":\"wait_satisfied\""),
         "expected analog wait to satisfy immediately, got: {out}"
+    );
+}
+
+const PLC_PID_FIXTURE: &str = r#"
+[topology]
+
+device AI0: analog_input { range: 0..100, unit: "bar", external: true }
+device AO0: analog_output { range: 0..100, unit: "%" }
+device loop_pressure: pid {
+    pv: AI0,
+    sp: 60bar,
+    kp: 2.0,
+    ki: 0.5,
+    kd: 0.0,
+    out: AO0,
+    period_ms: 100,
+    limit: 0..100
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step hold:
+"#;
+
+#[test]
+fn bridge_maps_pid_declaration_into_runtime_program_and_clamps_output() {
+    let tick_ms = 100;
+    let program = compile_to_runtime(PLC_PID_FIXTURE, tick_ms);
+    assert_eq!(program.pid_loops.len(), 1, "PID config should be bridged");
+    let cfg = program.pid_loops[0];
+    assert_eq!(cfg.pv.0, 0);
+    assert_eq!(cfg.out.0, 0);
+    assert_eq!(cfg.period_ticks, 1);
+    assert!(matches!(
+        cfg.anti_windup,
+        runtime_core::AntiWindup::ConditionalIntegration
+    ));
+
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 1, 1);
+
+    // Simple deterministic plant loop.
+    for _ in 0..20 {
+        rt.tick(&mut io).expect("tick");
+        let u = io
+            .analog_output_edges()
+            .last()
+            .map(|edge| edge.value)
+            .unwrap_or(0.0);
+        let y = io.read_analog_input(AnalogInputId(0));
+        let next = y + 0.3 * (u - y);
+        io.schedule_analog_input(io.tick(), AnalogInputId(0), next);
+    }
+
+    let final_u = io
+        .analog_output_edges()
+        .last()
+        .map(|edge| edge.value)
+        .unwrap_or(0.0);
+    assert!(
+        (0.0..=100.0).contains(&final_u),
+        "PID output should be clamped within limit, got {final_u}"
     );
 }

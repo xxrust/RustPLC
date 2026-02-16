@@ -144,7 +144,7 @@
         "cargo test --workspace passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "覆盖基础能力 #1"
     },
     {

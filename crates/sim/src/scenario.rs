@@ -249,7 +249,7 @@ inputs:
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
 
         fn run(scenario: &Scenario) -> (Vec<String>, Vec<crate::DigitalEdge>) {
             let mut io = SimIo::new(1, 1, 0, 0);
