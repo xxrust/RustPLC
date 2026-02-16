@@ -7,15 +7,16 @@ use rust_plc::semantic::{
 };
 use rust_plc::verification::{VerificationSummary, verify_all};
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use io_traits::{DigitalInputId, DigitalOutputId};
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
-use rust_plc::sim_regress::{run_sim_regress, SimRegressSummary};
-use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::io_map::{IoMap, IoUsage};
+use rust_plc::runtime_bridge::state_machine_to_runtime_program;
+use rust_plc::sim_regress::{SimRegressSummary, run_sim_regress};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -165,12 +166,20 @@ fn main() {
 fn print_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!("  {program} <file.plc>");
-    eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]");
-    eprintln!("  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]");
-    eprintln!("  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]");
+    eprintln!(
+        "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
+    );
+    eprintln!(
+        "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]"
+    );
+    eprintln!(
+        "  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]"
+    );
     eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
     eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
-    eprintln!("  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]");
+    eprintln!(
+        "  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
+    );
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -187,24 +196,28 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => {
-                out_path = Some(args.next().ok_or_else(|| {
-                    "Missing value for --out <trace.jsonl>".to_string()
-                })?);
+                out_path = Some(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --out <trace.jsonl>".to_string())?,
+                );
             }
             "--vcd-out" => {
-                vcd_out_path = Some(args.next().ok_or_else(|| {
-                    "Missing value for --vcd-out <wave.vcd>".to_string()
-                })?);
+                vcd_out_path = Some(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --vcd-out <wave.vcd>".to_string())?,
+                );
             }
             "--analog-out" => {
-                analog_out_path = Some(args.next().ok_or_else(|| {
-                    "Missing value for --analog-out <analog.csv>".to_string()
-                })?);
+                analog_out_path =
+                    Some(args.next().ok_or_else(|| {
+                        "Missing value for --analog-out <analog.csv>".to_string()
+                    })?);
             }
             "--report-out" => {
-                report_out_path = Some(args.next().ok_or_else(|| {
-                    "Missing value for --report-out <report.json>".to_string()
-                })?);
+                report_out_path =
+                    Some(args.next().ok_or_else(|| {
+                        "Missing value for --report-out <report.json>".to_string()
+                    })?);
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -217,9 +230,8 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
         }
     }
 
-    let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
-        format!("Failed to read scenario YAML file {scenario_path}: {err}")
-    })?;
+    let scenario_yaml = fs::read_to_string(&scenario_path)
+        .map_err(|err| format!("Failed to read scenario YAML file {scenario_path}: {err}"))?;
     let scenario = sim::Scenario::from_yaml_str(&scenario_yaml)
         .map_err(|err| format!("Failed to parse scenario YAML: {err}"))?;
 
@@ -294,32 +306,27 @@ fn run_sim_regress_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--plc-dir" => {
-                plc_dir = Some(PathBuf::from(
-                    args.next().ok_or_else(|| {
+                plc_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
                         "Missing value for --plc-dir <dir>".to_string()
-                    })?,
-                ));
+                    })?));
             }
             "--scenario-dir" => {
-                scenario_dir = Some(PathBuf::from(
-                    args.next().ok_or_else(|| {
+                scenario_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
                         "Missing value for --scenario-dir <dir>".to_string()
-                    })?,
-                ));
+                    })?));
             }
             "--artifacts-dir" => {
-                artifacts_dir = Some(PathBuf::from(
-                    args.next().ok_or_else(|| {
+                artifacts_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
                         "Missing value for --artifacts-dir <dir>".to_string()
-                    })?,
-                ));
+                    })?));
             }
             "--summary-out" => {
-                summary_out = Some(PathBuf::from(
-                    args.next().ok_or_else(|| {
-                        "Missing value for --summary-out <summary.json>".to_string()
-                    })?,
-                ));
+                summary_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --summary-out <summary.json>".to_string()
+                })?));
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -348,14 +355,13 @@ fn run_sim_regress_subcommand(
 
     if let Some(parent) = summary_out.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|err| {
-                format!("Failed to create output directory {parent:?}: {err}")
-            })?;
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create output directory {parent:?}: {err}"))?;
         }
     }
 
-    let summary =
-        run_sim_regress(&plc_dir, &scenario_dir, &artifacts_dir).map_err(|e| format!("sim-regress failed: {e}"))?;
+    let summary = run_sim_regress(&plc_dir, &scenario_dir, &artifacts_dir)
+        .map_err(|e| format!("sim-regress failed: {e}"))?;
     write_sim_regress_summary(&summary_out, &summary)?;
     Ok(())
 }
@@ -368,6 +374,31 @@ struct BuildMeta<'a> {
     runtime_semver: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     io_map: Option<IoMap>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AnalogContract {
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    analog_inputs: BTreeMap<String, AnalogInputContractEntry>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    analog_outputs: BTreeMap<String, AnalogOutputContractEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AnalogInputContractEntry {
+    min: f32,
+    max: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unit: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AnalogOutputContractEntry {
+    min: f32,
+    max: f32,
+    ramp_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unit: Option<String>,
 }
 
 fn run_build_rp2040_subcommand(
@@ -386,21 +417,22 @@ fn run_build_rp2040_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => {
-                out_dir = Some(PathBuf::from(
-                    args.next().ok_or_else(|| "Missing value for --out <dir>".to_string())?,
-                ));
+                out_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out <dir>".to_string()
+                    })?));
             }
             "--io-map" => {
-                io_map_path = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --io-map <file>".to_string())?,
-                ));
+                io_map_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --io-map <file>".to_string()
+                    })?));
             }
             "--emit-uf2" => {
-                emit_uf2 = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --emit-uf2 <file.uf2>".to_string())?,
-                ));
+                emit_uf2 =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --emit-uf2 <file.uf2>".to_string()
+                    })?));
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -419,12 +451,16 @@ fn run_build_rp2040_subcommand(
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
 
-    if Path::new(&plc_path).extension().and_then(|ext| ext.to_str()) != Some("plc") {
+    if Path::new(&plc_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        != Some("plc")
+    {
         return Err(format!("Expected a .plc file path, got: {plc_path}"));
     }
 
-    let plc_bytes = fs::read(&plc_path)
-        .map_err(|err| format!("Failed to read PLC file {plc_path}: {err}"))?;
+    let plc_bytes =
+        fs::read(&plc_path).map_err(|err| format!("Failed to read PLC file {plc_path}: {err}"))?;
     let plc_source = String::from_utf8(plc_bytes.clone())
         .map_err(|err| format!("PLC file is not valid UTF-8: {err}"))?;
 
@@ -437,8 +473,9 @@ fn run_build_rp2040_subcommand(
     let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
 
     // For build artifacts we use 1ms ticks so ms-based DSL durations are always aligned.
-    let runtime_program = state_machine_to_runtime_program(&ir_bundle.topology, &ir_bundle.state_machine, 1)
-        .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
+    let runtime_program =
+        state_machine_to_runtime_program(&ir_bundle.topology, &ir_bundle.state_machine, 1)
+            .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
 
     let usage = io_usage_for_program(&runtime_program);
     let io_map = match io_map_path.as_ref() {
@@ -471,6 +508,13 @@ fn run_build_rp2040_subcommand(
     fs::write(&iomap_path, iomap)
         .map_err(|err| format!("Failed to write {iomap_path:?}: {err}"))?;
 
+    let analog_contract = build_analog_contract(&plc_source)?;
+    let analog_contract_toml = toml::to_string_pretty(&analog_contract)
+        .map_err(|err| format!("Failed to serialize analog contract TOML: {err}"))?;
+    let analog_contract_path = out_dir.join("analog_contract.toml");
+    fs::write(&analog_contract_path, analog_contract_toml)
+        .map_err(|err| format!("Failed to write {analog_contract_path:?}: {err}"))?;
+
     let generated_at = time::OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string());
@@ -482,8 +526,8 @@ fn run_build_rp2040_subcommand(
         runtime_semver: runtime_core::VERSION,
         io_map,
     };
-    let mut meta_json =
-        serde_json::to_string_pretty(&meta).map_err(|err| format!("Failed to serialize build_meta.json: {err}"))?;
+    let mut meta_json = serde_json::to_string_pretty(&meta)
+        .map_err(|err| format!("Failed to serialize build_meta.json: {err}"))?;
     meta_json.push('\n');
     let meta_path = out_dir.join("build_meta.json");
     fs::write(&meta_path, meta_json)
@@ -493,7 +537,12 @@ fn run_build_rp2040_subcommand(
         let io_map_path = io_map_path.as_ref().ok_or_else(|| {
             "--emit-uf2 requires --io-map <file> so board pin mapping is explicit".to_string()
         })?;
-        emit_rp2040_uf2(&generated_path, io_map_path, &uf2_path)?;
+        emit_rp2040_uf2(
+            &generated_path,
+            io_map_path,
+            &analog_contract_path,
+            &uf2_path,
+        )?;
     }
 
     Ok(())
@@ -502,10 +551,12 @@ fn run_build_rp2040_subcommand(
 fn emit_rp2040_uf2(
     generated_program_rs: &Path,
     io_map_toml: &Path,
+    analog_contract_toml: &Path,
     uf2_out: &Path,
 ) -> Result<(), String> {
     let generated_program_rs = absolutize_path(generated_program_rs)?;
     let io_map_toml = absolutize_path(io_map_toml)?;
+    let analog_contract_toml = absolutize_path(analog_contract_toml)?;
     let uf2_out = absolutize_path(uf2_out)?;
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -517,13 +568,13 @@ fn emit_rp2040_uf2(
     }
 
     let cargo_bin = env::var("RUST_PLC_CARGO_BIN").unwrap_or_else(|_| "cargo".to_string());
-    let elf2uf2_bin =
-        env::var("RUST_PLC_ELF2UF2_BIN").unwrap_or_else(|_| "elf2uf2-rs".to_string());
+    let elf2uf2_bin = env::var("RUST_PLC_ELF2UF2_BIN").unwrap_or_else(|_| "elf2uf2-rs".to_string());
 
     let cargo = std::process::Command::new(&cargo_bin)
         .current_dir(&repo_root)
         .env("RUST_PLC_GENERATED_PROGRAM_RS", &generated_program_rs)
         .env("RUST_PLC_IO_MAP_TOML", &io_map_toml)
+        .env("RUST_PLC_ANALOG_CONTRACT_TOML", &analog_contract_toml)
         .arg("build")
         .arg("-p")
         .arg("board-rp2040")
@@ -532,9 +583,7 @@ fn emit_rp2040_uf2(
         .arg("--release")
         .output()
         .map_err(|err| {
-            format!(
-                "Failed to run cargo for RP2040 firmware build (bin={cargo_bin}): {err}"
-            )
+            format!("Failed to run cargo for RP2040 firmware build (bin={cargo_bin}): {err}")
         })?;
     if !cargo.status.success() {
         return Err(format!(
@@ -546,7 +595,13 @@ fn emit_rp2040_uf2(
 
     let target_dir = env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
-        .map(|path| if path.is_absolute() { path } else { repo_root.join(path) })
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                repo_root.join(path)
+            }
+        })
         .unwrap_or_else(|| repo_root.join("target"));
     let elf = target_dir.join("thumbv6m-none-eabi/release/board-rp2040");
     if !elf.exists() {
@@ -560,9 +615,7 @@ fn emit_rp2040_uf2(
         .arg(&uf2_out)
         .output()
         .map_err(|err| {
-            format!(
-                "Failed to run {elf2uf2_bin} (install with `cargo install elf2uf2-rs`): {err}"
-            )
+            format!("Failed to run {elf2uf2_bin} (install with `cargo install elf2uf2-rs`): {err}")
         })?;
     if !uf2.status.success() {
         return Err(format!(
@@ -573,6 +626,86 @@ fn emit_rp2040_uf2(
     }
 
     Ok(())
+}
+
+fn build_analog_contract(plc_source: &str) -> Result<AnalogContract, String> {
+    let parsed =
+        parse_plc(plc_source).map_err(|err| format!("Failed to parse PLC source: {err}"))?;
+    let expanded = preprocess_program(&parsed).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+
+    let mut analog_inputs = BTreeMap::<String, AnalogInputContractEntry>::new();
+    let mut analog_outputs = BTreeMap::<String, AnalogOutputContractEntry>::new();
+    for d in expanded.topology.devices {
+        match d.device_type {
+            rust_plc::ast::DeviceType::AnalogInput => {
+                let Some(id) = parse_prefixed_numeric_id(&d.name, "AI") else {
+                    continue;
+                };
+                let (min, max) = d
+                    .attributes
+                    .range
+                    .map(|r| (r.min as f32, r.max as f32))
+                    // Fallback keeps old projects buildable even when range is omitted.
+                    .unwrap_or((0.0, 3.3));
+                analog_inputs.insert(
+                    format!("ai{id}"),
+                    AnalogInputContractEntry {
+                        min,
+                        max,
+                        unit: d.attributes.unit.clone(),
+                    },
+                );
+            }
+            rust_plc::ast::DeviceType::AnalogOutput => {
+                let Some(id) = parse_prefixed_numeric_id(&d.name, "AO") else {
+                    continue;
+                };
+                let (min, max) = d
+                    .attributes
+                    .range
+                    .map(|r| (r.min as f32, r.max as f32))
+                    .unwrap_or((0.0, 10.0));
+                let ramp_ms = d
+                    .attributes
+                    .ramp_time
+                    .as_ref()
+                    .map(duration_to_ms)
+                    .unwrap_or(0);
+                analog_outputs.insert(
+                    format!("ao{id}"),
+                    AnalogOutputContractEntry {
+                        min,
+                        max,
+                        ramp_ms,
+                        unit: d.attributes.unit.clone(),
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+
+    Ok(AnalogContract {
+        analog_inputs,
+        analog_outputs,
+    })
+}
+
+fn parse_prefixed_numeric_id(name: &str, prefix: &str) -> Option<u16> {
+    name.strip_prefix(prefix)?.parse::<u16>().ok()
+}
+
+fn duration_to_ms(duration: &rust_plc::ast::DurationValue) -> u64 {
+    match duration.unit {
+        rust_plc::ast::TimeUnit::Ms => duration.value,
+        rust_plc::ast::TimeUnit::S => duration.value.saturating_mul(1000),
+    }
 }
 
 fn absolutize_path(path: &Path) -> Result<PathBuf, String> {
@@ -735,16 +868,16 @@ fn run_flash_rp2040_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--uf2" => {
-                uf2 = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --uf2 <file.uf2>".to_string())?,
-                ));
+                uf2 =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --uf2 <file.uf2>".to_string()
+                    })?));
             }
             "--mount" => {
-                mount = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --mount <path>".to_string())?,
-                ));
+                mount =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --mount <path>".to_string()
+                    })?));
             }
             "--dry-run" => dry_run = true,
             "-h" | "--help" => {
@@ -799,16 +932,15 @@ fn run_trace_parse_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--in" => {
-                input = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --in <log.txt>".to_string())?,
-                ));
+                input =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --in <log.txt>".to_string()
+                    })?));
             }
             "--out" => {
-                out = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --out <trace.jsonl>".to_string())?,
-                ));
+                out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --out <trace.jsonl>".to_string()
+                })?));
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -819,8 +951,12 @@ fn run_trace_parse_subcommand(
         }
     }
 
-    let input = input.ok_or_else(|| format!("Usage: {program} trace-parse --in <log.txt> --out <trace.jsonl>"))?;
-    let out = out.ok_or_else(|| format!("Usage: {program} trace-parse --in <log.txt> --out <trace.jsonl>"))?;
+    let input = input.ok_or_else(|| {
+        format!("Usage: {program} trace-parse --in <log.txt> --out <trace.jsonl>")
+    })?;
+    let out = out.ok_or_else(|| {
+        format!("Usage: {program} trace-parse --in <log.txt> --out <trace.jsonl>")
+    })?;
 
     let text = fs::read_to_string(&input)
         .map_err(|err| format!("Failed to read trace log {input:?}: {err}"))?;
@@ -858,22 +994,19 @@ fn run_trace_diff_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--sil" => {
-                sil = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --sil <trace.jsonl>".to_string())?,
-                ));
+                sil = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --sil <trace.jsonl>".to_string()
+                })?));
             }
             "--board" => {
-                board = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --board <trace.jsonl>".to_string())?,
-                ));
+                board = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --board <trace.jsonl>".to_string()
+                })?));
             }
             "--out" => {
-                out = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --out <report.json>".to_string())?,
-                ));
+                out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --out <report.json>".to_string()
+                })?));
             }
             "--context" => {
                 let raw = args

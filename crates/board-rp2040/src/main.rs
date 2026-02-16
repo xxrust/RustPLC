@@ -11,6 +11,8 @@ fn main() {
     println!();
     println!("To inject a generated Program module at build time:");
     println!("  export RUST_PLC_GENERATED_PROGRAM_RS=/path/to/generated_program.rs");
+    println!("  export RUST_PLC_IO_MAP_TOML=/path/to/io_map.toml");
+    println!("  export RUST_PLC_ANALOG_CONTRACT_TOML=/path/to/analog_contract.toml");
 }
 
 // Embedded firmware build (thumbv6m-none-eabi, target_os = "none").
@@ -19,21 +21,21 @@ mod firmware {
     use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
     use runtime_core::{Runtime, TransitionReason};
 
-    use embedded_hal_0_2::digital::v2::{InputPin, OutputPin};
     use cortex_m_rt::entry;
+    use embedded_hal_0_2::digital::v2::{InputPin, OutputPin};
+    use rp_pico::hal::clocks::ClockSource;
     use rp_pico::hal::{
         adc::{Adc, AdcPin},
         clocks::init_clocks_and_plls,
         gpio::{
-            DynPinId, FunctionNull, FunctionSioInput, FunctionSioOutput, OutputEnableOverride,
-            Pin, PullDown, PullUp,
+            DynPinId, FunctionNull, FunctionPwm, FunctionSioInput, FunctionSioOutput,
+            OutputEnableOverride, Pin, PullDown, PullUp,
         },
         pac,
         sio::Sio,
         timer::Timer,
         watchdog::Watchdog,
     };
-    use rp_pico::hal::clocks::ClockSource;
 
     // defmt logging over RTT + defmt-aware panic output.
     use defmt_rtt as _;
@@ -53,6 +55,7 @@ mod firmware {
     #[link_section = ".boot2"]
     #[used]
     static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
+    const AO_PWM_TOP: u16 = 65_535;
 
     struct AllPins {
         pins: [Option<Pin<DynPinId, FunctionNull, PullDown>>; 30],
@@ -107,17 +110,33 @@ mod firmware {
         adc: Adc,
         ai_pins: [Option<AdcPin<Pin<DynPinId, FunctionSioInput, PullDown>>>; io_map::MAX_AI],
         ai: [f32; io_map::MAX_AI],
-        ao: [f32; io_map::MAX_AO],
+        pwm: pac::PWM,
+        ao_pwm_pins: [Option<Pin<DynPinId, FunctionPwm, PullDown>>; io_map::MAX_AO],
+        ao_pwm_bindings: [Option<PwmChannelBinding>; io_map::MAX_AO],
+        ao_target: [f32; io_map::MAX_AO],
+        ao_current: [f32; io_map::MAX_AO],
+        tick_ms: u32,
+    }
+
+    #[derive(Clone, Copy)]
+    struct PwmChannelBinding {
+        slice: u8,
+        is_channel_a: bool,
     }
 
     impl PicoIo {
-        fn new(pins: &mut AllPins, adc: Adc) -> Self {
+        fn new(pins: &mut AllPins, adc: Adc, pwm: pac::PWM, tick_ms: u32) -> Self {
             let mut di: [Option<Pin<DynPinId, FunctionSioInput, PullUp>>; io_map::MAX_DI] =
                 core::array::from_fn(|_| None);
             let mut do_: [Option<Pin<DynPinId, FunctionSioOutput, PullDown>>; io_map::MAX_DO] =
                 core::array::from_fn(|_| None);
-            let mut ai_pins: [Option<AdcPin<Pin<DynPinId, FunctionSioInput, PullDown>>>; io_map::MAX_AI] =
+            let mut ai_pins: [Option<AdcPin<Pin<DynPinId, FunctionSioInput, PullDown>>>;
+                io_map::MAX_AI] = core::array::from_fn(|_| None);
+            let mut ao_pwm_pins: [Option<Pin<DynPinId, FunctionPwm, PullDown>>; io_map::MAX_AO] =
                 core::array::from_fn(|_| None);
+            let mut ao_pwm_bindings: [Option<PwmChannelBinding>; io_map::MAX_AO] =
+                core::array::from_fn(|_| None);
+            let mut configured_slices = [false; 8];
 
             for (id, &gpio) in io_map::DI_GPIO.iter().enumerate() {
                 if gpio == io_map::UNUSED_GPIO {
@@ -140,10 +159,7 @@ mod firmware {
                     continue;
                 }
                 if let Some(p) = pins.take(gpio) {
-                    let p = p
-                        .try_into_function::<FunctionSioOutput>()
-                        .ok()
-                        .unwrap();
+                    let p = p.try_into_function::<FunctionSioOutput>().ok().unwrap();
                     let mut p = p;
                     p.set_input_enable(false);
                     p.set_output_enable_override(OutputEnableOverride::Enable);
@@ -156,10 +172,7 @@ mod firmware {
                     continue;
                 }
                 if let Some(p) = pins.take(gpio) {
-                    let p = p
-                        .try_into_function::<FunctionSioInput>()
-                        .ok()
-                        .unwrap();
+                    let p = p.try_into_function::<FunctionSioInput>().ok().unwrap();
                     match AdcPin::new(p) {
                         Ok(pin) => ai_pins[id] = Some(pin),
                         Err(_) => {
@@ -172,6 +185,22 @@ mod firmware {
                     }
                 }
             }
+            for (id, &gpio) in io_map::AO_GPIO.iter().enumerate() {
+                if gpio == io_map::UNUSED_GPIO {
+                    continue;
+                }
+                if let Some(p) = pins.take(gpio) {
+                    let p = p.try_into_function::<FunctionPwm>().ok().unwrap();
+                    ao_pwm_pins[id] = Some(p);
+                    let binding = gpio_to_pwm_binding(gpio);
+                    ao_pwm_bindings[id] = Some(binding);
+                    if !configured_slices[binding.slice as usize] {
+                        configure_pwm_slice(&pwm, binding.slice);
+                        configured_slices[binding.slice as usize] = true;
+                    }
+                    set_pwm_channel_duty(&pwm, binding, 0);
+                }
+            }
 
             Self {
                 t: Tick(0),
@@ -180,7 +209,12 @@ mod firmware {
                 adc,
                 ai_pins,
                 ai: [0.0; io_map::MAX_AI],
-                ao: [0.0; io_map::MAX_AO],
+                pwm,
+                ao_pwm_pins,
+                ao_pwm_bindings,
+                ao_target: [0.0; io_map::MAX_AO],
+                ao_current: [0.0; io_map::MAX_AO],
+                tick_ms,
             }
         }
 
@@ -197,10 +231,47 @@ mod firmware {
                 let _discard = self.adc.read_single();
                 cortex_m::asm::delay(256);
                 let raw = self.adc.read_single();
-                // Convert RP2040 ADC raw counts (12-bit) into volts for runtime predicates.
-                self.ai[id] = (raw as f32) * (3.3 / 4095.0);
+                // Convert RP2040 ADC raw counts (12-bit) to volts, then map to engineering units
+                // using the per-channel contract embedded from `.plc` ranges.
+                let volts = (raw as f32) * (3.3 / 4095.0);
+                self.ai[id] = volts_to_engineering(id, volts);
             }
             self.adc.stop();
+        }
+
+        fn apply_analog_outputs(&mut self) {
+            for id in 0..io_map::MAX_AO {
+                if self.ao_pwm_pins[id].is_none() || self.ao_pwm_bindings[id].is_none() {
+                    continue;
+                }
+                let min = io_map::AO_ENG_MIN[id];
+                let max = io_map::AO_ENG_MAX[id];
+                if !(max > min) {
+                    continue;
+                }
+
+                let target = self.ao_target[id].clamp(min, max);
+                let current = self.ao_current[id];
+                let ramp_ms = io_map::AO_RAMP_MS[id];
+                let next = if ramp_ms == 0 {
+                    target
+                } else {
+                    let span = (max - min).abs();
+                    let delta = (span * (self.tick_ms as f32) / (ramp_ms as f32)).max(1e-6);
+                    if (target - current).abs() <= delta {
+                        target
+                    } else if target > current {
+                        current + delta
+                    } else {
+                        current - delta
+                    }
+                };
+                self.ao_current[id] = next;
+                let duty = engineering_to_pwm(id, next);
+                if let Some(binding) = self.ao_pwm_bindings[id] {
+                    set_pwm_channel_duty(&self.pwm, binding, duty);
+                }
+            }
         }
     }
 
@@ -226,11 +297,7 @@ mod firmware {
         }
 
         fn write_digital_output(&mut self, id: DigitalOutputId, value: bool) {
-            if let Some(p) = self
-                .do_
-                .get_mut(id.0 as usize)
-                .and_then(|p| p.as_mut())
-            {
+            if let Some(p) = self.do_.get_mut(id.0 as usize).and_then(|p| p.as_mut()) {
                 if value {
                     let _ = p.set_high();
                 } else {
@@ -240,7 +307,7 @@ mod firmware {
         }
 
         fn write_analog_output(&mut self, id: AnalogOutputId, value: f32) {
-            if let Some(slot) = self.ao.get_mut(id.0 as usize) {
+            if let Some(slot) = self.ao_target.get_mut(id.0 as usize) {
                 *slot = value;
             }
         }
@@ -281,10 +348,10 @@ mod firmware {
             &mut pac.RESETS,
         );
         let mut all_pins = AllPins::new(pins);
-        let mut io = PicoIo::new(&mut all_pins, adc);
+        const TICK_MS: u64 = 1;
+        let mut io = PicoIo::new(&mut all_pins, adc, pac.PWM, TICK_MS as u32);
 
         // v1 keeps polling semantics but paces ticks from RP2040 hardware timer.
-        const TICK_MS: u64 = 1;
         const TICK_US: u64 = TICK_MS * 1000;
         let mut next_tick_us = timer.get_counter().ticks();
         loop {
@@ -317,11 +384,76 @@ mod firmware {
                 },
             )
             .unwrap();
+
+            // Apply analog outputs after the runtime tick so AO changes are reflected on pins.
+            io.apply_analog_outputs();
+
             next_tick_us = next_tick_us.saturating_add(TICK_US);
             while timer.get_counter().ticks() < next_tick_us {
                 cortex_m::asm::nop();
             }
         }
+    }
+
+    fn volts_to_engineering(ai_idx: usize, volts: f32) -> f32 {
+        // Default mapping assumes 0.0..3.3V corresponds to `min..max` from the DSL.
+        // If min==max (misconfig), fall back to volts.
+        let min = *io_map::AI_ENG_MIN.get(ai_idx).unwrap_or(&0.0);
+        let max = *io_map::AI_ENG_MAX.get(ai_idx).unwrap_or(&3.3);
+        if (max - min).abs() < 1e-9 {
+            return volts;
+        }
+        let r = (volts / 3.3).clamp(0.0, 1.0);
+        min + r * (max - min)
+    }
+
+    fn engineering_to_pwm(ao_idx: usize, value: f32) -> u16 {
+        let min = *io_map::AO_ENG_MIN.get(ao_idx).unwrap_or(&0.0);
+        let max = *io_map::AO_ENG_MAX.get(ao_idx).unwrap_or(&10.0);
+        if (max - min).abs() < 1e-9 {
+            return 0;
+        }
+        let r = ((value - min) / (max - min)).clamp(0.0, 1.0);
+        // no_std: avoid `f32::round()` (requires libm on some targets).
+        let duty = r * (AO_PWM_TOP as f32) + 0.5;
+        let duty = if duty < 0.0 { 0.0 } else { duty };
+        let duty = if duty > (AO_PWM_TOP as f32) {
+            AO_PWM_TOP as f32
+        } else {
+            duty
+        };
+        duty as u16
+    }
+
+    fn gpio_to_pwm_binding(gpio: u8) -> PwmChannelBinding {
+        PwmChannelBinding {
+            slice: gpio / 2,
+            is_channel_a: gpio % 2 == 0,
+        }
+    }
+
+    fn configure_pwm_slice(pwm: &pac::PWM, slice: u8) {
+        let ch = pwm.ch(slice as usize);
+        ch.div().write(|w| unsafe {
+            w.int().bits(1);
+            w.frac().bits(0)
+        });
+        ch.top().write(|w| unsafe { w.top().bits(AO_PWM_TOP) });
+        ch.csr().modify(|_, w| {
+            w.divmode().div();
+            w.en().set_bit()
+        });
+    }
+
+    fn set_pwm_channel_duty(pwm: &pac::PWM, binding: PwmChannelBinding, duty: u16) {
+        let ch = pwm.ch(binding.slice as usize);
+        let current = ch.cc().read().bits();
+        let next = if binding.is_channel_a {
+            (current & 0xFFFF_0000) | (duty as u32)
+        } else {
+            (current & 0x0000_FFFF) | ((duty as u32) << 16)
+        };
+        ch.cc().write(|w| unsafe { w.bits(next) });
     }
 
     fn reason_str(r: TransitionReason) -> &'static str {

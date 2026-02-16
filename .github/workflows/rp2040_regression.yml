@@ -1,0 +1,44 @@
+name: rp2040-regression
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  workspace-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo test (workspace)
+        run: cargo test --workspace
+
+  rp2040-cross-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv6m-none-eabi
+      - name: Cross build board firmware
+        run: cargo build -p board-rp2040 --target thumbv6m-none-eabi --release
+
+  trace-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Golden gate should pass
+        run: |
+          cargo run --release -- trace-diff \
+            --sil examples/trace_golden/sil_trace.jsonl \
+            --board examples/trace_golden/board_trace_match.jsonl \
+            --out out/ci_trace_match_report.json \
+            --fail-on-mismatch
+      - name: PIL script should pass with golden board log
+        run: |
+          scripts/pil_trace_gate.sh \
+            --sil examples/trace_golden/sil_trace.jsonl \
+            --out-dir out/ci_pil_gate \
+            --board-log examples/trace_golden/board_log_match.log

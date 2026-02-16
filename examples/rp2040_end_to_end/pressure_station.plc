@@ -1,0 +1,30 @@
+[topology]
+
+device AI0: analog_input  { range: 0..100, unit: "bar", external: true }
+device AO0: analog_output { range: 0..10, unit: "V", ramp_time: 500ms }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step set_output:
+        action: set_analog AO0 7.5
+        action: log "set output to 7.5V"
+
+    step wait_pressure:
+        wait: AI0 > 80
+        timeout: 5000ms -> goto fault
+
+    step shutdown:
+        action: set_analog AO0 0
+        action: log "pressure reached, output reset"
+
+    on_complete: goto main
+
+task fault:
+    step stop:
+        action: set_analog AO0 0
+    step alarm:
+        action: log "pressure timeout"
+    on_complete: goto main

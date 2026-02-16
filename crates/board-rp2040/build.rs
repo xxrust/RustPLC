@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, env, fs, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 fn main() {
     // Make `memory.x` visible to the linker when building for embedded targets.
@@ -13,30 +17,79 @@ fn main() {
     // Otherwise we emit a tiny default program that just halts.
     let generated_path = out_dir.join("generated_program.rs");
     println!("cargo:rerun-if-env-changed=RUST_PLC_GENERATED_PROGRAM_RS");
+    let manifest_dir =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| manifest_dir.clone());
+
     match env::var("RUST_PLC_GENERATED_PROGRAM_RS") {
         Ok(path) => {
-            let contents = fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("failed to read RUST_PLC_GENERATED_PROGRAM_RS={path}: {e}"));
+            let path = resolve_input_path(&workspace_root, &path);
+            let contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "failed to read RUST_PLC_GENERATED_PROGRAM_RS={}: {e}",
+                    path.display()
+                )
+            });
             fs::write(&generated_path, contents).expect("write generated_program.rs");
         }
         Err(_) => {
-            fs::write(&generated_path, default_generated_program()).expect("write default generated_program.rs");
+            fs::write(&generated_path, default_generated_program())
+                .expect("write default generated_program.rs");
         }
     }
 
     // Compile-time embed of IO map TOML (optional).
     let io_map_rs_path = out_dir.join("io_map.rs");
     println!("cargo:rerun-if-env-changed=RUST_PLC_IO_MAP_TOML");
+    println!("cargo:rerun-if-env-changed=RUST_PLC_ANALOG_CONTRACT_TOML");
     match env::var("RUST_PLC_IO_MAP_TOML") {
         Ok(path) => {
-            let toml_str = fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("failed to read RUST_PLC_IO_MAP_TOML={path}: {e}"));
-            let map = parse_io_map(&toml_str).unwrap_or_else(|e| panic!("invalid io map TOML: {e}"));
-            fs::write(&io_map_rs_path, render_io_map_rs(&map)).expect("write io_map.rs");
+            let path = resolve_input_path(&workspace_root, &path);
+            let toml_str = fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "failed to read RUST_PLC_IO_MAP_TOML={}: {e}",
+                    path.display()
+                )
+            });
+            let map =
+                parse_io_map(&toml_str).unwrap_or_else(|e| panic!("invalid io map TOML: {e}"));
+            let analog_contract = match env::var("RUST_PLC_ANALOG_CONTRACT_TOML") {
+                Ok(analog_path) => {
+                    let analog_path = resolve_input_path(&workspace_root, &analog_path);
+                    let contract_toml = fs::read_to_string(&analog_path).unwrap_or_else(|e| {
+                        panic!(
+                            "failed to read RUST_PLC_ANALOG_CONTRACT_TOML={}: {e}",
+                            analog_path.display()
+                        )
+                    });
+                    parse_analog_contract(&contract_toml)
+                        .unwrap_or_else(|e| panic!("invalid analog contract TOML: {e}"))
+                }
+                Err(_) => AnalogContract::default(),
+            };
+            fs::write(&io_map_rs_path, render_io_map_rs(&map, &analog_contract))
+                .expect("write io_map.rs");
         }
         Err(_) => {
-            fs::write(&io_map_rs_path, render_io_map_rs(&IoMap::default())).expect("write io_map.rs");
+            fs::write(
+                &io_map_rs_path,
+                render_io_map_rs(&IoMap::default(), &AnalogContract::default()),
+            )
+            .expect("write io_map.rs");
         }
+    }
+}
+
+fn resolve_input_path(workspace_root: &Path, raw: &str) -> PathBuf {
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        path
+    } else {
+        workspace_root.join(path)
     }
 }
 
@@ -46,6 +99,25 @@ struct IoMap {
     digital_outputs: BTreeMap<u16, u8>,
     analog_inputs: BTreeMap<u16, u8>,
     analog_outputs: BTreeMap<u16, u8>,
+}
+
+#[derive(Debug, Default)]
+struct AnalogContract {
+    analog_inputs: BTreeMap<u16, AnalogInputContractEntry>,
+    analog_outputs: BTreeMap<u16, AnalogOutputContractEntry>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AnalogInputContractEntry {
+    min: f32,
+    max: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AnalogOutputContractEntry {
+    min: f32,
+    max: f32,
+    ramp_ms: u32,
 }
 
 fn parse_io_map(input: &str) -> Result<IoMap, String> {
@@ -103,7 +175,102 @@ fn parse_section(
     Ok(out)
 }
 
-fn render_io_map_rs(map: &IoMap) -> String {
+fn parse_analog_contract(input: &str) -> Result<AnalogContract, String> {
+    let v: toml::Value = toml::from_str(input).map_err(|e| e.to_string())?;
+    let ai = v.get("analog_inputs").and_then(|v| v.as_table());
+    let ao = v.get("analog_outputs").and_then(|v| v.as_table());
+    Ok(AnalogContract {
+        analog_inputs: match ai {
+            Some(t) => parse_analog_inputs_table(t)?,
+            None => BTreeMap::new(),
+        },
+        analog_outputs: match ao {
+            Some(t) => parse_analog_outputs_table(t)?,
+            None => BTreeMap::new(),
+        },
+    })
+}
+
+fn parse_analog_inputs_table(
+    table: &toml::value::Table,
+) -> Result<BTreeMap<u16, AnalogInputContractEntry>, String> {
+    let mut out = BTreeMap::new();
+    for (k, v) in table {
+        let id = parse_analog_key(k, "ai")?;
+        let t = v
+            .as_table()
+            .ok_or_else(|| format!("analog_inputs.{k} must be a table"))?;
+        let min = parse_required_float(t, "min", &format!("analog_inputs.{k}"))?;
+        let max = parse_required_float(t, "max", &format!("analog_inputs.{k}"))?;
+        if !(min < max) {
+            return Err(format!(
+                "analog_inputs.{k} has invalid range: min ({min}) must be < max ({max})"
+            ));
+        }
+        out.insert(id, AnalogInputContractEntry { min, max });
+    }
+    Ok(out)
+}
+
+fn parse_analog_outputs_table(
+    table: &toml::value::Table,
+) -> Result<BTreeMap<u16, AnalogOutputContractEntry>, String> {
+    let mut out = BTreeMap::new();
+    for (k, v) in table {
+        let id = parse_analog_key(k, "ao")?;
+        let t = v
+            .as_table()
+            .ok_or_else(|| format!("analog_outputs.{k} must be a table"))?;
+        let min = parse_required_float(t, "min", &format!("analog_outputs.{k}"))?;
+        let max = parse_required_float(t, "max", &format!("analog_outputs.{k}"))?;
+        if !(min < max) {
+            return Err(format!(
+                "analog_outputs.{k} has invalid range: min ({min}) must be < max ({max})"
+            ));
+        }
+        let ramp_ms = t.get("ramp_ms").and_then(|v| v.as_integer()).unwrap_or(0);
+        if ramp_ms < 0 {
+            return Err(format!(
+                "analog_outputs.{k}.ramp_ms must be >= 0, got {ramp_ms}"
+            ));
+        }
+        out.insert(
+            id,
+            AnalogOutputContractEntry {
+                min,
+                max,
+                ramp_ms: ramp_ms as u32,
+            },
+        );
+    }
+    Ok(out)
+}
+
+fn parse_analog_key(key: &str, prefix: &str) -> Result<u16, String> {
+    let id_str = key
+        .strip_prefix(prefix)
+        .ok_or_else(|| format!("invalid key {key:?} (expected {prefix}<id>)"))?;
+    id_str
+        .parse::<u16>()
+        .map_err(|_| format!("invalid key {key:?} (expected {prefix}<id>)"))
+}
+
+fn parse_required_float(
+    table: &toml::value::Table,
+    field: &str,
+    scope: &str,
+) -> Result<f32, String> {
+    let v = table
+        .get(field)
+        .ok_or_else(|| format!("{scope}.{field} is required"))?;
+    match v {
+        toml::Value::Float(n) => Ok(*n as f32),
+        toml::Value::Integer(n) => Ok(*n as f32),
+        _ => Err(format!("{scope}.{field} must be a number")),
+    }
+}
+
+fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
     const MAX_DI: usize = 32;
     const MAX_DO: usize = 32;
     const MAX_AI: usize = 32;
@@ -114,6 +281,11 @@ fn render_io_map_rs(map: &IoMap) -> String {
     let mut do_ = [UNUSED; MAX_DO];
     let mut ai = [UNUSED; MAX_AI];
     let mut ao = [UNUSED; MAX_AO];
+    let mut ai_min = [0.0f32; MAX_AI];
+    let mut ai_max = [3.3f32; MAX_AI];
+    let mut ao_min = [0.0f32; MAX_AO];
+    let mut ao_max = [10.0f32; MAX_AO];
+    let mut ao_ramp = [0u32; MAX_AO];
 
     for (&id, &gpio) in &map.digital_inputs {
         let idx = id as usize;
@@ -143,6 +315,23 @@ fn render_io_map_rs(map: &IoMap) -> String {
         }
         ao[idx] = gpio;
     }
+    for (&id, cfg) in &analog_contract.analog_inputs {
+        let idx = id as usize;
+        if idx >= MAX_AI {
+            panic!("analog contract ai{id} exceeds MAX_AI={MAX_AI}");
+        }
+        ai_min[idx] = cfg.min;
+        ai_max[idx] = cfg.max;
+    }
+    for (&id, cfg) in &analog_contract.analog_outputs {
+        let idx = id as usize;
+        if idx >= MAX_AO {
+            panic!("analog contract ao{id} exceeds MAX_AO={MAX_AO}");
+        }
+        ao_min[idx] = cfg.min;
+        ao_max[idx] = cfg.max;
+        ao_ramp[idx] = cfg.ramp_ms;
+    }
 
     let mut out = String::new();
     out.push_str("// @generated by board-rp2040 build.rs\n");
@@ -168,6 +357,31 @@ fn render_io_map_rs(map: &IoMap) -> String {
     out.push_str("];\n");
     out.push_str("pub const AO_GPIO: [u8; MAX_AO] = [\n");
     for v in ao {
+        out.push_str(&format!("  {v},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const AI_ENG_MIN: [f32; MAX_AI] = [\n");
+    for v in ai_min {
+        out.push_str(&format!("  {v:.6},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const AI_ENG_MAX: [f32; MAX_AI] = [\n");
+    for v in ai_max {
+        out.push_str(&format!("  {v:.6},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const AO_ENG_MIN: [f32; MAX_AO] = [\n");
+    for v in ao_min {
+        out.push_str(&format!("  {v:.6},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const AO_ENG_MAX: [f32; MAX_AO] = [\n");
+    for v in ao_max {
+        out.push_str(&format!("  {v:.6},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const AO_RAMP_MS: [u32; MAX_AO] = [\n");
+    for v in ao_ramp {
         out.push_str(&format!("  {v},\n"));
     }
     out.push_str("];\n");

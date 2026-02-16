@@ -7,6 +7,9 @@ const PLC_FIXTURE: &str = r#"
 device Y0: digital_output
 device X0: digital_input
 
+device AI0: analog_input { range: 0..100, unit: "bar" }
+device AO0: analog_output { range: 0..10, ramp_time: 500ms, unit: "V" }
+
 device start_button: digital_input {
     connected_to: X0
 }
@@ -88,10 +91,12 @@ fn cli_build_rp2040_emits_expected_artifacts() {
     let generated_path = out_dir.join("generated_program.rs");
     let meta_path = out_dir.join("build_meta.json");
     let iomap_path = out_dir.join("io_map.template.toml");
+    let analog_contract_path = out_dir.join("analog_contract.toml");
 
     assert!(generated_path.exists());
     assert!(meta_path.exists());
     assert!(iomap_path.exists());
+    assert!(analog_contract_path.exists());
 
     let generated = fs::read_to_string(&generated_path).expect("read generated");
     assert!(generated.contains("pub mod generated"));
@@ -119,6 +124,10 @@ fn cli_build_rp2040_emits_expected_artifacts() {
     assert!(iomap.contains("[digital_outputs]"));
     assert!(iomap.contains("[analog_inputs]"));
     assert!(iomap.contains("[analog_outputs]"));
+
+    let analog_contract = fs::read_to_string(&analog_contract_path).expect("read analog contract");
+    assert!(analog_contract.contains("[analog_inputs.ai0]"));
+    assert!(analog_contract.contains("[analog_outputs.ao0]"));
 }
 
 #[test]

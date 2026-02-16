@@ -31,12 +31,14 @@ Notes:
 - Runtime ticks are paced by RP2040 hardware timer (`1ms`), not CPU-cycle busy-loop constants.
 - `cargo build -p board-rp2040` (without `--target`) builds a host stub that prints these instructions.
 - Runtime output includes structured transition lines (`TRACE ...`) and DSL log action lines (`LOG ...`).
+- `build-rp2040` now also emits `analog_contract.toml` (AI/AO engineering ranges + AO ramp).
 
 ## I/O map notes (RP2040-specific)
 
 - `[digital_inputs]` / `[digital_outputs]` / `[analog_outputs]`: GPIO range `0..=29`
 - `[analog_inputs]`: GPIO range **`26..=29` only** (RP2040 ADC-capable pins)
-- Firmware samples mapped `analog_inputs` each tick and exposes values in **volts** (`0.0..3.3`) to runtime `wait: AIx ...` predicates.
+- Firmware samples mapped `analog_inputs` each tick, reads ADC voltage (`0.0..3.3V`), then linearly maps to engineering range from `analog_contract.toml`.
+- Firmware applies `analog_outputs` via PWM and supports per-channel ramp (`ramp_ms`) from `analog_contract.toml`.
 
 Example:
 
@@ -73,3 +75,22 @@ What it does:
 2. `flash-rp2040` (dry-run + actual, when `--mount` is set)
 3. collect board log (`serial` or custom `cmd`)
 4. `trace-parse` + `trace-diff --fail-on-mismatch`
+
+## PIL-style gate (no physical board)
+
+```bash
+scripts/pil_trace_gate.sh \
+  --sil examples/trace_golden/sil_trace.jsonl \
+  --out-dir out/pil_gate \
+  --board-log examples/trace_golden/board_log_match.log
+```
+
+Or capture log from a simulator command:
+
+```bash
+scripts/pil_trace_gate.sh \
+  --sil out/trace.jsonl \
+  --out-dir out/pil_gate \
+  --runner-cmd "renode -e 'include @scripts/renode/run.resc'" \
+  --duration 30
+```

@@ -1,0 +1,9 @@
+[digital_inputs]
+
+[digital_outputs]
+
+[analog_inputs]
+ai0 = 26
+
+[analog_outputs]
+ao0 = 20

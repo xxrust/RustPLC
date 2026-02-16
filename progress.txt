@@ -361,3 +361,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - `trace-diff --fail-on-mismatch` can be treated as CI gate once board logs are captured into stable files via `scripts/collect_board_log.sh`.
 ---
+
+## [2026-02-16 18:55:03 CST] - Roadmap Follow-up (Analog Contract + AO PWM + PIL Gate + CI)
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `analog_contract.toml` generation to `build-rp2040` by extracting `AI<n>`/`AO<n>` `range/unit` and `AO` `ramp_time` from the expanded AST; artifact is emitted alongside `generated_program.rs` and `io_map.template.toml`.
+  - Injected the analog contract into firmware builds via a new environment variable: `RUST_PLC_ANALOG_CONTRACT_TOML` (wired through both `--emit-uf2` and manual `cargo build -p board-rp2040 ...` flows).
+  - Extended RP2040 firmware semantics:
+    - AI: sample ADC each tick, convert raw -> volts -> engineering value (linear map using per-channel contract), so DSL `wait: AIx ...` thresholds are interpreted in engineering units.
+    - AO: drive mapped `analog_outputs` via PWM; normalize `set_analog` to duty using contract `min/max`; apply per-channel `ramp_ms` in the tick loop.
+  - Added a PIL-style regression gate script (`scripts/pil_trace_gate.sh`) that turns board/simulator stdout logs into structured trace and runs `trace-diff --fail-on-mismatch` without requiring physical flashing.
+  - Added minimal CI coverage for the above (`.github/workflows/rp2040_regression.yml`), plus docs and an end-to-end example package (`examples/rp2040_end_to_end/`) to make the flow reproducible.
+- Files changed
+  - `src/main.rs`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/src/main.rs`, `tests/build_rp2040.rs`, `README.md`, `docs/board_rp2040.md`, `docs/rp2040_iteration_rationale.md`, `docs/board_semantics_contract_v1.md`, `scripts/pil_trace_gate.sh`, `.github/workflows/rp2040_regression.yml`, `examples/rp2040_end_to_end/*`, `examples/trace_golden/board_log_match.log`, `progress.txt`
+- Verification
+  - `cargo test --workspace`
+  - `cargo build -p board-rp2040 --target thumbv6m-none-eabi --release`
+  - `scripts/pil_trace_gate.sh --sil examples/trace_golden/sil_trace.jsonl --out-dir out/pil_gate_test --board-log examples/trace_golden/board_log_match.log`
+---

@@ -297,6 +297,7 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc --out out/rp20
 - `out/rp2040/generated_program.rs`：由 DSL 编译出的 runtime 程序（给固件 include）
 - `out/rp2040/build_meta.json`：构建元数据（版本、hash、时间）
 - `out/rp2040/io_map.template.toml`：I/O 映射模板
+- `out/rp2040/analog_contract.toml`：模拟量合同（AI/AO range、AO ramp）
 
 #### 1.5) 填写 I/O 映射（必须）
 
@@ -326,7 +327,7 @@ ao0 = 20
 
 说明：
 - `[analog_inputs]` 在 RP2040 上仅支持 GPIO `26..=29`（ADC 引脚）。
-- 固件会按 tick 采样这些 AI，并将值以电压（`0.0..3.3` V）提供给运行时 `wait: AIx ...` 条件。
+- 固件会按 tick 采样这些 AI，并按 `analog_contract.toml` 把 `0.0..3.3V` 线性映射到 DSL 的工程量 range（如 bar/℃）。
 
 `RUST_PLC_IO_MAP_TOML` 的含义：  
 它是一个环境变量，指向上面的 `io_map.toml` 文件；`board-rp2040` 的 `build.rs` 会在编译期读取它并把映射“固化进固件”。
@@ -338,12 +339,14 @@ ao0 = 20
 ```bash
 RUST_PLC_GENERATED_PROGRAM_RS=out/rp2040/generated_program.rs \
 RUST_PLC_IO_MAP_TOML=out/rp2040/io_map.toml \
+RUST_PLC_ANALOG_CONTRACT_TOML=out/rp2040/analog_contract.toml \
 cargo build -p board-rp2040 --target thumbv6m-none-eabi --release
 ```
 
 几个关键参数的含义：
 - `RUST_PLC_GENERATED_PROGRAM_RS`：告诉固件编译流程使用哪份 `generated_program.rs`
 - `RUST_PLC_IO_MAP_TOML`：告诉固件编译流程使用哪份 I/O 映射
+- `RUST_PLC_ANALOG_CONTRACT_TOML`：告诉固件编译流程使用哪份模拟量合同（AI/AO range + AO ramp）
 - `-p board-rp2040`：只编译 workspace 里的 `board-rp2040` 包
 - `--target thumbv6m-none-eabi`：交叉编译到 RP2040（Cortex-M0+）目标
 - `--release`：使用发布优化配置（更接近实机运行）
@@ -360,6 +363,7 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
 说明：
 - `--emit-uf2` 会在内部执行 `cargo build -p board-rp2040 --target thumbv6m-none-eabi --release` 与 `elf2uf2-rs` 转换。
 - 因为要保证接线合同明确，`--emit-uf2` 需要同时提供 `--io-map`。
+- `--emit-uf2` 会自动把 `out/analog_contract.toml` 注入固件构建流程。
 
 #### 3) ELF -> UF2
 
@@ -368,6 +372,9 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
 ```bash
 elf2uf2-rs target/thumbv6m-none-eabi/release/board-rp2040 out/firmware.uf2
 ```
+
+如果你设置了 `CARGO_TARGET_DIR`，则 ELF 路径变为：  
+`$CARGO_TARGET_DIR/thumbv6m-none-eabi/release/board-rp2040`
 
 #### 4) 装载到 Pico（先 dry-run）
 
@@ -441,13 +448,35 @@ scripts/rp2040_trace_gate.sh \
 3. 日志采集（serial/cmd）
 4. `trace-parse` + `trace-diff --fail-on-mismatch`
 
+#### 8) PIL（无实板）trace gate（可选）
+
+目的：在没有真实板卡时，把“运行日志 -> 结构化 trace -> 对比门禁”固化为可复现流水线（例如 runner 使用 Renode）。
+
+```bash
+scripts/pil_trace_gate.sh \
+  --sil examples/trace_golden/sil_trace.jsonl \
+  --out-dir out/pil_gate \
+  --board-log examples/trace_golden/board_log_match.log
+```
+
+或由 runner 直接产生日志：
+
+```bash
+scripts/pil_trace_gate.sh \
+  --sil out/trace.jsonl \
+  --out-dir out/pil_gate \
+  --runner-cmd "renode -e 'include @scripts/renode/run.resc'" \
+  --duration 30
+```
+
 #### 当前下沉范围说明（RP2040 v1）
 
 - 已支持：`set` / `extend` / `retract` / `set_analog` / `log` 动作下沉
 - 已支持：数字量 `wait`（含 timeout）与模拟量 `wait`（region 谓词）下沉
-- 说明：模拟量输入已接入 RP2040 ADC 采样（按 `analog_inputs` 映射，单位电压 V）；如需工程量（bar/℃ 等）需在外部传感链或后续标定层完成换算
+- 说明：模拟量输入已接入 RP2040 ADC 采样，并按 `analog_contract.toml` 做工程量映射；模拟量输出已接入 PWM，下发 `set_analog` 时按 range 归一化并按 `ramp_ms` 做斜坡
 
 相关说明见 [`docs/board_rp2040.md`](docs/board_rp2040.md)。
+本轮设计动机与取舍见 [`docs/rp2040_iteration_rationale.md`](docs/rp2040_iteration_rationale.md)。
 
 当前板级日志至少包含两类结构化行：
 - `TRACE tick=<u64> task=<usize> from=<u16> to=<u16> reason=<str> ts_ms=<u64>`
