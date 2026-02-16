@@ -146,3 +146,35 @@ fn bridge_supports_timeout_to_goto_branch() {
         ]
     );
 }
+
+const PLC_ANALOG_FIXTURE: &str = r#"
+[topology]
+
+device AO0: analog_output { range: 0..10, unit: "V" }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step set_output:
+        action: set_analog AO0 4.2
+    on_complete: goto done
+
+task done:
+    step halt:
+"#;
+
+#[test]
+fn bridge_supports_set_analog_action_for_ao_channels() {
+    let program = compile_to_runtime(PLC_ANALOG_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 1);
+
+    rt.tick(&mut io).expect("tick");
+    let edges = io.analog_output_edges();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].tick, Tick(0));
+    assert_eq!(edges[0].id.0, 0);
+    assert!((edges[0].value - 4.2).abs() < f32::EPSILON);
+}

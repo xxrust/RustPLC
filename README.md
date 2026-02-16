@@ -316,6 +316,9 @@ di0 = 2
 
 [digital_outputs]
 do0 = 16
+
+[analog_outputs]
+ao0 = 26
 ```
 
 `RUST_PLC_IO_MAP_TOML` 的含义：  
@@ -388,6 +391,18 @@ cargo run --release -- trace-parse --in out/board.log --out out/board_trace.json
 ```bash
 cargo run --release -- trace-diff --sil out/trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json
 ```
+
+如果要把对比作为“回归门禁”（不一致直接返回非 0）：
+
+```bash
+cargo run --release -- trace-diff --sil out/trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json --fail-on-mismatch
+```
+
+#### 当前下沉范围说明（RP2040 v1）
+
+- 已支持：`set` / `extend` / `retract` / `set_analog` / `log` 动作下沉
+- 已支持：数字量 `wait`（含 timeout）下沉
+- 暂未支持：模拟量 `wait` 的 region 谓词在 RP2040 runtime 直接执行（例如 `AI0 in {region_1}`）
 
 相关说明见 [`docs/board_rp2040.md`](docs/board_rp2040.md)。
 

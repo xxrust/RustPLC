@@ -2,7 +2,7 @@ use crate::ir::{
     BinaryValue as IrBinaryValue, DeviceKind, State, StateMachine, TopologyGraph, Transition,
     TransitionAction, TransitionGuard,
 };
-use io_traits::{DigitalInputId, DigitalOutputId};
+use io_traits::{AnalogOutputId, DigitalInputId, DigitalOutputId};
 use petgraph::Direction;
 use petgraph::graph::NodeIndex;
 use runtime_core::{Action, Instr, Program, Step, StepId, Task, Timeout};
@@ -43,6 +43,16 @@ pub enum BridgeError {
 
     #[error("unable to resolve a unique physical digital output for device {device} (state {state})")]
     UnresolvableDigitalOutput { state: String, device: String },
+
+    #[error("unable to resolve a unique physical analog output for device {device} (state {state})")]
+    UnresolvableAnalogOutput { state: String, device: String },
+
+    #[error("invalid analog literal in {state}: set_analog {target} {value_raw}")]
+    InvalidAnalogLiteral {
+        state: String,
+        target: String,
+        value_raw: String,
+    },
 }
 
 /// Convert a compiler/semantic `StateMachine` IR into a minimal `runtime-core` `Program`.
@@ -50,6 +60,7 @@ pub enum BridgeError {
 /// Supported subset:
 /// - `action`: set (digital), extend, retract
 /// - `action`: log
+/// - `action`: set_analog
 /// - `wait`: single boolean equality/inequality (no AND/OR/NOT)
 /// - `delay`
 /// - `timeout -> goto`
@@ -439,10 +450,15 @@ fn convert_action(
             };
             Ok(Action::SetDigital { id, value })
         }
-        TransitionAction::SetAnalog { target, .. } => Err(BridgeError::UnsupportedAction {
-            state: state_name.to_string(),
-            action: format!("set_analog {target} ..."),
-        }),
+        TransitionAction::SetAnalog { target, value_raw } => {
+            let id = resolver.resolve_analog_output_id(state_name, target)?;
+            let value = value_raw.parse::<f32>().map_err(|_| BridgeError::InvalidAnalogLiteral {
+                state: state_name.to_string(),
+                target: target.clone(),
+                value_raw: value_raw.clone(),
+            })?;
+            Ok(Action::SetAnalog { id, value })
+        }
         TransitionAction::Log { message } => {
             let leaked_message: &'static str = Box::leak(message.clone().into_boxed_str());
             Ok(Action::Log {
@@ -524,6 +540,29 @@ impl<'a> TopologyResolver<'a> {
             })
     }
 
+    fn resolve_analog_output_id(
+        &self,
+        state_name: &str,
+        device: &str,
+    ) -> Result<AnalogOutputId, BridgeError> {
+        let start = self
+            .by_name
+            .get(device)
+            .copied()
+            .ok_or_else(|| BridgeError::UnknownDevice {
+                state: state_name.to_string(),
+                device: device.to_string(),
+            })?;
+
+        let ids = self.collect_physical_ids(start, DeviceKind::AnalogOutput, parse_ao_id);
+        unique_physical_id(ids)
+            .map(AnalogOutputId)
+            .map_err(|_| BridgeError::UnresolvableAnalogOutput {
+                state: state_name.to_string(),
+                device: device.to_string(),
+            })
+    }
+
     fn collect_physical_ids(
         &self,
         start: NodeIndex,
@@ -573,12 +612,24 @@ fn parse_y_id(name: &str) -> Option<u16> {
     parse_prefixed_u16(name, 'Y')
 }
 
+fn parse_ao_id(name: &str) -> Option<u16> {
+    parse_prefixed_token_u16(name, "AO")
+}
+
 fn parse_prefixed_u16(name: &str, prefix: char) -> Option<u16> {
     let mut chars = name.chars();
     if chars.next()? != prefix {
         return None;
     }
     let rest: String = chars.collect();
+    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse::<u16>().ok()
+}
+
+fn parse_prefixed_token_u16(name: &str, prefix: &str) -> Option<u16> {
+    let rest = name.strip_prefix(prefix)?;
     if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
         return None;
     }

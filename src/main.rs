@@ -170,7 +170,7 @@ fn print_usage(program: &str) {
     eprintln!("  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]");
     eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
     eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
-    eprintln!("  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]");
+    eprintln!("  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]");
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -576,6 +576,7 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
 
     let mut dis = BTreeSet::<u16>::new();
     let mut dos = BTreeSet::<u16>::new();
+    let mut aos = BTreeSet::<u16>::new();
     for task in program.tasks {
         for step in task.steps {
             match step.instr {
@@ -591,7 +592,9 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                             Action::Extend { output } | Action::Retract { output } => {
                                 dos.insert(output.0);
                             }
-                            Action::SetAnalog { .. } => {}
+                            Action::SetAnalog { id, .. } => {
+                                aos.insert(id.0);
+                            }
                             Action::Log { .. } => {}
                         }
                     }
@@ -623,6 +626,16 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
             out.push_str(&format!("# do{id} = 16\n"));
         }
     }
+    out.push('\n');
+
+    out.push_str("[analog_outputs]\n");
+    if aos.is_empty() {
+        out.push_str("# ao0 = 26\n");
+    } else {
+        for id in aos {
+            out.push_str(&format!("# ao{id} = 26\n"));
+        }
+    }
     out
 }
 
@@ -631,6 +644,7 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
 
     let mut dis = BTreeSet::<u16>::new();
     let mut dos = BTreeSet::<u16>::new();
+    let mut aos = BTreeSet::<u16>::new();
     for task in program.tasks {
         for step in task.steps {
             match step.instr {
@@ -646,7 +660,9 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                             Action::Extend { output } | Action::Retract { output } => {
                                 dos.insert(output.0);
                             }
-                            Action::SetAnalog { .. } => {}
+                            Action::SetAnalog { id, .. } => {
+                                aos.insert(id.0);
+                            }
                             Action::Log { .. } => {}
                         }
                     }
@@ -659,9 +675,11 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
     // `IoUsage` is a tiny borrowed wrapper; we leak the sets to keep build-rp2040 code simple.
     let dis: &'static [u16] = Box::leak(dis.into_iter().collect::<Vec<_>>().into_boxed_slice());
     let dos: &'static [u16] = Box::leak(dos.into_iter().collect::<Vec<_>>().into_boxed_slice());
+    let aos: &'static [u16] = Box::leak(aos.into_iter().collect::<Vec<_>>().into_boxed_slice());
     IoUsage {
         digital_inputs: dis,
         digital_outputs: dos,
+        analog_outputs: aos,
     }
 }
 
@@ -802,6 +820,7 @@ fn run_trace_diff_subcommand(
     let mut board: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
     let mut context_window: usize = 3;
+    let mut fail_on_mismatch = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -831,9 +850,10 @@ fn run_trace_diff_subcommand(
                     .parse::<usize>()
                     .map_err(|_| format!("Invalid --context value (expected usize): {raw}"))?;
             }
+            "--fail-on-mismatch" => fail_on_mismatch = true,
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+                    "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
                 ));
             }
             other => return Err(format!("Unknown argument for trace-diff: {other}")),
@@ -841,13 +861,13 @@ fn run_trace_diff_subcommand(
     }
 
     let sil = sil.ok_or_else(|| format!(
-        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
     ))?;
     let board = board.ok_or_else(|| format!(
-        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
     ))?;
     let out = out.ok_or_else(|| format!(
-        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]"
+        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
     ))?;
 
     let sil_text = fs::read_to_string(&sil)
@@ -873,6 +893,13 @@ fn run_trace_diff_subcommand(
         .map_err(|err| format!("Failed to serialize report JSON: {err}"))?;
     json.push('\n');
     fs::write(&out, json).map_err(|err| format!("Failed to write {out:?}: {err}"))?;
+
+    if fail_on_mismatch && !report.is_match {
+        return Err(format!(
+            "Trace mismatch detected (tick={:?}, type={:?}); see report {:?}",
+            report.first_mismatch_tick, report.mismatch_type, out
+        ));
+    }
     Ok(())
 }
 

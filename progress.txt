@@ -319,3 +319,14 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - Files changed
   - `src/trace_diff.rs`, `src/lib.rs`, `src/main.rs`, `tests/trace_diff.rs`, `prd.json`, `progress.txt`
 ---
+
+## [2026-02-16 15:12:28 CST] - Roadmap Follow-up (M4/M3 partial closeout)
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `build-rp2040 --emit-uf2 <file>` to continue from `.plc` build artifacts into RP2040 firmware compile + UF2 conversion in one CLI flow, with explicit `--io-map` requirement for wiring contract safety.
+  - Added trace regression gate capability via `trace-diff --fail-on-mismatch` (writes report JSON and exits non-zero when mismatch is detected).
+  - Extended RP2040 downlink subset to support `set_analog` actions (`AO<n>` resolution in runtime bridge), and extended I/O mapping contracts/templates to include `[analog_outputs]`.
+  - Updated RP2040 docs in README with staged flow details, new gating flag, and current downlink support boundaries.
+- Files changed
+  - `src/main.rs`, `tests/build_rp2040.rs`, `tests/trace_diff.rs`, `src/runtime_bridge.rs`, `tests/runtime_bridge_us006.rs`, `src/io_map.rs`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/src/main.rs`, `README.md`, `progress.txt`
+---
