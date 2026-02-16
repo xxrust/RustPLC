@@ -9,6 +9,7 @@ use crate::ir::{
 use petgraph::algo::kosaraju_scc;
 use petgraph::graph::DiGraph;
 use petgraph::visit::EdgeRef;
+use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
@@ -28,13 +29,53 @@ pub enum SafetyProofLevel {
     Bounded,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SafetyRuleStatusKind {
+    Bound,
+    Skipped,
+    Degraded,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SafetyCoverage {
+    pub bound_rules: usize,
+    pub degraded_rules: usize,
+    pub skipped_rules: usize,
+    pub total_rules: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SafetyAnalogThresholdDetail {
+    pub expr: String,
+    pub device: String,
+    pub operator: String,
+    pub value: String,
+    pub split_points: Vec<f64>,
+    pub hit_intervals: usize,
+    pub total_intervals: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SafetyRuleStatus {
+    pub line: usize,
+    pub rule: String,
+    pub status: SafetyRuleStatusKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub analog_thresholds: Vec<SafetyAnalogThresholdDetail>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SafetyReport {
     pub level: SafetyProofLevel,
     pub explored_depth: usize,
     pub warnings: Vec<String>,
     pub checked_rules: usize,
     pub skipped_rules: usize,
+    pub coverage: SafetyCoverage,
+    pub rule_statuses: Vec<SafetyRuleStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,7 +195,10 @@ pub fn verify_safety_with_config(
     let mut diagnostics = Vec::new();
     let mut all_complete = true;
     let mut checked_rules = 0usize;
-    let mut skipped_threshold_rules = Vec::new();
+    let mut rule_statuses = Vec::with_capacity(constraints.safety.len());
+    let mut bound_rules = 0usize;
+    let mut degraded_rules = 0usize;
+    let mut skipped_rules = 0usize;
 
     for (index, rule) in constraints.safety.iter().enumerate() {
         let relation = relation_text(&rule.relation);
@@ -168,14 +212,21 @@ pub fn verify_safety_with_config(
             .map(|node| node.line.max(1))
             .unwrap_or(1);
 
-        let Some(binding) = bind_safety_expr_rule(&model, rule) else {
-            if safety_rule_has_threshold(rule) {
-                skipped_threshold_rules.push(format!(
-                    "WARNING: Safety 规则 <input>:{} {} 含模拟量阈值，当前未建模，已跳过验证",
-                    line, rule_text
-                ));
+        let analog_thresholds = collect_analog_threshold_details(&model, rule);
+
+        let binding = match bind_safety_expr_rule_with_reason(&model, rule) {
+            Ok(binding) => binding,
+            Err(reason) => {
+                skipped_rules += 1;
+                rule_statuses.push(SafetyRuleStatus {
+                    line,
+                    rule: rule_text,
+                    status: SafetyRuleStatusKind::Skipped,
+                    reason: Some(reason),
+                    analog_thresholds,
+                });
+                continue;
             }
-            continue;
         };
 
         checked_rules += 1;
@@ -209,25 +260,80 @@ pub fn verify_safety_with_config(
             continue;
         }
 
-        if !outcome.fully_explored {
+        let has_threshold = safety_rule_has_threshold(rule);
+        let mut status = SafetyRuleStatusKind::Bound;
+        let mut reason: Option<String> = None;
+
+        if has_threshold {
+            status = SafetyRuleStatusKind::Degraded;
+            reason = Some("模拟量阈值采用区间离散抽象（非连续完备模型）".to_string());
+        }
+
+        if depth_plan.truncated || !outcome.fully_explored {
+            if matches!(status, SafetyRuleStatusKind::Bound) {
+                status = SafetyRuleStatusKind::Degraded;
+                reason = Some(format!(
+                    "有界搜索深度上限导致覆盖不完备（max_depth={}）",
+                    depth_plan.effective_depth
+                ));
+            } else if reason.is_some() {
+                // Preserve stable message ordering for CI; append bounded-depth note.
+                reason = Some(format!(
+                    "{}；有界搜索深度上限（max_depth={}）",
+                    reason.unwrap_or_default(),
+                    depth_plan.effective_depth
+                ));
+            }
+        }
+
+        match status {
+            SafetyRuleStatusKind::Bound => bound_rules += 1,
+            SafetyRuleStatusKind::Degraded => degraded_rules += 1,
+            SafetyRuleStatusKind::Skipped => skipped_rules += 1,
+        }
+
+        rule_statuses.push(SafetyRuleStatus {
+            line,
+            rule: rule_text,
+            status,
+            reason,
+            analog_thresholds,
+        });
+
+        if depth_plan.truncated || !outcome.fully_explored || has_threshold {
             all_complete = false;
         }
-    }
-
-    if depth_plan.truncated {
-        all_complete = false;
     }
 
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
 
-    let has_skipped_thresholds = !skipped_threshold_rules.is_empty();
     let mut warnings = depth_plan.warnings;
-    warnings.extend(skipped_threshold_rules.into_iter());
-    let skipped_rules = constraints.safety.len().saturating_sub(checked_rules);
+    let total_rules = constraints.safety.len();
+    let skipped_rules_count = total_rules.saturating_sub(checked_rules).max(skipped_rules);
 
-    let level = if !has_skipped_thresholds && (checked_rules == 0 || all_complete) {
+    for status in &rule_statuses {
+        if matches!(status.status, SafetyRuleStatusKind::Skipped) {
+            warnings.push(format!(
+                "WARNING: Safety 规则 <input>:{} {} 已跳过：{}",
+                status.line,
+                status.rule,
+                status.reason.as_deref().unwrap_or("无可用建模")
+            ));
+        }
+    }
+
+    let coverage = SafetyCoverage {
+        bound_rules,
+        degraded_rules,
+        skipped_rules: skipped_rules_count,
+        total_rules,
+    };
+
+    let level =
+        if degraded_rules == 0 && skipped_rules_count == 0 && (checked_rules == 0 || all_complete)
+        {
         SafetyProofLevel::Complete
     } else {
         if !all_complete {
@@ -244,7 +350,9 @@ pub fn verify_safety_with_config(
         explored_depth: depth_plan.effective_depth,
         warnings,
         checked_rules,
-        skipped_rules,
+        skipped_rules: skipped_rules_count,
+        coverage,
+        rule_statuses,
     })
 }
 
@@ -874,11 +982,16 @@ fn build_depth_plan(model: &SafetyModel, config: &SafetyConfig) -> DepthPlan {
     }
 }
 
-fn bind_safety_expr_rule(model: &SafetyModel, rule: &crate::ir::SafetyRule) -> Option<RuleBinding> {
-    let (left_device, left_states) = safety_expr_states(model, &rule.left)?;
-    let (right_device, right_states) = safety_expr_states(model, &rule.right)?;
+fn bind_safety_expr_rule_with_reason(
+    model: &SafetyModel,
+    rule: &crate::ir::SafetyRule,
+) -> Result<RuleBinding, String> {
+    let (left_device, left_states) =
+        safety_expr_states_with_reason(model, &rule.left).map_err(|r| format!("左侧：{r}"))?;
+    let (right_device, right_states) =
+        safety_expr_states_with_reason(model, &rule.right).map_err(|r| format!("右侧：{r}"))?;
 
-    Some(RuleBinding {
+    Ok(RuleBinding {
         relation: rule.relation.clone(),
         left_device,
         left_states,
@@ -887,23 +1000,52 @@ fn bind_safety_expr_rule(model: &SafetyModel, rule: &crate::ir::SafetyRule) -> O
     })
 }
 
-fn safety_expr_states(model: &SafetyModel, expr: &SafetyExpr) -> Option<(usize, Vec<usize>)> {
+fn safety_expr_states_with_reason(
+    model: &SafetyModel,
+    expr: &SafetyExpr,
+) -> Result<(usize, Vec<usize>), String> {
     match expr {
         SafetyExpr::State(state_expr) => {
-            let device_id = model.device_index.get(&state_expr.device).copied()?;
+            let device_id = model
+                .device_index
+                .get(&state_expr.device)
+                .copied()
+                .ok_or_else(|| format!("未知设备 {}", state_expr.device))?;
             let state_id = model.device_state_index[device_id]
                 .get(&state_expr.state)
-                .copied()?;
-            Some((device_id, vec![state_id]))
+                .copied()
+                .ok_or_else(|| format!("设备 {} 不存在状态 {}", state_expr.device, state_expr.state))?;
+            Ok((device_id, vec![state_id]))
         }
         SafetyExpr::Threshold {
             device,
             operator,
             value,
         } => {
-            let device_id = model.device_index.get(device).copied()?;
-            let states = threshold_states_for_expr(model, device_id, operator, value)?;
-            Some((device_id, states))
+            let device_id = model
+                .device_index
+                .get(device)
+                .copied()
+                .ok_or_else(|| format!("未知设备 {device}"))?;
+            let domain = model
+                .devices
+                .get(device_id)
+                .ok_or_else(|| format!("内部错误：设备 {device} 未注册"))?;
+            if !domain.is_analog {
+                return Err(format!("设备 {device} 非模拟量设备，无法进行阈值建模"));
+            }
+            if domain.region_bounds.is_none() {
+                return Err(format!("设备 {device} 缺少 range，无法进行区间离散建模"));
+            }
+            if comparison_op_from_str(operator).is_none() {
+                return Err(format!("不支持的比较运算符 {operator}"));
+            }
+            if value.parse::<f64>().is_err() {
+                return Err(format!("阈值值无法解析为数字：{value}"));
+            }
+            let states = threshold_states_for_expr(model, device_id, operator, value)
+                .ok_or_else(|| format!("无法将阈值表达式映射到离散区间：{device} {operator} {value}"))?;
+            Ok((device_id, states))
         }
     }
 }
@@ -976,6 +1118,62 @@ fn safety_expr_text(expr: &SafetyExpr) -> String {
 fn safety_rule_has_threshold(rule: &crate::ir::SafetyRule) -> bool {
     matches!(rule.left, SafetyExpr::Threshold { .. })
         || matches!(rule.right, SafetyExpr::Threshold { .. })
+}
+
+fn collect_analog_threshold_details(
+    model: &SafetyModel,
+    rule: &crate::ir::SafetyRule,
+) -> Vec<SafetyAnalogThresholdDetail> {
+    let mut out = Vec::new();
+    for expr in [&rule.left, &rule.right] {
+        let SafetyExpr::Threshold {
+            device,
+            operator,
+            value,
+        } = expr
+        else {
+            continue;
+        };
+
+        let Some(device_id) = model.device_index.get(device).copied() else {
+            continue;
+        };
+        let Some(domain) = model.devices.get(device_id) else {
+            continue;
+        };
+        if !domain.is_analog {
+            continue;
+        }
+        let Some(bounds) = domain.region_bounds.as_ref() else {
+            continue;
+        };
+        let split_points = split_points_from_region_bounds(bounds);
+        let hit_intervals = threshold_states_for_expr(model, device_id, operator, value)
+            .map(|states| states.len())
+            .unwrap_or(0);
+        out.push(SafetyAnalogThresholdDetail {
+            expr: safety_expr_text(expr),
+            device: device.clone(),
+            operator: operator.clone(),
+            value: value.clone(),
+            split_points,
+            hit_intervals,
+            total_intervals: bounds.len(),
+        });
+    }
+    out
+}
+
+fn split_points_from_region_bounds(bounds: &[(f64, f64)]) -> Vec<f64> {
+    if bounds.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(bounds.len() + 1);
+    out.push(bounds[0].0);
+    for (_, max) in bounds {
+        out.push(*max);
+    }
+    out
 }
 
 fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> SearchOutcome {
@@ -1178,9 +1376,10 @@ fn z3_sanity_probe() {
 #[cfg(test)]
 mod tests {
     use super::{
-        SafetyConfig, SafetyModel, SafetyProofLevel, analog_state_for_value, verify_safety,
-        verify_safety_with_config,
+        SafetyConfig, SafetyModel, SafetyProofLevel, SafetyRuleStatusKind, analog_state_for_value,
+        verify_safety, verify_safety_with_config,
     };
+    use crate::ir::{SafetyExpr, SafetyRelation, SafetyRule, StateExpr};
     use crate::parser::parse_plc;
     use crate::semantic::{build_constraint_set, build_state_machine};
 
@@ -1617,6 +1816,158 @@ task press:
     }
 
     #[test]
+    fn reports_rule_statuses_and_coverage_for_all_bound_rules() {
+        let source = r#"
+[topology]
+
+device out_a: digital_output
+device out_b: digital_output
+
+[constraints]
+
+safety: out_a.on conflicts_with out_b.on
+safety: out_a.on requires out_a.on
+
+[tasks]
+
+task main:
+    step s1:
+        action: log "tick"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("无动作变更场景不应违反安全约束");
+
+        assert_eq!(report.coverage.total_rules, 2);
+        assert_eq!(report.coverage.bound_rules, 2);
+        assert_eq!(report.coverage.degraded_rules, 0);
+        assert_eq!(report.coverage.skipped_rules, 0);
+        assert_eq!(report.rule_statuses.len(), 2);
+        assert!(report
+            .rule_statuses
+            .iter()
+            .all(|status| matches!(status.status, SafetyRuleStatusKind::Bound)));
+        assert!(report.rule_statuses.iter().all(|s| s.reason.is_none()));
+    }
+
+    #[test]
+    fn reports_rule_statuses_and_coverage_with_skipped_rule() {
+        let source = r#"
+[topology]
+
+device out_a: digital_output
+device out_b: digital_output
+
+[constraints]
+
+safety: out_a.on conflicts_with out_b.on
+
+[tasks]
+
+task main:
+    step s1:
+        action: log "tick"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let mut constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        constraints.safety.push(SafetyRule {
+            left: SafetyExpr::State(StateExpr {
+                device: "unknown_device".to_string(),
+                state: "on".to_string(),
+            }),
+            relation: SafetyRelation::ConflictsWith,
+            right: SafetyExpr::State(StateExpr {
+                device: "out_a".to_string(),
+                state: "on".to_string(),
+            }),
+            reason: None,
+        });
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("跳过绑定失败规则时应仍返回可用安全报告");
+
+        assert_eq!(report.coverage.total_rules, 2);
+        assert_eq!(report.coverage.bound_rules, 1);
+        assert_eq!(report.coverage.skipped_rules, 1);
+        assert!(report
+            .rule_statuses
+            .iter()
+            .any(|status| matches!(status.status, SafetyRuleStatusKind::Skipped)));
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("已跳过")),
+            "跳过规则时应输出可读告警"
+        );
+    }
+
+    #[test]
+    fn reports_rule_statuses_and_coverage_when_all_rules_skipped() {
+        let source = r#"
+[topology]
+
+device out_a: digital_output
+
+[constraints]
+
+[tasks]
+
+task main:
+    step s1:
+        action: log "tick"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let mut constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        constraints.safety.push(SafetyRule {
+            left: SafetyExpr::State(StateExpr {
+                device: "unknown_device".to_string(),
+                state: "on".to_string(),
+            }),
+            relation: SafetyRelation::ConflictsWith,
+            right: SafetyExpr::State(StateExpr {
+                device: "out_a".to_string(),
+                state: "on".to_string(),
+            }),
+            reason: None,
+        });
+        constraints.safety.push(SafetyRule {
+            left: SafetyExpr::State(StateExpr {
+                device: "unknown_device_2".to_string(),
+                state: "on".to_string(),
+            }),
+            relation: SafetyRelation::Requires,
+            right: SafetyExpr::State(StateExpr {
+                device: "out_a".to_string(),
+                state: "on".to_string(),
+            }),
+            reason: None,
+        });
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("全部规则跳过时仍应返回可用安全报告");
+
+        assert_eq!(report.coverage.total_rules, 2);
+        assert_eq!(report.coverage.bound_rules, 0);
+        assert_eq!(report.coverage.degraded_rules, 0);
+        assert_eq!(report.coverage.skipped_rules, 2);
+        assert!(report
+            .rule_statuses
+            .iter()
+            .all(|status| matches!(status.status, SafetyRuleStatusKind::Skipped)));
+    }
+
+    #[test]
     fn handles_and_or_wait_guards_in_bmc_state_exploration() {
         let source = r#"
 [topology]
@@ -1731,6 +2082,50 @@ task demo:
             ),
             "阈值规则纳入建模后应产生有效证明等级"
         );
+    }
+
+    #[test]
+    fn reports_analog_threshold_split_points_and_hit_intervals() {
+        let source = r#"
+[topology]
+
+device pressure_sensor: analog_input { range: 0..100, unit: "bar" }
+
+[constraints]
+
+safety: pressure_sensor > 50 conflicts_with pressure_sensor < 10
+
+[tasks]
+
+task main:
+    step s1:
+        action: log "tick"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("含模拟量阈值规则的场景应返回可用 safety 结果");
+
+        assert_eq!(report.rule_statuses.len(), 1);
+        let status = &report.rule_statuses[0];
+        assert!(matches!(status.status, SafetyRuleStatusKind::Degraded));
+        assert!(
+            status
+                .reason
+                .as_deref()
+                .unwrap_or("")
+                .contains("区间离散"),
+            "阈值抽象应标注为降级原因"
+        );
+        assert_eq!(status.analog_thresholds.len(), 2);
+        for detail in &status.analog_thresholds {
+            assert_eq!(detail.split_points, vec![0.0, 10.0, 50.0, 100.0]);
+            assert_eq!(detail.total_intervals, 3);
+            assert_eq!(detail.hit_intervals, 1);
+        }
     }
 
     #[test]

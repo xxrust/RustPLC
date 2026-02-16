@@ -78,6 +78,14 @@ task main:
         report["verification"]["safety"]["checked_rules"].is_number(),
         "checked_rules should be numeric"
     );
+    assert!(
+        report["verification"]["safety"]["coverage"].is_object(),
+        "safety should include coverage object"
+    );
+    assert!(
+        report["verification"]["safety"]["rule_statuses"].is_array(),
+        "safety should include rule_statuses array"
+    );
     assert!(report["verification"]["safety"]["warnings"].is_array());
 
     assert!(report["verification"]["liveness"]["warnings"].is_array());

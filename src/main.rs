@@ -2395,6 +2395,13 @@ fn print_success_summary(summary: &VerificationSummary) {
         "  - Safety: {}（深度 {}）",
         summary.safety.level, summary.safety.explored_depth
     );
+    eprintln!(
+        "    覆盖: bound {}/{}，degraded {}，skipped {}",
+        summary.safety.coverage.bound_rules,
+        summary.safety.coverage.total_rules,
+        summary.safety.coverage.degraded_rules,
+        summary.safety.coverage.skipped_rules
+    );
 
     for warning in &summary.safety.warnings {
         eprintln!(

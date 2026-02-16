@@ -8,6 +8,7 @@
 - Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
 - For human-friendly YAML parse errors, use `serde_path_to_error` so errors include a field path (e.g., `inputs[0].set.digital_inputs`).
 - `serde_yaml` enum representations can be surprising (it expects YAML tags like `!Variant`); for author-friendly scenario files prefer struct-shaped keys like `faults: - sensor_stuck: { at_ms, target, value }`.
+- To unit-test verifier behavior that semantic validation would normally reject (e.g., "skipped rule binding"), build constraints normally and then mutate `ConstraintSet` inside the test.
 - `src/runtime_bridge.rs` builds `runtime-core::Program<'static>` by leaking boxed slices/strings (`Box::leak`) to keep the runtime API simple for now; treat this as OK for CLI/tests but avoid in long-lived processes.
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
 - CLI integration tests in this repo should invoke the compiled binary via `env!("CARGO_BIN_EXE_rust_plc")` and verify artifacts on disk.
@@ -534,4 +535,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Prefer a single CLI subcommand (like `no-board-gate`) that writes all artifacts to an output dir and fails based on a structured diff report, so CI can always collect evidence.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
     - `no-board-gate` requires `tick_ms` to match between the SIL and board scenarios; otherwise traces are not meaningfully comparable.
+---
+
+## [2026-02-17 00:45:30 CST] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended safety verification output with per-rule status (`bound|degraded|skipped`) including a stable `reason`, plus a coverage summary (`bound/degraded/skipped/total`).
+  - For analog-threshold rules, emitted threshold abstraction details: split points from regionization and hit/total interval counts.
+  - Printed safety coverage in the CLI stderr summary and documented the new fields in the verification report contract.
+  - Added unit tests covering all-bound, partial-skip, and all-skip rule binding scenarios, plus analog threshold detail stability.
+- Files changed
+  - `src/verification/safety.rs`, `src/verification/mod.rs`, `src/main.rs`, `tests/verification_report.rs`, `docs/prd_clarifications.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Treat "degraded" as a first-class concept distinct from "skipped" so CI/reporting can separate bounded-depth limits from modeling gaps.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Many invalid safety rules are rejected in semantic analysis; unit tests that need binding failures must inject bad rules post-`build_constraint_set()`.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Threshold regionization uses `[min, ...threshold_values..., max]` split points, so the report can surface abstraction granularity deterministically.
 ---

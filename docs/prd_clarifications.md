@@ -114,3 +114,25 @@
   - `RUST_PLC_BUDGET_MAX_PARALLEL_BRANCHES`
   - `RUST_PLC_BUDGET_MAX_RACE_BRANCHES`
   - `RUST_PLC_BUDGET_WARN_ON_SAME_TICK_CYCLE`
+
+### Safety 覆盖透明化（US-007）
+
+`verification.safety` 现在包含可审计的覆盖信息，便于区分“完备绑定”与“有界/降级/跳过”：
+
+- `coverage`：
+  - `bound_rules`
+  - `degraded_rules`
+  - `skipped_rules`
+  - `total_rules`
+- `rule_statuses[]`（逐条规则）：
+  - `line`
+  - `rule`
+  - `status`：`bound | degraded | skipped`
+  - `reason`（可选）
+  - `analog_thresholds[]`（仅阈值规则）：
+    - `expr` / `device` / `operator` / `value`
+    - `split_points`（区间切分点）
+    - `hit_intervals`
+    - `total_intervals`
+
+CLI 文本摘要也会输出覆盖汇总：`bound/total`、`degraded`、`skipped`，用于快速审阅验证边界。

@@ -30,16 +30,18 @@ pub struct CheckerSummary {
     pub skipped_rules: usize,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SafetySummary {
     pub level: String,
     pub explored_depth: usize,
     pub warnings: Vec<WarningEntry>,
     pub checked_rules: usize,
     pub skipped_rules: usize,
+    pub coverage: safety::SafetyCoverage,
+    pub rule_statuses: Vec<safety::SafetyRuleStatus>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct VerificationSummary {
     pub safety: SafetySummary,
     pub liveness: CheckerSummary,
@@ -96,6 +98,8 @@ pub fn verify_all(
                     .collect(),
                 checked_rules: report.checked_rules,
                 skipped_rules: report.skipped_rules,
+                coverage: report.coverage,
+                rule_statuses: report.rule_statuses,
             }
         }
         Err(diagnostics) => {
@@ -113,6 +117,13 @@ pub fn verify_all(
                 warnings: Vec::new(),
                 checked_rules: 0,
                 skipped_rules: constraints.safety.len(),
+                coverage: safety::SafetyCoverage {
+                    bound_rules: 0,
+                    degraded_rules: 0,
+                    skipped_rules: constraints.safety.len(),
+                    total_rules: constraints.safety.len(),
+                },
+                rule_statuses: Vec::new(),
             }
         }
     };
