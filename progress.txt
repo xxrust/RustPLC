@@ -7,6 +7,7 @@
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
 - For reusable `.plc` templates meant to run via `runtime_bridge`, include explicit physical IO devices (`X<N>`, `Y<N>`) plus logical devices connected via `connected_to`, so IO IDs resolve deterministically.
+- For CLI-driven docs, add a doc consistency test that checks required commands are present both in the markdown playbook and in `rust_plc` usage output.
 - For `crates/sim` plant-style dynamics, keep the plant as a deterministic tick-step that *returns* input updates, and call it from `SimIo::advance_tick()` (after applying scenario inputs) to avoid borrow-checker pitfalls with `&mut self` callbacks.
 - For discrete dead-time models, use a fixed-length FIFO with `delay_ticks = ceil(dead_time_ms / tick_ms)` so response timing stays deterministic across runs.
 - Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
@@ -625,4 +626,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - For reusable .plc templates, always include explicit physical IO devices X<N>, Y<N> plus logical devices connected via connected_to so runtime_bridge can deterministically resolve DigitalInputId/DigitalOutputId.
   - Gotchas encountered (e.g., do not forget to update Z when changing W)
     - Adding a new CLI subcommand requires updating both the main dispatch in main() and print_usage(); integration tests should invoke it via env!(CARGO_BIN_EXE_rust_plc) and assert exit behavior for both warn and error modes.
+---
+## [2026-02-17 06:36:45 CST] - US-012
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added No-Board Playbook documentation covering compile/verify -> sim (SIL) -> virtual-board -> trace-diff -> release-bundle, including input/output artifacts for each step.
+  - Linked the playbook from README for discoverability.
+  - Added a doc consistency integration test that asserts the playbook mentions required commands and that those subcommands exist in current CLI usage output.
+- Files changed
+  - docs/no_board_playbook.md, README.md, tests/no_board_playbook_doc.rs, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., this codebase uses X for Y)
+    - For delivery docs, prefer listing concrete artifact paths (report/trace/log/manifest) so CI gates can be reproduced locally without guesswork.
+  - Gotchas encountered (e.g., do not forget to update Z when changing W)
+    - rust_plc usage text is printed to stderr; doc-consistency tests should capture stderr (not stdout) when checking command availability.
 ---

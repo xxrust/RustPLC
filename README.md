@@ -128,6 +128,7 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
 ```
 
 顺控恢复模板与关键 wait lint 见：[`docs/recovery_templates_sequence_lint.md`](docs/recovery_templates_sequence_lint.md)。
+无开发板完整交付流程见：[`docs/no_board_playbook.md`](docs/no_board_playbook.md)。
 
 ## 📚 详细文档
 
