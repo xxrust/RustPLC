@@ -117,6 +117,7 @@ fn cli_build_rp2040_emits_expected_artifacts() {
     let iomap = fs::read_to_string(&iomap_path).expect("read io map");
     assert!(iomap.contains("[digital_inputs]"));
     assert!(iomap.contains("[digital_outputs]"));
+    assert!(iomap.contains("[analog_outputs]"));
 }
 
 #[test]

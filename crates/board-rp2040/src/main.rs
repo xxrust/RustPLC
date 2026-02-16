@@ -103,7 +103,7 @@ mod firmware {
         di: [Option<Pin<DynPinId, FunctionSioInput, PullUp>>; io_map::MAX_DI],
         do_: [Option<Pin<DynPinId, FunctionSioOutput, PullDown>>; io_map::MAX_DO],
         ai: [f32; 8],
-        ao: [f32; 8],
+        ao: [f32; io_map::MAX_AO],
     }
 
     impl PicoIo {
@@ -151,7 +151,7 @@ mod firmware {
                 di,
                 do_,
                 ai: [0.0; 8],
-                ao: [0.0; 8],
+                ao: [0.0; io_map::MAX_AO],
             }
         }
     }

@@ -126,3 +126,48 @@ fn cli_trace_diff_reports_first_mismatch() {
     );
 }
 
+#[test]
+fn cli_trace_diff_can_fail_on_mismatch_for_regression_gate() {
+    let base = std::env::temp_dir().join(format!(
+        "rust_plc_trace_diff_gate_test_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock works")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&base).expect("create temp dir");
+
+    let sil = base.join("sil.jsonl");
+    let board = base.join("board.jsonl");
+    let out = base.join("report.json");
+
+    fs::write(
+        &sil,
+        "{\"tick\":0,\"task\":0,\"from_step\":0,\"to_step\":1,\"reason\":\"action\"}\n",
+    )
+    .expect("write sil");
+    fs::write(
+        &board,
+        "{\"tick\":0,\"task\":0,\"from_step\":0,\"to_step\":2,\"reason\":\"action\",\"timestamp_ms\":0}\n",
+    )
+    .expect("write board");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("trace-diff")
+        .arg("--sil")
+        .arg(&sil)
+        .arg("--board")
+        .arg(&board)
+        .arg("--out")
+        .arg(&out)
+        .arg("--fail-on-mismatch")
+        .output()
+        .expect("run trace-diff");
+
+    assert!(
+        !output.status.success(),
+        "trace-diff should fail when --fail-on-mismatch is set and traces differ"
+    );
+    assert!(out.exists(), "report should still be written on mismatch");
+}
