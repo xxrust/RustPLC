@@ -9,15 +9,34 @@ use serde::Serialize;
 use std::fmt;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WarningLevel {
+    Error,
+    Warn,
+    Info,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct WarningEntry {
+    pub level: WarningLevel,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CheckerSummary {
     pub level: String,
+    pub warnings: Vec<WarningEntry>,
+    pub checked_rules: usize,
+    pub skipped_rules: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SafetySummary {
     pub level: String,
     pub explored_depth: usize,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<WarningEntry>,
+    pub checked_rules: usize,
+    pub skipped_rules: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -70,7 +89,13 @@ pub fn verify_all(
             SafetySummary {
                 level,
                 explored_depth: report.explored_depth,
-                warnings: report.warnings,
+                warnings: report
+                    .warnings
+                    .into_iter()
+                    .map(|warning| warning_entry(&warning))
+                    .collect(),
+                checked_rules: report.checked_rules,
+                skipped_rules: report.skipped_rules,
             }
         }
         Err(diagnostics) => {
@@ -86,6 +111,8 @@ pub fn verify_all(
                 level: "失败".to_string(),
                 explored_depth: 0,
                 warnings: Vec::new(),
+                checked_rules: 0,
+                skipped_rules: constraints.safety.len(),
             }
         }
     };
@@ -140,14 +167,49 @@ pub fn verify_all(
         safety: safety_summary,
         liveness: CheckerSummary {
             level: "通过".to_string(),
+            warnings: Vec::new(),
+            checked_rules: state_machine.states.len().max(1),
+            skipped_rules: 0,
         },
         timing: CheckerSummary {
             level: "通过".to_string(),
+            warnings: Vec::new(),
+            checked_rules: constraints.timing.len(),
+            skipped_rules: 0,
         },
         causality: CheckerSummary {
             level: "通过".to_string(),
+            warnings: Vec::new(),
+            checked_rules: constraints.causality.len(),
+            skipped_rules: 0,
         },
     })
+}
+
+fn warning_entry(raw: &str) -> WarningEntry {
+    let trimmed = raw.trim();
+    if let Some(message) = trimmed.strip_prefix("ERROR:").map(str::trim) {
+        return WarningEntry {
+            level: WarningLevel::Error,
+            message: message.to_string(),
+        };
+    }
+    if let Some(message) = trimmed.strip_prefix("WARNING:").map(str::trim) {
+        return WarningEntry {
+            level: WarningLevel::Warn,
+            message: message.to_string(),
+        };
+    }
+    if let Some(message) = trimmed.strip_prefix("INFO:").map(str::trim) {
+        return WarningEntry {
+            level: WarningLevel::Info,
+            message: message.to_string(),
+        };
+    }
+    WarningEntry {
+        level: WarningLevel::Info,
+        message: trimmed.to_string(),
+    }
 }
 
 fn timing_suggestion(constraint: &str) -> String {

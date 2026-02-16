@@ -11,6 +11,7 @@
 - `src/runtime_bridge.rs` builds `runtime-core::Program<'static>` by leaking boxed slices/strings (`Box::leak`) to keep the runtime API simple for now; treat this as OK for CLI/tests but avoid in long-lived processes.
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
 - CLI integration tests in this repo should invoke the compiled binary via `env!("CARGO_BIN_EXE_rust_plc")` and verify artifacts on disk.
+- The main `<file.plc>` CLI now writes a structured verification report to `out/<stem>.verification_report.json` by default; in tests prefer `--report <temp-file>` to avoid shared output collisions.
 - Batch SIL regress runs live in `rust_plc::sim_regress`: it scans `.plc`/scenario YAMLs recursively, writes per-case `trace.jsonl`/`report.json` under `out/sim-regress/case_XXXX`, and emits a summary JSON.
 - For embedded workspace crates, keep a host-stub `main()` behind `cfg(not(target_os = "none"))` so `cargo test --workspace` stays green while firmware code is `cfg(target_os = "none")`.
 
@@ -445,4 +446,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - `scripts/pil_trace_baseline_suite.sh --runner cat --out-root out/pil_baselines_verify_cat`
   - `scripts/calibration_profile.sh --plc examples/rp2040_end_to_end/pressure_station.plc --profile ci_smoke --out-root out/calibration_profiles_test --force`
   - `python3 scripts/trace_diff_dashboard.py --diff out/pil_baselines_verify_cat/case_action_goto/diff_report.json --out out/dashboard_test.html --title Smoke --sil-trace examples/trace_baselines/case_action_goto/sil_trace.jsonl --board-trace out/pil_baselines_verify_cat/case_action_goto/board_trace.jsonl --board-log out/pil_baselines_verify_cat/case_action_goto/board.log`
+---
+
+## [2026-02-16 22:20:54 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended verifier summaries to include `checked_rules`/`skipped_rules` and structured `warnings` with severity (`error|warn|info`).
+  - The main `rust_plc <file.plc>` command now writes a structured verification report (default `out/<stem>.verification_report.json`, override via `--report <file>`), and prints warning severities in the stderr summary.
+- Files changed
+  - `src/verification/mod.rs`, `src/verification/safety.rs`, `src/main.rs`, `tests/verification_report.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Prefer structured warnings (`{level,message}`) over free-form strings so CI can later gate on warnings without brittle string matching.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Liveness rejects SCC cycles without timeout or `allow_indefinite_wait`; fixtures that intentionally create loops should add an `allow_indefinite_wait` wait edge.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - In CLI tests, pass `--report <temp-file>` to avoid shared `out/` collisions between concurrent test runs.
 ---

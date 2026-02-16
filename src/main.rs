@@ -5,7 +5,7 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program,
 };
-use rust_plc::verification::{VerificationSummary, verify_all};
+use rust_plc::verification::{VerificationSummary, WarningLevel, verify_all};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::env;
@@ -27,6 +27,15 @@ struct IrBundle {
     constraints: ConstraintSet,
     timing_model: TimingModel,
     verification: VerificationSummary,
+}
+
+#[derive(Debug, Serialize)]
+struct VerificationReportFile<'a> {
+    schema_version: u32,
+    tool_version: &'a str,
+    source_plc: &'a str,
+    generated_at: &'a str,
+    verification: &'a VerificationSummary,
 }
 
 static SIM_STEP1_ACTIONS: [Action; 1] = [Action::SetDigital {
@@ -135,10 +144,27 @@ fn main() {
     }
 
     let path = first;
-    if args.next().is_some() {
-        print_usage(&program);
-        std::process::exit(1);
-    };
+    let mut report_path: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--report" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --report <file>");
+                    std::process::exit(1);
+                });
+                report_path = Some(PathBuf::from(value));
+            }
+            "-h" | "--help" => {
+                print_usage(&program);
+                std::process::exit(0);
+            }
+            other => {
+                eprintln!("Unknown argument: {other}");
+                print_usage(&program);
+                std::process::exit(1);
+            }
+        }
+    }
 
     if Path::new(&path).extension().and_then(|ext| ext.to_str()) != Some("plc") {
         eprintln!("Expected a .plc file path, got: {path}");
@@ -166,6 +192,13 @@ fn main() {
         }
     };
 
+    let report_path =
+        report_path.unwrap_or_else(|| default_verification_report_path(Path::new(&path)));
+    if let Err(err) = write_verification_report(&path, &report_path, &ir_bundle.verification) {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
+
     print_success_summary(&ir_bundle.verification);
 
     match serde_json::to_string_pretty(&ir_bundle) {
@@ -179,7 +212,7 @@ fn main() {
 
 fn print_usage(program: &str) {
     eprintln!("Usage:");
-    eprintln!("  {program} <file.plc>");
+    eprintln!("  {program} <file.plc> [--report <verification_report.json>]");
     eprintln!(
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
     );
@@ -1539,10 +1572,63 @@ fn print_success_summary(summary: &VerificationSummary) {
     );
 
     for warning in &summary.safety.warnings {
-        eprintln!("    {warning}");
+        eprintln!(
+            "    [{}] {}",
+            warning_level_label(&warning.level),
+            warning.message
+        );
     }
 
     eprintln!("  - Liveness: {}", summary.liveness.level);
     eprintln!("  - Timing: {}", summary.timing.level);
     eprintln!("  - Causality: {}", summary.causality.level);
+}
+
+fn warning_level_label(level: &WarningLevel) -> &'static str {
+    match level {
+        WarningLevel::Error => "ERROR",
+        WarningLevel::Warn => "WARN",
+        WarningLevel::Info => "INFO",
+    }
+}
+
+fn default_verification_report_path(plc_path: &Path) -> PathBuf {
+    let stem = plc_path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("input");
+    PathBuf::from("out").join(format!("{stem}.verification_report.json"))
+}
+
+fn write_verification_report(
+    source_plc: &str,
+    report_path: &Path,
+    verification: &VerificationSummary,
+) -> Result<(), String> {
+    if let Some(parent) = report_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create report directory {parent:?}: {err}"))?;
+        }
+    }
+
+    let generated_at = time::OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string());
+    let report = VerificationReportFile {
+        schema_version: 1,
+        tool_version: env!("CARGO_PKG_VERSION"),
+        source_plc,
+        generated_at: &generated_at,
+        verification,
+    };
+
+    let mut report_json = serde_json::to_string_pretty(&report)
+        .map_err(|err| format!("Failed to serialize verification report JSON: {err}"))?;
+    report_json.push('\n');
+    fs::write(report_path, report_json)
+        .map_err(|err| format!("Failed to write verification report {report_path:?}: {err}"))?;
+
+    Ok(())
 }

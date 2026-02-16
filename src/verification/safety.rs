@@ -33,6 +33,8 @@ pub struct SafetyReport {
     pub level: SafetyProofLevel,
     pub explored_depth: usize,
     pub warnings: Vec<String>,
+    pub checked_rules: usize,
+    pub skipped_rules: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,6 +225,7 @@ pub fn verify_safety_with_config(
     let has_skipped_thresholds = !skipped_threshold_rules.is_empty();
     let mut warnings = depth_plan.warnings;
     warnings.extend(skipped_threshold_rules.into_iter());
+    let skipped_rules = constraints.safety.len().saturating_sub(checked_rules);
 
     let level = if !has_skipped_thresholds && (checked_rules == 0 || all_complete) {
         SafetyProofLevel::Complete
@@ -240,6 +243,8 @@ pub fn verify_safety_with_config(
         level,
         explored_depth: depth_plan.effective_depth,
         warnings,
+        checked_rules,
+        skipped_rules,
     })
 }
 
