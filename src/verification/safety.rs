@@ -629,6 +629,9 @@ fn collect_threshold_values_from_wait(
         if let LiteralValue::Number(value) = &condition.right {
             add_threshold_value(values_by_device, &condition.left, *value);
         }
+        if let LiteralValue::Measured(measured) = &condition.right {
+            add_threshold_value(values_by_device, &condition.left, measured.value);
+        }
     }
 }
 

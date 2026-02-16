@@ -252,15 +252,20 @@ fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
             let mut device = None;
             let mut operator = None;
             let mut value = None;
+            let mut unit = None;
             for part in inner.into_inner() {
                 match part.as_rule() {
                     Rule::identifier => device = Some(part.as_str().to_string()),
                     Rule::comparison_operator => operator = Some(parse_comparison_operator(part)?),
                     Rule::number => {
-                        value =
-                            Some(part.as_str().parse::<f64>().map_err(|_| {
-                                PlcError::parse(line, "analog_condition 数值解析失败")
-                            })?);
+                        value = Some(part.as_str().parse::<f64>().map_err(|_| {
+                            PlcError::parse(line, "analog_condition 数值解析失败")
+                        })?);
+                    }
+                    Rule::measured_value => {
+                        let measured = parse_measured_value(part)?;
+                        value = Some(measured.value);
+                        unit = Some(measured.unit);
                     }
                     _ => {}
                 }
@@ -271,6 +276,7 @@ fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
                 operator: operator
                     .ok_or_else(|| PlcError::parse(line, "analog_condition 缺少比较符"))?,
                 value: value.ok_or_else(|| PlcError::parse(line, "analog_condition 缺少阈值"))?,
+                unit,
             })
         }
         Rule::state_reference => Ok(SafetyOperand::State(parse_state_reference(inner)?)),
@@ -723,6 +729,7 @@ fn parse_condition_value(pair: Pair<Rule>) -> Result<LiteralValue, PlcError> {
 
     match value.as_rule() {
         Rule::boolean_value => Ok(LiteralValue::Boolean(value.as_str() == "true")),
+        Rule::measured_value => Ok(LiteralValue::Measured(parse_measured_value(value)?)),
         Rule::number => {
             let parsed = value
                 .as_str()

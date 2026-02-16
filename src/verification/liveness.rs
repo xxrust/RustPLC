@@ -494,6 +494,7 @@ fn literal_to_text(literal: &LiteralValue) -> String {
     match literal {
         LiteralValue::Boolean(value) => value.to_string(),
         LiteralValue::Number(value) => value.to_string(),
+        LiteralValue::Measured(measured) => format!("{}{}", measured.value, measured.unit),
         LiteralValue::String(value) => format!("\"{value}\""),
         LiteralValue::State(state) => format!("{}.{}", state.device, state.state),
     }

@@ -68,7 +68,7 @@ topology_section = { section_topology ~ device_declaration* }
 topology_file = { SOI ~ topology_section ~ EOI }
 
 safety_relation = { "conflicts_with" | "requires" }
-analog_condition = { identifier ~ comparison_operator ~ number }
+analog_condition = { identifier ~ comparison_operator ~ (measured_value | number) }
 safety_operand = { analog_condition | state_reference }
 safety_constraint = {
     "safety" ~ ":" ~ safety_operand ~ safety_relation ~ safety_operand ~ reason_clause?
@@ -113,6 +113,7 @@ condition_operand = { state_reference | identifier }
 comparison_operator = { ">=" | "<=" | "==" | "!=" | ">" | "<" }
 condition_value = {
     boolean_value
+    | measured_value
     | number
     | string_literal
     | state_reference

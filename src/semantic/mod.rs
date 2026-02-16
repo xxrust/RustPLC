@@ -338,6 +338,14 @@ fn collect_threshold_values_from_statements(
                                 .push(*value);
                         }
                     }
+                    if let LiteralValue::Measured(measured) = &condition.right {
+                        if let Some(device_name) = wait_operand_device_name(&condition.left) {
+                            values_by_device
+                                .entry(device_name.to_string())
+                                .or_default()
+                                .push(measured.value);
+                        }
+                    }
                 }
             }
             StepStatement::Repeat { body, .. } => {
@@ -446,6 +454,7 @@ pub fn build_constraint_set_from_ast(
     let known_states = collect_known_states(topology, &device_kinds);
     let task_steps = collect_task_steps(tasks);
     let device_ranges = collect_device_ranges(topology);
+    let device_units = collect_device_units(topology);
 
     for safety in &constraints.safety {
         validate_safety_operand(
@@ -455,6 +464,7 @@ pub fn build_constraint_set_from_ast(
             &device_kinds,
             &known_states,
             &device_ranges,
+            &device_units,
             &mut errors,
         );
         validate_safety_operand(
@@ -464,6 +474,7 @@ pub fn build_constraint_set_from_ast(
             &device_kinds,
             &known_states,
             &device_ranges,
+            &device_units,
             &mut errors,
         );
 
@@ -514,6 +525,7 @@ pub fn build_constraint_set_from_ast(
                 step.line.max(1),
                 &device_kinds,
                 &device_ranges,
+                &device_units,
                 &mut errors,
             );
             validate_analog_actions_in_statements(
@@ -1109,11 +1121,24 @@ fn collect_device_ranges(topology: &TopologySection) -> HashMap<String, (f64, f6
         .devices
         .iter()
         .filter_map(|device| {
+            device.attributes.range.as_ref().map(|r| {
+                let (min, max) = if r.min <= r.max { (r.min, r.max) } else { (r.max, r.min) };
+                (device.name.clone(), (min, max))
+            })
+        })
+        .collect()
+}
+
+fn collect_device_units(topology: &TopologySection) -> HashMap<String, String> {
+    topology
+        .devices
+        .iter()
+        .filter_map(|device| {
             device
                 .attributes
-                .range
+                .unit
                 .as_ref()
-                .map(|r| (device.name.clone(), (r.min, r.max)))
+                .map(|unit| (device.name.clone(), unit.clone()))
         })
         .collect()
 }
@@ -1203,6 +1228,7 @@ fn validate_wait_device_references_in_statements(
     line: usize,
     device_kinds: &HashMap<String, DeviceKind>,
     device_ranges: &HashMap<String, (f64, f64)>,
+    device_units: &HashMap<String, String>,
     errors: &mut Vec<PlcError>,
 ) {
     for statement in statements {
@@ -1229,15 +1255,17 @@ fn validate_wait_device_references_in_statements(
                             );
                         }
                     }
-                    if let LiteralValue::Number(value) = &condition.right {
+                    if let Some((value, unit)) = threshold_literal_value_and_unit(&condition.right) {
                         if let Some(device) = wait_operand_device_name(&condition.left) {
                             validate_analog_threshold_comparison(
                                 device,
-                                *value,
+                                value,
+                                unit,
                                 line,
                                 "wait 条件阈值比较",
                                 device_kinds,
                                 device_ranges,
+                                device_units,
                                 errors,
                             );
                         }
@@ -1251,6 +1279,7 @@ fn validate_wait_device_references_in_statements(
                     line,
                     device_kinds,
                     device_ranges,
+                    device_units,
                     errors,
                 );
             }
@@ -1261,6 +1290,7 @@ fn validate_wait_device_references_in_statements(
                         line,
                         device_kinds,
                         device_ranges,
+                        device_units,
                         errors,
                     );
                 }
@@ -1272,6 +1302,7 @@ fn validate_wait_device_references_in_statements(
                         line,
                         device_kinds,
                         device_ranges,
+                        device_units,
                         errors,
                     );
                 }
@@ -1328,21 +1359,29 @@ fn validate_safety_operand(
     device_kinds: &HashMap<String, DeviceKind>,
     known_states: &HashMap<String, HashSet<String>>,
     device_ranges: &HashMap<String, (f64, f64)>,
+    device_units: &HashMap<String, String>,
     errors: &mut Vec<PlcError>,
 ) {
     match operand {
         SafetyOperand::State(state_ref) => {
             validate_state_reference(state_ref, line, source, device_kinds, known_states, errors);
         }
-        SafetyOperand::Threshold { device, value, .. } => {
+        SafetyOperand::Threshold {
+            device,
+            value,
+            unit,
+            ..
+        } => {
             validate_device_reference(device, line, source, device_kinds, errors);
             validate_analog_threshold_comparison(
                 device,
                 *value,
+                unit.as_deref(),
                 line,
                 "safety 阈值比较",
                 device_kinds,
                 device_ranges,
+                device_units,
                 errors,
             );
         }
@@ -1352,10 +1391,12 @@ fn validate_safety_operand(
 fn validate_analog_threshold_comparison(
     device: &str,
     value: f64,
+    value_unit: Option<&str>,
     line: usize,
     source: &str,
     device_kinds: &HashMap<String, DeviceKind>,
     device_ranges: &HashMap<String, (f64, f64)>,
+    device_units: &HashMap<String, String>,
     errors: &mut Vec<PlcError>,
 ) {
     let Some(kind) = device_kinds.get(device) else {
@@ -1382,6 +1423,20 @@ fn validate_analog_threshold_comparison(
         return;
     };
 
+    if let Some(expected_unit) = device_units.get(device) {
+        if let Some(got_unit) = value_unit
+            && got_unit != expected_unit
+        {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!(
+                    "阈值单位不一致：{device} 声明 unit=\"{expected_unit}\"，但比较值使用单位 \"{got_unit}\"",
+                ),
+                "请统一单位（修改 unit 或比较值单位），或移除比较值的单位后缀",
+            ));
+        }
+    }
+
     if value < *min || value > *max {
         errors.push(PlcError::semantic_with_reason(
             line,
@@ -1401,6 +1456,7 @@ fn map_safety_operand(operand: &SafetyOperand) -> SafetyExpr {
             device,
             operator,
             value,
+            unit: _,
         } => SafetyExpr::Threshold {
             device: device.clone(),
             operator: comparison_operator_to_string(operator).to_string(),
@@ -2291,14 +2347,14 @@ fn wait_term_to_expression(
     condition: &ConditionExpression,
     wait_ctx: &WaitExpressionContext,
 ) -> String {
-    if let LiteralValue::Number(value) = &condition.right {
+    if let Some((value, _unit)) = threshold_literal_value_and_unit(&condition.right) {
         if let Some(device_name) = wait_operand_device_name(&condition.left) {
             if let Some(regions) = wait_ctx.analog_input_regions.get(device_name) {
                 let op = comparison_op_from_ast(&condition.operator);
                 let mut matching = Vec::new();
 
                 for (index, (min, max)) in regions.iter().enumerate() {
-                    if region_intersects(op, *value, *min, *max) {
+                    if region_intersects(op, value, *min, *max) {
                         matching.push(index);
                     }
                 }
@@ -2340,8 +2396,17 @@ fn literal_to_expression(literal: &LiteralValue) -> String {
     match literal {
         LiteralValue::Boolean(value) => value.to_string(),
         LiteralValue::Number(value) => value.to_string(),
+        LiteralValue::Measured(measured) => format!("{}{}", measured.value, measured.unit),
         LiteralValue::String(value) => format!("\"{}\"", value),
         LiteralValue::State(state) => format!("{}.{}", state.device, state.state),
+    }
+}
+
+fn threshold_literal_value_and_unit(literal: &LiteralValue) -> Option<(f64, Option<&str>)> {
+    match literal {
+        LiteralValue::Number(value) => Some((*value, None)),
+        LiteralValue::Measured(measured) => Some((measured.value, Some(measured.unit.as_str()))),
+        LiteralValue::Boolean(_) | LiteralValue::String(_) | LiteralValue::State(_) => None,
     }
 }
 
@@ -2900,6 +2965,62 @@ task main:
             rendered.contains("期望 analog_input"),
             "应报告 wait 条件使用非 analog_input 设备"
         );
+    }
+
+    #[test]
+    fn reports_unit_mismatch_for_analog_thresholds() {
+        let input = r#"
+[topology]
+
+device pressure: analog_input { range: 0..10, unit: "bar" }
+device button: digital_input
+
+[constraints]
+
+safety: pressure > 5psi conflicts_with button.on
+
+[tasks]
+
+task main:
+    step check:
+        wait: pressure > 5psi
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let errors = build_constraint_set(&program).expect_err("单位不一致应报错");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("单位不一致") && rendered.contains("bar") && rendered.contains("psi"),
+            "应报告阈值比较单位不一致"
+        );
+    }
+
+    #[test]
+    fn accepts_unit_matched_analog_thresholds() {
+        let input = r#"
+[topology]
+
+device pressure: analog_input { range: 0..10, unit: "bar" }
+device button: digital_input
+
+[constraints]
+
+safety: pressure > 5bar conflicts_with button.on
+
+[tasks]
+
+task main:
+    step check:
+        wait: pressure > 5bar
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let constraints = build_constraint_set(&program).expect("单位一致的阈值比较应通过语义检查");
+        assert_eq!(constraints.safety.len(), 1);
     }
 
     #[test]

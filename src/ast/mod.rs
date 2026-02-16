@@ -110,6 +110,8 @@ pub enum SafetyOperand {
         device: String,
         operator: ComparisonOperator,
         value: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<String>,
     },
 }
 
@@ -254,6 +256,7 @@ pub enum ComparisonOperator {
 pub enum LiteralValue {
     Boolean(bool),
     Number(f64),
+    Measured(MeasuredValue),
     String(String),
     State(StateReference),
 }
