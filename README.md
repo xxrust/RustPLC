@@ -127,6 +127,8 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
   --out out/rp2040 --io-map out/rp2040/io_map.toml --emit-uf2 out/firmware.uf2
 ```
 
+顺控恢复模板与关键 wait lint 见：[`docs/recovery_templates_sequence_lint.md`](docs/recovery_templates_sequence_lint.md)。
+
 ## 📚 详细文档
 
 深度内容请查阅 **[Wiki](https://github.com/xxrust/RustPLC/wiki)**：

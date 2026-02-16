@@ -1,0 +1,64 @@
+[topology]
+
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device Y0: digital_output
+device Y1: digital_output
+device Y2: digital_output
+
+device start_button: digital_input {
+    connected_to: X0
+    debounce: 20ms
+}
+device sensor_extend: digital_input {
+    connected_to: X1
+}
+device maintenance_reset: digital_input {
+    connected_to: X2
+}
+device cyl_extend_cmd: digital_output {
+    connected_to: Y0
+}
+device cyl_retract_cmd: digital_output {
+    connected_to: Y1
+}
+device alarm_light: digital_output {
+    connected_to: Y2
+}
+
+[constraints]
+
+[tasks]
+
+task cycle:
+    step command_extend:
+        action: set cyl_retract_cmd off
+        action: set cyl_extend_cmd on
+    step wait_extend_feedback:
+        wait: sensor_extend == true
+        timeout: 800ms -> goto sensor_stuck_recovery
+    step command_retract:
+        action: set cyl_extend_cmd off
+        action: set cyl_retract_cmd on
+    step settle:
+        delay: 120ms
+    on_complete: goto ready
+
+task sensor_stuck_recovery:
+    step force_safe_state:
+        action: set cyl_extend_cmd off
+        action: set cyl_retract_cmd off
+        action: set alarm_light on
+    step wait_maintenance_reset:
+        wait: maintenance_reset == true
+        allow_indefinite_wait: true
+    step clear_alarm:
+        action: set alarm_light off
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle

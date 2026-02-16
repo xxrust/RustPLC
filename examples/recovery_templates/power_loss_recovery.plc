@@ -1,0 +1,58 @@
+[topology]
+
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device Y0: digital_output
+device Y1: digital_output
+
+device start_button: digital_input {
+    connected_to: X0
+    debounce: 20ms
+}
+device power_ok: digital_input {
+    connected_to: X1
+}
+device station_sensor: digital_input {
+    connected_to: X2
+}
+device conveyor: digital_output {
+    connected_to: Y0
+}
+device alarm_light: digital_output {
+    connected_to: Y1
+}
+
+[constraints]
+
+[tasks]
+
+task cycle:
+    step wait_power:
+        wait: power_ok == true
+        timeout: 200ms -> goto power_loss_recovery
+    step feed_on:
+        action: set conveyor on
+    step wait_station:
+        wait: station_sensor == true
+        timeout: 1200ms -> goto power_loss_recovery
+    step feed_off:
+        action: set conveyor off
+    on_complete: goto ready
+
+task power_loss_recovery:
+    step safe_shutdown:
+        action: set conveyor off
+        action: set alarm_light on
+    step wait_power_restore:
+        wait: power_ok == true
+        timeout: 5000ms -> goto power_loss_recovery
+    step clear_alarm:
+        action: set alarm_light off
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle

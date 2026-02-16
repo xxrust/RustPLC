@@ -16,6 +16,9 @@ use io_traits::{DigitalInputId, DigitalOutputId, Io};
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::io_map::{IoMap, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
+use rust_plc::sequence_lint::{
+    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
+};
 use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -238,6 +241,13 @@ fn main() {
         }
         return;
     }
+    if first == "sequence-lint" {
+        if let Err(msg) = run_sequence_lint_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let path = first;
     let mut report_path: Option<PathBuf> = None;
@@ -420,6 +430,9 @@ fn print_usage(program: &str) {
     );
     eprintln!("  {program} pil-run <file.plc> --scenario <scenario.yaml>");
     eprintln!("  {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>");
+    eprintln!(
+        "  {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]"
+    );
     eprintln!();
     eprintln!("Budget options (also configurable via env vars):");
     eprintln!("  --budget-max-actions-per-transition <n>");
@@ -427,6 +440,75 @@ fn print_usage(program: &str) {
     eprintln!("  --budget-max-parallel-branches <n>");
     eprintln!("  --budget-max-race-branches <n>");
     eprintln!("  --budget-warn-on-same-tick-cycle <true|false>");
+}
+
+fn run_sequence_lint_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!(
+            "Usage: {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]"
+        ));
+    };
+
+    let mut config = SequenceLintConfig::default();
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--critical-wait-level" => {
+                let raw_level = args.next().ok_or_else(|| {
+                    "Missing value for --critical-wait-level <warn|error>".to_string()
+                })?;
+                config.critical_wait_level = raw_level.parse::<LintLevel>()?;
+            }
+            "--critical-wait-exempt" => {
+                let spec = args.next().ok_or_else(|| {
+                    "Missing value for --critical-wait-exempt <task.step|task.*>".to_string()
+                })?;
+                let exemption = CriticalWaitExemption::parse(&spec)
+                    .map_err(|err| format!("Invalid exemption `{spec}`: {err}"))?;
+                config.critical_wait_exemptions.push(exemption);
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]"
+                ));
+            }
+            other => {
+                return Err(format!("Unknown argument for sequence-lint: {other}"));
+            }
+        }
+    }
+
+    let source =
+        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let parsed = parse_plc(&source).map_err(|err| err.to_string())?;
+    let expanded = preprocess_program(&parsed).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+
+    let findings = lint_critical_wait_recovery(&expanded, &config);
+    if findings.is_empty() {
+        eprintln!("sequence-lint: PASS (critical_wait_recovery)");
+        return Ok(());
+    }
+
+    for finding in &findings {
+        eprintln!("{finding}");
+    }
+
+    match config.critical_wait_level {
+        LintLevel::Warn => Ok(()),
+        LintLevel::Error => Err(format!(
+            "sequence-lint failed: {} critical wait finding(s)",
+            findings.len()
+        )),
+    }
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {

@@ -6,6 +6,7 @@
 - In `src/parser/plc.pest`, when `number` and `integer` are both allowed, list `number` before `integer` to avoid `2.0` being partially consumed as `2`.
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
+- For reusable `.plc` templates meant to run via `runtime_bridge`, include explicit physical IO devices (`X<N>`, `Y<N>`) plus logical devices connected via `connected_to`, so IO IDs resolve deterministically.
 - For `crates/sim` plant-style dynamics, keep the plant as a deterministic tick-step that *returns* input updates, and call it from `SimIo::advance_tick()` (after applying scenario inputs) to avoid borrow-checker pitfalls with `&mut self` callbacks.
 - For discrete dead-time models, use a fixed-length FIFO with `delay_ticks = ceil(dead_time_ms / tick_ms)` so response timing stays deterministic across runs.
 - Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
@@ -609,4 +610,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Dead-time needs a tick-aligned FIFO delay; off-by-one in queue length will shift the response start and break regressions.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `sim-pid-kpi` uses the normal compile pipeline (`compile_plc_to_runtime_program`) and then runs a loop-local IO backend, so it doesn't interfere with existing `SimIo` plant/fault semantics.
+---
+## [2026-02-17 06:31:42 CST] - US-011
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added fault recovery template examples for E-stop, power-loss, and sensor-stuck.
+  - Implemented sequence-lint critical wait recovery with configurable warn/error level and per-step/task exemptions.
+  - Added docs defining critical-path waits and exemption guidance.
+  - Added integration tests ensuring templates compile and lint behavior is stable.
+- Files changed
+  - src/sequence_lint.rs, src/lib.rs, src/main.rs, examples/recovery_templates/*.plc, docs/recovery_templates_sequence_lint.md, README.md, tests/sequence_lint.rs, tests/recovery_templates.rs, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., this codebase uses X for Y)
+    - For reusable .plc templates, always include explicit physical IO devices X<N>, Y<N> plus logical devices connected via connected_to so runtime_bridge can deterministically resolve DigitalInputId/DigitalOutputId.
+  - Gotchas encountered (e.g., do not forget to update Z when changing W)
+    - Adding a new CLI subcommand requires updating both the main dispatch in main() and print_usage(); integration tests should invoke it via env!(CARGO_BIN_EXE_rust_plc) and assert exit behavior for both warn and error modes.
 ---
