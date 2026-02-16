@@ -47,6 +47,8 @@ task main:
 task fault:
     step retract_fault:
         action: retract cyl_A
+    step alarm:
+        action: log "fault timeout"
     on_complete: goto done
 
 task done:
@@ -94,6 +96,7 @@ fn cli_build_rp2040_emits_expected_artifacts() {
     let generated = fs::read_to_string(&generated_path).expect("read generated");
     assert!(generated.contains("pub mod generated"));
     assert!(generated.contains("pub static PROGRAM"));
+    assert!(generated.contains("Action::Log"));
 
     let meta = fs::read_to_string(&meta_path).expect("read meta");
     let v: serde_json::Value = serde_json::from_str(&meta).expect("meta should be valid JSON");
@@ -115,4 +118,3 @@ fn cli_build_rp2040_emits_expected_artifacts() {
     assert!(iomap.contains("[digital_inputs]"));
     assert!(iomap.contains("[digital_outputs]"));
 }
-

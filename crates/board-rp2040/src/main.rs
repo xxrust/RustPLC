@@ -237,17 +237,31 @@ mod firmware {
         loop {
             let tick = io.tick().0;
             defmt::info!("TICK tick={} ts_ms={}", tick, tick.saturating_mul(TICK_MS));
-            rt.tick_with_trace(&mut io, |e| {
-                defmt::info!(
-                    "TRACE tick={} task={} from={} to={} reason={} ts_ms={}",
-                    e.tick.0,
-                    e.task,
-                    e.from.0,
-                    e.to.0,
-                    reason_str(e.reason),
-                    e.tick.0.saturating_mul(TICK_MS)
-                );
-            })
+            rt.tick_with_trace_and_logs(
+                &mut io,
+                |e| {
+                    defmt::info!(
+                        "TRACE tick={} task={} from={} to={} reason={} ts_ms={}",
+                        e.tick.0,
+                        e.task,
+                        e.from.0,
+                        e.to.0,
+                        reason_str(e.reason),
+                        e.tick.0.saturating_mul(TICK_MS)
+                    );
+                },
+                |log| {
+                    defmt::info!(
+                        "LOG tick={} task={} step={} msg_id={} msg={} ts_ms={}",
+                        log.tick.0,
+                        log.task,
+                        log.step.0,
+                        log.message_id,
+                        log.message,
+                        log.tick.0.saturating_mul(TICK_MS)
+                    );
+                },
+            )
             .unwrap();
             cortex_m::asm::delay(12_000_000);
         }

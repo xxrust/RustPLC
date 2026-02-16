@@ -118,6 +118,13 @@ fn format_action(a: &Action) -> String {
             "Action::Retract {{ output: DigitalOutputId({}) }}",
             output.0
         ),
+        Action::Log {
+            message_id,
+            message,
+        } => format!(
+            "Action::Log {{ message_id: {}, message: {:?} }}",
+            message_id, message
+        ),
     }
 }
 

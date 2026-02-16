@@ -30,6 +30,15 @@ pub struct TraceEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogEvent {
+    pub tick: Tick,
+    pub task: usize,
+    pub step: StepId,
+    pub message_id: u16,
+    pub message: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeError {
     ProgramHasNoTasks,
     InvalidTaskIndex { task: usize },
@@ -43,6 +52,7 @@ pub enum Action {
     SetAnalog { id: AnalogOutputId, value: f32 },
     Extend { output: DigitalOutputId },
     Retract { output: DigitalOutputId },
+    Log { message_id: u16, message: &'static str },
 }
 
 impl Action {
@@ -52,6 +62,7 @@ impl Action {
             Action::SetAnalog { id, value } => io.write_analog_output(id, value),
             Action::Extend { output } => io.write_digital_output(output, true),
             Action::Retract { output } => io.write_digital_output(output, false),
+            Action::Log { .. } => {}
         }
     }
 }
@@ -143,13 +154,22 @@ impl<'a> Runtime<'a> {
     }
 
     pub fn tick<IO: Io>(&mut self, io: &mut IO) -> Result<(), RuntimeError> {
-        self.tick_with_trace(io, |_| {})
+        self.tick_with_trace_and_logs(io, |_| {}, |_| {})
     }
 
     pub fn tick_with_trace<IO: Io>(
         &mut self,
         io: &mut IO,
         mut on_event: impl FnMut(TraceEvent),
+    ) -> Result<(), RuntimeError> {
+        self.tick_with_trace_and_logs(io, |e| on_event(e), |_| {})
+    }
+
+    pub fn tick_with_trace_and_logs<IO: Io>(
+        &mut self,
+        io: &mut IO,
+        mut on_event: impl FnMut(TraceEvent),
+        mut on_log: impl FnMut(LogEvent),
     ) -> Result<(), RuntimeError> {
         let now = io.tick();
         if self.step_entered_at.is_none() {
@@ -177,7 +197,19 @@ impl<'a> Runtime<'a> {
             match step.instr {
                 Instr::Action { actions, next } => {
                     for a in actions {
-                        a.apply(io);
+                        match *a {
+                            Action::Log {
+                                message_id,
+                                message,
+                            } => on_log(LogEvent {
+                                tick: now,
+                                task: self.loc.task,
+                                step: self.loc.step,
+                                message_id,
+                                message,
+                            }),
+                            _ => a.apply(io),
+                        }
                     }
                     self.transition(now, next, TransitionReason::Action, &mut on_event)?;
                     continue;
@@ -435,5 +467,49 @@ mod tests {
                 reason: TransitionReason::Timeout,
             }]
         );
+    }
+
+    #[test]
+    fn log_action_emits_log_event_without_touching_io() {
+        static ACTIONS: [Action; 1] = [Action::Log {
+            message_id: 7,
+            message: "fault timeout",
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "log_once",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+
+        let mut logs = std::vec::Vec::new();
+        let mut traces = std::vec::Vec::new();
+        rt.tick_with_trace_and_logs(&mut io, |e| traces.push(e), |l| logs.push(l))
+            .unwrap();
+
+        assert_eq!(io.do_[0], false, "log action should not modify outputs");
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].tick, Tick(0));
+        assert_eq!(logs[0].step, StepId(0));
+        assert_eq!(logs[0].message_id, 7);
+        assert_eq!(logs[0].message, "fault timeout");
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].reason, TransitionReason::Action);
     }
 }

@@ -49,6 +49,7 @@ pub enum BridgeError {
 ///
 /// Supported subset:
 /// - `action`: set (digital), extend, retract
+/// - `action`: log
 /// - `wait`: single boolean equality/inequality (no AND/OR/NOT)
 /// - `delay`
 /// - `timeout -> goto`
@@ -442,11 +443,24 @@ fn convert_action(
             state: state_name.to_string(),
             action: format!("set_analog {target} ..."),
         }),
-        TransitionAction::Log { message } => Err(BridgeError::UnsupportedAction {
-            state: state_name.to_string(),
-            action: format!("log \"{message}\""),
-        }),
+        TransitionAction::Log { message } => {
+            let leaked_message: &'static str = Box::leak(message.clone().into_boxed_str());
+            Ok(Action::Log {
+                message_id: stable_log_message_id(message),
+                message: leaked_message,
+            })
+        }
     }
+}
+
+fn stable_log_message_id(message: &str) -> u16 {
+    // Deterministic FNV-1a hash folded to 16-bit.
+    let mut h: u32 = 0x811c9dc5;
+    for b in message.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    (h ^ (h >> 16)) as u16
 }
 
 struct TopologyResolver<'a> {

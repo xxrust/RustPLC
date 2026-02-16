@@ -290,6 +290,10 @@ cargo run --release -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP
 
 相关说明见 [`docs/board_rp2040.md`](docs/board_rp2040.md)。
 
+当前板级日志至少包含两类结构化行：
+- `TRACE tick=<u64> task=<usize> from=<u16> to=<u16> reason=<str> ts_ms=<u64>`
+- `LOG tick=<u64> task=<usize> step=<u16> msg_id=<u16> msg=<str> ts_ms=<u64>`
+
 ## 为什么需要 RustPLC
 
 传统 PLC 编程（梯形图 / ST / FBD）依赖工程师的经验来保证安全性。当系统复杂度上升，人工审查的可靠性急剧下降——气缸碰撞、死锁、超时这些问题往往在现场调试时才暴露。

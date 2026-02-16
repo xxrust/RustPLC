@@ -502,6 +502,7 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                                 dos.insert(output.0);
                             }
                             Action::SetAnalog { .. } => {}
+                            Action::Log { .. } => {}
                         }
                     }
                 }
@@ -556,6 +557,7 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                                 dos.insert(output.0);
                             }
                             Action::SetAnalog { .. } => {}
+                            Action::Log { .. } => {}
                         }
                     }
                 }

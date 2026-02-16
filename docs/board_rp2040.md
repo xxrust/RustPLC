@@ -20,4 +20,4 @@ cargo build -p board-rp2040 --target thumbv6m-none-eabi
 Notes:
 - The binary uses `defmt` over RTT for logging and a simple busy-loop tick counter.
 - `cargo build -p board-rp2040` (without `--target`) builds a host stub that prints these instructions.
-
+- Runtime output includes structured transition lines (`TRACE ...`) and DSL log action lines (`LOG ...`).
