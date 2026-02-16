@@ -490,3 +490,15 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - Verification
   - `cargo test --workspace`
 ---
+
+## [2026-02-16 22:59:09 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `virtual-board` subcommand that runs a `.plc` against a `scenario.yaml` and writes board-style artifacts: `board.log`, `board_trace.jsonl`, and `virtual_board_meta.json`.
+  - Ensured `trace-parse` can parse the generated `board.log` without changes.
+  - Added integration test covering artifact emission and trace parsing.
+- Files changed
+  - `src/main.rs`, `tests/virtual_board.rs`, `prd.json`, `progress.txt`
+- Verification
+  - `cargo test --workspace`
+---

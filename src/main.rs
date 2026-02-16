@@ -210,6 +210,13 @@ fn main() {
         }
         return;
     }
+    if first == "virtual-board" {
+        if let Err(msg) = run_virtual_board_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let path = first;
     let mut report_path: Option<PathBuf> = None;
@@ -382,6 +389,7 @@ fn print_usage(program: &str) {
         "  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
     );
     eprintln!("  {program} pil-run <file.plc> --scenario <scenario.yaml>");
+    eprintln!("  {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>");
     eprintln!();
     eprintln!("Budget options (also configurable via env vars):");
     eprintln!("  --budget-max-actions-per-transition <n>");
@@ -1561,6 +1569,158 @@ fn run_pil_run_subcommand(
             break;
         }
     }
+
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct VirtualBoardMeta<'a> {
+    schema_version: u32,
+    source_plc: &'a str,
+    scenario_path: &'a str,
+    generated_at: &'a str,
+    tick_ms: u64,
+    duration_ticks: u64,
+}
+
+fn run_virtual_board_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!(
+            "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>"
+        ));
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    let mut out_dir: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "--out-dir" => {
+                out_dir = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --out-dir <dir>".to_string())?,
+                ));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>"
+                ));
+            }
+            other => return Err(format!("Unknown argument for virtual-board: {other}")),
+        }
+    }
+
+    let scenario_path = scenario_path.ok_or_else(|| {
+        format!("Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>")
+    })?;
+    let out_dir = out_dir.ok_or_else(|| {
+        format!("Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>")
+    })?;
+    fs::create_dir_all(&out_dir)
+        .map_err(|err| format!("Failed to create output directory {out_dir:?}: {err}"))?;
+
+    let plc_source =
+        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
+        format!(
+            "Failed to read scenario YAML file {}: {err}",
+            scenario_path.display()
+        )
+    })?;
+    let scenario = sim::Scenario::from_yaml_str(&scenario_yaml).map_err(|e| format!("{e}"))?;
+
+    let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
+    let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+    scenario
+        .apply_to_simio(&mut io)
+        .map_err(|e| format!("scenario apply failed: {e}"))?;
+    let mut rt =
+        runtime_core::Runtime::new(&program).map_err(|e| format!("runtime init failed: {e:?}"))?;
+
+    let board_log = std::cell::RefCell::new(String::new());
+    board_log.borrow_mut().push_str("boot ok\n");
+
+    for _ in 0..scenario.duration_ticks() {
+        let tick = io.tick().0;
+        let ts_ms = tick.saturating_mul(scenario.tick_ms);
+        board_log
+            .borrow_mut()
+            .push_str(&format!("TICK tick={tick} ts_ms={ts_ms}\n"));
+
+        rt.tick_with_trace_and_logs(
+            &mut io,
+            |e| {
+                let ts_ms = e.tick.0.saturating_mul(scenario.tick_ms);
+                board_log.borrow_mut().push_str(&format!(
+                    "TRACE tick={} task={} from={} to={} reason={} ts_ms={}\n",
+                    e.tick.0,
+                    e.task,
+                    e.from.0,
+                    e.to.0,
+                    reason_str(e.reason),
+                    ts_ms
+                ));
+            },
+            |log| {
+                let ts_ms = log.tick.0.saturating_mul(scenario.tick_ms);
+                board_log.borrow_mut().push_str(&format!(
+                    "LOG tick={} task={} step={} msg_id={} msg={} ts_ms={}\n",
+                    log.tick.0, log.task, log.step.0, log.message_id, log.message, ts_ms
+                ));
+            },
+        )
+        .map_err(|e| format!("runtime tick failed: {e:?}"))?;
+
+        if is_halted(&rt, &program) {
+            break;
+        }
+    }
+
+    let board_log = board_log.into_inner();
+    let board_log_path = out_dir.join("board.log");
+    fs::write(&board_log_path, &board_log)
+        .map_err(|err| format!("Failed to write board log {board_log_path:?}: {err}"))?;
+
+    let rows = rust_plc::board_trace::parse_trace_text(&board_log)
+        .map_err(|err| format!("Failed to parse generated board trace: {err}"))?;
+    let mut board_trace_jsonl = String::new();
+    for row in rows {
+        let mut line = serde_json::to_string(&row)
+            .map_err(|err| format!("Failed to serialize trace row: {err}"))?;
+        line.push('\n');
+        board_trace_jsonl.push_str(&line);
+    }
+    let board_trace_path = out_dir.join("board_trace.jsonl");
+    fs::write(&board_trace_path, board_trace_jsonl)
+        .map_err(|err| format!("Failed to write board trace {board_trace_path:?}: {err}"))?;
+
+    let generated_at = time::OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string());
+    let scenario_path_text = scenario_path.to_string_lossy().to_string();
+    let meta = VirtualBoardMeta {
+        schema_version: 1,
+        source_plc: &plc_path,
+        scenario_path: &scenario_path_text,
+        generated_at: &generated_at,
+        tick_ms: scenario.tick_ms,
+        duration_ticks: scenario.duration_ticks(),
+    };
+    let mut meta_json = serde_json::to_string_pretty(&meta)
+        .map_err(|err| format!("Failed to serialize virtual board meta JSON: {err}"))?;
+    meta_json.push('\n');
+    let meta_path = out_dir.join("virtual_board_meta.json");
+    fs::write(&meta_path, meta_json)
+        .map_err(|err| format!("Failed to write virtual board meta {meta_path:?}: {err}"))?;
 
     Ok(())
 }
