@@ -203,6 +203,13 @@ fn main() {
         }
         return;
     }
+    if first == "no-board-gate" {
+        if let Err(msg) = run_no_board_gate_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "pil-run" {
         if let Err(msg) = run_pil_run_subcommand(&program, args) {
             eprintln!("{msg}");
@@ -387,6 +394,9 @@ fn print_usage(program: &str) {
     eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
     eprintln!(
         "  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
+    );
+    eprintln!(
+        "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]"
     );
     eprintln!("  {program} pil-run <file.plc> --scenario <scenario.yaml>");
     eprintln!("  {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>");
@@ -1483,6 +1493,169 @@ fn run_trace_diff_subcommand(
     Ok(())
 }
 
+fn run_no_board_gate_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!(
+            "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]"
+        ));
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    let mut sil_scenario_path: Option<PathBuf> = None;
+    let mut board_scenario_path: Option<PathBuf> = None;
+    let mut out_dir: Option<PathBuf> = None;
+    let mut context_window: usize = 3;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "--sil-scenario" => {
+                sil_scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --sil-scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "--board-scenario" => {
+                board_scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --board-scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "--out-dir" => {
+                out_dir = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --out-dir <dir>".to_string())?,
+                ));
+            }
+            "--context" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --context <n>".to_string())?;
+                context_window = raw
+                    .parse::<usize>()
+                    .map_err(|_| format!("Invalid --context value (expected usize): {raw}"))?;
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]"
+                ));
+            }
+            other => return Err(format!("Unknown argument for no-board-gate: {other}")),
+        }
+    }
+
+    let out_dir = out_dir.ok_or_else(|| {
+        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]")
+    })?;
+
+    let sil_scenario_path = sil_scenario_path.or_else(|| scenario_path.clone()).ok_or_else(|| {
+        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]")
+    })?;
+    let board_scenario_path =
+        board_scenario_path.or_else(|| scenario_path.clone()).ok_or_else(|| {
+            format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]")
+        })?;
+
+    fs::create_dir_all(&out_dir)
+        .map_err(|err| format!("Failed to create output directory {out_dir:?}: {err}"))?;
+
+    let plc_source =
+        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+
+    let sil_yaml = fs::read_to_string(&sil_scenario_path).map_err(|err| {
+        format!(
+            "Failed to read SIL scenario YAML file {}: {err}",
+            sil_scenario_path.display()
+        )
+    })?;
+    let board_yaml = fs::read_to_string(&board_scenario_path).map_err(|err| {
+        format!(
+            "Failed to read board scenario YAML file {}: {err}",
+            board_scenario_path.display()
+        )
+    })?;
+
+    let sil_scenario = sim::Scenario::from_yaml_str(&sil_yaml).map_err(|e| format!("{e}"))?;
+    let board_scenario = sim::Scenario::from_yaml_str(&board_yaml).map_err(|e| format!("{e}"))?;
+
+    if sil_scenario.tick_ms != board_scenario.tick_ms {
+        return Err(format!(
+            "SIL tick_ms ({}) must match board tick_ms ({}) for no-board-gate",
+            sil_scenario.tick_ms, board_scenario.tick_ms
+        ));
+    }
+
+    let program = compile_plc_to_runtime_program(&plc_source, sil_scenario.tick_ms)?;
+
+    let sil_trace_path = out_dir.join("sil_trace.jsonl");
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &sil_scenario);
+    let mut sil_io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+    let sil_run =
+        sim::run_program_for_scenario(&program, &sil_scenario, &mut sil_io).map_err(|e| {
+            format!("SIL simulation failed: {e}")
+        })?;
+
+    fs::write(&sil_trace_path, sil_run.trace.into_string())
+        .map_err(|err| format!("Failed to write SIL trace file {sil_trace_path:?}: {err}"))?;
+
+    let (_, board_trace_path, _) = write_virtual_board_artifacts(
+        Path::new(&plc_path),
+        &board_scenario_path,
+        &program,
+        &board_scenario,
+        &out_dir,
+    )?;
+
+    let board_trace_text = fs::read_to_string(&board_trace_path)
+        .map_err(|err| format!("Failed to read board trace {board_trace_path:?}: {err}"))?;
+    let sil_trace_text = fs::read_to_string(&sil_trace_path)
+        .map_err(|err| format!("Failed to read SIL trace {sil_trace_path:?}: {err}"))?;
+
+    let sil_events = rust_plc::trace_diff::parse_trace_jsonl(&sil_trace_text)
+        .map_err(|err| format!("Failed to parse SIL trace JSONL: {err}"))?;
+    let board_events = rust_plc::trace_diff::parse_trace_jsonl(&board_trace_text)
+        .map_err(|err| format!("Failed to parse board trace JSONL: {err}"))?;
+
+    let report = rust_plc::trace_diff::diff_traces(&sil_events, &board_events, context_window);
+    let diff_report_path = out_dir.join("diff_report.json");
+    let mut json = serde_json::to_string_pretty(&report)
+        .map_err(|err| format!("Failed to serialize diff report JSON: {err}"))?;
+    json.push('\n');
+    fs::write(&diff_report_path, json)
+        .map_err(|err| format!("Failed to write diff report {diff_report_path:?}: {err}"))?;
+
+    if report.is_match {
+        eprintln!(
+            "no-board-gate: PASS (sil_events={}, board_events={})",
+            report.sil_events, report.board_events
+        );
+    } else {
+        eprintln!(
+            "no-board-gate: FAIL (tick={:?}, type={:?}, index={:?})",
+            report.first_mismatch_tick, report.mismatch_type, report.mismatch_index
+        );
+    }
+    eprintln!("  sil_trace: {}", sil_trace_path.display());
+    eprintln!("  board_trace: {}", board_trace_path.display());
+    eprintln!("  diff_report: {}", diff_report_path.display());
+
+    if !report.is_match {
+        return Err(format!(
+            "Trace mismatch detected; see report {}",
+            diff_report_path.display()
+        ));
+    }
+    Ok(())
+}
+
 fn run_pil_run_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
@@ -1583,6 +1756,101 @@ struct VirtualBoardMeta<'a> {
     duration_ticks: u64,
 }
 
+fn write_virtual_board_artifacts(
+    plc_path: &Path,
+    scenario_path: &Path,
+    program: &Program<'_>,
+    scenario: &sim::Scenario,
+    out_dir: &Path,
+) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(program, scenario);
+    let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+    scenario
+        .apply_to_simio(&mut io)
+        .map_err(|e| format!("scenario apply failed: {e}"))?;
+    let mut rt =
+        runtime_core::Runtime::new(program).map_err(|e| format!("runtime init failed: {e:?}"))?;
+
+    let board_log = std::cell::RefCell::new(String::new());
+    board_log.borrow_mut().push_str("boot ok\n");
+
+    for _ in 0..scenario.duration_ticks() {
+        let tick = io.tick().0;
+        let ts_ms = tick.saturating_mul(scenario.tick_ms);
+        board_log
+            .borrow_mut()
+            .push_str(&format!("TICK tick={tick} ts_ms={ts_ms}\n"));
+
+        rt.tick_with_trace_and_logs(
+            &mut io,
+            |e| {
+                let ts_ms = e.tick.0.saturating_mul(scenario.tick_ms);
+                board_log.borrow_mut().push_str(&format!(
+                    "TRACE tick={} task={} from={} to={} reason={} ts_ms={}\n",
+                    e.tick.0,
+                    e.task,
+                    e.from.0,
+                    e.to.0,
+                    reason_str(e.reason),
+                    ts_ms
+                ));
+            },
+            |log| {
+                let ts_ms = log.tick.0.saturating_mul(scenario.tick_ms);
+                board_log.borrow_mut().push_str(&format!(
+                    "LOG tick={} task={} step={} msg_id={} msg={} ts_ms={}\n",
+                    log.tick.0, log.task, log.step.0, log.message_id, log.message, ts_ms
+                ));
+            },
+        )
+        .map_err(|e| format!("runtime tick failed: {e:?}"))?;
+
+        if is_halted(&rt, program) {
+            break;
+        }
+    }
+
+    let board_log = board_log.into_inner();
+    let board_log_path = out_dir.join("board.log");
+    fs::write(&board_log_path, &board_log)
+        .map_err(|err| format!("Failed to write board log {board_log_path:?}: {err}"))?;
+
+    let rows = rust_plc::board_trace::parse_trace_text(&board_log)
+        .map_err(|err| format!("Failed to parse generated board trace: {err}"))?;
+    let mut board_trace_jsonl = String::new();
+    for row in rows {
+        let mut line = serde_json::to_string(&row)
+            .map_err(|err| format!("Failed to serialize trace row: {err}"))?;
+        line.push('\n');
+        board_trace_jsonl.push_str(&line);
+    }
+    let board_trace_path = out_dir.join("board_trace.jsonl");
+    fs::write(&board_trace_path, board_trace_jsonl)
+        .map_err(|err| format!("Failed to write board trace {board_trace_path:?}: {err}"))?;
+
+    let generated_at = time::OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string());
+    let plc_path_text = plc_path.to_string_lossy().to_string();
+    let scenario_path_text = scenario_path.to_string_lossy().to_string();
+    let meta = VirtualBoardMeta {
+        schema_version: 1,
+        source_plc: &plc_path_text,
+        scenario_path: &scenario_path_text,
+        generated_at: &generated_at,
+        tick_ms: scenario.tick_ms,
+        duration_ticks: scenario.duration_ticks(),
+    };
+    let mut meta_json = serde_json::to_string_pretty(&meta)
+        .map_err(|err| format!("Failed to serialize virtual board meta JSON: {err}"))?;
+    meta_json.push('\n');
+    let meta_path = out_dir.join("virtual_board_meta.json");
+    fs::write(&meta_path, meta_json)
+        .map_err(|err| format!("Failed to write virtual board meta {meta_path:?}: {err}"))?;
+
+    Ok((board_log_path, board_trace_path, meta_path))
+}
+
 fn run_virtual_board_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
@@ -1638,89 +1906,13 @@ fn run_virtual_board_subcommand(
     let scenario = sim::Scenario::from_yaml_str(&scenario_yaml).map_err(|e| format!("{e}"))?;
 
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
-    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
-    let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
-    scenario
-        .apply_to_simio(&mut io)
-        .map_err(|e| format!("scenario apply failed: {e}"))?;
-    let mut rt =
-        runtime_core::Runtime::new(&program).map_err(|e| format!("runtime init failed: {e:?}"))?;
-
-    let board_log = std::cell::RefCell::new(String::new());
-    board_log.borrow_mut().push_str("boot ok\n");
-
-    for _ in 0..scenario.duration_ticks() {
-        let tick = io.tick().0;
-        let ts_ms = tick.saturating_mul(scenario.tick_ms);
-        board_log
-            .borrow_mut()
-            .push_str(&format!("TICK tick={tick} ts_ms={ts_ms}\n"));
-
-        rt.tick_with_trace_and_logs(
-            &mut io,
-            |e| {
-                let ts_ms = e.tick.0.saturating_mul(scenario.tick_ms);
-                board_log.borrow_mut().push_str(&format!(
-                    "TRACE tick={} task={} from={} to={} reason={} ts_ms={}\n",
-                    e.tick.0,
-                    e.task,
-                    e.from.0,
-                    e.to.0,
-                    reason_str(e.reason),
-                    ts_ms
-                ));
-            },
-            |log| {
-                let ts_ms = log.tick.0.saturating_mul(scenario.tick_ms);
-                board_log.borrow_mut().push_str(&format!(
-                    "LOG tick={} task={} step={} msg_id={} msg={} ts_ms={}\n",
-                    log.tick.0, log.task, log.step.0, log.message_id, log.message, ts_ms
-                ));
-            },
-        )
-        .map_err(|e| format!("runtime tick failed: {e:?}"))?;
-
-        if is_halted(&rt, &program) {
-            break;
-        }
-    }
-
-    let board_log = board_log.into_inner();
-    let board_log_path = out_dir.join("board.log");
-    fs::write(&board_log_path, &board_log)
-        .map_err(|err| format!("Failed to write board log {board_log_path:?}: {err}"))?;
-
-    let rows = rust_plc::board_trace::parse_trace_text(&board_log)
-        .map_err(|err| format!("Failed to parse generated board trace: {err}"))?;
-    let mut board_trace_jsonl = String::new();
-    for row in rows {
-        let mut line = serde_json::to_string(&row)
-            .map_err(|err| format!("Failed to serialize trace row: {err}"))?;
-        line.push('\n');
-        board_trace_jsonl.push_str(&line);
-    }
-    let board_trace_path = out_dir.join("board_trace.jsonl");
-    fs::write(&board_trace_path, board_trace_jsonl)
-        .map_err(|err| format!("Failed to write board trace {board_trace_path:?}: {err}"))?;
-
-    let generated_at = time::OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| "unknown".to_string());
-    let scenario_path_text = scenario_path.to_string_lossy().to_string();
-    let meta = VirtualBoardMeta {
-        schema_version: 1,
-        source_plc: &plc_path,
-        scenario_path: &scenario_path_text,
-        generated_at: &generated_at,
-        tick_ms: scenario.tick_ms,
-        duration_ticks: scenario.duration_ticks(),
-    };
-    let mut meta_json = serde_json::to_string_pretty(&meta)
-        .map_err(|err| format!("Failed to serialize virtual board meta JSON: {err}"))?;
-    meta_json.push('\n');
-    let meta_path = out_dir.join("virtual_board_meta.json");
-    fs::write(&meta_path, meta_json)
-        .map_err(|err| format!("Failed to write virtual board meta {meta_path:?}: {err}"))?;
+    write_virtual_board_artifacts(
+        Path::new(&plc_path),
+        &scenario_path,
+        &program,
+        &scenario,
+        &out_dir,
+    )?;
 
     Ok(())
 }

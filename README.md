@@ -118,6 +118,10 @@ flowchart LR
 cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
 
+# 无开发板对比门禁（SIL vs virtual-board，一条命令跑完 sim + virtual-board + trace-diff）
+cargo run --release -- no-board-gate examples/assembly_station.plc \
+  --scenario scenarios/normal.yaml --out-dir out/no_board_gate
+
 # RP2040 固件构建
 cargo run --release -- build-rp2040 examples/assembly_station.plc \
   --out out/rp2040 --io-map out/rp2040/io_map.toml --emit-uf2 out/firmware.uf2

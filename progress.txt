@@ -13,6 +13,7 @@
 - CLI integration tests in this repo should invoke the compiled binary via `env!("CARGO_BIN_EXE_rust_plc")` and verify artifacts on disk.
 - The main `<file.plc>` CLI now writes a structured verification report to `out/<stem>.verification_report.json` by default; in tests prefer `--report <temp-file>` to avoid shared output collisions.
 - Batch SIL regress runs live in `rust_plc::sim_regress`: it scans `.plc`/scenario YAMLs recursively, writes per-case `trace.jsonl`/`report.json` under `out/sim-regress/case_XXXX`, and emits a summary JSON.
+- No-board trace regression gate is available as `rust_plc no-board-gate`: it runs SIL + `virtual-board` + `trace-diff` and writes `sil_trace.jsonl`, `board.log`, `board_trace.jsonl`, `diff_report.json` under `--out-dir`.
 - For embedded workspace crates, keep a host-stub `main()` behind `cfg(not(target_os = "none"))` so `cargo test --workspace` stays green while firmware code is `cfg(target_os = "none")`.
 
 Started: Sat Feb 14 23:50:11 CST 2026
@@ -501,4 +502,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - `src/main.rs`, `tests/virtual_board.rs`, `prd.json`, `progress.txt`
 - Verification
   - `cargo test --workspace`
+---
+
+## [2026-02-16 23:21:12 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `no-board-gate` CLI subcommand that runs SIL (`sim`), `virtual-board`, and a `trace-diff` gate in one command; writes `sil_trace.jsonl`, `board.log`, `board_trace.jsonl`, and `diff_report.json` under `--out-dir` and exits non-zero on mismatch.
+  - Refactored virtual-board artifact generation into `write_virtual_board_artifacts()` so `virtual-board` and `no-board-gate` stay in sync.
+  - Added integration tests covering a matching run (pass) and a mismatching run (fail).
+  - Documented the one-command local workflow in `README.md` and `README_EN.md`.
+- Files changed
+  - `src/main.rs`, `tests/no_board_gate.rs`, `README.md`, `README_EN.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Prefer a single CLI subcommand (like `no-board-gate`) that writes all artifacts to an output dir and fails based on a structured diff report, so CI can always collect evidence.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `no-board-gate` requires `tick_ms` to match between the SIL and board scenarios; otherwise traces are not meaningfully comparable.
 ---
