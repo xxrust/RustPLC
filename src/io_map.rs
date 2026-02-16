@@ -35,8 +35,13 @@ pub enum IoMapError {
         example: &'static str,
     },
 
-    #[error("invalid gpio number {gpio} for {kind}{id} (allowed: 0..=29)")]
-    InvalidGpio { kind: &'static str, id: u16, gpio: i64 },
+    #[error("invalid gpio number {gpio} for {kind}{id} (allowed: {allowed})")]
+    InvalidGpio {
+        kind: &'static str,
+        id: u16,
+        gpio: i64,
+        allowed: &'static str,
+    },
 
     #[error("gpio {gpio} is assigned multiple times ({a} and {b})")]
     DuplicateGpio { gpio: u8, a: String, b: String },
@@ -64,14 +69,46 @@ impl IoMap {
         let ai_table = v.get("analog_inputs").and_then(|v| v.as_table());
         let ao_table = v.get("analog_outputs").and_then(|v| v.as_table());
 
-        let digital_inputs = parse_map_section(di_table, "digital_inputs", "di", "di0")?;
-        let digital_outputs = parse_map_section(do_table, "digital_outputs", "do", "do0")?;
+        let digital_inputs = parse_map_section(
+            di_table,
+            "digital_inputs",
+            "di",
+            "di0",
+            0,
+            29,
+            "0..=29",
+        )?;
+        let digital_outputs = parse_map_section(
+            do_table,
+            "digital_outputs",
+            "do",
+            "do0",
+            0,
+            29,
+            "0..=29",
+        )?;
         let analog_inputs = match ai_table {
-            Some(t) => parse_map_section(t, "analog_inputs", "ai", "ai0")?,
+            Some(t) => parse_map_section(
+                t,
+                "analog_inputs",
+                "ai",
+                "ai0",
+                26,
+                29,
+                "26..=29 (RP2040 ADC-capable GPIO)",
+            )?,
             None => BTreeMap::new(),
         };
         let analog_outputs = match ao_table {
-            Some(t) => parse_map_section(t, "analog_outputs", "ao", "ao0")?,
+            Some(t) => parse_map_section(
+                t,
+                "analog_outputs",
+                "ao",
+                "ao0",
+                0,
+                29,
+                "0..=29",
+            )?,
             None => BTreeMap::new(),
         };
 
@@ -166,6 +203,9 @@ fn parse_map_section(
     section: &'static str,
     prefix: &'static str,
     example: &'static str,
+    min_gpio: i64,
+    max_gpio: i64,
+    allowed: &'static str,
 ) -> Result<BTreeMap<u16, u8>, IoMapError> {
     let mut out = BTreeMap::<u16, u8>::new();
     for (k, v) in t {
@@ -187,12 +227,14 @@ fn parse_map_section(
             kind: prefix,
             id,
             gpio: i64::MIN,
+            allowed,
         })?;
-        if !(0..=29).contains(&gpio) {
+        if !(min_gpio..=max_gpio).contains(&gpio) {
             return Err(IoMapError::InvalidGpio {
                 kind: prefix,
                 id,
                 gpio,
+                allowed,
             });
         }
         out.insert(id, gpio as u8);
@@ -318,5 +360,26 @@ ao0 = 20
         let m = IoMap::from_toml_str(input).expect("parse");
         let err = m.validate_for_usage(usage_with_ai0_ao0()).unwrap_err();
         assert!(err.to_string().contains("missing required mapping for ai0"));
+    }
+
+    #[test]
+    fn rejects_analog_input_on_non_adc_gpio() {
+        let input = r#"
+[digital_inputs]
+di0 = 2
+
+[digital_outputs]
+do0 = 16
+
+[analog_inputs]
+ai0 = 20
+
+[analog_outputs]
+ao0 = 21
+"#;
+        let err = IoMap::from_toml_str(input).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("26..=29 (RP2040 ADC-capable GPIO)"));
     }
 }

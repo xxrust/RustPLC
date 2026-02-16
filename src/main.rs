@@ -645,6 +645,7 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
     out.push('\n');
 
     out.push_str("[analog_inputs]\n");
+    out.push_str("# RP2040 ADC-capable GPIO: 26, 27, 28, 29\n");
     if ais.is_empty() {
         out.push_str("# ai0 = 26\n");
     } else {

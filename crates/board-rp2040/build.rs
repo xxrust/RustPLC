@@ -62,20 +62,26 @@ fn parse_io_map(input: &str) -> Result<IoMap, String> {
     let ao = v.get("analog_outputs").and_then(|v| v.as_table());
 
     Ok(IoMap {
-        digital_inputs: parse_section(di, "di")?,
-        digital_outputs: parse_section(do_, "do")?,
+        digital_inputs: parse_section(di, "di", 0, 29, "0..=29")?,
+        digital_outputs: parse_section(do_, "do", 0, 29, "0..=29")?,
         analog_inputs: match ai {
-            Some(t) => parse_section(t, "ai")?,
+            Some(t) => parse_section(t, "ai", 26, 29, "26..=29 (RP2040 ADC-capable GPIO)")?,
             None => BTreeMap::new(),
         },
         analog_outputs: match ao {
-            Some(t) => parse_section(t, "ao")?,
+            Some(t) => parse_section(t, "ao", 0, 29, "0..=29")?,
             None => BTreeMap::new(),
         },
     })
 }
 
-fn parse_section(t: &toml::value::Table, prefix: &str) -> Result<BTreeMap<u16, u8>, String> {
+fn parse_section(
+    t: &toml::value::Table,
+    prefix: &str,
+    min_gpio: i64,
+    max_gpio: i64,
+    allowed: &str,
+) -> Result<BTreeMap<u16, u8>, String> {
     let mut out = BTreeMap::<u16, u8>::new();
     for (k, v) in t {
         let id_str = k
@@ -87,9 +93,9 @@ fn parse_section(t: &toml::value::Table, prefix: &str) -> Result<BTreeMap<u16, u
         let gpio = v
             .as_integer()
             .ok_or_else(|| format!("invalid value for {k:?} (expected integer gpio)"))?;
-        if !(0..=29).contains(&gpio) {
+        if !(min_gpio..=max_gpio).contains(&gpio) {
             return Err(format!(
-                "invalid gpio {gpio} for {prefix}{id} (allowed: 0..=29)"
+                "invalid gpio {gpio} for {prefix}{id} (allowed: {allowed})"
             ));
         }
         out.insert(id, gpio as u8);

@@ -317,9 +317,16 @@ di0 = 2
 [digital_outputs]
 do0 = 16
 
+[analog_inputs]
+ai0 = 26
+
 [analog_outputs]
-ao0 = 26
+ao0 = 20
 ```
+
+说明：
+- `[analog_inputs]` 在 RP2040 上仅支持 GPIO `26..=29`（ADC 引脚）。
+- 固件会按 tick 采样这些 AI，并将值以电压（`0.0..3.3` V）提供给运行时 `wait: AIx ...` 条件。
 
 `RUST_PLC_IO_MAP_TOML` 的含义：  
 它是一个环境变量，指向上面的 `io_map.toml` 文件；`board-rp2040` 的 `build.rs` 会在编译期读取它并把映射“固化进固件”。
@@ -414,11 +421,31 @@ cargo run --release -- trace-diff --sil out/trace.jsonl --board out/board_trace.
 - `examples/trace_golden/board_trace_match.jsonl`
 - `examples/trace_golden/board_trace_mismatch.jsonl`
 
+#### 7) 一条脚本跑完整门禁链路（可选）
+
+目的：把构建/烧录/采集/对比串成统一流程，减少手工步骤与漏项。
+
+```bash
+scripts/rp2040_trace_gate.sh \
+  --plc examples/assembly_station.plc \
+  --io-map out/rp2040/io_map.toml \
+  --sil-trace out/trace.jsonl \
+  --out-dir out/rp2040_gate \
+  --mount /media/RPI-RP2 \
+  --collect-mode serial --port /dev/ttyACM0 --baud 115200 --duration 20
+```
+
+该脚本会执行：
+1. `build-rp2040 --emit-uf2`
+2. `flash-rp2040`（带 dry-run）
+3. 日志采集（serial/cmd）
+4. `trace-parse` + `trace-diff --fail-on-mismatch`
+
 #### 当前下沉范围说明（RP2040 v1）
 
 - 已支持：`set` / `extend` / `retract` / `set_analog` / `log` 动作下沉
 - 已支持：数字量 `wait`（含 timeout）与模拟量 `wait`（region 谓词）下沉
-- 说明：模拟量输入当前仍是最小实现（固件内 `ai` 缓冲）；若需真实 ADC 采样，请在后续版本接入 RP2040 ADC 后端并按 `analog_inputs` 映射取样
+- 说明：模拟量输入已接入 RP2040 ADC 采样（按 `analog_inputs` 映射，单位电压 V）；如需工程量（bar/℃ 等）需在外部传感链或后续标定层完成换算
 
 相关说明见 [`docs/board_rp2040.md`](docs/board_rp2040.md)。
 

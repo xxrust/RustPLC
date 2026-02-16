@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Run RP2040 build/flash/log/trace-diff as one reproducible pipeline.
+
+Usage:
+  scripts/rp2040_trace_gate.sh \
+    --plc <file.plc> \
+    --io-map <io_map.toml> \
+    --sil-trace <trace.jsonl> \
+    [--out-dir <dir>] \
+    [--mount <rp2040_mount>] \
+    [--board-log <board.log>] \
+    [--collect-mode serial --port <tty> [--baud <n>] [--duration <sec>]] \
+    [--collect-mode cmd --cmd "<producer>" [--duration <sec>]]
+
+Notes:
+  - Step 1 always runs: build-rp2040 + emit UF2
+  - If --mount is provided, step 2 flashes UF2 (dry-run then actual copy)
+  - If --collect-mode is provided, step 3 collects board log into --board-log (or default path)
+  - If --collect-mode is omitted, --board-log must already exist
+  - Step 4 always runs: trace-parse + trace-diff --fail-on-mismatch
+USAGE
+}
+
+PLC=""
+IO_MAP=""
+SIL_TRACE=""
+OUT_DIR="out/rp2040_gate"
+MOUNT=""
+BOARD_LOG=""
+COLLECT_MODE=""
+PORT=""
+BAUD="115200"
+DURATION="20"
+COLLECT_CMD=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --plc) PLC="${2:-}"; shift 2;;
+    --io-map) IO_MAP="${2:-}"; shift 2;;
+    --sil-trace) SIL_TRACE="${2:-}"; shift 2;;
+    --out-dir) OUT_DIR="${2:-}"; shift 2;;
+    --mount) MOUNT="${2:-}"; shift 2;;
+    --board-log) BOARD_LOG="${2:-}"; shift 2;;
+    --collect-mode) COLLECT_MODE="${2:-}"; shift 2;;
+    --port) PORT="${2:-}"; shift 2;;
+    --baud) BAUD="${2:-}"; shift 2;;
+    --duration) DURATION="${2:-}"; shift 2;;
+    --cmd) COLLECT_CMD="${2:-}"; shift 2;;
+    -h|--help) usage; exit 0;;
+    *) echo "Unknown arg: $1" >&2; usage; exit 2;;
+  esac
+done
+
+if [[ -z "$PLC" || -z "$IO_MAP" || -z "$SIL_TRACE" ]]; then
+  echo "Missing required args: --plc/--io-map/--sil-trace" >&2
+  usage
+  exit 2
+fi
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+mkdir -p "$REPO_ROOT/$OUT_DIR"
+UF2="$REPO_ROOT/$OUT_DIR/firmware.uf2"
+RP2040_OUT="$REPO_ROOT/$OUT_DIR/rp2040"
+BOARD_LOG_DEFAULT="$REPO_ROOT/$OUT_DIR/board.log"
+BOARD_TRACE="$REPO_ROOT/$OUT_DIR/board_trace.jsonl"
+DIFF_REPORT="$REPO_ROOT/$OUT_DIR/diff_report.json"
+
+if [[ -z "$BOARD_LOG" ]]; then
+  BOARD_LOG="$BOARD_LOG_DEFAULT"
+fi
+if [[ "$BOARD_LOG" != /* ]]; then
+  BOARD_LOG="$REPO_ROOT/$BOARD_LOG"
+fi
+
+echo "[1/4] build-rp2040 + emit UF2"
+(
+  cd "$REPO_ROOT"
+  cargo run --release -- build-rp2040 "$PLC" \
+    --out "$RP2040_OUT" \
+    --io-map "$IO_MAP" \
+    --emit-uf2 "$UF2"
+)
+
+if [[ -n "$MOUNT" ]]; then
+  echo "[2/4] flash-rp2040 dry-run"
+  (
+    cd "$REPO_ROOT"
+    cargo run --release -- flash-rp2040 --uf2 "$UF2" --mount "$MOUNT" --dry-run
+  )
+  echo "[2/4] flash-rp2040 actual copy"
+  (
+    cd "$REPO_ROOT"
+    cargo run --release -- flash-rp2040 --uf2 "$UF2" --mount "$MOUNT"
+  )
+else
+  echo "[2/4] skip flash (no --mount provided)"
+fi
+
+if [[ -n "$COLLECT_MODE" ]]; then
+  echo "[3/4] collect board log ($COLLECT_MODE)"
+  case "$COLLECT_MODE" in
+    serial)
+      if [[ -z "$PORT" ]]; then
+        echo "--port is required when --collect-mode serial" >&2
+        exit 2
+      fi
+      "$REPO_ROOT/scripts/collect_board_log.sh" \
+        --mode serial \
+        --port "$PORT" \
+        --baud "$BAUD" \
+        --duration "$DURATION" \
+        --out "$BOARD_LOG"
+      ;;
+    cmd)
+      if [[ -z "$COLLECT_CMD" ]]; then
+        echo "--cmd is required when --collect-mode cmd" >&2
+        exit 2
+      fi
+      "$REPO_ROOT/scripts/collect_board_log.sh" \
+        --mode cmd \
+        --duration "$DURATION" \
+        --out "$BOARD_LOG" \
+        --cmd "$COLLECT_CMD"
+      ;;
+    *)
+      echo "Unsupported --collect-mode: $COLLECT_MODE (use serial|cmd)" >&2
+      exit 2
+      ;;
+  esac
+else
+  echo "[3/4] skip log collection (no --collect-mode provided)"
+fi
+
+if [[ ! -f "$BOARD_LOG" ]]; then
+  echo "Board log not found: $BOARD_LOG" >&2
+  echo "Provide --collect-mode to collect one, or pass an existing file via --board-log." >&2
+  exit 1
+fi
+
+echo "[4/4] trace-parse + trace-diff --fail-on-mismatch"
+(
+  cd "$REPO_ROOT"
+  cargo run --release -- trace-parse --in "$BOARD_LOG" --out "$BOARD_TRACE"
+  cargo run --release -- trace-diff \
+    --sil "$SIL_TRACE" \
+    --board "$BOARD_TRACE" \
+    --out "$DIFF_REPORT" \
+    --fail-on-mismatch
+)
+
+echo "Pipeline done."
+echo "  UF2: $UF2"
+echo "  Board log: $BOARD_LOG"
+echo "  Board trace: $BOARD_TRACE"
+echo "  Diff report: $DIFF_REPORT"

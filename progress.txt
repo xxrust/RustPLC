@@ -342,3 +342,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - Files changed
   - `crates/runtime-core/src/lib.rs`, `src/ir/mod.rs`, `src/semantic/mod.rs`, `src/runtime_bridge.rs`, `src/io_map.rs`, `src/main.rs`, `src/sim_regress.rs`, `crates/codegen/src/lib.rs`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/src/main.rs`, `tests/build_rp2040.rs`, `tests/runtime_bridge_us006.rs`, `tests/trace_diff.rs`, `tests/trace_golden.rs`, `examples/trace_golden/*`, `scripts/collect_board_log.sh`, `README.md`, `docs/board_rp2040.md`, `progress.txt`
 ---
+
+## [2026-02-16 18:26:04 CST] - Roadmap Follow-up (Timer Tick + Real ADC + Gate Script)
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Replaced RP2040 firmware tick pacing from fixed CPU-cycle busy delay to RP2040 hardware timer pacing (`1ms`), while keeping deterministic `TICK/TRACE/LOG` timeline semantics.
+  - Wired RP2040 analog input backend to real ADC sampling path: mapped `analog_inputs` are sampled each tick and exposed to runtime as voltage values (`0.0..3.3V`) for `WaitAnalog` predicates.
+  - Tightened RP2040 I/O map contract so `[analog_inputs]` only accepts ADC-capable GPIO (`26..=29`), with build-time and CLI-side validation errors for invalid pins.
+  - Added end-to-end script `scripts/rp2040_trace_gate.sh` to run build+UF2 emit, optional flash, optional board-log collection, trace parse, and `trace-diff --fail-on-mismatch` gate in one flow.
+  - Added rollout docs (`docs/rp2040_iteration_rationale.md`) and updated README/board docs for the new timer/ADC behavior and scripted gate usage.
+- Files changed
+  - `crates/board-rp2040/Cargo.toml`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/src/main.rs`, `src/io_map.rs`, `src/main.rs`, `scripts/rp2040_trace_gate.sh`, `README.md`, `docs/board_rp2040.md`, `docs/rp2040_iteration_rationale.md`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For RP2040 board bring-up, it is safer to encode hardware capability constraints (like ADC pin ranges) in io-map validation rather than relying on runtime warnings.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Host-stub `cargo test --workspace` does not compile embedded-only paths; always run `cargo build -p board-rp2040 --target thumbv6m-none-eabi` after firmware-path changes.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `trace-diff --fail-on-mismatch` can be treated as CI gate once board logs are captured into stable files via `scripts/collect_board_log.sh`.
+---

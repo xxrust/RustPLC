@@ -19,9 +19,10 @@ mod firmware {
     use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
     use runtime_core::{Runtime, TransitionReason};
 
-    use embedded_hal::digital::v2::{InputPin, OutputPin};
+    use embedded_hal_0_2::digital::v2::{InputPin, OutputPin};
     use cortex_m_rt::entry;
     use rp_pico::hal::{
+        adc::{Adc, AdcPin},
         clocks::init_clocks_and_plls,
         gpio::{
             DynPinId, FunctionNull, FunctionSioInput, FunctionSioOutput, OutputEnableOverride,
@@ -29,6 +30,7 @@ mod firmware {
         },
         pac,
         sio::Sio,
+        timer::Timer,
         watchdog::Watchdog,
     };
     use rp_pico::hal::clocks::ClockSource;
@@ -102,15 +104,19 @@ mod firmware {
         t: Tick,
         di: [Option<Pin<DynPinId, FunctionSioInput, PullUp>>; io_map::MAX_DI],
         do_: [Option<Pin<DynPinId, FunctionSioOutput, PullDown>>; io_map::MAX_DO],
+        adc: Adc,
+        ai_pins: [Option<AdcPin<Pin<DynPinId, FunctionSioInput, PullDown>>>; io_map::MAX_AI],
         ai: [f32; io_map::MAX_AI],
         ao: [f32; io_map::MAX_AO],
     }
 
     impl PicoIo {
-        fn new(pins: &mut AllPins) -> Self {
+        fn new(pins: &mut AllPins, adc: Adc) -> Self {
             let mut di: [Option<Pin<DynPinId, FunctionSioInput, PullUp>>; io_map::MAX_DI] =
                 core::array::from_fn(|_| None);
             let mut do_: [Option<Pin<DynPinId, FunctionSioOutput, PullDown>>; io_map::MAX_DO] =
+                core::array::from_fn(|_| None);
+            let mut ai_pins: [Option<AdcPin<Pin<DynPinId, FunctionSioInput, PullDown>>>; io_map::MAX_AI] =
                 core::array::from_fn(|_| None);
 
             for (id, &gpio) in io_map::DI_GPIO.iter().enumerate() {
@@ -145,14 +151,56 @@ mod firmware {
                     do_[id] = Some(p);
                 }
             }
+            for (id, &gpio) in io_map::AI_GPIO.iter().enumerate() {
+                if gpio == io_map::UNUSED_GPIO {
+                    continue;
+                }
+                if let Some(p) = pins.take(gpio) {
+                    let p = p
+                        .try_into_function::<FunctionSioInput>()
+                        .ok()
+                        .unwrap();
+                    match AdcPin::new(p) {
+                        Ok(pin) => ai_pins[id] = Some(pin),
+                        Err(_) => {
+                            defmt::warn!(
+                                "io_map ai{}={} is not ADC-capable; skipping this analog input",
+                                id,
+                                gpio
+                            );
+                        }
+                    }
+                }
+            }
 
             Self {
                 t: Tick(0),
                 di,
                 do_,
+                adc,
+                ai_pins,
                 ai: [0.0; io_map::MAX_AI],
                 ao: [0.0; io_map::MAX_AO],
             }
+        }
+
+        fn sample_analog_inputs(&mut self) {
+            for (id, pin) in self.ai_pins.iter_mut().enumerate() {
+                let Some(pin) = pin.as_mut() else {
+                    continue;
+                };
+                // Use RP2040 ADC free-running mode to sample the selected channel.
+                // We read twice after switching channel so the second sample reflects
+                // the new channel after mux settle.
+                self.adc.free_running(pin);
+                cortex_m::asm::delay(256);
+                let _discard = self.adc.read_single();
+                cortex_m::asm::delay(256);
+                let raw = self.adc.read_single();
+                // Convert RP2040 ADC raw counts (12-bit) into volts for runtime predicates.
+                self.ai[id] = (raw as f32) * (3.3 / 4095.0);
+            }
+            self.adc.stop();
         }
     }
 
@@ -174,7 +222,7 @@ mod firmware {
         }
 
         fn read_analog_input(&self, id: AnalogInputId) -> f32 {
-            self.ai[id.0 as usize]
+            self.ai.get(id.0 as usize).copied().unwrap_or(0.0)
         }
 
         fn write_digital_output(&mut self, id: DigitalOutputId, value: bool) {
@@ -192,7 +240,9 @@ mod firmware {
         }
 
         fn write_analog_output(&mut self, id: AnalogOutputId, value: f32) {
-            self.ao[id.0 as usize] = value;
+            if let Some(slot) = self.ao.get_mut(id.0 as usize) {
+                *slot = value;
+            }
         }
     }
 
@@ -218,6 +268,8 @@ mod firmware {
             clocks.system_clock.get_freq().to_Hz()
         );
 
+        let timer = Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+        let adc = Adc::new(pac.ADC, &mut pac.RESETS);
         let program = &generated_program::generated::PROGRAM;
         let mut rt = Runtime::new(program).unwrap();
 
@@ -229,12 +281,14 @@ mod firmware {
             &mut pac.RESETS,
         );
         let mut all_pins = AllPins::new(pins);
-        let mut io = PicoIo::new(&mut all_pins);
+        let mut io = PicoIo::new(&mut all_pins, adc);
 
-        // Minimal "tick" source: we drive the runtime in a loop paced by a crude busy-wait.
-        // Later stories can replace this with a timer interrupt and real GPIO-backed Io.
+        // v1 keeps polling semantics but paces ticks from RP2040 hardware timer.
         const TICK_MS: u64 = 1;
+        const TICK_US: u64 = TICK_MS * 1000;
+        let mut next_tick_us = timer.get_counter().ticks();
         loop {
+            io.sample_analog_inputs();
             let tick = io.tick().0;
             defmt::info!("TICK tick={} ts_ms={}", tick, tick.saturating_mul(TICK_MS));
             rt.tick_with_trace_and_logs(
@@ -263,7 +317,10 @@ mod firmware {
                 },
             )
             .unwrap();
-            cortex_m::asm::delay(12_000_000);
+            next_tick_us = next_tick_us.saturating_add(TICK_US);
+            while timer.get_counter().ticks() < next_tick_us {
+                cortex_m::asm::nop();
+            }
         }
     }
 
