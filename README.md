@@ -291,30 +291,30 @@ cargo run --release -- sim-regress \
 
 ```mermaid
 flowchart TD
-  P[".plc"] --> V["verify (编译 + 形式化验证)"]
+  P[".plc"] --> V["verify"]
 
   subgraph SIL["SIL (PC)"]
-    V --> SP["sim / sim-plc / sim-regress"]
-    SP --> ST["SIL trace.jsonl + wave.vcd + report.json"]
+    V --> SP["SIL 运行<br/>sim / sim-plc / sim-regress"]
+    SP --> ST["SIL 产物<br/>trace.jsonl / wave.vcd / report.json"]
   end
 
   subgraph BOARD["RP2040 (Pico)"]
-    V --> BR["build-rp2040 --out out/rp2040"]
-    BR --> IOM["io_map.template.toml -> io_map.toml (填写接线)"]
-    CAL["analog_calibration.toml (可选标定)"] --> BR
-    BR --> AC["analog_contract.toml (AI/AO range + ramp + scale/offset)"]
-    IOM --> FW["board-rp2040 build -> ELF -> UF2"]
+    V --> BR["build-rp2040<br/>--out out/rp2040"]
+    BR --> IOM["io_map.template.toml<br/>-> io_map.toml（填写接线）"]
+    CAL["可选标定<br/>analog_calibration.toml"] --> BR
+    BR --> AC["analog_contract.toml<br/>AI/AO range + ramp + scale/offset"]
+    IOM --> FW["board-rp2040 build<br/>ELF -> UF2"]
     AC --> FW
-    FW --> FL["flash-rp2040 (复制 UF2 到 RPI-RP2)"]
-    FL --> BL["board.log (RTT/串口采集)"]
-    BL --> TP["trace-parse -> board_trace.jsonl"]
+    FW --> FL["flash-rp2040<br/>复制 UF2 到 RPI-RP2"]
+    FL --> BL["采集 board.log<br/>RTT / 串口"]
+    BL --> TP["trace-parse<br/>-> board_trace.jsonl"]
   end
 
-  ST --> DIFF["trace-diff --fail-on-mismatch"]
+  ST --> DIFF["trace-diff<br/>--fail-on-mismatch"]
   TP --> DIFF
   DIFF --> OK{"一致?"}
   OK -- "是" --> PASS["通过 / 门禁放行"]
-  OK -- "否" --> REP["diff_report.json (首个偏差 tick + 上下文)"]
+  OK -- "否" --> REP["diff_report.json<br/>首个偏差 tick + 上下文"]
 ```
 
 #### 0) 环境准备（一次性）
