@@ -15,9 +15,25 @@
 - Batch SIL regress runs live in `rust_plc::sim_regress`: it scans `.plc`/scenario YAMLs recursively, writes per-case `trace.jsonl`/`report.json` under `out/sim-regress/case_XXXX`, and emits a summary JSON.
 - No-board trace regression gate is available as `rust_plc no-board-gate`: it runs SIL + `virtual-board` + `trace-diff` and writes `sil_trace.jsonl`, `board.log`, `board_trace.jsonl`, `diff_report.json` under `--out-dir`.
 - For embedded workspace crates, keep a host-stub `main()` behind `cfg(not(target_os = "none"))` so `cargo test --workspace` stays green while firmware code is `cfg(target_os = "none")`.
+- Release-style artifacts should include a `manifest.json` that hashes the exact on-disk files (plus `size_bytes`) so integration tests can verify integrity deterministically.
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-16 23:33:49 CST] - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `release-bundle` CLI subcommand to package a deliverable folder with `program.plc`, `scenario.yaml`, `generated_program.rs`, `io_map.template.toml`, `sil_trace.jsonl`, `sim_report.json`, `verification_report.json`, and `build_meta.json`.
+  - Emitted `manifest.json` listing each artifact's `sha256` + `size_bytes` for integrity and traceability.
+  - Extended `build_meta.json` to include `git_commit` and `git_dirty` (in both `build-rp2040` and `release-bundle` outputs).
+- Files changed
+  - `src/main.rs`, `tests/build_rp2040.rs`, `tests/release_bundle.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For “bundle” style commands, prefer hashing the copied-on-disk artifacts (not the inputs) and include `size_bytes` so tests can validate integrity without ambiguity.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Liveness verifier rejects `wait` steps without `timeout` unless `allow_indefinite_wait: true`; even minimal fixtures in CLI tests must satisfy this.
+---
+
 ## [2026-02-15 01:46:15 CST] - US-010
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented

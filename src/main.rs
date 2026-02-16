@@ -182,6 +182,13 @@ fn main() {
         }
         return;
     }
+    if first == "release-bundle" {
+        if let Err(msg) = run_release_bundle_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "flash-rp2040" {
         if let Err(msg) = run_flash_rp2040_subcommand(&program, args) {
             eprintln!("{msg}");
@@ -389,6 +396,9 @@ fn print_usage(program: &str) {
     );
     eprintln!(
         "  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
+    );
+    eprintln!(
+        "  {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>]"
     );
     eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
     eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
@@ -683,9 +693,34 @@ struct BuildMeta<'a> {
     generated_at: &'a str,
     tool_version: &'a str,
     runtime_semver: &'a str,
+    git_commit: &'a str,
+    git_dirty: bool,
     runtime_budget: RuntimeBudget,
     #[serde(skip_serializing_if = "Option::is_none")]
     io_map: Option<IoMap>,
+}
+
+#[derive(Debug, Clone)]
+struct GitMetadata {
+    commit: String,
+    dirty: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseBundleManifest<'a> {
+    schema_version: u32,
+    tool_version: &'a str,
+    generated_at: &'a str,
+    git_commit: &'a str,
+    git_dirty: bool,
+    artifacts: Vec<ReleaseBundleArtifact>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseBundleArtifact {
+    path: String,
+    sha256: String,
+    size_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -871,12 +906,15 @@ fn run_build_rp2040_subcommand(
     let generated_at = time::OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string());
+    let git_metadata = detect_git_metadata();
 
     let meta = BuildMeta {
         plc_sha256: &sha256,
         generated_at: &generated_at,
         tool_version: env!("CARGO_PKG_VERSION"),
         runtime_semver: runtime_core::VERSION,
+        git_commit: &git_metadata.commit,
+        git_dirty: git_metadata.dirty,
         runtime_budget: ir_bundle.runtime_budget.clone(),
         io_map,
     };
@@ -898,6 +936,234 @@ fn run_build_rp2040_subcommand(
             &uf2_path,
         )?;
     }
+
+    Ok(())
+}
+
+fn run_release_bundle_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!(
+            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>]"
+        ));
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    let mut out_dir: Option<PathBuf> = None;
+    let mut io_map_path: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "--out-dir" => {
+                out_dir = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --out-dir <dir>".to_string())?,
+                ));
+            }
+            "--io-map" => {
+                io_map_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --io-map <file>".to_string()
+                    })?));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>]"
+                ));
+            }
+            other => return Err(format!("Unknown argument for release-bundle: {other}")),
+        }
+    }
+
+    let scenario_path = scenario_path.ok_or_else(|| {
+        format!(
+            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>]"
+        )
+    })?;
+    let out_dir = out_dir.ok_or_else(|| {
+        format!(
+            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>]"
+        )
+    })?;
+
+    fs::create_dir_all(&out_dir)
+        .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
+
+    if Path::new(&plc_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        != Some("plc")
+    {
+        return Err(format!("Expected a .plc file path, got: {plc_path}"));
+    }
+
+    let plc_bytes =
+        fs::read(&plc_path).map_err(|err| format!("Failed to read PLC file {plc_path}: {err}"))?;
+    let plc_source = String::from_utf8(plc_bytes.clone())
+        .map_err(|err| format!("PLC file is not valid UTF-8: {err}"))?;
+
+    let plc_sha256 = sha256_hex(&plc_bytes);
+
+    let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
+        format!(
+            "Failed to read scenario YAML file {}: {err}",
+            scenario_path.display()
+        )
+    })?;
+    let scenario = sim::Scenario::from_yaml_str(&scenario_yaml).map_err(|e| format!("{e}"))?;
+
+    let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
+
+    // Board-oriented program generation uses 1ms ticks to align with firmware build artifacts.
+    let board_program =
+        state_machine_to_runtime_program(&ir_bundle.topology, &ir_bundle.state_machine, 1)
+            .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
+
+    let usage = io_usage_for_program(&board_program);
+    let io_map = match io_map_path.as_ref() {
+        None => None,
+        Some(path) => {
+            let toml_str = fs::read_to_string(&path)
+                .map_err(|err| format!("Failed to read io map {path:?}: {err}"))?;
+            let m = IoMap::from_toml_str(&toml_str)
+                .map_err(|err| format!("Failed to parse io map TOML: {err}"))?;
+            m.validate_for_usage(usage)
+                .map_err(|err| format!("Invalid io map for this program: {err}"))?;
+            Some(m)
+        }
+    };
+
+    // Write/copy core bundle artifacts.
+    let bundled_plc_path = out_dir.join("program.plc");
+    fs::write(&bundled_plc_path, &plc_bytes)
+        .map_err(|err| format!("Failed to write {bundled_plc_path:?}: {err}"))?;
+
+    let bundled_scenario_path = out_dir.join("scenario.yaml");
+    fs::write(&bundled_scenario_path, &scenario_yaml)
+        .map_err(|err| format!("Failed to write {bundled_scenario_path:?}: {err}"))?;
+
+    let io_map_template_path = out_dir.join("io_map.template.toml");
+    let io_map_template = io_map_template_for_program(&board_program);
+    fs::write(&io_map_template_path, &io_map_template)
+        .map_err(|err| format!("Failed to write {io_map_template_path:?}: {err}"))?;
+
+    // Always include an io_map file in the bundle: either the user-provided map or a template.
+    let bundled_io_map_path = out_dir.join("io_map.toml");
+    if let Some(src) = io_map_path.as_ref() {
+        fs::copy(src, &bundled_io_map_path)
+            .map_err(|err| format!("Failed to copy io map {src:?} -> {bundled_io_map_path:?}: {err}"))?;
+    } else {
+        fs::write(&bundled_io_map_path, &io_map_template)
+            .map_err(|err| format!("Failed to write {bundled_io_map_path:?}: {err}"))?;
+    }
+
+    let generated_program_path = out_dir.join("generated_program.rs");
+    let mut generated_src = codegen::generate_program_module(&board_program, "generated")
+        .map_err(|err| format!("Codegen failed: {err:?}"))?;
+    if !generated_src.ends_with('\n') {
+        generated_src.push('\n');
+    }
+    fs::write(&generated_program_path, generated_src)
+        .map_err(|err| format!("Failed to write {generated_program_path:?}: {err}"))?;
+
+    let verification_report_path = out_dir.join("verification_report.json");
+    let plc_path_text = PathBuf::from(&plc_path).to_string_lossy().to_string();
+    write_verification_report(
+        &plc_path_text,
+        &verification_report_path,
+        &ir_bundle.runtime_budget,
+        &ir_bundle.verification,
+    )?;
+
+    // SIL artifacts for trace/report packaging.
+    let sil_program =
+        state_machine_to_runtime_program(&ir_bundle.topology, &ir_bundle.state_machine, scenario.tick_ms)
+            .map_err(|err| format!("Failed to bridge to SIL runtime Program: {err}"))?;
+    let sil_trace_path = out_dir.join("sil_trace.jsonl");
+    let sim_report_path = out_dir.join("sim_report.json");
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&sil_program, &scenario);
+    let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+    let run = sim::run_program_for_scenario(&sil_program, &scenario, &mut io)
+        .map_err(|err| format!("SIL simulation failed: {err}"))?;
+    fs::write(&sil_trace_path, run.trace.into_string())
+        .map_err(|err| format!("Failed to write trace file {sil_trace_path:?}: {err}"))?;
+    let mut sim_report_json = serde_json::to_string_pretty(&run.report)
+        .map_err(|err| format!("Failed to serialize sim report JSON: {err}"))?;
+    sim_report_json.push('\n');
+    fs::write(&sim_report_path, sim_report_json)
+        .map_err(|err| format!("Failed to write sim report {sim_report_path:?}: {err}"))?;
+
+    let generated_at = time::OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string());
+    let git_metadata = detect_git_metadata();
+
+    let build_meta_path = out_dir.join("build_meta.json");
+    let meta = BuildMeta {
+        plc_sha256: &plc_sha256,
+        generated_at: &generated_at,
+        tool_version: env!("CARGO_PKG_VERSION"),
+        runtime_semver: runtime_core::VERSION,
+        git_commit: &git_metadata.commit,
+        git_dirty: git_metadata.dirty,
+        runtime_budget: ir_bundle.runtime_budget.clone(),
+        io_map,
+    };
+    let mut meta_json = serde_json::to_string_pretty(&meta)
+        .map_err(|err| format!("Failed to serialize build_meta.json: {err}"))?;
+    meta_json.push('\n');
+    fs::write(&build_meta_path, meta_json)
+        .map_err(|err| format!("Failed to write {build_meta_path:?}: {err}"))?;
+
+    let manifest_path = out_dir.join("manifest.json");
+    let mut artifact_paths: Vec<PathBuf> = vec![
+        bundled_plc_path,
+        bundled_scenario_path,
+        bundled_io_map_path,
+        io_map_template_path,
+        generated_program_path,
+        verification_report_path,
+        sil_trace_path,
+        sim_report_path,
+        build_meta_path,
+    ];
+    artifact_paths.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+    let mut artifacts = Vec::new();
+    for p in &artifact_paths {
+        let rel = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| format!("Non-utf8 artifact filename: {p:?}"))?
+            .to_string();
+        let (sha, size) = sha256_file(p)?;
+        artifacts.push(ReleaseBundleArtifact {
+            path: rel,
+            sha256: sha,
+            size_bytes: size,
+        });
+    }
+
+    let manifest = ReleaseBundleManifest {
+        schema_version: 1,
+        tool_version: env!("CARGO_PKG_VERSION"),
+        generated_at: &generated_at,
+        git_commit: &git_metadata.commit,
+        git_dirty: git_metadata.dirty,
+        artifacts,
+    };
+    let mut manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|err| format!("Failed to serialize manifest.json: {err}"))?;
+    manifest_json.push('\n');
+    fs::write(&manifest_path, manifest_json)
+        .map_err(|err| format!("Failed to write {manifest_path:?}: {err}"))?;
 
     Ok(())
 }
@@ -1138,6 +1404,48 @@ fn absolutize_path(path: &Path) -> Result<PathBuf, String> {
     }
     let cwd = env::current_dir().map_err(|err| format!("Failed to read current dir: {err}"))?;
     Ok(cwd.join(path))
+}
+
+fn detect_git_metadata() -> GitMetadata {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let commit = std::process::Command::new("git")
+        .current_dir(&repo_root)
+        .arg("rev-parse")
+        .arg("HEAD")
+        .output()
+        .ok()
+        .and_then(|out| {
+            if out.status.success() {
+                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let dirty = std::process::Command::new("git")
+        .current_dir(&repo_root)
+        .arg("status")
+        .arg("--porcelain")
+        .output()
+        .ok()
+        .map(|out| out.status.success() && !out.stdout.is_empty())
+        .unwrap_or(false);
+
+    GitMetadata { commit, dirty }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    hex::encode(h.finalize())
+}
+
+fn sha256_file(path: &Path) -> Result<(String, u64), String> {
+    let bytes = fs::read(path).map_err(|err| format!("Failed to read artifact {path:?}: {err}"))?;
+    let size = bytes.len() as u64;
+    Ok((sha256_hex(&bytes), size))
 }
 
 fn io_map_template_for_program(program: &Program<'_>) -> String {

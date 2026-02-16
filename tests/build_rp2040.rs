@@ -115,6 +115,11 @@ fn cli_build_rp2040_emits_expected_artifacts() {
         v.get("runtime_semver").and_then(|v| v.as_str()).is_some(),
         true
     );
+    assert_eq!(
+        v.get("git_commit").and_then(|v| v.as_str()).is_some(),
+        true
+    );
+    assert_eq!(v.get("git_dirty").and_then(|v| v.as_bool()).is_some(), true);
     let sha = v
         .get("plc_sha256")
         .and_then(|v| v.as_str())
