@@ -338,6 +338,19 @@ cargo build -p board-rp2040 --target thumbv6m-none-eabi --release
 - `--target thumbv6m-none-eabi`：交叉编译到 RP2040（Cortex-M0+）目标
 - `--release`：使用发布优化配置（更接近实机运行）
 
+如果你希望在 `build-rp2040` 阶段直接产出 UF2，可用：
+
+```bash
+cargo run --release -- build-rp2040 examples/assembly_station.plc \
+  --out out/rp2040 \
+  --io-map out/rp2040/io_map.toml \
+  --emit-uf2 out/firmware.uf2
+```
+
+说明：
+- `--emit-uf2` 会在内部执行 `cargo build -p board-rp2040 --target thumbv6m-none-eabi --release` 与 `elf2uf2-rs` 转换。
+- 因为要保证接线合同明确，`--emit-uf2` 需要同时提供 `--io-map`。
+
 #### 3) ELF -> UF2
 
 目的：把 ELF 转成 Pico 拖拽烧录需要的 UF2。

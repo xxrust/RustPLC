@@ -167,7 +167,7 @@ fn print_usage(program: &str) {
     eprintln!("  {program} <file.plc>");
     eprintln!("  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]");
     eprintln!("  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]");
-    eprintln!("  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]");
+    eprintln!("  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]");
     eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
     eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
     eprintln!("  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>]");
@@ -375,11 +375,14 @@ fn run_build_rp2040_subcommand(
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let Some(plc_path) = args.next() else {
-        return Err(format!("Usage: {program} build-rp2040 <file.plc> --out <dir>"));
+        return Err(format!(
+            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]"
+        ));
     };
 
     let mut out_dir: Option<PathBuf> = None;
     let mut io_map_path: Option<PathBuf> = None;
+    let mut emit_uf2: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => {
@@ -393,9 +396,15 @@ fn run_build_rp2040_subcommand(
                         .ok_or_else(|| "Missing value for --io-map <file>".to_string())?,
                 ));
             }
+            "--emit-uf2" => {
+                emit_uf2 = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --emit-uf2 <file.uf2>".to_string())?,
+                ));
+            }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]"
+                    "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]"
                 ));
             }
             other => return Err(format!("Unknown argument for build-rp2040: {other}")),
@@ -403,7 +412,9 @@ fn run_build_rp2040_subcommand(
     }
 
     let out_dir = out_dir.ok_or_else(|| {
-        format!("Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>]")
+        format!(
+            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]"
+        )
     })?;
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
@@ -430,7 +441,7 @@ fn run_build_rp2040_subcommand(
         .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
 
     let usage = io_usage_for_program(&runtime_program);
-    let io_map = match io_map_path {
+    let io_map = match io_map_path.as_ref() {
         None => None,
         Some(path) => {
             let toml_str = fs::read_to_string(&path)
@@ -478,7 +489,86 @@ fn run_build_rp2040_subcommand(
     fs::write(&meta_path, meta_json)
         .map_err(|err| format!("Failed to write {meta_path:?}: {err}"))?;
 
+    if let Some(uf2_path) = emit_uf2 {
+        let io_map_path = io_map_path.as_ref().ok_or_else(|| {
+            "--emit-uf2 requires --io-map <file> so board pin mapping is explicit".to_string()
+        })?;
+        emit_rp2040_uf2(&generated_path, io_map_path, &uf2_path)?;
+    }
+
     Ok(())
+}
+
+fn emit_rp2040_uf2(
+    generated_program_rs: &Path,
+    io_map_toml: &Path,
+    uf2_out: &Path,
+) -> Result<(), String> {
+    let generated_program_rs = absolutize_path(generated_program_rs)?;
+    let io_map_toml = absolutize_path(io_map_toml)?;
+    let uf2_out = absolutize_path(uf2_out)?;
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(parent) = uf2_out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create UF2 output dir {parent:?}: {err}"))?;
+        }
+    }
+
+    let cargo = std::process::Command::new("cargo")
+        .current_dir(&repo_root)
+        .env("RUST_PLC_GENERATED_PROGRAM_RS", &generated_program_rs)
+        .env("RUST_PLC_IO_MAP_TOML", &io_map_toml)
+        .arg("build")
+        .arg("-p")
+        .arg("board-rp2040")
+        .arg("--target")
+        .arg("thumbv6m-none-eabi")
+        .arg("--release")
+        .output()
+        .map_err(|err| format!("Failed to run cargo for RP2040 firmware build: {err}"))?;
+    if !cargo.status.success() {
+        return Err(format!(
+            "RP2040 firmware build failed.\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&cargo.stdout),
+            String::from_utf8_lossy(&cargo.stderr)
+        ));
+    }
+
+    let elf = repo_root.join("target/thumbv6m-none-eabi/release/board-rp2040");
+    if !elf.exists() {
+        return Err(format!(
+            "Expected firmware ELF does not exist after build: {elf:?}"
+        ));
+    }
+
+    let uf2 = std::process::Command::new("elf2uf2-rs")
+        .arg(&elf)
+        .arg(&uf2_out)
+        .output()
+        .map_err(|err| {
+            format!(
+                "Failed to run elf2uf2-rs (install with `cargo install elf2uf2-rs`): {err}"
+            )
+        })?;
+    if !uf2.status.success() {
+        return Err(format!(
+            "UF2 conversion failed.\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&uf2.stdout),
+            String::from_utf8_lossy(&uf2.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
+fn absolutize_path(path: &Path) -> Result<PathBuf, String> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    let cwd = env::current_dir().map_err(|err| format!("Failed to read current dir: {err}"))?;
+    Ok(cwd.join(path))
 }
 
 fn io_map_template_for_program(program: &Program<'_>) -> String {
