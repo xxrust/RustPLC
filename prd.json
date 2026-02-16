@@ -1,136 +1,199 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/post-sil-rp2040-build-flash",
-  "description": "SIL 主线已完成后，进入 RP2040 下沉阶段：优先打通 IR->固件生成、I/O 映射合同、自动装载（UF2）和板级可观测性闭环，形成可重复构建与可比对的端到端链路。",
+  "branchName": "ralph/no-board-foundation-hardening",
+  "description": "在无实体开发板条件下，完成可交付基础能力补齐：验证报告可解释性、确定性时序上界、虚拟板级闭环、发布可追溯、模拟量安全覆盖透明化，以及 PID+仿真回归能力的最小落地。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "新增 codegen crate：将 runtime Program 生成可嵌入 Rust 静态模块",
-      "description": "作为开发者，我希望把已支持子集的 Program 生成 `no_std` 可用的静态 Rust 模块（steps/tasks/actions 常量），以便 board-rp2040 无需动态分配即可运行控制逻辑。",
+      "title": "统一验证报告契约：verification_report.json + warnings 分级",
+      "description": "作为用户，我希望每次编译都产出统一结构化验证报告，明确 proof level、warnings、覆盖范围与降级原因，避免误判“已完备证明”。",
       "acceptanceCriteria": [
-        "新增 `crates/codegen` crate，提供 `generate_program_module(...)` 或等效 API",
-        "输入为 runtime-bridge 可产出的 Program（当前支持子集），输出为可编译 Rust 源码字符串",
-        "生成代码不使用堆分配，使用 `static`/常量数组表达 Program",
-        "新增单元测试：对最小 Program 生成源码并通过 `syn` 解析或等效语法校验",
+        "新增统一报告结构（建议 `verification_report.json`），至少包含 safety/liveness/timing/causality 的 level、warnings、checked_rules、skipped_rules",
+        "CLI 默认输出路径可配置（如 `--report <file>`），并保持向后兼容",
+        "warnings 增加分级（error/warn/info）并在文本 summary 中体现",
+        "新增集成测试：对包含降级告警的样例断言 JSON 字段完整且稳定",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "覆盖基础能力 #4/#6"
     },
     {
       "id": "US-002",
-      "title": "CLI 新增 build-rp2040：.plc -> 验证 -> 生成固件工程输入",
-      "description": "作为用户，我希望通过一条命令把 `.plc` 走完编译与验证，并产出 RP2040 固件所需的生成文件与元数据，以便后续自动构建与烧录。",
+      "title": "CLI 门禁：支持 --deny-warnings",
+      "description": "作为 CI 使用者，我希望当存在 warn 级告警时可让命令失败，从而把风险显式纳入发布门禁。",
       "acceptanceCriteria": [
-        "在 `src/main.rs` 新增 `build-rp2040` 子命令（不破坏既有命令）",
-        "`build-rp2040 <file.plc> --out <dir>` 会执行现有编译+验证流程，失败时非 0 返回并输出错误",
-        "成功时输出至少 3 个产物：`generated_program.rs`、`build_meta.json`、`io_map.template.toml`（或等效命名）",
-        "`build_meta.json` 包含 `plc_sha256`、`generated_at`、`tool_version`、`runtime_semver` 字段",
-        "新增 CLI 集成测试：断言产物存在且关键字段完整",
+        "主 CLI 增加 `--deny-warnings`（或等效）开关",
+        "当存在 warn/error 级告警时返回非 0，并输出可读失败原因",
+        "默认行为不变（未开启时仅提示，不阻断）",
+        "新增集成测试覆盖：默认模式通过、deny 模式失败",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "覆盖基础能力 #4/#6"
     },
     {
       "id": "US-003",
-      "title": "board-rp2040 接入“生成 Program”并运行真实控制逻辑（子集）",
-      "description": "作为开发者，我希望 Pico 固件不再只跑示例 tick，而是能编译并执行来自 `.plc` 的生成 Program，从而建立真实下沉路径。",
+      "title": "runtime 上界分析：tick 转移/动作/并行展开预算",
+      "description": "作为开发者，我希望在无实板时也能得到结构化时序上界，评估确定性与实时性风险。",
       "acceptanceCriteria": [
-        "`crates/board-rp2040` 可通过 feature 或 include 路径接入 `generated_program.rs`",
-        "固件主循环调用 runtime-core 执行生成 Program，而不是硬编码 demo Program",
-        "保留 host-stub 构建路径（`cfg(not(target_os = \"none\"))`）以保证 workspace 测试稳定",
-        "新增最小编译测试或脚本化校验：`cargo build -p board-rp2040 --target thumbv6m-none-eabi` 成功",
+        "新增运行时静态预算分析：单 tick 最大转移次数、最大动作数、最大并行展开",
+        "预算结果写入验证报告与构建元数据",
+        "当预算超过阈值时输出 warn 级告警（阈值可配置）",
+        "新增单元测试覆盖正常与超阈值场景",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "覆盖基础能力 #3"
     },
     {
       "id": "US-004",
-      "title": "I/O 映射合同 v1：逻辑点位到 RP2040 GPIO 的配置与校验",
-      "description": "作为开发者，我希望用配置文件定义 Y/X 到 GPIO 的映射并在构建期校验，从而把接线假设显式化、可追踪、可复现。",
+      "title": "虚拟板级 Runner：生成 board.log/board_trace.jsonl",
+      "description": "作为用户，我希望在没有实体 RP2040 的情况下，仍能走完整“板级日志 -> 解析 -> 对比”链路。",
       "acceptanceCriteria": [
-        "定义映射文件格式（建议 TOML）：至少覆盖 digital inputs / digital outputs",
-        "新增映射解析与验证模块，校验重复分配、非法引脚、缺失必需点位",
-        "`build-rp2040` 支持 `--io-map <file>`，并把解析后的映射写入构建元数据",
-        "新增单元测试覆盖：合法映射、重复引脚、缺失映射、非法编号",
+        "新增 `virtual-board`（命令或库）以 host 方式执行与板端一致的 trace 输出格式",
+        "输出至少包括：`board.log`、`board_trace.jsonl`、元信息文件",
+        "`trace-parse` 对虚拟板日志零改动可解析",
+        "新增集成测试：给定示例 `.plc` + scenario 可稳定产出文件并可被解析",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "覆盖基础能力 #7/#3"
     },
     {
       "id": "US-005",
-      "title": "RP2040 HAL 适配层 v1：把 runtime-core 的 Io trait 接到真实 GPIO",
-      "description": "作为用户，我希望固件可以按映射表读写 Pico GPIO，让 runtime 在板上驱动真实引脚。",
+      "title": "无板对比门禁：SIL vs virtual-board trace-diff",
+      "description": "作为 CI 使用者，我希望自动比较 SIL 与虚拟板轨迹，首个偏差可定位并可阻断回归。",
       "acceptanceCriteria": [
-        "在 `board-rp2040` 中新增 `PicoIo`（或等效）实现 `io_traits::Io` 的数字 I/O 方法",
-        "支持从映射配置初始化输入/输出引脚方向",
-        "tick 推进与循环周期有明确来源（busy-loop 可接受，后续可替换定时器）",
-        "固件日志至少输出启动信息、tick 计数和关键 step 迁移摘要",
-        "cargo build -p board-rp2040 --target thumbv6m-none-eabi succeeds",
-        "Typecheck passes"
+        "新增脚本或命令串联 `sim` + `virtual-board` + `trace-diff --fail-on-mismatch`",
+        "输出差异报告 JSON 与可读摘要",
+        "新增至少 1 组一致与 1 组不一致测试样例",
+        "文档给出本地一条命令执行方式",
+        "Typecheck passes",
+        "cargo test --workspace passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "覆盖基础能力 #7"
     },
     {
       "id": "US-006",
-      "title": "CLI 新增 flash-rp2040：UF2 自动装载（含 dry-run）",
-      "description": "作为用户，我希望通过命令行自动把固件装载到 Pico，并在无法自动识别设备时得到清晰提示。",
+      "title": "发布包与追溯：release-bundle + sha 清单 + git 元数据",
+      "description": "作为交付人员，我希望一次构建即可产出可审计、可复现、可回滚的完整工件包。",
       "acceptanceCriteria": [
-        "新增 `flash-rp2040` 子命令，支持 `--uf2 <file>` 与 `--mount <path>`",
-        "支持 `--dry-run`：只打印将执行的检测/复制动作，不实际写入",
-        "当 mount 点不存在、不可写或 UF2 文件缺失时，返回非 0 并输出可操作错误",
-        "新增集成测试（可使用临时目录模拟 mount 点）覆盖成功和失败路径",
+        "新增 `release-bundle`（命令或脚本），打包 `.plc`、io_map、scenario、generated_program、trace、report",
+        "生成 `manifest.json`（包含每个工件 sha256）",
+        "build 元数据新增 git commit、dirty 标记、生成时间",
+        "新增集成测试：校验 manifest 字段与哈希一致性",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "覆盖基础能力 #5"
     },
     {
       "id": "US-007",
-      "title": "板级可观测性 v1：统一 Trace 事件格式并落盘",
-      "description": "作为开发者，我希望板上运行产生的关键轨迹可被主机侧解析并与 SIL 结果对比，降低实机调试成本。",
+      "title": "模拟量安全覆盖透明化：规则绑定率与抽象粒度报告",
+      "description": "作为安全评审者，我希望知道每条 safety 规则是否真正进入模型、采用何种抽象，避免“黑盒通过”。",
       "acceptanceCriteria": [
-        "定义最小统一事件格式（tick/task/step/reason/timestamp_ms）",
-        "board-rp2040 日志输出该事件格式（defmt 或串口文本均可）",
-        "新增主机侧解析工具（CLI 子命令或库函数）将日志转换为 JSONL",
-        "新增测试：给定样例日志可稳定解析为结构化事件序列",
+        "Safety 报告新增每条规则状态：bound/skipped/degraded + reason",
+        "对模拟量阈值规则输出区间切分点与命中区间数量",
+        "summary 输出 coverage 指标（如 `bound_rules/total_rules`）",
+        "新增单元测试覆盖：全部绑定、部分跳过、全部跳过三类场景",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "覆盖基础能力 #6"
     },
     {
       "id": "US-008",
-      "title": "SIL vs 板级对比工具 v1：关键边沿与 step 轨迹差异报告",
-      "description": "作为用户，我希望自动比较 SIL 与板级运行结果，并定位首个偏差 tick 与对应 step，快速判断是模型问题还是硬件时序差异。",
+      "title": "阈值语义强化：类型/range/unit 一致性校验",
+      "description": "作为开发者，我希望 safety/wait 阈值比较在语义阶段就拒绝非法设备、越界值与单位不一致输入。",
       "acceptanceCriteria": [
-        "新增对比模块：输入 SIL trace.jsonl 与 board trace.jsonl，输出差异报告 JSON",
-        "报告包含：是否一致、首个偏差 tick、偏差类型（step/reason/edge）、上下文窗口",
-        "提供 CLI 入口（建议 `trace-diff` 子命令）",
-        "新增测试：构造一组一致与一组不一致样例，断言报告字段正确",
+        "阈值比较仅允许模拟量设备（analog_input/analog_output 规则按设计约束）",
+        "阈值值必须落入声明 range（含边界）",
+        "当设备声明 unit 且比较值带单位时，必须一致；不一致报错",
+        "新增单元测试覆盖类型错误、越界、单位不一致、合法路径",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "覆盖基础能力 #6"
+    },
+    {
+      "id": "US-009",
+      "title": "PID 最小可用子集：DSL/IR/runtime 打通",
+      "description": "作为控制工程师，我希望在 RustPLC 中定义并运行最小 PID 回路（采样周期、限幅、anti-windup），为闭环控制奠基。",
+      "acceptanceCriteria": [
+        "DSL 支持最小 PID 声明（pv/sp/kp/ki/kd/out/period_ms/limit）",
+        "IR/runtime 支持离散 PID 执行与输出限幅",
+        "支持 anti-windup（至少一种策略，文档说明）",
+        "新增单元测试：阶跃响应下输出有限且收敛趋势正确",
+        "Typecheck passes",
+        "cargo test --workspace passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "覆盖基础能力 #1"
+    },
+    {
+      "id": "US-010",
+      "title": "仿真对象模型与 KPI 回归：超调/稳定时间/稳态误差",
+      "description": "作为控制工程师，我希望用标准对象模型自动评估 PID 与策略变更效果，防止控制性能退化。",
+      "acceptanceCriteria": [
+        "`crates/sim` 新增至少两类对象模型（如一阶惯性、纯滞后或死区/饱和）",
+        "新增 KPI 计算：超调、稳定时间、稳态误差",
+        "新增回归测试：同一场景下 KPI 结果可重复且在阈值内",
+        "CLI 可导出 KPI JSON",
+        "Typecheck passes",
+        "cargo test --workspace passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "覆盖基础能力 #1/#7"
+    },
+    {
+      "id": "US-011",
+      "title": "异常恢复模板与顺控 lint：关键 wait 必须可恢复",
+      "description": "作为项目维护者，我希望将急停/掉电/传感器卡死的恢复路径固化为模板，并由 lint 强制关键 wait 配置 timeout+goto。",
+      "acceptanceCriteria": [
+        "新增故障恢复模板（至少急停、掉电、传感器卡死三类）",
+        "新增 lint：关键路径 wait 缺失 timeout+goto 时给出 warn/error（可配置）",
+        "模板配套示例与集成测试可运行通过",
+        "文档说明何为关键路径与如何豁免",
+        "Typecheck passes",
+        "cargo test --workspace passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "覆盖基础能力 #2"
+    },
+    {
+      "id": "US-012",
+      "title": "无开发板交付文档：No-Board Playbook",
+      "description": "作为新用户，我希望有一份从 `.plc` 到虚拟板级 gate 再到 release-bundle 的完整流程文档。",
+      "acceptanceCriteria": [
+        "新增文档章节 `No-Board Playbook`（README 或 docs）",
+        "文档包含最小命令序列：compile/verify -> sim -> virtual-board -> trace-diff -> release-bundle",
+        "每个命令解释输入输出文件的用途",
+        "新增文档相关测试或示例检查，确保命令与当前 CLI 一致",
+        "Typecheck passes",
+        "cargo test --workspace passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "覆盖基础能力 #4/#5/#7"
     }
   ]
 }
