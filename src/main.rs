@@ -145,6 +145,7 @@ fn main() {
 
     let path = first;
     let mut report_path: Option<PathBuf> = None;
+    let mut deny_warnings = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--report" => {
@@ -153,6 +154,9 @@ fn main() {
                     std::process::exit(1);
                 });
                 report_path = Some(PathBuf::from(value));
+            }
+            "--deny-warnings" => {
+                deny_warnings = true;
             }
             "-h" | "--help" => {
                 print_usage(&program);
@@ -200,6 +204,16 @@ fn main() {
     }
 
     print_success_summary(&ir_bundle.verification);
+    if deny_warnings {
+        let blocking_warnings = collect_blocking_warnings(&ir_bundle.verification);
+        if !blocking_warnings.is_empty() {
+            eprintln!("--deny-warnings 已启用，检测到阻断级告警：");
+            for warning in blocking_warnings {
+                eprintln!("  - {warning}");
+            }
+            std::process::exit(2);
+        }
+    }
 
     match serde_json::to_string_pretty(&ir_bundle) {
         Ok(json) => println!("{json}"),
@@ -212,7 +226,9 @@ fn main() {
 
 fn print_usage(program: &str) {
     eprintln!("Usage:");
-    eprintln!("  {program} <file.plc> [--report <verification_report.json>]");
+    eprintln!(
+        "  {program} <file.plc> [--report <verification_report.json>] [--deny-warnings]"
+    );
     eprintln!(
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
     );
@@ -1589,6 +1605,31 @@ fn warning_level_label(level: &WarningLevel) -> &'static str {
         WarningLevel::Error => "ERROR",
         WarningLevel::Warn => "WARN",
         WarningLevel::Info => "INFO",
+    }
+}
+
+fn collect_blocking_warnings(summary: &VerificationSummary) -> Vec<String> {
+    let mut warnings = Vec::new();
+    collect_checker_blocking_warnings("safety", &summary.safety.warnings, &mut warnings);
+    collect_checker_blocking_warnings("liveness", &summary.liveness.warnings, &mut warnings);
+    collect_checker_blocking_warnings("timing", &summary.timing.warnings, &mut warnings);
+    collect_checker_blocking_warnings("causality", &summary.causality.warnings, &mut warnings);
+    warnings
+}
+
+fn collect_checker_blocking_warnings(
+    checker: &str,
+    entries: &[rust_plc::verification::WarningEntry],
+    output: &mut Vec<String>,
+) {
+    for entry in entries {
+        if matches!(entry.level, WarningLevel::Warn | WarningLevel::Error) {
+            output.push(format!(
+                "[{checker}] {}: {}",
+                warning_level_label(&entry.level),
+                entry.message
+            ));
+        }
     }
 }
 

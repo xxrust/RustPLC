@@ -150,3 +150,55 @@ task process_B:
         "bounded safety case should include warn-level warning entries"
     );
 }
+
+#[test]
+fn deny_warnings_fails_process_when_warns_exist() {
+    let base = temp_dir("rust_plc_verification_report_deny_warn");
+    let plc_path = base.join("warn.plc");
+    let report_path = base.join("warn_report.json");
+
+    let source = r#"
+[topology]
+device mode_switch: digital_input
+device out_a: digital_output
+device out_b: digital_output
+
+[constraints]
+safety: out_a.on requires out_a.on
+
+[tasks]
+task choose:
+    step wait_mode:
+        wait: mode_switch == true
+        allow_indefinite_wait: true
+    step decide:
+        if: mode_switch == true goto process_A else: goto process_B
+
+task process_A:
+    step run:
+        action: set out_a on
+    on_complete: goto choose
+
+task process_B:
+    step run:
+        action: set out_b on
+    on_complete: goto choose
+"#;
+    fs::write(&plc_path, source).expect("write plc");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg(&plc_path)
+        .arg("--report")
+        .arg(&report_path)
+        .arg("--deny-warnings")
+        .output()
+        .expect("run rust_plc");
+
+    assert!(
+        !output.status.success(),
+        "deny-warnings should fail the process when warn entries exist"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--deny-warnings"));
+    assert!(stderr.contains("[safety]"));
+}

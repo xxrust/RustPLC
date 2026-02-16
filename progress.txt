@@ -463,3 +463,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - In CLI tests, pass `--report <temp-file>` to avoid shared `out/` collisions between concurrent test runs.
 ---
+
+## [2026-02-16 22:34:43 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `--deny-warnings` to `rust_plc <file.plc>`: when enabled, any `warn`/`error` warning in the verification summary fails the process (after writing the JSON verification report).
+  - Added integration test asserting `--deny-warnings` blocks a bounded-safety case that emits `warn` entries.
+  - Documented the verification report contract and `--deny-warnings` behavior in docs.
+- Files changed
+  - `src/main.rs`, `tests/verification_report.rs`, `docs/prd_clarifications.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Gate behavior should be based on structured warning levels, not substring matching from stderr.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Write report artifacts before exiting on deny-warnings so CI can still collect evidence.
+---

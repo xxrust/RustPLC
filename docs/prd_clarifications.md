@@ -55,3 +55,35 @@
 - **使用“阈值集合”离散化**：验证引擎仅按出现的阈值分区，避免状态空间爆炸。
 - **外部设定值标注 `external: true`**：避免被错误要求具备“动作→输入”的因果链。
 - **传感器（sensor）用于离散信号**：如限位开关、已量化的反馈信号；不承担数值语义。
+
+---
+
+## 验证报告契约（US-001/US-002 对应）
+
+从 2026-02-16 起，`rust_plc <file.plc>` 在验证通过后会额外产出结构化报告：
+
+- 默认路径：`out/<plc文件名>.verification_report.json`
+- 可指定路径：`--report <file>`
+
+### 报告字段（最小契约）
+
+- 顶层：
+  - `schema_version`
+  - `tool_version`
+  - `source_plc`
+  - `generated_at`
+  - `verification`
+- `verification.<checker>`（`safety/liveness/timing/causality`）：
+  - `level`
+  - `warnings`（数组，元素结构 `{ level, message }`）
+  - `checked_rules`
+  - `skipped_rules`
+
+### `--deny-warnings` 门禁
+
+当启用 `--deny-warnings` 时：
+
+- 若存在 `warn` 或 `error` 级 warning，命令返回非 0（阻断）
+- 默认（不加该参数）仍保持“仅提示不阻断”
+
+这使 CI 可以把“有界验证/风险提示”纳入发布门禁，而不是仅凭字符串日志人工判断。
