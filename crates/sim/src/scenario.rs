@@ -27,7 +27,7 @@ impl fmt::Display for ScenarioError {
 
 impl std::error::Error for ScenarioError {}
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scenario {
     /// Used for reproducibility when we later add randomized disturbances.
     #[serde(default)]
@@ -58,10 +58,11 @@ impl Scenario {
             });
         };
 
-        let s: Scenario = serde_path_to_error::deserialize(doc).map_err(|e| ScenarioError::Parse {
-            path: e.path().to_string(),
-            message: e.into_inner().to_string(),
-        })?;
+        let s: Scenario =
+            serde_path_to_error::deserialize(doc).map_err(|e| ScenarioError::Parse {
+                path: e.path().to_string(),
+                message: e.into_inner().to_string(),
+            })?;
         s.validate()?;
         Ok(s)
     }
@@ -137,13 +138,13 @@ impl Scenario {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InputEvent {
     pub at_ms: u64,
     pub set: InputSet,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct InputSet {
     /// Map from digital input id to value.
     #[serde(default)]
@@ -164,7 +165,7 @@ impl InputSet {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FaultEvent {
     pub sensor_stuck: SensorStuckFault,
 }
@@ -175,7 +176,11 @@ impl FaultEvent {
     }
 
     fn apply(&self, io: &mut SimIo, tick: Tick) {
-        io.schedule_sensor_stuck(tick, DigitalInputId(self.sensor_stuck.target), self.sensor_stuck.value);
+        io.schedule_sensor_stuck(
+            tick,
+            DigitalInputId(self.sensor_stuck.target),
+            self.sensor_stuck.value,
+        );
     }
 }
 

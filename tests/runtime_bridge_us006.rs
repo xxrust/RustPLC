@@ -1,8 +1,8 @@
 use io_traits::{DigitalInputId, DigitalOutputId, Tick};
+use runtime_core::Runtime;
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
-use runtime_core::Runtime;
 
 fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'static> {
     let program = parse_plc(plc_source).expect("parse plc");
@@ -120,7 +120,8 @@ fn bridge_supports_timeout_to_goto_branch() {
 
     // Run until tick 5 (50ms) to trigger timeout.
     for _ in 0..6 {
-        rt.tick_with_trace(&mut io, |e| trace.record(e)).expect("tick");
+        rt.tick_with_trace(&mut io, |e| trace.record(e))
+            .expect("tick");
     }
 
     let out = trace.into_string();
@@ -211,7 +212,8 @@ fn bridge_supports_analog_wait_guard_mapped_to_regions() {
     io.schedule_analog_input(Tick(0), io_traits::AnalogInputId(0), 90.0);
 
     let mut trace = sim::JsonlTraceRecorder::new();
-    rt.tick_with_trace(&mut io, |e| trace.record(e)).expect("tick");
+    rt.tick_with_trace(&mut io, |e| trace.record(e))
+        .expect("tick");
     let out = trace.into_string();
     assert!(
         out.contains("\"reason\":\"wait_satisfied\""),

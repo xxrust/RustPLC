@@ -65,10 +65,9 @@ fn golden_trace_pair_mismatch_fails_gate() {
         .output()
         .expect("run trace-diff");
 
+    assert!(!output.status.success(), "golden mismatch should fail gate");
     assert!(
-        !output.status.success(),
-        "golden mismatch should fail gate"
+        out.exists(),
+        "report should be materialized for mismatch diagnostics"
     );
-    assert!(out.exists(), "report should be materialized for mismatch diagnostics");
 }
-

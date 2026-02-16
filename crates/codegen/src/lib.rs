@@ -13,7 +13,10 @@ pub enum CodegenError {
 /// Notes:
 /// - This is intentionally simple and "stringly typed"; it is an internal build artifact generator.
 /// - The generated module contains no heap allocation and uses only `static` arrays.
-pub fn generate_program_module(program: &Program<'_>, module_name: &str) -> Result<String, CodegenError> {
+pub fn generate_program_module(
+    program: &Program<'_>,
+    module_name: &str,
+) -> Result<String, CodegenError> {
     if program.tasks.is_empty() {
         return Err(CodegenError::ProgramHasNoTasks);
     }
@@ -30,25 +33,39 @@ pub fn generate_program_module(program: &Program<'_>, module_name: &str) -> Resu
             }
             match step.instr {
                 Instr::Action { next, .. } => {
-                    if !check(next, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
+                    if !check(next, task.steps.len()) {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
                 }
                 Instr::WaitDigital { next, timeout, .. } => {
-                    if !check(next, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
+                    if !check(next, task.steps.len()) {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
                     if let Some(tmo) = timeout {
-                        if !check(tmo.target, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
+                        if !check(tmo.target, task.steps.len()) {
+                            return Err(CodegenError::StepIdOutOfRange);
+                        }
                     }
                 }
                 Instr::WaitAnalog { next, timeout, .. } => {
-                    if !check(next, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
+                    if !check(next, task.steps.len()) {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
                     if let Some(tmo) = timeout {
-                        if !check(tmo.target, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
+                        if !check(tmo.target, task.steps.len()) {
+                            return Err(CodegenError::StepIdOutOfRange);
+                        }
                     }
                 }
                 Instr::Delay { next, .. } => {
-                    if !check(next, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
+                    if !check(next, task.steps.len()) {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
                 }
                 Instr::Goto { target } => {
-                    if !check(target, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
+                    if !check(target, task.steps.len()) {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
                 }
                 Instr::Halt => {}
             }
@@ -65,14 +82,19 @@ pub fn generate_program_module(program: &Program<'_>, module_name: &str) -> Resu
     out.push_str("#[allow(non_snake_case)]\n");
     out.push_str("#[allow(non_camel_case_types)]\n");
     out.push_str(&format!("pub mod {module_name} {{\n"));
-    out.push_str("  use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, AnalogOutputId};\n");
+    out.push_str(
+        "  use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, AnalogOutputId};\n",
+    );
     out.push_str("  use runtime_core::{Action, AnalogRange, Instr, Program, Step, StepId, Task, Timeout};\n\n");
 
     // Emit actions arrays, then steps, then tasks, then program.
     for (tidx, task) in program.tasks.iter().enumerate() {
         for (sidx, step) in task.steps.iter().enumerate() {
             if let Instr::Action { actions, .. } = step.instr {
-                out.push_str(&format!("  static T{tidx}_S{sidx}_ACTIONS: [Action; {}] = [\n", actions.len()));
+                out.push_str(&format!(
+                    "  static T{tidx}_S{sidx}_ACTIONS: [Action; {}] = [\n",
+                    actions.len()
+                ));
                 for a in actions {
                     out.push_str("    ");
                     out.push_str(&format_action(a));
@@ -96,7 +118,10 @@ pub fn generate_program_module(program: &Program<'_>, module_name: &str) -> Resu
             }
         }
 
-        out.push_str(&format!("  static T{tidx}_STEPS: [Step<'static>; {}] = [\n", task.steps.len()));
+        out.push_str(&format!(
+            "  static T{tidx}_STEPS: [Step<'static>; {}] = [\n",
+            task.steps.len()
+        ));
         for (sidx, step) in task.steps.iter().enumerate() {
             out.push_str("    Step { name: ");
             out.push_str(&format!("{:?}", step.name));
@@ -107,11 +132,17 @@ pub fn generate_program_module(program: &Program<'_>, module_name: &str) -> Resu
         out.push_str("  ];\n\n");
     }
 
-    out.push_str(&format!("  static TASKS: [Task<'static>; {}] = [\n", program.tasks.len()));
+    out.push_str(&format!(
+        "  static TASKS: [Task<'static>; {}] = [\n",
+        program.tasks.len()
+    ));
     for (tidx, task) in program.tasks.iter().enumerate() {
         out.push_str("    Task { name: ");
         out.push_str(&format!("{:?}", task.name));
-        out.push_str(&format!(", steps: &T{tidx}_STEPS, entry: StepId({}) }},\n", task.entry.0));
+        out.push_str(&format!(
+            ", steps: &T{tidx}_STEPS, entry: StepId({}) }},\n",
+            task.entry.0
+        ));
     }
     out.push_str("  ];\n\n");
     out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS };\n");
@@ -128,12 +159,12 @@ fn format_action(a: &Action) -> String {
         ),
         Action::SetAnalog { id, value } => format!(
             "Action::SetAnalog {{ id: AnalogOutputId({}), value: {} }}",
-            id.0, format_f32(value)
+            id.0,
+            format_f32(value)
         ),
-        Action::Extend { output } => format!(
-            "Action::Extend {{ output: DigitalOutputId({}) }}",
-            output.0
-        ),
+        Action::Extend { output } => {
+            format!("Action::Extend {{ output: DigitalOutputId({}) }}", output.0)
+        }
         Action::Retract { output } => format!(
             "Action::Retract {{ output: DigitalOutputId({}) }}",
             output.0
@@ -169,7 +200,10 @@ fn format_instr(tidx: usize, sidx: usize, instr: &Instr<'_>) -> String {
         } => {
             let tmo = match timeout {
                 None => "None".to_string(),
-                Some(Timeout { after_ticks, target }) => format!(
+                Some(Timeout {
+                    after_ticks,
+                    target,
+                }) => format!(
                     "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
                     after_ticks, target.0
                 ),
@@ -187,7 +221,10 @@ fn format_instr(tidx: usize, sidx: usize, instr: &Instr<'_>) -> String {
         } => {
             let tmo = match timeout {
                 None => "None".to_string(),
-                Some(Timeout { after_ticks, target }) => format!(
+                Some(Timeout {
+                    after_ticks,
+                    target,
+                }) => format!(
                     "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
                     after_ticks, target.0
                 ),

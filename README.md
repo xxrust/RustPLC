@@ -229,6 +229,7 @@ cargo run --release -- your_file.plc
 形式化验证证明的是“模型满足约束”；SIL 则把**同一份控制逻辑**（不论来自 AI 生成还是人工编写）放进一个**确定性运行时**，用可脚本化的输入/故障（以及可选的 Plant 模型）把程序“跑起来”，产出可复现的**轨迹**与**波形**，用于回归与调试。
 
 - `sim`：读取一个场景 YAML，跑一个内置最小 Program，用于验证仿真管线（场景 → trace/VCD/report）。
+- `sim-plc`：读取真实 `.plc` + 场景 YAML，输出 SIL trace（便于和 PIL/板级做同一 DSL 的对比）。
 - `sim-regress`：对 `--plc-dir` 下的 `.plc`（AI/手写均可）与 `--scenario-dir` 下的 `.yaml/.yml` 做**笛卡尔积**跑批：编译 `.plc` → 转为 runtime Program → 运行场景/故障 → 输出每个用例制品与汇总报告（适合作为回归门禁）。
 
 场景文件（YAML）最小例子：
@@ -266,6 +267,15 @@ cargo run --release -- sim scenarios/basic.yaml
 cargo run --release -- sim-regress --plc-dir examples --scenario-dir scenarios
 ```
 
+如果你希望失败用例自动输出“最小复现场景”（缩短 duration、去掉无关输入/故障），加上：
+
+```bash
+cargo run --release -- sim-regress \
+  --plc-dir examples \
+  --scenario-dir scenarios \
+  --minimize-failure
+```
+
 更多背景与设计取舍见：
 - [`docs/roadmap_autosim_arduino.md`](docs/roadmap_autosim_arduino.md)（SIL/Plant/回归闭环路线图）
 - [`docs/dsl-sil-verification.md`](docs/dsl-sil-verification.md)（为什么 DSL 静态验证后仍值得做 SIL）
@@ -298,6 +308,7 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc --out out/rp20
 - `out/rp2040/build_meta.json`：构建元数据（版本、hash、时间）
 - `out/rp2040/io_map.template.toml`：I/O 映射模板
 - `out/rp2040/analog_contract.toml`：模拟量合同（AI/AO range、AO ramp）
+- `out/rp2040/analog_calibration.template.toml`：模拟量标定模板（scale/offset）
 
 #### 1.5) 填写 I/O 映射（必须）
 
@@ -328,6 +339,16 @@ ao0 = 20
 说明：
 - `[analog_inputs]` 在 RP2040 上仅支持 GPIO `26..=29`（ADC 引脚）。
 - 固件会按 tick 采样这些 AI，并按 `analog_contract.toml` 把 `0.0..3.3V` 线性映射到 DSL 的工程量 range（如 bar/℃）。
+
+如果需要板级标定（传感器偏置/驱动斜率），可额外提供标定文件：
+
+```bash
+cargo run --release -- build-rp2040 examples/assembly_station.plc \
+  --out out/rp2040 \
+  --analog-calibration out/rp2040/analog_calibration.toml
+```
+
+标定规则：`eng_calibrated = eng_raw * scale + offset`（分别支持 AI/AO 通道）。
 
 `RUST_PLC_IO_MAP_TOML` 的含义：  
 它是一个环境变量，指向上面的 `io_map.toml` 文件；`board-rp2040` 的 `build.rs` 会在编译期读取它并把映射“固化进固件”。
@@ -467,6 +488,17 @@ scripts/pil_trace_gate.sh \
   --out-dir out/pil_gate \
   --runner-cmd "renode -e 'include @scripts/renode/run.resc'" \
   --duration 30
+```
+
+仓库额外提供两类 PIL 基线脚本：
+
+```bash
+# 预置 trace 基线（cat 或 renode runner）
+scripts/pil_trace_baseline_suite.sh --runner cat
+scripts/pil_trace_baseline_suite.sh --runner renode
+
+# 真实 .plc + 场景语义基线（SIL trace vs pil-run board-log）
+scripts/pil_semantic_baseline.sh --cases-dir examples/pil_baselines
 ```
 
 #### 当前下沉范围说明（RP2040 v1）

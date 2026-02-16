@@ -67,10 +67,11 @@ pub fn parse_trace_jsonl(input: &str) -> Result<Vec<NormalizedTraceEvent>, Trace
         if line.is_empty() {
             continue;
         }
-        let row: JsonlRowAny = serde_json::from_str(line).map_err(|err| TraceJsonlParseError::InvalidJson {
-            line: line_no,
-            message: err.to_string(),
-        })?;
+        let row: JsonlRowAny =
+            serde_json::from_str(line).map_err(|err| TraceJsonlParseError::InvalidJson {
+                line: line_no,
+                message: err.to_string(),
+            })?;
         out.push(NormalizedTraceEvent {
             tick: row.tick,
             task: row.task,
@@ -226,4 +227,3 @@ mod tests {
         assert_eq!(rep.context[1].index, 1);
     }
 }
-

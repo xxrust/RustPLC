@@ -842,10 +842,7 @@ fn build_state_machine_from_ast_with_context(
                     regions
                         .iter()
                         .map(|(min, max)| {
-                            (
-                                format_numeric_literal(*min),
-                                format_numeric_literal(*max),
-                            )
+                            (format_numeric_literal(*min), format_numeric_literal(*max))
                         })
                         .collect::<Vec<_>>(),
                 )

@@ -41,6 +41,15 @@ SIL 主线完成后，板级链路的瓶颈集中在三点：
   - `ramp_ms` 在固件 tick 循环内实现最小斜坡。
 - 价值：AO 不再是内存缓冲，板上输出可用于真实执行器链路。
 
+### 3.5) 模拟量标定入口（scale/offset）
+
+- 文件：`src/main.rs`、`crates/board-rp2040/build.rs`、`crates/board-rp2040/src/main.rs`
+- 改动：
+  - `build-rp2040` 新增 `analog_calibration.template.toml`（可选标定模板）；
+  - 支持 `build-rp2040 --analog-calibration <file>` 把 AI/AO 的 `scale/offset` 合并写入 `analog_contract.toml`；
+  - 固件侧在 AI 映射后、AO 下发前统一应用：`eng_cal = eng_raw * scale + offset`。
+- 价值：把“板级偏置/斜率”从代码里拿出来，作为可版本化资产进入回归链路。
+
 ### 4) I/O 合同补强（AI 引脚约束）
 
 - 文件：`src/io_map.rs`、`crates/board-rp2040/build.rs`
@@ -75,6 +84,7 @@ SIL 主线完成后，板级链路的瓶颈集中在三点：
 
 - AI/AO 默认换算模型为线性映射（`0.0..3.3V -> min..max`）；复杂传感器曲线仍需后续标定层。
 - PIL 脚本已就绪，但具体 Renode 平台脚本仍按项目硬件模型补充（runner-cmd 可先接已有日志源）。
+- `sim-regress --minimize-failure` 会输出最小失败用例（缩短 duration、移除无关输入/故障），但目前仅做结构化删减（不做连续参数求解/最小化）。
 
 ## 验证状态
 

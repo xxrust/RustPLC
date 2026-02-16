@@ -31,7 +31,11 @@ pub struct ScenarioSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FaultSummary {
-    SensorStuck { at_ms: u64, target: u16, value: bool },
+    SensorStuck {
+        at_ms: u64,
+        target: u16,
+        value: bool,
+    },
 }
 
 impl ScenarioSummary {
@@ -40,7 +44,12 @@ impl ScenarioSummary {
             tick_ms: s.tick_ms,
             duration_ms: s.duration_ms,
             inputs_count: s.inputs.len(),
-            faults: s.faults.iter().cloned().map(FaultSummary::from_fault).collect(),
+            faults: s
+                .faults
+                .iter()
+                .cloned()
+                .map(FaultSummary::from_fault)
+                .collect(),
         }
     }
 }

@@ -111,6 +111,8 @@ struct AnalogContract {
 struct AnalogInputContractEntry {
     min: f32,
     max: f32,
+    scale: f32,
+    offset: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -118,6 +120,8 @@ struct AnalogOutputContractEntry {
     min: f32,
     max: f32,
     ramp_ms: u32,
+    scale: f32,
+    offset: f32,
 }
 
 fn parse_io_map(input: &str) -> Result<IoMap, String> {
@@ -207,7 +211,17 @@ fn parse_analog_inputs_table(
                 "analog_inputs.{k} has invalid range: min ({min}) must be < max ({max})"
             ));
         }
-        out.insert(id, AnalogInputContractEntry { min, max });
+        let scale = parse_optional_float(t, "scale", &format!("analog_inputs.{k}"), 1.0)?;
+        let offset = parse_optional_float(t, "offset", &format!("analog_inputs.{k}"), 0.0)?;
+        out.insert(
+            id,
+            AnalogInputContractEntry {
+                min,
+                max,
+                scale,
+                offset,
+            },
+        );
     }
     Ok(out)
 }
@@ -234,12 +248,16 @@ fn parse_analog_outputs_table(
                 "analog_outputs.{k}.ramp_ms must be >= 0, got {ramp_ms}"
             ));
         }
+        let scale = parse_optional_float(t, "scale", &format!("analog_outputs.{k}"), 1.0)?;
+        let offset = parse_optional_float(t, "offset", &format!("analog_outputs.{k}"), 0.0)?;
         out.insert(
             id,
             AnalogOutputContractEntry {
                 min,
                 max,
                 ramp_ms: ramp_ms as u32,
+                scale,
+                offset,
             },
         );
     }
@@ -270,6 +288,22 @@ fn parse_required_float(
     }
 }
 
+fn parse_optional_float(
+    table: &toml::value::Table,
+    field: &str,
+    scope: &str,
+    default: f32,
+) -> Result<f32, String> {
+    let Some(v) = table.get(field) else {
+        return Ok(default);
+    };
+    match v {
+        toml::Value::Float(n) => Ok(*n as f32),
+        toml::Value::Integer(n) => Ok(*n as f32),
+        _ => Err(format!("{scope}.{field} must be a number")),
+    }
+}
+
 fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
     const MAX_DI: usize = 32;
     const MAX_DO: usize = 32;
@@ -283,9 +317,13 @@ fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
     let mut ao = [UNUSED; MAX_AO];
     let mut ai_min = [0.0f32; MAX_AI];
     let mut ai_max = [3.3f32; MAX_AI];
+    let mut ai_scale = [1.0f32; MAX_AI];
+    let mut ai_offset = [0.0f32; MAX_AI];
     let mut ao_min = [0.0f32; MAX_AO];
     let mut ao_max = [10.0f32; MAX_AO];
     let mut ao_ramp = [0u32; MAX_AO];
+    let mut ao_scale = [1.0f32; MAX_AO];
+    let mut ao_offset = [0.0f32; MAX_AO];
 
     for (&id, &gpio) in &map.digital_inputs {
         let idx = id as usize;
@@ -322,6 +360,8 @@ fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
         }
         ai_min[idx] = cfg.min;
         ai_max[idx] = cfg.max;
+        ai_scale[idx] = cfg.scale;
+        ai_offset[idx] = cfg.offset;
     }
     for (&id, cfg) in &analog_contract.analog_outputs {
         let idx = id as usize;
@@ -331,6 +371,8 @@ fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
         ao_min[idx] = cfg.min;
         ao_max[idx] = cfg.max;
         ao_ramp[idx] = cfg.ramp_ms;
+        ao_scale[idx] = cfg.scale;
+        ao_offset[idx] = cfg.offset;
     }
 
     let mut out = String::new();
@@ -370,6 +412,16 @@ fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
         out.push_str(&format!("  {v:.6},\n"));
     }
     out.push_str("];\n");
+    out.push_str("pub const AI_CAL_SCALE: [f32; MAX_AI] = [\n");
+    for v in ai_scale {
+        out.push_str(&format!("  {v:.6},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const AI_CAL_OFFSET: [f32; MAX_AI] = [\n");
+    for v in ai_offset {
+        out.push_str(&format!("  {v:.6},\n"));
+    }
+    out.push_str("];\n");
     out.push_str("pub const AO_ENG_MIN: [f32; MAX_AO] = [\n");
     for v in ao_min {
         out.push_str(&format!("  {v:.6},\n"));
@@ -383,6 +435,16 @@ fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
     out.push_str("pub const AO_RAMP_MS: [u32; MAX_AO] = [\n");
     for v in ao_ramp {
         out.push_str(&format!("  {v},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const AO_CAL_SCALE: [f32; MAX_AO] = [\n");
+    for v in ao_scale {
+        out.push_str(&format!("  {v:.6},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const AO_CAL_OFFSET: [f32; MAX_AO] = [\n");
+    for v in ao_offset {
+        out.push_str(&format!("  {v:.6},\n"));
     }
     out.push_str("];\n");
     out

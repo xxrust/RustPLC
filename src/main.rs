@@ -6,17 +6,17 @@ use rust_plc::semantic::{
     preprocess_program,
 };
 use rust_plc::verification::{VerificationSummary, verify_all};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use io_traits::{DigitalInputId, DigitalOutputId};
+use io_traits::{DigitalInputId, DigitalOutputId, Io};
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::io_map::{IoMap, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
-use rust_plc::sim_regress::{SimRegressSummary, run_sim_regress};
+use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -91,6 +91,13 @@ fn main() {
         }
         return;
     }
+    if first == "sim-plc" {
+        if let Err(msg) = run_sim_plc_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "build-rp2040" {
         if let Err(msg) = run_build_rp2040_subcommand(&program, args) {
             eprintln!("{msg}");
@@ -114,6 +121,13 @@ fn main() {
     }
     if first == "trace-diff" {
         if let Err(msg) = run_trace_diff_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if first == "pil-run" {
+        if let Err(msg) = run_pil_run_subcommand(&program, args) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
@@ -169,17 +183,19 @@ fn print_usage(program: &str) {
     eprintln!(
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
     );
+    eprintln!("  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>");
     eprintln!(
-        "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]"
+        "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
     );
     eprintln!(
-        "  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]"
+        "  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
     );
     eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
     eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
     eprintln!(
         "  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
     );
+    eprintln!("  {program} pil-run <file.plc> --scenario <scenario.yaml>");
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -294,6 +310,79 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
     Ok(())
 }
 
+fn run_sim_plc_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!(
+            "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>"
+        ));
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    let mut out_path: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "--out" => {
+                out_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out <trace.jsonl>".to_string()
+                    })?));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>"
+                ));
+            }
+            other => return Err(format!("Unknown argument for sim-plc: {other}")),
+        }
+    }
+
+    let scenario_path = scenario_path.ok_or_else(|| {
+        format!(
+            "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>"
+        )
+    })?;
+    let out_path = out_path.ok_or_else(|| {
+        format!(
+            "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>"
+        )
+    })?;
+
+    if let Some(parent) = out_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create output directory {parent:?}: {err}"))?;
+        }
+    }
+
+    let plc_source =
+        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
+        format!(
+            "Failed to read scenario YAML file {}: {err}",
+            scenario_path.display()
+        )
+    })?;
+    let scenario = sim::Scenario::from_yaml_str(&scenario_yaml).map_err(|e| format!("{e}"))?;
+    let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
+
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
+    let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+    let run =
+        sim::run_program_for_scenario(&program, &scenario, &mut io).map_err(|e| format!("{e}"))?;
+    fs::write(&out_path, run.trace.into_string())
+        .map_err(|err| format!("Failed to write trace file {out_path:?}: {err}"))?;
+    Ok(())
+}
+
 fn run_sim_regress_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
@@ -302,6 +391,7 @@ fn run_sim_regress_subcommand(
     let mut scenario_dir: Option<PathBuf> = None;
     let mut artifacts_dir: Option<PathBuf> = None;
     let mut summary_out: Option<PathBuf> = None;
+    let mut minimize_failure = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -328,9 +418,12 @@ fn run_sim_regress_subcommand(
                     "Missing value for --summary-out <summary.json>".to_string()
                 })?));
             }
+            "--minimize-failure" => {
+                minimize_failure = true;
+            }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]"
+                    "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
                 ));
             }
             other => {
@@ -341,12 +434,12 @@ fn run_sim_regress_subcommand(
 
     let plc_dir = plc_dir.ok_or_else(|| {
         format!(
-            "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]"
+            "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
         )
     })?;
     let scenario_dir = scenario_dir.ok_or_else(|| {
         format!(
-            "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>]"
+            "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
         )
     })?;
 
@@ -360,8 +453,15 @@ fn run_sim_regress_subcommand(
         }
     }
 
-    let summary = run_sim_regress(&plc_dir, &scenario_dir, &artifacts_dir)
-        .map_err(|e| format!("sim-regress failed: {e}"))?;
+    let summary = run_sim_regress_with_options(
+        &plc_dir,
+        &scenario_dir,
+        &artifacts_dir,
+        SimRegressOptions {
+            minimize: minimize_failure,
+        },
+    )
+    .map_err(|e| format!("sim-regress failed: {e}"))?;
     write_sim_regress_summary(&summary_out, &summary)?;
     Ok(())
 }
@@ -388,6 +488,8 @@ struct AnalogContract {
 struct AnalogInputContractEntry {
     min: f32,
     max: f32,
+    scale: f32,
+    offset: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     unit: Option<String>,
 }
@@ -397,8 +499,30 @@ struct AnalogOutputContractEntry {
     min: f32,
     max: f32,
     ramp_ms: u64,
+    scale: f32,
+    offset: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     unit: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct AnalogCalibrationFile {
+    #[serde(default)]
+    analog_inputs: BTreeMap<String, AnalogCalibrationEntry>,
+    #[serde(default)]
+    analog_outputs: BTreeMap<String, AnalogCalibrationEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AnalogCalibrationEntry {
+    #[serde(default = "default_calibration_scale")]
+    scale: f32,
+    #[serde(default)]
+    offset: f32,
+}
+
+fn default_calibration_scale() -> f32 {
+    1.0
 }
 
 fn run_build_rp2040_subcommand(
@@ -407,12 +531,13 @@ fn run_build_rp2040_subcommand(
 ) -> Result<(), String> {
     let Some(plc_path) = args.next() else {
         return Err(format!(
-            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]"
+            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
         ));
     };
 
     let mut out_dir: Option<PathBuf> = None;
     let mut io_map_path: Option<PathBuf> = None;
+    let mut analog_calibration_path: Option<PathBuf> = None;
     let mut emit_uf2: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -428,6 +553,12 @@ fn run_build_rp2040_subcommand(
                         "Missing value for --io-map <file>".to_string()
                     })?));
             }
+            "--analog-calibration" => {
+                analog_calibration_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --analog-calibration <file>".to_string()
+                    })?));
+            }
             "--emit-uf2" => {
                 emit_uf2 =
                     Some(PathBuf::from(args.next().ok_or_else(|| {
@@ -436,7 +567,7 @@ fn run_build_rp2040_subcommand(
             }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]"
+                    "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
                 ));
             }
             other => return Err(format!("Unknown argument for build-rp2040: {other}")),
@@ -445,7 +576,7 @@ fn run_build_rp2040_subcommand(
 
     let out_dir = out_dir.ok_or_else(|| {
         format!(
-            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--emit-uf2 <file.uf2>]"
+            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
         )
     })?;
     fs::create_dir_all(&out_dir)
@@ -508,12 +639,22 @@ fn run_build_rp2040_subcommand(
     fs::write(&iomap_path, iomap)
         .map_err(|err| format!("Failed to write {iomap_path:?}: {err}"))?;
 
-    let analog_contract = build_analog_contract(&plc_source)?;
+    let mut analog_contract = build_analog_contract(&plc_source)?;
+    if let Some(path) = analog_calibration_path.as_ref() {
+        let calibration_toml = fs::read_to_string(path)
+            .map_err(|err| format!("Failed to read analog calibration file {path:?}: {err}"))?;
+        apply_analog_calibration(&mut analog_contract, &calibration_toml)?;
+    }
     let analog_contract_toml = toml::to_string_pretty(&analog_contract)
         .map_err(|err| format!("Failed to serialize analog contract TOML: {err}"))?;
     let analog_contract_path = out_dir.join("analog_contract.toml");
     fs::write(&analog_contract_path, analog_contract_toml)
         .map_err(|err| format!("Failed to write {analog_contract_path:?}: {err}"))?;
+
+    let analog_cal_template_path = out_dir.join("analog_calibration.template.toml");
+    let analog_cal_template = analog_calibration_template_for_contract(&analog_contract);
+    fs::write(&analog_cal_template_path, analog_cal_template)
+        .map_err(|err| format!("Failed to write {analog_cal_template_path:?}: {err}"))?;
 
     let generated_at = time::OffsetDateTime::now_utc()
         .format(&Rfc3339)
@@ -658,6 +799,8 @@ fn build_analog_contract(plc_source: &str) -> Result<AnalogContract, String> {
                     AnalogInputContractEntry {
                         min,
                         max,
+                        scale: 1.0,
+                        offset: 0.0,
                         unit: d.attributes.unit.clone(),
                     },
                 );
@@ -683,6 +826,8 @@ fn build_analog_contract(plc_source: &str) -> Result<AnalogContract, String> {
                         min,
                         max,
                         ramp_ms,
+                        scale: 1.0,
+                        offset: 0.0,
                         unit: d.attributes.unit.clone(),
                     },
                 );
@@ -706,6 +851,72 @@ fn duration_to_ms(duration: &rust_plc::ast::DurationValue) -> u64 {
         rust_plc::ast::TimeUnit::Ms => duration.value,
         rust_plc::ast::TimeUnit::S => duration.value.saturating_mul(1000),
     }
+}
+
+fn apply_analog_calibration(
+    contract: &mut AnalogContract,
+    calibration_toml: &str,
+) -> Result<(), String> {
+    let cal: AnalogCalibrationFile =
+        toml::from_str(calibration_toml).map_err(|e| format!("Invalid calibration TOML: {e}"))?;
+
+    for (k, v) in &cal.analog_inputs {
+        validate_calibration_entry(v, &format!("analog_inputs.{k}"))?;
+        let entry = contract.analog_inputs.get_mut(k).ok_or_else(|| {
+            format!("analog calibration key not found in contract: analog_inputs.{k}")
+        })?;
+        entry.scale = v.scale;
+        entry.offset = v.offset;
+    }
+    for (k, v) in &cal.analog_outputs {
+        validate_calibration_entry(v, &format!("analog_outputs.{k}"))?;
+        let entry = contract.analog_outputs.get_mut(k).ok_or_else(|| {
+            format!("analog calibration key not found in contract: analog_outputs.{k}")
+        })?;
+        entry.scale = v.scale;
+        entry.offset = v.offset;
+    }
+    Ok(())
+}
+
+fn validate_calibration_entry(v: &AnalogCalibrationEntry, scope: &str) -> Result<(), String> {
+    if !v.scale.is_finite() || v.scale.abs() < 1e-9 {
+        return Err(format!("{scope}.scale must be finite and non-zero"));
+    }
+    if !v.offset.is_finite() {
+        return Err(format!("{scope}.offset must be finite"));
+    }
+    Ok(())
+}
+
+fn analog_calibration_template_for_contract(contract: &AnalogContract) -> String {
+    let mut out = String::new();
+    out.push_str("# Analog calibration template (optional)\n");
+    out.push_str("#\n");
+    out.push_str("# The firmware applies calibration as:\n");
+    out.push_str("#   eng_calibrated = eng_raw * scale + offset\n");
+    out.push_str("#\n");
+    out.push_str("# Notes:\n");
+    out.push_str("# - Keys match analog_contract.toml sections: ai0/ao0/...\n");
+    out.push_str("# - Only entries present here override defaults.\n\n");
+
+    if !contract.analog_inputs.is_empty() {
+        out.push_str("[analog_inputs]\n");
+        for k in contract.analog_inputs.keys() {
+            out.push_str(&format!("# {k} = {{ scale = 1.0, offset = 0.0 }}\n"));
+        }
+        out.push('\n');
+    }
+
+    if !contract.analog_outputs.is_empty() {
+        out.push_str("[analog_outputs]\n");
+        for k in contract.analog_outputs.keys() {
+            out.push_str(&format!("# {k} = {{ scale = 1.0, offset = 0.0 }}\n"));
+        }
+        out.push('\n');
+    }
+
+    out
 }
 
 fn absolutize_path(path: &Path) -> Result<PathBuf, String> {
@@ -1067,6 +1278,206 @@ fn run_trace_diff_subcommand(
         ));
     }
     Ok(())
+}
+
+fn run_pil_run_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!(
+            "Usage: {program} pil-run <file.plc> --scenario <scenario.yaml>"
+        ));
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} pil-run <file.plc> --scenario <scenario.yaml>"
+                ));
+            }
+            other => return Err(format!("Unknown argument for pil-run: {other}")),
+        }
+    }
+
+    let scenario_path = scenario_path
+        .ok_or_else(|| format!("Usage: {program} pil-run <file.plc> --scenario <scenario.yaml>"))?;
+
+    let plc_source =
+        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
+        format!(
+            "Failed to read scenario YAML file {}: {err}",
+            scenario_path.display()
+        )
+    })?;
+    let scenario = sim::Scenario::from_yaml_str(&scenario_yaml).map_err(|e| format!("{e}"))?;
+
+    let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
+
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
+    let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+    scenario
+        .apply_to_simio(&mut io)
+        .map_err(|e| format!("scenario apply failed: {e}"))?;
+
+    let mut rt =
+        runtime_core::Runtime::new(&program).map_err(|e| format!("runtime init failed: {e:?}"))?;
+
+    println!("boot ok");
+    for _ in 0..scenario.duration_ticks() {
+        let tick = io.tick().0;
+        let ts_ms = tick.saturating_mul(scenario.tick_ms);
+        println!("TICK tick={tick} ts_ms={ts_ms}");
+
+        rt.tick_with_trace_and_logs(
+            &mut io,
+            |e| {
+                let ts_ms = e.tick.0.saturating_mul(scenario.tick_ms);
+                println!(
+                    "TRACE tick={} task={} from={} to={} reason={} ts_ms={}",
+                    e.tick.0,
+                    e.task,
+                    e.from.0,
+                    e.to.0,
+                    reason_str(e.reason),
+                    ts_ms
+                );
+            },
+            |log| {
+                let ts_ms = log.tick.0.saturating_mul(scenario.tick_ms);
+                println!(
+                    "LOG tick={} task={} step={} msg_id={} msg={} ts_ms={}",
+                    log.tick.0, log.task, log.step.0, log.message_id, log.message, ts_ms
+                );
+            },
+        )
+        .map_err(|e| format!("runtime tick failed: {e:?}"))?;
+
+        if is_halted(&rt, &program) {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+fn compile_plc_to_runtime_program(
+    plc_source: &str,
+    tick_ms: u64,
+) -> Result<Program<'static>, String> {
+    let program = parse_plc(plc_source).map_err(|e| e.to_string())?;
+    let expanded = preprocess_program(&program).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+
+    let topology = build_topology_graph(&expanded).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let sm = build_state_machine(&expanded).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+
+    state_machine_to_runtime_program(&topology, &sm, tick_ms).map_err(|e| e.to_string())
+}
+
+fn io_sizes_for_program_and_scenario(
+    program: &Program<'_>,
+    scenario: &sim::Scenario,
+) -> (usize, usize, usize, usize) {
+    let mut max_di: Option<u16> = None;
+    let mut max_do: Option<u16> = None;
+    let mut max_ai: Option<u16> = None;
+    let mut max_ao: Option<u16> = None;
+
+    for task in program.tasks {
+        for step in task.steps {
+            match step.instr {
+                Instr::WaitDigital { id, .. } => {
+                    max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
+                }
+                Instr::WaitAnalog { id, .. } => {
+                    max_ai = Some(max_ai.map_or(id.0, |m| m.max(id.0)));
+                }
+                Instr::Action { actions, .. } => {
+                    for a in actions {
+                        match *a {
+                            Action::SetDigital { id, .. }
+                            | Action::Extend { output: id }
+                            | Action::Retract { output: id } => {
+                                max_do = Some(max_do.map_or(id.0, |m| m.max(id.0)));
+                            }
+                            Action::SetAnalog { id, .. } => {
+                                max_ao = Some(max_ao.map_or(id.0, |m| m.max(id.0)));
+                            }
+                            Action::Log { .. } => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for ev in &scenario.inputs {
+        for (&id, _) in &ev.set.digital_inputs {
+            max_di = Some(max_di.map_or(id, |m| m.max(id)));
+        }
+        for (&id, _) in &ev.set.analog_inputs {
+            max_ai = Some(max_ai.map_or(id, |m| m.max(id)));
+        }
+    }
+    for f in &scenario.faults {
+        let id = f.sensor_stuck.target;
+        max_di = Some(max_di.map_or(id, |m| m.max(id)));
+    }
+
+    let num_di = max_di.map(|m| m as usize + 1).unwrap_or(0).max(1);
+    let num_do = max_do.map(|m| m as usize + 1).unwrap_or(0).max(1);
+    let num_ai = max_ai.map(|m| m as usize + 1).unwrap_or(0);
+    let num_ao = max_ao.map(|m| m as usize + 1).unwrap_or(0);
+    (num_di, num_do, num_ai, num_ao)
+}
+
+fn is_halted<'a>(rt: &runtime_core::Runtime<'a>, program: &'a Program<'a>) -> bool {
+    let loc = rt.location();
+    let Ok(task) = program.task(loc.task) else {
+        return false;
+    };
+    let Some(step) = task.step(loc.step) else {
+        return false;
+    };
+    matches!(step.instr, Instr::Halt)
+}
+
+fn reason_str(r: runtime_core::TransitionReason) -> &'static str {
+    match r {
+        runtime_core::TransitionReason::Action => "action",
+        runtime_core::TransitionReason::DelayElapsed => "delay_elapsed",
+        runtime_core::TransitionReason::WaitSatisfied => "wait_satisfied",
+        runtime_core::TransitionReason::Timeout => "timeout",
+        runtime_core::TransitionReason::Goto => "goto",
+    }
 }
 
 fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {

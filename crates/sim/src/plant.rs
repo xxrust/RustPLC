@@ -174,8 +174,12 @@ impl Cylinder {
         let desired = Self::desired_from_valve_state(valve_state);
 
         match (self.state, desired) {
-            (CylinderState::Retracted, Some(MotionDir::Extend)) => self.start_motion(MotionDir::Extend),
-            (CylinderState::Extended, Some(MotionDir::Retract)) => self.start_motion(MotionDir::Retract),
+            (CylinderState::Retracted, Some(MotionDir::Extend)) => {
+                self.start_motion(MotionDir::Extend)
+            }
+            (CylinderState::Extended, Some(MotionDir::Retract)) => {
+                self.start_motion(MotionDir::Retract)
+            }
             (CylinderState::Moving { dir, remaining }, Some(want)) => {
                 if dir != want {
                     self.start_motion(want);
@@ -457,4 +461,3 @@ mod tests {
         assert_eq!(rt.location().step, StepId(2));
     }
 }
-

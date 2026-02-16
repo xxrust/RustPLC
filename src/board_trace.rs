@@ -39,9 +39,10 @@ pub fn parse_trace_text(input: &str) -> Result<Vec<TraceRow>, TraceParseError> {
         if line.is_empty() {
             continue;
         }
-        if !line.starts_with("TRACE ") {
+        let Some(trace_start) = line.find("TRACE ") else {
             continue;
-        }
+        };
+        let line = &line[trace_start..];
         let mut tick: Option<u64> = None;
         let mut task: Option<usize> = None;
         let mut from_step: Option<u16> = None;
@@ -50,10 +51,12 @@ pub fn parse_trace_text(input: &str) -> Result<Vec<TraceRow>, TraceParseError> {
         let mut ts_ms: Option<u64> = None;
 
         for token in line.split_whitespace().skip(1) {
-            let (k, v) = token.split_once('=').ok_or_else(|| TraceParseError::NotTrace {
-                line: line_no,
-                text: line.to_string(),
-            })?;
+            let (k, v) = token
+                .split_once('=')
+                .ok_or_else(|| TraceParseError::NotTrace {
+                    line: line_no,
+                    text: line.to_string(),
+                })?;
             match k {
                 "tick" => tick = Some(parse_u64(line_no, "tick", token, v)?),
                 "task" => task = Some(parse_usize(line_no, "task", token, v)?),
@@ -170,5 +173,16 @@ TRACE task=0 tick=1 from=1 to=2 reason=goto ts_ms=1
         assert_eq!(rows[1].tick, 1);
         assert_eq!(rows[1].reason, "goto");
     }
-}
 
+    #[test]
+    fn parses_trace_lines_with_log_prefix() {
+        let input = r#"
+18:10:49.8655 [INFO] Script: TRACE tick=0 task=0 from=0 to=1 reason=action ts_ms=0
+18:10:49.8656 [INFO] Script: TRACE tick=1 task=0 from=1 to=2 reason=goto ts_ms=1
+"#;
+        let rows = parse_trace_text(input).expect("parse ok");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].tick, 0);
+        assert_eq!(rows[1].tick, 1);
+    }
+}

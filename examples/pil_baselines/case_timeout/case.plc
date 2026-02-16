@@ -1,0 +1,26 @@
+[topology]
+
+device X0: digital_input
+
+device start_button: digital_input {
+    connected_to: X0
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_start:
+        wait: start_button == true
+        timeout: 2ms -> goto fault
+
+    step ok:
+        action: log "start pressed"
+
+    on_complete: goto main
+
+task fault:
+    step alarm:
+        action: log "timeout"
+    on_complete: goto main

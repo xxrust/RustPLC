@@ -2,7 +2,9 @@ use core::fmt;
 
 use runtime_core::{Instr, Program, Runtime, RuntimeError, TransitionReason};
 
-use crate::{JsonlTraceRecorder, Scenario, ScenarioError, SimFailure, SimIo, SimReport, ScenarioSummary};
+use crate::{
+    JsonlTraceRecorder, Scenario, ScenarioError, ScenarioSummary, SimFailure, SimIo, SimReport,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimRunError {
@@ -58,9 +60,7 @@ pub fn run_program_for_scenario<'a>(
                     kind: "timeout".to_string(),
                     message: format!(
                         "timeout transition at task {} step {} -> {}",
-                        e.task,
-                        e.from.0,
-                        e.to.0
+                        e.task, e.from.0, e.to.0
                     ),
                     at_ms: e.tick.0.saturating_mul(scenario.tick_ms),
                     task: e.task,
@@ -169,4 +169,3 @@ faults:
         );
     }
 }
-

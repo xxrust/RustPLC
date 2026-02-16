@@ -404,7 +404,10 @@ mod firmware {
             return volts;
         }
         let r = (volts / 3.3).clamp(0.0, 1.0);
-        min + r * (max - min)
+        let eng = min + r * (max - min);
+        let scale = *io_map::AI_CAL_SCALE.get(ai_idx).unwrap_or(&1.0);
+        let offset = *io_map::AI_CAL_OFFSET.get(ai_idx).unwrap_or(&0.0);
+        eng * scale + offset
     }
 
     fn engineering_to_pwm(ao_idx: usize, value: f32) -> u16 {
@@ -413,7 +416,10 @@ mod firmware {
         if (max - min).abs() < 1e-9 {
             return 0;
         }
-        let r = ((value - min) / (max - min)).clamp(0.0, 1.0);
+        let scale = *io_map::AO_CAL_SCALE.get(ao_idx).unwrap_or(&1.0);
+        let offset = *io_map::AO_CAL_OFFSET.get(ao_idx).unwrap_or(&0.0);
+        let calibrated = value * scale + offset;
+        let r = ((calibrated - min) / (max - min)).clamp(0.0, 1.0);
         // no_std: avoid `f32::round()` (requires libm on some targets).
         let duty = r * (AO_PWM_TOP as f32) + 0.5;
         let duty = if duty < 0.0 { 0.0 } else { duty };

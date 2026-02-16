@@ -76,4 +76,3 @@ fn flash_rp2040_dry_run_does_not_copy() {
     let copied = mount.join("firmware.uf2");
     assert!(!copied.exists(), "dry-run should not copy uf2");
 }
-

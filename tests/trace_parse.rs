@@ -42,4 +42,3 @@ fn cli_trace_parse_converts_trace_lines_to_jsonl() {
     assert_eq!(v.get("tick").and_then(|v| v.as_u64()), Some(0));
     assert_eq!(v.get("reason").and_then(|v| v.as_str()), Some("action"));
 }
-

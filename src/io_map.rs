@@ -27,7 +27,9 @@ pub enum IoMapError {
     #[error("expected a table [{section}] in io map")]
     MissingSection { section: &'static str },
 
-    #[error("invalid key {key:?} in [{section}] (expected prefix {prefix:?} + integer id, e.g. {example:?})")]
+    #[error(
+        "invalid key {key:?} in [{section}] (expected prefix {prefix:?} + integer id, e.g. {example:?})"
+    )]
     InvalidKey {
         section: &'static str,
         key: String,
@@ -54,39 +56,23 @@ impl IoMap {
     pub fn from_toml_str(input: &str) -> Result<Self, IoMapError> {
         let v: toml::Value = toml::from_str(input)?;
 
-        let di_table = v
-            .get("digital_inputs")
-            .and_then(|v| v.as_table())
-            .ok_or(IoMapError::MissingSection {
+        let di_table = v.get("digital_inputs").and_then(|v| v.as_table()).ok_or(
+            IoMapError::MissingSection {
                 section: "digital_inputs",
-            })?;
-        let do_table = v
-            .get("digital_outputs")
-            .and_then(|v| v.as_table())
-            .ok_or(IoMapError::MissingSection {
+            },
+        )?;
+        let do_table = v.get("digital_outputs").and_then(|v| v.as_table()).ok_or(
+            IoMapError::MissingSection {
                 section: "digital_outputs",
-            })?;
+            },
+        )?;
         let ai_table = v.get("analog_inputs").and_then(|v| v.as_table());
         let ao_table = v.get("analog_outputs").and_then(|v| v.as_table());
 
-        let digital_inputs = parse_map_section(
-            di_table,
-            "digital_inputs",
-            "di",
-            "di0",
-            0,
-            29,
-            "0..=29",
-        )?;
-        let digital_outputs = parse_map_section(
-            do_table,
-            "digital_outputs",
-            "do",
-            "do0",
-            0,
-            29,
-            "0..=29",
-        )?;
+        let digital_inputs =
+            parse_map_section(di_table, "digital_inputs", "di", "di0", 0, 29, "0..=29")?;
+        let digital_outputs =
+            parse_map_section(do_table, "digital_outputs", "do", "do0", 0, 29, "0..=29")?;
         let analog_inputs = match ai_table {
             Some(t) => parse_map_section(
                 t,
@@ -100,15 +86,7 @@ impl IoMap {
             None => BTreeMap::new(),
         };
         let analog_outputs = match ao_table {
-            Some(t) => parse_map_section(
-                t,
-                "analog_outputs",
-                "ao",
-                "ao0",
-                0,
-                29,
-                "0..=29",
-            )?,
+            Some(t) => parse_map_section(t, "analog_outputs", "ao", "ao0", 0, 29, "0..=29")?,
             None => BTreeMap::new(),
         };
 
@@ -288,7 +266,8 @@ ai0 = 26
 ao0 = 20
 "#;
         let m = IoMap::from_toml_str(input).expect("parse");
-        m.validate_for_usage(usage_with_ai0_ao0()).expect("validate");
+        m.validate_for_usage(usage_with_ai0_ao0())
+            .expect("validate");
     }
 
     #[test]
@@ -378,8 +357,9 @@ ai0 = 20
 ao0 = 21
 "#;
         let err = IoMap::from_toml_str(input).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("26..=29 (RP2040 ADC-capable GPIO)"));
+        assert!(
+            err.to_string()
+                .contains("26..=29 (RP2040 ADC-capable GPIO)")
+        );
     }
 }

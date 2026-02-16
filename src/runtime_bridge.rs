@@ -38,16 +38,22 @@ pub enum BridgeError {
     #[error("device {device} referenced in {state} is not defined in topology")]
     UnknownDevice { state: String, device: String },
 
-    #[error("unable to resolve a unique physical digital input for device {device} (state {state})")]
+    #[error(
+        "unable to resolve a unique physical digital input for device {device} (state {state})"
+    )]
     UnresolvableDigitalInput { state: String, device: String },
 
-    #[error("unable to resolve a unique physical digital output for device {device} (state {state})")]
+    #[error(
+        "unable to resolve a unique physical digital output for device {device} (state {state})"
+    )]
     UnresolvableDigitalOutput { state: String, device: String },
 
     #[error("unable to resolve a unique physical analog input for device {device} (state {state})")]
     UnresolvableAnalogInput { state: String, device: String },
 
-    #[error("unable to resolve a unique physical analog output for device {device} (state {state})")]
+    #[error(
+        "unable to resolve a unique physical analog output for device {device} (state {state})"
+    )]
     UnresolvableAnalogOutput { state: String, device: String },
 
     #[error("invalid analog literal in {state}: set_analog {target} {value_raw}")]
@@ -97,7 +103,10 @@ pub fn state_machine_to_runtime_program(
         let name = format!("{}.{}", s.task_name, s.step_name);
         let leaked: &'static str = Box::leak(name.into_boxed_str());
         step_names.push(leaked);
-        state_to_step.insert((s.task_name.clone(), s.step_name.clone()), StepId(idx as u16));
+        state_to_step.insert(
+            (s.task_name.clone(), s.step_name.clone()),
+            StepId(idx as u16),
+        );
     }
 
     let initial_id = state_to_step
@@ -153,7 +162,9 @@ pub fn state_machine_to_runtime_program(
         entry: initial_id,
     };
     let leaked_tasks: &'static [Task<'static>] = Box::leak(vec![task].into_boxed_slice());
-    Ok(Program { tasks: leaked_tasks })
+    Ok(Program {
+        tasks: leaked_tasks,
+    })
 }
 
 fn convert_state_outgoing(
@@ -167,8 +178,24 @@ fn convert_state_outgoing(
 ) -> Result<Instr<'static>, BridgeError> {
     match outs.len() {
         0 => Ok(Instr::Halt),
-        1 => convert_single_transition(resolver, state_name, outs[0], state_to_step, steps, sm, tick_ms),
-        2 => convert_wait_with_timeout(resolver, state_name, outs, state_to_step, steps, sm, tick_ms),
+        1 => convert_single_transition(
+            resolver,
+            state_name,
+            outs[0],
+            state_to_step,
+            steps,
+            sm,
+            tick_ms,
+        ),
+        2 => convert_wait_with_timeout(
+            resolver,
+            state_name,
+            outs,
+            state_to_step,
+            steps,
+            sm,
+            tick_ms,
+        ),
         n => Err(BridgeError::UnsupportedTransitionShape {
             state: state_name.to_string(),
             details: format!("expected 0..=2 outgoing transitions, got {n}"),
@@ -192,7 +219,10 @@ fn convert_single_transition(
                 Ok(Instr::Goto { target })
             } else {
                 let actions = leak_actions(resolver, state_name, &t.actions)?;
-                Ok(Instr::Action { actions, next: target })
+                Ok(Instr::Action {
+                    actions,
+                    next: target,
+                })
             }
         }
         TransitionGuard::Delay { duration_ms } => {
@@ -200,7 +230,10 @@ fn convert_single_transition(
             let target = lookup_target_step(state_name, &t.to, state_to_step)?;
 
             if t.actions.is_empty() {
-                Ok(Instr::Delay { ticks, next: target })
+                Ok(Instr::Delay {
+                    ticks,
+                    next: target,
+                })
             } else {
                 let action_step = push_action_step(
                     steps,
@@ -270,8 +303,7 @@ fn convert_single_transition(
         }
         TransitionGuard::Timeout { .. } => Err(BridgeError::UnsupportedTransitionShape {
             state: state_name.to_string(),
-            details: "timeout-only transition is not supported (expected wait+timeout)"
-                .to_string(),
+            details: "timeout-only transition is not supported (expected wait+timeout)".to_string(),
         }),
     }
 }
@@ -404,28 +436,35 @@ fn ranges_to_analog_ranges(
     device: &str,
     region_indices: &[usize],
 ) -> Result<&'static [AnalogRange], BridgeError> {
-    let regions = sm
-        .analog_regions
-        .get(device)
-        .ok_or_else(|| BridgeError::MissingAnalogRegions {
-            state: state_name.to_string(),
-            device: device.to_string(),
-        })?;
+    let regions =
+        sm.analog_regions
+            .get(device)
+            .ok_or_else(|| BridgeError::MissingAnalogRegions {
+                state: state_name.to_string(),
+                device: device.to_string(),
+            })?;
 
     let mut out = Vec::new();
     for &idx in region_indices {
-        let (min_s, max_s) = regions.get(idx).ok_or_else(|| BridgeError::UnsupportedAnalogWait {
-            state: state_name.to_string(),
-            expression: format!("{device} region_{idx}"),
-        })?;
-        let min = min_s.parse::<f32>().map_err(|_| BridgeError::UnsupportedAnalogWait {
-            state: state_name.to_string(),
-            expression: format!("{device} region_{idx}"),
-        })?;
-        let max = max_s.parse::<f32>().map_err(|_| BridgeError::UnsupportedAnalogWait {
-            state: state_name.to_string(),
-            expression: format!("{device} region_{idx}"),
-        })?;
+        let (min_s, max_s) =
+            regions
+                .get(idx)
+                .ok_or_else(|| BridgeError::UnsupportedAnalogWait {
+                    state: state_name.to_string(),
+                    expression: format!("{device} region_{idx}"),
+                })?;
+        let min = min_s
+            .parse::<f32>()
+            .map_err(|_| BridgeError::UnsupportedAnalogWait {
+                state: state_name.to_string(),
+                expression: format!("{device} region_{idx}"),
+            })?;
+        let max = max_s
+            .parse::<f32>()
+            .map_err(|_| BridgeError::UnsupportedAnalogWait {
+                state: state_name.to_string(),
+                expression: format!("{device} region_{idx}"),
+            })?;
         out.push(AnalogRange { min, max });
     }
 
@@ -457,7 +496,10 @@ fn ms_to_ticks(state_name: &str, duration_ms: u64, tick_ms: u64) -> Result<u64, 
     Ok(duration_ms / tick_ms)
 }
 
-fn parse_single_bool_guard(state_name: &str, expression: &str) -> Result<(String, bool), BridgeError> {
+fn parse_single_bool_guard(
+    state_name: &str,
+    expression: &str,
+) -> Result<(String, bool), BridgeError> {
     let expr = expression.trim();
 
     if expr.contains(" AND ") || expr.contains(" OR ") || expr.contains("NOT(") {
@@ -568,11 +610,14 @@ fn convert_action(
         }
         TransitionAction::SetAnalog { target, value_raw } => {
             let id = resolver.resolve_analog_output_id(state_name, target)?;
-            let value = value_raw.parse::<f32>().map_err(|_| BridgeError::InvalidAnalogLiteral {
-                state: state_name.to_string(),
-                target: target.clone(),
-                value_raw: value_raw.clone(),
-            })?;
+            let value =
+                value_raw
+                    .parse::<f32>()
+                    .map_err(|_| BridgeError::InvalidAnalogLiteral {
+                        state: state_name.to_string(),
+                        target: target.clone(),
+                        value_raw: value_raw.clone(),
+                    })?;
             Ok(Action::SetAnalog { id, value })
         }
         TransitionAction::Log { message } => {
@@ -615,22 +660,22 @@ impl<'a> TopologyResolver<'a> {
         state_name: &str,
         device: &str,
     ) -> Result<DigitalInputId, BridgeError> {
-        let start = self
-            .by_name
-            .get(device)
-            .copied()
-            .ok_or_else(|| BridgeError::UnknownDevice {
-                state: state_name.to_string(),
-                device: device.to_string(),
-            })?;
+        let start =
+            self.by_name
+                .get(device)
+                .copied()
+                .ok_or_else(|| BridgeError::UnknownDevice {
+                    state: state_name.to_string(),
+                    device: device.to_string(),
+                })?;
 
         let ids = self.collect_physical_ids(start, DeviceKind::DigitalInput, parse_x_id);
-        unique_physical_id(ids)
-            .map(DigitalInputId)
-            .map_err(|_| BridgeError::UnresolvableDigitalInput {
+        unique_physical_id(ids).map(DigitalInputId).map_err(|_| {
+            BridgeError::UnresolvableDigitalInput {
                 state: state_name.to_string(),
                 device: device.to_string(),
-            })
+            }
+        })
     }
 
     fn resolve_digital_output_id(
@@ -638,22 +683,22 @@ impl<'a> TopologyResolver<'a> {
         state_name: &str,
         device: &str,
     ) -> Result<DigitalOutputId, BridgeError> {
-        let start = self
-            .by_name
-            .get(device)
-            .copied()
-            .ok_or_else(|| BridgeError::UnknownDevice {
-                state: state_name.to_string(),
-                device: device.to_string(),
-            })?;
+        let start =
+            self.by_name
+                .get(device)
+                .copied()
+                .ok_or_else(|| BridgeError::UnknownDevice {
+                    state: state_name.to_string(),
+                    device: device.to_string(),
+                })?;
 
         let ids = self.collect_physical_ids(start, DeviceKind::DigitalOutput, parse_y_id);
-        unique_physical_id(ids)
-            .map(DigitalOutputId)
-            .map_err(|_| BridgeError::UnresolvableDigitalOutput {
+        unique_physical_id(ids).map(DigitalOutputId).map_err(|_| {
+            BridgeError::UnresolvableDigitalOutput {
                 state: state_name.to_string(),
                 device: device.to_string(),
-            })
+            }
+        })
     }
 
     fn resolve_analog_output_id(
@@ -661,22 +706,22 @@ impl<'a> TopologyResolver<'a> {
         state_name: &str,
         device: &str,
     ) -> Result<AnalogOutputId, BridgeError> {
-        let start = self
-            .by_name
-            .get(device)
-            .copied()
-            .ok_or_else(|| BridgeError::UnknownDevice {
-                state: state_name.to_string(),
-                device: device.to_string(),
-            })?;
+        let start =
+            self.by_name
+                .get(device)
+                .copied()
+                .ok_or_else(|| BridgeError::UnknownDevice {
+                    state: state_name.to_string(),
+                    device: device.to_string(),
+                })?;
 
         let ids = self.collect_physical_ids(start, DeviceKind::AnalogOutput, parse_ao_id);
-        unique_physical_id(ids)
-            .map(AnalogOutputId)
-            .map_err(|_| BridgeError::UnresolvableAnalogOutput {
+        unique_physical_id(ids).map(AnalogOutputId).map_err(|_| {
+            BridgeError::UnresolvableAnalogOutput {
                 state: state_name.to_string(),
                 device: device.to_string(),
-            })
+            }
+        })
     }
 
     fn resolve_analog_input_id(
@@ -684,22 +729,22 @@ impl<'a> TopologyResolver<'a> {
         state_name: &str,
         device: &str,
     ) -> Result<AnalogInputId, BridgeError> {
-        let start = self
-            .by_name
-            .get(device)
-            .copied()
-            .ok_or_else(|| BridgeError::UnknownDevice {
-                state: state_name.to_string(),
-                device: device.to_string(),
-            })?;
+        let start =
+            self.by_name
+                .get(device)
+                .copied()
+                .ok_or_else(|| BridgeError::UnknownDevice {
+                    state: state_name.to_string(),
+                    device: device.to_string(),
+                })?;
 
         let ids = self.collect_physical_ids(start, DeviceKind::AnalogInput, parse_ai_id);
-        unique_physical_id(ids)
-            .map(AnalogInputId)
-            .map_err(|_| BridgeError::UnresolvableAnalogInput {
+        unique_physical_id(ids).map(AnalogInputId).map_err(|_| {
+            BridgeError::UnresolvableAnalogInput {
                 state: state_name.to_string(),
                 device: device.to_string(),
-            })
+            }
+        })
     }
 
     fn collect_physical_ids(
@@ -723,7 +768,11 @@ impl<'a> TopologyResolver<'a> {
                 }
             }
 
-            for pred in self.topology.graph.neighbors_directed(n, Direction::Incoming) {
+            for pred in self
+                .topology
+                .graph
+                .neighbors_directed(n, Direction::Incoming)
+            {
                 if visited.insert(pred) {
                     queue.push_back(pred);
                 }

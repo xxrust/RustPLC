@@ -92,11 +92,13 @@ fn cli_build_rp2040_emits_expected_artifacts() {
     let meta_path = out_dir.join("build_meta.json");
     let iomap_path = out_dir.join("io_map.template.toml");
     let analog_contract_path = out_dir.join("analog_contract.toml");
+    let analog_cal_template_path = out_dir.join("analog_calibration.template.toml");
 
     assert!(generated_path.exists());
     assert!(meta_path.exists());
     assert!(iomap_path.exists());
     assert!(analog_contract_path.exists());
+    assert!(analog_cal_template_path.exists());
 
     let generated = fs::read_to_string(&generated_path).expect("read generated");
     assert!(generated.contains("pub mod generated"));
@@ -128,6 +130,137 @@ fn cli_build_rp2040_emits_expected_artifacts() {
     let analog_contract = fs::read_to_string(&analog_contract_path).expect("read analog contract");
     assert!(analog_contract.contains("[analog_inputs.ai0]"));
     assert!(analog_contract.contains("[analog_outputs.ao0]"));
+    assert!(analog_contract.contains("scale = 1.0"));
+    assert!(analog_contract.contains("offset = 0.0"));
+
+    let analog_cal_template =
+        fs::read_to_string(&analog_cal_template_path).expect("read analog calibration template");
+    assert!(analog_cal_template.contains("[analog_inputs]"));
+    assert!(analog_cal_template.contains("[analog_outputs]"));
+}
+
+#[test]
+fn cli_build_rp2040_applies_analog_calibration_overrides() {
+    let base = std::env::temp_dir().join(format!(
+        "rust_plc_build_rp2040_calibration_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock works")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&base).expect("create temp dir");
+
+    let plc_path = base.join("fixture.plc");
+    let out_dir = base.join("out");
+    let cal_path = base.join("analog_calibration.toml");
+    fs::write(&plc_path, PLC_FIXTURE).expect("write plc");
+    fs::write(
+        &cal_path,
+        r#"
+[analog_inputs]
+ai0 = { scale = 1.01, offset = -0.2 }
+
+[analog_outputs]
+ao0 = { scale = 0.98, offset = 0.15 }
+"#,
+    )
+    .expect("write calibration");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("build-rp2040")
+        .arg(&plc_path)
+        .arg("--out")
+        .arg(&out_dir)
+        .arg("--analog-calibration")
+        .arg(&cal_path)
+        .output()
+        .expect("run build-rp2040");
+
+    assert!(
+        output.status.success(),
+        "build-rp2040 should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let analog_contract =
+        fs::read_to_string(out_dir.join("analog_contract.toml")).expect("read contract");
+    let parsed: toml::Value = toml::from_str(&analog_contract).expect("valid TOML");
+
+    let ai0 = parsed
+        .get("analog_inputs")
+        .and_then(|v| v.get("ai0"))
+        .expect("analog_inputs.ai0");
+    let ai0_scale = ai0
+        .get("scale")
+        .and_then(|v| v.as_float())
+        .expect("ai0.scale");
+    let ai0_offset = ai0
+        .get("offset")
+        .and_then(|v| v.as_float())
+        .expect("ai0.offset");
+    assert!((ai0_scale - 1.01).abs() < 1e-6);
+    assert!((ai0_offset - (-0.2)).abs() < 1e-6);
+
+    let ao0 = parsed
+        .get("analog_outputs")
+        .and_then(|v| v.get("ao0"))
+        .expect("analog_outputs.ao0");
+    let ao0_scale = ao0
+        .get("scale")
+        .and_then(|v| v.as_float())
+        .expect("ao0.scale");
+    let ao0_offset = ao0
+        .get("offset")
+        .and_then(|v| v.as_float())
+        .expect("ao0.offset");
+    assert!((ao0_scale - 0.98).abs() < 1e-6);
+    assert!((ao0_offset - 0.15).abs() < 1e-6);
+}
+
+#[test]
+fn cli_build_rp2040_rejects_unknown_calibration_channel() {
+    let base = std::env::temp_dir().join(format!(
+        "rust_plc_build_rp2040_calibration_unknown_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock works")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&base).expect("create temp dir");
+
+    let plc_path = base.join("fixture.plc");
+    let out_dir = base.join("out");
+    let cal_path = base.join("analog_calibration.toml");
+    fs::write(&plc_path, PLC_FIXTURE).expect("write plc");
+    fs::write(
+        &cal_path,
+        r#"
+[analog_outputs]
+ao99 = { scale = 1.0, offset = 0.0 }
+"#,
+    )
+    .expect("write calibration");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("build-rp2040")
+        .arg(&plc_path)
+        .arg("--out")
+        .arg(&out_dir)
+        .arg("--analog-calibration")
+        .arg(&cal_path)
+        .output()
+        .expect("run build-rp2040");
+
+    assert!(
+        !output.status.success(),
+        "build-rp2040 should fail on unknown calibration channel"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("analog calibration key not found in contract"),
+        "stderr should explain calibration mismatch, got: {stderr}"
+    );
 }
 
 #[test]

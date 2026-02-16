@@ -52,25 +52,40 @@ if [[ -z "$SIL" || -z "$OUT_DIR" ]]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-mkdir -p "$REPO_ROOT/$OUT_DIR"
-BOARD_TRACE="$REPO_ROOT/$OUT_DIR/board_trace.jsonl"
-DIFF_REPORT="$REPO_ROOT/$OUT_DIR/diff_report.json"
+if [[ "$OUT_DIR" != /* ]]; then
+  OUT_DIR="$REPO_ROOT/$OUT_DIR"
+fi
+mkdir -p "$OUT_DIR"
+BOARD_TRACE="$OUT_DIR/board_trace.jsonl"
+DIFF_REPORT="$OUT_DIR/diff_report.json"
 
 if [[ -z "$BOARD_LOG" ]]; then
-  BOARD_LOG="$REPO_ROOT/$OUT_DIR/board.log"
+  BOARD_LOG="$OUT_DIR/board.log"
 elif [[ "$BOARD_LOG" != /* ]]; then
   BOARD_LOG="$REPO_ROOT/$BOARD_LOG"
 fi
 
 if [[ -n "$RUNNER_CMD" ]]; then
   echo "[1/3] runner command capture -> $BOARD_LOG"
-  timeout "${DURATION}s" bash -lc "$RUNNER_CMD" > "$BOARD_LOG" || true
+  set +e
+  timeout "${DURATION}s" bash -lc "$RUNNER_CMD" > "$BOARD_LOG"
+  rc=$?
+  set -e
+  # `timeout` returns 124 on timeouts; allow it as long as we captured output.
+  if [[ $rc -ne 0 && $rc -ne 124 ]]; then
+    echo "Runner command failed (exit=$rc): $RUNNER_CMD" >&2
+    exit 1
+  fi
 else
   echo "[1/3] skip runner capture (use existing --board-log)"
 fi
 
 if [[ ! -f "$BOARD_LOG" ]]; then
   echo "Board log not found: $BOARD_LOG" >&2
+  exit 1
+fi
+if [[ ! -s "$BOARD_LOG" ]]; then
+  echo "Board log is empty: $BOARD_LOG" >&2
   exit 1
 fi
 

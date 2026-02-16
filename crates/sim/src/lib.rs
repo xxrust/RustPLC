@@ -2,22 +2,20 @@
 
 use std::collections::BTreeMap;
 
-use io_traits::{
-    AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick,
-};
+use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use runtime_core::{TraceEvent, TransitionReason};
 use serde::Serialize;
 
-mod scenario;
-mod waveform;
 mod plant;
 mod report;
 mod runner;
-pub use scenario::{Scenario, ScenarioError, InputEvent, InputSet};
-pub use waveform::{export_analog_outputs_csv, export_analog_outputs_jsonl, export_vcd_digital};
-pub use plant::{Plant, SolenoidValveConfig, LimitKind, LimitSensorConfig, CylinderConfig};
+mod scenario;
+mod waveform;
+pub use plant::{CylinderConfig, LimitKind, LimitSensorConfig, Plant, SolenoidValveConfig};
 pub use report::{ScenarioSummary, SimFailure, SimReport};
-pub use runner::{run_program_for_scenario, SimRunError, SimRunOutput};
+pub use runner::{SimRunError, SimRunOutput, run_program_for_scenario};
+pub use scenario::{InputEvent, InputSet, Scenario, ScenarioError};
+pub use waveform::{export_analog_outputs_csv, export_analog_outputs_jsonl, export_vcd_digital};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DigitalEdge {
@@ -112,7 +110,11 @@ impl SimIo {
         self
     }
 
-    pub fn with_scheduled_changes(mut self, tick: Tick, changes: impl IntoIterator<Item = InputChange>) -> Self {
+    pub fn with_scheduled_changes(
+        mut self,
+        tick: Tick,
+        changes: impl IntoIterator<Item = InputChange>,
+    ) -> Self {
         for c in changes {
             self.scheduled.entry(tick.0).or_default().push(c);
         }
@@ -354,7 +356,9 @@ fn reason_str(r: TransitionReason) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runtime_core::{Action, Instr, Program, Runtime, Step, StepId, Task, Timeout, TraceEvent, TransitionReason};
+    use runtime_core::{
+        Action, Instr, Program, Runtime, Step, StepId, Task, Timeout, TraceEvent, TransitionReason,
+    };
 
     #[test]
     fn simio_records_output_edges_and_jsonl_trace() {

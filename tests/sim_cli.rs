@@ -78,7 +78,6 @@ inputs:
     );
 
     let report = fs::read_to_string(&report_out_path).expect("read report json");
-    let v: serde_json::Value =
-        serde_json::from_str(&report).expect("report should be valid JSON");
+    let v: serde_json::Value = serde_json::from_str(&report).expect("report should be valid JSON");
     assert!(v.get("scenario").is_some());
 }

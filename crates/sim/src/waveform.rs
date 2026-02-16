@@ -76,7 +76,11 @@ pub fn export_vcd_digital(io: &SimIo, tick_ms: u64) -> String {
     }
 
     // Stable sorting: time first, then signal index (keeps output deterministic for same-time changes).
-    changes.sort_by(|a, b| a.time_ms.cmp(&b.time_ms).then_with(|| a.index.cmp(&b.index)));
+    changes.sort_by(|a, b| {
+        a.time_ms
+            .cmp(&b.time_ms)
+            .then_with(|| a.index.cmp(&b.index))
+    });
 
     let mut last_time: Option<u64> = Some(0);
     for c in changes {
@@ -209,6 +213,9 @@ mod tests {
         assert!(vcd.contains("$var wire 1 ! di0 $end"));
         assert!(vcd.contains("$var wire 1 \" do0 $end"));
         assert!(vcd.contains("#10"));
-        assert!(vcd.contains("1\""), "expected a rising edge on do0, got:\n{vcd}");
+        assert!(
+            vcd.contains("1\""),
+            "expected a rising edge on do0, got:\n{vcd}"
+        );
     }
 }

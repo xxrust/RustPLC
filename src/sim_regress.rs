@@ -71,7 +71,21 @@ pub struct SimRegressFailure {
     pub trace_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimized_scenario_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimization: Option<FailureMinimizationSummary>,
     pub failure: Failure,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FailureMinimizationSummary {
+    pub original_duration_ms: u64,
+    pub minimized_duration_ms: u64,
+    pub original_inputs: usize,
+    pub minimized_inputs: usize,
+    pub original_faults: usize,
+    pub minimized_faults: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -82,10 +96,35 @@ pub struct SimRegressSummary {
     pub failures: Vec<SimRegressFailure>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SimRegressOptions {
+    pub minimize: bool,
+}
+
+impl Default for SimRegressOptions {
+    fn default() -> Self {
+        Self { minimize: false }
+    }
+}
+
 pub fn run_sim_regress(
     plc_dir: &Path,
     scenario_dir: &Path,
     artifacts_dir: &Path,
+) -> Result<SimRegressSummary, String> {
+    run_sim_regress_with_options(
+        plc_dir,
+        scenario_dir,
+        artifacts_dir,
+        SimRegressOptions::default(),
+    )
+}
+
+pub fn run_sim_regress_with_options(
+    plc_dir: &Path,
+    scenario_dir: &Path,
+    artifacts_dir: &Path,
+    options: SimRegressOptions,
 ) -> Result<SimRegressSummary, String> {
     let mut plc_files = collect_files_recursive(plc_dir, &["plc"])?;
     let mut scenario_files = collect_files_recursive(scenario_dir, &["yaml", "yml"])?;
@@ -124,10 +163,17 @@ pub fn run_sim_regress(
                 format!("Failed to create case artifact dir {artifact_dir:?}: {err}")
             })?;
 
-            let failure = run_one_case(plc_path, scenario_path, &artifact_dir)?;
+            let failure = run_one_case(plc_path, scenario_path, &artifact_dir, options)?;
             match failure {
                 None => pass += 1,
-                Some((failure, trace_path, report_path, seed)) => {
+                Some((
+                    failure,
+                    trace_path,
+                    report_path,
+                    seed,
+                    minimized_scenario_path,
+                    minimization,
+                )) => {
                     fail += 1;
                     failures.push(SimRegressFailure {
                         plc: plc_path.display().to_string(),
@@ -136,6 +182,9 @@ pub fn run_sim_regress(
                         artifact_dir: artifact_dir.display().to_string(),
                         trace_path: trace_path.map(|p| p.display().to_string()),
                         report_path: report_path.map(|p| p.display().to_string()),
+                        minimized_scenario_path: minimized_scenario_path
+                            .map(|p| p.display().to_string()),
+                        minimization,
                         failure,
                     });
                 }
@@ -155,10 +204,20 @@ fn run_one_case(
     plc_path: &Path,
     scenario_path: &Path,
     artifact_dir: &Path,
-) -> Result<Option<(Failure, Option<PathBuf>, Option<PathBuf>, Option<u64>)>, String> {
-    let plc_source = fs::read_to_string(plc_path).map_err(|err| {
-        format!("Failed to read PLC file {}: {err}", plc_path.display())
-    })?;
+    options: SimRegressOptions,
+) -> Result<
+    Option<(
+        Failure,
+        Option<PathBuf>,
+        Option<PathBuf>,
+        Option<u64>,
+        Option<PathBuf>,
+        Option<FailureMinimizationSummary>,
+    )>,
+    String,
+> {
+    let plc_source = fs::read_to_string(plc_path)
+        .map_err(|err| format!("Failed to read PLC file {}: {err}", plc_path.display()))?;
 
     let scenario_yaml = fs::read_to_string(scenario_path).map_err(|err| {
         format!(
@@ -174,7 +233,7 @@ fn run_one_case(
             // Still write a report-like artifact so users can inspect failures uniformly.
             let report_path = artifact_dir.join("report.json");
             write_failure_report_json(&report_path, &failure)?;
-            return Ok(Some((failure, None, Some(report_path), None)));
+            return Ok(Some((failure, None, Some(report_path), None, None, None)));
         }
     };
 
@@ -189,12 +248,13 @@ fn run_one_case(
                 None,
                 Some(report_path),
                 scenario.seed,
+                None,
+                None,
             )));
         }
     };
 
-    let (num_di, num_do, num_ai, num_ao) =
-        io_sizes_for_program_and_scenario(&program, &scenario);
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
 
     let run = match sim::run_program_for_scenario(&program, &scenario, &mut io) {
@@ -208,14 +268,15 @@ fn run_one_case(
                 None,
                 Some(report_path),
                 scenario.seed,
+                None,
+                None,
             )));
         }
     };
 
     let trace_path = artifact_dir.join("trace.jsonl");
-    fs::write(&trace_path, run.trace.into_string()).map_err(|err| {
-        format!("Failed to write trace file {trace_path:?}: {err}")
-    })?;
+    fs::write(&trace_path, run.trace.into_string())
+        .map_err(|err| format!("Failed to write trace file {trace_path:?}: {err}"))?;
 
     let report_path = artifact_dir.join("report.json");
     let mut report_json = serde_json::to_string_pretty(&run.report)
@@ -225,15 +286,198 @@ fn run_one_case(
         .map_err(|err| format!("Failed to write report file {report_path:?}: {err}"))?;
 
     if let Some(f) = run.report.failure {
+        let failure = Failure::from_sim_failure(f);
+
+        if options.minimize {
+            let (min_scenario, min_run, min_summary) =
+                minimize_failure_case(&program, &scenario, &failure)?;
+            let minimized_scenario_path = artifact_dir.join("minimized_scenario.yaml");
+            let minimized_trace_path = artifact_dir.join("minimized_trace.jsonl");
+            let minimized_report_path = artifact_dir.join("minimized_report.json");
+
+            let yaml = serde_yaml::to_string(&min_scenario)
+                .map_err(|e| format!("Failed to serialize minimized scenario YAML: {e}"))?;
+            fs::write(&minimized_scenario_path, yaml)
+                .map_err(|err| format!("Failed to write {minimized_scenario_path:?}: {err}"))?;
+            fs::write(&minimized_trace_path, min_run.trace.into_string()).map_err(|err| {
+                format!("Failed to write trace file {minimized_trace_path:?}: {err}")
+            })?;
+            let mut report_json = serde_json::to_string_pretty(&min_run.report)
+                .map_err(|err| format!("Failed to serialize report JSON: {err}"))?;
+            report_json.push('\n');
+            fs::write(&minimized_report_path, report_json).map_err(|err| {
+                format!("Failed to write report file {minimized_report_path:?}: {err}")
+            })?;
+
+            return Ok(Some((
+                failure,
+                Some(trace_path),
+                Some(report_path),
+                scenario.seed,
+                Some(minimized_scenario_path),
+                Some(min_summary),
+            )));
+        }
+
         return Ok(Some((
-            Failure::from_sim_failure(f),
+            failure,
             Some(trace_path),
             Some(report_path),
             scenario.seed,
+            None,
+            None,
         )));
     }
 
     Ok(None)
+}
+
+fn minimize_failure_case(
+    program: &Program<'static>,
+    scenario: &sim::Scenario,
+    failure: &Failure,
+) -> Result<(sim::Scenario, sim::SimRunOutput, FailureMinimizationSummary), String> {
+    let target_kind = failure.kind.as_str();
+    let original_duration_ms = scenario.duration_ms;
+    let original_inputs = scenario.inputs.len();
+    let original_faults = scenario.faults.len();
+
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(program, scenario);
+
+    let mut best = scenario.clone();
+
+    // 1) Try to shrink duration to the first failing tick boundary (if known).
+    if let Some(at_ms) = failure.at_ms {
+        let mut d = at_ms.saturating_add(best.tick_ms);
+        if d == 0 {
+            d = best.tick_ms;
+        }
+        best.duration_ms = d;
+    }
+    if !scenario_fails(program, &best, target_kind, num_di, num_do, num_ai, num_ao)? {
+        // As a fallback, keep original duration.
+        best = scenario.clone();
+    }
+
+    // 2) Delta-debugging: remove whole input events if the failure persists.
+    let mut i = 0usize;
+    while i < best.inputs.len() {
+        let mut cand = best.clone();
+        cand.inputs.remove(i);
+        if scenario_fails(program, &cand, target_kind, num_di, num_do, num_ai, num_ao)? {
+            best = cand;
+        } else {
+            i += 1;
+        }
+    }
+
+    // 3) Remove individual input assignments inside events (keeps timing but drops unrelated inputs).
+    for ev_idx in 0..best.inputs.len() {
+        // Digital inputs
+        let keys: Vec<u16> = best.inputs[ev_idx]
+            .set
+            .digital_inputs
+            .keys()
+            .copied()
+            .collect();
+        for k in keys {
+            let mut cand = best.clone();
+            cand.inputs[ev_idx].set.digital_inputs.remove(&k);
+            if cand.inputs[ev_idx].set.digital_inputs.is_empty()
+                && cand.inputs[ev_idx].set.analog_inputs.is_empty()
+            {
+                cand.inputs.remove(ev_idx);
+            }
+            if scenario_fails(program, &cand, target_kind, num_di, num_do, num_ai, num_ao)? {
+                best = cand;
+            }
+        }
+
+        // Analog inputs
+        if ev_idx >= best.inputs.len() {
+            break;
+        }
+        let keys: Vec<u16> = best.inputs[ev_idx]
+            .set
+            .analog_inputs
+            .keys()
+            .copied()
+            .collect();
+        for k in keys {
+            let mut cand = best.clone();
+            cand.inputs[ev_idx].set.analog_inputs.remove(&k);
+            if cand.inputs[ev_idx].set.digital_inputs.is_empty()
+                && cand.inputs[ev_idx].set.analog_inputs.is_empty()
+            {
+                cand.inputs.remove(ev_idx);
+            }
+            if scenario_fails(program, &cand, target_kind, num_di, num_do, num_ai, num_ao)? {
+                best = cand;
+            }
+        }
+    }
+
+    // 4) Remove faults (when failure persists without them, they were irrelevant noise).
+    let mut fi = 0usize;
+    while fi < best.faults.len() {
+        let mut cand = best.clone();
+        cand.faults.remove(fi);
+        if scenario_fails(program, &cand, target_kind, num_di, num_do, num_ai, num_ao)? {
+            best = cand;
+        } else {
+            fi += 1;
+        }
+    }
+
+    // Final run artifacts for minimized scenario.
+    let min_run = run_program_for_options(program, &best, num_di, num_do, num_ai, num_ao)?;
+    if min_run.report.failure.as_ref().map(|f| f.kind.as_str()) != Some(target_kind) {
+        return Err("minimization produced a non-failing scenario; this is a bug".to_string());
+    }
+
+    Ok((
+        best.clone(),
+        min_run,
+        FailureMinimizationSummary {
+            original_duration_ms,
+            minimized_duration_ms: best.duration_ms,
+            original_inputs,
+            minimized_inputs: best.inputs.len(),
+            original_faults,
+            minimized_faults: best.faults.len(),
+        },
+    ))
+}
+
+fn scenario_fails(
+    program: &Program<'static>,
+    scenario: &sim::Scenario,
+    target_kind: &str,
+    num_di: usize,
+    num_do: usize,
+    num_ai: usize,
+    num_ao: usize,
+) -> Result<bool, String> {
+    let run = run_program_for_options(program, scenario, num_di, num_do, num_ai, num_ao)?;
+    Ok(run
+        .report
+        .failure
+        .as_ref()
+        .map(|f| f.kind.as_str() == target_kind)
+        .unwrap_or(false))
+}
+
+fn run_program_for_options(
+    program: &Program<'static>,
+    scenario: &sim::Scenario,
+    num_di: usize,
+    num_do: usize,
+    num_ai: usize,
+    num_ao: usize,
+) -> Result<sim::SimRunOutput, String> {
+    let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+    sim::run_program_for_scenario(program, scenario, &mut io)
+        .map_err(|e| format!("Simulation failed: {e}"))
 }
 
 fn write_failure_report_json(report_path: &Path, failure: &Failure) -> Result<(), String> {
@@ -254,18 +498,36 @@ fn compile_plc_to_runtime_program(
     tick_ms: u64,
 ) -> Result<Program<'static>, String> {
     let program = parse_plc(plc_source).map_err(|e| e.to_string())?;
-    let expanded = preprocess_program(&program)
-        .map_err(|errors| errors.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"))?;
+    let expanded = preprocess_program(&program).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
 
-    let topology = build_topology_graph(&expanded)
-        .map_err(|errors| errors.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"))?;
-    let sm = build_state_machine(&expanded)
-        .map_err(|errors| errors.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"))?;
+    let topology = build_topology_graph(&expanded).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let sm = build_state_machine(&expanded).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
 
     state_machine_to_runtime_program(&topology, &sm, tick_ms).map_err(|e| e.to_string())
 }
 
-fn io_sizes_for_program_and_scenario(program: &Program<'_>, scenario: &sim::Scenario) -> (usize, usize, usize, usize) {
+fn io_sizes_for_program_and_scenario(
+    program: &Program<'_>,
+    scenario: &sim::Scenario,
+) -> (usize, usize, usize, usize) {
     let mut max_di: Option<u16> = None;
     let mut max_do: Option<u16> = None;
     let mut max_ai: Option<u16> = None;
@@ -332,8 +594,7 @@ fn collect_files_recursive(root: &Path, exts: &[&str]) -> Result<Vec<PathBuf>, S
         let entries = fs::read_dir(&dir)
             .map_err(|err| format!("Failed to read directory {}: {err}", dir.display()))?;
         for entry in entries {
-            let entry =
-                entry.map_err(|err| format!("Failed to read directory entry: {err}"))?;
+            let entry = entry.map_err(|err| format!("Failed to read directory entry: {err}"))?;
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);

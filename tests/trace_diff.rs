@@ -43,8 +43,7 @@ fn cli_trace_diff_reports_match() {
     );
 
     let rep: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&out).expect("read report"))
-            .expect("valid json");
+        serde_json::from_str(&fs::read_to_string(&out).expect("read report")).expect("valid json");
     assert_eq!(rep.get("is_match").and_then(|v| v.as_bool()), Some(true));
     assert_eq!(
         rep.get("first_mismatch_tick").and_then(|v| v.as_u64()),
@@ -105,8 +104,7 @@ fn cli_trace_diff_reports_first_mismatch() {
     );
 
     let rep: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&out).expect("read report"))
-            .expect("valid json");
+        serde_json::from_str(&fs::read_to_string(&out).expect("read report")).expect("valid json");
     assert_eq!(rep.get("is_match").and_then(|v| v.as_bool()), Some(false));
     assert_eq!(
         rep.get("first_mismatch_tick").and_then(|v| v.as_u64()),
@@ -116,12 +114,11 @@ fn cli_trace_diff_reports_first_mismatch() {
         rep.get("mismatch_type").and_then(|v| v.as_str()),
         Some("reason")
     );
+    assert_eq!(rep.get("mismatch_index").and_then(|v| v.as_u64()), Some(1));
     assert_eq!(
-        rep.get("mismatch_index").and_then(|v| v.as_u64()),
-        Some(1)
-    );
-    assert_eq!(
-        rep.get("context").and_then(|v| v.as_array()).map(|a| a.len()),
+        rep.get("context")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len()),
         Some(2)
     );
 }

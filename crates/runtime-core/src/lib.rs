@@ -48,11 +48,24 @@ pub enum RuntimeError {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
-    SetDigital { id: DigitalOutputId, value: bool },
-    SetAnalog { id: AnalogOutputId, value: f32 },
-    Extend { output: DigitalOutputId },
-    Retract { output: DigitalOutputId },
-    Log { message_id: u16, message: &'static str },
+    SetDigital {
+        id: DigitalOutputId,
+        value: bool,
+    },
+    SetAnalog {
+        id: AnalogOutputId,
+        value: f32,
+    },
+    Extend {
+        output: DigitalOutputId,
+    },
+    Retract {
+        output: DigitalOutputId,
+    },
+    Log {
+        message_id: u16,
+        message: &'static str,
+    },
 }
 
 impl Action {
@@ -81,7 +94,10 @@ pub struct AnalogRange {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instr<'a> {
-    Action { actions: &'a [Action], next: StepId },
+    Action {
+        actions: &'a [Action],
+        next: StepId,
+    },
     WaitDigital {
         id: DigitalInputId,
         equals: bool,
@@ -94,8 +110,13 @@ pub enum Instr<'a> {
         next: StepId,
         timeout: Option<Timeout>,
     },
-    Delay { ticks: u64, next: StepId },
-    Goto { target: StepId },
+    Delay {
+        ticks: u64,
+        next: StepId,
+    },
+    Goto {
+        target: StepId,
+    },
     Halt,
 }
 
@@ -156,7 +177,10 @@ impl<'a> Runtime<'a> {
         let entry = program.task(0)?.entry;
         Ok(Self {
             program,
-            loc: Location { task: 0, step: entry },
+            loc: Location {
+                task: 0,
+                step: entry,
+            },
             step_entered_at: None,
         })
     }
@@ -250,7 +274,12 @@ impl<'a> Runtime<'a> {
                     }
                     if let Some(tmo) = timeout {
                         if elapsed >= tmo.after_ticks {
-                            self.transition(now, tmo.target, TransitionReason::Timeout, &mut on_event)?;
+                            self.transition(
+                                now,
+                                tmo.target,
+                                TransitionReason::Timeout,
+                                &mut on_event,
+                            )?;
                             continue;
                         }
                     }
@@ -269,7 +298,12 @@ impl<'a> Runtime<'a> {
                     }
                     if let Some(tmo) = timeout {
                         if elapsed >= tmo.after_ticks {
-                            self.transition(now, tmo.target, TransitionReason::Timeout, &mut on_event)?;
+                            self.transition(
+                                now,
+                                tmo.target,
+                                TransitionReason::Timeout,
+                                &mut on_event,
+                            )?;
                             continue;
                         }
                     }
@@ -323,7 +357,13 @@ mod tests {
 
     impl MemIo {
         fn new() -> Self {
-            Self { t: Tick(0), di: [false], do_: [false], ai: [0.0], ao: [0.0] }
+            Self {
+                t: Tick(0),
+                di: [false],
+                do_: [false],
+                ai: [0.0],
+                ao: [0.0],
+            }
         }
     }
 
