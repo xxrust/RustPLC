@@ -272,20 +272,108 @@ cargo run --release -- sim-regress --plc-dir examples --scenario-dir scenarios
 
 ### RP2040 板级链路（已打通）
 
-在 SIL 闭环之外，仓库已提供 RP2040（Raspberry Pi Pico）最小可用下沉链路：
+在 SIL 闭环之外，仓库已提供 RP2040（Raspberry Pi Pico）最小可用下沉链路。  
+注意：这不是“一条命令从 `.plc` 直接到 UF2”，而是**分阶段**流程（每一步有明确目的）。
+
+#### 0) 环境准备（一次性）
 
 ```bash
-# 1) .plc -> 验证 -> 生成 RP2040 构建输入
+# RP2040 交叉编译目标
+rustup target add thumbv6m-none-eabi
+
+# ELF -> UF2 转换工具（若未安装）
+cargo install elf2uf2-rs
+```
+
+#### 1) `.plc` -> 验证 -> 生成 RP2040 构建输入
+
+目的：先确保 DSL 验证通过，并生成固件构建所需中间产物。
+
+```bash
 cargo run --release -- build-rp2040 examples/assembly_station.plc --out out/rp2040
+```
 
-# 2) （可选）板级日志转 JSONL
-cargo run --release -- trace-parse --in out/board.log --out out/board_trace.jsonl
+会生成：
+- `out/rp2040/generated_program.rs`：由 DSL 编译出的 runtime 程序（给固件 include）
+- `out/rp2040/build_meta.json`：构建元数据（版本、hash、时间）
+- `out/rp2040/io_map.template.toml`：I/O 映射模板
 
-# 3) SIL trace vs 板级 trace 对比
-cargo run --release -- trace-diff --sil out/trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json
+#### 1.5) 填写 I/O 映射（必须）
 
-# 4) UF2 自动装载（先 dry-run）
+目的：把逻辑点位（`di0/do0`）映射到 Pico 的物理 GPIO（如 `2/16`）。
+
+从模板复制并填写：
+
+```bash
+cp out/rp2040/io_map.template.toml out/rp2040/io_map.toml
+```
+
+示例（按你的接线改）：
+
+```toml
+[digital_inputs]
+di0 = 2
+
+[digital_outputs]
+do0 = 16
+```
+
+`RUST_PLC_IO_MAP_TOML` 的含义：  
+它是一个环境变量，指向上面的 `io_map.toml` 文件；`board-rp2040` 的 `build.rs` 会在编译期读取它并把映射“固化进固件”。
+
+#### 2) 用生成程序 + I/O 映射编译 RP2040 固件（产出 ELF）
+
+目的：把 DSL 生成物真正编译成 RP2040 可执行固件（ELF）。
+
+```bash
+RUST_PLC_GENERATED_PROGRAM_RS=out/rp2040/generated_program.rs \
+RUST_PLC_IO_MAP_TOML=out/rp2040/io_map.toml \
+cargo build -p board-rp2040 --target thumbv6m-none-eabi --release
+```
+
+几个关键参数的含义：
+- `RUST_PLC_GENERATED_PROGRAM_RS`：告诉固件编译流程使用哪份 `generated_program.rs`
+- `RUST_PLC_IO_MAP_TOML`：告诉固件编译流程使用哪份 I/O 映射
+- `-p board-rp2040`：只编译 workspace 里的 `board-rp2040` 包
+- `--target thumbv6m-none-eabi`：交叉编译到 RP2040（Cortex-M0+）目标
+- `--release`：使用发布优化配置（更接近实机运行）
+
+#### 3) ELF -> UF2
+
+目的：把 ELF 转成 Pico 拖拽烧录需要的 UF2。
+
+```bash
+elf2uf2-rs target/thumbv6m-none-eabi/release/board-rp2040 out/firmware.uf2
+```
+
+#### 4) 装载到 Pico（先 dry-run）
+
+目的：验证路径/挂载点正确，再实际复制。
+
+```bash
+# 仅预演
 cargo run --release -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP2 --dry-run
+
+# 实际复制
+cargo run --release -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP2
+```
+
+#### 5) 板级日志解析（可选）
+
+目的：把板子输出日志转换成结构化 JSONL，便于自动对比。  
+前提：你已经通过 RTT/串口工具把日志导出为 `out/board.log`。
+
+```bash
+cargo run --release -- trace-parse --in out/board.log --out out/board_trace.jsonl
+```
+
+#### 6) SIL vs 板级对比（可选）
+
+目的：快速定位首个偏差 tick（模型问题 vs 板级时序问题）。  
+前提：同时具备 `out/trace.jsonl`（SIL）和 `out/board_trace.jsonl`（板级）。
+
+```bash
+cargo run --release -- trace-diff --sil out/trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json
 ```
 
 相关说明见 [`docs/board_rp2040.md`](docs/board_rp2040.md)。
