@@ -285,6 +285,38 @@ cargo run --release -- sim-regress \
 在 SIL 闭环之外，仓库已提供 RP2040（Raspberry Pi Pico）最小可用下沉链路。  
 注意：这不是“一条命令从 `.plc` 直接到 UF2”，而是**分阶段**流程（每一步有明确目的）。
 
+#### 流程总览（SIL / PIL / 板级）
+
+这张图把“同一份 `.plc`”从 SIL 到板级，再到 trace 对比门禁的关键制品/命令串起来（脚本只是把这些步骤标准化、可重复）。
+
+```mermaid
+flowchart TD
+  P[".plc"] --> V["verify (编译 + 形式化验证)"]
+
+  subgraph SIL["SIL (PC)"]
+    V --> SP["sim / sim-plc / sim-regress"]
+    SP --> ST["SIL trace.jsonl + wave.vcd + report.json"]
+  end
+
+  subgraph BOARD["RP2040 (Pico)"]
+    V --> BR["build-rp2040 --out out/rp2040"]
+    BR --> IOM["io_map.template.toml -> io_map.toml (填写接线)"]
+    CAL["analog_calibration.toml (可选标定)"] --> BR
+    BR --> AC["analog_contract.toml (AI/AO range + ramp + scale/offset)"]
+    IOM --> FW["board-rp2040 build -> ELF -> UF2"]
+    AC --> FW
+    FW --> FL["flash-rp2040 (复制 UF2 到 RPI-RP2)"]
+    FL --> BL["board.log (RTT/串口采集)"]
+    BL --> TP["trace-parse -> board_trace.jsonl"]
+  end
+
+  ST --> DIFF["trace-diff --fail-on-mismatch"]
+  TP --> DIFF
+  DIFF --> OK{"一致?"}
+  OK -- "是" --> PASS["通过 / 门禁放行"]
+  OK -- "否" --> REP["diff_report.json (首个偏差 tick + 上下文)"]
+```
+
 #### 0) 环境准备（一次性）
 
 ```bash
