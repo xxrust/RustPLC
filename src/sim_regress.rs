@@ -84,6 +84,8 @@ pub struct FailureMinimizationSummary {
     pub minimized_duration_ms: u64,
     pub original_inputs: usize,
     pub minimized_inputs: usize,
+    pub original_input_assignments: usize,
+    pub minimized_input_assignments: usize,
     pub original_faults: usize,
     pub minimized_faults: usize,
 }
@@ -337,26 +339,57 @@ fn minimize_failure_case(
     scenario: &sim::Scenario,
     failure: &Failure,
 ) -> Result<(sim::Scenario, sim::SimRunOutput, FailureMinimizationSummary), String> {
-    let target_kind = failure.kind.as_str();
+    let target_signature = FailureSignature {
+        kind: failure.kind.as_str(),
+        task: failure.task,
+        step: failure.step,
+    };
     let original_duration_ms = scenario.duration_ms;
     let original_inputs = scenario.inputs.len();
+    let original_input_assignments = input_assignment_count(scenario);
     let original_faults = scenario.faults.len();
 
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(program, scenario);
 
     let mut best = scenario.clone();
 
-    // 1) Try to shrink duration to the first failing tick boundary (if known).
+    // 1) Try to shrink duration using binary search while preserving failure signature.
+    let max_ticks = best.duration_ticks().max(1);
+    let mut hi_ticks = max_ticks;
     if let Some(at_ms) = failure.at_ms {
-        let mut d = at_ms.saturating_add(best.tick_ms);
-        if d == 0 {
-            d = best.tick_ms;
-        }
-        best.duration_ms = d;
+        let at_ticks = at_ms / best.tick_ms;
+        hi_ticks = hi_ticks.min(at_ticks.saturating_add(1).max(1));
     }
-    if !scenario_fails(program, &best, target_kind, num_di, num_do, num_ai, num_ao)? {
-        // As a fallback, keep original duration.
-        best = scenario.clone();
+
+    if scenario_matches_failure_signature(
+        program,
+        &scenario_with_ticks(&best, hi_ticks),
+        &target_signature,
+        num_di,
+        num_do,
+        num_ai,
+        num_ao,
+    )? {
+        let mut lo = 1u64;
+        let mut hi = hi_ticks;
+        while lo < hi {
+            let mid = lo + ((hi - lo) / 2);
+            let cand = scenario_with_ticks(&best, mid);
+            if scenario_matches_failure_signature(
+                program,
+                &cand,
+                &target_signature,
+                num_di,
+                num_do,
+                num_ai,
+                num_ao,
+            )? {
+                hi = mid;
+            } else {
+                lo = mid.saturating_add(1);
+            }
+        }
+        best = scenario_with_ticks(&best, lo);
     }
 
     // 2) Delta-debugging: remove whole input events if the failure persists.
@@ -364,7 +397,15 @@ fn minimize_failure_case(
     while i < best.inputs.len() {
         let mut cand = best.clone();
         cand.inputs.remove(i);
-        if scenario_fails(program, &cand, target_kind, num_di, num_do, num_ai, num_ao)? {
+        if scenario_matches_failure_signature(
+            program,
+            &cand,
+            &target_signature,
+            num_di,
+            num_do,
+            num_ai,
+            num_ao,
+        )? {
             best = cand;
         } else {
             i += 1;
@@ -372,7 +413,10 @@ fn minimize_failure_case(
     }
 
     // 3) Remove individual input assignments inside events (keeps timing but drops unrelated inputs).
-    for ev_idx in 0..best.inputs.len() {
+    let mut ev_idx = 0usize;
+    while ev_idx < best.inputs.len() {
+        let mut event_changed = false;
+
         // Digital inputs
         let keys: Vec<u16> = best.inputs[ev_idx]
             .set
@@ -388,8 +432,20 @@ fn minimize_failure_case(
             {
                 cand.inputs.remove(ev_idx);
             }
-            if scenario_fails(program, &cand, target_kind, num_di, num_do, num_ai, num_ao)? {
+            if scenario_matches_failure_signature(
+                program,
+                &cand,
+                &target_signature,
+                num_di,
+                num_do,
+                num_ai,
+                num_ao,
+            )? {
                 best = cand;
+                event_changed = true;
+                if ev_idx >= best.inputs.len() {
+                    break;
+                }
             }
         }
 
@@ -411,9 +467,25 @@ fn minimize_failure_case(
             {
                 cand.inputs.remove(ev_idx);
             }
-            if scenario_fails(program, &cand, target_kind, num_di, num_do, num_ai, num_ao)? {
+            if scenario_matches_failure_signature(
+                program,
+                &cand,
+                &target_signature,
+                num_di,
+                num_do,
+                num_ai,
+                num_ao,
+            )? {
                 best = cand;
+                event_changed = true;
+                if ev_idx >= best.inputs.len() {
+                    break;
+                }
             }
+        }
+
+        if !event_changed {
+            ev_idx += 1;
         }
     }
 
@@ -422,7 +494,15 @@ fn minimize_failure_case(
     while fi < best.faults.len() {
         let mut cand = best.clone();
         cand.faults.remove(fi);
-        if scenario_fails(program, &cand, target_kind, num_di, num_do, num_ai, num_ao)? {
+        if scenario_matches_failure_signature(
+            program,
+            &cand,
+            &target_signature,
+            num_di,
+            num_do,
+            num_ai,
+            num_ao,
+        )? {
             best = cand;
         } else {
             fi += 1;
@@ -431,7 +511,7 @@ fn minimize_failure_case(
 
     // Final run artifacts for minimized scenario.
     let min_run = run_program_for_options(program, &best, num_di, num_do, num_ai, num_ao)?;
-    if min_run.report.failure.as_ref().map(|f| f.kind.as_str()) != Some(target_kind) {
+    if !run_matches_failure_signature(&min_run, &target_signature) {
         return Err("minimization produced a non-failing scenario; this is a bug".to_string());
     }
 
@@ -443,28 +523,69 @@ fn minimize_failure_case(
             minimized_duration_ms: best.duration_ms,
             original_inputs,
             minimized_inputs: best.inputs.len(),
+            original_input_assignments,
+            minimized_input_assignments: input_assignment_count(&best),
             original_faults,
             minimized_faults: best.faults.len(),
         },
     ))
 }
 
-fn scenario_fails(
+#[derive(Debug, Clone, Copy)]
+struct FailureSignature<'a> {
+    kind: &'a str,
+    task: Option<usize>,
+    step: Option<u16>,
+}
+
+fn scenario_with_ticks(base: &sim::Scenario, ticks: u64) -> sim::Scenario {
+    let mut out = base.clone();
+    out.duration_ms = ticks.saturating_mul(out.tick_ms);
+    out
+}
+
+fn run_matches_failure_signature(
+    run: &sim::SimRunOutput,
+    signature: &FailureSignature<'_>,
+) -> bool {
+    let Some(f) = run.report.failure.as_ref() else {
+        return false;
+    };
+    if f.kind != signature.kind {
+        return false;
+    }
+    if let Some(task) = signature.task {
+        if f.task != task {
+            return false;
+        }
+    }
+    if let Some(step) = signature.step {
+        if f.step != step {
+            return false;
+        }
+    }
+    true
+}
+
+fn scenario_matches_failure_signature(
     program: &Program<'static>,
     scenario: &sim::Scenario,
-    target_kind: &str,
+    target_signature: &FailureSignature<'_>,
     num_di: usize,
     num_do: usize,
     num_ai: usize,
     num_ao: usize,
 ) -> Result<bool, String> {
     let run = run_program_for_options(program, scenario, num_di, num_do, num_ai, num_ao)?;
-    Ok(run
-        .report
-        .failure
-        .as_ref()
-        .map(|f| f.kind.as_str() == target_kind)
-        .unwrap_or(false))
+    Ok(run_matches_failure_signature(&run, target_signature))
+}
+
+fn input_assignment_count(scenario: &sim::Scenario) -> usize {
+    scenario
+        .inputs
+        .iter()
+        .map(|ev| ev.set.digital_inputs.len() + ev.set.analog_inputs.len())
+        .sum()
 }
 
 fn run_program_for_options(

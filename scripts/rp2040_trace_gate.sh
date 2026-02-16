@@ -62,12 +62,18 @@ if [[ -z "$PLC" || -z "$IO_MAP" || -z "$SIL_TRACE" ]]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-mkdir -p "$REPO_ROOT/$OUT_DIR"
-UF2="$REPO_ROOT/$OUT_DIR/firmware.uf2"
-RP2040_OUT="$REPO_ROOT/$OUT_DIR/rp2040"
-BOARD_LOG_DEFAULT="$REPO_ROOT/$OUT_DIR/board.log"
-BOARD_TRACE="$REPO_ROOT/$OUT_DIR/board_trace.jsonl"
-DIFF_REPORT="$REPO_ROOT/$OUT_DIR/diff_report.json"
+if [[ "$OUT_DIR" = /* ]]; then
+  OUT_DIR_ABS="$OUT_DIR"
+else
+  OUT_DIR_ABS="$REPO_ROOT/$OUT_DIR"
+fi
+mkdir -p "$OUT_DIR_ABS"
+UF2="$OUT_DIR_ABS/firmware.uf2"
+RP2040_OUT="$OUT_DIR_ABS/rp2040"
+BOARD_LOG_DEFAULT="$OUT_DIR_ABS/board.log"
+BOARD_TRACE="$OUT_DIR_ABS/board_trace.jsonl"
+DIFF_REPORT="$OUT_DIR_ABS/diff_report.json"
+DASHBOARD_HTML="$OUT_DIR_ABS/trace_diff_dashboard.html"
 
 if [[ -z "$BOARD_LOG" ]]; then
   BOARD_LOG="$BOARD_LOG_DEFAULT"
@@ -152,8 +158,19 @@ echo "[4/4] trace-parse + trace-diff --fail-on-mismatch"
     --fail-on-mismatch
 )
 
+if command -v python3 >/dev/null 2>&1; then
+  "$REPO_ROOT/scripts/trace_diff_dashboard.py" \
+    --diff "$DIFF_REPORT" \
+    --out "$DASHBOARD_HTML" \
+    --title "RP2040 Trace Gate" \
+    --sil-trace "$SIL_TRACE" \
+    --board-trace "$BOARD_TRACE" \
+    --board-log "$BOARD_LOG"
+fi
+
 echo "Pipeline done."
 echo "  UF2: $UF2"
 echo "  Board log: $BOARD_LOG"
 echo "  Board trace: $BOARD_TRACE"
 echo "  Diff report: $DIFF_REPORT"
+echo "  Dashboard: $DASHBOARD_HTML"

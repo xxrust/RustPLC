@@ -414,3 +414,35 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - `scripts/pil_trace_baseline_suite.sh --runner renode`
   - `scripts/pil_semantic_baseline.sh --out-root out/pil_semantic_baselines_verify`
 ---
+
+## [2026-02-16 19:49:22 CST] - Roadmap Follow-up (4项工程化推进：HIL闭环/标定资产化/最小化增强/轻量界面)
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - HIL 回归闭环：新增 `scripts/rp2040_hil_gate.sh`，串联 `sim-plc`(SIL同场景) + `rp2040_trace_gate`(build/flash/log/trace-diff gate) + 可选 bundle 打包，并输出 `hil_meta.json` / `hil_summary.json`。
+  - HIL CI 模板：新增 `.github/workflows/rp2040_hil_nightly.yml`（self-hosted runner），支持 `workflow_dispatch` + nightly `schedule`，并上传 `out/ci_hil_gate` 工件。
+  - 标定资产化与诊断：新增 `scripts/calibration_profile.sh`，把标定流程固化为 profile 目录（build 产物、hash 清单、诊断 Markdown、复用命令）。
+  - 失败最小化增强（sim-regress）：
+    - 从“仅保持 failure.kind”升级为“保持 failure 签名（kind/task/step）”；
+    - duration 缩短改为二分搜索；
+    - 输入 assignment 计数纳入最小化统计；
+    - 修复事件级删减时索引漂移导致的不稳定风险。
+  - 轻量可视化：
+    - 新增 `scripts/trace_diff_dashboard.py`（JSON -> HTML 报告）；
+    - 新增 `tools/trace_viewer/index.html`（本地静态加载 `diff_report.json`）；
+    - `pil_trace_gate.sh` / `rp2040_trace_gate.sh` 自动产出 `trace_diff_dashboard.html`。
+  - 文档补充：新增 `docs/hil_regression.md`，并更新 `README.md` / `docs/board_rp2040.md` / `docs/rp2040_iteration_rationale.md`。
+- Files changed
+  - `.github/workflows/rp2040_hil_nightly.yml`
+  - `scripts/rp2040_hil_gate.sh`, `scripts/calibration_profile.sh`, `scripts/trace_diff_dashboard.py`
+  - `scripts/rp2040_trace_gate.sh`, `scripts/pil_trace_gate.sh`
+  - `tools/trace_viewer/index.html`
+  - `src/sim_regress.rs`, `tests/sim_regress.rs`
+  - `README.md`, `docs/hil_regression.md`, `docs/board_rp2040.md`, `docs/rp2040_iteration_rationale.md`, `progress.txt`
+- Verification
+  - `cargo fmt --all`
+  - `cargo test --workspace`
+  - `cargo build -p board-rp2040 --target thumbv6m-none-eabi --release`
+  - `scripts/pil_trace_baseline_suite.sh --runner cat --out-root out/pil_baselines_verify_cat`
+  - `scripts/calibration_profile.sh --plc examples/rp2040_end_to_end/pressure_station.plc --profile ci_smoke --out-root out/calibration_profiles_test --force`
+  - `python3 scripts/trace_diff_dashboard.py --diff out/pil_baselines_verify_cat/case_action_goto/diff_report.json --out out/dashboard_test.html --title Smoke --sil-trace examples/trace_baselines/case_action_goto/sil_trace.jsonl --board-trace out/pil_baselines_verify_cat/case_action_goto/board_trace.jsonl --board-log out/pil_baselines_verify_cat/case_action_goto/board.log`
+---

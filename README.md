@@ -533,6 +533,55 @@ scripts/pil_trace_baseline_suite.sh --runner renode
 scripts/pil_semantic_baseline.sh --cases-dir examples/pil_baselines
 ```
 
+#### 9) HIL（实板）回归门禁（可选）
+
+目的：把“真实板卡 nightly 回归”做成可复现流水线（构建/烧录/采集/对比/打包）。
+
+```bash
+scripts/rp2040_hil_gate.sh \
+  --plc examples/rp2040_end_to_end/pressure_station.plc \
+  --scenario examples/rp2040_end_to_end/scenarios/normal.yaml \
+  --io-map examples/rp2040_end_to_end/io_map.toml \
+  --mount /media/RPI-RP2 \
+  --port /dev/ttyACM0 \
+  --duration 20 \
+  --out-dir out/rp2040_hil_gate \
+  --bundle
+```
+
+说明：
+- 脚本会先用 `sim-plc` 生成同场景 SIL trace，再调用 `rp2040_trace_gate.sh` 做板级 gate。
+- 失败时也会保留制品；`--bundle` 会额外产出 `hil_bundle.tgz` 便于上传 CI Artifact。
+- 参考文档：[`docs/hil_regression.md`](docs/hil_regression.md)。
+- 仓库已提供 self-hosted workflow 模板：`.github/workflows/rp2040_hil_nightly.yml`。
+
+#### 10) 标定资产化与诊断（可选）
+
+目的：把一次标定固化成“可追溯配置资产”（模板/合同/hash/诊断报告），避免口口相传。
+
+```bash
+scripts/calibration_profile.sh \
+  --plc examples/assembly_station.plc \
+  --profile lineA_2026w07 \
+  --io-map out/rp2040/io_map.toml \
+  --analog-calibration out/rp2040/analog_calibration.toml
+```
+
+输出目录：`out/calibration_profiles/<profile>/`
+- `build_rp2040/*`（生成程序、合同、模板、build_meta）
+- `profile_manifest.json`（输入来源、版本与文件 hash）
+- `diagnostics.md`（AI/AO 通道参数与复用命令）
+
+#### 11) 轻量 Trace/Diff 界面（可选）
+
+两种方式：
+
+1) gate 脚本自动生成 HTML（推荐）  
+`scripts/pil_trace_gate.sh` / `scripts/rp2040_trace_gate.sh` / `scripts/rp2040_hil_gate.sh` 会输出 `trace_diff_dashboard.html`。
+
+2) 本地静态查看器  
+直接打开 `tools/trace_viewer/index.html`，加载任意 `diff_report.json`。
+
 #### 当前下沉范围说明（RP2040 v1）
 
 - 已支持：`set` / `extend` / `retract` / `set_analog` / `log` 动作下沉

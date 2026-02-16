@@ -76,6 +76,25 @@ What it does:
 2. `flash-rp2040` (dry-run + actual, when `--mount` is set)
 3. collect board log (`serial` or custom `cmd`)
 4. `trace-parse` + `trace-diff --fail-on-mismatch`
+5. render `trace_diff_dashboard.html`
+
+## HIL regression script (real board)
+
+When you want a nightly/CI-friendly artifact bundle with one command:
+
+```bash
+scripts/rp2040_hil_gate.sh \
+  --plc examples/rp2040_end_to_end/pressure_station.plc \
+  --scenario examples/rp2040_end_to_end/scenarios/normal.yaml \
+  --io-map examples/rp2040_end_to_end/io_map.toml \
+  --mount /media/RPI-RP2 \
+  --port /dev/ttyACM0 \
+  --duration 20 \
+  --out-dir out/rp2040_hil_gate \
+  --bundle
+```
+
+Artifacts include `hil_meta.json`, `hil_summary.json`, and (optional) `hil_bundle.tgz`.
 
 ## PIL-style gate (no physical board)
 
@@ -95,3 +114,5 @@ scripts/pil_trace_gate.sh \
   --runner-cmd "renode -e 'include @scripts/renode/run.resc'" \
   --duration 30
 ```
+
+Both PIL and board gate scripts also emit `trace_diff_dashboard.html`.

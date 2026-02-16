@@ -1,0 +1,67 @@
+name: rp2040-hil-nightly
+
+on:
+  workflow_dispatch:
+    inputs:
+      mount:
+        description: "RP2040 UF2 mount path (e.g. /media/RPI-RP2)"
+        required: false
+        type: string
+      port:
+        description: "Serial port (e.g. /dev/ttyACM0)"
+        required: false
+        type: string
+      duration:
+        description: "Log capture duration in seconds"
+        required: false
+        type: string
+  schedule:
+    - cron: "0 1 * * *"
+
+jobs:
+  hil-gate:
+    # Requires a physically connected RP2040 board.
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 30
+    env:
+      DEFAULT_MOUNT: /media/RPI-RP2
+      DEFAULT_PORT: /dev/ttyACM0
+      DEFAULT_DURATION: "20"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv6m-none-eabi
+      - name: Ensure elf2uf2-rs
+        run: cargo install elf2uf2-rs --locked || true
+      - name: Resolve runtime args
+        id: args
+        run: |
+          MOUNT="${{ github.event.inputs.mount }}"
+          PORT="${{ github.event.inputs.port }}"
+          DURATION="${{ github.event.inputs.duration }}"
+          if [[ -z "$MOUNT" ]]; then MOUNT="${DEFAULT_MOUNT}"; fi
+          if [[ -z "$PORT" ]]; then PORT="${DEFAULT_PORT}"; fi
+          if [[ -z "$DURATION" ]]; then DURATION="${DEFAULT_DURATION}"; fi
+          echo "mount=$MOUNT" >> "$GITHUB_OUTPUT"
+          echo "port=$PORT" >> "$GITHUB_OUTPUT"
+          echo "duration=$DURATION" >> "$GITHUB_OUTPUT"
+      - name: Run RP2040 HIL gate
+        run: |
+          scripts/rp2040_hil_gate.sh \
+            --plc examples/rp2040_end_to_end/pressure_station.plc \
+            --scenario examples/rp2040_end_to_end/scenarios/normal.yaml \
+            --io-map examples/rp2040_end_to_end/io_map.toml \
+            --mount "${{ steps.args.outputs.mount }}" \
+            --port "${{ steps.args.outputs.port }}" \
+            --duration "${{ steps.args.outputs.duration }}" \
+            --out-dir out/ci_hil_gate \
+            --bundle
+      - name: Upload HIL artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rp2040-hil-gate-${{ github.run_id }}
+          path: out/ci_hil_gate
+          if-no-files-found: warn
+

@@ -58,6 +58,7 @@ fi
 mkdir -p "$OUT_DIR"
 BOARD_TRACE="$OUT_DIR/board_trace.jsonl"
 DIFF_REPORT="$OUT_DIR/diff_report.json"
+DASHBOARD_HTML="$OUT_DIR/trace_diff_dashboard.html"
 
 if [[ -z "$BOARD_LOG" ]]; then
   BOARD_LOG="$OUT_DIR/board.log"
@@ -105,7 +106,18 @@ echo "[3/3] trace-diff --fail-on-mismatch"
     --fail-on-mismatch
 )
 
+if command -v python3 >/dev/null 2>&1; then
+  "$REPO_ROOT/scripts/trace_diff_dashboard.py" \
+    --diff "$DIFF_REPORT" \
+    --out "$DASHBOARD_HTML" \
+    --title "PIL Trace Gate" \
+    --sil-trace "$SIL" \
+    --board-trace "$BOARD_TRACE" \
+    --board-log "$BOARD_LOG"
+fi
+
 echo "PIL gate passed."
 echo "  board_log: $BOARD_LOG"
 echo "  board_trace: $BOARD_TRACE"
 echo "  diff_report: $DIFF_REPORT"
+echo "  dashboard: $DASHBOARD_HTML"

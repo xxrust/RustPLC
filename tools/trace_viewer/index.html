@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RustPLC Trace/Diff Viewer</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      margin: 24px;
+      color: #222;
+    }
+    .row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 14px;
+      margin-top: 12px;
+      background: #fff;
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .pass { background: #117a37; }
+    .fail { background: #9b1c1c; }
+    code {
+      background: #f4f4f4;
+      border-radius: 4px;
+      padding: 1px 4px;
+      white-space: nowrap;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 8px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f7f7f7; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>RustPLC Trace/Diff Viewer</h1>
+  <p class="muted">Load a <code>diff_report.json</code> produced by <code>rust_plc trace-diff</code>.</p>
+
+  <div class="card">
+    <div class="row">
+      <label>diff_report.json:
+        <input id="diffFile" type="file" accept=".json,application/json" />
+      </label>
+      <button id="clearBtn" type="button">Clear</button>
+    </div>
+    <div id="status" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card">
+    <h2>Mismatch Context</h2>
+    <div id="context"></div>
+  </div>
+
+  <script>
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function fmtEvent(ev) {
+      if (!ev) return "—";
+      return `tick=${ev.tick} task=${ev.task} ${ev.from_step}->${ev.to_step} reason=${ev.reason}`;
+    }
+
+    function render(diff) {
+      const isMatch = !!diff.is_match;
+      const badge = `<span class="badge ${isMatch ? "pass" : "fail"}">${isMatch ? "PASS" : "FAIL"}</span>`;
+      const status = `
+        ${badge}
+        <ul>
+          <li>sil_events: ${escapeHtml(diff.sil_events)}</li>
+          <li>board_events: ${escapeHtml(diff.board_events)}</li>
+          <li>first_mismatch_tick: ${escapeHtml(diff.first_mismatch_tick)}</li>
+          <li>mismatch_type: ${escapeHtml(diff.mismatch_type)}</li>
+          <li>mismatch_index: ${escapeHtml(diff.mismatch_index)}</li>
+        </ul>
+      `;
+      document.getElementById("status").innerHTML = status;
+
+      const rows = Array.isArray(diff.context) ? diff.context : [];
+      if (rows.length === 0) {
+        document.getElementById("context").innerHTML = "<p class='muted'>(No mismatch context.)</p>";
+        return;
+      }
+
+      const body = rows.map(r => {
+        const idx = escapeHtml(r.index);
+        const sil = escapeHtml(fmtEvent(r.sil));
+        const board = escapeHtml(fmtEvent(r.board));
+        return `<tr><td>${idx}</td><td><code>${sil}</code></td><td><code>${board}</code></td></tr>`;
+      }).join("\n");
+
+      document.getElementById("context").innerHTML = `
+        <table>
+          <thead><tr><th>Index</th><th>SIL</th><th>Board</th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      `;
+    }
+
+    async function readJsonFile(file) {
+      const text = await file.text();
+      return JSON.parse(text);
+    }
+
+    document.getElementById("diffFile").addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        const diff = await readJsonFile(file);
+        render(diff);
+      } catch (err) {
+        document.getElementById("status").innerHTML =
+          `<span class="badge fail">ERROR</span> <code>${escapeHtml(err)}</code>`;
+        document.getElementById("context").innerHTML = "";
+      }
+    });
+
+    document.getElementById("clearBtn").addEventListener("click", () => {
+      document.getElementById("diffFile").value = "";
+      document.getElementById("status").innerHTML = "";
+      document.getElementById("context").innerHTML = "";
+    });
+  </script>
+</body>
+</html>
+

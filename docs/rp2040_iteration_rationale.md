@@ -92,3 +92,19 @@ SIL 主线完成后，板级链路的瓶颈集中在三点：
 - 已通过：`cargo build -p board-rp2040 --target thumbv6m-none-eabi --release`
 - 板级链路建议：`scripts/rp2040_trace_gate.sh`
 - 无板链路建议：`scripts/pil_trace_gate.sh`
+
+## 进一步工程化（本轮补齐）
+
+围绕“先稳定再做大界面”的原则，本轮补了四个面向交付的能力：
+
+1) **HIL 回归闭环可脚本化**  
+新增 `scripts/rp2040_hil_gate.sh`（SIL trace + 板级 gate + bundle），并补了 self-hosted workflow 模板 `.github/workflows/rp2040_hil_nightly.yml`。
+
+2) **标定资产化**  
+新增 `scripts/calibration_profile.sh`，把一次标定固化为 profile 目录（build 产物 + hash 清单 + 诊断报告），便于版本化和回放。
+
+3) **失败最小化更稳**  
+`sim-regress --minimize-failure` 改为按失败签名（kind/task/step）保持语义一致，并新增更稳定的 duration 二分缩短策略与 assignment 计数指标。
+
+4) **轻量可视化先落地**  
+新增 `scripts/trace_diff_dashboard.py`（自动生成 HTML 报告）与 `tools/trace_viewer/index.html`（本地静态加载 `diff_report.json`）。

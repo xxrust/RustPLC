@@ -53,6 +53,42 @@ task done:
     step halt:
 "#;
 
+const PLC_FIXTURE_MULTI_TIMEOUT: &str = r#"
+[topology]
+
+device X0: digital_input
+device X1: digital_input
+
+device start_a: digital_input {
+    connected_to: X0
+}
+
+device start_b: digital_input {
+    connected_to: X1
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_a:
+        wait: start_a == true
+        timeout: 30ms -> goto fault
+
+    step wait_b:
+        wait: start_b == true
+        timeout: 40ms -> goto fault
+
+    on_complete: goto done
+
+task fault:
+    step halt:
+
+task done:
+    step halt_done:
+"#;
+
 #[test]
 fn sim_regress_reports_one_pass_one_fail() {
     let base = std::env::temp_dir().join(format!(
@@ -173,5 +209,64 @@ faults:
     let mini = f.minimization.as_ref().unwrap();
     assert!(mini.minimized_duration_ms <= mini.original_duration_ms);
     assert!(mini.minimized_inputs <= mini.original_inputs);
+    assert!(mini.minimized_input_assignments <= mini.original_input_assignments);
     assert!(mini.minimized_faults <= mini.original_faults);
+}
+
+#[test]
+fn sim_regress_minimization_keeps_failure_step_signature() {
+    let base = std::env::temp_dir().join(format!(
+        "rust_plc_sim_regress_signature_test_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock works")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&base).expect("create temp dir");
+
+    let plc_dir = base.join("plcs");
+    let scenario_dir = base.join("scenarios");
+    let artifacts_dir = base.join("artifacts");
+    fs::create_dir_all(&plc_dir).unwrap();
+    fs::create_dir_all(&scenario_dir).unwrap();
+
+    fs::write(plc_dir.join("fixture.plc"), PLC_FIXTURE_MULTI_TIMEOUT).expect("write plc");
+
+    // Required event: DI0 true to pass wait_a. Noise event: DI2 true (unused).
+    // Failure should stay at wait_b timeout (step=1), not regress to wait_a timeout (step=0).
+    let fail_yaml = r#"
+tick_ms: 10
+duration_ms: 200
+inputs:
+  - at_ms: 10
+    set:
+      digital_inputs:
+        0: true
+  - at_ms: 20
+    set:
+      digital_inputs:
+        2: true
+"#;
+    fs::write(scenario_dir.join("fail.yaml"), fail_yaml).expect("write fail scenario");
+
+    let summary = rust_plc::sim_regress::run_sim_regress_with_options(
+        &plc_dir,
+        &scenario_dir,
+        &artifacts_dir,
+        rust_plc::sim_regress::SimRegressOptions { minimize: true },
+    )
+    .expect("sim-regress should succeed");
+
+    assert_eq!(summary.total, 1);
+    assert_eq!(summary.fail, 1);
+    let f = &summary.failures[0];
+    assert_eq!(f.failure.kind, "timeout");
+    assert_eq!(f.failure.task, Some(0));
+    assert_eq!(f.failure.step, Some(1));
+
+    let mini = f.minimization.as_ref().expect("minimization summary");
+    assert!(mini.minimized_input_assignments <= mini.original_input_assignments);
+    // DI0 assignment is still required to keep failure at step=1.
+    assert!(mini.minimized_input_assignments >= 1);
 }
