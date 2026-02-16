@@ -87,3 +87,30 @@
 - 默认（不加该参数）仍保持“仅提示不阻断”
 
 这使 CI 可以把“有界验证/风险提示”纳入发布门禁，而不是仅凭字符串日志人工判断。
+
+### Runtime Budget（US-003）
+
+结构化报告与 `build_meta.json` 现在都包含 `runtime_budget`，用于无实板阶段的确定性预算评估。当前字段包括：
+
+- `max_transitions_per_tick_cap`（runtime-core 固定上限，当前 64）
+- `max_transitions_same_tick_upper_bound`
+- `max_actions_per_transition`
+- `max_actions_per_tick_upper_bound`
+- `max_parallel_branches`
+- `max_race_branches`
+- `has_same_tick_cycle`
+
+可通过 CLI 或环境变量配置预算阈值并触发 warn：
+
+- CLI:
+  - `--budget-max-actions-per-transition`
+  - `--budget-max-actions-per-tick`
+  - `--budget-max-parallel-branches`
+  - `--budget-max-race-branches`
+  - `--budget-warn-on-same-tick-cycle`
+- ENV:
+  - `RUST_PLC_BUDGET_MAX_ACTIONS_PER_TRANSITION`
+  - `RUST_PLC_BUDGET_MAX_ACTIONS_PER_TICK`
+  - `RUST_PLC_BUDGET_MAX_PARALLEL_BRANCHES`
+  - `RUST_PLC_BUDGET_MAX_RACE_BRANCHES`
+  - `RUST_PLC_BUDGET_WARN_ON_SAME_TICK_CYCLE`

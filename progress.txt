@@ -478,3 +478,15 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
     - Write report artifacts before exiting on deny-warnings so CI can still collect evidence.
 ---
+
+## [2026-02-16 22:54:22 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added runtime budget analysis and included it in both `verification_report.json` and `build_meta.json` (`runtime_budget` field).
+  - Added configurable budget thresholds (CLI flags + env vars) and emits warn-level entries under `verification.timing.warnings` when exceeded.
+  - Added integration test covering budget warning emission.
+- Files changed
+  - `src/main.rs`, `tests/verification_report.rs`, `docs/prd_clarifications.md`, `prd.json`, `progress.txt`
+- Verification
+  - `cargo test --workspace`
+---

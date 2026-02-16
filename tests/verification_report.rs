@@ -69,6 +69,10 @@ task main:
         report["tool_version"].as_str().is_some(),
         "report should include tool_version"
     );
+    assert!(
+        report["runtime_budget"].is_object(),
+        "report should include runtime_budget object"
+    );
     assert_eq!(report["verification"]["safety"]["skipped_rules"], 0);
     assert!(
         report["verification"]["safety"]["checked_rules"].is_number(),
@@ -201,4 +205,53 @@ task process_B:
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("--deny-warnings"));
     assert!(stderr.contains("[safety]"));
+}
+
+#[test]
+fn budget_thresholds_emit_warn_entries() {
+    let base = temp_dir("rust_plc_budget_warn");
+    let plc_path = base.join("budget_warn.plc");
+    let report_path = base.join("budget_warn_report.json");
+
+    let source = r#"
+[topology]
+device X0: digital_input
+device Y0: digital_output
+
+[constraints]
+
+[tasks]
+task main:
+    step s1:
+        action: set Y0 on
+"#;
+    fs::write(&plc_path, source).expect("write plc");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg(&plc_path)
+        .arg("--report")
+        .arg(&report_path)
+        .arg("--budget-max-actions-per-transition")
+        .arg("0")
+        .output()
+        .expect("run rust_plc");
+
+    assert!(
+        output.status.success(),
+        "runtime budget warning should not fail by default, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&report_path).expect("read report"))
+            .expect("report JSON should parse");
+    let timing_warnings = report["verification"]["timing"]["warnings"]
+        .as_array()
+        .expect("timing warnings should be array");
+    assert!(
+        timing_warnings
+            .iter()
+            .any(|w| w["level"] == "warn" && w["message"].as_str().unwrap_or("").contains("runtime budget")),
+        "budget threshold exceed should add warn-level timing warning"
+    );
 }
