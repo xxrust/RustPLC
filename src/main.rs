@@ -168,6 +168,13 @@ fn main() {
         }
         return;
     }
+    if first == "sim-pid-kpi" {
+        if let Err(msg) = run_sim_pid_kpi_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "sim-plc" {
         if let Err(msg) = run_sim_plc_subcommand(&program, args) {
             eprintln!("{msg}");
@@ -393,6 +400,9 @@ fn print_usage(program: &str) {
     eprintln!("  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>");
     eprintln!(
         "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
+    );
+    eprintln!(
+        "  {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]"
     );
     eprintln!(
         "  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
@@ -684,6 +694,79 @@ fn run_sim_regress_subcommand(
     )
     .map_err(|e| format!("sim-regress failed: {e}"))?;
     write_sim_regress_summary(&summary_out, &summary)?;
+    Ok(())
+}
+
+fn run_sim_pid_kpi_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!(
+            "Usage: {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]"
+        ));
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    let mut out_path: Option<PathBuf> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <pid_scenario.yaml>".to_string()
+                    })?));
+            }
+            "--out" => {
+                out_path = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --out <kpi.json>".to_string())?,
+                ));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]"
+                ));
+            }
+            other => return Err(format!("Unknown argument for sim-pid-kpi: {other}")),
+        }
+    }
+
+    let scenario_path = scenario_path.ok_or_else(|| {
+        format!(
+            "Usage: {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]"
+        )
+    })?;
+    let out_path = out_path.unwrap_or_else(|| PathBuf::from("out/pid_kpi.json"));
+
+    if let Some(parent) = out_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create output directory {parent:?}: {err}"))?;
+        }
+    }
+
+    let plc_source =
+        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
+        format!(
+            "Failed to read PID scenario YAML {}: {err}",
+            scenario_path.display()
+        )
+    })?;
+    let scenario = sim::PidControlScenario::from_yaml_str(&scenario_yaml)
+        .map_err(|err| format!("Failed to parse PID scenario YAML: {err}"))?;
+    let runtime_program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
+    let report = sim::run_pid_kpi(&runtime_program, &scenario)
+        .map_err(|err| format!("Failed to run PID KPI simulation: {err}"))?;
+
+    let mut json = serde_json::to_string_pretty(&report)
+        .map_err(|err| format!("Failed to serialize KPI JSON: {err}"))?;
+    json.push('\n');
+    fs::write(&out_path, json)
+        .map_err(|err| format!("Failed to write KPI file {out_path:?}: {err}"))?;
+
     Ok(())
 }
 

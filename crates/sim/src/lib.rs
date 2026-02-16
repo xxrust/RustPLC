@@ -11,11 +11,13 @@ mod report;
 mod runner;
 mod scenario;
 mod waveform;
+mod control_kpi;
 pub use plant::{CylinderConfig, LimitKind, LimitSensorConfig, Plant, SolenoidValveConfig};
 pub use report::{ScenarioSummary, SimFailure, SimReport};
 pub use runner::{SimRunError, SimRunOutput, run_program_for_scenario};
 pub use scenario::{InputEvent, InputSet, Scenario, ScenarioError};
 pub use waveform::{export_analog_outputs_csv, export_analog_outputs_jsonl, export_vcd_digital};
+pub use control_kpi::{ControlKpiError, PidControlScenario, PidKpiReport, ProcessModelConfig, run_pid_kpi};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DigitalEdge {

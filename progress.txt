@@ -7,6 +7,7 @@
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
 - For `crates/sim` plant-style dynamics, keep the plant as a deterministic tick-step that *returns* input updates, and call it from `SimIo::advance_tick()` (after applying scenario inputs) to avoid borrow-checker pitfalls with `&mut self` callbacks.
+- For discrete dead-time models, use a fixed-length FIFO with `delay_ticks = ceil(dead_time_ms / tick_ms)` so response timing stays deterministic across runs.
 - Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
 - For human-friendly YAML parse errors, use `serde_path_to_error` so errors include a field path (e.g., `inputs[0].set.digital_inputs`).
 - `serde_yaml` enum representations can be surprising (it expects YAML tags like `!Variant`); for author-friendly scenario files prefer struct-shaped keys like `faults: - sensor_stuck: { at_ms, target, value }`.
@@ -589,4 +590,23 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Adding fields to `runtime_core::Program` requires updating all static literals (runtime-core tests, sim tests, codegen output template, and board stub generation) in one pass.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `state_machine_to_runtime_program` already receives both topology and state machine; topology-carried loop specs can be bridged without altering task IR shape.
+---
+## [2026-02-17 06:03:31 CST] - US-010
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added two deterministic process object models for no-board PID evaluation:
+    - First-order lag (`first_order`)
+    - Dead-time + first-order lag (`dead_time_first_order`)
+  - Added KPI computation for step response: overshoot (%), settling time (2% band with a floor), and steady-state error.
+  - Added new CLI subcommand `sim-pid-kpi` to run a PID loop from a `.plc` against a PID-KPI scenario YAML and export KPI JSON.
+  - Added regression tests ensuring KPI output is deterministic and within thresholds.
+- Files changed
+  - `crates/sim/src/control_kpi.rs`, `crates/sim/src/lib.rs`, `src/main.rs`, `tests/pid_kpi_cli.rs`, `docs/sim_pid_kpi.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - KPI settling-time can be computed deterministically as the earliest index where all remaining samples stay within a tolerance band.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Dead-time needs a tick-aligned FIFO delay; off-by-one in queue length will shift the response start and break regressions.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `sim-pid-kpi` uses the normal compile pipeline (`compile_plc_to_runtime_program`) and then runs a loop-local IO backend, so it doesn't interfere with existing `SimIo` plant/fault semantics.
 ---
