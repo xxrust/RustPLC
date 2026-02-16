@@ -270,6 +270,26 @@ cargo run --release -- sim-regress --plc-dir examples --scenario-dir scenarios
 - [`docs/roadmap_autosim_arduino.md`](docs/roadmap_autosim_arduino.md)（SIL/Plant/回归闭环路线图）
 - [`docs/dsl-sil-verification.md`](docs/dsl-sil-verification.md)（为什么 DSL 静态验证后仍值得做 SIL）
 
+### RP2040 板级链路（已打通）
+
+在 SIL 闭环之外，仓库已提供 RP2040（Raspberry Pi Pico）最小可用下沉链路：
+
+```bash
+# 1) .plc -> 验证 -> 生成 RP2040 构建输入
+cargo run --release -- build-rp2040 examples/assembly_station.plc --out out/rp2040
+
+# 2) （可选）板级日志转 JSONL
+cargo run --release -- trace-parse --in out/board.log --out out/board_trace.jsonl
+
+# 3) SIL trace vs 板级 trace 对比
+cargo run --release -- trace-diff --sil out/trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json
+
+# 4) UF2 自动装载（先 dry-run）
+cargo run --release -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP2 --dry-run
+```
+
+相关说明见 [`docs/board_rp2040.md`](docs/board_rp2040.md)。
+
 ## 为什么需要 RustPLC
 
 传统 PLC 编程（梯形图 / ST / FBD）依赖工程师的经验来保证安全性。当系统复杂度上升，人工审查的可靠性急剧下降——气缸碰撞、死锁、超时这些问题往往在现场调试时才暴露。
@@ -568,8 +588,9 @@ cargo build --release --features z3-solver
 - [x] AI 辅助生成（plc-gen skill）
 - [x] 模拟量 I/O（analog_input / analog_output / set_analog / 阈值比较）
 - [x] SIL 仿真闭环（SimIO / Plant / 故障注入 / 波形导出 / 批量回归）
-- [ ] 代码生成 → 确定性 Rust 执行内核
-- [ ] 硬件抽象层（EtherCAT / Modbus / GPIO）
+- [x] 代码生成 + RP2040 构建/烧录（build-rp2040 / flash-rp2040）
+- [x] 板级可观测与 SIL 对比（trace-parse / trace-diff）
+- [ ] 硬件抽象层扩展（EtherCAT / Modbus / 更多 GPIO 板卡）
 - [ ] PID 控制
 - [ ] 多控制器协同
 - [ ] 图形化 DSL 编辑器
