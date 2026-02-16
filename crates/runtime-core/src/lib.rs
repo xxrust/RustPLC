@@ -4,7 +4,7 @@
 #[cfg(test)]
 extern crate std;
 
-use io_traits::{AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
+use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -74,11 +74,23 @@ pub struct Timeout {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AnalogRange {
+    pub min: f32,
+    pub max: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instr<'a> {
     Action { actions: &'a [Action], next: StepId },
     WaitDigital {
         id: DigitalInputId,
         equals: bool,
+        next: StepId,
+        timeout: Option<Timeout>,
+    },
+    WaitAnalog {
+        id: AnalogInputId,
+        ranges: &'a [AnalogRange],
         next: StepId,
         timeout: Option<Timeout>,
     },
@@ -244,6 +256,25 @@ impl<'a> Runtime<'a> {
                     }
                     break;
                 }
+                Instr::WaitAnalog {
+                    id,
+                    ranges,
+                    next,
+                    timeout,
+                } => {
+                    let v = io.read_analog_input(id);
+                    if analog_in_selected_ranges(v, ranges) {
+                        self.transition(now, next, TransitionReason::WaitSatisfied, &mut on_event)?;
+                        continue;
+                    }
+                    if let Some(tmo) = timeout {
+                        if elapsed >= tmo.after_ticks {
+                            self.transition(now, tmo.target, TransitionReason::Timeout, &mut on_event)?;
+                            continue;
+                        }
+                    }
+                    break;
+                }
                 Instr::Halt => break,
             }
         }
@@ -271,6 +302,10 @@ impl<'a> Runtime<'a> {
         });
         Ok(())
     }
+}
+
+fn analog_in_selected_ranges(value: f32, ranges: &[AnalogRange]) -> bool {
+    ranges.iter().any(|r| value >= r.min && value <= r.max)
 }
 
 #[cfg(test)]
@@ -465,6 +500,52 @@ mod tests {
                 from: StepId(0),
                 to: StepId(1),
                 reason: TransitionReason::Timeout,
+            }]
+        );
+    }
+
+    #[test]
+    fn analog_wait_satisfies_when_value_enters_selected_region() {
+        static RANGES: [AnalogRange; 1] = [AnalogRange {
+            min: 80.0,
+            max: 100.0,
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "wait_ai0_region",
+                instr: Instr::WaitAnalog {
+                    id: AnalogInputId(0),
+                    ranges: &RANGES,
+                    next: StepId(1),
+                    timeout: None,
+                },
+            },
+            Step {
+                name: "done",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program { tasks: &TASKS };
+
+        let mut io = MemIo::new();
+        io.ai[0] = 90.0;
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        let mut events: std::vec::Vec<TraceEvent> = std::vec::Vec::new();
+
+        rt.tick_with_trace(&mut io, |e| events.push(e)).unwrap();
+        assert_eq!(
+            events,
+            std::vec![TraceEvent {
+                tick: Tick(0),
+                task: 0,
+                from: StepId(0),
+                to: StepId(1),
+                reason: TransitionReason::WaitSatisfied,
             }]
         );
     }

@@ -2,10 +2,10 @@ use crate::ir::{
     BinaryValue as IrBinaryValue, DeviceKind, State, StateMachine, TopologyGraph, Transition,
     TransitionAction, TransitionGuard,
 };
-use io_traits::{AnalogOutputId, DigitalInputId, DigitalOutputId};
+use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
 use petgraph::Direction;
 use petgraph::graph::NodeIndex;
-use runtime_core::{Action, Instr, Program, Step, StepId, Task, Timeout};
+use runtime_core::{Action, AnalogRange, Instr, Program, Step, StepId, Task, Timeout};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +44,9 @@ pub enum BridgeError {
     #[error("unable to resolve a unique physical digital output for device {device} (state {state})")]
     UnresolvableDigitalOutput { state: String, device: String },
 
+    #[error("unable to resolve a unique physical analog input for device {device} (state {state})")]
+    UnresolvableAnalogInput { state: String, device: String },
+
     #[error("unable to resolve a unique physical analog output for device {device} (state {state})")]
     UnresolvableAnalogOutput { state: String, device: String },
 
@@ -53,6 +56,12 @@ pub enum BridgeError {
         target: String,
         value_raw: String,
     },
+
+    #[error("unsupported analog wait guard in {state}: {expression}")]
+    UnsupportedAnalogWait { state: String, expression: String },
+
+    #[error("analog input {device} has no region table in state machine (state {state})")]
+    MissingAnalogRegions { state: String, device: String },
 }
 
 /// Convert a compiler/semantic `StateMachine` IR into a minimal `runtime-core` `Program`.
@@ -129,6 +138,7 @@ pub fn state_machine_to_runtime_program(
             &outs,
             &state_to_step,
             &mut steps,
+            sm,
             tick_ms,
         )?;
 
@@ -152,12 +162,13 @@ fn convert_state_outgoing(
     outs: &[&Transition],
     state_to_step: &HashMap<(String, String), StepId>,
     steps: &mut Vec<Step<'static>>,
+    sm: &StateMachine,
     tick_ms: u64,
 ) -> Result<Instr<'static>, BridgeError> {
     match outs.len() {
         0 => Ok(Instr::Halt),
-        1 => convert_single_transition(resolver, state_name, outs[0], state_to_step, steps, tick_ms),
-        2 => convert_wait_with_timeout(resolver, state_name, outs, state_to_step, steps, tick_ms),
+        1 => convert_single_transition(resolver, state_name, outs[0], state_to_step, steps, sm, tick_ms),
+        2 => convert_wait_with_timeout(resolver, state_name, outs, state_to_step, steps, sm, tick_ms),
         n => Err(BridgeError::UnsupportedTransitionShape {
             state: state_name.to_string(),
             details: format!("expected 0..=2 outgoing transitions, got {n}"),
@@ -171,6 +182,7 @@ fn convert_single_transition(
     t: &Transition,
     state_to_step: &HashMap<(String, String), StepId>,
     steps: &mut Vec<Step<'static>>,
+    sm: &StateMachine,
     tick_ms: u64,
 ) -> Result<Instr<'static>, BridgeError> {
     match &t.guard {
@@ -205,29 +217,56 @@ fn convert_single_transition(
             }
         }
         TransitionGuard::Condition { expression } => {
-            let (device, equals) = parse_single_bool_guard(state_name, expression)?;
-            let id = resolver.resolve_digital_input_id(state_name, &device)?;
+            let expr = expression.trim();
+            if let Some((device, ranges)) = parse_analog_region_guard(expr) {
+                let id = resolver.resolve_analog_input_id(state_name, &device)?;
+                let analog_ranges = ranges_to_analog_ranges(sm, state_name, &device, &ranges)?;
 
-            let target = lookup_target_step(state_name, &t.to, state_to_step)?;
-            let next = if t.actions.is_empty() {
-                target
+                let target = lookup_target_step(state_name, &t.to, state_to_step)?;
+                let next = if t.actions.is_empty() {
+                    target
+                } else {
+                    push_action_step(
+                        steps,
+                        &format!("{state_name}__cond_actions"),
+                        resolver,
+                        state_name,
+                        &t.actions,
+                        target,
+                    )?
+                };
+
+                Ok(Instr::WaitAnalog {
+                    id,
+                    ranges: analog_ranges,
+                    next,
+                    timeout: None,
+                })
             } else {
-                push_action_step(
-                    steps,
-                    &format!("{state_name}__cond_actions"),
-                    resolver,
-                    state_name,
-                    &t.actions,
-                    target,
-                )?
-            };
+                let (device, equals) = parse_single_bool_guard(state_name, expr)?;
+                let id = resolver.resolve_digital_input_id(state_name, &device)?;
 
-            Ok(Instr::WaitDigital {
-                id,
-                equals,
-                next,
-                timeout: None,
-            })
+                let target = lookup_target_step(state_name, &t.to, state_to_step)?;
+                let next = if t.actions.is_empty() {
+                    target
+                } else {
+                    push_action_step(
+                        steps,
+                        &format!("{state_name}__cond_actions"),
+                        resolver,
+                        state_name,
+                        &t.actions,
+                        target,
+                    )?
+                };
+
+                Ok(Instr::WaitDigital {
+                    id,
+                    equals,
+                    next,
+                    timeout: None,
+                })
+            }
         }
         TransitionGuard::Timeout { .. } => Err(BridgeError::UnsupportedTransitionShape {
             state: state_name.to_string(),
@@ -243,6 +282,7 @@ fn convert_wait_with_timeout(
     outs: &[&Transition],
     state_to_step: &HashMap<(String, String), StepId>,
     steps: &mut Vec<Step<'static>>,
+    sm: &StateMachine,
     tick_ms: u64,
 ) -> Result<Instr<'static>, BridgeError> {
     let (cond, timeout) = match (outs[0], outs[1]) {
@@ -273,8 +313,8 @@ fn convert_wait_with_timeout(
         unreachable!();
     };
 
-    let (device, equals) = parse_single_bool_guard(state_name, expression)?;
-    let id = resolver.resolve_digital_input_id(state_name, &device)?;
+    let expr = expression.trim();
+    let analog_wait = parse_analog_region_guard(expr);
 
     let cond_target = lookup_target_step(state_name, &cond.to, state_to_step)?;
     let cond_next = if cond.actions.is_empty() {
@@ -305,15 +345,91 @@ fn convert_wait_with_timeout(
     };
 
     let after_ticks = ms_to_ticks(state_name, *duration_ms, tick_ms)?;
-    Ok(Instr::WaitDigital {
-        id,
-        equals,
-        next: cond_next,
-        timeout: Some(Timeout {
-            after_ticks,
-            target: timeout_next,
-        }),
-    })
+    if let Some((device, ranges)) = analog_wait {
+        let id = resolver.resolve_analog_input_id(state_name, &device)?;
+        let analog_ranges = ranges_to_analog_ranges(sm, state_name, &device, &ranges)?;
+        Ok(Instr::WaitAnalog {
+            id,
+            ranges: analog_ranges,
+            next: cond_next,
+            timeout: Some(Timeout {
+                after_ticks,
+                target: timeout_next,
+            }),
+        })
+    } else {
+        let (device, equals) = parse_single_bool_guard(state_name, expr)?;
+        let id = resolver.resolve_digital_input_id(state_name, &device)?;
+        Ok(Instr::WaitDigital {
+            id,
+            equals,
+            next: cond_next,
+            timeout: Some(Timeout {
+                after_ticks,
+                target: timeout_next,
+            }),
+        })
+    }
+}
+
+fn parse_analog_region_guard(expr: &str) -> Option<(String, Vec<usize>)> {
+    // Expected: "<device> in {region_1, region_2}"
+    let (lhs, rhs) = expr.split_once(" in ")?;
+    let device = lhs.trim();
+    if device.is_empty() || device.contains('.') {
+        return None;
+    }
+    let rhs = rhs.trim();
+    let rhs = rhs.strip_prefix('{')?.strip_suffix('}')?.trim();
+    if rhs.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for tok in rhs.split(',') {
+        let t = tok.trim();
+        let idx_str = t.strip_prefix("region_")?;
+        let idx: usize = idx_str.parse().ok()?;
+        out.push(idx);
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some((device.to_string(), out))
+    }
+}
+
+fn ranges_to_analog_ranges(
+    sm: &StateMachine,
+    state_name: &str,
+    device: &str,
+    region_indices: &[usize],
+) -> Result<&'static [AnalogRange], BridgeError> {
+    let regions = sm
+        .analog_regions
+        .get(device)
+        .ok_or_else(|| BridgeError::MissingAnalogRegions {
+            state: state_name.to_string(),
+            device: device.to_string(),
+        })?;
+
+    let mut out = Vec::new();
+    for &idx in region_indices {
+        let (min_s, max_s) = regions.get(idx).ok_or_else(|| BridgeError::UnsupportedAnalogWait {
+            state: state_name.to_string(),
+            expression: format!("{device} region_{idx}"),
+        })?;
+        let min = min_s.parse::<f32>().map_err(|_| BridgeError::UnsupportedAnalogWait {
+            state: state_name.to_string(),
+            expression: format!("{device} region_{idx}"),
+        })?;
+        let max = max_s.parse::<f32>().map_err(|_| BridgeError::UnsupportedAnalogWait {
+            state: state_name.to_string(),
+            expression: format!("{device} region_{idx}"),
+        })?;
+        out.push(AnalogRange { min, max });
+    }
+
+    Ok(Box::leak(out.into_boxed_slice()))
 }
 
 fn lookup_target_step(
@@ -563,6 +679,29 @@ impl<'a> TopologyResolver<'a> {
             })
     }
 
+    fn resolve_analog_input_id(
+        &self,
+        state_name: &str,
+        device: &str,
+    ) -> Result<AnalogInputId, BridgeError> {
+        let start = self
+            .by_name
+            .get(device)
+            .copied()
+            .ok_or_else(|| BridgeError::UnknownDevice {
+                state: state_name.to_string(),
+                device: device.to_string(),
+            })?;
+
+        let ids = self.collect_physical_ids(start, DeviceKind::AnalogInput, parse_ai_id);
+        unique_physical_id(ids)
+            .map(AnalogInputId)
+            .map_err(|_| BridgeError::UnresolvableAnalogInput {
+                state: state_name.to_string(),
+                device: device.to_string(),
+            })
+    }
+
     fn collect_physical_ids(
         &self,
         start: NodeIndex,
@@ -614,6 +753,10 @@ fn parse_y_id(name: &str) -> Option<u16> {
 
 fn parse_ao_id(name: &str) -> Option<u16> {
     parse_prefixed_token_u16(name, "AO")
+}
+
+fn parse_ai_id(name: &str) -> Option<u16> {
+    parse_prefixed_token_u16(name, "AI")
 }
 
 fn parse_prefixed_u16(name: &str, prefix: char) -> Option<u16> {

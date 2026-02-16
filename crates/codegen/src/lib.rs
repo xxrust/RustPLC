@@ -38,6 +38,12 @@ pub fn generate_program_module(program: &Program<'_>, module_name: &str) -> Resu
                         if !check(tmo.target, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
                     }
                 }
+                Instr::WaitAnalog { next, timeout, .. } => {
+                    if !check(next, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
+                    if let Some(tmo) = timeout {
+                        if !check(tmo.target, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
+                    }
+                }
                 Instr::Delay { next, .. } => {
                     if !check(next, task.steps.len()) { return Err(CodegenError::StepIdOutOfRange); }
                 }
@@ -59,8 +65,8 @@ pub fn generate_program_module(program: &Program<'_>, module_name: &str) -> Resu
     out.push_str("#[allow(non_snake_case)]\n");
     out.push_str("#[allow(non_camel_case_types)]\n");
     out.push_str(&format!("pub mod {module_name} {{\n"));
-    out.push_str("  use io_traits::{DigitalInputId, DigitalOutputId, AnalogOutputId};\n");
-    out.push_str("  use runtime_core::{Action, Instr, Program, Step, StepId, Task, Timeout};\n\n");
+    out.push_str("  use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, AnalogOutputId};\n");
+    out.push_str("  use runtime_core::{Action, AnalogRange, Instr, Program, Step, StepId, Task, Timeout};\n\n");
 
     // Emit actions arrays, then steps, then tasks, then program.
     for (tidx, task) in program.tasks.iter().enumerate() {
@@ -71,6 +77,20 @@ pub fn generate_program_module(program: &Program<'_>, module_name: &str) -> Resu
                     out.push_str("    ");
                     out.push_str(&format_action(a));
                     out.push_str(",\n");
+                }
+                out.push_str("  ];\n\n");
+            }
+            if let Instr::WaitAnalog { ranges, .. } = step.instr {
+                out.push_str(&format!(
+                    "  static T{tidx}_S{sidx}_RANGES: [AnalogRange; {}] = [\n",
+                    ranges.len()
+                ));
+                for r in ranges {
+                    out.push_str(&format!(
+                        "    AnalogRange {{ min: {}, max: {} }},\n",
+                        format_f32(r.min),
+                        format_f32(r.max)
+                    ));
                 }
                 out.push_str("  ];\n\n");
             }
@@ -157,6 +177,29 @@ fn format_instr(tidx: usize, sidx: usize, instr: &Instr<'_>) -> String {
             format!(
                 "Instr::WaitDigital {{ id: DigitalInputId({}), equals: {}, next: StepId({}), timeout: {} }}",
                 id.0, equals, next.0, tmo
+            )
+        }
+        Instr::WaitAnalog {
+            id,
+            ranges,
+            next,
+            timeout,
+        } => {
+            let tmo = match timeout {
+                None => "None".to_string(),
+                Some(Timeout { after_ticks, target }) => format!(
+                    "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
+                    after_ticks, target.0
+                ),
+            };
+            let ranges_ref = if ranges.is_empty() {
+                "&[]".to_string()
+            } else {
+                format!("&T{}_S{}_RANGES", tidx, sidx)
+            };
+            format!(
+                "Instr::WaitAnalog {{ id: AnalogInputId({}), ranges: {}, next: StepId({}), timeout: {} }}",
+                id.0, ranges_ref, next.0, tmo
             )
         }
         Instr::Delay { ticks, next } => format!(

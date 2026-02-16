@@ -6,6 +6,8 @@ pub struct IoMap {
     pub digital_inputs: BTreeMap<u16, u8>,
     pub digital_outputs: BTreeMap<u16, u8>,
     #[serde(default)]
+    pub analog_inputs: BTreeMap<u16, u8>,
+    #[serde(default)]
     pub analog_outputs: BTreeMap<u16, u8>,
 }
 
@@ -13,6 +15,7 @@ pub struct IoMap {
 pub struct IoUsage {
     pub digital_inputs: &'static [u16],
     pub digital_outputs: &'static [u16],
+    pub analog_inputs: &'static [u16],
     pub analog_outputs: &'static [u16],
 }
 
@@ -58,10 +61,15 @@ impl IoMap {
             .ok_or(IoMapError::MissingSection {
                 section: "digital_outputs",
             })?;
+        let ai_table = v.get("analog_inputs").and_then(|v| v.as_table());
         let ao_table = v.get("analog_outputs").and_then(|v| v.as_table());
 
         let digital_inputs = parse_map_section(di_table, "digital_inputs", "di", "di0")?;
         let digital_outputs = parse_map_section(do_table, "digital_outputs", "do", "do0")?;
+        let analog_inputs = match ai_table {
+            Some(t) => parse_map_section(t, "analog_inputs", "ai", "ai0")?,
+            None => BTreeMap::new(),
+        };
         let analog_outputs = match ao_table {
             Some(t) => parse_map_section(t, "analog_outputs", "ao", "ao0")?,
             None => BTreeMap::new(),
@@ -70,6 +78,7 @@ impl IoMap {
         Ok(Self {
             digital_inputs,
             digital_outputs,
+            analog_inputs,
             analog_outputs,
         })
     }
@@ -89,6 +98,11 @@ impl IoMap {
         for &id in usage.analog_outputs {
             if !self.analog_outputs.contains_key(&id) {
                 return Err(IoMapError::MissingRequired { kind: "ao", id });
+            }
+        }
+        for &id in usage.analog_inputs {
+            if !self.analog_inputs.contains_key(&id) {
+                return Err(IoMapError::MissingRequired { kind: "ai", id });
             }
         }
 
@@ -116,6 +130,16 @@ impl IoMap {
         }
         for (&id, &gpio) in &self.analog_outputs {
             let key = format!("ao{id}");
+            if let Some(prev) = seen.insert(gpio, key.clone()) {
+                return Err(IoMapError::DuplicateGpio {
+                    gpio,
+                    a: prev,
+                    b: key,
+                });
+            }
+        }
+        for (&id, &gpio) in &self.analog_inputs {
+            let key = format!("ai{id}");
             if let Some(prev) = seen.insert(gpio, key.clone()) {
                 return Err(IoMapError::DuplicateGpio {
                     gpio,
@@ -183,21 +207,25 @@ mod tests {
     fn usage_one_di_do() -> IoUsage {
         static DIS: [u16; 1] = [0];
         static DOS: [u16; 1] = [0];
+        static AIS: [u16; 0] = [];
         static AOS: [u16; 0] = [];
         IoUsage {
             digital_inputs: &DIS,
             digital_outputs: &DOS,
+            analog_inputs: &AIS,
             analog_outputs: &AOS,
         }
     }
 
-    fn usage_with_ao0() -> IoUsage {
+    fn usage_with_ai0_ao0() -> IoUsage {
         static DIS: [u16; 1] = [0];
         static DOS: [u16; 1] = [0];
+        static AIS: [u16; 1] = [0];
         static AOS: [u16; 1] = [0];
         IoUsage {
             digital_inputs: &DIS,
             digital_outputs: &DOS,
+            analog_inputs: &AIS,
             analog_outputs: &AOS,
         }
     }
@@ -211,11 +239,14 @@ di0 = 2
 [digital_outputs]
 do0 = 16
 
+[analog_inputs]
+ai0 = 26
+
 [analog_outputs]
 ao0 = 20
 "#;
         let m = IoMap::from_toml_str(input).expect("parse");
-        m.validate_for_usage(usage_with_ao0()).expect("validate");
+        m.validate_for_usage(usage_with_ai0_ao0()).expect("validate");
     }
 
     #[test]
@@ -268,7 +299,24 @@ di0 = 2
 do0 = 16
 "#;
         let m = IoMap::from_toml_str(input).expect("parse");
-        let err = m.validate_for_usage(usage_with_ao0()).unwrap_err();
+        let err = m.validate_for_usage(usage_with_ai0_ao0()).unwrap_err();
         assert!(err.to_string().contains("missing required mapping for ao0"));
+    }
+
+    #[test]
+    fn rejects_missing_required_analog_input() {
+        let input = r#"
+[digital_inputs]
+di0 = 2
+
+[digital_outputs]
+do0 = 16
+
+[analog_outputs]
+ao0 = 20
+"#;
+        let m = IoMap::from_toml_str(input).expect("parse");
+        let err = m.validate_for_usage(usage_with_ai0_ao0()).unwrap_err();
+        assert!(err.to_string().contains("missing required mapping for ai0"));
     }
 }

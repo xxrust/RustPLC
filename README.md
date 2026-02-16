@@ -379,6 +379,17 @@ cargo run --release -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP
 目的：把板子输出日志转换成结构化 JSONL，便于自动对比。  
 前提：你已经通过 RTT/串口工具把日志导出为 `out/board.log`。
 
+推荐使用仓库脚本统一采集（避免每个人命令不一致）：
+
+```bash
+# 串口采集（示例）
+scripts/collect_board_log.sh --mode serial --port /dev/ttyACM0 --baud 115200 --duration 20 --out out/board.log
+
+# 或用任意外部命令采集（RTT/自定义工具）
+scripts/collect_board_log.sh --mode cmd --duration 20 --out out/board.log \
+  --cmd "probe-rs attach --chip RP2040 --elf target/thumbv6m-none-eabi/release/board-rp2040"
+```
+
 ```bash
 cargo run --release -- trace-parse --in out/board.log --out out/board_trace.jsonl
 ```
@@ -398,11 +409,16 @@ cargo run --release -- trace-diff --sil out/trace.jsonl --board out/board_trace.
 cargo run --release -- trace-diff --sil out/trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json --fail-on-mismatch
 ```
 
+仓库也提供了最小 golden 对比样例（可直接用于回归脚本）：
+- `examples/trace_golden/sil_trace.jsonl`
+- `examples/trace_golden/board_trace_match.jsonl`
+- `examples/trace_golden/board_trace_mismatch.jsonl`
+
 #### 当前下沉范围说明（RP2040 v1）
 
 - 已支持：`set` / `extend` / `retract` / `set_analog` / `log` 动作下沉
-- 已支持：数字量 `wait`（含 timeout）下沉
-- 暂未支持：模拟量 `wait` 的 region 谓词在 RP2040 runtime 直接执行（例如 `AI0 in {region_1}`）
+- 已支持：数字量 `wait`（含 timeout）与模拟量 `wait`（region 谓词）下沉
+- 说明：模拟量输入当前仍是最小实现（固件内 `ai` 缓冲）；若需真实 ADC 采样，请在后续版本接入 RP2040 ADC 后端并按 `analog_inputs` 映射取样
 
 相关说明见 [`docs/board_rp2040.md`](docs/board_rp2040.md)。
 

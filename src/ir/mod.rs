@@ -119,6 +119,8 @@ pub struct StateMachine {
     pub states: Vec<State>,
     pub transitions: Vec<Transition>,
     pub initial: State,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub analog_regions: BTreeMap<String, Vec<(String, String)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -310,6 +312,7 @@ mod tests {
                 task_name: "init".to_string(),
                 step_name: "extend_A".to_string(),
             },
+            analog_regions: BTreeMap::new(),
         };
 
         let constraints = ConstraintSet {

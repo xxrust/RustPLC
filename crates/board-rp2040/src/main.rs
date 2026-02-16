@@ -102,7 +102,7 @@ mod firmware {
         t: Tick,
         di: [Option<Pin<DynPinId, FunctionSioInput, PullUp>>; io_map::MAX_DI],
         do_: [Option<Pin<DynPinId, FunctionSioOutput, PullDown>>; io_map::MAX_DO],
-        ai: [f32; 8],
+        ai: [f32; io_map::MAX_AI],
         ao: [f32; io_map::MAX_AO],
     }
 
@@ -150,7 +150,7 @@ mod firmware {
                 t: Tick(0),
                 di,
                 do_,
-                ai: [0.0; 8],
+                ai: [0.0; io_map::MAX_AI],
                 ao: [0.0; io_map::MAX_AO],
             }
         }

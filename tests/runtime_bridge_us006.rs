@@ -178,3 +178,43 @@ fn bridge_supports_set_analog_action_for_ao_channels() {
     assert_eq!(edges[0].id.0, 0);
     assert!((edges[0].value - 4.2).abs() < f32::EPSILON);
 }
+
+const PLC_ANALOG_WAIT_FIXTURE: &str = r#"
+[topology]
+
+device AI0: analog_input { range: 0..100, unit: "bar", external: true }
+device X0: digital_input
+
+device start_button: digital_input {
+    connected_to: X0
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_pressure:
+        wait: AI0 > 80
+        timeout: 5ms -> goto done
+    on_complete: goto done
+
+task done:
+    step halt:
+"#;
+
+#[test]
+fn bridge_supports_analog_wait_guard_mapped_to_regions() {
+    let program = compile_to_runtime(PLC_ANALOG_WAIT_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 1, 0);
+    io.schedule_analog_input(Tick(0), io_traits::AnalogInputId(0), 90.0);
+
+    let mut trace = sim::JsonlTraceRecorder::new();
+    rt.tick_with_trace(&mut io, |e| trace.record(e)).expect("tick");
+    let out = trace.into_string();
+    assert!(
+        out.contains("\"reason\":\"wait_satisfied\""),
+        "expected analog wait to satisfy immediately, got: {out}"
+    );
+}

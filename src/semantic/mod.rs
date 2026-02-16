@@ -833,13 +833,40 @@ fn build_state_machine_from_ast_with_context(
     }
 
     if errors.is_empty() {
+        let analog_regions = wait_ctx
+            .analog_input_regions
+            .iter()
+            .map(|(device, regions)| {
+                (
+                    device.clone(),
+                    regions
+                        .iter()
+                        .map(|(min, max)| {
+                            (
+                                format_numeric_literal(*min),
+                                format_numeric_literal(*max),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
         Ok(StateMachine {
             states: builder.states,
             transitions: builder.transitions,
             initial,
+            analog_regions,
         })
     } else {
         Err(errors)
+    }
+}
+
+fn format_numeric_literal(v: f64) -> String {
+    if v.fract() == 0.0 {
+        format!("{v:.1}")
+    } else {
+        v.to_string()
     }
 }
 

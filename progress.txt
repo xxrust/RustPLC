@@ -330,3 +330,15 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - Files changed
   - `src/main.rs`, `tests/build_rp2040.rs`, `tests/trace_diff.rs`, `src/runtime_bridge.rs`, `tests/runtime_bridge_us006.rs`, `src/io_map.rs`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/src/main.rs`, `README.md`, `progress.txt`
 ---
+
+## [2026-02-16 16:41:19 CST] - Roadmap Follow-up (Analog Wait + Tooling)
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended `runtime-core` with `Instr::WaitAnalog` to support analog-input waits using the same region abstraction as the verifier (range list).
+  - Extended semantic IR `StateMachine` with a compact `analog_regions` table so the RP2040 downlink can map `AI0 in {region_k}` guards into concrete ranges at build time.
+  - Updated `runtime_bridge` to support analog wait guards and `AI<n>` resolution, and expanded the I/O map contract/templates to include `[analog_inputs]` and `[analog_outputs]`.
+  - Added regression-gate features and fixtures: `trace-diff --fail-on-mismatch`, golden trace pairs under `examples/trace_golden/`, and more robust `--emit-uf2` tests via mocked toolchain binaries.
+  - Added a small log-capture helper script (`scripts/collect_board_log.sh`) and documented it.
+- Files changed
+  - `crates/runtime-core/src/lib.rs`, `src/ir/mod.rs`, `src/semantic/mod.rs`, `src/runtime_bridge.rs`, `src/io_map.rs`, `src/main.rs`, `src/sim_regress.rs`, `crates/codegen/src/lib.rs`, `crates/board-rp2040/build.rs`, `crates/board-rp2040/src/main.rs`, `tests/build_rp2040.rs`, `tests/runtime_bridge_us006.rs`, `tests/trace_diff.rs`, `tests/trace_golden.rs`, `examples/trace_golden/*`, `scripts/collect_board_log.sh`, `README.md`, `docs/board_rp2040.md`, `progress.txt`
+---

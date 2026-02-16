@@ -44,6 +44,7 @@ fn main() {
 struct IoMap {
     digital_inputs: BTreeMap<u16, u8>,
     digital_outputs: BTreeMap<u16, u8>,
+    analog_inputs: BTreeMap<u16, u8>,
     analog_outputs: BTreeMap<u16, u8>,
 }
 
@@ -57,11 +58,16 @@ fn parse_io_map(input: &str) -> Result<IoMap, String> {
         .get("digital_outputs")
         .and_then(|v| v.as_table())
         .ok_or_else(|| "missing [digital_outputs]".to_string())?;
+    let ai = v.get("analog_inputs").and_then(|v| v.as_table());
     let ao = v.get("analog_outputs").and_then(|v| v.as_table());
 
     Ok(IoMap {
         digital_inputs: parse_section(di, "di")?,
         digital_outputs: parse_section(do_, "do")?,
+        analog_inputs: match ai {
+            Some(t) => parse_section(t, "ai")?,
+            None => BTreeMap::new(),
+        },
         analog_outputs: match ao {
             Some(t) => parse_section(t, "ao")?,
             None => BTreeMap::new(),
@@ -94,11 +100,13 @@ fn parse_section(t: &toml::value::Table, prefix: &str) -> Result<BTreeMap<u16, u
 fn render_io_map_rs(map: &IoMap) -> String {
     const MAX_DI: usize = 32;
     const MAX_DO: usize = 32;
+    const MAX_AI: usize = 32;
     const MAX_AO: usize = 32;
     const UNUSED: u8 = 255;
 
     let mut di = [UNUSED; MAX_DI];
     let mut do_ = [UNUSED; MAX_DO];
+    let mut ai = [UNUSED; MAX_AI];
     let mut ao = [UNUSED; MAX_AO];
 
     for (&id, &gpio) in &map.digital_inputs {
@@ -115,6 +123,13 @@ fn render_io_map_rs(map: &IoMap) -> String {
         }
         do_[idx] = gpio;
     }
+    for (&id, &gpio) in &map.analog_inputs {
+        let idx = id as usize;
+        if idx >= MAX_AI {
+            panic!("ai{id} exceeds MAX_AI={MAX_AI}");
+        }
+        ai[idx] = gpio;
+    }
     for (&id, &gpio) in &map.analog_outputs {
         let idx = id as usize;
         if idx >= MAX_AO {
@@ -128,6 +143,7 @@ fn render_io_map_rs(map: &IoMap) -> String {
     out.push_str("pub const UNUSED_GPIO: u8 = 255;\n");
     out.push_str(&format!("pub const MAX_DI: usize = {MAX_DI};\n"));
     out.push_str(&format!("pub const MAX_DO: usize = {MAX_DO};\n"));
+    out.push_str(&format!("pub const MAX_AI: usize = {MAX_AI};\n"));
     out.push_str(&format!("pub const MAX_AO: usize = {MAX_AO};\n"));
     out.push_str("pub const DI_GPIO: [u8; MAX_DI] = [\n");
     for v in di {
@@ -136,6 +152,11 @@ fn render_io_map_rs(map: &IoMap) -> String {
     out.push_str("];\n");
     out.push_str("pub const DO_GPIO: [u8; MAX_DO] = [\n");
     for v in do_ {
+        out.push_str(&format!("  {v},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const AI_GPIO: [u8; MAX_AI] = [\n");
+    for v in ai {
         out.push_str(&format!("  {v},\n"));
     }
     out.push_str("];\n");

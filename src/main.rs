@@ -516,7 +516,11 @@ fn emit_rp2040_uf2(
         }
     }
 
-    let cargo = std::process::Command::new("cargo")
+    let cargo_bin = env::var("RUST_PLC_CARGO_BIN").unwrap_or_else(|_| "cargo".to_string());
+    let elf2uf2_bin =
+        env::var("RUST_PLC_ELF2UF2_BIN").unwrap_or_else(|_| "elf2uf2-rs".to_string());
+
+    let cargo = std::process::Command::new(&cargo_bin)
         .current_dir(&repo_root)
         .env("RUST_PLC_GENERATED_PROGRAM_RS", &generated_program_rs)
         .env("RUST_PLC_IO_MAP_TOML", &io_map_toml)
@@ -527,7 +531,11 @@ fn emit_rp2040_uf2(
         .arg("thumbv6m-none-eabi")
         .arg("--release")
         .output()
-        .map_err(|err| format!("Failed to run cargo for RP2040 firmware build: {err}"))?;
+        .map_err(|err| {
+            format!(
+                "Failed to run cargo for RP2040 firmware build (bin={cargo_bin}): {err}"
+            )
+        })?;
     if !cargo.status.success() {
         return Err(format!(
             "RP2040 firmware build failed.\nstdout:\n{}\nstderr:\n{}",
@@ -536,20 +544,24 @@ fn emit_rp2040_uf2(
         ));
     }
 
-    let elf = repo_root.join("target/thumbv6m-none-eabi/release/board-rp2040");
+    let target_dir = env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .map(|path| if path.is_absolute() { path } else { repo_root.join(path) })
+        .unwrap_or_else(|| repo_root.join("target"));
+    let elf = target_dir.join("thumbv6m-none-eabi/release/board-rp2040");
     if !elf.exists() {
         return Err(format!(
             "Expected firmware ELF does not exist after build: {elf:?}"
         ));
     }
 
-    let uf2 = std::process::Command::new("elf2uf2-rs")
+    let uf2 = std::process::Command::new(&elf2uf2_bin)
         .arg(&elf)
         .arg(&uf2_out)
         .output()
         .map_err(|err| {
             format!(
-                "Failed to run elf2uf2-rs (install with `cargo install elf2uf2-rs`): {err}"
+                "Failed to run {elf2uf2_bin} (install with `cargo install elf2uf2-rs`): {err}"
             )
         })?;
     if !uf2.status.success() {
@@ -576,12 +588,16 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
 
     let mut dis = BTreeSet::<u16>::new();
     let mut dos = BTreeSet::<u16>::new();
+    let mut ais = BTreeSet::<u16>::new();
     let mut aos = BTreeSet::<u16>::new();
     for task in program.tasks {
         for step in task.steps {
             match step.instr {
                 Instr::WaitDigital { id, .. } => {
                     dis.insert(id.0);
+                }
+                Instr::WaitAnalog { id, .. } => {
+                    ais.insert(id.0);
                 }
                 Instr::Action { actions, .. } => {
                     for a in actions {
@@ -628,6 +644,16 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
     }
     out.push('\n');
 
+    out.push_str("[analog_inputs]\n");
+    if ais.is_empty() {
+        out.push_str("# ai0 = 26\n");
+    } else {
+        for id in ais {
+            out.push_str(&format!("# ai{id} = 26\n"));
+        }
+    }
+    out.push('\n');
+
     out.push_str("[analog_outputs]\n");
     if aos.is_empty() {
         out.push_str("# ao0 = 26\n");
@@ -644,12 +670,16 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
 
     let mut dis = BTreeSet::<u16>::new();
     let mut dos = BTreeSet::<u16>::new();
+    let mut ais = BTreeSet::<u16>::new();
     let mut aos = BTreeSet::<u16>::new();
     for task in program.tasks {
         for step in task.steps {
             match step.instr {
                 Instr::WaitDigital { id, .. } => {
                     dis.insert(id.0);
+                }
+                Instr::WaitAnalog { id, .. } => {
+                    ais.insert(id.0);
                 }
                 Instr::Action { actions, .. } => {
                     for a in actions {
@@ -675,10 +705,12 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
     // `IoUsage` is a tiny borrowed wrapper; we leak the sets to keep build-rp2040 code simple.
     let dis: &'static [u16] = Box::leak(dis.into_iter().collect::<Vec<_>>().into_boxed_slice());
     let dos: &'static [u16] = Box::leak(dos.into_iter().collect::<Vec<_>>().into_boxed_slice());
+    let ais: &'static [u16] = Box::leak(ais.into_iter().collect::<Vec<_>>().into_boxed_slice());
     let aos: &'static [u16] = Box::leak(aos.into_iter().collect::<Vec<_>>().into_boxed_slice());
     IoUsage {
         digital_inputs: dis,
         digital_outputs: dos,
+        analog_inputs: ais,
         analog_outputs: aos,
     }
 }

@@ -1,0 +1,2 @@
+{"tick":0,"task":0,"from_step":0,"to_step":1,"reason":"action","timestamp_ms":0}
+{"tick":1,"task":0,"from_step":1,"to_step":3,"reason":"goto","timestamp_ms":1}
