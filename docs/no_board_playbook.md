@@ -1,129 +1,121 @@
-# No-Board Playbook（无开发板交付流程）
+# No-RTOS Real-Time Playbook（无开发板）
 
-本 Playbook 目标：在没有 RP2040 实体板的情况下，仍可从 `.plc` 产出可交付工件，并通过虚拟板级门禁把回归风险显式化。
+目标：在**不引入 RTOS**、且没有实体开发板的情况下，依然完成实时性证据链与发布门禁。
 
-最小流程：
+最小命令链（必须按序执行）：
 
-1. compile/verify（生成结构化验证报告）
-2. sim（SIL 生成 trace）
-3. virtual-board（host 方式生成 board.log + board_trace.jsonl）
-4. trace-diff（SIL vs virtual-board 对比门禁）
-5. release-bundle（打包可追溯交付物）
+1. `compile/verify`（结构与静态预算）
+2. `virtual-board`（生成板侧等价日志与 tick 时序）
+3. `timing-report`（统计 p50/p95/p99/max/mean）
+4. `no-board-gate`（轨迹一致性 + 实时阈值）
+5. `release-bundle`（打包可审计工件）
 
-## 0. 前置
+## 0) 前置
 
-- 假设当前工作目录为仓库根目录
-- 示例使用 `examples/two_cylinder.plc`
-- 示例场景文件使用你自己的 `scenario.yaml`（或参考 `examples/rp2040_end_to_end/scenarios/normal.yaml`）
+- 假设当前目录为仓库根目录。
+- 示例 PLC：`examples/realtime_stress/stress_case.plc`
+- 示例场景：
+  - 安全：`examples/realtime_stress/scenarios/safe.yaml`
+  - 高负载：`examples/realtime_stress/scenarios/overload.yaml`
 
-以下命令均可用 `cargo run --release -- ...` 或直接运行已构建的二进制 `target/release/rust_plc`。
-
-## 1. compile/verify
+## 1) compile/verify
 
 ```bash
-cargo run --release -- examples/two_cylinder.plc \
-  --report out/two_cylinder.verification_report.json \
+cargo run --release -- examples/realtime_stress/stress_case.plc \
+  --report out/realtime/verification_report.json \
+  --budget-max-time-estimate-us 2000 \
   --deny-warnings
 ```
 
-输入：
-- `.plc` 源文件
+输入：`.plc`
 
 输出：
-- `out/two_cylinder.verification_report.json`
-  - 结构化验证报告（safety/liveness/timing/causality 的 level/warnings/checked_rules 等）
-- stdout：编译后的 IR JSON（用于调试/工具链对接）
+- `out/realtime/verification_report.json`
+  - 包含 `runtime_budget.budget_time_estimate`
+  - 若超过预算阈值会产生 `timing.warn`
 
-## 2. sim（SIL）
+建议阈值：
+- 初始可用 `--budget-max-time-estimate-us 2000`（1ms tick 系统建议逐步收紧到 1000~1500）。
 
-```bash
-cargo run --release -- sim-plc examples/two_cylinder.plc \
-  --scenario examples/rp2040_end_to_end/scenarios/normal.yaml \
-  --out out/no_board/sil_trace.jsonl
-```
-
-输入：
-- `.plc` 源文件
-- `scenario.yaml`（tick_ms/duration_ms/inputs/faults）
-
-输出：
-- `out/no_board/sil_trace.jsonl`
-  - SIL JSONL 轨迹（每行一个 transition 事件）
-
-## 3. virtual-board（host 虚拟板）
+## 2) virtual-board
 
 ```bash
-cargo run --release -- virtual-board examples/two_cylinder.plc \
-  --scenario examples/rp2040_end_to_end/scenarios/normal.yaml \
-  --out-dir out/no_board/virtual_board
+cargo run --release -- virtual-board examples/realtime_stress/stress_case.plc \
+  --scenario examples/realtime_stress/scenarios/safe.yaml \
+  --out-dir out/realtime/virtual_board
 ```
 
-输入：
-- `.plc` 源文件
-- `scenario.yaml`
+输入：`.plc` + `scenario.yaml`
 
-输出目录（`--out-dir`）：
+输出目录：
 - `board.log`
-  - 虚拟板日志（含 TRACE 行，格式与板端一致）
 - `board_trace.jsonl`
-  - 结构化板级轨迹（JSONL）
+- `tick_timing.jsonl`
 - `virtual_board_meta.json`
-  - 运行元信息（tick_ms/duration 等）
 
-可选：若你有真实板日志，可用 `trace-parse` 把 `board.log` 转成 JSONL。
-
-## 4. trace-diff（门禁）
+## 3) timing-report
 
 ```bash
-cargo run --release -- trace-diff \
-  --sil out/no_board/sil_trace.jsonl \
-  --board out/no_board/virtual_board/board_trace.jsonl \
-  --out out/no_board/diff_report.json \
-  --context 2 \
-  --fail-on-mismatch
+cargo run --release -- timing-report \
+  --in out/realtime/virtual_board/tick_timing.jsonl \
+  --out out/realtime/virtual_board/timing_report.json
 ```
 
-输入：
-- `--sil`：SIL 轨迹 JSONL
-- `--board`：板级/虚拟板轨迹 JSONL
+输入：`tick_timing.jsonl`
 
 输出：
+- `timing_report.json`
+  - 至少包含：`count/overrun_count/exec_us_min/exec_us_p50/exec_us_p95/exec_us_p99/exec_us_max/exec_us_mean`
+
+建议阈值评审：
+- 首轮先记录基线，再在 `no-board-gate` 使用 `p99` 和 `overrun_count` 门禁。
+
+## 4) no-board-gate
+
+```bash
+cargo run --release -- no-board-gate examples/realtime_stress/stress_case.plc \
+  --scenario examples/realtime_stress/scenarios/safe.yaml \
+  --out-dir out/realtime/gate \
+  --max-p99-exec-us 120 \
+  --max-overrun-count 0
+```
+
+输入：`.plc` + `scenario.yaml` + 阈值
+
+输出目录：
+- `sil_trace.jsonl`
+- `board.log`
+- `board_trace.jsonl`
+- `tick_timing.jsonl`
+- `timing_report.json`
 - `diff_report.json`
-  - `is_match` 是否一致
-  - 首个 mismatch 的位置（tick/index/reason）
-  - 上下文事件窗口（context）
 
-提示：若你希望一条命令跑完整个门禁链路，可直接用：
+失败条件：
+- 轨迹不一致（trace mismatch）
+- `p99_exec_us` 超过 `--max-p99-exec-us`
+- `overrun_count` 超过 `--max-overrun-count`
 
-```bash
-cargo run --release -- no-board-gate examples/two_cylinder.plc \
-  --scenario examples/rp2040_end_to_end/scenarios/normal.yaml \
-  --out-dir out/no_board/gate
-```
+建议阈值：
+- 先在 safe 场景测基线，再以“基线 + 10%~20%”设定 `--max-p99-exec-us`。
+- `--max-overrun-count` 推荐从 `0` 开始。
 
-## 5. release-bundle（交付包）
+## 5) release-bundle
 
 ```bash
-cargo run --release -- release-bundle examples/two_cylinder.plc \
-  --scenario examples/rp2040_end_to_end/scenarios/normal.yaml \
-  --out-dir out/no_board/release
+cargo run --release -- release-bundle examples/realtime_stress/stress_case.plc \
+  --scenario examples/realtime_stress/scenarios/safe.yaml \
+  --out-dir out/realtime/release \
+  --max-p99-exec-us 120 \
+  --max-overrun-count 0
 ```
 
-输入：
-- `.plc` 源文件
-- `scenario.yaml`
+输入：`.plc` + `scenario.yaml` +（可选）实时阈值
 
-输出目录（`--out-dir`）：
-- `manifest.json`
-  - 每个工件的 `sha256` 与 `size_bytes`（可审计/可复现）
+输出目录：
+- `manifest.json`（所有工件哈希 + 大小）
 - `verification_report.json`
-  - 结构化验证报告
 - `sim_report.json` / `sil_trace.jsonl`
-  - 仿真报告与轨迹
-- `board.log` / `board_trace.jsonl`
-  - 虚拟板日志与轨迹
-- `diff_report.json`
-  - 对比差异报告
-- `build_meta.json`
-  - build 元信息（git commit/dirty/generated_at/tool_version 等）
+- `tick_timing.jsonl` / `timing_report.json`
+- `gate_summary.json` / `diff_report.json`
+- `build_meta.json`（含 `realtime_profile.tick_ms/thresholds/overrun_count/p99_exec_us`）
 

@@ -752,3 +752,16 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Gotchas encountered (e.g., don't forget to update Z when changing W)
     - Timeout `goto` targets are task-scoped in this DSL flow; stress fixtures should avoid step-only timeout targets.
 ---
+## [2026-02-17 14:43:31 CST] - US-RT-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Replaced the no-board playbook with a No-RTOS real-time playbook that documents the full evidence chain: compile/verify -> virtual-board -> timing-report -> no-board-gate -> release-bundle.
+  - Updated the doc-consistency test to assert the new required commands exist in CLI usage and are mentioned in docs.
+- Files changed
+  - `docs/no_board_playbook.md`, `tests/no_board_playbook_doc.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., this codebase uses X for Y)
+    - Keep docs gated by a “mentions commands + commands exist” test so playbooks never drift behind the CLI surface.
+  - Gotchas encountered (e.g., don't forget to update Z when changing W)
+    - When command chains evolve, update both doc examples and the doc consistency needles together to avoid silent documentation decay.
+---
