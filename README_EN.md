@@ -150,6 +150,11 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
 
 > Tip: the first `build-rp2040` run writes `out/rp2040/io_map.template.toml`. Copy/edit it for your board pins before running `--emit-uf2`.
 
+Local playbooks:
+- Scenario authoring + regression: `docs/scenario_playbook.md`
+- Failure minimization + feedback loop: `docs/scenario_minimization.md`
+- No-board delivery/gate: `docs/no_board_playbook.md`
+
 ## 📚 Documentation
 
 For in-depth content, see the **[Wiki](https://github.com/xxrust/RustPLC/wiki)**:

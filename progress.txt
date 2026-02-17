@@ -90,6 +90,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - Even when a scenario is authored with `pulse/hold`, the canonical backend format is expanded numeric-ID `inputs`; minimized scenarios are emitted in that canonical form for maximum compatibility.
 ---
+## [2026-02-18 00:43:06 CST] - US-SCENE-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a standard end-to-end scenario workflow playbook at `docs/scenario_playbook.md` (init/validate/expand/run/gen/regress/minimize/no-board).
+  - Linked local playbooks from README/README_EN so users can find the “what next” path without hunting Wiki pages.
+  - Added doc consistency test `tests/scenario_playbook_doc.rs` to ensure the playbook mentions core commands and that they exist in CLI usage output.
+  - Updated the playbook with common error scenarios (missing scenario file / PLC-scenario mismatch) and pointed to the current friendly diagnostics and fixes.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `docs/scenario_playbook.md`, `tests/scenario_playbook_doc.rs`, `README.md`, `README_EN.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Doc/tests that assert “commands are mentioned + commands exist” are a cheap way to prevent playbooks from silently drifting behind the CLI surface.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Always state the expected working directory in copy/paste docs; relative paths are otherwise the #1 source of “No such file or directory” reports.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - The current recommended loop is: `scenario-init` -> `scenario-validate` -> (`scenario-expand` when needed) -> `sim-plc` -> `scenario-gen` -> `sim-regress --minimize-failure` -> `no-board-gate`.
+---
 ## [2026-02-17 22:31:10 CST] - US-SCENE-003
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
