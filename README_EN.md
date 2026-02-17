@@ -134,10 +134,13 @@ For in-depth content, see the **[Wiki](https://github.com/xxrust/RustPLC/wiki)**
 | Page | Content |
 |------|---------|
 | [Quick Start](https://github.com/xxrust/RustPLC/wiki/Quick-Start) | 5-minute setup: install, build, run |
-| [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) | Full syntax reference: topology, constraints, control logic |
+| [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) | Full syntax reference: topology, constraints, control logic, PID |
 | [Architecture](https://github.com/xxrust/RustPLC/wiki/Architecture) | Compilation pipeline, module structure, IR design |
 | [Verification Engines](https://github.com/xxrust/RustPLC/wiki/Verification-Engines) | Engine internals and mathematical foundations |
 | [SIL Simulation](https://github.com/xxrust/RustPLC/wiki/SIL-Simulation) | Simulation loop: scenarios, fault injection, batch regression |
+| [PID Control](https://github.com/xxrust/RustPLC/wiki/PID-Control) | PID loop declaration, runtime semantics, KPI regression |
+| [No-Board Gate](https://github.com/xxrust/RustPLC/wiki/No-Board-Gate) | No-board delivery gate: virtual board + trace diff + release-bundle |
+| [Recovery Templates](https://github.com/xxrust/RustPLC/wiki/Recovery-Templates) | Fault recovery templates and sequence lint |
 | [RP2040 Deployment](https://github.com/xxrust/RustPLC/wiki/RP2040-Deployment) | Cross-compilation, I/O mapping, flashing, trace comparison |
 | [Examples Gallery](https://github.com/xxrust/RustPLC/wiki/Examples-Gallery) | Example files with industrial scenario walkthroughs |
 | [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) | Full AI dialogue workflow for generating `.plc` files |
@@ -154,8 +157,17 @@ For in-depth content, see the **[Wiki](https://github.com/xxrust/RustPLC/wiki)**
 - [x] SIL simulation loop (SimIO / Plant / fault injection / waveform export / batch regression)
 - [x] Code generation + RP2040 build/flash (build-rp2040 / flash-rp2040)
 - [x] Board-level observability & SIL comparison (trace-parse / trace-diff)
+- [x] Unified verification report contract (verification_report.json + warning levels)
+- [x] CLI gate (--deny-warnings)
+- [x] Runtime upper-bound analysis (tick transfer / action / parallel expansion budgets)
+- [x] Virtual board runner + no-board comparison gate (no-board-gate)
+- [x] Release bundle & traceability (release-bundle + sha manifest + git metadata)
+- [x] Analog safety coverage transparency (rule binding rate & abstraction granularity report)
+- [x] Threshold semantic hardening (type / range / unit consistency checks)
+- [x] PID minimal subset (DSL / IR / runtime integration + KPI regression)
+- [x] Simulation object model & KPI regression (overshoot / settling time / steady-state error)
+- [x] Recovery templates & sequence lint (critical waits must be recoverable)
 - [ ] Hardware abstraction layer (EtherCAT / Modbus / more GPIO boards)
-- [ ] PID control
 - [ ] Multi-controller coordination
 - [ ] Graphical DSL editor
 

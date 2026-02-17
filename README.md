@@ -137,10 +137,13 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
 | 页面 | 内容 |
 |------|------|
 | [Quick Start](https://github.com/xxrust/RustPLC/wiki/Quick-Start) | 5 分钟上手：安装、编译、运行 |
-| [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) | 完整语法参考：拓扑、约束、控制逻辑 |
+| [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) | 完整语法参考：拓扑、约束、控制逻辑、PID |
 | [Architecture](https://github.com/xxrust/RustPLC/wiki/Architecture) | 编译流水线、模块结构、IR 设计 |
 | [Verification Engines](https://github.com/xxrust/RustPLC/wiki/Verification-Engines) | 四大引擎原理与数学基础 |
 | [SIL Simulation](https://github.com/xxrust/RustPLC/wiki/SIL-Simulation) | 仿真闭环：场景定义、故障注入、批量回归 |
+| [PID Control](https://github.com/xxrust/RustPLC/wiki/PID-Control) | PID 回路声明、运行时语义、KPI 回归 |
+| [No-Board Gate](https://github.com/xxrust/RustPLC/wiki/No-Board-Gate) | 无板交付门禁：虚拟板级 + trace 对比 + release-bundle |
+| [Recovery Templates](https://github.com/xxrust/RustPLC/wiki/Recovery-Templates) | 异常恢复模板与顺控 lint |
 | [RP2040 Deployment](https://github.com/xxrust/RustPLC/wiki/RP2040-Deployment) | 交叉编译、I/O 映射、烧录、trace 对比 |
 | [Examples Gallery](https://github.com/xxrust/RustPLC/wiki/Examples-Gallery) | 示例文件详解与工业场景对照 |
 | [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) | AI 对话生成 `.plc` 的完整流程 |
@@ -157,8 +160,17 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
 - [x] SIL 仿真闭环（SimIO / Plant / 故障注入 / 波形导出 / 批量回归）
 - [x] 代码生成 + RP2040 构建/烧录（build-rp2040 / flash-rp2040）
 - [x] 板级可观测与 SIL 对比（trace-parse / trace-diff）
+- [x] 统一验证报告契约（verification_report.json + warnings 分级）
+- [x] CLI 门禁（--deny-warnings）
+- [x] Runtime 上界分析（tick 转移/动作/并行展开预算）
+- [x] 虚拟板级 Runner + 无板对比门禁（no-board-gate）
+- [x] 发布包与追溯（release-bundle + sha 清单 + git 元数据）
+- [x] 模拟量安全覆盖透明化（规则绑定率与抽象粒度报告）
+- [x] 阈值语义强化（类型/range/unit 一致性校验）
+- [x] PID 最小可用子集（DSL/IR/runtime 打通 + KPI 回归）
+- [x] 仿真对象模型与 KPI 回归（超调/稳定时间/稳态误差）
+- [x] 异常恢复模板与顺控 lint（关键 wait 必须可恢复）
 - [ ] 硬件抽象层扩展（EtherCAT / Modbus / 更多 GPIO 板卡）
-- [ ] PID 控制
 - [ ] 多控制器协同
 - [ ] 图形化 DSL 编辑器
 
