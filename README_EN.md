@@ -167,6 +167,13 @@ For in-depth content, see the **[Wiki](https://github.com/xxrust/RustPLC/wiki)**
 - [x] PID minimal subset (DSL / IR / runtime integration + KPI regression)
 - [x] Simulation object model & KPI regression (overshoot / settling time / steady-state error)
 - [x] Recovery templates & sequence lint (critical waits must be recoverable)
+- [x] Tick timing observability contract (tick_timing.jsonl + per-tick exec/slack/overrun)
+- [x] Timing statistics report (timing-report: p50/p95/p99/max + overrun count)
+- [x] No-board gate real-time thresholds (--max-p99-exec-us / --max-overrun-count)
+- [x] Structural upper-bound to time budget mapping (budget_time_estimate)
+- [x] Release bundle includes real-time evidence artifacts (tick_timing.jsonl / timing_report.json)
+- [x] Worst-case load scenario injection & reproducible replay
+- [x] No-RTOS Real-Time Playbook documentation
 - [ ] Hardware abstraction layer (EtherCAT / Modbus / more GPIO boards)
 - [ ] Multi-controller coordination
 - [ ] Graphical DSL editor

@@ -170,6 +170,13 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
 - [x] PID 最小可用子集（DSL/IR/runtime 打通 + KPI 回归）
 - [x] 仿真对象模型与 KPI 回归（超调/稳定时间/稳态误差）
 - [x] 异常恢复模板与顺控 lint（关键 wait 必须可恢复）
+- [x] Tick 时序观测契约（tick_timing.jsonl + 每 tick 执行时长/slack/overrun）
+- [x] 时序统计报告（timing-report：p50/p95/p99/max + overrun 计数）
+- [x] 无板门禁实时阈值（--max-p99-exec-us / --max-overrun-count）
+- [x] 结构上界到时间预算映射（budget_time_estimate）
+- [x] release-bundle 纳入实时证据工件（tick_timing.jsonl / timing_report.json）
+- [x] 最坏负载场景注入与可复现回放
+- [x] No-RTOS Real-Time Playbook 文档
 - [ ] 硬件抽象层扩展（EtherCAT / Modbus / 更多 GPIO 板卡）
 - [ ] 多控制器协同
 - [ ] 图形化 DSL 编辑器
