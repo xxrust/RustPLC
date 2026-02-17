@@ -135,6 +135,10 @@ cargo run --release -- sim-plc examples/assembly_station.plc \
 #   cargo run --release -- scenario-expand examples/assembly_station.plc \
 #     --scenario examples/scenarios/pulse_hold.yaml --out out/pulse_hold.expanded.yaml
 
+# Batch-generate scenarios (parametric config -> multiple YAMLs for regressions/gates)
+cargo run --release -- scenario-gen --plc examples/assembly_station.plc \
+  --config examples/scenario_gen/basic.yaml --out-dir out/scenario_gen
+
 # No-board comparison gate (SIL vs virtual-board; runs sim + virtual-board + trace-diff)
 cargo run --release -- no-board-gate examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out-dir out/no_board_gate

@@ -53,6 +53,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - `scenarios/normal.yaml` is intentionally tuned for `examples/assembly_station.plc`; `examples/two_cylinder.plc` should use `scenarios/two_cylinder.yaml`.
 ---
+## [2026-02-18 00:20:09 CST] - US-SCENE-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>` to generate a capped Cartesian product of scenario variants (stable order), writing `scenario_XXXX.yaml` files plus a `summary.json` index.
+  - Supported core knobs for regression coverage: `seed_base`, `duration_ms`, `start_pulse_ms`, `sensor_window_ms`, and `inject_sensor_stuck`.
+  - Added a ready-to-run generator config example at `examples/scenario_gen/basic.yaml`, and documented the command in README/README_EN quickstart blocks.
+  - Added integration test `tests/scenario_gen.rs` to assert stable case count and deterministic outputs across repeated runs (same config), and that at least one generated case is consumable by `sim-plc`.
+  - Re-exported scenario schema helper structs from `crates/sim` so CLI tools can construct fault templates programmatically without duplicating the YAML schema.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `src/main.rs`, `crates/sim/src/lib.rs`, `examples/scenario_gen/basic.yaml`, `tests/scenario_gen.rs`, `README.md`, `README_EN.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For regressions, emitting a `summary.json` index (case params + file names) makes it easy to feed generated scenarios into `sim-regress` and to bisect failures deterministically.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Keep generation order stable and cap the Cartesian product (`max_cases`) so CI time stays predictable as configs grow.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Generated scenarios are serialized into the canonical numeric-ID format, so downstream commands (`sim-plc`, `no-board-gate`, `release-bundle`, `sim-regress`) can consume them without extra resolution steps.
+---
 ## [2026-02-17 22:31:10 CST] - US-SCENE-003
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented

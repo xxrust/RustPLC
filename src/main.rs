@@ -1205,6 +1205,13 @@ fn main() {
         }
         return;
     }
+    if first == "scenario-gen" {
+        if let Err(msg) = run_scenario_gen_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let path = first;
     let mut report_path: Option<PathBuf> = None;
@@ -1485,6 +1492,9 @@ fn print_usage(program: &str) {
     );
     eprintln!(
         "  {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>"
+    );
+    eprintln!(
+        "  {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>"
     );
     eprintln!();
     eprintln!("Budget options (also configurable via env vars):");
@@ -1850,6 +1860,393 @@ fn run_scenario_expand_subcommand(
     fs::write(&out_path, out)
         .map_err(|err| format!("Failed to write expanded scenario {}: {err}", out_path.display()))?;
     eprintln!("scenario-expand: wrote {}", out_path.display());
+    Ok(())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ScenarioGenConfig {
+    #[serde(default)]
+    seed_base: Option<u64>,
+    #[serde(default = "scenario_gen_default_tick_ms")]
+    tick_ms: u64,
+    #[serde(default)]
+    duration_ms: Vec<u64>,
+    #[serde(default)]
+    start_pulse_ms: Vec<u64>,
+    #[serde(default)]
+    sensor_window_ms: Vec<u64>,
+    #[serde(default)]
+    inject_sensor_stuck: Vec<bool>,
+    #[serde(default = "scenario_gen_default_max_cases")]
+    max_cases: usize,
+}
+
+fn scenario_gen_default_tick_ms() -> u64 {
+    10
+}
+
+fn scenario_gen_default_max_cases() -> usize {
+    16
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScenarioGenCase {
+    name: String,
+    path: String,
+    seed: Option<u64>,
+    duration_ms: u64,
+    start_pulse_ms: u64,
+    sensor_window_ms: u64,
+    inject_sensor_stuck: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ScenarioGenSummary {
+    schema_version: u32,
+    plc: String,
+    config: String,
+    count: usize,
+    cases: Vec<ScenarioGenCase>,
+}
+
+impl ScenarioGenConfig {
+    fn validate(&self) -> Result<(), String> {
+        if self.tick_ms == 0 {
+            return Err("tick_ms must be > 0".to_string());
+        }
+        if self.max_cases == 0 {
+            return Err("max_cases must be > 0".to_string());
+        }
+
+        for (i, duration) in self.duration_ms.iter().enumerate() {
+            if *duration == 0 {
+                return Err(format!("duration_ms[{i}] must be > 0"));
+            }
+            if *duration < self.tick_ms {
+                return Err(format!(
+                    "duration_ms[{i}] ({duration}) must be >= tick_ms ({})",
+                    self.tick_ms
+                ));
+            }
+        }
+        for (i, pulse) in self.start_pulse_ms.iter().enumerate() {
+            if *pulse == 0 {
+                return Err(format!("start_pulse_ms[{i}] must be > 0"));
+            }
+        }
+        for (i, window) in self.sensor_window_ms.iter().enumerate() {
+            if *window == 0 {
+                return Err(format!("sensor_window_ms[{i}] must be > 0"));
+            }
+        }
+        Ok(())
+    }
+
+    fn seed_base_value(&self) -> u64 {
+        self.seed_base.unwrap_or(42)
+    }
+
+    fn duration_values(&self) -> Vec<u64> {
+        dedup_u64_preserve_order_with_default(&self.duration_ms, &[1000, 2000, 3000])
+    }
+
+    fn start_pulse_values(&self) -> Vec<u64> {
+        dedup_u64_preserve_order_with_default(&self.start_pulse_ms, &[30, 50])
+    }
+
+    fn sensor_window_values(&self) -> Vec<u64> {
+        dedup_u64_preserve_order_with_default(&self.sensor_window_ms, &[20, 40])
+    }
+
+    fn fault_values(&self) -> Vec<bool> {
+        dedup_bool_preserve_order_with_default(&self.inject_sensor_stuck, &[false, true])
+    }
+}
+
+fn dedup_u64_preserve_order_with_default(values: &[u64], default: &[u64]) -> Vec<u64> {
+    let src = if values.is_empty() { default } else { values };
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::<u64>::new();
+    for v in src {
+        if seen.insert(*v) {
+            out.push(*v);
+        }
+    }
+    out
+}
+
+fn dedup_bool_preserve_order_with_default(values: &[bool], default: &[bool]) -> Vec<bool> {
+    let src = if values.is_empty() { default } else { values };
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::<bool>::new();
+    for v in src {
+        if seen.insert(*v) {
+            out.push(*v);
+        }
+    }
+    out
+}
+
+fn round_up_to_tick(ms: u64, tick_ms: u64) -> u64 {
+    if tick_ms == 0 {
+        return ms;
+    }
+    ((ms + tick_ms - 1) / tick_ms) * tick_ms
+}
+
+fn round_down_to_tick(ms: u64, tick_ms: u64) -> u64 {
+    if tick_ms == 0 {
+        return ms;
+    }
+    (ms / tick_ms) * tick_ms
+}
+
+fn discover_start_and_sensor_ids(hints: &ScenarioInitInputHints) -> (Option<u16>, Vec<u16>) {
+    let start_id = hints
+        .digital_aliases
+        .iter()
+        .find_map(|(&id, aliases)| {
+            if aliases_contain_keyword(aliases, "start") {
+                Some(id)
+            } else {
+                None
+            }
+        });
+    let mut sensor_ids = hints
+        .digital_aliases
+        .iter()
+        .filter_map(|(&id, aliases)| {
+            if aliases_contain_keyword(aliases, "sensor") {
+                Some(id)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    sensor_ids.sort_unstable();
+    sensor_ids.dedup();
+    (start_id, sensor_ids)
+}
+
+fn run_scenario_gen_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let mut plc_path: Option<PathBuf> = None;
+    let mut config_path: Option<PathBuf> = None;
+    let mut out_dir: Option<PathBuf> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--plc" => {
+                plc_path = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --plc <file.plc>".to_string())?,
+                ));
+            }
+            "--config" => {
+                config_path = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --config <gen.yaml>".to_string())?,
+                ));
+            }
+            "--out-dir" => {
+                out_dir = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --out-dir <dir>".to_string())?,
+                ));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>"
+                ));
+            }
+            other => return Err(format!("Unknown argument for scenario-gen: {other}")),
+        }
+    }
+
+    let plc_path = plc_path.ok_or_else(|| {
+        format!("Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>")
+    })?;
+    let config_path = config_path.ok_or_else(|| {
+        format!("Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>")
+    })?;
+    let out_dir = out_dir.ok_or_else(|| {
+        format!("Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>")
+    })?;
+
+    let plc_source =
+        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {}: {err}", plc_path.display()))?;
+    let config_yaml = fs::read_to_string(&config_path)
+        .map_err(|err| format!("Failed to read {}: {err}", config_path.display()))?;
+    let config: ScenarioGenConfig = serde_yaml::from_str(&config_yaml)
+        .map_err(|err| format!("Failed to parse scenario-gen config {}: {err}", config_path.display()))?;
+    config.validate()?;
+
+    fs::create_dir_all(&out_dir)
+        .map_err(|err| format!("Failed to create output directory {}: {err}", out_dir.display()))?;
+
+    let hints = collect_scenario_init_hints(&plc_source)?;
+    let (start_id, sensor_ids) = discover_start_and_sensor_ids(&hints);
+
+    let seed_base = config.seed_base_value();
+    let durations = config.duration_values();
+    let start_pulses = config.start_pulse_values();
+    let sensor_windows = config.sensor_window_values();
+    let fault_values = config.fault_values();
+
+    let mut cases = Vec::<ScenarioGenCase>::new();
+    let mut case_idx = 0usize;
+    'combos: for duration in durations {
+        for pulse in &start_pulses {
+            for window in &sensor_windows {
+                for inject_fault in &fault_values {
+                    if case_idx >= config.max_cases {
+                        break 'combos;
+                    }
+
+                    let mut inputs = Vec::<sim::InputEvent>::new();
+                    let primary_start = start_id.or_else(|| hints.digital_ids.first().copied());
+                    if let Some(start) = primary_start {
+                        let mut set = sim::InputSet::default();
+                        set.digital_inputs.insert(start, true);
+                        inputs.push(sim::InputEvent { at_ms: 0, set });
+
+                        let mut release_ms = round_up_to_tick((*pulse).max(config.tick_ms), config.tick_ms);
+                        if release_ms >= duration {
+                            let latest = duration.saturating_sub(config.tick_ms);
+                            release_ms = round_down_to_tick(latest, config.tick_ms);
+                        }
+                        if release_ms > 0 && release_ms < duration {
+                            let mut set = sim::InputSet::default();
+                            set.digital_inputs.insert(start, false);
+                            inputs.push(sim::InputEvent {
+                                at_ms: release_ms,
+                                set,
+                            });
+                        }
+                    }
+
+                    let sensor_spacing = round_up_to_tick((*window).max(config.tick_ms), config.tick_ms);
+                    if !sensor_ids.is_empty() {
+                        let sensor_targets = sensor_ids
+                            .iter()
+                            .copied()
+                            .filter(|id| Some(*id) != start_id)
+                            .take(8)
+                            .collect::<Vec<_>>();
+                        if !sensor_targets.is_empty() {
+                            let mut baseline = sim::InputSet::default();
+                            for id in &sensor_targets {
+                                baseline.digital_inputs.insert(*id, false);
+                            }
+                            inputs.push(sim::InputEvent {
+                                at_ms: 0,
+                                set: baseline,
+                            });
+
+                            let sensor_start = round_up_to_tick(
+                                (*pulse).saturating_add(sensor_spacing),
+                                config.tick_ms,
+                            );
+                            let mut at_ms = sensor_start.max(config.tick_ms);
+                            for id in sensor_targets {
+                                if at_ms >= duration {
+                                    break;
+                                }
+                                let mut set = sim::InputSet::default();
+                                set.digital_inputs.insert(id, true);
+                                inputs.push(sim::InputEvent { at_ms, set });
+                                at_ms = at_ms.saturating_add(sensor_spacing);
+                            }
+                        }
+                    }
+
+                    inputs.sort_by_key(|e| e.at_ms);
+
+                    let faults = if *inject_fault {
+                        let target = sensor_ids
+                            .first()
+                            .copied()
+                            .or(start_id)
+                            .or_else(|| hints.digital_ids.first().copied())
+                            .unwrap_or(0);
+                        let latest = duration.saturating_sub(config.tick_ms);
+                        let mut at_ms = round_up_to_tick(200, config.tick_ms);
+                        if at_ms >= duration {
+                            at_ms = round_down_to_tick(latest, config.tick_ms);
+                        }
+                        vec![sim::FaultEvent {
+                            sensor_stuck: sim::SensorStuckFault {
+                                at_ms,
+                                target,
+                                value: true,
+                            },
+                        }]
+                    } else {
+                        Vec::new()
+                    };
+
+                    let scenario = sim::Scenario {
+                        seed: Some(seed_base + case_idx as u64),
+                        tick_ms: config.tick_ms,
+                        duration_ms: duration,
+                        inputs,
+                        digital_bursts: Vec::new(),
+                        faults,
+                    };
+                    let mut io = sim::SimIo::new(32, 32, 8, 8);
+                    scenario.apply_to_simio(&mut io).map_err(|e| {
+                        format!(
+                            "Generated scenario failed validation (duration_ms={duration}, start_pulse_ms={pulse}, sensor_window_ms={window}, inject_sensor_stuck={inject_fault}): {e}"
+                        )
+                    })?;
+
+                    let name = format!("scenario_{:04}.yaml", case_idx + 1);
+                    let path = out_dir.join(&name);
+                    let mut yaml = serde_yaml::to_string(&scenario)
+                        .map_err(|err| format!("Failed to serialize generated scenario: {err}"))?;
+                    if !yaml.ends_with('\n') {
+                        yaml.push('\n');
+                    }
+                    fs::write(&path, yaml)
+                        .map_err(|err| format!("Failed to write {}: {err}", path.display()))?;
+
+                    cases.push(ScenarioGenCase {
+                        name: format!("case_{:04}", case_idx + 1),
+                        path: name,
+                        seed: scenario.seed,
+                        duration_ms: duration,
+                        start_pulse_ms: *pulse,
+                        sensor_window_ms: *window,
+                        inject_sensor_stuck: *inject_fault,
+                    });
+                    case_idx += 1;
+                }
+            }
+        }
+    }
+
+    let summary = ScenarioGenSummary {
+        schema_version: 1,
+        plc: display_path_relative_to_cwd(&plc_path),
+        config: display_path_relative_to_cwd(&config_path),
+        count: cases.len(),
+        cases,
+    };
+    let summary_path = out_dir.join("summary.json");
+    let mut json = serde_json::to_string_pretty(&summary)
+        .map_err(|err| format!("Failed to serialize summary JSON: {err}"))?;
+    json.push('\n');
+    fs::write(&summary_path, json)
+        .map_err(|err| format!("Failed to write {}: {err}", summary_path.display()))?;
+
+    eprintln!(
+        "scenario-gen: wrote {} scenarios under {} (summary: {})",
+        summary.count,
+        out_dir.display(),
+        summary_path.display()
+    );
     Ok(())
 }
 

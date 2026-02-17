@@ -1,0 +1,22 @@
+# Scenario generator config (example).
+#
+# Usage:
+#   cargo run --release -- scenario-gen --plc examples/assembly_station.plc \
+#     --config examples/scenario_gen/basic.yaml --out-dir out/scenario_gen
+#
+# Notes:
+# - Values are combined as a Cartesian product, capped by `max_cases` (stable order).
+# - `seed` is derived from `seed_base + case_index`.
+
+seed_base: 1000
+tick_ms: 10
+
+duration_ms: [1000, 2000]
+start_pulse_ms: [30, 50]
+sensor_window_ms: [20]
+
+# Whether to inject one representative `sensor_stuck` fault in a case.
+inject_sensor_stuck: [false, true]
+
+# Upper bound of emitted cases (keeps CI fast & output manageable).
+max_cases: 6

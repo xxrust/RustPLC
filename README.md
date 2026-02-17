@@ -135,6 +135,10 @@ cargo run --release -- sim-plc examples/assembly_station.plc \
 #   cargo run --release -- scenario-expand examples/assembly_station.plc \
 #     --scenario examples/scenarios/pulse_hold.yaml --out out/pulse_hold.expanded.yaml
 
+# 批量生成场景（参数化配置 -> 多组 YAML，用于回归/门禁）
+cargo run --release -- scenario-gen --plc examples/assembly_station.plc \
+  --config examples/scenario_gen/basic.yaml --out-dir out/scenario_gen
+
 # 无开发板对比门禁（SIL vs virtual-board，一条命令跑完 sim + virtual-board + trace-diff）
 cargo run --release -- no-board-gate examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out-dir out/no_board_gate
