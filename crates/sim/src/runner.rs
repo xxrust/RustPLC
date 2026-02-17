@@ -16,7 +16,22 @@ impl fmt::Display for SimRunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SimRunError::Scenario(e) => write!(f, "{e}"),
-            SimRunError::Runtime(e) => write!(f, "runtime error: {e:?}"),
+            SimRunError::Runtime(e) => match e {
+                RuntimeError::TooManyTransitionsInOneTick => {
+                    write!(
+                        f,
+                        "runtime error: TooManyTransitionsInOneTick\n\
+hint: a same-tick transition loop likely occurred (e.g. a task completes immediately and re-enters within the same tick).\n\
+common causes:\n\
+  - scenario sets start_button/sensors to values that make waits/guards satisfied instantly\n\
+  - start_button is held true, so `ready` -> `init` loops without time advancing\n\
+fix:\n\
+  - pulse start_button (set true then false)\n\
+  - script sensor edges over time (set false at t=0, then set true at later `at_ms`)\n"
+                    )
+                }
+                other => write!(f, "runtime error: {other:?}"),
+            },
         }
     }
 }

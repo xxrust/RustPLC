@@ -1,0 +1,8 @@
+tick_ms: 100
+duration_ms: 10000
+loop_index: 0
+initial_pv: 0.0
+model:
+  kind: first_order
+  gain: 1.0
+  tau_ms: 1200

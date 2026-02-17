@@ -1,0 +1,20 @@
+[topology]
+device AI0: analog_input { range: 0..100, unit: "bar", external: true }
+device AO0: analog_output { range: 0..100, unit: "%" }
+
+device loop_pressure: pid {
+    pv: AI0,
+    sp: 60bar,
+    kp: 2.0,
+    ki: 0.5,
+    kd: 0.0,
+    out: AO0,
+    period_ms: 100,
+    limit: 0..100
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step hold:

@@ -34,6 +34,8 @@ git clone https://github.com/xxrust/RustPLC.git
 cd RustPLC
 cargo build --release
 cargo run --release -- examples/two_cylinder.plc
+# 仅看验证摘要（不打印大块 IR JSON）
+cargo run --release -- examples/two_cylinder.plc --no-print-ir
 ```
 
 ```
@@ -124,8 +126,10 @@ cargo run --release -- no-board-gate examples/assembly_station.plc \
 
 # RP2040 固件构建
 cargo run --release -- build-rp2040 examples/assembly_station.plc \
-  --out out/rp2040 --io-map out/rp2040/io_map.toml --emit-uf2 out/firmware.uf2
+  --out out/rp2040
 ```
+
+> 提示：`build-rp2040` 首次运行会生成 `out/rp2040/io_map.template.toml`。复制并按你的引脚修改后再执行 `--emit-uf2`。
 
 顺控恢复模板与关键 wait lint 见：[`docs/recovery_templates_sequence_lint.md`](docs/recovery_templates_sequence_lint.md)。
 无开发板完整交付流程见：[`docs/no_board_playbook.md`](docs/no_board_playbook.md)。

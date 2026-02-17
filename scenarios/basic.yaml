@@ -1,0 +1,9 @@
+# Scenario for the `sim` subcommand's built-in program:
+# wait DI0 == true -> set DO0 true -> halt
+tick_ms: 10
+duration_ms: 30
+inputs:
+  - at_ms: 10
+    set:
+      digital_inputs:
+        0: true

@@ -11,6 +11,12 @@ This repo includes an RP2040 firmware target in `crates/board-rp2040` that can r
 rustup target add thumbv6m-none-eabi
 ```
 
+If you want to emit UF2 from the CLI (`build-rp2040 --emit-uf2`), install:
+
+```bash
+cargo install elf2uf2-rs
+```
+
 ## Build (ELF)
 
 ```bash
@@ -20,6 +26,13 @@ cargo build -p board-rp2040 --target thumbv6m-none-eabi
 Or from DSL in one flow (`.plc -> verify -> generated program/io map/meta`):
 
 ```bash
+# Step 1: generate artifacts (includes `io_map.template.toml`)
+cargo run --release -- build-rp2040 examples/assembly_station.plc --out out/rp2040
+
+# Step 2: copy + edit the IO map (pin mapping is board-specific)
+cp out/rp2040/io_map.template.toml out/rp2040/io_map.toml
+
+# Step 3 (optional): build firmware + UF2 (requires `thumbv6m-none-eabi` + `elf2uf2-rs`)
 cargo run --release -- build-rp2040 examples/assembly_station.plc \
   --out out/rp2040 \
   --io-map out/rp2040/io_map.toml \

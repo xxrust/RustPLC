@@ -9,12 +9,13 @@ use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, ve
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use io_traits::{DigitalInputId, DigitalOutputId, Io};
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
-use rust_plc::io_map::{IoMap, IoUsage};
+use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::sequence_lint::{
     CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
@@ -192,6 +193,182 @@ static SIM_TASKS: [Task<'static>; 1] = [Task {
 
 static SIM_PROGRAM: Program<'static> = Program { tasks: &SIM_TASKS, pid_loops: &[] };
 
+const SCENARIO_YAML_MINIMAL_TEMPLATE: &str = r#"tick_ms: 10
+duration_ms: 1000
+inputs:
+  - at_ms: 0
+    set:
+      digital_inputs:
+        0: true
+"#;
+
+fn should_skip_suggest_walk_dir(name: &OsStr) -> bool {
+    // Keep this list small and obvious: just skip the usual big/noisy directories.
+    matches!(
+        name.to_str(),
+        Some(".git")
+            | Some("target")
+            | Some("out")
+            | Some("archive")
+            | Some(".codex")
+            | Some(".claude")
+            | Some(".ralph_logs")
+            | Some("node_modules")
+    )
+}
+
+fn display_path_relative_to_cwd(p: &Path) -> String {
+    match env::current_dir() {
+        Ok(cwd) => p
+            .strip_prefix(&cwd)
+            .map(|rel| rel.display().to_string())
+            .unwrap_or_else(|_| p.display().to_string()),
+        Err(_) => p.display().to_string(),
+    }
+}
+
+fn find_similar_yaml_files_by_name(wanted_file_name: &OsStr, max_matches: usize) -> Vec<PathBuf> {
+    let Ok(cwd) = env::current_dir() else {
+        return Vec::new();
+    };
+
+    // Keep this bounded to avoid surprising slowdowns if the tool is run from an unexpected dir.
+    let mut matches = Vec::new();
+    let mut stack: Vec<(PathBuf, usize)> = vec![(cwd, 0)];
+    let mut entries_seen: usize = 0;
+    let max_entries: usize = 20_000;
+    let max_depth: usize = 8;
+
+    while let Some((dir, depth)) = stack.pop() {
+        if depth > max_depth {
+            continue;
+        }
+        if dir
+            .file_name()
+            .is_some_and(|n| should_skip_suggest_walk_dir(n))
+        {
+            continue;
+        }
+        let Ok(rd) = fs::read_dir(&dir) else {
+            continue;
+        };
+
+        for entry in rd {
+            entries_seen += 1;
+            if entries_seen > max_entries {
+                return matches;
+            }
+
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+
+            if ft.is_dir() {
+                stack.push((path, depth + 1));
+                continue;
+            }
+            if !ft.is_file() {
+                continue;
+            }
+            let ext = path.extension().and_then(|e| e.to_str());
+            if !matches!(ext, Some("yaml") | Some("yml")) {
+                continue;
+            }
+            if path.file_name() != Some(wanted_file_name) {
+                continue;
+            }
+
+            matches.push(path);
+            if matches.len() >= max_matches {
+                return matches;
+            }
+        }
+    }
+
+    matches
+}
+
+fn scenario_yaml_help() -> String {
+    let mut msg = String::new();
+    msg.push_str("Minimal scenario template:\n");
+    msg.push_str(SCENARIO_YAML_MINIMAL_TEMPLATE);
+    msg.push('\n');
+    msg.push_str("Tips:\n");
+    msg.push_str("- `at_ms` must be < `duration_ms` and aligned to `tick_ms`.\n");
+    msg.push_str("- IDs are numeric (0 => DI0/AI0, 10 => DI10, ...).\n");
+    msg
+}
+
+fn read_scenario_yaml_file(path: &Path) -> Result<String, String> {
+    fs::read_to_string(path).map_err(|err| {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            return format!(
+                "Failed to read scenario YAML file {}: {err}",
+                path.display()
+            );
+        }
+
+        let mut msg = format!("Scenario YAML file not found: {}\n", path.display());
+        if let Ok(cwd) = env::current_dir() {
+            msg.push_str(&format!("  cwd: {}\n", cwd.display()));
+        }
+
+        if let Some(wanted_name) = path.file_name() {
+            let suggestions = find_similar_yaml_files_by_name(wanted_name, 6);
+            if !suggestions.is_empty() {
+                msg.push_str("  similarly named files found:\n");
+                for s in suggestions {
+                    msg.push_str(&format!("    - {}\n", display_path_relative_to_cwd(&s)));
+                }
+            }
+        }
+
+        msg.push('\n');
+        msg.push_str(&scenario_yaml_help());
+        msg
+    })
+}
+
+fn parse_scenario_yaml(yaml: &str) -> Result<sim::Scenario, String> {
+    sim::Scenario::from_yaml_str(yaml).map_err(|e| format!("Failed to parse scenario YAML: {e}\n\n{}", scenario_yaml_help()))
+}
+
+fn scenario_mismatch_hint_for_example(
+    plc_path: &str,
+    scenario_path: &Path,
+    err: &sim::SimRunError,
+    subcommand: &str,
+) -> Option<String> {
+    if !matches!(
+        err,
+        sim::SimRunError::Runtime(runtime_core::RuntimeError::TooManyTransitionsInOneTick)
+    ) {
+        return None;
+    }
+
+    let plc_name = Path::new(plc_path).file_name().and_then(|s| s.to_str())?;
+    let scenario_name = scenario_path.file_name().and_then(|s| s.to_str())?;
+
+    if plc_name == "two_cylinder.plc" && scenario_name == "normal.yaml" {
+        let suggested_cmd = if subcommand == "sim-plc" {
+            "cargo run --release -- sim-plc examples/two_cylinder.plc --scenario scenarios/two_cylinder.yaml --out trace.jsonl"
+        } else {
+            "cargo run --release -- no-board-gate examples/two_cylinder.plc --scenario scenarios/two_cylinder.yaml --out-dir out/no_board_gate"
+        };
+        return Some(format!(
+            "Tip: `scenarios/normal.yaml` is tuned for `examples/assembly_station.plc`.\n\
+For `examples/two_cylinder.plc`, use `scenarios/two_cylinder.yaml`:\n\
+  {suggested_cmd}"
+        ));
+    }
+
+    None
+}
+
 fn main() {
     let mut args = env::args();
     let program = args.next().unwrap_or_else(|| "rust_plc".to_string());
@@ -302,6 +479,8 @@ fn main() {
 
     let path = first;
     let mut report_path: Option<PathBuf> = None;
+    let mut no_print_ir = false;
+    let mut ir_out_path: Option<PathBuf> = None;
     let mut deny_warnings = false;
     let mut budget_thresholds = RuntimeBudgetThresholds::from_env();
     while let Some(arg) = args.next() {
@@ -312,6 +491,18 @@ fn main() {
                     std::process::exit(1);
                 });
                 report_path = Some(PathBuf::from(value));
+            }
+            // Back-compat note: the CLI historically printed IR JSON to stdout by default.
+            // Keep that as the default for tests/scripts, and offer a switch to suppress it.
+            "--no-print-ir" => {
+                no_print_ir = true;
+            }
+            "--ir-out" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --ir-out <file>");
+                    std::process::exit(1);
+                });
+                ir_out_path = Some(PathBuf::from(value));
             }
             "--deny-warnings" => {
                 deny_warnings = true;
@@ -472,6 +663,7 @@ fn main() {
     }
 
     print_success_summary(&ir_bundle.verification);
+    eprintln!("verification_report: {}", report_path.display());
     if deny_warnings {
         let blocking_warnings = collect_blocking_warnings(&ir_bundle.verification);
         if !blocking_warnings.is_empty() {
@@ -483,11 +675,38 @@ fn main() {
         }
     }
 
-    match serde_json::to_string_pretty(&ir_bundle) {
-        Ok(json) => println!("{json}"),
-        Err(err) => {
-            eprintln!("Failed to serialize IR as JSON: {err}");
-            std::process::exit(1);
+    if let Some(ir_out_path) = ir_out_path {
+        if let Some(parent) = ir_out_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                if let Err(err) = fs::create_dir_all(parent) {
+                    eprintln!("Failed to create output directory {parent:?}: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        match serde_json::to_string_pretty(&ir_bundle) {
+            Ok(mut json) => {
+                json.push('\n');
+                if let Err(err) = fs::write(&ir_out_path, json) {
+                    eprintln!("Failed to write IR JSON file {ir_out_path:?}: {err}");
+                    std::process::exit(1);
+                }
+                eprintln!("ir_bundle: {}", ir_out_path.display());
+            }
+            Err(err) => {
+                eprintln!("Failed to serialize IR as JSON: {err}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if !no_print_ir {
+        match serde_json::to_string_pretty(&ir_bundle) {
+            Ok(json) => println!("{json}"),
+            Err(err) => {
+                eprintln!("Failed to serialize IR as JSON: {err}");
+                std::process::exit(1);
+            }
         }
     }
 }
@@ -495,7 +714,7 @@ fn main() {
 fn print_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!(
-        "  {program} <file.plc> [--report <verification_report.json>] [--deny-warnings] [--budget-... <value>]"
+        "  {program} <file.plc> [--report <verification_report.json>] [--deny-warnings] [--no-print-ir] [--ir-out <ir_bundle.json>] [--budget-... <value>]"
     );
     eprintln!(
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
@@ -659,10 +878,9 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
         }
     }
 
-    let scenario_yaml = fs::read_to_string(&scenario_path)
-        .map_err(|err| format!("Failed to read scenario YAML file {scenario_path}: {err}"))?;
-    let scenario = sim::Scenario::from_yaml_str(&scenario_yaml)
-        .map_err(|err| format!("Failed to parse scenario YAML: {err}"))?;
+    let scenario_path = PathBuf::from(&scenario_path);
+    let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
+    let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let out_path = out_path.map(PathBuf::from);
     let base_dir = out_path
@@ -778,19 +996,21 @@ fn run_sim_plc_subcommand(
 
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
-    let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
-        format!(
-            "Failed to read scenario YAML file {}: {err}",
-            scenario_path.display()
-        )
-    })?;
-    let scenario = sim::Scenario::from_yaml_str(&scenario_yaml).map_err(|e| format!("{e}"))?;
+    let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
+    let scenario = parse_scenario_yaml(&scenario_yaml)?;
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
 
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
-    let run =
-        sim::run_program_for_scenario(&program, &scenario, &mut io).map_err(|e| format!("{e}"))?;
+    let run = sim::run_program_for_scenario(&program, &scenario, &mut io).map_err(|e| {
+        let mut msg = format!("{e}");
+        if let Some(hint) = scenario_mismatch_hint_for_example(&plc_path, &scenario_path, &e, "sim-plc")
+        {
+            msg.push_str("\n\n");
+            msg.push_str(&hint);
+        }
+        msg
+    })?;
     fs::write(&out_path, run.trace.into_string())
         .map_err(|err| format!("Failed to write trace file {out_path:?}: {err}"))?;
     Ok(())
@@ -931,14 +1151,23 @@ fn run_sim_pid_kpi_subcommand(
 
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let pid_example = "Example:\n\
+tick_ms: 100\n\
+duration_ms: 10000\n\
+loop_index: 0\n\
+initial_pv: 0.0\n\
+model:\n\
+  kind: first_order\n\
+  gain: 1.0\n\
+  tau_ms: 500\n";
     let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
         format!(
-            "Failed to read PID scenario YAML {}: {err}",
+            "Failed to read PID scenario YAML {}: {err}\n\n{pid_example}",
             scenario_path.display()
         )
     })?;
     let scenario = sim::PidControlScenario::from_yaml_str(&scenario_yaml)
-        .map_err(|err| format!("Failed to parse PID scenario YAML: {err}"))?;
+        .map_err(|err| format!("Failed to parse PID scenario YAML: {err}\n\n{pid_example}"))?;
     let runtime_program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
     let report = sim::run_pid_kpi(&runtime_program, &scenario)
         .map_err(|err| format!("Failed to run PID KPI simulation: {err}"))?;
@@ -1157,8 +1386,20 @@ fn run_build_rp2040_subcommand(
                 .map_err(|err| format!("Failed to read io map {path:?}: {err}"))?;
             let m = IoMap::from_toml_str(&toml_str)
                 .map_err(|err| format!("Failed to parse io map TOML: {err}"))?;
-            m.validate_for_usage(usage)
-                .map_err(|err| format!("Invalid io map for this program: {err}"))?;
+            match m.validate_for_usage(usage) {
+                Ok(()) => {}
+                Err(IoMapError::MissingRequired { kind, id }) => {
+                    return Err(format!(
+                        "Invalid io map for this program: missing required mapping for {kind}{id}\n\
+\n\
+hint: the io map must contain a GPIO assignment for every DI/DO/AI/AO used by the program.\n\
+Start from the generated `io_map.template.toml` under `--out <dir>` and fill in GPIO numbers."
+                    ));
+                }
+                Err(err) => {
+                    return Err(format!("Invalid io map for this program: {err}"));
+                }
+            }
             Some(m)
         }
     };
@@ -1332,13 +1573,8 @@ fn run_release_bundle_subcommand(
 
     let plc_sha256 = sha256_hex(&plc_bytes);
 
-    let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
-        format!(
-            "Failed to read scenario YAML file {}: {err}",
-            scenario_path.display()
-        )
-    })?;
-    let scenario = sim::Scenario::from_yaml_str(&scenario_yaml).map_err(|e| format!("{e}"))?;
+    let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
+    let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
 
@@ -1355,8 +1591,20 @@ fn run_release_bundle_subcommand(
                 .map_err(|err| format!("Failed to read io map {path:?}: {err}"))?;
             let m = IoMap::from_toml_str(&toml_str)
                 .map_err(|err| format!("Failed to parse io map TOML: {err}"))?;
-            m.validate_for_usage(usage)
-                .map_err(|err| format!("Invalid io map for this program: {err}"))?;
+            match m.validate_for_usage(usage) {
+                Ok(()) => {}
+                Err(IoMapError::MissingRequired { kind, id }) => {
+                    return Err(format!(
+                        "Invalid io map for this program: missing required mapping for {kind}{id}\n\
+\n\
+hint: the io map must contain a GPIO assignment for every DI/DO/AI/AO used by the program.\n\
+Start from the generated `io_map.template.toml` under `--out-dir <dir>` and fill in GPIO numbers."
+                    ));
+                }
+                Err(err) => {
+                    return Err(format!("Invalid io map for this program: {err}"));
+                }
+            }
             Some(m)
         }
     };
@@ -2397,21 +2645,11 @@ fn run_no_board_gate_subcommand(
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
 
-    let sil_yaml = fs::read_to_string(&sil_scenario_path).map_err(|err| {
-        format!(
-            "Failed to read SIL scenario YAML file {}: {err}",
-            sil_scenario_path.display()
-        )
-    })?;
-    let board_yaml = fs::read_to_string(&board_scenario_path).map_err(|err| {
-        format!(
-            "Failed to read board scenario YAML file {}: {err}",
-            board_scenario_path.display()
-        )
-    })?;
+    let sil_yaml = read_scenario_yaml_file(&sil_scenario_path)?;
+    let board_yaml = read_scenario_yaml_file(&board_scenario_path)?;
 
-    let sil_scenario = sim::Scenario::from_yaml_str(&sil_yaml).map_err(|e| format!("{e}"))?;
-    let board_scenario = sim::Scenario::from_yaml_str(&board_yaml).map_err(|e| format!("{e}"))?;
+    let sil_scenario = parse_scenario_yaml(&sil_yaml)?;
+    let board_scenario = parse_scenario_yaml(&board_yaml)?;
 
     if sil_scenario.tick_ms != board_scenario.tick_ms {
         return Err(format!(
@@ -2425,10 +2663,21 @@ fn run_no_board_gate_subcommand(
     let sil_trace_path = out_dir.join("sil_trace.jsonl");
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &sil_scenario);
     let mut sil_io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
-    let sil_run =
-        sim::run_program_for_scenario(&program, &sil_scenario, &mut sil_io).map_err(|e| {
-            format!("SIL simulation failed: {e}")
-        })?;
+    let sil_run = sim::run_program_for_scenario(&program, &sil_scenario, &mut sil_io).map_err(
+        |e| {
+            let mut msg = format!("SIL simulation failed: {e}");
+            if let Some(hint) = scenario_mismatch_hint_for_example(
+                &plc_path,
+                &sil_scenario_path,
+                &e,
+                "no-board-gate",
+            ) {
+                msg.push_str("\n\n");
+                msg.push_str(&hint);
+            }
+            msg
+        },
+    )?;
 
     fs::write(&sil_trace_path, sil_run.trace.into_string())
         .map_err(|err| format!("Failed to write SIL trace file {sil_trace_path:?}: {err}"))?;
@@ -2567,13 +2816,8 @@ fn run_pil_run_subcommand(
 
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
-    let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
-        format!(
-            "Failed to read scenario YAML file {}: {err}",
-            scenario_path.display()
-        )
-    })?;
-    let scenario = sim::Scenario::from_yaml_str(&scenario_yaml).map_err(|e| format!("{e}"))?;
+    let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
+    let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
 
@@ -2810,13 +3054,8 @@ fn run_virtual_board_subcommand(
 
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
-    let scenario_yaml = fs::read_to_string(&scenario_path).map_err(|err| {
-        format!(
-            "Failed to read scenario YAML file {}: {err}",
-            scenario_path.display()
-        )
-    })?;
-    let scenario = sim::Scenario::from_yaml_str(&scenario_yaml).map_err(|e| format!("{e}"))?;
+    let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
+    let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
     write_virtual_board_artifacts(

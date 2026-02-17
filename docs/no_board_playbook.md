@@ -24,7 +24,7 @@
 cargo run --release -- examples/realtime_stress/stress_case.plc \
   --report out/realtime/verification_report.json \
   --budget-max-time-estimate-us 2000 \
-  --deny-warnings
+  --no-print-ir
 ```
 
 输入：`.plc`
@@ -36,6 +36,7 @@ cargo run --release -- examples/realtime_stress/stress_case.plc \
 
 建议阈值：
 - 初始可用 `--budget-max-time-estimate-us 2000`（1ms tick 系统建议逐步收紧到 1000~1500）。
+- `stress_case.plc` 会触发一个 timing warn（same-tick cycle）用于压测覆盖，因此不建议在这一步直接加 `--deny-warnings`。
 
 ## 2) virtual-board
 
@@ -76,7 +77,7 @@ cargo run --release -- timing-report \
 cargo run --release -- no-board-gate examples/realtime_stress/stress_case.plc \
   --scenario examples/realtime_stress/scenarios/safe.yaml \
   --out-dir out/realtime/gate \
-  --max-p99-exec-us 120 \
+  --max-p99-exec-us 250 \
   --max-overrun-count 0
 ```
 
@@ -96,7 +97,7 @@ cargo run --release -- no-board-gate examples/realtime_stress/stress_case.plc \
 - `overrun_count` 超过 `--max-overrun-count`
 
 建议阈值：
-- 先在 safe 场景测基线，再以“基线 + 10%~20%”设定 `--max-p99-exec-us`。
+- 先在 safe 场景测基线，再以“基线 + 10%~20%”设定 `--max-p99-exec-us`。当前仓库基线约为 `215us`，文档示例使用 `250us`。
 - `--max-overrun-count` 推荐从 `0` 开始。
 
 ## 5) release-bundle
@@ -105,7 +106,7 @@ cargo run --release -- no-board-gate examples/realtime_stress/stress_case.plc \
 cargo run --release -- release-bundle examples/realtime_stress/stress_case.plc \
   --scenario examples/realtime_stress/scenarios/safe.yaml \
   --out-dir out/realtime/release \
-  --max-p99-exec-us 120 \
+  --max-p99-exec-us 250 \
   --max-overrun-count 0
 ```
 
@@ -118,4 +119,3 @@ cargo run --release -- release-bundle examples/realtime_stress/stress_case.plc \
 - `tick_timing.jsonl` / `timing_report.json`
 - `gate_summary.json` / `diff_report.json`
 - `build_meta.json`（含 `realtime_profile.tick_ms/thresholds/overrun_count/p99_exec_us`）
-

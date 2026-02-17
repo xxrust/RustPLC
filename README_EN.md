@@ -34,6 +34,8 @@ git clone https://github.com/xxrust/RustPLC.git
 cd RustPLC
 cargo build --release
 cargo run --release -- examples/two_cylinder.plc
+# Summary-only mode (suppresses large IR JSON on stdout)
+cargo run --release -- examples/two_cylinder.plc --no-print-ir
 ```
 
 ```
@@ -124,8 +126,10 @@ cargo run --release -- no-board-gate examples/assembly_station.plc \
 
 # RP2040 firmware build
 cargo run --release -- build-rp2040 examples/assembly_station.plc \
-  --out out/rp2040 --io-map out/rp2040/io_map.toml --emit-uf2 out/firmware.uf2
+  --out out/rp2040
 ```
+
+> Tip: the first `build-rp2040` run writes `out/rp2040/io_map.template.toml`. Copy/edit it for your board pins before running `--emit-uf2`.
 
 ## 📚 Documentation
 

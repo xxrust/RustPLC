@@ -5,7 +5,7 @@
 ## Command
 
 ```bash
-rust_plc sim-pid-kpi examples/pid_loop.plc \
+cargo run --release -- sim-pid-kpi examples/pid_loop.plc \
   --scenario examples/pid_kpi_scenario.yaml \
   --out out/pid_kpi.json
 ```
@@ -40,4 +40,3 @@ Fields:
   - `overshoot_percent`
   - `settling_time_ms` (`null` means not settled in horizon)
   - `steady_state_error`
-
