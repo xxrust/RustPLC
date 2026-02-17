@@ -9,6 +9,7 @@
 - For reusable `.plc` templates meant to run via `runtime_bridge`, include explicit physical IO devices (`X<N>`, `Y<N>`) plus logical devices connected via `connected_to`, so IO IDs resolve deterministically.
 - For CLI-driven docs, add a doc consistency test that checks required commands are present both in the markdown playbook and in `rust_plc` usage output.
 - For JSONL contracts that are diff-sensitive, serialize typed structs (not maps) and keep canonical field declaration order so snapshots stay stable.
+- For percentile-based gates/reports, use one deterministic nearest-rank rule and lock it with unit tests so threshold behavior stays stable across refactors.
 - For `crates/sim` plant-style dynamics, keep the plant as a deterministic tick-step that *returns* input updates, and call it from `SimIo::advance_tick()` (after applying scenario inputs) to avoid borrow-checker pitfalls with `&mut self` callbacks.
 - For discrete dead-time models, use a fixed-length FIFO with `delay_ticks = ceil(dead_time_ms / tick_ms)` so response timing stays deterministic across runs.
 - Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
@@ -671,4 +672,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - For firmware timing observability, emit additive log lines (`TIMING`) instead of changing existing trace lines so host parsers remain backward compatible.
   - Gotchas encountered (e.g., don't forget to update Z when changing W)
     - Shared helpers used only by firmware + tests should be `#[cfg(any(test, target_os = "none"))]` to avoid host-side dead-code warnings in workspace checks.
+---
+## [2026-02-17 14:18:49 CST] - US-RT-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `timing-report` CLI subcommand to parse `tick_timing.jsonl` and emit `timing_report.json` with count/overrun_count and exec_us stats (min/max/p50/p95/p99/mean).
+  - Implemented a small timing-report module (`rust_plc::timing_report`) with deterministic percentile computation and unit tests.
+  - Added an integration test to validate end-to-end report generation from a known tick_timing fixture.
+- Files changed
+  - `src/main.rs`, `src/timing_report.rs`, `src/lib.rs`, `tests/timing_report.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., this codebase uses X for Y)
+    - For metric-style CLI reports, keep the statistical computation in `src/` (library) and make the CLI a thin IO/formatting wrapper so tests can validate both layers.
+  - Gotchas encountered (e.g., don't forget to update Z when changing W)
+    - Percentile definitions vary; pick a single deterministic nearest-rank method and encode it in unit tests to avoid future regressions.
 ---

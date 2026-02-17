@@ -20,7 +20,8 @@ use rust_plc::sequence_lint::{
     CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
 };
 use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
-use rust_plc::tick_timing::{TickTimingSample, to_tick_timing_jsonl};
+use rust_plc::tick_timing::{TickTimingSample, parse_tick_timing_jsonl, to_tick_timing_jsonl};
+use rust_plc::timing_report::build_timing_report;
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -216,6 +217,13 @@ fn main() {
     }
     if first == "trace-diff" {
         if let Err(msg) = run_trace_diff_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if first == "timing-report" {
+        if let Err(msg) = run_timing_report_subcommand(&program, args) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
@@ -425,6 +433,9 @@ fn print_usage(program: &str) {
     eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
     eprintln!(
         "  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
+    );
+    eprintln!(
+        "  {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]"
     );
     eprintln!(
         "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]"
@@ -1972,6 +1983,81 @@ fn run_trace_diff_subcommand(
             report.first_mismatch_tick, report.mismatch_type, out
         ));
     }
+    Ok(())
+}
+
+fn run_timing_report_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let mut input: Option<PathBuf> = None;
+    let mut out: Option<PathBuf> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--in" => {
+                input =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --in <tick_timing.jsonl>".to_string()
+                    })?));
+            }
+            "--out" => {
+                out =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out <timing_report.json>".to_string()
+                    })?));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]"
+                ));
+            }
+            other => return Err(format!("Unknown argument for timing-report: {other}")),
+        }
+    }
+
+    let input = input.ok_or_else(|| {
+        format!("Usage: {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]")
+    })?;
+
+    let out = out.unwrap_or_else(|| {
+        input
+            .parent()
+            .map(|p| p.join("timing_report.json"))
+            .unwrap_or_else(|| PathBuf::from("timing_report.json"))
+    });
+
+    let text = fs::read_to_string(&input)
+        .map_err(|err| format!("Failed to read timing input {input:?}: {err}"))?;
+    let rows = parse_tick_timing_jsonl(&text)
+        .map_err(|err| format!("Failed to parse tick_timing JSONL: {err}"))?;
+    let report = build_timing_report(&rows)
+        .ok_or_else(|| "tick_timing.jsonl is empty; cannot build timing report".to_string())?;
+
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create output dir {parent:?}: {err}"))?;
+        }
+    }
+
+    let mut json = serde_json::to_string_pretty(&report)
+        .map_err(|err| format!("Failed to serialize timing report JSON: {err}"))?;
+    json.push('\n');
+    fs::write(&out, json).map_err(|err| format!("Failed to write timing report {out:?}: {err}"))?;
+
+    eprintln!(
+        "timing-report: count={} overrun_count={} exec_us[min/p50/p95/p99/max/mean]={}/{}/{}/{}/{}/{:.2}",
+        report.count,
+        report.overrun_count,
+        report.exec_us_min,
+        report.exec_us_p50,
+        report.exec_us_p95,
+        report.exec_us_p99,
+        report.exec_us_max,
+        report.exec_us_mean
+    );
+    eprintln!("  timing_report: {}", out.display());
     Ok(())
 }
 
