@@ -7,6 +7,7 @@
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
 - For reusable `.plc` templates meant to run via `runtime_bridge`, include explicit physical IO devices (`X<N>`, `Y<N>`) plus logical devices connected via `connected_to`, so IO IDs resolve deterministically.
+- In `TopologyGraph`, `device A { connected_to: B }` creates an edge `B -> A` (upstream to downstream). For scenario/IO mapping helpers, start from physical IO nodes (`X<N>`, `AI<N>`) and follow outgoing neighbors to discover logical aliases.
 - For CLI-driven docs, add a doc consistency test that checks required commands are present both in the markdown playbook and in `rust_plc` usage output.
 - For JSONL contracts that are diff-sensitive, serialize typed structs (not maps) and keep canonical field declaration order so snapshots stay stable.
 - For percentile-based gates/reports, use one deterministic nearest-rank rule and lock it with unit tests so threshold behavior stays stable across refactors.
@@ -764,4 +765,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Keep docs gated by a “mentions commands + commands exist” test so playbooks never drift behind the CLI surface.
   - Gotchas encountered (e.g., don't forget to update Z when changing W)
     - When command chains evolve, update both doc examples and the doc consistency needles together to avoid silent documentation decay.
+---
+## [2026-02-17 21:04:43 CST] - US-SCENE-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added new CLI subcommand `scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal>]`.
+  - Implemented scenario skeleton generation from PLC topology/runtime waits: generated YAML now includes `tick_ms`, `duration_ms`, `inputs`, and inline comments/aliases for discovered key DI/AI IDs.
+  - Added `minimal` and `normal` presets (`normal` is default); `normal` emits a runnable baseline event (`at_ms: 0`) with detected inputs initialized, while `minimal` emits commented scaffolding with `inputs: []`.
+  - Added integration test coverage for command success, output file existence/basic fields, and parseability against both `examples/assembly_station.plc` and `examples/two_cylinder.plc`.
+  - Updated README/README_EN command flow to include “initialize scenario from .plc” before simulation/gates.
+- Files changed
+  - `src/main.rs`, `tests/scenario_init.rs`, `README.md`, `README_EN.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For scenario bootstrap features, deriving input templates from runtime wait usage + topology aliases keeps generated YAML focused on actionable signals while preserving compatibility with numeric-ID scenarios.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `connected_to` edges are stored upstream->downstream in `TopologyGraph`; alias discovery for physical inputs must traverse outgoing neighbors (not incoming).
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `scenario-init` defaults output to `<plc_stem>.scenario.yaml` beside the source PLC when `--out` is not provided.
 ---

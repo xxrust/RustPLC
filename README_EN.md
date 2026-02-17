@@ -116,6 +116,10 @@ flowchart LR
 ```
 
 ```bash
+# Initialize a runnable scenario skeleton from a .plc (for sim/gates/bundles)
+cargo run --release -- scenario-init examples/assembly_station.plc \
+  --out out/assembly_station.scenario.yaml --preset normal
+
 # SIL simulation
 cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl

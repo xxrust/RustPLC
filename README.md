@@ -116,6 +116,10 @@ flowchart LR
 ```
 
 ```bash
+# 从 .plc 初始化一个可运行的场景骨架（用于后续仿真/门禁/交付）
+cargo run --release -- scenario-init examples/assembly_station.plc \
+  --out out/assembly_station.scenario.yaml --preset normal
+
 # SIL 仿真
 cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl

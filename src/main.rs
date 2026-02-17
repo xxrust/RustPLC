@@ -1,5 +1,5 @@
 use rust_plc::error::PlcError;
-use rust_plc::ir::{ConstraintSet, StateMachine, TimingModel, TopologyGraph};
+use rust_plc::ir::{ConstraintSet, DeviceKind, StateMachine, TimingModel, TopologyGraph};
 use rust_plc::parser::parse_plc;
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
@@ -7,13 +7,14 @@ use rust_plc::semantic::{
 };
 use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use io_traits::{DigitalInputId, DigitalOutputId, Io};
+use petgraph::Direction;
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
@@ -337,6 +338,253 @@ fn parse_scenario_yaml(yaml: &str) -> Result<sim::Scenario, String> {
     sim::Scenario::from_yaml_str(yaml).map_err(|e| format!("Failed to parse scenario YAML: {e}\n\n{}", scenario_yaml_help()))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScenarioInitPreset {
+    Minimal,
+    Normal,
+}
+
+impl ScenarioInitPreset {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "minimal" => Some(Self::Minimal),
+            "normal" => Some(Self::Normal),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Minimal => "minimal",
+            Self::Normal => "normal",
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct ScenarioInitInputHints {
+    digital_ids: Vec<u16>,
+    analog_ids: Vec<u16>,
+    digital_aliases: BTreeMap<u16, Vec<String>>,
+    analog_aliases: BTreeMap<u16, Vec<String>>,
+}
+
+fn default_scenario_init_out_path(plc_path: &Path) -> PathBuf {
+    let parent = plc_path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = plc_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("scenario");
+    parent.join(format!("{stem}.scenario.yaml"))
+}
+
+fn parse_prefixed_u16(name: &str, prefix: char) -> Option<u16> {
+    let rest = name.strip_prefix(prefix)?;
+    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse::<u16>().ok()
+}
+
+fn parse_prefixed_token_u16(name: &str, prefix: &str) -> Option<u16> {
+    let rest = name.strip_prefix(prefix)?;
+    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse::<u16>().ok()
+}
+
+fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHints, String> {
+    let program = parse_plc(plc_source).map_err(|e| e.to_string())?;
+    let expanded = preprocess_program(&program).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let topology = build_topology_graph(&expanded).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let state_machine = build_state_machine(&expanded).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let runtime =
+        state_machine_to_runtime_program(&topology, &state_machine, 10).map_err(|e| e.to_string())?;
+
+    let mut used_di = BTreeSet::<u16>::new();
+    let mut used_ai = BTreeSet::<u16>::new();
+    for task in runtime.tasks {
+        for step in task.steps {
+            match step.instr {
+                Instr::WaitDigital { id, .. } => {
+                    used_di.insert(id.0);
+                }
+                Instr::WaitAnalog { id, .. } => {
+                    used_ai.insert(id.0);
+                }
+                Instr::Action { .. } | Instr::Delay { .. } | Instr::Goto { .. } | Instr::Halt => {}
+            }
+        }
+    }
+    for pid in runtime.pid_loops {
+        used_ai.insert(pid.pv.0);
+    }
+
+    let mut digital_aliases = BTreeMap::<u16, Vec<String>>::new();
+    let mut analog_aliases = BTreeMap::<u16, Vec<String>>::new();
+    for node in topology.graph.node_indices() {
+        let device = &topology.graph[node];
+        match device.kind {
+            DeviceKind::DigitalInput => {
+                if let Some(id) = parse_prefixed_u16(&device.name, 'X') {
+                    let aliases = collect_downstream_aliases(
+                        &topology,
+                        node,
+                        is_physical_digital_input_name,
+                    );
+                    digital_aliases.insert(id, aliases);
+                }
+            }
+            DeviceKind::AnalogInput => {
+                if let Some(id) = parse_prefixed_token_u16(&device.name, "AI") {
+                    let aliases =
+                        collect_downstream_aliases(&topology, node, is_physical_analog_input_name);
+                    analog_aliases.insert(id, aliases);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if used_di.is_empty() {
+        used_di.extend(digital_aliases.keys().copied());
+    }
+    if used_ai.is_empty() {
+        used_ai.extend(analog_aliases.keys().copied());
+    }
+
+    Ok(ScenarioInitInputHints {
+        digital_ids: used_di.into_iter().collect(),
+        analog_ids: used_ai.into_iter().collect(),
+        digital_aliases,
+        analog_aliases,
+    })
+}
+
+fn collect_downstream_aliases(
+    topology: &TopologyGraph,
+    node: petgraph::graph::NodeIndex,
+    is_physical_input_name: fn(&str) -> bool,
+) -> Vec<String> {
+    let mut aliases = topology
+        .graph
+        .neighbors_directed(node, Direction::Outgoing)
+        .filter_map(|next| {
+            let name = topology.graph[next].name.as_str();
+            if is_physical_input_name(name) {
+                return None;
+            }
+            Some(name.to_string())
+        })
+        .collect::<Vec<_>>();
+    aliases.sort();
+    aliases.dedup();
+    aliases
+}
+
+fn is_physical_digital_input_name(name: &str) -> bool {
+    parse_prefixed_u16(name, 'X').is_some()
+}
+
+fn is_physical_analog_input_name(name: &str) -> bool {
+    parse_prefixed_token_u16(name, "AI").is_some()
+}
+
+fn render_input_alias_comment(aliases: &BTreeMap<u16, Vec<String>>, id: u16) -> String {
+    let Some(names) = aliases.get(&id) else {
+        return String::new();
+    };
+    if names.is_empty() {
+        return String::new();
+    }
+    let shown = names.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+    if names.len() > 3 {
+        format!(" # {shown}, ...")
+    } else {
+        format!(" # {shown}")
+    }
+}
+
+fn render_scenario_init_yaml(
+    plc_path: &Path,
+    preset: ScenarioInitPreset,
+    hints: &ScenarioInitInputHints,
+) -> String {
+    let source_name = plc_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("<unknown>");
+
+    let mut out = String::new();
+    out.push_str("# Generated by `rust_plc scenario-init`.\n");
+    out.push_str(&format!("# Source PLC: {source_name}\n"));
+    out.push_str(&format!("# Preset: {}\n", preset.as_str()));
+    out.push_str("# Keep `at_ms` aligned to `tick_ms`, and keep `at_ms` < `duration_ms`.\n");
+    out.push_str("tick_ms: 10\n");
+    out.push_str("duration_ms: 1000\n\n");
+
+    if hints.digital_ids.is_empty() && hints.analog_ids.is_empty() {
+        out.push_str("# No physical X*/AI* inputs were discovered from this PLC topology.\n");
+    }
+
+    match preset {
+        ScenarioInitPreset::Minimal => {
+            out.push_str("# Add input events under `inputs`, for example:\n");
+            out.push_str("# - at_ms: 0\n");
+            out.push_str("#   set:\n");
+            out.push_str("#     digital_inputs:\n");
+            out.push_str("#       0: true\n");
+            out.push_str("#     analog_inputs:\n");
+            out.push_str("#       0: 1.0\n");
+            out.push_str("inputs: []\n");
+        }
+        ScenarioInitPreset::Normal => {
+            out.push_str("inputs:\n");
+            out.push_str("  - at_ms: 0\n");
+            if hints.digital_ids.is_empty() && hints.analog_ids.is_empty() {
+                out.push_str("    set: {}\n");
+            } else {
+                out.push_str("    set:\n");
+                if !hints.digital_ids.is_empty() {
+                    out.push_str("      digital_inputs:\n");
+                    for id in &hints.digital_ids {
+                        let suffix = render_input_alias_comment(&hints.digital_aliases, *id);
+                        out.push_str(&format!("        {id}: false{suffix}\n"));
+                    }
+                }
+                if !hints.analog_ids.is_empty() {
+                    out.push_str("      analog_inputs:\n");
+                    for id in &hints.analog_ids {
+                        let suffix = render_input_alias_comment(&hints.analog_aliases, *id);
+                        out.push_str(&format!("        {id}: 0.0{suffix}\n"));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 fn scenario_mismatch_hint_for_example(
     plc_path: &str,
     scenario_path: &Path,
@@ -471,6 +719,13 @@ fn main() {
     }
     if first == "sequence-lint" {
         if let Err(msg) = run_sequence_lint_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if first == "scenario-init" {
+        if let Err(msg) = run_scenario_init_subcommand(&program, args) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
@@ -748,6 +1003,9 @@ fn print_usage(program: &str) {
     eprintln!(
         "  {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]"
     );
+    eprintln!(
+        "  {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal>]"
+    );
     eprintln!();
     eprintln!("Budget options (also configurable via env vars):");
     eprintln!("  --budget-max-actions-per-transition <n>");
@@ -828,6 +1086,67 @@ fn run_sequence_lint_subcommand(
             findings.len()
         )),
     }
+}
+
+fn run_scenario_init_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!(
+            "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal>]"
+        ));
+    };
+
+    let mut out_path: Option<PathBuf> = None;
+    let mut preset = ScenarioInitPreset::Normal;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--out" => {
+                out_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --out <scenario.yaml>".to_string()
+                })?));
+            }
+            "--preset" => {
+                let raw = args.next().ok_or_else(|| {
+                    "Missing value for --preset <minimal|normal>".to_string()
+                })?;
+                preset = ScenarioInitPreset::parse(&raw).ok_or_else(|| {
+                    format!("Invalid preset `{raw}` (expected `minimal` or `normal`)")
+                })?;
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal>]"
+                ));
+            }
+            other => {
+                return Err(format!("Unknown argument for scenario-init: {other}"));
+            }
+        }
+    }
+
+    let plc_path = PathBuf::from(plc_path);
+    let plc_source =
+        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
+
+    let out_path = out_path.unwrap_or_else(|| default_scenario_init_out_path(&plc_path));
+    if let Some(parent) = out_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!("Failed to create output directory {}: {err}", parent.display())
+            })?;
+        }
+    }
+
+    let hints = collect_scenario_init_hints(&plc_source)?;
+    let yaml = render_scenario_init_yaml(&plc_path, preset, &hints);
+    fs::write(&out_path, yaml)
+        .map_err(|err| format!("Failed to write scenario YAML {}: {err}", out_path.display()))?;
+
+    eprintln!("scenario-init: wrote {}", out_path.display());
+    Ok(())
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
