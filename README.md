@@ -126,6 +126,9 @@ cargo run --release -- sim-plc examples/assembly_station.plc \
 
 # 场景文件支持“设备名写法”（来自 .plc 的 topology），例如 scenarios/normal.yaml 中的：
 #   digital_inputs: { start_button: true }
+# 以及高层语法糖（pulse/hold），可通过 scenario-expand 导出展开后的 inputs：
+#   cargo run --release -- scenario-expand examples/assembly_station.plc \
+#     --scenario examples/scenarios/pulse_hold.yaml --out out/pulse_hold.expanded.yaml
 
 # 无开发板对比门禁（SIL vs virtual-board，一条命令跑完 sim + virtual-board + trace-diff）
 cargo run --release -- no-board-gate examples/assembly_station.plc \

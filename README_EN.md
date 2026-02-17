@@ -126,6 +126,9 @@ cargo run --release -- sim-plc examples/assembly_station.plc \
 
 # Scenario YAML also supports device-name keys (from the .plc topology), e.g. in scenarios/normal.yaml:
 #   digital_inputs: { start_button: true }
+# It also supports higher-level sugar (pulse/hold). You can export the fully expanded `inputs` via:
+#   cargo run --release -- scenario-expand examples/assembly_station.plc \
+#     --scenario examples/scenarios/pulse_hold.yaml --out out/pulse_hold.expanded.yaml
 
 # No-board comparison gate (SIL vs virtual-board; runs sim + virtual-board + trace-diff)
 cargo run --release -- no-board-gate examples/assembly_station.plc \

@@ -52,6 +52,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - Name resolution supports `start_button`, physical aliases (`X10`, `DI10`, `AI0`), and resolves sensors via upstream physical inputs in the topology graph.
 ---
+## [2026-02-17 22:43:29 CST] - US-SCENE-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added optional high-level scenario sugar fields `pulse` and `hold` (expanded at load time into low-level `inputs` events).
+  - Kept deterministic behavior by expanding into a merged, time-sorted `inputs` list; conflicts at the same `at_ms` are detected and reported with both source paths.
+  - Added `scenario-expand` CLI command to export the fully expanded (numeric-ID) scenario YAML for debugging and review.
+  - Added an example sugar scenario under `examples/scenarios/pulse_hold.yaml` and documented the command in README/README_EN.
+  - Added test coverage for pulse/hold expansion, alignment validation, and the scenario-expand CLI output.
+- Files changed
+  - `src/scenario_resolve.rs`, `src/main.rs`, `tests/scenario_expand.rs`, `examples/scenarios/pulse_hold.yaml`, `README.md`, `README_EN.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Implementing sugar as a YAML preprocessor lets us ship new authoring conveniences without changing the stable `sim::Scenario` schema.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Expand/remove sugar keys before `sim::Scenario::from_yaml_str`, otherwise serde will reject unknown top-level fields like `pulse`/`hold`.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `scenario-expand` writes the final expanded scenario with numeric IDs only, which is the canonical backend format used by sim/no-board-gate/bundles.
+---
 ## [2026-02-16 23:33:49 CST] - US-006
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
