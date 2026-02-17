@@ -511,7 +511,7 @@ fn print_usage(program: &str) {
         "  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
     );
     eprintln!(
-        "  {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>]"
+        "  {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
     );
     eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
     eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
@@ -961,8 +961,37 @@ struct BuildMeta<'a> {
     git_commit: &'a str,
     git_dirty: bool,
     runtime_budget: RuntimeBudget,
+    realtime_profile: RealtimeProfile,
     #[serde(skip_serializing_if = "Option::is_none")]
     io_map: Option<IoMap>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RealtimeProfile {
+    tick_ms: u64,
+    thresholds: RealtimeThresholdConfig,
+    overrun_count: u64,
+    p99_exec_us: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RealtimeThresholdConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_p99_exec_us: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_overrun_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GateSummary {
+    schema_version: u32,
+    trace_match: bool,
+    realtime_pass: bool,
+    passed: bool,
+    p99_exec_us: u64,
+    overrun_count: u64,
+    thresholds: RealtimeThresholdConfig,
+    reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1181,6 +1210,15 @@ fn run_build_rp2040_subcommand(
         git_commit: &git_metadata.commit,
         git_dirty: git_metadata.dirty,
         runtime_budget: ir_bundle.runtime_budget.clone(),
+        realtime_profile: RealtimeProfile {
+            tick_ms: 1,
+            thresholds: RealtimeThresholdConfig {
+                max_p99_exec_us: None,
+                max_overrun_count: None,
+            },
+            overrun_count: 0,
+            p99_exec_us: 0,
+        },
         io_map,
     };
     let mut meta_json = serde_json::to_string_pretty(&meta)
@@ -1211,13 +1249,15 @@ fn run_release_bundle_subcommand(
 ) -> Result<(), String> {
     let Some(plc_path) = args.next() else {
         return Err(format!(
-            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>]"
+            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
         ));
     };
 
     let mut scenario_path: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
     let mut io_map_path: Option<PathBuf> = None;
+    let mut max_p99_exec_us: Option<u64> = None;
+    let mut max_overrun_count: Option<u64> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--scenario" => {
@@ -1238,9 +1278,25 @@ fn run_release_bundle_subcommand(
                         "Missing value for --io-map <file>".to_string()
                     })?));
             }
+            "--max-p99-exec-us" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --max-p99-exec-us <us>".to_string())?;
+                max_p99_exec_us = Some(raw.parse::<u64>().map_err(|_| {
+                    format!("Invalid --max-p99-exec-us value (expected u64): {raw}")
+                })?);
+            }
+            "--max-overrun-count" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --max-overrun-count <n>".to_string())?;
+                max_overrun_count = Some(raw.parse::<u64>().map_err(|_| {
+                    format!("Invalid --max-overrun-count value (expected u64): {raw}")
+                })?);
+            }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>]"
+                    "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
                 ));
             }
             other => return Err(format!("Unknown argument for release-bundle: {other}")),
@@ -1249,12 +1305,12 @@ fn run_release_bundle_subcommand(
 
     let scenario_path = scenario_path.ok_or_else(|| {
         format!(
-            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>]"
+            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
         )
     })?;
     let out_dir = out_dir.ok_or_else(|| {
         format!(
-            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>]"
+            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
         )
     })?;
 
@@ -1365,6 +1421,90 @@ fn run_release_bundle_subcommand(
     fs::write(&sim_report_path, sim_report_json)
         .map_err(|err| format!("Failed to write sim report {sim_report_path:?}: {err}"))?;
 
+    let (_board_log_path, board_trace_path, _board_meta_path, tick_timing_path) =
+        write_virtual_board_artifacts(
+            Path::new(&plc_path),
+            &scenario_path,
+            &sil_program,
+            &scenario,
+            &out_dir,
+        )?;
+
+    let board_trace_text = fs::read_to_string(&board_trace_path)
+        .map_err(|err| format!("Failed to read board trace {board_trace_path:?}: {err}"))?;
+    let sil_trace_text = fs::read_to_string(&sil_trace_path)
+        .map_err(|err| format!("Failed to read SIL trace {sil_trace_path:?}: {err}"))?;
+    let sil_events = rust_plc::trace_diff::parse_trace_jsonl(&sil_trace_text)
+        .map_err(|err| format!("Failed to parse SIL trace JSONL: {err}"))?;
+    let board_events = rust_plc::trace_diff::parse_trace_jsonl(&board_trace_text)
+        .map_err(|err| format!("Failed to parse board trace JSONL: {err}"))?;
+    let diff_report = rust_plc::trace_diff::diff_traces(&sil_events, &board_events, 3);
+    let diff_report_path = out_dir.join("diff_report.json");
+    let mut diff_json = serde_json::to_string_pretty(&diff_report)
+        .map_err(|err| format!("Failed to serialize diff report JSON: {err}"))?;
+    diff_json.push('\n');
+    fs::write(&diff_report_path, diff_json)
+        .map_err(|err| format!("Failed to write diff report {diff_report_path:?}: {err}"))?;
+
+    let tick_timing_text = fs::read_to_string(&tick_timing_path)
+        .map_err(|err| format!("Failed to read tick timing {tick_timing_path:?}: {err}"))?;
+    let tick_timing_rows = parse_tick_timing_jsonl(&tick_timing_text)
+        .map_err(|err| format!("Failed to parse tick timing JSONL: {err}"))?;
+    let timing_report = build_timing_report(&tick_timing_rows)
+        .ok_or_else(|| "tick_timing.jsonl is empty; cannot build timing report".to_string())?;
+    let timing_report_path = out_dir.join("timing_report.json");
+    let mut timing_json = serde_json::to_string_pretty(&timing_report)
+        .map_err(|err| format!("Failed to serialize timing report JSON: {err}"))?;
+    timing_json.push('\n');
+    fs::write(&timing_report_path, timing_json)
+        .map_err(|err| format!("Failed to write timing report {timing_report_path:?}: {err}"))?;
+
+    let mut gate_reasons = Vec::new();
+    let mut realtime_pass = true;
+    if !diff_report.is_match {
+        gate_reasons.push(format!(
+            "trace mismatch (tick={:?}, type={:?}, index={:?})",
+            diff_report.first_mismatch_tick, diff_report.mismatch_type, diff_report.mismatch_index
+        ));
+    }
+    if let Some(limit) = max_p99_exec_us {
+        if timing_report.exec_us_p99 > limit {
+            realtime_pass = false;
+            gate_reasons.push(format!(
+                "p99 exec_us={} exceeds threshold {}",
+                timing_report.exec_us_p99, limit
+            ));
+        }
+    }
+    if let Some(limit) = max_overrun_count {
+        if timing_report.overrun_count > limit {
+            realtime_pass = false;
+            gate_reasons.push(format!(
+                "overrun_count={} exceeds threshold {}",
+                timing_report.overrun_count, limit
+            ));
+        }
+    }
+    let gate_summary = GateSummary {
+        schema_version: 1,
+        trace_match: diff_report.is_match,
+        realtime_pass,
+        passed: gate_reasons.is_empty(),
+        p99_exec_us: timing_report.exec_us_p99,
+        overrun_count: timing_report.overrun_count,
+        thresholds: RealtimeThresholdConfig {
+            max_p99_exec_us,
+            max_overrun_count,
+        },
+        reasons: gate_reasons,
+    };
+    let gate_summary_path = out_dir.join("gate_summary.json");
+    let mut gate_summary_json = serde_json::to_string_pretty(&gate_summary)
+        .map_err(|err| format!("Failed to serialize gate summary JSON: {err}"))?;
+    gate_summary_json.push('\n');
+    fs::write(&gate_summary_path, gate_summary_json)
+        .map_err(|err| format!("Failed to write gate summary {gate_summary_path:?}: {err}"))?;
+
     let generated_at = time::OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string());
@@ -1379,6 +1519,15 @@ fn run_release_bundle_subcommand(
         git_commit: &git_metadata.commit,
         git_dirty: git_metadata.dirty,
         runtime_budget: ir_bundle.runtime_budget.clone(),
+        realtime_profile: RealtimeProfile {
+            tick_ms: scenario.tick_ms,
+            thresholds: RealtimeThresholdConfig {
+                max_p99_exec_us,
+                max_overrun_count,
+            },
+            overrun_count: timing_report.overrun_count,
+            p99_exec_us: timing_report.exec_us_p99,
+        },
         io_map,
     };
     let mut meta_json = serde_json::to_string_pretty(&meta)
@@ -1397,6 +1546,10 @@ fn run_release_bundle_subcommand(
         verification_report_path,
         sil_trace_path,
         sim_report_path,
+        tick_timing_path,
+        timing_report_path,
+        gate_summary_path,
+        diff_report_path,
         build_meta_path,
     ];
     artifact_paths.sort_by(|a, b| a.file_name().cmp(&b.file_name()));

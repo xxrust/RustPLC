@@ -126,6 +126,9 @@ fn release_bundle_emits_manifest_with_consistent_hashes() {
         "io_map.template.toml",
         "sil_trace.jsonl",
         "sim_report.json",
+        "tick_timing.jsonl",
+        "timing_report.json",
+        "gate_summary.json",
         "verification_report.json",
         "build_meta.json",
     ] {
@@ -159,5 +162,21 @@ fn release_bundle_emits_manifest_with_consistent_hashes() {
             .and_then(|v| v.as_bool())
             .is_some(),
         "build_meta should include git_dirty"
+    );
+    assert!(
+        build_meta
+            .get("realtime_profile")
+            .and_then(|v| v.as_object())
+            .is_some(),
+        "build_meta should include realtime_profile"
+    );
+    assert_eq!(
+        build_meta["realtime_profile"]["tick_ms"].as_u64(),
+        Some(10),
+        "realtime_profile tick_ms should come from scenario"
+    );
+    assert!(
+        build_meta["realtime_profile"]["overrun_count"].as_u64().is_some(),
+        "realtime_profile should include overrun_count"
     );
 }

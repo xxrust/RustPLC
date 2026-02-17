@@ -27,6 +27,7 @@
 - For embedded workspace crates, keep a host-stub `main()` behind `cfg(not(target_os = "none"))` so `cargo test --workspace` stays green while firmware code is `cfg(target_os = "none")`.
 - In embedded crates with host-stub builds, gate firmware-only helpers with `#[cfg(any(test, target_os = "none"))]` so `cargo check --workspace` stays warning-clean on host.
 - Release-style artifacts should include a `manifest.json` that hashes the exact on-disk files (plus `size_bytes`) so integration tests can verify integrity deterministically.
+- When release-bundle adds new evidence artifacts, add them to both manifest hashing and integration-test required lists in the same change to keep delivery contracts auditable.
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
@@ -717,4 +718,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Keep “evidence fields” (like `budget_time_estimate`) inside the serialized report object so CI can gate on JSON rather than stderr parsing.
   - Gotchas encountered (e.g., don't forget to update Z when changing W)
     - When warnings depend on computed fields, update the computed fields before serializing the report so evidence and gate behavior don't diverge.
+---
+## [2026-02-17 14:32:42 CST] - US-RT-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended `release-bundle` to include realtime evidence artifacts: `tick_timing.jsonl`, `timing_report.json`, `gate_summary.json` (plus `diff_report.json` for trace gate context).
+  - Added release-time gate summary generation from SIL-vs-virtual-board trace diff and timing thresholds, without changing release-bundle’s success semantics.
+  - Extended `build_meta.json` with `realtime_profile` (tick_ms, thresholds, p99_exec_us, overrun_count).
+  - Updated release-bundle integration test to validate new artifacts and realtime profile presence.
+- Files changed
+  - `src/main.rs`, `tests/release_bundle.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., this codebase uses X for Y)
+    - Bundle commands should include both raw telemetry (`tick_timing.jsonl`) and interpreted summaries (`timing_report.json`, `gate_summary.json`) so audit and debugging workflows both work offline.
+  - Gotchas encountered (e.g., don't forget to update Z when changing W)
+    - Any new bundle artifact must be added to manifest hashing; otherwise integrity checks in tests will drift from actual deliverables.
 ---
