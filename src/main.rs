@@ -365,6 +365,8 @@ impl ScenarioInitPreset {
 struct ScenarioInitInputHints {
     digital_ids: Vec<u16>,
     analog_ids: Vec<u16>,
+    physical_digital_ids: Vec<u16>,
+    physical_analog_ids: Vec<u16>,
     digital_aliases: BTreeMap<u16, Vec<String>>,
     analog_aliases: BTreeMap<u16, Vec<String>>,
 }
@@ -473,9 +475,14 @@ fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHint
         used_ai.extend(analog_aliases.keys().copied());
     }
 
+    let physical_digital_ids = digital_aliases.keys().copied().collect::<Vec<_>>();
+    let physical_analog_ids = analog_aliases.keys().copied().collect::<Vec<_>>();
+
     Ok(ScenarioInitInputHints {
         digital_ids: used_di.into_iter().collect(),
         analog_ids: used_ai.into_iter().collect(),
+        physical_digital_ids,
+        physical_analog_ids,
         digital_aliases,
         analog_aliases,
     })
@@ -583,6 +590,319 @@ fn render_scenario_init_yaml(
         }
     }
     out
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScenarioValidateSeverity {
+    Error,
+    Warn,
+}
+
+impl ScenarioValidateSeverity {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Error => "ERROR",
+            Self::Warn => "WARN",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ScenarioValidateFinding {
+    severity: ScenarioValidateSeverity,
+    tag: String,
+    message: String,
+    suggestion: Option<String>,
+}
+
+impl ScenarioValidateFinding {
+    fn error(tag: impl Into<String>, message: impl Into<String>, suggestion: Option<String>) -> Self {
+        Self {
+            severity: ScenarioValidateSeverity::Error,
+            tag: tag.into(),
+            message: message.into(),
+            suggestion,
+        }
+    }
+
+    fn warn(tag: impl Into<String>, message: impl Into<String>, suggestion: Option<String>) -> Self {
+        Self {
+            severity: ScenarioValidateSeverity::Warn,
+            tag: tag.into(),
+            message: message.into(),
+            suggestion,
+        }
+    }
+}
+
+fn print_scenario_validate_findings(findings: &[ScenarioValidateFinding]) {
+    let errors = findings
+        .iter()
+        .filter(|f| f.severity == ScenarioValidateSeverity::Error)
+        .count();
+    let warnings = findings
+        .iter()
+        .filter(|f| f.severity == ScenarioValidateSeverity::Warn)
+        .count();
+
+    if errors == 0 && warnings == 0 {
+        eprintln!("scenario-validate: PASS (no issues)");
+        return;
+    }
+    if errors == 0 {
+        eprintln!("scenario-validate: PASS ({warnings} warning(s))");
+    } else {
+        eprintln!("scenario-validate: FAIL ({errors} error(s), {warnings} warning(s))");
+    }
+
+    for finding in findings {
+        eprintln!(
+            "{} [{}] {}",
+            finding.severity.label(),
+            finding.tag,
+            finding.message
+        );
+        if let Some(suggestion) = &finding.suggestion {
+            eprintln!("  Fix:\n{suggestion}");
+        }
+    }
+}
+
+fn collect_scenario_referenced_inputs(
+    scenario: &sim::Scenario,
+) -> (Vec<(String, u16)>, Vec<(String, u16)>) {
+    let mut digital = Vec::<(String, u16)>::new();
+    let mut analog = Vec::<(String, u16)>::new();
+
+    for (event_idx, event) in scenario.inputs.iter().enumerate() {
+        for (&id, _) in &event.set.digital_inputs {
+            digital.push((format!("inputs[{event_idx}].set.digital_inputs.{id}"), id));
+        }
+        for (&id, _) in &event.set.analog_inputs {
+            analog.push((format!("inputs[{event_idx}].set.analog_inputs.{id}"), id));
+        }
+    }
+    for (idx, burst) in scenario.digital_bursts.iter().enumerate() {
+        digital.push((format!("digital_bursts[{idx}].target"), burst.target));
+    }
+    for (idx, fault) in scenario.faults.iter().enumerate() {
+        digital.push((
+            format!("faults[{idx}].sensor_stuck.target"),
+            fault.sensor_stuck.target,
+        ));
+    }
+
+    (digital, analog)
+}
+
+fn collect_initial_digital_values(scenario: &sim::Scenario) -> BTreeMap<u16, bool> {
+    let mut values = BTreeMap::<u16, bool>::new();
+    for event in &scenario.inputs {
+        if event.at_ms != 0 {
+            continue;
+        }
+        for (&id, &value) in &event.set.digital_inputs {
+            values.insert(id, value);
+        }
+    }
+
+    // Faults are applied after scripted inputs for the same tick.
+    for fault in &scenario.faults {
+        if fault.sensor_stuck.at_ms != 0 {
+            continue;
+        }
+        values.insert(fault.sensor_stuck.target, fault.sensor_stuck.value);
+    }
+    values
+}
+
+fn aliases_contain_keyword(aliases: &[String], keyword: &str) -> bool {
+    aliases
+        .iter()
+        .any(|name| name.to_ascii_lowercase().contains(keyword))
+}
+
+fn first_alias(aliases: &BTreeMap<u16, Vec<String>>, id: u16) -> Option<String> {
+    aliases
+        .get(&id)
+        .and_then(|names| names.first())
+        .map(|s| s.to_string())
+}
+
+fn has_later_digital_false(scenario: &sim::Scenario, id: u16) -> bool {
+    scenario.inputs.iter().any(|event| {
+        event.at_ms > 0
+            && event
+                .set
+                .digital_inputs
+                .get(&id)
+                .copied()
+                .map(|value| !value)
+                .unwrap_or(false)
+    }) || scenario.faults.iter().any(|fault| {
+        fault.sensor_stuck.target == id && fault.sensor_stuck.at_ms > 0 && !fault.sensor_stuck.value
+    })
+}
+
+fn validate_scenario_against_plc(
+    plc_path: &Path,
+    scenario_path: &Path,
+    scenario: &sim::Scenario,
+    hints: &ScenarioInitInputHints,
+) -> Vec<ScenarioValidateFinding> {
+    let mut findings = Vec::<ScenarioValidateFinding>::new();
+
+    if scenario.duration_ms == 0 {
+        findings.push(ScenarioValidateFinding::error(
+            "duration_ms",
+            "must be > 0",
+            Some("duration_ms: 1000".to_string()),
+        ));
+    }
+
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    if let Err(err) = scenario.apply_to_simio(&mut io) {
+        if let sim::ScenarioError::Validation { path, message } = err {
+            let tick_suggestion = if path.ends_with(".at_ms") {
+                format!(
+                    "Use multiples of tick_ms ({}), e.g. 0, {}, {}",
+                    scenario.tick_ms,
+                    scenario.tick_ms,
+                    scenario.tick_ms.saturating_mul(2)
+                )
+            } else {
+                "Check the scenario field value and retry".to_string()
+            };
+            findings.push(ScenarioValidateFinding::error(path, message, Some(tick_suggestion)));
+        }
+    }
+
+    let valid_di = if !hints.physical_digital_ids.is_empty() {
+        hints.physical_digital_ids.iter().copied().collect::<BTreeSet<_>>()
+    } else {
+        hints.digital_ids.iter().copied().collect::<BTreeSet<_>>()
+    };
+    let valid_ai = if !hints.physical_analog_ids.is_empty() {
+        hints.physical_analog_ids.iter().copied().collect::<BTreeSet<_>>()
+    } else {
+        hints.analog_ids.iter().copied().collect::<BTreeSet<_>>()
+    };
+
+    let (digital_refs, analog_refs) = collect_scenario_referenced_inputs(scenario);
+    let plc_display = display_path_relative_to_cwd(plc_path);
+    let scenario_display = display_path_relative_to_cwd(scenario_path);
+    let skeleton_cmd = format!(
+        "  rust_plc scenario-init {} --out {} --preset normal",
+        plc_display, scenario_display
+    );
+
+    for (path, id) in digital_refs {
+        if !valid_di.is_empty() && !valid_di.contains(&id) {
+            let known = valid_di.iter().copied().collect::<Vec<_>>();
+            let known_text = if known.is_empty() {
+                "none".to_string()
+            } else {
+                known
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            findings.push(ScenarioValidateFinding::error(
+                path,
+                format!("DI{id} does not exist in `{plc_display}` (known DI ids: {known_text})"),
+                Some(format!(
+                    "Regenerate a PLC-matched scenario skeleton:\n{skeleton_cmd}"
+                )),
+            ));
+        }
+    }
+    for (path, id) in analog_refs {
+        if !valid_ai.is_empty() && !valid_ai.contains(&id) {
+            let known = valid_ai.iter().copied().collect::<Vec<_>>();
+            let known_text = if known.is_empty() {
+                "none".to_string()
+            } else {
+                known
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            findings.push(ScenarioValidateFinding::error(
+                path,
+                format!("AI{id} does not exist in `{plc_display}` (known AI ids: {known_text})"),
+                Some(format!(
+                    "Regenerate a PLC-matched scenario skeleton:\n{skeleton_cmd}"
+                )),
+            ));
+        }
+    }
+
+    let initial = collect_initial_digital_values(scenario);
+    let mut start_ids = hints
+        .digital_aliases
+        .iter()
+        .filter_map(|(&id, aliases)| {
+            if aliases_contain_keyword(aliases, "start") {
+                Some(id)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    start_ids.sort_unstable();
+    start_ids.dedup();
+
+    for id in start_ids {
+        if initial.get(&id).copied().unwrap_or(false) && !has_later_digital_false(scenario, id) {
+            let label = first_alias(&hints.digital_aliases, id)
+                .map(|name| format!("{name} (DI{id})"))
+                .unwrap_or_else(|| format!("DI{id}"));
+            findings.push(ScenarioValidateFinding::warn(
+                "risk.start_button_held",
+                format!("{label} starts true and is never released; this can cause same-tick loops"),
+                Some(format!(
+                    "inputs:\n  - at_ms: 0\n    set:\n      digital_inputs:\n        {id}: true\n  - at_ms: {}\n    set:\n      digital_inputs:\n        {id}: false",
+                    scenario.tick_ms
+                )),
+            ));
+        }
+    }
+
+    let mut sensor_ids = hints
+        .digital_aliases
+        .iter()
+        .filter_map(|(&id, aliases)| {
+            if aliases_contain_keyword(aliases, "sensor") {
+                Some(id)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    sensor_ids.sort_unstable();
+    sensor_ids.dedup();
+
+    if !sensor_ids.is_empty()
+        && sensor_ids
+            .iter()
+            .all(|id| initial.get(id).copied().unwrap_or(false))
+    {
+        let preview = sensor_ids.iter().take(3).copied().collect::<Vec<_>>();
+        let mut snippet = String::from("inputs:\n  - at_ms: 0\n    set:\n      digital_inputs:\n");
+        for id in preview {
+            snippet.push_str(&format!("        {id}: false\n"));
+        }
+        snippet.push_str("  # add later `at_ms` edges to set each sensor true when reached");
+        findings.push(ScenarioValidateFinding::warn(
+            "risk.sensors_all_true_at_start",
+            "all known sensor inputs start true; waits/guards may be satisfied immediately".to_string(),
+            Some(snippet),
+        ));
+    }
+
+    findings
 }
 
 fn scenario_mismatch_hint_for_example(
@@ -726,6 +1046,13 @@ fn main() {
     }
     if first == "scenario-init" {
         if let Err(msg) = run_scenario_init_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if first == "scenario-validate" {
+        if let Err(msg) = run_scenario_validate_subcommand(&program, args) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
@@ -1006,6 +1333,9 @@ fn print_usage(program: &str) {
     eprintln!(
         "  {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal>]"
     );
+    eprintln!(
+        "  {program} scenario-validate <file.plc> --scenario <scenario.yaml>"
+    );
     eprintln!();
     eprintln!("Budget options (also configurable via env vars):");
     eprintln!("  --budget-max-actions-per-transition <n>");
@@ -1146,6 +1476,154 @@ fn run_scenario_init_subcommand(
         .map_err(|err| format!("Failed to write scenario YAML {}: {err}", out_path.display()))?;
 
     eprintln!("scenario-init: wrote {}", out_path.display());
+    Ok(())
+}
+
+fn run_scenario_validate_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!(
+            "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml>"
+        ));
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --scenario <scenario.yaml>".to_string()
+                })?));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml>"
+                ));
+            }
+            other => {
+                return Err(format!("Unknown argument for scenario-validate: {other}"));
+            }
+        }
+    }
+
+    let Some(scenario_path) = scenario_path else {
+        return Err("Missing required argument: --scenario <scenario.yaml>".to_string());
+    };
+
+    let plc_path = PathBuf::from(plc_path);
+    let plc_source =
+        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
+
+    let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
+    let scenario = parse_scenario_yaml(&scenario_yaml)?;
+
+    let hints = collect_scenario_init_hints(&plc_source)?;
+    let mut findings = validate_scenario_against_plc(&plc_path, &scenario_path, &scenario, &hints);
+
+    // If the scenario was generated by `scenario-init`, it includes a header we can sanity-check.
+    let header_source = scenario_yaml
+        .lines()
+        .take(40)
+        .find_map(|line| line.strip_prefix("# Source PLC: ").map(|s| s.trim().to_string()));
+    if let (Some(expected), Some(actual)) = (
+        header_source.as_deref(),
+        plc_path.file_name().and_then(|s| s.to_str()),
+    ) {
+        if expected != actual {
+            findings.push(ScenarioValidateFinding::warn(
+                "risk.scenario_plc_mismatch",
+                format!(
+                    "scenario header says it was generated from `{expected}`, but you're validating against `{actual}`"
+                ),
+                Some(format!(
+                    "Regenerate a PLC-matched skeleton:\n  rust_plc scenario-init {} --out {} --preset normal",
+                    display_path_relative_to_cwd(&plc_path),
+                    display_path_relative_to_cwd(&scenario_path)
+                )),
+            ));
+        }
+    }
+
+    let has_error = findings
+        .iter()
+        .any(|f| f.severity == ScenarioValidateSeverity::Error);
+
+    if !has_error {
+        let runtime_program =
+            compile_plc_to_runtime_program(&plc_source, scenario.tick_ms).map_err(|e| {
+                format!("scenario-validate: failed to compile PLC to runtime program: {e}")
+            })?;
+        let (num_di, num_do, num_ai, num_ao) =
+            io_sizes_for_program_and_scenario(&runtime_program, &scenario);
+        let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+
+        // Re-apply the scenario onto the IO we will use for probing.
+        if let Err(err) = scenario.apply_to_simio(&mut io) {
+            findings.push(ScenarioValidateFinding::error(
+                "scenario.apply",
+                err.to_string(),
+                Some("Fix the scenario YAML errors and retry.".to_string()),
+            ));
+        } else {
+            let mut rt = runtime_core::Runtime::new(&runtime_program)
+                .map_err(|err| format!("scenario-validate: runtime init failed: {err:?}"))?;
+
+            // Probe the early ticks only; if a same-tick loop exists, it should surface quickly.
+            let probe_ticks = scenario.duration_ticks().min(50);
+            for _ in 0..probe_ticks {
+                if let Err(err) = rt.tick_with_trace(&mut io, |_| {}) {
+                    let sim_err = sim::SimRunError::from(err);
+                    let mut suggestion = String::new();
+
+                    if let Some(tip) = scenario_mismatch_hint_for_example(
+                        plc_path.to_string_lossy().as_ref(),
+                        &scenario_path,
+                        &sim_err,
+                        "sim-plc",
+                    ) {
+                        suggestion.push_str(&tip);
+                        suggestion.push('\n');
+                    }
+
+                    suggestion.push_str(
+                        "If this is caused by inputs being satisfied immediately, try pulsing start_button and scripting sensor edges over time.\n\
+Example:\n\
+inputs:\n\
+  - at_ms: 0\n\
+    set:\n\
+      digital_inputs:\n\
+        10: true\n\
+  - at_ms: 50\n\
+    set:\n\
+      digital_inputs:\n\
+        10: false\n",
+                    );
+
+                    findings.push(ScenarioValidateFinding::error(
+                        "runtime.probe",
+                        sim_err.to_string(),
+                        Some(suggestion),
+                    ));
+                    break;
+                }
+                if is_halted(&rt, &runtime_program) {
+                    break;
+                }
+            }
+        }
+    }
+
+    print_scenario_validate_findings(&findings);
+
+    if findings
+        .iter()
+        .any(|f| f.severity == ScenarioValidateSeverity::Error)
+    {
+        return Err("scenario-validate failed".to_string());
+    }
+
     Ok(())
 }
 
