@@ -11,6 +11,7 @@
 - For JSONL contracts that are diff-sensitive, serialize typed structs (not maps) and keep canonical field declaration order so snapshots stay stable.
 - For percentile-based gates/reports, use one deterministic nearest-rank rule and lock it with unit tests so threshold behavior stays stable across refactors.
 - For `crates/sim` plant-style dynamics, keep the plant as a deterministic tick-step that *returns* input updates, and call it from `SimIo::advance_tick()` (after applying scenario inputs) to avoid borrow-checker pitfalls with `&mut self` callbacks.
+- For scenario-side burst generators, enforce tick alignment on `at_ms/period_ms/active_ms` at parse time so replay behavior stays deterministic and seed-independent.
 - For discrete dead-time models, use a fixed-length FIFO with `delay_ticks = ceil(dead_time_ms / tick_ms)` so response timing stays deterministic across runs.
 - Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
 - For human-friendly YAML parse errors, use `serde_path_to_error` so errors include a field path (e.g., `inputs[0].set.digital_inputs`).
@@ -733,4 +734,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Bundle commands should include both raw telemetry (`tick_timing.jsonl`) and interpreted summaries (`timing_report.json`, `gate_summary.json`) so audit and debugging workflows both work offline.
   - Gotchas encountered (e.g., don't forget to update Z when changing W)
     - Any new bundle artifact must be added to manifest hashing; otherwise integrity checks in tests will drift from actual deliverables.
+---
+## [2026-02-17 14:40:45 CST] - US-RT-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended `sim::Scenario` with deterministic `digital_bursts` support (start/period/count/active_ms/target), including strict tick alignment validation and replay-safe expansion into scheduled inputs.
+  - Added scenario unit coverage for burst + fault overlay determinism.
+  - Added reusable high-load/safe fixtures under `examples/realtime_stress/` and an integration regression test that:
+    - compares safe vs overload timing-report p99 behavior,
+    - verifies no-board-gate pass/fail under the same threshold,
+    - verifies same-seed deterministic output consistency.
+- Files changed
+  - `crates/sim/src/scenario.rs`, `tests/realtime_stress.rs`, `examples/realtime_stress/stress_case.plc`, `examples/realtime_stress/scenarios/safe.yaml`, `examples/realtime_stress/scenarios/overload.yaml`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., this codebase uses X for Y)
+    - Keep stress fixtures in `examples/` and have integration tests consume them directly so docs/examples/tests stay in sync.
+  - Gotchas encountered (e.g., don't forget to update Z when changing W)
+    - Timeout `goto` targets are task-scoped in this DSL flow; stress fixtures should avoid step-only timeout targets.
 ---

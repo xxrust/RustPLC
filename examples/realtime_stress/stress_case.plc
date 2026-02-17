@@ -1,0 +1,22 @@
+[topology]
+device X0: digital_input
+device Y0: digital_output
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_hi:
+        wait: X0 == true
+        timeout: 1ms -> goto main
+    step log_1:
+        action: log "h1"
+    step log_2:
+        action: log "h2"
+    step log_3:
+        action: log "h3"
+    step wait_low:
+        wait: X0 == false
+        timeout: 1ms -> goto main
+    on_complete: goto main
+

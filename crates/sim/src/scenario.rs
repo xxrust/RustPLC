@@ -43,6 +43,10 @@ pub struct Scenario {
     #[serde(default)]
     pub inputs: Vec<InputEvent>,
 
+    /// Deterministic high-frequency burst inputs.
+    #[serde(default)]
+    pub digital_bursts: Vec<DigitalBurstEvent>,
+
     /// Scripted fault injections over time.
     #[serde(default)]
     pub faults: Vec<FaultEvent>,
@@ -104,6 +108,10 @@ impl Scenario {
             ev.set.apply(io, Tick(tick));
         }
 
+        for burst in &self.digital_bursts {
+            burst.apply(io, self.tick_ms, self.duration_ms)?;
+        }
+
         for (idx, fault) in self.faults.iter().enumerate() {
             let (at_ms, path_prefix) = (fault.at_ms(), format!("faults[{idx}]"));
             if at_ms >= self.duration_ms && self.duration_ms != 0 {
@@ -133,6 +141,9 @@ impl Scenario {
                 path: "tick_ms".to_string(),
                 message: "must be > 0".to_string(),
             });
+        }
+        for (idx, burst) in self.digital_bursts.iter().enumerate() {
+            burst.validate(self.tick_ms, self.duration_ms, idx)?;
         }
         Ok(())
     }
@@ -192,9 +203,117 @@ pub struct SensorStuckFault {
     pub value: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct DigitalBurstEvent {
+    pub at_ms: u64,
+    pub period_ms: u64,
+    pub count: u32,
+    pub target: u16,
+    pub active_ms: u64,
+    #[serde(default = "default_burst_active_value")]
+    pub active_value: bool,
+    #[serde(default = "default_burst_inactive_value")]
+    pub inactive_value: bool,
+}
+
+fn default_burst_active_value() -> bool {
+    true
+}
+
+fn default_burst_inactive_value() -> bool {
+    false
+}
+
+impl DigitalBurstEvent {
+    fn validate(&self, tick_ms: u64, duration_ms: u64, idx: usize) -> Result<(), ScenarioError> {
+        if self.count == 0 {
+            return Err(ScenarioError::Validation {
+                path: format!("digital_bursts[{idx}].count"),
+                message: "must be > 0".to_string(),
+            });
+        }
+        if self.period_ms == 0 {
+            return Err(ScenarioError::Validation {
+                path: format!("digital_bursts[{idx}].period_ms"),
+                message: "must be > 0".to_string(),
+            });
+        }
+        if self.active_ms == 0 {
+            return Err(ScenarioError::Validation {
+                path: format!("digital_bursts[{idx}].active_ms"),
+                message: "must be > 0".to_string(),
+            });
+        }
+        if self.active_ms > self.period_ms {
+            return Err(ScenarioError::Validation {
+                path: format!("digital_bursts[{idx}].active_ms"),
+                message: format!("must be <= period_ms ({})", self.period_ms),
+            });
+        }
+        if self.at_ms % tick_ms != 0 {
+            return Err(ScenarioError::Validation {
+                path: format!("digital_bursts[{idx}].at_ms"),
+                message: format!("must be aligned to tick_ms ({tick_ms}); got {}", self.at_ms),
+            });
+        }
+        if self.period_ms % tick_ms != 0 {
+            return Err(ScenarioError::Validation {
+                path: format!("digital_bursts[{idx}].period_ms"),
+                message: format!(
+                    "must be aligned to tick_ms ({tick_ms}); got {}",
+                    self.period_ms
+                ),
+            });
+        }
+        if self.active_ms % tick_ms != 0 {
+            return Err(ScenarioError::Validation {
+                path: format!("digital_bursts[{idx}].active_ms"),
+                message: format!(
+                    "must be aligned to tick_ms ({tick_ms}); got {}",
+                    self.active_ms
+                ),
+            });
+        }
+        if duration_ms != 0 && self.at_ms >= duration_ms {
+            return Err(ScenarioError::Validation {
+                path: format!("digital_bursts[{idx}].at_ms"),
+                message: format!("must be < duration_ms ({duration_ms})"),
+            });
+        }
+        Ok(())
+    }
+
+    fn apply(&self, io: &mut SimIo, tick_ms: u64, duration_ms: u64) -> Result<(), ScenarioError> {
+        let period_ticks = self.period_ms / tick_ms;
+        let active_ticks = self.active_ms / tick_ms;
+        let first_tick = self.at_ms / tick_ms;
+        let target = DigitalInputId(self.target);
+
+        for pulse_idx in 0..self.count as u64 {
+            let start_tick = first_tick.saturating_add(pulse_idx.saturating_mul(period_ticks));
+            let start_ms = start_tick.saturating_mul(tick_ms);
+            if duration_ms != 0 && start_ms >= duration_ms {
+                break;
+            }
+            io.schedule_digital_input(Tick(start_tick), target, self.active_value);
+
+            if active_ticks < period_ticks {
+                let end_tick = start_tick.saturating_add(active_ticks);
+                let end_ms = end_tick.saturating_mul(tick_ms);
+                if duration_ms == 0 || end_ms < duration_ms {
+                    io.schedule_digital_input(Tick(end_tick), target, self.inactive_value);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use io_traits::Io;
     use io_traits::DigitalOutputId;
     use runtime_core::{Action, Instr, Program, Runtime, Step, StepId, Task};
 
@@ -300,5 +419,49 @@ faults:
         assert_eq!(scenario.duration_ms, 30);
         assert_eq!(scenario.inputs.len(), 1);
         assert_eq!(scenario.faults.len(), 1);
+    }
+
+    #[test]
+    fn scenario_yaml_supports_digital_burst_with_fault_overlay_deterministically() {
+        let yaml = r#"
+seed: 9
+tick_ms: 1
+duration_ms: 8
+digital_bursts:
+  - at_ms: 0
+    period_ms: 2
+    count: 4
+    target: 0
+    active_ms: 1
+faults:
+  - sensor_stuck:
+      at_ms: 5
+      target: 0
+      value: false
+"#;
+
+        fn run_once(yaml: &str) -> Vec<bool> {
+            let scenario = Scenario::from_yaml_str(yaml).expect("scenario should parse");
+            let mut io = SimIo::new(1, 0, 0, 0);
+            scenario
+                .apply_to_simio(&mut io)
+                .expect("scenario apply should succeed");
+
+            let mut observed = Vec::new();
+            for _ in 0..scenario.duration_ticks() {
+                observed.push(io.read_digital_input(DigitalInputId(0)));
+                io.advance_tick();
+            }
+            observed
+        }
+
+        let observed_a = run_once(yaml);
+        let observed_b = run_once(yaml);
+
+        assert_eq!(observed_a, observed_b, "burst schedule should be deterministic");
+        assert_eq!(
+            observed_a,
+            vec![true, false, true, false, true, false, false, false]
+        );
     }
 }

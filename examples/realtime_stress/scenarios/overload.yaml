@@ -1,0 +1,15 @@
+seed: 11
+tick_ms: 1
+duration_ms: 60
+digital_bursts:
+  - at_ms: 1
+    period_ms: 1
+    count: 45
+    target: 0
+    active_ms: 1
+faults:
+  - sensor_stuck:
+      at_ms: 30
+      target: 0
+      value: false
+
