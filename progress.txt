@@ -8,6 +8,7 @@
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
 - For reusable `.plc` templates meant to run via `runtime_bridge`, include explicit physical IO devices (`X<N>`, `Y<N>`) plus logical devices connected via `connected_to`, so IO IDs resolve deterministically.
 - For CLI-driven docs, add a doc consistency test that checks required commands are present both in the markdown playbook and in `rust_plc` usage output.
+- For JSONL contracts that are diff-sensitive, serialize typed structs (not maps) and keep canonical field declaration order so snapshots stay stable.
 - For `crates/sim` plant-style dynamics, keep the plant as a deterministic tick-step that *returns* input updates, and call it from `SimIo::advance_tick()` (after applying scenario inputs) to avoid borrow-checker pitfalls with `&mut self` callbacks.
 - For discrete dead-time models, use a fixed-length FIFO with `delay_ticks = ceil(dead_time_ms / tick_ms)` so response timing stays deterministic across runs.
 - Waveform exports are deterministic by construction: VCD assigns idcodes in a fixed order (`di<N>` then `do<N>`) and uses timestamps `tick * tick_ms` with `$timescale 1ms`.
@@ -640,4 +641,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - For delivery docs, prefer listing concrete artifact paths (report/trace/log/manifest) so CI gates can be reproduced locally without guesswork.
   - Gotchas encountered (e.g., do not forget to update Z when changing W)
     - rust_plc usage text is printed to stderr; doc-consistency tests should capture stderr (not stdout) when checking command availability.
+---
+## [2026-02-17 14:05:34 CST] - US-RT-001
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Added a reusable tick-timing contract module (tick_timing) with JSONL parser/serializer and stable field order.
+  - Extended virtual-board artifact generation to emit tick_timing.jsonl rows with tick/ts_start_us/ts_end_us/exec_us/slack_us/overrun.
+  - Kept existing board.log + board_trace.jsonl behavior unchanged for backward compatibility.
+  - Added integration assertions that tick_timing.jsonl exists, parses, and has monotonic tick order with consistent timing fields.
+- Files changed
+  - src/tick_timing.rs, src/lib.rs, src/main.rs, tests/virtual_board.rs, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., this codebase uses X for Y)
+    - For artifact-style JSONL contracts, expose parse/serialize helpers in src/ so CLI commands and integration tests validate the same schema path.
+  - Gotchas encountered (e.g., don't forget to update Z when changing W)
+    - Changing write_virtual_board_artifacts() return shape requires updating both direct callers (virtual-board and no-board-gate).
 ---

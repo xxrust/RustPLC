@@ -20,6 +20,7 @@ use rust_plc::sequence_lint::{
     CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
 };
 use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
+use rust_plc::tick_timing::{TickTimingSample, to_tick_timing_jsonl};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -2087,7 +2088,7 @@ fn run_no_board_gate_subcommand(
     fs::write(&sil_trace_path, sil_run.trace.into_string())
         .map_err(|err| format!("Failed to write SIL trace file {sil_trace_path:?}: {err}"))?;
 
-    let (_, board_trace_path, _) = write_virtual_board_artifacts(
+    let (_, board_trace_path, _, _) = write_virtual_board_artifacts(
         Path::new(&plc_path),
         &board_scenario_path,
         &program,
@@ -2243,7 +2244,7 @@ fn write_virtual_board_artifacts(
     program: &Program<'_>,
     scenario: &sim::Scenario,
     out_dir: &Path,
-) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(program, scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
     scenario
@@ -2251,13 +2252,18 @@ fn write_virtual_board_artifacts(
         .map_err(|e| format!("scenario apply failed: {e}"))?;
     let mut rt =
         runtime_core::Runtime::new(program).map_err(|e| format!("runtime init failed: {e:?}"))?;
+    let tick_period_us = scenario.tick_ms.saturating_mul(1000);
 
     let board_log = std::cell::RefCell::new(String::new());
     board_log.borrow_mut().push_str("boot ok\n");
+    let mut tick_timing_rows: Vec<TickTimingSample> = Vec::new();
 
     for _ in 0..scenario.duration_ticks() {
         let tick = io.tick().0;
         let ts_ms = tick.saturating_mul(scenario.tick_ms);
+        let ts_start_us = tick.saturating_mul(tick_period_us);
+        let transition_count = std::cell::Cell::new(0u64);
+        let log_count = std::cell::Cell::new(0u64);
         board_log
             .borrow_mut()
             .push_str(&format!("TICK tick={tick} ts_ms={ts_ms}\n"));
@@ -2265,6 +2271,7 @@ fn write_virtual_board_artifacts(
         rt.tick_with_trace_and_logs(
             &mut io,
             |e| {
+                transition_count.set(transition_count.get().saturating_add(1));
                 let ts_ms = e.tick.0.saturating_mul(scenario.tick_ms);
                 board_log.borrow_mut().push_str(&format!(
                     "TRACE tick={} task={} from={} to={} reason={} ts_ms={}\n",
@@ -2277,6 +2284,7 @@ fn write_virtual_board_artifacts(
                 ));
             },
             |log| {
+                log_count.set(log_count.get().saturating_add(1));
                 let ts_ms = log.tick.0.saturating_mul(scenario.tick_ms);
                 board_log.borrow_mut().push_str(&format!(
                     "LOG tick={} task={} step={} msg_id={} msg={} ts_ms={}\n",
@@ -2285,6 +2293,28 @@ fn write_virtual_board_artifacts(
             },
         )
         .map_err(|e| format!("runtime tick failed: {e:?}"))?;
+
+        // Keep virtual-board timing deterministic for stable no-board regressions.
+        let exec_us = transition_count
+            .get()
+            .saturating_mul(40)
+            .saturating_add(log_count.get().saturating_mul(15))
+            .saturating_add(10);
+        let overrun = exec_us > tick_period_us;
+        let slack_us = if overrun {
+            0
+        } else {
+            tick_period_us.saturating_sub(exec_us)
+        };
+        let ts_end_us = ts_start_us.saturating_add(exec_us);
+        tick_timing_rows.push(TickTimingSample {
+            tick,
+            ts_start_us,
+            ts_end_us,
+            exec_us,
+            slack_us,
+            overrun,
+        });
 
         if is_halted(&rt, program) {
             break;
@@ -2309,6 +2339,12 @@ fn write_virtual_board_artifacts(
     fs::write(&board_trace_path, board_trace_jsonl)
         .map_err(|err| format!("Failed to write board trace {board_trace_path:?}: {err}"))?;
 
+    let tick_timing_jsonl = to_tick_timing_jsonl(&tick_timing_rows)
+        .map_err(|err| format!("Failed to serialize tick timing JSONL: {err}"))?;
+    let tick_timing_path = out_dir.join("tick_timing.jsonl");
+    fs::write(&tick_timing_path, tick_timing_jsonl)
+        .map_err(|err| format!("Failed to write tick timing {tick_timing_path:?}: {err}"))?;
+
     let generated_at = time::OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string());
@@ -2329,7 +2365,7 @@ fn write_virtual_board_artifacts(
     fs::write(&meta_path, meta_json)
         .map_err(|err| format!("Failed to write virtual board meta {meta_path:?}: {err}"))?;
 
-    Ok((board_log_path, board_trace_path, meta_path))
+    Ok((board_log_path, board_trace_path, meta_path, tick_timing_path))
 }
 
 fn run_virtual_board_subcommand(

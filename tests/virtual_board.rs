@@ -71,9 +71,11 @@ inputs:
 
     let board_log = out_dir.join("board.log");
     let board_trace = out_dir.join("board_trace.jsonl");
+    let tick_timing = out_dir.join("tick_timing.jsonl");
     let meta = out_dir.join("virtual_board_meta.json");
     assert!(board_log.exists(), "board.log should exist");
     assert!(board_trace.exists(), "board_trace.jsonl should exist");
+    assert!(tick_timing.exists(), "tick_timing.jsonl should exist");
     assert!(meta.exists(), "virtual_board_meta.json should exist");
 
     let log_text = fs::read_to_string(&board_log).expect("read board.log");
@@ -84,6 +86,24 @@ inputs:
         !trace_text.trim().is_empty(),
         "board trace jsonl should contain at least one row"
     );
+    let tick_timing_text = fs::read_to_string(&tick_timing).expect("read tick timing");
+    let rows = rust_plc::tick_timing::parse_tick_timing_jsonl(&tick_timing_text)
+        .expect("tick timing jsonl should parse");
+    assert!(!rows.is_empty(), "tick timing should contain at least one row");
+    assert!(
+        rows.windows(2).all(|w| w[0].tick < w[1].tick),
+        "tick timing rows should be in ascending tick order"
+    );
+    let first = &rows[0];
+    assert!(first.ts_end_us >= first.ts_start_us);
+    assert_eq!(
+        first.exec_us,
+        first.ts_end_us.saturating_sub(first.ts_start_us),
+        "exec_us should equal end-start"
+    );
+    if first.overrun {
+        assert_eq!(first.slack_us, 0, "overrun row should have zero slack");
+    }
 
     let parsed_out = out_dir.join("parsed_trace.jsonl");
     let parse_output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))

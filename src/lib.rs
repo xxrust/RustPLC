@@ -8,5 +8,6 @@ pub mod runtime_bridge;
 pub mod semantic;
 pub mod sequence_lint;
 pub mod sim_regress;
+pub mod tick_timing;
 pub mod trace_diff;
 pub mod verification;

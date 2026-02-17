@@ -1,199 +1,134 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/no-board-foundation-hardening",
-  "description": "在无实体开发板条件下，完成可交付基础能力补齐：验证报告可解释性、确定性时序上界、虚拟板级闭环、发布可追溯、模拟量安全覆盖透明化，以及 PID+仿真回归能力的最小落地。",
+  "branchName": "ralph/non-rtos-realtime-evidence",
+  "description": "在不引入 RTOS 的前提下，补齐 tick 级实时性观测、统计、门禁与交付证据链，使 no-board 流程可量化评估执行时延与超周期风险。",
   "userStories": [
     {
-      "id": "US-001",
-      "title": "统一验证报告契约：verification_report.json + warnings 分级",
-      "description": "作为用户，我希望每次编译都产出统一结构化验证报告，明确 proof level、warnings、覆盖范围与降级原因，避免误判“已完备证明”。",
+      "id": "US-RT-001",
+      "title": "统一 tick 时序观测契约：tick_timing.jsonl",
+      "description": "作为控制工程师，我希望 runtime/virtual-board 使用统一的每 tick 时序记录格式，以便跨环境对齐实时性数据。",
       "acceptanceCriteria": [
-        "新增统一报告结构（建议 `verification_report.json`），至少包含 safety/liveness/timing/causality 的 level、warnings、checked_rules、skipped_rules",
-        "CLI 默认输出路径可配置（如 `--report <file>`），并保持向后兼容",
-        "warnings 增加分级（error/warn/info）并在文本 summary 中体现",
-        "新增集成测试：对包含降级告警的样例断言 JSON 字段完整且稳定",
+        "定义统一记录字段（至少包含 tick、ts_start_us、ts_end_us、exec_us、slack_us、overrun）",
+        "virtual-board 与 host 侧产物输出该格式（向后兼容现有 trace 产物）",
+        "新增单元或集成测试，断言字段完整且顺序稳定",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "覆盖基础能力 #4/#6"
+      "notes": "实时证据基础层"
     },
     {
-      "id": "US-002",
-      "title": "CLI 门禁：支持 --deny-warnings",
-      "description": "作为 CI 使用者，我希望当存在 warn 级告警时可让命令失败，从而把风险显式纳入发布门禁。",
+      "id": "US-RT-002",
+      "title": "RP2040 固件 tick 执行时长采样与 overrun 标记",
+      "description": "作为固件维护者，我希望在不改变调度模型的情况下记录每 tick 执行时长，并明确是否超出周期预算。",
       "acceptanceCriteria": [
-        "主 CLI 增加 `--deny-warnings`（或等效）开关",
-        "当存在 warn/error 级告警时返回非 0，并输出可读失败原因",
-        "默认行为不变（未开启时仅提示，不阻断）",
-        "新增集成测试覆盖：默认模式通过、deny 模式失败",
+        "固件主循环记录每 tick 执行时间（us）与剩余裕量（slack_us）",
+        "当执行时间超过 tick 周期时打 overrun 标记并计数",
+        "保留现有 TICK/TRACE/LOG 输出语义，不破坏 trace-parse",
+        "新增测试或可验证样例覆盖 overrun/non-overrun",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "覆盖基础能力 #4/#6"
+      "passes": false,
+      "notes": "板端观测补齐"
     },
     {
-      "id": "US-003",
-      "title": "runtime 上界分析：tick 转移/动作/并行展开预算",
-      "description": "作为开发者，我希望在无实板时也能得到结构化时序上界，评估确定性与实时性风险。",
+      "id": "US-RT-003",
+      "title": "时序统计命令：timing-report（p50/p95/p99/max）",
+      "description": "作为 CI 使用者，我希望从 tick 时序记录自动生成统计报告，以便建立可量化基线。",
       "acceptanceCriteria": [
-        "新增运行时静态预算分析：单 tick 最大转移次数、最大动作数、最大并行展开",
-        "预算结果写入验证报告与构建元数据",
-        "当预算超过阈值时输出 warn 级告警（阈值可配置）",
-        "新增单元测试覆盖正常与超阈值场景",
+        "新增命令（或子命令）读取 tick_timing.jsonl 并输出 timing_report.json",
+        "报告至少包含 count、overrun_count、min/max、p50/p95/p99、mean",
+        "支持可读 summary 输出并可配置输出路径",
+        "新增集成测试验证统计值与样例输入一致",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "覆盖基础能力 #3"
+      "passes": false,
+      "notes": "统计层"
     },
     {
-      "id": "US-004",
-      "title": "虚拟板级 Runner：生成 board.log/board_trace.jsonl",
-      "description": "作为用户，我希望在没有实体 RP2040 的情况下，仍能走完整“板级日志 -> 解析 -> 对比”链路。",
+      "id": "US-RT-004",
+      "title": "no-board-gate 实时门禁：--max-p99-exec-us/--max-overrun-count",
+      "description": "作为发布门禁维护者，我希望 no-board-gate 能基于实时统计阈值阻断风险版本。",
       "acceptanceCriteria": [
-        "新增 `virtual-board`（命令或库）以 host 方式执行与板端一致的 trace 输出格式",
-        "输出至少包括：`board.log`、`board_trace.jsonl`、元信息文件",
-        "`trace-parse` 对虚拟板日志零改动可解析",
-        "新增集成测试：给定示例 `.plc` + scenario 可稳定产出文件并可被解析",
+        "no-board-gate 新增实时阈值参数（至少 p99 与 overrun_count）",
+        "超阈值时返回非 0，并在摘要中给出阻断原因",
+        "默认不启用阈值时保持兼容",
+        "新增通过与失败两类集成测试",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "覆盖基础能力 #7/#3"
+      "passes": false,
+      "notes": "门禁层"
     },
     {
-      "id": "US-005",
-      "title": "无板对比门禁：SIL vs virtual-board trace-diff",
-      "description": "作为 CI 使用者，我希望自动比较 SIL 与虚拟板轨迹，首个偏差可定位并可阻断回归。",
+      "id": "US-RT-005",
+      "title": "结构上界到时间预算映射：budget_time_estimate",
+      "description": "作为开发者，我希望把现有 runtime budget 映射为可解释的时间预算估计，提前发现潜在超周期风险。",
       "acceptanceCriteria": [
-        "新增脚本或命令串联 `sim` + `virtual-board` + `trace-diff --fail-on-mismatch`",
-        "输出差异报告 JSON 与可读摘要",
-        "新增至少 1 组一致与 1 组不一致测试样例",
-        "文档给出本地一条命令执行方式",
+        "在现有 runtime budget 基础上引入可配置成本模型（动作/转移/并行展开）",
+        "生成 budget_time_estimate 字段写入验证报告",
+        "超预算时给出 warn 级告警并可被 --deny-warnings 阻断",
+        "新增测试覆盖正常与超预算场景",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "覆盖基础能力 #7"
+      "passes": false,
+      "notes": "静态预估层"
     },
     {
-      "id": "US-006",
-      "title": "发布包与追溯：release-bundle + sha 清单 + git 元数据",
-      "description": "作为交付人员，我希望一次构建即可产出可审计、可复现、可回滚的完整工件包。",
+      "id": "US-RT-006",
+      "title": "release-bundle 纳入实时证据工件",
+      "description": "作为交付人员，我希望发布包默认包含时序报告与阈值判定结果，支持审计与回滚。",
       "acceptanceCriteria": [
-        "新增 `release-bundle`（命令或脚本），打包 `.plc`、io_map、scenario、generated_program、trace、report",
-        "生成 `manifest.json`（包含每个工件 sha256）",
-        "build 元数据新增 git commit、dirty 标记、生成时间",
-        "新增集成测试：校验 manifest 字段与哈希一致性",
+        "release-bundle 新增打包 timing 相关工件（timing_report/tick_timing/gate_summary）",
+        "manifest.json 覆盖新增工件并校验 sha256 一致",
+        "build_meta 增加 realtime profile 字段（tick_ms、thresholds、overrun_count）",
+        "新增集成测试验证工件完整性与哈希一致",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "覆盖基础能力 #5"
+      "passes": false,
+      "notes": "交付层"
     },
     {
-      "id": "US-007",
-      "title": "模拟量安全覆盖透明化：规则绑定率与抽象粒度报告",
-      "description": "作为安全评审者，我希望知道每条 safety 规则是否真正进入模型、采用何种抽象，避免“黑盒通过”。",
+      "id": "US-RT-007",
+      "title": "最坏负载场景注入与可复现回放",
+      "description": "作为验证工程师，我希望用确定性场景复现边界负载，验证实时门禁在高压力下仍稳定。",
       "acceptanceCriteria": [
-        "Safety 报告新增每条规则状态：bound/skipped/degraded + reason",
-        "对模拟量阈值规则输出区间切分点与命中区间数量",
-        "summary 输出 coverage 指标（如 `bound_rules/total_rules`）",
-        "新增单元测试覆盖：全部绑定、部分跳过、全部跳过三类场景",
+        "扩展 scenario 能表达高频输入/突发事件/故障叠加（保持 deterministic）",
+        "新增至少 1 组过载样例与 1 组安全样例",
+        "timing-report 与 no-board-gate 可复用该场景并输出稳定结果",
+        "新增回归测试保证同 seed 输出一致",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "覆盖基础能力 #6"
+      "passes": false,
+      "notes": "压力验证层"
     },
     {
-      "id": "US-008",
-      "title": "阈值语义强化：类型/range/unit 一致性校验",
-      "description": "作为开发者，我希望 safety/wait 阈值比较在语义阶段就拒绝非法设备、越界值与单位不一致输入。",
+      "id": "US-RT-008",
+      "title": "文档与操作手册：No-RTOS Real-Time Playbook",
+      "description": "作为新成员，我希望有完整步骤从 .plc 到实时门禁报告再到 release-bundle，避免口口相传。",
       "acceptanceCriteria": [
-        "阈值比较仅允许模拟量设备（analog_input/analog_output 规则按设计约束）",
-        "阈值值必须落入声明 range（含边界）",
-        "当设备声明 unit 且比较值带单位时，必须一致；不一致报错",
-        "新增单元测试覆盖类型错误、越界、单位不一致、合法路径",
+        "新增文档章节（README 或 docs）说明非 RTOS 实时保证路径",
+        "给出最小命令链：compile/verify -> virtual-board -> timing-report -> no-board-gate -> release-bundle",
+        "每步说明输入输出工件与常见阈值配置建议",
+        "新增文档一致性测试，确保命令与 CLI 当前实现一致",
         "Typecheck passes",
         "cargo test --workspace passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "覆盖基础能力 #6"
-    },
-    {
-      "id": "US-009",
-      "title": "PID 最小可用子集：DSL/IR/runtime 打通",
-      "description": "作为控制工程师，我希望在 RustPLC 中定义并运行最小 PID 回路（采样周期、限幅、anti-windup），为闭环控制奠基。",
-      "acceptanceCriteria": [
-        "DSL 支持最小 PID 声明（pv/sp/kp/ki/kd/out/period_ms/limit）",
-        "IR/runtime 支持离散 PID 执行与输出限幅",
-        "支持 anti-windup（至少一种策略，文档说明）",
-        "新增单元测试：阶跃响应下输出有限且收敛趋势正确",
-        "Typecheck passes",
-        "cargo test --workspace passes"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": "覆盖基础能力 #1"
-    },
-    {
-      "id": "US-010",
-      "title": "仿真对象模型与 KPI 回归：超调/稳定时间/稳态误差",
-      "description": "作为控制工程师，我希望用标准对象模型自动评估 PID 与策略变更效果，防止控制性能退化。",
-      "acceptanceCriteria": [
-        "`crates/sim` 新增至少两类对象模型（如一阶惯性、纯滞后或死区/饱和）",
-        "新增 KPI 计算：超调、稳定时间、稳态误差",
-        "新增回归测试：同一场景下 KPI 结果可重复且在阈值内",
-        "CLI 可导出 KPI JSON",
-        "Typecheck passes",
-        "cargo test --workspace passes"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": "覆盖基础能力 #1/#7"
-    },
-    {
-      "id": "US-011",
-      "title": "异常恢复模板与顺控 lint：关键 wait 必须可恢复",
-      "description": "作为项目维护者，我希望将急停/掉电/传感器卡死的恢复路径固化为模板，并由 lint 强制关键 wait 配置 timeout+goto。",
-      "acceptanceCriteria": [
-        "新增故障恢复模板（至少急停、掉电、传感器卡死三类）",
-        "新增 lint：关键路径 wait 缺失 timeout+goto 时给出 warn/error（可配置）",
-        "模板配套示例与集成测试可运行通过",
-        "文档说明何为关键路径与如何豁免",
-        "Typecheck passes",
-        "cargo test --workspace passes"
-      ],
-      "priority": 11,
-      "passes": true,
-      "notes": "覆盖基础能力 #2"
-    },
-    {
-      "id": "US-012",
-      "title": "无开发板交付文档：No-Board Playbook",
-      "description": "作为新用户，我希望有一份从 `.plc` 到虚拟板级 gate 再到 release-bundle 的完整流程文档。",
-      "acceptanceCriteria": [
-        "新增文档章节 `No-Board Playbook`（README 或 docs）",
-        "文档包含最小命令序列：compile/verify -> sim -> virtual-board -> trace-diff -> release-bundle",
-        "每个命令解释输入输出文件的用途",
-        "新增文档相关测试或示例检查，确保命令与当前 CLI 一致",
-        "Typecheck passes",
-        "cargo test --workspace passes"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": "覆盖基础能力 #4/#5/#7"
+      "passes": false,
+      "notes": "落地与传播层"
     }
   ]
 }
