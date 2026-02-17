@@ -343,6 +343,9 @@ fn parse_scenario_yaml(yaml: &str) -> Result<sim::Scenario, String> {
 enum ScenarioInitPreset {
     Minimal,
     Normal,
+    Timeout,
+    SensorStuck,
+    Bounce,
 }
 
 impl ScenarioInitPreset {
@@ -350,6 +353,9 @@ impl ScenarioInitPreset {
         match raw {
             "minimal" => Some(Self::Minimal),
             "normal" => Some(Self::Normal),
+            "timeout" => Some(Self::Timeout),
+            "sensor_stuck" => Some(Self::SensorStuck),
+            "bounce" => Some(Self::Bounce),
             _ => None,
         }
     }
@@ -358,6 +364,9 @@ impl ScenarioInitPreset {
         match self {
             Self::Minimal => "minimal",
             Self::Normal => "normal",
+            Self::Timeout => "timeout",
+            Self::SensorStuck => "sensor_stuck",
+            Self::Bounce => "bounce",
         }
     }
 }
@@ -549,11 +558,41 @@ fn render_scenario_init_yaml(
     out.push_str(&format!("# Preset: {}\n", preset.as_str()));
     out.push_str("# Keep `at_ms` aligned to `tick_ms`, and keep `at_ms` < `duration_ms`.\n");
     out.push_str("tick_ms: 10\n");
-    out.push_str("duration_ms: 1000\n\n");
+    match preset {
+        ScenarioInitPreset::Minimal => out.push_str("duration_ms: 1000\n\n"),
+        ScenarioInitPreset::Normal => out.push_str("duration_ms: 6000\n\n"),
+        ScenarioInitPreset::Timeout => out.push_str("duration_ms: 2000\n\n"),
+        ScenarioInitPreset::SensorStuck => out.push_str("duration_ms: 3000\n\n"),
+        ScenarioInitPreset::Bounce => out.push_str("duration_ms: 1000\n\n"),
+    }
 
     if hints.digital_ids.is_empty() && hints.analog_ids.is_empty() {
         out.push_str("# No physical X*/AI* inputs were discovered from this PLC topology.\n");
     }
+
+    let start_id = hints
+        .digital_aliases
+        .iter()
+        .find_map(|(&id, aliases)| {
+            if aliases_contain_keyword(aliases, "start") {
+                Some(id)
+            } else {
+                None
+            }
+        });
+    let mut sensor_ids = hints
+        .digital_aliases
+        .iter()
+        .filter_map(|(&id, aliases)| {
+            if aliases_contain_keyword(aliases, "sensor") {
+                Some(id)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    sensor_ids.sort_unstable();
+    sensor_ids.dedup();
 
     match preset {
         ScenarioInitPreset::Minimal => {
@@ -566,20 +605,58 @@ fn render_scenario_init_yaml(
             out.push_str("#       0: 1.0\n");
             out.push_str("inputs: []\n");
         }
-        ScenarioInitPreset::Normal => {
+        ScenarioInitPreset::Normal
+        | ScenarioInitPreset::Timeout
+        | ScenarioInitPreset::SensorStuck
+        | ScenarioInitPreset::Bounce => {
             out.push_str("inputs:\n");
-            out.push_str("  - at_ms: 0\n");
-            if hints.digital_ids.is_empty() && hints.analog_ids.is_empty() {
-                out.push_str("    set: {}\n");
-            } else {
-                out.push_str("    set:\n");
-                if !hints.digital_ids.is_empty() {
-                    out.push_str("      digital_inputs:\n");
-                    for id in &hints.digital_ids {
-                        let suffix = render_input_alias_comment(&hints.digital_aliases, *id);
-                        out.push_str(&format!("        {id}: false{suffix}\n"));
+
+            // Start button pulse/bounce if we can identify one from topology aliases.
+            if let Some(start_id) = start_id {
+                match preset {
+                    ScenarioInitPreset::Bounce => {
+                        // A few quick toggles to emulate a bouncy button, ending released.
+                        let toggles = [(0, true), (10, false), (20, true), (30, false), (40, true), (50, false)];
+                        for (at_ms, value) in toggles {
+                            out.push_str(&format!("  - at_ms: {at_ms}\n"));
+                            out.push_str("    set:\n");
+                            out.push_str("      digital_inputs:\n");
+                            let suffix = render_input_alias_comment(&hints.digital_aliases, start_id);
+                            out.push_str(&format!("        {start_id}: {value}{suffix}\n"));
+                            if at_ms == 0 && !hints.analog_ids.is_empty() {
+                                out.push_str("      analog_inputs:\n");
+                                for id in &hints.analog_ids {
+                                    let suffix = render_input_alias_comment(&hints.analog_aliases, *id);
+                                    out.push_str(&format!("        {id}: 0.0{suffix}\n"));
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        out.push_str("  - at_ms: 0\n");
+                        out.push_str("    set:\n");
+                        out.push_str("      digital_inputs:\n");
+                        let suffix = render_input_alias_comment(&hints.digital_aliases, start_id);
+                        out.push_str(&format!("        {start_id}: true{suffix}\n"));
+                        if !hints.analog_ids.is_empty() {
+                            out.push_str("      analog_inputs:\n");
+                            for id in &hints.analog_ids {
+                                let suffix = render_input_alias_comment(&hints.analog_aliases, *id);
+                                out.push_str(&format!("        {id}: 0.0{suffix}\n"));
+                            }
+                        }
+                        out.push_str("  - at_ms: 50\n");
+                        out.push_str("    set:\n");
+                        out.push_str("      digital_inputs:\n");
+                        out.push_str(&format!("        {start_id}: false{suffix}\n"));
                     }
                 }
+            } else {
+                // Keep a placeholder to guide first-time authors.
+                out.push_str("  - at_ms: 0\n");
+                out.push_str("    set:\n");
+                out.push_str("      digital_inputs:\n");
+                out.push_str("        0: true  # (example) press start button\n");
                 if !hints.analog_ids.is_empty() {
                     out.push_str("      analog_inputs:\n");
                     for id in &hints.analog_ids {
@@ -587,6 +664,43 @@ fn render_scenario_init_yaml(
                         out.push_str(&format!("        {id}: 0.0{suffix}\n"));
                     }
                 }
+                out.push_str("  - at_ms: 50\n");
+                out.push_str("    set:\n");
+                out.push_str("      digital_inputs:\n");
+                out.push_str("        0: false # (example) release\n");
+            }
+
+            // For a "normal" preset, try to drive common sensor waits by turning sensors on later.
+            if preset == ScenarioInitPreset::Normal {
+                // Heuristic: script sensor edges in a stable order so waits don't satisfy immediately.
+                let mut t = 100u64;
+                for id in &sensor_ids {
+                    out.push_str(&format!("  - at_ms: {t}\n"));
+                    out.push_str("    set:\n");
+                    out.push_str("      digital_inputs:\n");
+                    let suffix = render_input_alias_comment(&hints.digital_aliases, *id);
+                    out.push_str(&format!("        {id}: true{suffix}\n"));
+                    t = t.saturating_add(20);
+                    if t >= 1000 {
+                        break;
+                    }
+                }
+            }
+
+            // Inject one representative stuck fault for the template.
+            if preset == ScenarioInitPreset::SensorStuck {
+                let target = sensor_ids
+                    .first()
+                    .copied()
+                    .or(start_id)
+                    .unwrap_or(0);
+                out.push_str("\n# Fault injection example:\n");
+                out.push_str("faults:\n");
+                out.push_str("  - sensor_stuck:\n");
+                out.push_str("      at_ms: 200\n");
+                let suffix = render_input_alias_comment(&hints.digital_aliases, target);
+                out.push_str(&format!("      target: {target}{suffix}\n"));
+                out.push_str("      value: true\n");
             }
         }
     }
@@ -919,6 +1033,14 @@ fn scenario_mismatch_hint_for_example(
         return None;
     }
 
+    scenario_mismatch_hint_for_example_paths(plc_path, scenario_path, subcommand)
+}
+
+fn scenario_mismatch_hint_for_example_paths(
+    plc_path: &str,
+    scenario_path: &Path,
+    subcommand: &str,
+) -> Option<String> {
     let plc_name = Path::new(plc_path).file_name().and_then(|s| s.to_str())?;
     let scenario_name = scenario_path.file_name().and_then(|s| s.to_str())?;
 
@@ -936,6 +1058,23 @@ For `examples/two_cylinder.plc`, use `scenarios/two_cylinder.yaml`:\n\
     }
 
     None
+}
+
+fn format_resolve_scenario_yaml_error(
+    plc_path: &str,
+    scenario_path: &Path,
+    subcommand: &str,
+    err: &str,
+) -> String {
+    let mut msg = format!(
+        "Failed to resolve device-name inputs in scenario {}:\n{err}",
+        scenario_path.display()
+    );
+    if let Some(hint) = scenario_mismatch_hint_for_example_paths(plc_path, scenario_path, subcommand) {
+        msg.push_str("\n\n");
+        msg.push_str(&hint);
+    }
+    msg
 }
 
 fn main() {
@@ -1339,7 +1478,7 @@ fn print_usage(program: &str) {
         "  {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]"
     );
     eprintln!(
-        "  {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal>]"
+        "  {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]"
     );
     eprintln!(
         "  {program} scenario-validate <file.plc> --scenario <scenario.yaml>"
@@ -1435,7 +1574,7 @@ fn run_scenario_init_subcommand(
 ) -> Result<(), String> {
     let Some(plc_path) = args.next() else {
         return Err(format!(
-            "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal>]"
+            "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]"
         ));
     };
 
@@ -1459,7 +1598,7 @@ fn run_scenario_init_subcommand(
             }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal>]"
+                    "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]"
                 ));
             }
             other => {
@@ -1528,12 +1667,8 @@ fn run_scenario_validate_subcommand(
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
 
     let raw_scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &raw_scenario_yaml).map_err(|e| {
-        format!(
-            "Failed to resolve device-name inputs in scenario {}:\n{e}",
-            scenario_path.display()
-        )
-    })?;
+    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &raw_scenario_yaml)
+        .map_err(|e| format_resolve_scenario_yaml_error(plc_path.to_string_lossy().as_ref(), &scenario_path, "scenario-validate", &e))?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let hints = collect_scenario_init_hints(&plc_source)?;
@@ -1885,12 +2020,8 @@ fn run_sim_plc_subcommand(
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
-        format!(
-            "Failed to resolve device-name inputs in scenario {}:\n{e}",
-            scenario_path.display()
-        )
-    })?;
+    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml)
+        .map_err(|e| format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "sim-plc", &e))?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
 
@@ -2468,12 +2599,8 @@ fn run_release_bundle_subcommand(
     let plc_sha256 = sha256_hex(&plc_bytes);
 
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
-        format!(
-            "Failed to resolve device-name inputs in scenario {}:\n{e}",
-            scenario_path.display()
-        )
-    })?;
+    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml)
+        .map_err(|e| format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "release-bundle", &e))?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
@@ -3548,16 +3675,10 @@ fn run_no_board_gate_subcommand(
     let sil_yaml = read_scenario_yaml_file(&sil_scenario_path)?;
     let board_yaml = read_scenario_yaml_file(&board_scenario_path)?;
     let sil_yaml = resolve_scenario_yaml_for_plc(&plc_source, &sil_yaml).map_err(|e| {
-        format!(
-            "Failed to resolve device-name inputs in scenario {}:\n{e}",
-            sil_scenario_path.display()
-        )
+        format_resolve_scenario_yaml_error(&plc_path, &sil_scenario_path, "no-board-gate", &e)
     })?;
     let board_yaml = resolve_scenario_yaml_for_plc(&plc_source, &board_yaml).map_err(|e| {
-        format!(
-            "Failed to resolve device-name inputs in scenario {}:\n{e}",
-            board_scenario_path.display()
-        )
+        format_resolve_scenario_yaml_error(&plc_path, &board_scenario_path, "no-board-gate", &e)
     })?;
 
     let sil_scenario = parse_scenario_yaml(&sil_yaml)?;
@@ -3729,12 +3850,8 @@ fn run_pil_run_subcommand(
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
-        format!(
-            "Failed to resolve device-name inputs in scenario {}:\n{e}",
-            scenario_path.display()
-        )
-    })?;
+    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml)
+        .map_err(|e| format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "pil-run", &e))?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
@@ -3973,12 +4090,8 @@ fn run_virtual_board_subcommand(
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
-        format!(
-            "Failed to resolve device-name inputs in scenario {}:\n{e}",
-            scenario_path.display()
-        )
-    })?;
+    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml)
+        .map_err(|e| format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "virtual-board", &e))?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;

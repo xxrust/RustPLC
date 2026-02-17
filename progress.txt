@@ -34,6 +34,25 @@
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-17 23:27:29 CST] - US-SCENE-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended `scenario-init --preset` from `minimal|normal` to `minimal|normal|timeout|sensor_stuck|bounce` and wired each preset to template-specific duration and input/fault scaffolding.
+  - Improved generated templates to auto-pulse detected start inputs and include alias comments; `normal` now scripts staggered sensor edges to reduce same-tick loop risk, while `sensor_stuck` includes a ready-to-run fault injection example.
+  - Updated README/README_EN quickstart examples to explain when to use `timeout` / `sensor_stuck` / `bounce` presets.
+  - Added integration coverage (`tests/scenario_templates.rs`) to verify these templates can be generated and pass `scenario-validate`.
+  - Hardened mismatch UX for wiki-style commands: when `two_cylinder.plc` is run with `scenarios/normal.yaml`, resolve-time errors now include a direct command suggestion to use `scenarios/two_cylinder.yaml`.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `src/main.rs`, `README.md`, `README_EN.md`, `tests/scenario_templates.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Encoding scenario templates inside `scenario-init` keeps docs/examples/tests aligned to one source of truth and avoids drift across external YAML snippets.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Scenario mismatch hints should be attached both at runtime simulation errors and at pre-parse name-resolution errors, otherwise users may miss the actionable fix path.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `scenarios/normal.yaml` is intentionally tuned for `examples/assembly_station.plc`; `examples/two_cylinder.plc` should use `scenarios/two_cylinder.yaml`.
+---
 ## [2026-02-17 22:31:10 CST] - US-SCENE-003
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented

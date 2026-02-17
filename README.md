@@ -120,6 +120,11 @@ flowchart LR
 cargo run --release -- scenario-init examples/assembly_station.plc \
   --out out/assembly_station.scenario.yaml --preset normal
 
+# 也可使用内置模板（更适合快速构造特定类型用例）：
+#   --preset timeout        # 触发超时路径（通常不脚本传感器到位）
+#   --preset sensor_stuck   # 注入传感器卡死 fault 示例
+#   --preset bounce         # 按键抖动示例
+
 # SIL 仿真
 cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl

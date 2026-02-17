@@ -120,6 +120,11 @@ flowchart LR
 cargo run --release -- scenario-init examples/assembly_station.plc \
   --out out/assembly_station.scenario.yaml --preset normal
 
+# Built-in templates (handy for quickly constructing specific cases):
+#   --preset timeout        # trigger timeout paths (usually by not scripting sensors)
+#   --preset sensor_stuck   # inject a sensor_stuck fault example
+#   --preset bounce         # button bounce example
+
 # SIL simulation
 cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
