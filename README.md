@@ -124,6 +124,9 @@ cargo run --release -- scenario-init examples/assembly_station.plc \
 cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
 
+# 场景文件支持“设备名写法”（来自 .plc 的 topology），例如 scenarios/normal.yaml 中的：
+#   digital_inputs: { start_button: true }
+
 # 无开发板对比门禁（SIL vs virtual-board，一条命令跑完 sim + virtual-board + trace-diff）
 cargo run --release -- no-board-gate examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out-dir out/no_board_gate

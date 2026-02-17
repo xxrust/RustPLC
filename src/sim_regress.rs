@@ -1,5 +1,6 @@
 use crate::parser::parse_plc;
 use crate::runtime_bridge::state_machine_to_runtime_program;
+use crate::scenario_resolve::resolve_scenario_yaml_for_plc;
 use crate::semantic::{build_state_machine, build_topology_graph, preprocess_program};
 use runtime_core::{Action, Instr, Program};
 use serde::Serialize;
@@ -227,6 +228,16 @@ fn run_one_case(
             scenario_path.display()
         )
     })?;
+
+    let scenario_yaml = match resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml) {
+        Ok(yaml) => yaml,
+        Err(e) => {
+            let failure = Failure::scenario_error(e);
+            let report_path = artifact_dir.join("report.json");
+            write_failure_report_json(&report_path, &failure)?;
+            return Ok(Some((failure, None, Some(report_path), None, None, None)));
+        }
+    };
 
     let scenario = match sim::Scenario::from_yaml_str(&scenario_yaml) {
         Ok(s) => s,

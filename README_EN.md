@@ -124,6 +124,9 @@ cargo run --release -- scenario-init examples/assembly_station.plc \
 cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
 
+# Scenario YAML also supports device-name keys (from the .plc topology), e.g. in scenarios/normal.yaml:
+#   digital_inputs: { start_button: true }
+
 # No-board comparison gate (SIL vs virtual-board; runs sim + virtual-board + trace-diff)
 cargo run --release -- no-board-gate examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out-dir out/no_board_gate

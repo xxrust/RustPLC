@@ -2,7 +2,9 @@
 #
 # Notes:
 # - `at_ms` must be < `duration_ms` and aligned to `tick_ms`.
-# - Digital/analog input IDs are numeric (0 => DI0/AI0, 10 => DI10, ...).
+# - For `rust_plc sim-plc` / `no-board-gate` / `scenario-validate`, you may use either:
+#   - numeric IDs (e.g. `10` for DI10), or
+#   - device names from the `.plc` topology (e.g. `start_button`, `sensor_left_arrive`).
 seed: 42
 tick_ms: 10
 duration_ms: 6000
@@ -12,55 +14,54 @@ inputs:
   - at_ms: 0
     set:
       digital_inputs:
-        10: true
+        start_button: true
   - at_ms: 50
     set:
       digital_inputs:
-        10: false
+        start_button: false
 
   # Drive the rest of the assembly_station example through a "happy path" cycle by scripting sensor edges.
-  # X0..X9 map to DI0..DI9.
   - at_ms: 100
     set:
       digital_inputs:
-        0: true   # sensor_left_arrive
+        sensor_left_arrive: true
   - at_ms: 120
     set:
       digital_inputs:
-        1: true   # sensor_right_arrive
+        sensor_right_arrive: true
 
   - at_ms: 200
     set:
       digital_inputs:
-        2: true   # sensor_push_L_ext
+        sensor_push_L_ext: true
   - at_ms: 220
     set:
       digital_inputs:
-        4: true   # sensor_push_R_ext
+        sensor_push_R_ext: true
 
   - at_ms: 300
     set:
       digital_inputs:
-        6: true   # sensor_press_ext
+        sensor_press_ext: true
   - at_ms: 350
     set:
       digital_inputs:
-        7: true   # sensor_press_ret
+        sensor_press_ret: true
 
   - at_ms: 450
     set:
       digital_inputs:
-        3: true   # sensor_push_L_ret
+        sensor_push_L_ret: true
   - at_ms: 470
     set:
       digital_inputs:
-        5: true   # sensor_push_R_ret
+        sensor_push_R_ret: true
 
   - at_ms: 600
     set:
       digital_inputs:
-        8: true   # sensor_eject_ext
+        sensor_eject_ext: true
   - at_ms: 650
     set:
       digital_inputs:
-        9: true   # sensor_eject_ret
+        sensor_eject_ret: true

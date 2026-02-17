@@ -34,6 +34,24 @@
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-17 22:31:10 CST] - US-SCENE-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added scenario YAML preprocessing that allows using `.plc` topology device names (e.g. `start_button`, `sensor_left_arrive`, `pressure_sensor`) in `digital_inputs` / `analog_inputs`, while keeping numeric IDs fully compatible.
+  - Implemented name -> DI/AI resolution by building the PLC topology and traversing upstream (`connected_to`) links to find a unique physical `X<N>` / `AI<N>` id (same directionality as `runtime_bridge` resolution).
+  - Extended CLI commands that take both `.plc` + `--scenario` to resolve device-name keys before parsing (`scenario-validate`, `sim-plc`, `no-board-gate`, `release-bundle`, `pil-run`, `virtual-board`) and updated `sim-regress` accordingly.
+  - Updated `scenarios/normal.yaml` to demonstrate device-name keys, and referenced it in README/README_EN.
+  - Added unit tests covering named inputs, mixed numeric+name writing, and unknown-name diagnostics.
+- Files changed
+  - `src/scenario_resolve.rs`, `src/lib.rs`, `src/main.rs`, `src/sim_regress.rs`, `scenarios/normal.yaml`, `README.md`, `README_EN.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keeping `sim::Scenario` on stable numeric IDs while adding a topology-backed YAML preprocessor gives a low-risk path to improve authoring UX without breaking existing artifacts/minimizers.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Any codepath that parses scenario YAML alongside a PLC file should resolve device-name keys before calling `sim::Scenario::from_yaml_str`, otherwise name-based scenarios will fail to deserialize.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Name resolution supports `start_button`, physical aliases (`X10`, `DI10`, `AI0`), and resolves sensors via upstream physical inputs in the topology graph.
+---
 ## [2026-02-16 23:33:49 CST] - US-006
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
