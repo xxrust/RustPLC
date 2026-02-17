@@ -15,11 +15,11 @@
 
 ```mermaid
 flowchart TD
-    A["工程师用自然语言<br>描述工艺流程"] --> B["AI (Claude / Codex)<br>通过 plc-gen skill<br>多轮对话生成 .plc"]
-    B --> C["RustPLC 编译器<br>四大引擎形式化验证"]
-    C --> D{"验证通过?"}
-    D -- "是" --> E["输出 JSON IR<br>可用于代码生成 / 仿真"]
-    D -- "否" --> F["精确错误报告<br>行号 + 修复建议"]
+    A["自然语言描述工艺"] --> B["AI 生成 .plc"]
+    B --> C["编译器验证"]
+    C --> D{"通过?"}
+    D -- "是" --> E["JSON IR 输出"]
+    D -- "否" --> F["错误报告 + 修复建议"]
     F --> B
 ```
 
@@ -107,9 +107,9 @@ ERROR [liveness] 潜在死锁
 
 ```mermaid
 flowchart LR
-    A[".plc 验证通过"] --> B["SIL 仿真<br>故障注入 / 波形导出 / 批量回归"]
-    A --> C["RP2040 部署<br>交叉编译 / 烧录 / trace 对比"]
-    B --> D["trace-diff<br>SIL vs 板级对比门禁"]
+    A[".plc 验证通过"] --> B["SIL 仿真"]
+    A --> C["RP2040 部署"]
+    B --> D["trace-diff 对比门禁"]
     C --> D
 ```
 

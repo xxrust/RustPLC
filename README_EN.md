@@ -15,11 +15,11 @@
 
 ```mermaid
 flowchart TD
-    A["Engineer describes<br>process in plain language"] --> B["AI (Claude / Codex)<br>generates .plc via<br>plc-gen skill"]
-    B --> C["RustPLC compiler<br>four verification engines"]
-    C --> D{"Verification<br>passed?"}
-    D -- "Yes" --> E["JSON IR output<br>for codegen / simulation"]
-    D -- "No" --> F["Precise error report<br>line number + fix suggestion"]
+    A["Describe process"] --> B["AI generates .plc"]
+    B --> C["Compiler verifies"]
+    C --> D{"Passed?"}
+    D -- "Yes" --> E["JSON IR output"]
+    D -- "No" --> F["Error report + fix suggestion"]
     F --> B
 ```
 
@@ -107,9 +107,9 @@ After `.plc` verification passes, proceed to simulation and board-level deployme
 
 ```mermaid
 flowchart LR
-    A[".plc verified"] --> B["SIL Simulation<br>fault injection / waveform / regression"]
-    A --> C["RP2040 Deployment<br>cross-compile / flash / trace diff"]
-    B --> D["trace-diff<br>SIL vs board comparison gate"]
+    A[".plc verified"] --> B["SIL Simulation"]
+    A --> C["RP2040 Deployment"]
+    B --> D["trace-diff gate"]
     C --> D
 ```
 
