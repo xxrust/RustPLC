@@ -20,6 +20,7 @@
 - The repo is not currently rustfmt-clean; treat `cargo fmt --check` as non-gating unless you are intentionally doing a formatting pass.
 - CLI integration tests in this repo should invoke the compiled binary via `env!("CARGO_BIN_EXE_rust_plc")` and verify artifacts on disk.
 - The main `<file.plc>` CLI now writes a structured verification report to `out/<stem>.verification_report.json` by default; in tests prefer `--report <temp-file>` to avoid shared output collisions.
+- Runtime budget warnings should update `runtime_budget` data before report serialization, so JSON evidence and stderr/deny-warnings behavior stay consistent.
 - Batch SIL regress runs live in `rust_plc::sim_regress`: it scans `.plc`/scenario YAMLs recursively, writes per-case `trace.jsonl`/`report.json` under `out/sim-regress/case_XXXX`, and emits a summary JSON.
 - No-board trace regression gate is available as `rust_plc no-board-gate`: it runs SIL + `virtual-board` + `trace-diff` and writes `sil_trace.jsonl`, `board.log`, `board_trace.jsonl`, `diff_report.json` under `--out-dir`.
 - `no-board-gate` can reuse `tick_timing.jsonl` to enforce realtime thresholds (`--max-p99-exec-us`, `--max-overrun-count`) while keeping trace-diff gating unchanged when thresholds are unset.
@@ -702,4 +703,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Reusing already emitted artifacts (`tick_timing.jsonl`) avoids rerunning simulations when adding new gate dimensions.
   - Gotchas encountered (e.g., don't forget to update Z when changing W)
     - Keep failure output explicit about whether the block came from trace mismatch, realtime threshold, or both; this speeds up CI triage.
+---
+## [2026-02-17 14:28:35 CST] - US-RT-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a configurable time cost model on top of existing runtime-budget facts and computed `budget_time_estimate` (us) under `runtime_budget` in the verification report.
+  - Added CLI + env configuration for the cost model and max budget threshold; when exceeded, emits a warn-level timing warning that can be blocked by `--deny-warnings`.
+  - Extended integration tests to cover report shape, warn emission, and deny-warnings blocking for over-budget estimates.
+- Files changed
+  - `src/main.rs`, `tests/verification_report.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., this codebase uses X for Y)
+    - Keep “evidence fields” (like `budget_time_estimate`) inside the serialized report object so CI can gate on JSON rather than stderr parsing.
+  - Gotchas encountered (e.g., don't forget to update Z when changing W)
+    - When warnings depend on computed fields, update the computed fields before serializing the report so evidence and gate behavior don't diverge.
 ---

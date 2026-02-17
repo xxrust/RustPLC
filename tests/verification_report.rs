@@ -73,6 +73,10 @@ task main:
         report["runtime_budget"].is_object(),
         "report should include runtime_budget object"
     );
+    assert!(
+        report["runtime_budget"]["budget_time_estimate"].is_object(),
+        "runtime_budget should include budget_time_estimate object"
+    );
     assert_eq!(report["verification"]["safety"]["skipped_rules"], 0);
     assert!(
         report["verification"]["safety"]["checked_rules"].is_number(),
@@ -261,5 +265,99 @@ task main:
             .iter()
             .any(|w| w["level"] == "warn" && w["message"].as_str().unwrap_or("").contains("runtime budget")),
         "budget threshold exceed should add warn-level timing warning"
+    );
+}
+
+#[test]
+fn budget_time_estimate_warns_and_deny_warnings_can_block() {
+    let base = temp_dir("rust_plc_budget_time_estimate");
+    let plc_path = base.join("budget_time.plc");
+    let report_path = base.join("budget_time_report.json");
+
+    let source = r#"
+[topology]
+device X0: digital_input
+device Y0: digital_output
+
+[constraints]
+
+[tasks]
+task main:
+    step s1:
+        action: set Y0 on
+"#;
+    fs::write(&plc_path, source).expect("write plc");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg(&plc_path)
+        .arg("--report")
+        .arg(&report_path)
+        .arg("--budget-action-cost-us")
+        .arg("20")
+        .arg("--budget-transition-cost-us")
+        .arg("10")
+        .arg("--budget-parallel-expand-cost-us")
+        .arg("5")
+        .arg("--budget-max-time-estimate-us")
+        .arg("10")
+        .output()
+        .expect("run rust_plc");
+
+    assert!(
+        output.status.success(),
+        "budget time estimate warning should not fail by default, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&report_path).expect("read report"))
+            .expect("report JSON should parse");
+    assert_eq!(
+        report["runtime_budget"]["budget_time_estimate"]["max_allowed_us"].as_u64(),
+        Some(10)
+    );
+    assert_eq!(
+        report["runtime_budget"]["budget_time_estimate"]["exceeds_budget"].as_bool(),
+        Some(true)
+    );
+
+    let timing_warnings = report["verification"]["timing"]["warnings"]
+        .as_array()
+        .expect("timing warnings should be array");
+    assert!(
+        timing_warnings.iter().any(|w| {
+            w["level"] == "warn"
+                && w["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("runtime budget time estimate")
+        }),
+        "over-budget estimate should emit warn-level timing warning"
+    );
+
+    let deny_output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg(&plc_path)
+        .arg("--report")
+        .arg(base.join("budget_time_report_deny.json"))
+        .arg("--budget-action-cost-us")
+        .arg("20")
+        .arg("--budget-transition-cost-us")
+        .arg("10")
+        .arg("--budget-parallel-expand-cost-us")
+        .arg("5")
+        .arg("--budget-max-time-estimate-us")
+        .arg("10")
+        .arg("--deny-warnings")
+        .output()
+        .expect("run rust_plc --deny-warnings");
+
+    assert!(
+        !deny_output.status.success(),
+        "deny-warnings should fail for over-budget time estimate warning"
+    );
+    let deny_stderr = String::from_utf8_lossy(&deny_output.stderr);
+    assert!(
+        deny_stderr.contains("runtime budget time estimate"),
+        "deny-warnings stderr should mention budget time estimate warning"
     );
 }

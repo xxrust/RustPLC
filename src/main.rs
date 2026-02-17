@@ -56,6 +56,20 @@ struct RuntimeBudget {
     max_parallel_branches: usize,
     max_race_branches: usize,
     has_same_tick_cycle: bool,
+    budget_time_estimate: BudgetTimeEstimate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct BudgetTimeEstimate {
+    action_cost_us: u64,
+    transition_cost_us: u64,
+    parallel_expand_cost_us: u64,
+    action_component_us: u64,
+    transition_component_us: u64,
+    parallel_component_us: u64,
+    total_estimate_us: u64,
+    max_allowed_us: u64,
+    exceeds_budget: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -65,6 +79,10 @@ struct RuntimeBudgetThresholds {
     max_parallel_branches: usize,
     max_race_branches: usize,
     warn_on_same_tick_cycle: bool,
+    action_cost_us: u64,
+    transition_cost_us: u64,
+    parallel_expand_cost_us: u64,
+    max_budget_time_estimate_us: u64,
 }
 
 impl Default for RuntimeBudgetThresholds {
@@ -75,6 +93,10 @@ impl Default for RuntimeBudgetThresholds {
             max_parallel_branches: 8,
             max_race_branches: 8,
             warn_on_same_tick_cycle: true,
+            action_cost_us: 8,
+            transition_cost_us: 5,
+            parallel_expand_cost_us: 12,
+            max_budget_time_estimate_us: 2_000,
         }
     }
 }
@@ -105,6 +127,26 @@ impl RuntimeBudgetThresholds {
         if let Ok(v) = env::var("RUST_PLC_BUDGET_WARN_ON_SAME_TICK_CYCLE") {
             if let Ok(b) = v.parse::<bool>() {
                 out.warn_on_same_tick_cycle = b;
+            }
+        }
+        if let Ok(v) = env::var("RUST_PLC_BUDGET_ACTION_COST_US") {
+            if let Ok(n) = v.parse::<u64>() {
+                out.action_cost_us = n;
+            }
+        }
+        if let Ok(v) = env::var("RUST_PLC_BUDGET_TRANSITION_COST_US") {
+            if let Ok(n) = v.parse::<u64>() {
+                out.transition_cost_us = n;
+            }
+        }
+        if let Ok(v) = env::var("RUST_PLC_BUDGET_PARALLEL_EXPAND_COST_US") {
+            if let Ok(n) = v.parse::<u64>() {
+                out.parallel_expand_cost_us = n;
+            }
+        }
+        if let Ok(v) = env::var("RUST_PLC_BUDGET_MAX_TIME_ESTIMATE_US") {
+            if let Ok(n) = v.parse::<u64>() {
+                out.max_budget_time_estimate_us = n;
             }
         }
         out
@@ -331,6 +373,48 @@ fn main() {
                         std::process::exit(1);
                     });
             }
+            "--budget-action-cost-us" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-action-cost-us <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.action_cost_us = value.parse::<u64>().unwrap_or_else(|_| {
+                    eprintln!("Invalid integer for --budget-action-cost-us: {value}");
+                    std::process::exit(1);
+                });
+            }
+            "--budget-transition-cost-us" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-transition-cost-us <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.transition_cost_us = value.parse::<u64>().unwrap_or_else(|_| {
+                    eprintln!("Invalid integer for --budget-transition-cost-us: {value}");
+                    std::process::exit(1);
+                });
+            }
+            "--budget-parallel-expand-cost-us" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-parallel-expand-cost-us <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.parallel_expand_cost_us =
+                    value.parse::<u64>().unwrap_or_else(|_| {
+                        eprintln!("Invalid integer for --budget-parallel-expand-cost-us: {value}");
+                        std::process::exit(1);
+                    });
+            }
+            "--budget-max-time-estimate-us" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-max-time-estimate-us <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.max_budget_time_estimate_us =
+                    value.parse::<u64>().unwrap_or_else(|_| {
+                        eprintln!("Invalid integer for --budget-max-time-estimate-us: {value}");
+                        std::process::exit(1);
+                    });
+            }
             "-h" | "--help" => {
                 print_usage(&program);
                 std::process::exit(0);
@@ -371,7 +455,7 @@ fn main() {
     let mut ir_bundle = ir_bundle;
     apply_runtime_budget_warnings(
         &mut ir_bundle.verification,
-        &ir_bundle.runtime_budget,
+        &mut ir_bundle.runtime_budget,
         budget_thresholds,
     );
 
@@ -452,6 +536,10 @@ fn print_usage(program: &str) {
     eprintln!("  --budget-max-parallel-branches <n>");
     eprintln!("  --budget-max-race-branches <n>");
     eprintln!("  --budget-warn-on-same-tick-cycle <true|false>");
+    eprintln!("  --budget-action-cost-us <n>");
+    eprintln!("  --budget-transition-cost-us <n>");
+    eprintln!("  --budget-parallel-expand-cost-us <n>");
+    eprintln!("  --budget-max-time-estimate-us <n>");
 }
 
 fn run_sequence_lint_subcommand(
@@ -2904,7 +2992,7 @@ fn analyze_runtime_budget(program: &rust_plc::ast::PlcProgram, state_machine: &S
         .saturating_mul(max_transitions_per_tick_cap)
         .max(max_actions_per_transition);
 
-    RuntimeBudget {
+    let mut budget = RuntimeBudget {
         max_transitions_per_tick_cap,
         max_transitions_same_tick_upper_bound,
         max_actions_per_transition,
@@ -2912,7 +3000,20 @@ fn analyze_runtime_budget(program: &rust_plc::ast::PlcProgram, state_machine: &S
         max_parallel_branches,
         max_race_branches,
         has_same_tick_cycle: has_cycle,
-    }
+        budget_time_estimate: BudgetTimeEstimate {
+            action_cost_us: 0,
+            transition_cost_us: 0,
+            parallel_expand_cost_us: 0,
+            action_component_us: 0,
+            transition_component_us: 0,
+            parallel_component_us: 0,
+            total_estimate_us: 0,
+            max_allowed_us: 0,
+            exceeds_budget: false,
+        },
+    };
+    budget.budget_time_estimate = estimate_budget_time(&budget, &RuntimeBudgetThresholds::default());
+    budget
 }
 
 fn analyze_program_budget_facts(program: &rust_plc::ast::PlcProgram) -> (usize, usize, usize) {
@@ -3032,10 +3133,12 @@ fn analyze_longest_chain(outgoing: &[Vec<usize>], edges: &[(usize, usize)]) -> (
 
 fn apply_runtime_budget_warnings(
     verification: &mut VerificationSummary,
-    budget: &RuntimeBudget,
+    budget: &mut RuntimeBudget,
     thresholds: RuntimeBudgetThresholds,
 ) {
     let mut warnings: Vec<WarningEntry> = Vec::new();
+
+    budget.budget_time_estimate = estimate_budget_time(budget, &thresholds);
 
     if budget.max_actions_per_transition > thresholds.max_actions_per_transition {
         warnings.push(WarningEntry {
@@ -3079,6 +3182,47 @@ fn apply_runtime_budget_warnings(
             message: "runtime budget: same-tick transition subgraph contains a cycle; runtime-core will cap chaining per tick".to_string(),
         });
     }
+    if budget.budget_time_estimate.exceeds_budget {
+        warnings.push(WarningEntry {
+            level: WarningLevel::Warn,
+            message: format!(
+                "runtime budget time estimate: total_estimate_us={} exceeds threshold {}",
+                budget.budget_time_estimate.total_estimate_us,
+                budget.budget_time_estimate.max_allowed_us
+            ),
+        });
+    }
 
     verification.timing.warnings.extend(warnings);
+}
+
+fn estimate_budget_time(
+    budget: &RuntimeBudget,
+    thresholds: &RuntimeBudgetThresholds,
+) -> BudgetTimeEstimate {
+    let action_component_us = (budget.max_actions_per_tick_upper_bound as u64)
+        .saturating_mul(thresholds.action_cost_us);
+    let transition_component_us = (budget.max_transitions_same_tick_upper_bound as u64)
+        .saturating_mul(thresholds.transition_cost_us);
+    let parallel_expansion = budget
+        .max_parallel_branches
+        .saturating_sub(1)
+        .saturating_add(budget.max_race_branches.saturating_sub(1)) as u64;
+    let parallel_component_us =
+        parallel_expansion.saturating_mul(thresholds.parallel_expand_cost_us);
+    let total_estimate_us = action_component_us
+        .saturating_add(transition_component_us)
+        .saturating_add(parallel_component_us);
+
+    BudgetTimeEstimate {
+        action_cost_us: thresholds.action_cost_us,
+        transition_cost_us: thresholds.transition_cost_us,
+        parallel_expand_cost_us: thresholds.parallel_expand_cost_us,
+        action_component_us,
+        transition_component_us,
+        parallel_component_us,
+        total_estimate_us,
+        max_allowed_us: thresholds.max_budget_time_estimate_us,
+        exceeds_budget: total_estimate_us > thresholds.max_budget_time_estimate_us,
+    }
 }
