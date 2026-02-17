@@ -133,3 +133,105 @@ inputs: []
     .expect("valid diff report json");
     assert_eq!(report.get("is_match").and_then(|v| v.as_bool()), Some(false));
 }
+
+#[test]
+fn no_board_gate_passes_when_realtime_thresholds_are_within_limits() {
+    let base = temp_dir("rust_plc_no_board_gate_rt_pass");
+    let plc_path = base.join("fixture.plc");
+    let scenario_path = base.join("scenario.yaml");
+    let out_dir = base.join("out");
+    write_fixture_plc(&plc_path);
+
+    let scenario = r#"
+tick_ms: 10
+duration_ms: 40
+inputs:
+  - at_ms: 10
+    set:
+      digital_inputs:
+        0: true
+"#;
+    fs::write(&scenario_path, scenario).expect("write scenario");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("no-board-gate")
+        .arg(&plc_path)
+        .arg("--scenario")
+        .arg(&scenario_path)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .arg("--max-p99-exec-us")
+        .arg("200")
+        .arg("--max-overrun-count")
+        .arg("0")
+        .output()
+        .expect("run no-board-gate");
+
+    assert!(
+        output.status.success(),
+        "no-board-gate should pass with relaxed realtime thresholds, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let timing_report = out_dir.join("timing_report.json");
+    assert!(timing_report.exists(), "timing_report.json should exist");
+    let report: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&timing_report).expect("read timing report json"),
+    )
+    .expect("valid timing report json");
+    assert!(
+        report.get("count").and_then(|v| v.as_u64()).unwrap_or(0) > 0,
+        "timing report should contain at least one tick sample"
+    );
+    assert_eq!(report.get("overrun_count").and_then(|v| v.as_u64()), Some(0));
+}
+
+#[test]
+fn no_board_gate_fails_when_realtime_threshold_is_exceeded() {
+    let base = temp_dir("rust_plc_no_board_gate_rt_fail");
+    let plc_path = base.join("fixture.plc");
+    let scenario_path = base.join("scenario.yaml");
+    let out_dir = base.join("out");
+    write_fixture_plc(&plc_path);
+
+    let scenario = r#"
+tick_ms: 10
+duration_ms: 40
+inputs:
+  - at_ms: 10
+    set:
+      digital_inputs:
+        0: true
+"#;
+    fs::write(&scenario_path, scenario).expect("write scenario");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("no-board-gate")
+        .arg(&plc_path)
+        .arg("--scenario")
+        .arg(&scenario_path)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .arg("--max-p99-exec-us")
+        .arg("1")
+        .output()
+        .expect("run no-board-gate");
+
+    assert!(
+        !output.status.success(),
+        "no-board-gate should fail when realtime threshold is exceeded"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("realtime threshold exceeded"),
+        "stderr should contain realtime threshold failure, got: {stderr}"
+    );
+
+    let diff_report = out_dir.join("diff_report.json");
+    assert!(diff_report.exists(), "diff report should exist");
+    let diff: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&diff_report).expect("read diff report json"),
+    )
+    .expect("valid diff report json");
+    assert_eq!(diff.get("is_match").and_then(|v| v.as_bool()), Some(true));
+}

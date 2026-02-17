@@ -438,7 +438,7 @@ fn print_usage(program: &str) {
         "  {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]"
     );
     eprintln!(
-        "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]"
+        "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
     );
     eprintln!("  {program} pil-run <file.plc> --scenario <scenario.yaml>");
     eprintln!("  {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>");
@@ -2067,7 +2067,7 @@ fn run_no_board_gate_subcommand(
 ) -> Result<(), String> {
     let Some(plc_path) = args.next() else {
         return Err(format!(
-            "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]"
+            "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
         ));
     };
 
@@ -2076,6 +2076,8 @@ fn run_no_board_gate_subcommand(
     let mut board_scenario_path: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
     let mut context_window: usize = 3;
+    let mut max_p99_exec_us: Option<u64> = None;
+    let mut max_overrun_count: Option<u64> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -2111,9 +2113,25 @@ fn run_no_board_gate_subcommand(
                     .parse::<usize>()
                     .map_err(|_| format!("Invalid --context value (expected usize): {raw}"))?;
             }
+            "--max-p99-exec-us" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --max-p99-exec-us <us>".to_string())?;
+                max_p99_exec_us = Some(raw.parse::<u64>().map_err(|_| {
+                    format!("Invalid --max-p99-exec-us value (expected u64): {raw}")
+                })?);
+            }
+            "--max-overrun-count" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --max-overrun-count <n>".to_string())?;
+                max_overrun_count = Some(raw.parse::<u64>().map_err(|_| {
+                    format!("Invalid --max-overrun-count value (expected u64): {raw}")
+                })?);
+            }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]"
+                    "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
                 ));
             }
             other => return Err(format!("Unknown argument for no-board-gate: {other}")),
@@ -2121,15 +2139,15 @@ fn run_no_board_gate_subcommand(
     }
 
     let out_dir = out_dir.ok_or_else(|| {
-        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]")
+        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]")
     })?;
 
     let sil_scenario_path = sil_scenario_path.or_else(|| scenario_path.clone()).ok_or_else(|| {
-        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]")
+        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]")
     })?;
     let board_scenario_path =
         board_scenario_path.or_else(|| scenario_path.clone()).ok_or_else(|| {
-            format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>]")
+            format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]")
         })?;
 
     fs::create_dir_all(&out_dir)
@@ -2174,7 +2192,7 @@ fn run_no_board_gate_subcommand(
     fs::write(&sil_trace_path, sil_run.trace.into_string())
         .map_err(|err| format!("Failed to write SIL trace file {sil_trace_path:?}: {err}"))?;
 
-    let (_, board_trace_path, _, _) = write_virtual_board_artifacts(
+    let (_, board_trace_path, _, tick_timing_path) = write_virtual_board_artifacts(
         Path::new(&plc_path),
         &board_scenario_path,
         &program,
@@ -2200,6 +2218,37 @@ fn run_no_board_gate_subcommand(
     fs::write(&diff_report_path, json)
         .map_err(|err| format!("Failed to write diff report {diff_report_path:?}: {err}"))?;
 
+    let tick_timing_text = fs::read_to_string(&tick_timing_path)
+        .map_err(|err| format!("Failed to read tick timing {tick_timing_path:?}: {err}"))?;
+    let tick_timing_rows = parse_tick_timing_jsonl(&tick_timing_text)
+        .map_err(|err| format!("Failed to parse tick timing JSONL: {err}"))?;
+    let timing_report = build_timing_report(&tick_timing_rows)
+        .ok_or_else(|| "tick_timing.jsonl is empty; cannot evaluate realtime gate".to_string())?;
+    let timing_report_path = out_dir.join("timing_report.json");
+    let mut timing_json = serde_json::to_string_pretty(&timing_report)
+        .map_err(|err| format!("Failed to serialize timing report JSON: {err}"))?;
+    timing_json.push('\n');
+    fs::write(&timing_report_path, timing_json)
+        .map_err(|err| format!("Failed to write timing report {timing_report_path:?}: {err}"))?;
+
+    let mut realtime_failures = Vec::new();
+    if let Some(limit) = max_p99_exec_us {
+        if timing_report.exec_us_p99 > limit {
+            realtime_failures.push(format!(
+                "p99 exec_us={} exceeds --max-p99-exec-us={limit}",
+                timing_report.exec_us_p99
+            ));
+        }
+    }
+    if let Some(limit) = max_overrun_count {
+        if timing_report.overrun_count > limit {
+            realtime_failures.push(format!(
+                "overrun_count={} exceeds --max-overrun-count={limit}",
+                timing_report.overrun_count
+            ));
+        }
+    }
+
     if report.is_match {
         eprintln!(
             "no-board-gate: PASS (sil_events={}, board_events={})",
@@ -2214,12 +2263,32 @@ fn run_no_board_gate_subcommand(
     eprintln!("  sil_trace: {}", sil_trace_path.display());
     eprintln!("  board_trace: {}", board_trace_path.display());
     eprintln!("  diff_report: {}", diff_report_path.display());
+    eprintln!(
+        "  timing_report: {} (p99_exec_us={}, overrun_count={})",
+        timing_report_path.display(),
+        timing_report.exec_us_p99,
+        timing_report.overrun_count
+    );
 
-    if !report.is_match {
-        return Err(format!(
-            "Trace mismatch detected; see report {}",
-            diff_report_path.display()
-        ));
+    for reason in &realtime_failures {
+        eprintln!("  realtime-gate: {reason}");
+    }
+
+    if !report.is_match || !realtime_failures.is_empty() {
+        let mut reasons = Vec::new();
+        if !report.is_match {
+            reasons.push(format!(
+                "trace mismatch (see {})",
+                diff_report_path.display()
+            ));
+        }
+        if !realtime_failures.is_empty() {
+            reasons.push(format!(
+                "realtime threshold exceeded ({})",
+                realtime_failures.join("; ")
+            ));
+        }
+        return Err(format!("no-board-gate failed: {}", reasons.join(", ")));
     }
     Ok(())
 }

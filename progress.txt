@@ -22,6 +22,7 @@
 - The main `<file.plc>` CLI now writes a structured verification report to `out/<stem>.verification_report.json` by default; in tests prefer `--report <temp-file>` to avoid shared output collisions.
 - Batch SIL regress runs live in `rust_plc::sim_regress`: it scans `.plc`/scenario YAMLs recursively, writes per-case `trace.jsonl`/`report.json` under `out/sim-regress/case_XXXX`, and emits a summary JSON.
 - No-board trace regression gate is available as `rust_plc no-board-gate`: it runs SIL + `virtual-board` + `trace-diff` and writes `sil_trace.jsonl`, `board.log`, `board_trace.jsonl`, `diff_report.json` under `--out-dir`.
+- `no-board-gate` can reuse `tick_timing.jsonl` to enforce realtime thresholds (`--max-p99-exec-us`, `--max-overrun-count`) while keeping trace-diff gating unchanged when thresholds are unset.
 - For embedded workspace crates, keep a host-stub `main()` behind `cfg(not(target_os = "none"))` so `cargo test --workspace` stays green while firmware code is `cfg(target_os = "none")`.
 - In embedded crates with host-stub builds, gate firmware-only helpers with `#[cfg(any(test, target_os = "none"))]` so `cargo check --workspace` stays warning-clean on host.
 - Release-style artifacts should include a `manifest.json` that hashes the exact on-disk files (plus `size_bytes`) so integration tests can verify integrity deterministically.
@@ -686,4 +687,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - For metric-style CLI reports, keep the statistical computation in `src/` (library) and make the CLI a thin IO/formatting wrapper so tests can validate both layers.
   - Gotchas encountered (e.g., don't forget to update Z when changing W)
     - Percentile definitions vary; pick a single deterministic nearest-rank method and encode it in unit tests to avoid future regressions.
+---
+## [2026-02-17 14:22:27 CST] - US-RT-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended `no-board-gate` with optional realtime thresholds: `--max-p99-exec-us` and `--max-overrun-count`.
+  - Added realtime statistics evaluation inside no-board gate (from `tick_timing.jsonl`) and wrote `timing_report.json` to the gate output directory.
+  - Preserved backward compatibility: if thresholds are not provided, gate behavior remains trace-diff based.
+  - Added integration tests for threshold pass and threshold fail scenarios.
+- Files changed
+  - `src/main.rs`, `tests/no_board_gate.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., this codebase uses X for Y)
+    - Reusing already emitted artifacts (`tick_timing.jsonl`) avoids rerunning simulations when adding new gate dimensions.
+  - Gotchas encountered (e.g., don't forget to update Z when changing W)
+    - Keep failure output explicit about whether the block came from trace mismatch, realtime threshold, or both; this speeds up CI triage.
 ---
