@@ -22,6 +22,7 @@
 - Batch SIL regress runs live in `rust_plc::sim_regress`: it scans `.plc`/scenario YAMLs recursively, writes per-case `trace.jsonl`/`report.json` under `out/sim-regress/case_XXXX`, and emits a summary JSON.
 - No-board trace regression gate is available as `rust_plc no-board-gate`: it runs SIL + `virtual-board` + `trace-diff` and writes `sil_trace.jsonl`, `board.log`, `board_trace.jsonl`, `diff_report.json` under `--out-dir`.
 - For embedded workspace crates, keep a host-stub `main()` behind `cfg(not(target_os = "none"))` so `cargo test --workspace` stays green while firmware code is `cfg(target_os = "none")`.
+- In embedded crates with host-stub builds, gate firmware-only helpers with `#[cfg(any(test, target_os = "none"))]` so `cargo check --workspace` stays warning-clean on host.
 - Release-style artifacts should include a `manifest.json` that hashes the exact on-disk files (plus `size_bytes`) so integration tests can verify integrity deterministically.
 
 Started: Sat Feb 14 23:50:11 CST 2026
@@ -656,4 +657,18 @@ Thread: https://ampcode.com/threads/
     - For artifact-style JSONL contracts, expose parse/serialize helpers in src/ so CLI commands and integration tests validate the same schema path.
   - Gotchas encountered (e.g., don't forget to update Z when changing W)
     - Changing write_virtual_board_artifacts() return shape requires updating both direct callers (virtual-board and no-board-gate).
+---
+## [2026-02-17 14:12:39 CST] - US-RT-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added RP2040 firmware tick timing evaluation (`exec_us`, `slack_us`, `overrun`) without changing the existing tick scheduler model.
+  - Emitted a new `TIMING ... overrun_count` defmt line each tick, while preserving existing `TICK`/`TRACE`/`LOG` output semantics.
+  - Added unit tests for overrun and non-overrun timing evaluation cases.
+- Files changed
+  - `crates/board-rp2040/src/main.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., this codebase uses X for Y)
+    - For firmware timing observability, emit additive log lines (`TIMING`) instead of changing existing trace lines so host parsers remain backward compatible.
+  - Gotchas encountered (e.g., don't forget to update Z when changing W)
+    - Shared helpers used only by firmware + tests should be `#[cfg(any(test, target_os = "none"))]` to avoid host-side dead-code warnings in workspace checks.
 ---

@@ -1,6 +1,34 @@
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", no_main)]
 
+#[cfg(any(test, target_os = "none"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TickTimingWindow {
+    ts_start_us: u64,
+    ts_end_us: u64,
+    exec_us: u64,
+    slack_us: u64,
+    overrun: bool,
+}
+
+#[cfg(any(test, target_os = "none"))]
+fn evaluate_tick_timing(ts_start_us: u64, ts_end_us: u64, deadline_us: u64) -> TickTimingWindow {
+    let exec_us = ts_end_us.saturating_sub(ts_start_us);
+    let overrun = ts_end_us > deadline_us;
+    let slack_us = if overrun {
+        0
+    } else {
+        deadline_us.saturating_sub(ts_end_us)
+    };
+    TickTimingWindow {
+        ts_start_us,
+        ts_end_us,
+        exec_us,
+        slack_us,
+        overrun,
+    }
+}
+
 // Host build: keep workspace builds green and provide instructions.
 #[cfg(not(target_os = "none"))]
 fn main() {
@@ -354,7 +382,10 @@ mod firmware {
         // v1 keeps polling semantics but paces ticks from RP2040 hardware timer.
         const TICK_US: u64 = TICK_MS * 1000;
         let mut next_tick_us = timer.get_counter().ticks();
+        let mut overrun_count: u64 = 0;
         loop {
+            let tick_start_us = timer.get_counter().ticks();
+            let deadline_us = next_tick_us.saturating_add(TICK_US);
             io.sample_analog_inputs();
             let tick = io.tick().0;
             defmt::info!("TICK tick={} ts_ms={}", tick, tick.saturating_mul(TICK_MS));
@@ -388,7 +419,23 @@ mod firmware {
             // Apply analog outputs after the runtime tick so AO changes are reflected on pins.
             io.apply_analog_outputs();
 
-            next_tick_us = next_tick_us.saturating_add(TICK_US);
+            let tick_end_us = timer.get_counter().ticks();
+            let timing = evaluate_tick_timing(tick_start_us, tick_end_us, deadline_us);
+            if timing.overrun {
+                overrun_count = overrun_count.saturating_add(1);
+            }
+            defmt::info!(
+                "TIMING tick={} ts_start_us={} ts_end_us={} exec_us={} slack_us={} overrun={} overrun_count={}",
+                tick,
+                timing.ts_start_us,
+                timing.ts_end_us,
+                timing.exec_us,
+                timing.slack_us,
+                timing.overrun,
+                overrun_count
+            );
+
+            next_tick_us = deadline_us;
             while timer.get_counter().ticks() < next_tick_us {
                 cortex_m::asm::nop();
             }
@@ -470,5 +517,26 @@ mod firmware {
             TransitionReason::Timeout => "timeout",
             TransitionReason::Goto => "goto",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::evaluate_tick_timing;
+
+    #[test]
+    fn evaluate_tick_timing_reports_non_overrun_with_positive_slack() {
+        let timing = evaluate_tick_timing(100, 250, 1_100);
+        assert_eq!(timing.exec_us, 150);
+        assert_eq!(timing.slack_us, 850);
+        assert!(!timing.overrun);
+    }
+
+    #[test]
+    fn evaluate_tick_timing_reports_overrun_with_zero_slack() {
+        let timing = evaluate_tick_timing(1_000, 2_250, 2_000);
+        assert_eq!(timing.exec_us, 1_250);
+        assert_eq!(timing.slack_us, 0);
+        assert!(timing.overrun);
     }
 }
