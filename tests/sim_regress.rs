@@ -211,6 +211,21 @@ faults:
     assert!(mini.minimized_inputs <= mini.original_inputs);
     assert!(mini.minimized_input_assignments <= mini.original_input_assignments);
     assert!(mini.minimized_faults <= mini.original_faults);
+
+    let minimized_path = f
+        .minimized_scenario_path
+        .as_ref()
+        .map(Path::new)
+        .expect("minimized scenario path");
+    let minimized_yaml = fs::read_to_string(minimized_path).expect("read minimized scenario yaml");
+    assert!(
+        minimized_yaml.starts_with("# Minimized by `rust_plc sim-regress --minimize-failure`."),
+        "minimized scenario should include a friendly header"
+    );
+    assert!(
+        minimized_yaml.contains("# Source scenario:"),
+        "minimized scenario should include source info"
+    );
 }
 
 #[test]
@@ -269,4 +284,89 @@ inputs:
     assert!(mini.minimized_input_assignments <= mini.original_input_assignments);
     // DI0 assignment is still required to keep failure at step=1.
     assert!(mini.minimized_input_assignments >= 1);
+}
+
+#[test]
+fn sim_regress_minimization_keeps_failure_signature_for_sugar_scenarios() {
+    let base = std::env::temp_dir().join(format!(
+        "rust_plc_sim_regress_sugar_minimize_test_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock works")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&base).expect("create temp dir");
+
+    let plc_dir = base.join("plcs");
+    let scenario_dir = base.join("scenarios");
+    let artifacts_dir = base.join("artifacts");
+    fs::create_dir_all(&plc_dir).unwrap();
+    fs::create_dir_all(&scenario_dir).unwrap();
+
+    let plc = r#"
+[topology]
+device X0: digital_input
+device X1: digital_input
+
+device start_button: digital_input {
+    connected_to: X0
+}
+device noise_button: digital_input {
+    connected_to: X1
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_start:
+        wait: start_button == true
+        timeout: 30ms -> goto fault
+    on_complete: goto done
+
+task fault:
+    step halt:
+
+task done:
+    step halt_done:
+"#;
+    fs::write(plc_dir.join("fixture.plc"), plc).expect("write plc");
+
+    // This scenario uses `hold` sugar, but still fails with a timeout (start_button never true).
+    let fail_yaml = r#"
+tick_ms: 10
+duration_ms: 200
+hold:
+  - from_ms: 0
+    to_ms: 100
+    digital: noise_button
+    value: true
+"#;
+    fs::write(scenario_dir.join("fail.yaml"), fail_yaml).expect("write fail scenario");
+
+    let summary = rust_plc::sim_regress::run_sim_regress_with_options(
+        &plc_dir,
+        &scenario_dir,
+        &artifacts_dir,
+        rust_plc::sim_regress::SimRegressOptions { minimize: true },
+    )
+    .expect("sim-regress should succeed");
+
+    assert_eq!(summary.total, 1);
+    assert_eq!(summary.fail, 1);
+    let f = &summary.failures[0];
+    assert_eq!(f.failure.kind, "timeout");
+    assert!(f.minimized_scenario_path.is_some());
+
+    let minimized_yaml =
+        fs::read_to_string(f.minimized_scenario_path.as_ref().unwrap()).expect("read minimized");
+    assert!(
+        minimized_yaml.contains("Note: source scenario uses pulse/hold sugar"),
+        "minimized scenario should mention sugar expansion"
+    );
+    assert!(
+        minimized_yaml.contains("Failure signature:"),
+        "minimized scenario should include failure signature"
+    );
 }

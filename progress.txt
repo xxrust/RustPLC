@@ -72,6 +72,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - Generated scenarios are serialized into the canonical numeric-ID format, so downstream commands (`sim-plc`, `no-board-gate`, `release-bundle`, `sim-regress`) can consume them without extra resolution steps.
 ---
+## [2026-02-18 00:36:33 CST] - US-SCENE-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Improved `sim-regress --minimize-failure` output UX by writing `minimized_scenario.yaml` with a readable header (source PLC/scenario paths, failure signature, seed, and next-step feedback).
+  - Fixed minimization with pulse/hold sugar: duration shrinking now drops out-of-range expanded input/fault events so the minimized scenario remains valid as duration decreases.
+  - Added regression coverage for sugar scenarios to ensure minimization keeps the original failure signature and surfaces a “sugar was expanded” note in the minimized output.
+  - Added a short doc playbook for the feedback loop at `docs/scenario_minimization.md`.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `src/sim_regress.rs`, `tests/sim_regress.rs`, `docs/scenario_minimization.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Adding source metadata + actionable fixes directly into minimized artifacts reduces the “what do I do now?” gap when users hit a failure in batch runs.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - If minimization shrinks `duration_ms`, it must also clip any scheduled events past the new duration; otherwise `Scenario::apply_to_simio` will reject the candidate.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Even when a scenario is authored with `pulse/hold`, the canonical backend format is expanded numeric-ID `inputs`; minimized scenarios are emitted in that canonical form for maximum compatibility.
+---
 ## [2026-02-17 22:31:10 CST] - US-SCENE-003
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented

@@ -7,6 +7,53 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+fn render_minimized_scenario_yaml(
+    scenario: &sim::Scenario,
+    plc_path: &Path,
+    scenario_path: &Path,
+    failure: &Failure,
+    seed: Option<u64>,
+    has_sugar: bool,
+) -> Result<String, String> {
+    let mut msg = String::new();
+    msg.push_str("# Minimized by `rust_plc sim-regress --minimize-failure`.\n");
+    msg.push_str(&format!("# Source PLC: {}\n", plc_path.display()));
+    msg.push_str(&format!(
+        "# Source scenario: {}\n",
+        scenario_path.display()
+    ));
+    msg.push_str(&format!(
+        "# Failure signature: kind={} task={:?} step={:?} at_ms={:?}\n",
+        failure.kind, failure.task, failure.step, failure.at_ms
+    ));
+    msg.push_str(&format!("# Seed: {:?}\n", seed));
+    if has_sugar {
+        msg.push_str("# Note: source scenario uses pulse/hold sugar; this file is the expanded numeric-ID form.\n");
+        msg.push_str("#       Use `rust_plc scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>` to inspect expansions.\n");
+    }
+    msg.push_str("#\n");
+    msg.push_str("# Feedback (what to try next):\n");
+    match failure.kind.as_str() {
+        "timeout" => {
+            msg.push_str("# - The PLC likely waited for an input edge that never happened.\n");
+            msg.push_str("# - Try scripting the relevant sensors/guards over time, or extend `duration_ms`.\n");
+            msg.push_str("# - If you're starting from scratch: `rust_plc scenario-init <file.plc> --preset normal`.\n");
+        }
+        _ => {
+            msg.push_str("# - Review the failure message and script the missing input edges.\n");
+        }
+    }
+    msg.push_str("#\n");
+
+    let mut yaml = serde_yaml::to_string(scenario)
+        .map_err(|e| format!("Failed to serialize minimized scenario YAML: {e}"))?;
+    if !yaml.ends_with('\n') {
+        yaml.push('\n');
+    }
+    msg.push_str(&yaml);
+    Ok(msg)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Failure {
     pub kind: String,
@@ -222,14 +269,19 @@ fn run_one_case(
     let plc_source = fs::read_to_string(plc_path)
         .map_err(|err| format!("Failed to read PLC file {}: {err}", plc_path.display()))?;
 
-    let scenario_yaml = fs::read_to_string(scenario_path).map_err(|err| {
+    let raw_scenario_yaml = fs::read_to_string(scenario_path).map_err(|err| {
         format!(
             "Failed to read scenario YAML file {}: {err}",
             scenario_path.display()
         )
     })?;
 
-    let scenario_yaml = match resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml) {
+    let has_sugar = raw_scenario_yaml.contains("\npulse:")
+        || raw_scenario_yaml.contains("\nhold:")
+        || raw_scenario_yaml.contains("\npulses:")
+        || raw_scenario_yaml.contains("\nholds:");
+
+    let scenario_yaml = match resolve_scenario_yaml_for_plc(&plc_source, &raw_scenario_yaml) {
         Ok(yaml) => yaml,
         Err(e) => {
             let failure = Failure::scenario_error(e);
@@ -308,8 +360,14 @@ fn run_one_case(
             let minimized_trace_path = artifact_dir.join("minimized_trace.jsonl");
             let minimized_report_path = artifact_dir.join("minimized_report.json");
 
-            let yaml = serde_yaml::to_string(&min_scenario)
-                .map_err(|e| format!("Failed to serialize minimized scenario YAML: {e}"))?;
+            let yaml = render_minimized_scenario_yaml(
+                &min_scenario,
+                plc_path,
+                scenario_path,
+                &failure,
+                scenario.seed,
+                has_sugar,
+            )?;
             fs::write(&minimized_scenario_path, yaml)
                 .map_err(|err| format!("Failed to write {minimized_scenario_path:?}: {err}"))?;
             fs::write(&minimized_trace_path, min_run.trace.into_string()).map_err(|err| {
@@ -552,6 +610,26 @@ struct FailureSignature<'a> {
 fn scenario_with_ticks(base: &sim::Scenario, ticks: u64) -> sim::Scenario {
     let mut out = base.clone();
     out.duration_ms = ticks.saturating_mul(out.tick_ms);
+
+    // When shrinking duration, drop any scripted changes that would become invalid
+    // (Scenario::apply_to_simio requires at_ms < duration_ms).
+    let dur = out.duration_ms;
+    out.inputs.retain(|ev| ev.at_ms < dur);
+    out.faults.retain(|f| f.sensor_stuck.at_ms < dur);
+    out.digital_bursts.retain(|b| {
+        if b.at_ms >= dur {
+            return false;
+        }
+        // Conservative check: ensure the final active window ends before duration.
+        if b.count == 0 || b.period_ms == 0 {
+            return false;
+        }
+        let last_start = b
+            .at_ms
+            .saturating_add(b.period_ms.saturating_mul((b.count.saturating_sub(1)) as u64));
+        let last_end = last_start.saturating_add(b.active_ms);
+        last_end < dur
+    });
     out
 }
 
