@@ -46,6 +46,7 @@ fn main() {
 // Embedded firmware build (thumbv6m-none-eabi, target_os = "none").
 #[cfg(target_os = "none")]
 mod firmware {
+    use super::evaluate_tick_timing;
     use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
     use runtime_core::{Runtime, TransitionReason};
 
