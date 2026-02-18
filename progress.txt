@@ -1447,3 +1447,15 @@ Thread: N/A (Codex CLI)
   - For PIO snapshot consumers, draining RX FIFO and using the newest value is safer than single-read sampling when runtime load is variable.
 ---
 
+## [2026-02-19 01:31:40 CST] - US-007
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Enabled axis1 AB feedback path using the same shared PIO quadrature counter + tick-snapshot implementation as axis0 (wired via io_map.motion.encoder.axis1).
+  - Kept axis0/axis1 encoder logic unified; axis selection is purely config/pin wiring and channel ID mapping.
+- Quality checks
+  - cargo test --workspace
+- Files changed
+  - prd.json
+  - progress.txt
+---
+
