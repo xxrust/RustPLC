@@ -1,0 +1,54 @@
+[digital_inputs]
+di24 = "virtual" # axis0 enc_dir_positive
+di26 = "virtual" # axis1 enc_dir_positive
+
+[digital_outputs]
+do24 = "virtual" # axis0 enable
+do25 = "virtual" # axis0 dir
+do26 = "virtual" # axis1 enable
+do27 = "virtual" # axis1 dir
+
+[analog_inputs]
+ai24 = "virtual" # axis0 count
+ai25 = "virtual" # axis0 speed
+ai26 = "virtual" # axis1 count
+ai27 = "virtual" # axis1 speed
+
+[analog_outputs]
+ao24 = "virtual" # axis0 vel_cmd_sps
+ao26 = "virtual" # axis1 vel_cmd_sps
+
+[motion.stepper.axis0]
+step_gpio = 2
+dir_gpio = 3
+en_gpio = 4
+dir_inverted = false
+v_max_sps = 20000
+acc_sps2 = 40000
+dec_sps2 = 40000
+
+[motion.stepper.axis1]
+step_gpio = 5
+dir_gpio = 6
+en_gpio = 7
+dir_inverted = false
+v_max_sps = 20000
+acc_sps2 = 40000
+dec_sps2 = 40000
+
+[motion.encoder.axis0]
+a_gpio = 8
+b_gpio = 9
+ppr = 1024
+quad = 4
+count_sign = "normal"
+scale = 1.0
+
+[motion.encoder.axis1]
+a_gpio = 10
+b_gpio = 11
+ppr = 1024
+quad = 4
+count_sign = "normal"
+scale = 1.0
+

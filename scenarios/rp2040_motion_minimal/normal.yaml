@@ -1,0 +1,27 @@
+# Source PLC: examples/rp2040_motion_minimal.plc
+seed: 2026
+tick_ms: 10
+duration_ms: 2000
+
+inputs:
+  - at_ms: 0
+    set:
+      digital_inputs:
+        axis0_enc_dir_positive: false
+        axis1_enc_dir_positive: false
+      analog_inputs:
+        axis0_count: 0
+        axis1_count: 0
+
+  - at_ms: 100
+    set:
+      digital_inputs:
+        axis0_enc_dir_positive: true
+        axis1_enc_dir_positive: true
+
+  - at_ms: 800
+    set:
+      analog_inputs:
+        axis0_count: 25000
+        axis1_count: 18000
+

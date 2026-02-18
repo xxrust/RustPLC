@@ -1,0 +1,89 @@
+[topology]
+
+# Dual-axis minimal example for the RP2040 motion subsystem.
+#
+# It demonstrates the current dev-stage convention:
+# - Commands are written to virtual outputs (Y24/Y25/AO24 and Y26/Y27/AO26)
+# - Feedback is read from virtual inputs (AI24/X24 and AI26/X26)
+# - Scenarios drive the external feedback to exercise nominal + fault paths
+
+# Physical IO (channel IDs only; bind to "virtual" in io_map.toml for motion channels)
+device Y24: digital_output  # axis0 enable (virtual)
+device Y25: digital_output  # axis0 dir (virtual)
+device AO24: analog_output { range: 0..20000, unit: "step_s" } # axis0 vel_cmd_sps (virtual)
+
+device Y26: digital_output  # axis1 enable (virtual)
+device Y27: digital_output  # axis1 dir (virtual)
+device AO26: analog_output { range: 0..20000, unit: "step_s" } # axis1 vel_cmd_sps (virtual)
+
+device AI24: analog_input { range: 0..4000000, unit: "count", external: true } # axis0 count
+device X24: digital_input { external: true }                                    # axis0 enc_dir_positive
+
+device AI26: analog_input { range: 0..4000000, unit: "count", external: true } # axis1 count
+device X26: digital_input { external: true }                                    # axis1 enc_dir_positive
+
+# Logical aliases
+device axis0_enable: digital_output { connected_to: Y24 }
+device axis0_dir: digital_output { connected_to: Y25 }
+device axis0_vel_cmd: analog_output { connected_to: AO24, range: 0..20000, unit: "step_s" }
+device axis0_count: analog_input { connected_to: AI24, range: 0..4000000, unit: "count", external: true }
+device axis0_enc_dir_positive: digital_input { connected_to: X24, external: true }
+
+device axis1_enable: digital_output { connected_to: Y26 }
+device axis1_dir: digital_output { connected_to: Y27 }
+device axis1_vel_cmd: analog_output { connected_to: AO26, range: 0..20000, unit: "step_s" }
+device axis1_count: analog_input { connected_to: AI26, range: 0..4000000, unit: "count", external: true }
+device axis1_enc_dir_positive: digital_input { connected_to: X26, external: true }
+
+[constraints]
+
+[tasks]
+
+task cycle:
+  step enable_axes:
+    action: set axis0_enable on
+    action: set axis1_enable on
+
+  step set_dir_forward:
+    action: set axis0_dir on
+    action: set axis1_dir on
+
+  step start_move:
+    action: set_analog axis0_vel_cmd 8000
+    action: set_analog axis1_vel_cmd 6000
+
+  step wait_dir_feedback:
+    wait: axis0_enc_dir_positive == true
+    timeout: 200ms -> goto fault
+
+  step wait_axis0_count:
+    wait: axis0_count >= 20000
+    timeout: 1500ms -> goto fault
+
+  step wait_axis1_count:
+    wait: axis1_count >= 15000
+    timeout: 1500ms -> goto fault
+
+  step stop:
+    action: set_analog axis0_vel_cmd 0
+    action: set_analog axis1_vel_cmd 0
+    action: set axis0_enable off
+    action: set axis1_enable off
+
+  on_complete: goto done
+
+task fault:
+  step safe_stop:
+    action: set_analog axis0_vel_cmd 0
+    action: set_analog axis1_vel_cmd 0
+    action: set axis0_enable off
+    action: set axis1_enable off
+
+  step log:
+    action: log "fault: timeout waiting for motion feedback"
+
+  on_complete: goto done
+
+task done:
+  step hold:
+    allow_indefinite_wait: true
