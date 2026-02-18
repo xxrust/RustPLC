@@ -132,8 +132,8 @@
         "cargo test --workspace passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added an explicit “本期边界与非目标” section to docs/stepper_ab_encoder.md and gated it with a small doc regression test to prevent future scope ambiguity."
     }
   ]
 }

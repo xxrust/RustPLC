@@ -74,3 +74,19 @@ fn stepper_ab_encoder_doc_covers_rule_templates_and_playbook_link() {
         assert!(doc.contains(needle), "doc should mention `{needle}`");
     }
 }
+
+#[test]
+fn stepper_ab_encoder_doc_covers_scope_boundaries_and_non_goals() {
+    let doc = read_doc("docs/stepper_ab_encoder.md");
+    for needle in [
+        "本期边界与非目标",
+        "实时脉冲轨迹规划",
+        "复杂运动学在线求解",
+        "原始 AB 边沿在 DSL 直接解码",
+        "DSL 负责顺控、互锁、安全约束",
+        "驱动/板级层负责高速计算",
+        "隐含新增能力",
+    ] {
+        assert!(doc.contains(needle), "doc should mention `{needle}`");
+    }
+}

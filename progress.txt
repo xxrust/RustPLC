@@ -18,6 +18,7 @@
 - For CLI-driven docs, add a doc consistency test that checks required commands are present both in the markdown playbook and in `rust_plc` usage output.
 - For docs with fenced ` ```plc` snippets, keep each snippet a complete PLC file (`[topology]` + `[constraints]` + `[tasks]` in order) and add an integration test that extracts and parses those blocks via `parse_plc` to prevent example drift.
 - For repo-local Wiki drafts under `docs/wiki/`, include at least one complete ` ```plc` snippet and gate it with a small test (extract + `parse_plc`) so drafts don't silently drift into non-parseable examples.
+- For scope-sensitive deliverables, add an explicit “in-scope vs out-of-scope” section in the canonical doc and lock key boundary phrases with a doc regression test to avoid implicit capability creep.
 - For doc deliverables with structural acceptance criteria (required headings/links), add a lightweight regression test that asserts those key strings exist to prevent drift.
 - For JSONL contracts that are diff-sensitive, serialize typed structs (not maps) and keep canonical field declaration order so snapshots stay stable.
 - For percentile-based gates/reports, use one deterministic nearest-rank rule and lock it with unit tests so threshold behavior stays stable across refactors.
@@ -1083,4 +1084,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Repo-local wiki drafts are not auto-discoverable unless README/docs include an explicit entry link.
   - Useful context (e.g., "the evaluation panel is in component X")
     - The canonical modeling source remains `docs/stepper_ab_encoder.md`; wiki drafts should stay terminology-compatible with that file.
+---
+## [2026-02-18 14:30:04 CST] - US-009
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added an explicit “本期边界与非目标（防 scope 膨胀）” section to `docs/stepper_ab_encoder.md`, listing out-of-scope items (实时脉冲轨迹规划、复杂运动学在线求解、原始 AB 边沿 DSL 直接解码) and in-scope boundary (DSL 顺控/互锁 + 驱动层高速计算与信号化).
+  - Added an explicit review policy sentence to remove ambiguity around “隐含新增能力”.
+  - Added `tests/stepper_ab_encoder_doc.rs` regression coverage to ensure boundary/non-goal phrases remain present.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `docs/stepper_ab_encoder.md`
+  - `tests/stepper_ab_encoder_doc.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Scope-control requirements are easiest to keep stable when boundary text is centralized in one canonical doc section and guarded by a simple string-based doc test.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Without explicit in-scope/out-of-scope wording, reviewers can infer hidden capabilities from examples or terminology even when implementation does not provide them.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `docs/stepper_ab_encoder.md` is the canonical source for this topic; wiki drafts and examples should inherit these scope boundaries rather than define their own variants.
 ---
