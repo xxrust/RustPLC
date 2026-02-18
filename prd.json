@@ -8,7 +8,7 @@
       "title": "解析 RP2040 日志中的 TIMING 记录为 tick_timing.jsonl",
       "description": "作为测试工程师，我希望把板端输出的 TIMING 行解析成统一的 tick_timing.jsonl，以便用同一套 timing-report 工具评估 cycle/jitter/overrun。",
       "acceptanceCriteria": [
-        "新增解析函数：从板端日志提取 TIMING tick/exec_us/slack_us/overrun/overrun_count 等字段",
+        "新增解析函数：从板端日志提取 TIMING tick/ts_start_us/ts_end_us/exec_us/slack_us/overrun 字段（允许日志含额外字段并忽略）",
         "把解析结果映射到现有 TickTimingSample 并可序列化为 tick_timing.jsonl",
         "为解析器新增单元测试（覆盖乱序字段、混入其他日志行、缺字段报错）",
         "cargo test --workspace passes"
@@ -19,12 +19,13 @@
     },
     {
       "id": "US-002",
-      "title": "新增 CLI 子命令将 board.log 转换为 tick_timing.jsonl",
-      "description": "作为开发者，我希望一个命令即可把 board.log 转成 tick_timing.jsonl，从而能直接接入 rust_plc timing-report 与 no-board-gate 的指标体系。",
+      "title": "扩展 trace-parse：同一份 board.log 同时导出 trace.jsonl 与 tick_timing.jsonl",
+      "description": "作为开发者，我希望用同一个 trace-parse 命令从 board.log 导出 trace 与 tick_timing 两类工件，避免引入新的并行命令与重复 I/O。",
       "acceptanceCriteria": [
-        "新增子命令：rust_plc board-timing --in <board.log> --out <tick_timing.jsonl>",
-        "输出 JSONL 采用现有 TickTimingSample 的字段顺序（保持确定性）",
-        "README 或 docs 中给出最小用法示例（board-timing + timing-report 两步）",
+        "trace-parse 增加可选参数：--timing-out <tick_timing.jsonl>（未提供时保持原行为仅导出 trace.jsonl）",
+        "tick_timing.jsonl 的 JSON 字段顺序与 TickTimingSample 序列化保持一致（保持确定性）",
+        "新增/更新 CLI 帮助与用法字符串，明确 trace-parse 的新参数",
+        "README 或 docs 中给出最小用法示例（trace-parse --timing-out + timing-report 两步）",
         "cargo test --workspace passes"
       ],
       "priority": 2,
@@ -37,7 +38,7 @@
       "description": "作为调试工程师，我希望在仿真中强制某些输出点位保持固定值（即使 PLC 程序写了别的值），用于定位互锁与故障路径。",
       "acceptanceCriteria": [
         "SimIo 支持对指定 DO/AO 设定 persistent forced value（持续生效，直到解除）",
-        "当输出被 force 时，程序对该点位的写入不会改变最终输出值（trace/edges 体现最终值）",
+        "当输出被 force 时，程序对该点位的写入不会改变最终输出值（edges 体现最终值）",
         "新增单元测试：force DO 覆盖程序写入；force AO 覆盖程序写入",
         "cargo test --workspace passes"
       ],
@@ -65,7 +66,7 @@
       "description": "作为团队成员，我希望 FORCE 的使用方式被文档化并有可回归的最小示例，避免每次调试都重新发明工具。",
       "acceptanceCriteria": [
         "新增文档：docs/force_override.md（说明 force 的语义、优先级、适用范围与反模式）",
-        "新增至少 1 个可运行示例（例如 examples/force_override_demo.plc + 对应 scenario.yaml）",
+        "新增至少 1 个可运行示例（例如 examples/force_override_demo.plc + 对应 scenario.yaml），可用 sim-plc 运行",
         "示例能展示 force 输入与 force 输出各 1 个点位的效果",
         "cargo test --workspace passes"
       ],
@@ -79,7 +80,7 @@
       "description": "作为自动化工程师，我希望 RustPLC 能理解 IEC 风格的地址字符串（至少能解析到逻辑 id），从而降低从其他 PLC 平台迁移的学习成本。",
       "acceptanceCriteria": [
         "新增纯函数解析器：支持 %IXn.m、%QXn.m、%IWn、%QWn（最小子集）",
-        "解析器输出统一的逻辑通道类型（DI/DO/AI/AO）与 id（并明确 bit/word 的映射规则）",
+        "解析器输出统一的逻辑通道类型（DI/DO/AI/AO）与 id，并在 docs 中明确这是‘别名映射’而非完整 IEC 语义实现（含 bit/word -> id 的规则）",
         "新增单元测试覆盖：合法/非法地址、边界值、空白/大小写处理规则",
         "cargo test --workspace passes"
       ],
@@ -92,7 +93,7 @@
       "title": "io_map.toml 支持 IEC 风格 key 作为 DI/DO/AI/AO 的别名输入",
       "description": "作为现场集成工程师，我希望 io_map.toml 可以直接使用 IEC 地址作为 key（或 alias），以减少手工对照与接线错误。",
       "acceptanceCriteria": [
-        "IoMap::from_toml_str 支持在 [digital_inputs]/[digital_outputs]/[analog_inputs]/[analog_outputs] 中使用 IEC 风格 key（必要时允许 TOML quoted keys）",
+        "IoMap::from_toml_str 支持在 [digital_inputs]/[digital_outputs]/[analog_inputs]/[analog_outputs] 中使用 IEC 风格 key（要求 TOML quoted keys，例如 \"%QX0.0\"）",
         "IEC key 与现有 di/do/ai/ao key 可混用，冲突时有明确报错（指出冲突的两个 key）",
         "为该能力新增单元测试（至少 2 个混用/冲突用例）",
         "cargo test --workspace passes"
@@ -106,7 +107,7 @@
       "title": "在 io_map.template.toml 中输出 IEC 地址提示注释",
       "description": "作为新用户，我希望生成的 io_map 模板直接提示对应 IEC 地址写法，减少文档来回翻找。",
       "acceptanceCriteria": [
-        "io_map.template.toml 的每个 di/do/ai/ao 注释行包含 IEC 地址提示（例如 do0 -> %QX0.0 之类的最小映射）",
+        "io_map.template.toml 的每个 di/do/ai/ao 注释行包含 IEC 地址提示（例如 do0 -> %QX0.0 的最小映射），并注明若要用 IEC key 需要 TOML quoted key",
         "模板中清晰说明 bit/word/通道映射规则（用注释写清楚，不引入新配置格式）",
         "为模板输出新增一个轻量的单元测试（校验关键提示字符串存在）",
         "cargo test --workspace passes"
@@ -118,7 +119,7 @@
     {
       "id": "US-009",
       "title": "在 board-rp2040 固件中抽出最小 HAL 形状（initialize/update_in/update_out/finalize）",
-      "description": "作为维护者，我希望板端固件结构更接近 OpenPLC 的最小 HAL 形状，从而降低后续移植到其他板卡时的复制成本。",
+      "description": "作为维护者，我希望板端固件结构更接近 OpenPLC 的最小 HAL 形状，从而降低后续移植到其他板卡时的复制成本；该重构不应改变现有行为。",
       "acceptanceCriteria": [
         "在 board-rp2040 固件中新增一个内部模块或文件，封装 initialize/update_in/update_out/finalize 的最小形状",
         "main loop 使用该封装（不改变现有行为：IO 映射、AO ramp、timing 统计、safe_state）",
@@ -144,4 +145,3 @@
     }
   ]
 }
-
