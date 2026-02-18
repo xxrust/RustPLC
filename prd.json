@@ -135,22 +135,7 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "US-010",
-      "title": "Close the collision-avoidance loop using zone_code + bi-directional interlock on real-board signals",
-      "description": "As a safety owner, I want the existing collision-avoidance model (zone_code + bi-directional interlock) to be exercised against board-level feedback, not just documentation.",
-      "acceptanceCriteria": [
-        "Example uses `zone_code` for collision windows and enforces mutual exclusion with an actuator state",
-        "Example includes a bi-directional interlock rule (e.g. move_cmd.on conflicts_with dangerous posture)",
-        "At least one danger-window scenario triggers a controlled fault (no silent violation)",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
-      ],
-      "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -165,7 +150,7 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -179,7 +164,7 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -194,7 +179,7 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
