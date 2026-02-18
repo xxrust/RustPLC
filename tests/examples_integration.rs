@@ -287,6 +287,60 @@ fn parses_stepper_collision_guard_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_stepper_multi_sensor_consistency_example_into_verified_ir_json() {
+    let source = read_example("stepper_multi_sensor_consistency.plc");
+    let ir_json = compile_source_to_json(&source)
+        .expect("stepper_multi_sensor_consistency example should compile");
+
+    let safety_rules = ir_json["constraints"]["safety"]
+        .as_array()
+        .expect("constraints.safety should be an array");
+    assert_eq!(
+        safety_rules.len(),
+        1,
+        "stepper_multi_sensor_consistency should define one safety rule (alarm interlock)"
+    );
+
+    let safety_statuses = ir_json["verification"]["safety"]["rule_statuses"]
+        .as_array()
+        .expect("verification.safety.rule_statuses should be an array");
+    assert_eq!(
+        safety_statuses.len(),
+        1,
+        "verification report should include a status entry for the safety rule"
+    );
+    assert!(
+        safety_statuses.iter().any(|status| {
+            status["rule"]
+                .as_str()
+                .unwrap_or("")
+                .contains("axis_x.on")
+        }),
+        "verification report should include the axis_x alarm interlock rule"
+    );
+    assert_eq!(
+        ir_json["verification"]["safety"]["skipped_rules"]
+            .as_u64()
+            .expect("skipped_rules should be numeric"),
+        0,
+        "no safety rules should be skipped in this example"
+    );
+
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
 fn parses_and_or_wait_demo_example_into_verified_ir_json() {
     let source = read_example("and_or_wait_demo.plc");
     let ir_json = compile_source_to_json(&source).expect("and_or_wait_demo should compile");

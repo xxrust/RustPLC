@@ -4,6 +4,8 @@
 - For `#![no_std]` crates that still want unit tests/doctests, add `#[cfg(test)] extern crate std;`.
 - In `src/parser/plc.pest`, when an alternation allows both `measured_value` (e.g. `50bar`) and `number`, list `measured_value` first so `50bar` doesn't partially match as `50`.
 - In `src/parser/plc.pest`, when `number` and `integer` are both allowed, list `number` before `integer` to avoid `2.0` being partially consumed as `2`.
+- In PLC topology `analog_input { range: A..B }`, the DSL range syntax does not support negative bounds; if you need signed values, model them as offset-encoded (or split sign into a separate discrete signal) and keep `range` non-negative.
+- In `if: <cond> goto ... else: goto ...`, `goto` targets must be a task name or `task.step` (step-only names are treated as task names); when branching within the same task, use `goto cycle.<step_name>`.
 - Safety rules that relate an unconstrained `external: true` analog input (e.g. `zone_code`) to an actuator state can be unverifiable/unsatisfiable unless the actuator state is unreachable or you model assumptions about the external signal's behavior.
 - For multi-coordinate axis setups (count/theta/pos_mm), pick exactly one “primary truth” coordinate; keep conversion + consistency checks in the driver layer and expose discrete health signals (`range_valid`, `pos_consistent`, optional `health_code`) to the DSL.
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
@@ -1014,4 +1016,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `docs/stepper_ab_encoder.md` is guarded by `tests/stepper_ab_encoder_doc.rs` which parses every fenced ` ```plc` block; avoid adding partial snippets or rearranging blocks into non-parseable fragments.
   - Useful context (e.g., "the evaluation panel is in component X")
     - A practical split is: driver layer computes `axis_theta/axis_pos_mm/zone_code` plus `range_valid/pos_consistent`; DSL focuses on interlocks, state sequencing, and explicit fault/degrade transitions.
+---
+## [2026-02-18 14:06:54 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `examples/stepper_multi_sensor_consistency.plc`, a minimal runnable example that models encoder+laser inputs and consumes drive-layer `pos_consistent` + `sensor_fault_code` to choose between normal, degraded (recoverable), and fault paths.
+  - Added integration coverage in `tests/examples_integration.rs` to compile/verify the new example and assert the safety report includes the expected alarm interlock rule.
+  - Verified `cargo run --release -- examples/stepper_multi_sensor_consistency.plc --no-print-ir` and `cargo test --workspace` pass.
+- Files changed
+  - `examples/stepper_multi_sensor_consistency.plc`
+  - `tests/examples_integration.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - The most verification-friendly way to express “sensor consistency” in DSL is to consume discrete health outputs (`pos_consistent`, `sensor_fault_code`) from the driver layer and branch into `degraded`/`fault` tasks, rather than trying to model arithmetic comparisons in DSL.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - PLC `analog_input` `range: A..B` does not accept negative bounds; represent signed quantities via offset encoding if needed.
+    - `if: ... goto <name>` treats `<name>` as a task; to jump to a step within the same task, use `goto task.step` (e.g., `goto cycle.enable_axis`).
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - For monitoring-style waits, `wait: <target_reached> OR <health_degraded>` + a follow-up `if:` decision step is a compact way to express “stop early on degraded health” without writing explicit loops.
 ---

@@ -1,0 +1,133 @@
+[topology]
+
+# Minimal, runnable example showing multi-sensor consistency handling:
+# - Encoder-derived position (axis_count) + external distance sensor (laser_pos_mm)
+# - Drive-layer health signals exposed to DSL: pos_consistent (bool) + sensor_fault_code (enum)
+# - If consistency fails: enter a degraded state (stop motion + wait for recovery)
+# - If sensor_fault_code is non-zero: enter fault (requires manual attention)
+
+# Physical IO
+device Y0: digital_output  # DIR
+device Y1: digital_output  # EN
+device Y2: digital_output  # MOVE_CMD
+device X0: digital_input   # INPOS
+device X1: digital_input   # ALARM
+device X2: digital_input   # POS_CONSISTENT (drive-layer computed)
+
+# External feedback provided by the drive / board layer
+device AI0: analog_input { range: 0..4000000, unit: "count", external: true }   # encoder count snapshot
+device AI1: analog_input { range: 0..2000, unit: "mm", external: true }         # laser distance snapshot
+device AI2: analog_input { range: 0..5, unit: "code", external: true }          # 0=ok, 1=laser dropout, 2=pos mismatch, ...
+
+# Logical aliases for scenarios/tests.
+device axis_count: analog_input { connected_to: AI0, range: 0..4000000, unit: "count" }
+device laser_pos_mm: analog_input { connected_to: AI1, range: 0..2000, unit: "mm" }
+device sensor_fault_code: analog_input { connected_to: AI2, range: 0..5, unit: "code" }
+
+# Logical devices
+device axis_x: motor {
+    connected_to: Y1
+    ramp_time: 10ms
+}
+
+device dir_positive: digital_output {
+    connected_to: Y0
+}
+
+device move_cmd: digital_output {
+    connected_to: Y2
+}
+
+device inpos_x: sensor {
+    connected_to: X0
+    detects: axis_x.position_ok
+}
+
+device alarm_x: sensor {
+    connected_to: X1
+    detects: axis_x.alarm
+}
+
+device pos_consistent: digital_input {
+    connected_to: X2
+}
+
+[constraints]
+
+# Basic: do not enable the axis while drive is alarming.
+safety: axis_x.on requires alarm_x.off
+    reason: "Drive alarm must be cleared before enabling axis"
+
+[tasks]
+
+task cycle:
+    # Fault scenario hook: alarm can be driven by scenarios.
+    step wait_alarm_clear:
+        wait: alarm_x == false
+        timeout: 200ms -> goto fault
+
+    # If the distance sensor reports an explicit fault, treat it as a hard fault.
+    step check_sensor_fault:
+        if: sensor_fault_code == 0 goto cycle.check_consistency else: goto fault
+
+    # If consistency is not established, enter a degraded state before enabling motion.
+    step check_consistency:
+        if: pos_consistent == true goto cycle.enable_axis else: goto degraded
+
+    step enable_axis:
+        action: set axis_x on
+
+    step set_dir_positive:
+        action: set dir_positive on
+
+    step start_move:
+        action: set move_cmd on
+
+    # While moving, continuously accept either "target reached" or "health degraded".
+    step wait_target_or_degrade:
+        wait: axis_count >= 120000 OR pos_consistent == false OR sensor_fault_code != 0
+        timeout: 3000ms -> goto fault
+
+    step decide_after_move_watch:
+        if: sensor_fault_code == 0 goto cycle.decide_after_consistency else: goto fault
+
+    step decide_after_consistency:
+        if: pos_consistent == true goto cycle.wait_inpos_or_degrade else: goto degraded
+
+    step wait_inpos_or_degrade:
+        wait: inpos_x == true OR pos_consistent == false OR sensor_fault_code != 0
+        timeout: 1000ms -> goto fault
+
+    step decide_after_inpos_watch:
+        if: sensor_fault_code == 0 goto cycle.decide_after_inpos_consistency else: goto fault
+
+    step decide_after_inpos_consistency:
+        if: pos_consistent == true goto cycle.stop_move else: goto degraded
+
+    step stop_move:
+        action: set move_cmd off
+
+    on_complete: goto idle
+
+task degraded:
+    step safe_stop:
+        action: set move_cmd off
+        action: set axis_x off
+    step log:
+        action: log "degraded: multi-sensor inconsistency detected; motion inhibited"
+    step wait_recover:
+        wait: pos_consistent == true AND sensor_fault_code == 0
+        timeout: 2000ms -> goto fault
+    on_complete: goto idle
+
+task fault:
+    step safe_stop:
+        action: set move_cmd off
+        action: set axis_x off
+    step log:
+        action: log "fault: sensor fault/alarm/timeout"
+    on_complete: goto idle
+
+task idle:
+    step hold:
+        allow_indefinite_wait: true
