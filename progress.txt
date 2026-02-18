@@ -1367,3 +1367,23 @@ Thread: (manual execution; ralph.sh tool execution blocked by missing/expired CL
 - **Learnings for future iterations:**
   - Keep motion config errors path-addressable (e.g. `motion.stepper.axis0`) and include a concrete hint so CI/build logs are self-service.
 ---
+
+
+## 2026-02-19T00:24:55+08:00 - US-003
+Thread: (manual execution; ralph.sh tool execution blocked by missing/expired CLI auth)
+- What was implemented
+  - Added a firmware `motion` module with lifecycle-shaped hooks (initialize/update_in/update_out/finalize_on_error).
+  - Integrated motion hooks into `firmware::hal::Hal` so future PIO step/encoder work does not bloat `main.rs`.
+  - Preserved existing TRACE/TIMING and safe-state behavior (motion is a no-op in this story).
+- Quality checks
+  - `cargo test --workspace`
+  - `cargo build -p board-rp2040 --target thumbv6m-none-eabi --release`
+- Files changed
+  - `crates/board-rp2040/src/firmware/motion.rs`
+  - `crates/board-rp2040/src/firmware/hal.rs`
+  - `crates/board-rp2040/src/main.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Keep new realtime subsystems behind HAL-shaped hooks so timing evidence (`TIMING ...`) remains comparable across refactors.
+---

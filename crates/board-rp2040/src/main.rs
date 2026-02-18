@@ -71,6 +71,7 @@ mod firmware {
     use panic_probe as _;
 
     mod hal;
+    mod motion;
 
     mod generated_program {
         // Filled by build.rs; can be overridden via RUST_PLC_GENERATED_PROGRAM_RS.
