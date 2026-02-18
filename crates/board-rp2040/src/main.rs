@@ -138,7 +138,9 @@ mod firmware {
     struct PicoIo {
         t: Tick,
         di: [Option<Pin<DynPinId, FunctionSioInput, PullUp>>; io_map::MAX_DI],
+        di_virtual: [bool; io_map::MAX_DI],
         do_: [Option<Pin<DynPinId, FunctionSioOutput, PullDown>>; io_map::MAX_DO],
+        do_state: [bool; io_map::MAX_DO],
         adc: Adc,
         ai_pins: [Option<AdcPin<Pin<DynPinId, FunctionSioInput, PullDown>>>; io_map::MAX_AI],
         ai: [f32; io_map::MAX_AI],
@@ -160,8 +162,10 @@ mod firmware {
         fn new(pins: &mut AllPins, adc: Adc, pwm: pac::PWM, tick_ms: u32) -> Self {
             let mut di: [Option<Pin<DynPinId, FunctionSioInput, PullUp>>; io_map::MAX_DI] =
                 core::array::from_fn(|_| None);
+            let di_virtual: [bool; io_map::MAX_DI] = [false; io_map::MAX_DI];
             let mut do_: [Option<Pin<DynPinId, FunctionSioOutput, PullDown>>; io_map::MAX_DO] =
                 core::array::from_fn(|_| None);
+            let do_state: [bool; io_map::MAX_DO] = [false; io_map::MAX_DO];
             let mut ai_pins: [Option<AdcPin<Pin<DynPinId, FunctionSioInput, PullDown>>>;
                 io_map::MAX_AI] = core::array::from_fn(|_| None);
             let mut ao_pwm_pins: [Option<Pin<DynPinId, FunctionPwm, PullDown>>; io_map::MAX_AO] =
@@ -237,7 +241,9 @@ mod firmware {
             Self {
                 t: Tick(0),
                 di,
+                di_virtual,
                 do_,
+                do_state,
                 adc,
                 ai_pins,
                 ai: [0.0; io_map::MAX_AI],
@@ -399,6 +405,24 @@ mod firmware {
                 }
             }
         }
+
+        fn write_virtual_digital_input(&mut self, id: usize, value: bool) {
+            if let Some(slot) = self.di_virtual.get_mut(id) {
+                *slot = value;
+            }
+        }
+
+        fn read_analog_output_target(&self, id: usize) -> f32 {
+            self.ao_target.get(id).copied().unwrap_or(0.0)
+        }
+
+        fn tick_ms(&self) -> u32 {
+            self.tick_ms
+        }
+
+        fn read_digital_output_latched(&self, id: usize) -> bool {
+            self.do_state.get(id).copied().unwrap_or(false)
+        }
     }
 
     impl Io for PicoIo {
@@ -411,22 +435,26 @@ mod firmware {
         }
 
         fn read_digital_input(&self, id: DigitalInputId) -> bool {
-            self.di
-                .get(id.0 as usize)
-                .and_then(|p| p.as_ref())
-                .and_then(|p| p.is_high().ok())
-                .unwrap_or(false)
+            let idx = id.0 as usize;
+            if let Some(pin) = self.di.get(idx).and_then(|p| p.as_ref()) {
+                pin.is_high().ok().unwrap_or(false)
+            } else {
+                self.di_virtual.get(idx).copied().unwrap_or(false)
+            }
         }
 
         fn read_analog_input(&self, id: AnalogInputId) -> f32 {
             self.ai.get(id.0 as usize).copied().unwrap_or(0.0)
         }
 
-        fn write_digital_output(&mut self, id: DigitalOutputId, value: bool) {
-            if let Some(p) = self.do_.get_mut(id.0 as usize).and_then(|p| p.as_mut()) {
-                if value {
-                    let _ = p.set_high();
-                } else {
+	        fn write_digital_output(&mut self, id: DigitalOutputId, value: bool) {
+	            if let Some(slot) = self.do_state.get_mut(id.0 as usize) {
+	                *slot = value;
+	            }
+	            if let Some(p) = self.do_.get_mut(id.0 as usize).and_then(|p| p.as_mut()) {
+	                if value {
+	                    let _ = p.set_high();
+	                } else {
                     let _ = p.set_low();
                 }
             }
@@ -473,10 +501,12 @@ mod firmware {
             sio.gpio_bank0,
             &mut pac.RESETS,
         );
-        let mut all_pins = AllPins::new(pins);
-        const TICK_MS: u64 = 1;
-        let io = PicoIo::new(&mut all_pins, adc, pac.PWM, TICK_MS as u32);
-        let mut hal = hal::Hal::initialize(timer, io, TICK_MS);
+	        let mut all_pins = AllPins::new(pins);
+	        const TICK_MS: u64 = 1;
+	        let io = PicoIo::new(&mut all_pins, adc, pac.PWM, TICK_MS as u32);
+	        let sys_hz = clocks.system_clock.get_freq().to_Hz();
+	        let motion = motion::Motion::initialize(&mut all_pins, pac.PIO0, &mut pac.RESETS, sys_hz);
+	        let mut hal = hal::Hal::initialize(timer, io, motion, TICK_MS);
 
         loop {
             let (tick, tick_start_us, deadline_us) = hal.update_in();

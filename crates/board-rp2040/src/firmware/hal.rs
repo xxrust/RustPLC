@@ -16,11 +16,9 @@ pub(super) struct Hal {
 }
 
 impl Hal {
-    pub(super) fn initialize(timer: Timer, io: PicoIo, tick_ms: u64) -> Self {
+    pub(super) fn initialize(timer: Timer, io: PicoIo, motion: Motion, tick_ms: u64) -> Self {
         let tick_us = tick_ms.saturating_mul(1000);
         let next_tick_us = timer.get_counter().ticks();
-        let mut io = io;
-        let motion = Motion::initialize(&mut io);
         Self {
             timer,
             io,

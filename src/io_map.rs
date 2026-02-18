@@ -152,6 +152,14 @@ pub enum IoMapError {
         allowed: &'static str,
     },
 
+    #[error("invalid gpio value {value:?} for {kind}{id} (allowed: {allowed})")]
+    InvalidGpioValue {
+        kind: &'static str,
+        id: u16,
+        value: String,
+        allowed: &'static str,
+    },
+
     #[error("gpio {gpio} is assigned multiple times ({a} and {b})")]
     DuplicateGpio { gpio: u8, a: String, b: String },
 
@@ -183,9 +191,9 @@ impl IoMap {
         let ao_table = v.get("analog_outputs").and_then(|v| v.as_table());
 
         let digital_inputs =
-            parse_map_section(di_table, "digital_inputs", "di", "di0", 0, 29, "0..=29")?;
+            parse_map_section(di_table, "digital_inputs", "di", "di0", 0, 29, "0..=29 or \"virtual\"")?;
         let digital_outputs =
-            parse_map_section(do_table, "digital_outputs", "do", "do0", 0, 29, "0..=29")?;
+            parse_map_section(do_table, "digital_outputs", "do", "do0", 0, 29, "0..=29 or \"virtual\"")?;
         let analog_inputs = match ai_table {
             Some(t) => parse_map_section(
                 t,
@@ -194,12 +202,12 @@ impl IoMap {
                 "ai0",
                 26,
                 29,
-                "26..=29 (RP2040 ADC-capable GPIO)",
+                "26..=29 (RP2040 ADC-capable GPIO) or \"virtual\"",
             )?,
             None => BTreeMap::new(),
         };
         let analog_outputs = match ao_table {
-            Some(t) => parse_map_section(t, "analog_outputs", "ao", "ao0", 0, 29, "0..=29")?,
+            Some(t) => parse_map_section(t, "analog_outputs", "ao", "ao0", 0, 29, "0..=29 or \"virtual\"")?,
             None => BTreeMap::new(),
         };
 
@@ -242,6 +250,10 @@ impl IoMap {
         // Ensure no gpio is assigned twice across DI/DO sets.
         let mut seen = BTreeMap::<u8, String>::new();
         let mut insert_seen = |gpio: u8, key: String| -> Result<(), IoMapError> {
+            // `255` is reserved for "virtual" channels (no physical GPIO binding).
+            if gpio == u8::MAX {
+                return Ok(());
+            }
             if let Some(prev) = seen.insert(gpio, key.clone()) {
                 return Err(IoMapError::DuplicateGpio {
                     gpio,
@@ -759,21 +771,36 @@ fn parse_map_section(
             prefix,
             example,
         })?;
-        let gpio = v.as_integer().ok_or_else(|| IoMapError::InvalidGpio {
-            kind: prefix,
-            id,
-            gpio: i64::MIN,
-            allowed,
-        })?;
-        if !(min_gpio..=max_gpio).contains(&gpio) {
-            return Err(IoMapError::InvalidGpio {
+        let gpio = if let Some(i) = v.as_integer() {
+            if !(min_gpio..=max_gpio).contains(&i) {
+                return Err(IoMapError::InvalidGpio {
+                    kind: prefix,
+                    id,
+                    gpio: i,
+                    allowed,
+                });
+            }
+            i as u8
+        } else if let Some(s) = v.as_str() {
+            if s.eq_ignore_ascii_case("virtual") {
+                u8::MAX
+            } else {
+                return Err(IoMapError::InvalidGpioValue {
+                    kind: prefix,
+                    id,
+                    value: s.to_string(),
+                    allowed,
+                });
+            }
+        } else {
+            return Err(IoMapError::InvalidGpioValue {
                 kind: prefix,
                 id,
-                gpio,
+                value: format!("{v:?}"),
                 allowed,
             });
-        }
-        out.insert(id, gpio as u8);
+        };
+        out.insert(id, gpio);
     }
     Ok(out)
 }

@@ -1387,3 +1387,26 @@ Thread: (manual execution; ralph.sh tool execution blocked by missing/expired CL
 - **Learnings for future iterations:**
   - Keep new realtime subsystems behind HAL-shaped hooks so timing evidence (`TIMING ...`) remains comparable across refactors.
 ---
+## [2026-02-19 01:22:11 CST] - US-004
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Implemented a PIO-based STEP pulse generator (non-blocking TX-fed half-period loop) with a firmware trapezoid ramp and direction switch deadtime.
+  - Bound STEP/DIR/EN pins from io_map.motion.stepper.axis0 (and the shared implementation also supports axis1 via axis1 config).
+  - Established a dev-stage motion IO convention using virtual channels (DO/AO commands + DI/AI feedback) and added core plumbing to support virtual DI values in board-rp2040.
+  - Extended io_map parsing to allow "virtual" GPIO bindings for DI/DO/AI/AO (no physical pin), which is required for firmware-provided motion feedback channels.
+  - Extended the board-rp2040 build-time io_map embedder to parse/emit motion encoder constants (needed for later AB feedback stories).
+  - Verified: cargo test --workspace; cargo check -p board-rp2040 --target thumbv6m-none-eabi; cargo build -p board-rp2040 --target thumbv6m-none-eabi --release.
+- Files changed
+  - crates/board-rp2040/Cargo.toml
+  - crates/board-rp2040/build.rs
+  - crates/board-rp2040/src/firmware/hal.rs
+  - crates/board-rp2040/src/firmware/motion.rs
+  - crates/board-rp2040/src/main.rs
+  - src/io_map.rs
+  - prd.json
+  - progress.txt
+- Learnings for future iterations:
+  - pio_proc::pio_asm does not allow jumping to .wrap_target; use explicit labels (e.g. loop:) and jmp loop.
+  - Virtual IO channels are simplest when they reuse existing DI/DO/AI/AO ids and set io_map GPIO to "virtual" (firmware then skips pin binding and can publish synthetic values).
+---
+

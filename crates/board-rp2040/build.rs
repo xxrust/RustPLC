@@ -99,7 +99,63 @@ struct IoMap {
     digital_outputs: BTreeMap<u16, u8>,
     analog_inputs: BTreeMap<u16, u8>,
     analog_outputs: BTreeMap<u16, u8>,
+    motion_stepper_axis0: StepperAxisConfig,
+    motion_stepper_axis1: StepperAxisConfig,
+    motion_encoder_axis0: EncoderAxisConfig,
+    motion_encoder_axis1: EncoderAxisConfig,
     safe_state: SafeStateConfig,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StepperAxisConfig {
+    defined: bool,
+    step_gpio: u8,
+    dir_gpio: u8,
+    en_gpio: u8,
+    dir_inverted: bool,
+    v_max_sps: u32,
+    acc_sps2: u32,
+    dec_sps2: u32,
+}
+
+impl Default for StepperAxisConfig {
+    fn default() -> Self {
+        Self {
+            defined: false,
+            step_gpio: 255,
+            dir_gpio: 255,
+            en_gpio: 255,
+            dir_inverted: false,
+            v_max_sps: 0,
+            acc_sps2: 0,
+            dec_sps2: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EncoderAxisConfig {
+    defined: bool,
+    a_gpio: u8,
+    b_gpio: u8,
+    count_sign_inverted: bool,
+    scale: f32,
+    ppr: u32,
+    quad: u8,
+}
+
+impl Default for EncoderAxisConfig {
+    fn default() -> Self {
+        Self {
+            defined: false,
+            a_gpio: 255,
+            b_gpio: 255,
+            count_sign_inverted: false,
+            scale: 1.0,
+            ppr: 0,
+            quad: 4,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,21 +226,211 @@ fn parse_io_map(input: &str) -> Result<IoMap, String> {
     let ai = v.get("analog_inputs").and_then(|v| v.as_table());
     let ao = v.get("analog_outputs").and_then(|v| v.as_table());
 
+    let (motion_stepper_axis0, motion_stepper_axis1) = parse_motion_stepper(&v)?;
+    let (motion_encoder_axis0, motion_encoder_axis1) = parse_motion_encoder(&v)?;
     let safe_state = parse_safe_state(&v)?;
 
     Ok(IoMap {
-        digital_inputs: parse_section(di, "di", 0, 29, "0..=29")?,
-        digital_outputs: parse_section(do_, "do", 0, 29, "0..=29")?,
+        digital_inputs: parse_section(di, "di", 0, 29, "0..=29 or \"virtual\"")?,
+        digital_outputs: parse_section(do_, "do", 0, 29, "0..=29 or \"virtual\"")?,
         analog_inputs: match ai {
-            Some(t) => parse_section(t, "ai", 26, 29, "26..=29 (RP2040 ADC-capable GPIO)")?,
+            Some(t) => parse_section(
+                t,
+                "ai",
+                26,
+                29,
+                "26..=29 (RP2040 ADC-capable GPIO) or \"virtual\"",
+            )?,
             None => BTreeMap::new(),
         },
         analog_outputs: match ao {
-            Some(t) => parse_section(t, "ao", 0, 29, "0..=29")?,
+            Some(t) => parse_section(t, "ao", 0, 29, "0..=29 or \"virtual\"")?,
             None => BTreeMap::new(),
         },
+        motion_stepper_axis0,
+        motion_stepper_axis1,
+        motion_encoder_axis0,
+        motion_encoder_axis1,
         safe_state,
     })
+}
+
+fn parse_motion_stepper(v: &toml::Value) -> Result<(StepperAxisConfig, StepperAxisConfig), String> {
+    let Some(motion) = v.get("motion") else {
+        return Ok((StepperAxisConfig::default(), StepperAxisConfig::default()));
+    };
+    let Some(motion) = motion.as_table() else {
+        return Err("motion must be a table".to_string());
+    };
+
+    let Some(stepper) = motion.get("stepper") else {
+        return Ok((StepperAxisConfig::default(), StepperAxisConfig::default()));
+    };
+    let Some(stepper) = stepper.as_table() else {
+        return Err("motion.stepper must be a table".to_string());
+    };
+
+    let axis0 = match stepper.get("axis0") {
+        None => StepperAxisConfig::default(),
+        Some(v) => parse_stepper_axis_table(v, "motion.stepper.axis0")?,
+    };
+    let axis1 = match stepper.get("axis1") {
+        None => StepperAxisConfig::default(),
+        Some(v) => parse_stepper_axis_table(v, "motion.stepper.axis1")?,
+    };
+    Ok((axis0, axis1))
+}
+
+fn parse_motion_encoder(v: &toml::Value) -> Result<(EncoderAxisConfig, EncoderAxisConfig), String> {
+    let Some(motion) = v.get("motion") else {
+        return Ok((EncoderAxisConfig::default(), EncoderAxisConfig::default()));
+    };
+    let Some(motion) = motion.as_table() else {
+        return Err("motion must be a table".to_string());
+    };
+
+    let Some(encoder) = motion.get("encoder") else {
+        return Ok((EncoderAxisConfig::default(), EncoderAxisConfig::default()));
+    };
+    let Some(encoder) = encoder.as_table() else {
+        return Err("motion.encoder must be a table".to_string());
+    };
+
+    let axis0 = match encoder.get("axis0") {
+        None => EncoderAxisConfig::default(),
+        Some(v) => parse_encoder_axis_table(v, "motion.encoder.axis0")?,
+    };
+    let axis1 = match encoder.get("axis1") {
+        None => EncoderAxisConfig::default(),
+        Some(v) => parse_encoder_axis_table(v, "motion.encoder.axis1")?,
+    };
+    Ok((axis0, axis1))
+}
+
+fn parse_encoder_axis_table(v: &toml::Value, base: &str) -> Result<EncoderAxisConfig, String> {
+    let Some(t) = v.as_table() else {
+        return Err(format!("{base} must be a table"));
+    };
+
+    let a_gpio = parse_required_gpio(t, "a_gpio", base)?;
+    let b_gpio = parse_required_gpio(t, "b_gpio", base)?;
+    if a_gpio == b_gpio {
+        return Err(format!("{base}: a_gpio and b_gpio must be distinct"));
+    }
+
+    let ppr = t
+        .get("ppr")
+        .and_then(|v| v.as_integer())
+        .ok_or_else(|| format!("missing required {base}.ppr"))?;
+    if ppr <= 0 || ppr > (u32::MAX as i64) {
+        return Err(format!("{base}.ppr must be > 0"));
+    }
+
+    let quad = t.get("quad").and_then(|v| v.as_integer()).unwrap_or(4);
+    if quad != 1 && quad != 2 && quad != 4 {
+        return Err(format!("{base}.quad must be one of: 1, 2, 4"));
+    }
+
+    let count_sign_inverted = match t.get("count_sign").and_then(|v| v.as_str()) {
+        None => false,
+        Some("normal") => false,
+        Some("inverted") => true,
+        Some(other) => {
+            return Err(format!(
+                "{base}.count_sign must be normal|inverted, got {other:?}"
+            ))
+        }
+    };
+    let scale = t.get("scale").and_then(|v| v.as_float()).unwrap_or(1.0);
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(format!("{base}.scale must be a finite number > 0"));
+    }
+
+    Ok(EncoderAxisConfig {
+        defined: true,
+        a_gpio,
+        b_gpio,
+        count_sign_inverted,
+        scale: scale as f32,
+        ppr: ppr as u32,
+        quad: quad as u8,
+    })
+}
+
+fn parse_stepper_axis_table(v: &toml::Value, base: &str) -> Result<StepperAxisConfig, String> {
+    let Some(t) = v.as_table() else {
+        return Err(format!("{base} must be a table"));
+    };
+
+    let step_gpio = parse_required_gpio(t, "step_gpio", base)?;
+    let dir_gpio = parse_required_gpio(t, "dir_gpio", base)?;
+    let en_gpio = parse_required_gpio(t, "en_gpio", base)?;
+    if step_gpio == dir_gpio || step_gpio == en_gpio || dir_gpio == en_gpio {
+        return Err(format!(
+            "{base}: step_gpio/dir_gpio/en_gpio must be distinct"
+        ));
+    }
+    let dir_inverted = t.get("dir_inverted").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // Trapezoid defaults are optional; if any is set, all three must be set.
+    let v_max_sps = t.get("v_max_sps").and_then(|v| v.as_integer());
+    let acc_sps2 = t.get("acc_sps2").and_then(|v| v.as_integer());
+    let dec_sps2 = t.get("dec_sps2").and_then(|v| v.as_integer());
+    let any = v_max_sps.is_some() || acc_sps2.is_some() || dec_sps2.is_some();
+    let all = v_max_sps.is_some() && acc_sps2.is_some() && dec_sps2.is_some();
+    if any && !all {
+        return Err(format!(
+            "{base}: if any of v_max_sps/acc_sps2/dec_sps2 is set, all three must be set"
+        ));
+    }
+
+    let v_max_sps = if let Some(v) = v_max_sps {
+        if v <= 0 {
+            return Err(format!("{base}.v_max_sps must be > 0"));
+        }
+        v as u32
+    } else {
+        0
+    };
+    let acc_sps2 = if let Some(v) = acc_sps2 {
+        if v <= 0 {
+            return Err(format!("{base}.acc_sps2 must be > 0"));
+        }
+        v as u32
+    } else {
+        0
+    };
+    let dec_sps2 = if let Some(v) = dec_sps2 {
+        if v <= 0 {
+            return Err(format!("{base}.dec_sps2 must be > 0"));
+        }
+        v as u32
+    } else {
+        0
+    };
+
+    Ok(StepperAxisConfig {
+        defined: true,
+        step_gpio,
+        dir_gpio,
+        en_gpio,
+        dir_inverted,
+        v_max_sps,
+        acc_sps2,
+        dec_sps2,
+    })
+}
+
+fn parse_required_gpio(t: &toml::value::Table, field: &str, base: &str) -> Result<u8, String> {
+    let path = format!("{base}.{field}");
+    let v = t
+        .get(field)
+        .and_then(|v| v.as_integer())
+        .ok_or_else(|| format!("missing required {path}"))?;
+    if v < 0 || v > 29 {
+        return Err(format!("{path} must be in 0..=29"));
+    }
+    Ok(v as u8)
 }
 
 fn parse_safe_state(v: &toml::Value) -> Result<SafeStateConfig, String> {
@@ -335,15 +581,27 @@ fn parse_section(
         let id: u16 = id_str
             .parse()
             .map_err(|_| format!("invalid key {k:?} (expected {prefix}<id>)"))?;
-        let gpio = v
-            .as_integer()
-            .ok_or_else(|| format!("invalid value for {k:?} (expected integer gpio)"))?;
-        if !(min_gpio..=max_gpio).contains(&gpio) {
+        let gpio = if let Some(gpio) = v.as_integer() {
+            if !(min_gpio..=max_gpio).contains(&gpio) {
+                return Err(format!(
+                    "invalid gpio {gpio} for {prefix}{id} (allowed: {allowed})"
+                ));
+            }
+            gpio as u8
+        } else if let Some(s) = v.as_str() {
+            if s.eq_ignore_ascii_case("virtual") {
+                255
+            } else {
+                return Err(format!(
+                    "invalid value for {k:?} (expected integer gpio or \"virtual\", got {s:?})"
+                ));
+            }
+        } else {
             return Err(format!(
-                "invalid gpio {gpio} for {prefix}{id} (allowed: {allowed})"
+                "invalid value for {k:?} (expected integer gpio or \"virtual\")"
             ));
-        }
-        out.insert(id, gpio as u8);
+        };
+        out.insert(id, gpio);
     }
     Ok(out)
 }
@@ -587,6 +845,131 @@ fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
         out.push_str(&format!("  {v},\n"));
     }
     out.push_str("];\n");
+    // Motion: stepper axis configs (optional). The firmware treats `*_DEFINED=false` as "not wired".
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS0_DEFINED: bool = {};\n",
+        map.motion_stepper_axis0.defined
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS0_STEP_GPIO: u8 = {};\n",
+        map.motion_stepper_axis0.step_gpio
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS0_DIR_GPIO: u8 = {};\n",
+        map.motion_stepper_axis0.dir_gpio
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS0_EN_GPIO: u8 = {};\n",
+        map.motion_stepper_axis0.en_gpio
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS0_DIR_INVERTED: bool = {};\n",
+        map.motion_stepper_axis0.dir_inverted
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS0_V_MAX_SPS: u32 = {};\n",
+        map.motion_stepper_axis0.v_max_sps
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS0_ACC_SPS2: u32 = {};\n",
+        map.motion_stepper_axis0.acc_sps2
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS0_DEC_SPS2: u32 = {};\n",
+        map.motion_stepper_axis0.dec_sps2
+    ));
+
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS1_DEFINED: bool = {};\n",
+        map.motion_stepper_axis1.defined
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS1_STEP_GPIO: u8 = {};\n",
+        map.motion_stepper_axis1.step_gpio
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS1_DIR_GPIO: u8 = {};\n",
+        map.motion_stepper_axis1.dir_gpio
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS1_EN_GPIO: u8 = {};\n",
+        map.motion_stepper_axis1.en_gpio
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS1_DIR_INVERTED: bool = {};\n",
+        map.motion_stepper_axis1.dir_inverted
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS1_V_MAX_SPS: u32 = {};\n",
+        map.motion_stepper_axis1.v_max_sps
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS1_ACC_SPS2: u32 = {};\n",
+        map.motion_stepper_axis1.acc_sps2
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_STEPPER_AXIS1_DEC_SPS2: u32 = {};\n",
+        map.motion_stepper_axis1.dec_sps2
+    ));
+
+    // Motion: AB encoder axis configs (optional).
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS0_DEFINED: bool = {};\n",
+        map.motion_encoder_axis0.defined
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS0_A_GPIO: u8 = {};\n",
+        map.motion_encoder_axis0.a_gpio
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS0_B_GPIO: u8 = {};\n",
+        map.motion_encoder_axis0.b_gpio
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS0_COUNT_SIGN_INVERTED: bool = {};\n",
+        map.motion_encoder_axis0.count_sign_inverted
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS0_SCALE: f32 = {:.6};\n",
+        map.motion_encoder_axis0.scale
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS0_PPR: u32 = {};\n",
+        map.motion_encoder_axis0.ppr
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS0_QUAD: u8 = {};\n",
+        map.motion_encoder_axis0.quad
+    ));
+
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS1_DEFINED: bool = {};\n",
+        map.motion_encoder_axis1.defined
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS1_A_GPIO: u8 = {};\n",
+        map.motion_encoder_axis1.a_gpio
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS1_B_GPIO: u8 = {};\n",
+        map.motion_encoder_axis1.b_gpio
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS1_COUNT_SIGN_INVERTED: bool = {};\n",
+        map.motion_encoder_axis1.count_sign_inverted
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS1_SCALE: f32 = {:.6};\n",
+        map.motion_encoder_axis1.scale
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS1_PPR: u32 = {};\n",
+        map.motion_encoder_axis1.ppr
+    ));
+    out.push_str(&format!(
+        "pub const MOTION_ENCODER_AXIS1_QUAD: u8 = {};\n",
+        map.motion_encoder_axis1.quad
+    ));
     out.push_str("pub const AI_GPIO: [u8; MAX_AI] = [\n");
     for v in ai {
         out.push_str(&format!("  {v},\n"));
