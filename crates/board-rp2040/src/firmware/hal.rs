@@ -1,12 +1,12 @@
 #![cfg(target_os = "none")]
 
-use super::evaluate_tick_timing;
 use super::PicoIo;
+use io_traits::Io;
 use rp_pico::hal::timer::Timer;
 
-pub struct Hal {
+pub(super) struct Hal {
     timer: Timer,
-    pub io: PicoIo,
+    io: PicoIo,
     tick_ms: u64,
     tick_us: u64,
     next_tick_us: u64,
@@ -14,7 +14,7 @@ pub struct Hal {
 }
 
 impl Hal {
-    pub fn initialize(timer: Timer, io: PicoIo, tick_ms: u64) -> Self {
+    pub(super) fn initialize(timer: Timer, io: PicoIo, tick_ms: u64) -> Self {
         let tick_us = tick_ms.saturating_mul(1000);
         let next_tick_us = timer.get_counter().ticks();
         Self {
@@ -27,10 +27,14 @@ impl Hal {
         }
     }
 
+    pub(super) fn io_mut(&mut self) -> &mut PicoIo {
+        &mut self.io
+    }
+
     /// Sample external inputs and emit the standard `TICK ...` record.
     ///
     /// Returns (tick, tick_start_us, deadline_us) for timing accounting in `update_out`.
-    pub fn update_in(&mut self) -> (u64, u64, u64) {
+    pub(super) fn update_in(&mut self) -> (u64, u64, u64) {
         let tick_start_us = self.timer.get_counter().ticks();
         let deadline_us = self.next_tick_us.saturating_add(self.tick_us);
 
@@ -43,12 +47,12 @@ impl Hal {
     }
 
     /// Apply outputs, emit `TIMING ...`, and pace the loop to the next tick boundary.
-    pub fn update_out(&mut self, tick: u64, tick_start_us: u64, deadline_us: u64) {
+    pub(super) fn update_out(&mut self, tick: u64, tick_start_us: u64, deadline_us: u64) {
         // Keep existing behavior: apply analog outputs after runtime evaluation.
         self.io.apply_analog_outputs();
 
         let tick_end_us = self.timer.get_counter().ticks();
-        let timing = evaluate_tick_timing(tick_start_us, tick_end_us, deadline_us);
+        let timing = super::evaluate_tick_timing(tick_start_us, tick_end_us, deadline_us);
         if timing.overrun {
             self.overrun_count = self.overrun_count.saturating_add(1);
         }
@@ -72,7 +76,7 @@ impl Hal {
     /// Best-effort controlled-stop path on runtime failure.
     ///
     /// Note: hard crashes/power-loss must still be handled by the hardware safety chain.
-    pub fn finalize_on_error(&mut self, tick: u64) -> ! {
+    pub(super) fn finalize_on_error(&mut self, tick: u64) -> ! {
         self.io.enter_safe_state();
         defmt::error!("SAFE_STATE_APPLIED tick={}", tick);
         loop {

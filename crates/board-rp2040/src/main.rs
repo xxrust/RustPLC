@@ -480,7 +480,7 @@ mod firmware {
         loop {
             let (tick, tick_start_us, deadline_us) = hal.update_in();
             let tick_res = rt.tick_with_trace_and_logs(
-                &mut hal.io,
+                hal.io_mut(),
                 |e| {
                     defmt::info!(
                         "TRACE tick={} task={} from={} to={} reason={} ts_ms={}",
@@ -505,7 +505,11 @@ mod firmware {
                 },
             );
             if let Err(err) = tick_res {
-                defmt::error!("RUNTIME_ERR tick={} err={:?} -> entering safe state", tick, err);
+                defmt::error!(
+                    "RUNTIME_ERR tick={} err={:?} -> entering safe state",
+                    tick,
+                    defmt::Debug2Format(&err)
+                );
                 hal.finalize_on_error(tick);
             }
 
