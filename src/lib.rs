@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod board_log;
 pub mod board_trace;
 pub mod error;
 pub mod io_map;

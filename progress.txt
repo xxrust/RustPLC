@@ -43,6 +43,7 @@
 - When release-bundle adds new evidence artifacts, add them to both manifest hashing and integration-test required lists in the same change to keep delivery contracts auditable.
 - For example safety-modeling fixtures, assert `verification.safety.rule_statuses` contains one entry per safety rule and keep `skipped_rules == 0` to catch silently unbound constraints.
 - For board text log parsing, use `line.find("TRACE ")` / `line.find("TIMING ")` to tolerate prefixed logs, parse unordered `k=v` tokens, ignore unknown fields, and report missing/invalid required fields with source line numbers.
+- Prefer `rust_plc::board_log::parse_board_log_text` as the single entrypoint for mixed `board.log` parsing (TRACE + TIMING), and keep record-specific parsers in `board_trace` / `tick_timing`.
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
@@ -1121,4 +1122,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Without explicit in-scope/out-of-scope wording, reviewers can infer hidden capabilities from examples or terminology even when implementation does not provide them.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `docs/stepper_ab_encoder.md` is the canonical source for this topic; wiki drafts and examples should inherit these scope boundaries rather than define their own variants.
+---
+## [2026-02-18 19:55:36 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a new unified module `rust_plc::board_log` with `parse_board_log_text(&str)` returning `BoardLogParseOutput { trace_rows, timing_rows }`.
+  - Wired TRACE parsing through `board_trace::parse_trace_text` and TIMING parsing through `tick_timing::parse_tick_timing_text`, with a typed wrapper error (`BoardLogParseError`) so callers can keep one entrypoint.
+  - Added a unit test covering mixed/prefixed board.log text and verifying both vectors are produced in one pass.
+  - Exposed the module in `src/lib.rs` and ran `cargo test --workspace` successfully.
+- Files changed
+  - `src/board_log.rs`
+  - `src/lib.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Use `board_log::parse_board_log_text` as the top-level parser for any command that needs both TRACE and TIMING artifacts, and keep the low-level line parsing in the specialized modules.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - If TRACE/TIMING parsing rules evolve, update the record-specific modules (`board_trace`, `tick_timing`) first; `board_log` should remain a thin composition layer.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - This story intentionally centralizes parse orchestration now so the next CLI story (`board-parse`) can consume one stable API instead of duplicating file-read/parse flow.
 ---
