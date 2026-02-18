@@ -155,6 +155,10 @@ Local playbooks:
 - Failure minimization + feedback loop: `docs/scenario_minimization.md`
 - No-board delivery/gate: `docs/no_board_playbook.md`
 
+Repo-local Wiki drafts (offline-readable):
+- `docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md`
+- `docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md`
+
 ## 📚 Documentation
 
 For in-depth content, see the **[Wiki](https://github.com/xxrust/RustPLC/wiki)**:

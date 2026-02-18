@@ -1,0 +1,100 @@
+# Topology Abstraction: PLS / Angle / Distance (Draft)
+
+Date: 2026-02-18
+
+This is a repo-local Wiki draft, aligned with:
+- `docs/stepper_ab_encoder.md`
+- `docs/scenario_playbook.md`
+
+## Problem Statement
+
+A single motion chain often exposes multiple coordinates:
+
+- Pulse/count (`axis_count`)
+- Angle (`axis_theta`)
+- Linear position (`axis_pos_mm`)
+- Speed (`axis_speed`)
+
+If all coordinates are treated as equal “truth,” constraints become contradictory and hard to verify.
+
+## Recommended Model: Primary + Derived Coordinates
+
+Use exactly one primary truth coordinate for safety/control closure:
+
+- Typical primary: `axis_count` or `axis_pos_mm`.
+- Other coordinates are derived observations for display/diagnostics/signalization.
+
+In RustPLC DSL:
+- Prefer safety and interlocks against primary coordinate or derived discrete safety signals.
+- Avoid multi-coordinate arithmetic as decision truth in DSL.
+
+## Conversion Boundary
+
+Keep conversion and kinematic logic in the driver/board layer:
+
+- `theta_deg = f(count, ppr, gear_ratio, ...)`
+- `pos_mm = g(theta_deg, lead, linkage, LUT, ...)`
+- Nonlinear mechanisms should use LUT/piecewise fits in the driver layer.
+
+DSL should consume output signals, not implement conversion math.
+
+## Standard Signal Set
+
+Recommended interface signals for this topology abstraction:
+
+- Analog: `axis_count`, `axis_theta`, `axis_pos_mm`, `axis_speed`
+- Digital: `range_valid`, `pos_consistent`, `inpos`, `alarm`
+- Analog/encoded: `zone_code` (`0=safe`, `1..N=collision window`)
+
+These signals let DSL stay verifiable while preserving engineering semantics.
+
+## Consistency Strategy (Encoder vs Distance Sensor)
+
+When both encoder-derived and external distance estimates exist:
+
+- Compare in driver layer (`abs(pos_encoder - pos_laser) <= tol` plus persistence/hysteresis).
+- Publish simple DSL-friendly results:
+  - `pos_consistent` (bool)
+  - optional encoded fault/health code (`sensor_fault_code` / `safety_mode`)
+
+Then in DSL:
+- If inconsistent in risk-related context, go `fault`.
+- If inconsistent but posture is safe, optionally degrade (restrict motion) and recover only after consistency returns.
+
+## Fault vs Degrade Policy
+
+Suggested policy:
+
+- Go `fault` for alarm conditions, prolonged invalid range data, or inconsistency during dangerous-window operations.
+- Allow degrade for transient validity/consistency loss while still in safe posture; restrict to safe retreat/recovery actions.
+
+## Parseable DSL Skeleton
+
+```plc
+[topology]
+device axis_count: analog_input { range: 0..4000000, unit: "count", external: true }
+device axis_theta: analog_input { range: 0..360, unit: "deg", external: true }
+device axis_pos_mm: analog_input { range: 0..5000, unit: "mm", external: true }
+device axis_speed: analog_input { range: 0..200000, unit: "count_s", external: true }
+device range_valid: digital_input
+device pos_consistent: digital_input
+device zone_code: analog_input { range: 0..3, unit: "zone", external: true }
+device move_cmd: digital_output
+device cyl_clamp: cylinder
+
+[constraints]
+safety: zone_code > 0 conflicts_with cyl_clamp.extended
+safety: move_cmd.on conflicts_with cyl_clamp.extended
+safety: move_cmd.on requires range_valid.on
+safety: move_cmd.on requires pos_consistent.on
+
+[tasks]
+task cycle:
+    step hold:
+```
+
+## Cross References
+
+- Safety and rule templates: `docs/stepper_ab_encoder.md`
+- Scenario authoring and regression loop: `docs/scenario_playbook.md`
+
