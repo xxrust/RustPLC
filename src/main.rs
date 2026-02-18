@@ -1135,8 +1135,8 @@ fn main() {
         }
         return;
     }
-    if first == "trace-parse" {
-        if let Err(msg) = run_trace_parse_subcommand(&program, args) {
+    if first == "board-parse" {
+        if let Err(msg) = run_board_parse_subcommand(&program, args) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
@@ -1469,7 +1469,7 @@ fn print_usage(program: &str) {
         "  {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
     );
     eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
-    eprintln!("  {program} trace-parse --in <log.txt> --out <trace.jsonl>");
+    eprintln!("  {program} board-parse --in <board.log> --out-dir <dir>");
     eprintln!(
         "  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
     );
@@ -3774,62 +3774,69 @@ fn run_flash_rp2040_subcommand(
     Ok(())
 }
 
-fn run_trace_parse_subcommand(
+fn run_board_parse_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let mut input: Option<PathBuf> = None;
-    let mut out: Option<PathBuf> = None;
+    let mut out_dir: Option<PathBuf> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--in" => {
                 input =
                     Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --in <log.txt>".to_string()
+                        "Missing value for --in <board.log>".to_string()
                     })?));
             }
-            "--out" => {
-                out = Some(PathBuf::from(args.next().ok_or_else(|| {
-                    "Missing value for --out <trace.jsonl>".to_string()
-                })?));
+            "--out-dir" => {
+                out_dir = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --out-dir <dir>".to_string())?,
+                ));
             }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} trace-parse --in <log.txt> --out <trace.jsonl>"
+                    "Usage: {program} board-parse --in <board.log> --out-dir <dir>"
                 ));
             }
-            other => return Err(format!("Unknown argument for trace-parse: {other}")),
+            other => return Err(format!("Unknown argument for board-parse: {other}")),
         }
     }
 
     let input = input.ok_or_else(|| {
-        format!("Usage: {program} trace-parse --in <log.txt> --out <trace.jsonl>")
+        format!("Usage: {program} board-parse --in <board.log> --out-dir <dir>")
     })?;
-    let out = out.ok_or_else(|| {
-        format!("Usage: {program} trace-parse --in <log.txt> --out <trace.jsonl>")
+    let out_dir = out_dir.ok_or_else(|| {
+        format!("Usage: {program} board-parse --in <board.log> --out-dir <dir>")
     })?;
 
     let text = fs::read_to_string(&input)
-        .map_err(|err| format!("Failed to read trace log {input:?}: {err}"))?;
-    let rows = rust_plc::board_trace::parse_trace_text(&text)
-        .map_err(|err| format!("Failed to parse trace log: {err}"))?;
+        .map_err(|err| format!("Failed to read board log {input:?}: {err}"))?;
+    let parsed = rust_plc::board_log::parse_board_log_text(&text)
+        .map_err(|err| format!("Failed to parse board log: {err}"))?;
 
-    if let Some(parent) = out.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .map_err(|err| format!("Failed to create output dir {parent:?}: {err}"))?;
-        }
-    }
+    fs::create_dir_all(&out_dir)
+        .map_err(|err| format!("Failed to create output dir {out_dir:?}: {err}"))?;
 
-    let mut jsonl = String::new();
-    for r in rows {
+    let mut board_trace_jsonl = String::new();
+    for r in parsed.trace_rows {
         let mut line = serde_json::to_string(&r)
             .map_err(|err| format!("Failed to serialize trace row JSON: {err}"))?;
         line.push('\n');
-        jsonl.push_str(&line);
+        board_trace_jsonl.push_str(&line);
     }
-    fs::write(&out, jsonl).map_err(|err| format!("Failed to write {out:?}: {err}"))?;
+
+    let board_trace_path = out_dir.join("board_trace.jsonl");
+    fs::write(&board_trace_path, board_trace_jsonl)
+        .map_err(|err| format!("Failed to write {board_trace_path:?}: {err}"))?;
+
+    let tick_timing_jsonl = to_tick_timing_jsonl(&parsed.timing_rows)
+        .map_err(|err| format!("Failed to serialize tick timing JSONL: {err}"))?;
+    let tick_timing_path = out_dir.join("tick_timing.jsonl");
+    fs::write(&tick_timing_path, tick_timing_jsonl)
+        .map_err(|err| format!("Failed to write {tick_timing_path:?}: {err}"))?;
+
     Ok(())
 }
 
@@ -4409,6 +4416,9 @@ fn write_virtual_board_artifacts(
             slack_us,
             overrun,
         });
+        board_log.borrow_mut().push_str(&format!(
+            "TIMING tick={tick} ts_start_us={ts_start_us} ts_end_us={ts_end_us} exec_us={exec_us} slack_us={slack_us} overrun={overrun}\n"
+        ));
 
         if is_halted(&rt, program) {
             break;

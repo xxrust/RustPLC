@@ -189,7 +189,7 @@ For in-depth content, see the **[Wiki](https://github.com/xxrust/RustPLC/wiki)**
 - [x] Analog I/O (analog_input / analog_output / set_analog / threshold comparison)
 - [x] SIL simulation loop (SimIO / Plant / fault injection / waveform export / batch regression)
 - [x] Code generation + RP2040 build/flash (build-rp2040 / flash-rp2040)
-- [x] Board-level observability & SIL comparison (trace-parse / trace-diff)
+- [x] Board-level observability & SIL comparison (board-parse / trace-diff)
 - [x] Unified verification report contract (verification_report.json + warning levels)
 - [x] CLI gate (--deny-warnings)
 - [x] Runtime upper-bound analysis (tick transfer / action / parallel expansion budgets)

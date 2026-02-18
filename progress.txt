@@ -47,6 +47,37 @@
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-18 20:07:37 CST] - US-003
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Added `rust_plc board-parse --in <board.log> --out-dir <dir>` to parse mixed board logs and emit a standard artifact set: `board_trace.jsonl` + `tick_timing.jsonl`.
+  - Removed the `trace-parse` CLI subcommand and updated `print_usage` accordingly (dev-phase break in compatibility by design).
+  - Updated HIL/PIL gate scripts and docs/README references to use `board-parse`.
+  - Updated CLI integration tests: renamed `tests/trace_parse.rs` to `tests/board_parse.rs` and adjusted `tests/virtual_board.rs` to validate `board-parse` on generated `board.log`.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `src/main.rs`
+  - `tests/board_parse.rs`
+  - `tests/virtual_board.rs`
+  - `scripts/rp2040_trace_gate.sh`
+  - `scripts/pil_trace_gate.sh`
+  - `scripts/rp2040_hil_gate.sh`
+  - `docs/board_semantics_contract_v1.md`
+  - `docs/board_rp2040.md`
+  - `docs/hil_regression.md`
+  - `docs/rp2040_iteration_rationale.md`
+  - `README.md`
+  - `README_EN.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Prefer “emit a standard artifact directory” commands (like `board-parse`) over one-off converters; it keeps downstream tools (`trace-diff`, `timing-report`, no-board gates) decoupled and reusable.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - When renaming/removing CLI commands, remember to update the doc-gate tests that assert `print_usage` contains required commands (e.g., `tests/no_board_playbook_doc.rs`).
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `board-parse` intentionally composes `board_log::parse_board_log_text` so TRACE/TIMING parsing stays single-sourced across commands and scripts.
+---
 ## [2026-02-18 19:49:22 CST] - US-001
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented

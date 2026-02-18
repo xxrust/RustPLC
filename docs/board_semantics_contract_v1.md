@@ -18,7 +18,7 @@ Firmware must emit structured lines:
 
 Host-side tooling assumptions:
 
-- `trace-parse` consumes `TRACE ...` lines and outputs JSONL rows.
+- `board-parse` consumes board logs and outputs `board_trace.jsonl` + `tick_timing.jsonl`.
 - `trace-diff --fail-on-mismatch` is the regression gate.
 
 ## 3) Digital I/O contract

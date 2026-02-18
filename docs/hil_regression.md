@@ -5,7 +5,7 @@
 - 固件：由同一份 `.plc` 生成并烧录
 - 输入：按 `scenario.yaml` 驱动（SIL 与板级使用同一份场景）
 - 观测：采集板级 `board.log`（RTT 或串口转存为文本）
-- 对比：`trace-parse` + `trace-diff --fail-on-mismatch`
+- 对比：`board-parse` + `trace-diff --fail-on-mismatch`
 - 产物：`diff_report.json` + `trace_diff_dashboard.html` + (可选) `hil_bundle.tgz`
 
 ## 1) 准备一台自托管 Runner
@@ -71,4 +71,3 @@ scripts/rp2040_hil_gate.sh \
 - 由 `workflow_dispatch` 手工触发或 schedule 定时触发
 
 注意：公共 CI（`ubuntu-latest`）不具备真实硬件，因此只能跑 PIL/SIL 基线，不能替代 HIL。
-

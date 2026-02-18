@@ -65,12 +65,12 @@ SIL 主线完成后，板级链路的瓶颈集中在三点：
   1. `build-rp2040 --emit-uf2`
   2. `flash-rp2040`（dry-run + actual）
   3. 板级日志采集（serial/cmd）
-  4. `trace-parse` + `trace-diff --fail-on-mismatch`
+  4. `board-parse` + `trace-diff --fail-on-mismatch`
 - 价值：减少人工步骤差异，让“板级回归”可复制、可门禁。
 
 - 文件：`scripts/pil_trace_gate.sh`
 - 改动：新增 PIL 样式 trace gate（无需实板烧录，runner 可替换为 Renode 或任意日志生产命令）。
-- 价值：让“无实板回归”也能走标准 `trace-parse` + `trace-diff` 门禁。
+- 价值：让“无实板回归”也能走标准 `board-parse` + `trace-diff` 门禁。
 
 ### 6) 文档与流程固化
 

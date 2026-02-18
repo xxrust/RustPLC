@@ -88,7 +88,7 @@ What it does:
 1. `build-rp2040 --emit-uf2`
 2. `flash-rp2040` (dry-run + actual, when `--mount` is set)
 3. collect board log (`serial` or custom `cmd`)
-4. `trace-parse` + `trace-diff --fail-on-mismatch`
+4. `board-parse` + `trace-diff --fail-on-mismatch`
 5. render `trace_diff_dashboard.html`
 
 ## HIL regression script (real board)

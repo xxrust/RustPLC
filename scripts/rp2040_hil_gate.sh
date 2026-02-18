@@ -7,7 +7,7 @@ Run an end-to-end HIL gate for RP2040:
   - generate SIL trace from (.plc + scenario)
   - build/flash RP2040 UF2
   - collect board log
-  - trace-parse + trace-diff --fail-on-mismatch
+  - board-parse + trace-diff --fail-on-mismatch
   - (optional) bundle all artifacts for later inspection
 
 Usage:

@@ -105,19 +105,37 @@ inputs:
         assert_eq!(first.slack_us, 0, "overrun row should have zero slack");
     }
 
-    let parsed_out = out_dir.join("parsed_trace.jsonl");
+    let parsed_dir = out_dir.join("parsed");
     let parse_output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg("trace-parse")
+        .arg("board-parse")
         .arg("--in")
         .arg(&board_log)
-        .arg("--out")
-        .arg(&parsed_out)
+        .arg("--out-dir")
+        .arg(&parsed_dir)
         .output()
-        .expect("run trace-parse");
+        .expect("run board-parse");
     assert!(
         parse_output.status.success(),
-        "trace-parse should succeed on virtual board logs, stderr: {}",
+        "board-parse should succeed on virtual board logs, stderr: {}",
         String::from_utf8_lossy(&parse_output.stderr)
     );
-    assert!(parsed_out.exists(), "trace-parse output should exist");
+    assert!(
+        parsed_dir.join("board_trace.jsonl").exists(),
+        "board-parse should emit board_trace.jsonl"
+    );
+    assert!(
+        parsed_dir.join("tick_timing.jsonl").exists(),
+        "board-parse should emit tick_timing.jsonl"
+    );
+
+    // board-parse artifacts should exactly match virtual-board artifacts (same serializers).
+    let virtual_trace = fs::read_to_string(&board_trace).expect("read virtual board trace");
+    let parsed_trace = fs::read_to_string(parsed_dir.join("board_trace.jsonl"))
+        .expect("read parsed board trace");
+    assert_eq!(virtual_trace, parsed_trace);
+
+    let virtual_timing = fs::read_to_string(&tick_timing).expect("read virtual tick timing");
+    let parsed_timing = fs::read_to_string(parsed_dir.join("tick_timing.jsonl"))
+        .expect("read parsed tick timing");
+    assert_eq!(virtual_timing, parsed_timing);
 }

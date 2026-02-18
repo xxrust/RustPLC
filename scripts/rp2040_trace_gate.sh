@@ -21,7 +21,7 @@ Notes:
   - If --mount is provided, step 2 flashes UF2 (dry-run then actual copy)
   - If --collect-mode is provided, step 3 collects board log into --board-log (or default path)
   - If --collect-mode is omitted, --board-log must already exist
-  - Step 4 always runs: trace-parse + trace-diff --fail-on-mismatch
+  - Step 4 always runs: board-parse + trace-diff --fail-on-mismatch
 USAGE
 }
 
@@ -147,10 +147,10 @@ if [[ ! -f "$BOARD_LOG" ]]; then
   exit 1
 fi
 
-echo "[4/4] trace-parse + trace-diff --fail-on-mismatch"
+echo "[4/4] board-parse + trace-diff --fail-on-mismatch"
 (
   cd "$REPO_ROOT"
-  cargo run --release -- trace-parse --in "$BOARD_LOG" --out "$BOARD_TRACE"
+  cargo run --release -- board-parse --in "$BOARD_LOG" --out-dir "$OUT_DIR_ABS"
   cargo run --release -- trace-diff \
     --sil "$SIL_TRACE" \
     --board "$BOARD_TRACE" \

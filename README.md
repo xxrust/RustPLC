@@ -187,7 +187,7 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
 - [x] 模拟量 I/O（analog_input / analog_output / set_analog / 阈值比较）
 - [x] SIL 仿真闭环（SimIO / Plant / 故障注入 / 波形导出 / 批量回归）
 - [x] 代码生成 + RP2040 构建/烧录（build-rp2040 / flash-rp2040）
-- [x] 板级可观测与 SIL 对比（trace-parse / trace-diff）
+- [x] 板级可观测与 SIL 对比（board-parse / trace-diff）
 - [x] 统一验证报告契约（verification_report.json + warnings 分级）
 - [x] CLI 门禁（--deny-warnings）
 - [x] Runtime 上界分析（tick 转移/动作/并行展开预算）

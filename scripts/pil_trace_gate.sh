@@ -90,10 +90,10 @@ if [[ ! -s "$BOARD_LOG" ]]; then
   exit 1
 fi
 
-echo "[2/3] trace-parse"
+echo "[2/3] board-parse"
 (
   cd "$REPO_ROOT"
-  cargo run --release -- trace-parse --in "$BOARD_LOG" --out "$BOARD_TRACE"
+  cargo run --release -- board-parse --in "$BOARD_LOG" --out-dir "$OUT_DIR"
 )
 
 echo "[3/3] trace-diff --fail-on-mismatch"
