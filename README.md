@@ -157,6 +157,7 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
 - [`docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md`](docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md)
 - [`docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md`](docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md)
 - [`docs/wiki/Fail-Safe-Safe-State.md`](docs/wiki/Fail-Safe-Safe-State.md)
+- [`docs/wiki/OpenPLC-v3-Learnings-Integration.md`](docs/wiki/OpenPLC-v3-Learnings-Integration.md)
 
 ## 📚 详细文档
 

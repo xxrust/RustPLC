@@ -159,6 +159,7 @@ Repo-local Wiki drafts (offline-readable):
 - `docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md`
 - `docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md`
 - `docs/wiki/Fail-Safe-Safe-State.md`
+- `docs/wiki/OpenPLC-v3-Learnings-Integration.md`
 
 ## 📚 Documentation
 
