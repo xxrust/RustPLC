@@ -1,134 +1,139 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/scenario-authoring-experience",
-  "description": "从低层传感器脚本转向高层可维护场景编写：先补齐 scenario-init 与场景校验，再引入设备名写法、语法糖、模板库与参数化生成，保持与现有 sim/no-board-gate/release-bundle 兼容。",
+  "branchName": "ralph/stepper-ab-encoder-safety-modeling",
+  "description": "将步进轴（Pulse/Dir）+ AB 编码器场景中的防碰撞互锁与多坐标（pls/角度/距离）拓扑抽象沉淀为可验证、可复用、可回归的规范 + 示例 + 场景 + Wiki 草稿资产。",
   "userStories": [
     {
-      "id": "US-SCENE-001",
-      "title": "scenario-init：从 .plc 生成可运行场景骨架",
-      "description": "作为初次使用者，我希望给一个 .plc 文件自动生成 scenario 骨架（包含 tick/duration、关键输入模板、注释），避免从零手写 YAML。",
+      "id": "US-001",
+      "title": "定义防碰撞建模基线（zone_code + 双向互锁）",
+      "description": "作为控制工程师，我希望有标准化的步进轴防碰撞建模规则（zone_code + 双向互锁），以便不同项目使用同一套安全抽象。",
       "acceptanceCriteria": [
-        "新增 CLI 子命令：scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal>]",
-        "输出 YAML 默认包含 tick_ms、duration_ms、inputs 基础结构与注释",
-        "对 two_cylinder/assembly_station 等示例可生成可运行骨架（至少不语法报错）",
-        "文档增加“从 .plc 初始化场景”步骤",
-        "新增集成测试覆盖命令成功、输出文件存在与基本字段",
+        "在 docs/stepper_ab_encoder.md 中明确 zone_code、危险窗口、双向互锁定义",
+        "明确‘命令互锁 + 窗口互锁’的最小组合规则",
+        "补充至少 2 个正反例（推荐写法/反模式）",
+        "文档中的 DSL 片段可通过语法检查（示例级）",
         "cargo test --workspace passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "M1"
+      "notes": ""
     },
     {
-      "id": "US-SCENE-002",
-      "title": "scenario-validate：友好校验与可执行修复建议",
-      "description": "作为场景编写者，我希望在运行前拿到清晰可执行的错误提示（字段缺失、时间未对齐、文件不匹配、疑似同 tick 循环风险）。",
+      "id": "US-002",
+      "title": "新增单轴防碰撞示例 PLC",
+      "description": "作为开发者，我希望有最小可运行示例，展示 zone_code 与执行器互斥，以便快速复用。",
       "acceptanceCriteria": [
-        "新增 CLI 子命令：scenario-validate <file.plc> --scenario <scenario.yaml>",
-        "覆盖基础规则：tick_ms > 0、duration_ms > 0、at_ms 对齐与上界、YAML 结构合法",
-        "发现 high risk 配置时输出建议（例如 start_button 持续为 true、关键传感器全初值 true）",
-        "输出建议包含可复制命令或 YAML 片段，不仅仅是错误码",
-        "新增集成测试覆盖通过/失败两类输出",
+        "新增 examples/stepper_collision_guard.plc",
+        "示例包含 zone_code（analog_input external）与至少 1 条互斥 safety",
+        "示例包含 fault 路径（timeout -> goto fault）",
+        "cargo run --release -- examples/stepper_collision_guard.plc --no-print-ir 成功",
         "cargo test --workspace passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "M1.5"
+      "passes": false,
+      "notes": ""
     },
     {
-      "id": "US-SCENE-003",
-      "title": "设备名写法：scenario 支持 device key 并自动映射 ID",
-      "description": "作为用户，我希望在 scenario 里使用 start_button/sensor_A_ext 这样的设备名，而不是 DI/AI 数字 ID。",
+      "id": "US-003",
+      "title": "在示例中体现双向互锁（窗口互锁 + 命令互锁）",
+      "description": "作为安全工程师，我希望示例同时约束‘禁区禁止动作’和‘危险姿态禁止继续运动’，避免单向互锁漏洞。",
       "acceptanceCriteria": [
-        "Scenario parser 支持设备名写法（digital/analog）并兼容现有 numeric ID 写法",
-        "在解析或预处理阶段基于 .plc topology 建立 name -> DI/AI 映射",
-        "命名冲突或未知设备报错需包含路径与修复建议",
-        "README/Wiki 示例至少新增 1 个设备名写法案例",
-        "新增测试覆盖 name 写法、混用写法、未知 name 报错",
+        "在示例中包含规则 A：zone_code 与执行器状态冲突",
+        "在示例中包含规则 B：move_cmd.on 与执行器危险状态冲突（或 requires 安全状态）",
+        "验证报告能识别这两类约束（Safety 规则绑定或降级信息清晰）",
         "cargo test --workspace passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "M2"
+      "passes": false,
+      "notes": ""
     },
     {
-      "id": "US-SCENE-004",
-      "title": "高层语法糖：pulse/hold/sequence 自动展开",
-      "description": "作为场景作者，我希望用高层语法描述常见动作（按键脉冲、保持、顺序到位），避免重复编写 at_ms + set。",
+      "id": "US-006",
+      "title": "补充场景与回归资产（normal + 3 fault）",
+      "description": "作为测试工程师，我希望有标准场景集覆盖正常与故障路径，保证后续改动不破坏安全逻辑。",
       "acceptanceCriteria": [
-        "新增可选高层字段（至少 pulse 与 hold），并在加载时展开为 inputs 事件",
-        "语法糖展开后保持 deterministic，且可导出最终展开结果",
-        "错误提示包含展开前来源路径（便于定位）",
-        "新增 examples/scenarios 高层语法示例",
-        "新增测试覆盖展开正确性与边界检查",
+        "新增场景：normal / count_stuck / wrong_direction / alarm_triggered",
+        "场景覆盖至少 1 条成功路径和 3 条失败路径",
+        "在 tests/ 增加对应回归测试或命令级集成测试",
         "cargo test --workspace passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "M3"
+      "passes": false,
+      "notes": ""
     },
     {
-      "id": "US-SCENE-005",
-      "title": "场景模板库：normal/timeout/sensor_stuck/bounce",
-      "description": "作为测试工程师，我希望一键生成常用场景模板并绑定到目标 .plc，提高覆盖率和一致性。",
+      "id": "US-004",
+      "title": "定义多坐标抽象规范（pls/角度/距离）",
+      "description": "作为架构师，我希望明确多坐标如何分层与换算下沉，避免在 DSL 中引入难维护的复杂计算。",
       "acceptanceCriteria": [
-        "新增 template 目录或内置模板，并支持 scenario-init --preset 使用",
-        "至少提供 normal、timeout、sensor_stuck、bounce 四类模板",
-        "模板可按 .plc 自动填充设备名/ID 占位信息",
-        "文档新增“模板何时使用”建议",
-        "新增集成测试验证每个模板可生成可解析场景",
+        "文档明确‘主坐标 + 派生坐标’原则（例如 count/pos_mm 为主坐标）",
+        "文档明确换算下沉到驱动层（线性/非线性场景建议）",
+        "给出标准信号清单：axis_count/axis_theta/axis_pos_mm/axis_speed/pos_consistent/range_valid",
+        "给出‘何时进 fault/何时降级’的建议策略",
         "cargo test --workspace passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "M4"
+      "passes": false,
+      "notes": ""
     },
     {
-      "id": "US-SCENE-006",
-      "title": "参数化批量生成：seed 与边界组合策略",
-      "description": "作为回归维护者，我希望从参数化配置自动生成多组场景，用较小数量覆盖关键边界，而不是手工穷举。",
+      "id": "US-005",
+      "title": "新增多传感器一致性示例（编码器 vs 测距）",
+      "description": "作为调试工程师，我希望示例体现‘编码器位移 vs 激光位移’一致性判定与故障处理，以便发现机构松动和传感异常。",
       "acceptanceCriteria": [
-        "新增命令：scenario-gen --plc <file.plc> --config <yaml> --out-dir <dir>",
-        "支持 seed、duration、关键事件窗口、故障开关等参数",
-        "生成结果可直接喂给 sim-regress/no-board-gate",
-        "提供至少一份 generator config 示例",
-        "新增测试验证生成数量稳定、同 seed 可复现",
+        "新增 examples/stepper_multi_sensor_consistency.plc（或等价示例）",
+        "示例包含 pos_consistent 或 sensor_fault_code 的使用",
+        "当一致性失败时，流程进入 fault 或降级分支",
+        "cargo run --release -- <该示例> --no-print-ir 成功",
         "cargo test --workspace passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "M5 part 1"
+      "passes": false,
+      "notes": ""
     },
     {
-      "id": "US-SCENE-007",
-      "title": "失败自动最小化与回灌场景",
-      "description": "作为调试者，我希望当批量场景失败时自动得到最小复现场景，并能回灌到模板/生成配置。",
+      "id": "US-007",
+      "title": "补齐规则模板与落地指引（含反模式）",
+      "description": "作为一线自动化工程师，我希望快速知道应该写什么 safety、避免写什么，减少建模歧义。",
       "acceptanceCriteria": [
-        "在 sim-regress --minimize-failure 基础上，补充对高层场景语法的最小化支持",
-        "输出 minimized_scenario.yaml 时保留可读注释与来源信息",
-        "支持生成回灌提示（建议更新哪条模板或参数）",
-        "新增失败样例测试，断言最小化后仍保留失败签名",
-        "文档补充“失败后如何回灌改进模板”流程",
+        "文档新增‘规则模板’章节（单阈值、区间编码、双向互锁、碰撞矩阵）",
+        "文档新增‘常见误区 -> 修正方式’",
+        "每个模板包含可复制 DSL 片段",
+        "与 docs/scenario_playbook.md 建立交叉引用",
         "cargo test --workspace passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "M5 part 2"
+      "passes": false,
+      "notes": ""
     },
     {
-      "id": "US-SCENE-008",
-      "title": "Playbook 与 Wiki 对齐：从 0 到回归门禁",
-      "description": "作为团队成员，我希望有一条从 scenario-init 到 no-board-gate 的标准流程，并保证 README/Wiki 命令可复制即运行。",
+      "id": "US-008",
+      "title": "补充 Wiki（以仓库内草稿形式交付）",
+      "description": "作为团队成员，我希望该方案在 Wiki 可检索、可培训、可长期维护。",
       "acceptanceCriteria": [
-        "新增 docs/scenario_playbook.md，覆盖 init/validate/run/gen/minimize",
-        "README/README_EN/Wiki 命令与当前 CLI 行为一致",
-        "新增文档一致性测试，至少覆盖 Quick Start + SIL + No-Board 核心命令",
-        "错误输出示例更新为当前友好提示版本",
+        "新增 docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md（Wiki 草稿）",
+        "新增 docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md（Wiki 草稿）",
+        "草稿内容与 docs/stepper_ab_encoder.md 保持一致（同一结论、同一术语）",
+        "在 README 或 docs 中增加入口链接（指向 GitHub Wiki 或本地草稿）",
         "cargo test --workspace passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "持续化"
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "固化实现边界与非目标（防 scope 膨胀）",
+      "description": "作为项目负责人，我希望明确当前不做什么，避免 scope 膨胀与团队误解。",
+      "acceptanceCriteria": [
+        "文档明确不在本期实现：实时脉冲轨迹规划、复杂运动学在线求解、原始 AB 边沿在 DSL 直接解码",
+        "文档明确本期边界：DSL 做顺控与互锁，驱动层做高速计算与信号化",
+        "评审记录中无‘隐含新增能力’歧义项",
+        "cargo test --workspace passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
