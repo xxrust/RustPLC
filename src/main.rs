@@ -3677,6 +3677,9 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
     let mut out = String::new();
     out.push_str("# RP2040 I/O map template (fill in GPIO numbers for your wiring)\n");
     out.push_str("# This file is a template; it may be incomplete by design.\n\n");
+    out.push_str("# GPIO mapping notes:\n");
+    out.push_str("# - DI/DO/AO: 0..=29 or \"virtual\" (no physical GPIO binding)\n");
+    out.push_str("# - AI: 26..=29 (ADC-capable) or \"virtual\" (board-provided synthetic)\n\n");
 
     out.push_str("[digital_inputs]\n");
     if dis.is_empty() {

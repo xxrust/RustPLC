@@ -856,6 +856,40 @@ ao0 = 20
     }
 
     #[test]
+    fn accepts_virtual_gpio_bindings_for_all_channel_kinds() {
+        let input = r#"
+[digital_inputs]
+di0 = "virtual"
+
+[digital_outputs]
+do0 = "virtual"
+
+[analog_inputs]
+ai0 = "virtual"
+
+[analog_outputs]
+ao0 = "virtual"
+"#;
+        let m = IoMap::from_toml_str(input).expect("parse");
+        m.validate_for_usage(usage_with_ai0_ao0())
+            .expect("validate");
+    }
+
+    #[test]
+    fn virtual_gpio_is_exempt_from_duplicate_gpio_validation() {
+        let input = r#"
+[digital_inputs]
+di0 = "virtual"
+
+[digital_outputs]
+do0 = "virtual"
+"#;
+        let m = IoMap::from_toml_str(input).expect("parse");
+        m.validate_for_usage(usage_one_di_do())
+            .expect("validate");
+    }
+
+    #[test]
     fn rejects_duplicate_gpio() {
         let input = r#"
 [digital_inputs]

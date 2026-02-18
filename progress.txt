@@ -1459,3 +1459,23 @@ Thread: N/A (Codex CLI)
   - progress.txt
 ---
 
+## [2026-02-19 01:38:46 CST] - US-008
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Finalized the motion feedback -> DSL-visible channel mapping strategy using virtual DI/AI channels (io_map GPIO = "virtual").
+  - Updated build-rp2040 io_map.template.toml generator to document "virtual" as a supported mapping for DI/DO/AI/AO.
+  - Added docs/motion_virtual_channels.md with a concrete PLC topology pattern and io_map examples for motion channels.
+  - Added tests to lock the contract:
+    - IoMap parser accepts "virtual" for DI/DO/AI/AO and skips duplicate-GPIO validation for virtual bindings.
+    - build-rp2040 CLI accepts an io_map.toml that uses "virtual" mappings.
+- Quality checks
+  - cargo test --workspace
+- Files changed
+  - src/main.rs
+  - src/io_map.rs
+  - tests/build_rp2040.rs
+  - docs/motion_virtual_channels.md
+  - prd.json
+  - progress.txt
+---
+

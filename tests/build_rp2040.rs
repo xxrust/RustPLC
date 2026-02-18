@@ -149,6 +149,61 @@ fn cli_build_rp2040_emits_expected_artifacts() {
 }
 
 #[test]
+fn cli_build_rp2040_accepts_virtual_gpio_bindings_in_io_map() {
+    let base = std::env::temp_dir().join(format!(
+        "rust_plc_build_rp2040_virtual_iomap_test_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock works")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&base).expect("create temp dir");
+
+    let plc_path = base.join("fixture.plc");
+    let out_dir = base.join("out");
+    let io_map_path = base.join("io_map.toml");
+    fs::write(&plc_path, PLC_FIXTURE).expect("write plc");
+    fs::write(
+        &io_map_path,
+        r#"
+[digital_inputs]
+di0 = "virtual"
+
+[digital_outputs]
+do0 = "virtual"
+
+[analog_inputs]
+ai0 = "virtual"
+
+[analog_outputs]
+ao0 = "virtual"
+"#,
+    )
+    .expect("write io_map");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("build-rp2040")
+        .arg(&plc_path)
+        .arg("--out")
+        .arg(&out_dir)
+        .arg("--io-map")
+        .arg(&io_map_path)
+        .output()
+        .expect("should run rust_plc build-rp2040");
+
+    assert!(
+        output.status.success(),
+        "build-rp2040 should accept virtual io_map mappings, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(out_dir.join("generated_program.rs").exists());
+    assert!(out_dir.join("io_map.template.toml").exists());
+    assert!(out_dir.join("analog_contract.toml").exists());
+}
+
+#[test]
 fn cli_build_rp2040_applies_analog_calibration_overrides() {
     let base = std::env::temp_dir().join(format!(
         "rust_plc_build_rp2040_calibration_{}_{}",
