@@ -1,6 +1,69 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct MotionConfig {
+    /// Stepper (Pulse/Dir/EN) axis configurations keyed by axis index (0, 1).
+    #[serde(default)]
+    pub stepper: BTreeMap<u8, StepperAxisConfig>,
+    /// Incremental AB encoder configurations keyed by axis index (0, 1).
+    #[serde(default)]
+    pub encoder: BTreeMap<u8, AbEncoderAxisConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CountSignConvention {
+    /// Positive count matches "forward" according to driver/firmware wiring.
+    Normal,
+    /// Invert the computed sign/count before publishing to the PLC.
+    Inverted,
+}
+
+impl Default for CountSignConvention {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StepperAxisConfig {
+    pub step_gpio: u8,
+    pub dir_gpio: u8,
+    pub en_gpio: u8,
+    #[serde(default)]
+    pub dir_inverted: bool,
+    /// Optional trapezoid profile defaults (steps/s and steps/s^2).
+    #[serde(default)]
+    pub v_max_sps: Option<u32>,
+    #[serde(default)]
+    pub acc_sps2: Option<u32>,
+    #[serde(default)]
+    pub dec_sps2: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AbEncoderAxisConfig {
+    pub a_gpio: u8,
+    pub b_gpio: u8,
+    pub ppr: u32,
+    /// Quadrature multiplier (typically 1, 2, or 4). Defaults to 4.
+    #[serde(default = "default_quad")]
+    pub quad: u8,
+    #[serde(default)]
+    pub count_sign: CountSignConvention,
+    /// Optional scaling factor to publish into PLC engineering units.
+    #[serde(default = "default_scale")]
+    pub scale: f32,
+}
+
+fn default_quad() -> u8 {
+    4
+}
+
+fn default_scale() -> f32 {
+    1.0
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SafeStateMode {
     /// Default policy: write 0/false for all outputs on exit.
@@ -49,6 +112,8 @@ pub struct IoMap {
     pub analog_inputs: BTreeMap<u16, u8>,
     #[serde(default)]
     pub analog_outputs: BTreeMap<u16, u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<MotionConfig>,
     #[serde(default)]
     pub safe_state: SafeStateConfig,
 }
@@ -95,6 +160,9 @@ pub enum IoMapError {
 
     #[error("invalid [safe_state] section: {details}")]
     InvalidSafeState { details: String },
+
+    #[error("invalid [motion] section at {path}: {message}")]
+    InvalidMotion { path: String, message: String },
 }
 
 impl IoMap {
@@ -135,6 +203,7 @@ impl IoMap {
             None => BTreeMap::new(),
         };
 
+        let motion = parse_motion_config(&v)?;
         let safe_state = parse_safe_state(&v)?;
 
         Ok(Self {
@@ -142,6 +211,7 @@ impl IoMap {
             digital_outputs,
             analog_inputs,
             analog_outputs,
+            motion,
             safe_state,
         })
     }
@@ -171,8 +241,7 @@ impl IoMap {
 
         // Ensure no gpio is assigned twice across DI/DO sets.
         let mut seen = BTreeMap::<u8, String>::new();
-        for (&id, &gpio) in &self.digital_inputs {
-            let key = format!("di{id}");
+        let mut insert_seen = |gpio: u8, key: String| -> Result<(), IoMapError> {
             if let Some(prev) = seen.insert(gpio, key.clone()) {
                 return Err(IoMapError::DuplicateGpio {
                     gpio,
@@ -180,35 +249,30 @@ impl IoMap {
                     b: key,
                 });
             }
+            Ok(())
+        };
+        for (&id, &gpio) in &self.digital_inputs {
+            insert_seen(gpio, format!("di{id}"))?;
         }
         for (&id, &gpio) in &self.digital_outputs {
-            let key = format!("do{id}");
-            if let Some(prev) = seen.insert(gpio, key.clone()) {
-                return Err(IoMapError::DuplicateGpio {
-                    gpio,
-                    a: prev,
-                    b: key,
-                });
-            }
+            insert_seen(gpio, format!("do{id}"))?;
         }
         for (&id, &gpio) in &self.analog_outputs {
-            let key = format!("ao{id}");
-            if let Some(prev) = seen.insert(gpio, key.clone()) {
-                return Err(IoMapError::DuplicateGpio {
-                    gpio,
-                    a: prev,
-                    b: key,
-                });
-            }
+            insert_seen(gpio, format!("ao{id}"))?;
         }
         for (&id, &gpio) in &self.analog_inputs {
-            let key = format!("ai{id}");
-            if let Some(prev) = seen.insert(gpio, key.clone()) {
-                return Err(IoMapError::DuplicateGpio {
-                    gpio,
-                    a: prev,
-                    b: key,
-                });
+            insert_seen(gpio, format!("ai{id}"))?;
+        }
+
+        if let Some(motion) = &self.motion {
+            for (&axis, cfg) in &motion.stepper {
+                insert_seen(cfg.step_gpio, format!("motion.stepper.axis{axis}.step_gpio"))?;
+                insert_seen(cfg.dir_gpio, format!("motion.stepper.axis{axis}.dir_gpio"))?;
+                insert_seen(cfg.en_gpio, format!("motion.stepper.axis{axis}.en_gpio"))?;
+            }
+            for (&axis, cfg) in &motion.encoder {
+                insert_seen(cfg.a_gpio, format!("motion.encoder.axis{axis}.a_gpio"))?;
+                insert_seen(cfg.b_gpio, format!("motion.encoder.axis{axis}.b_gpio"))?;
             }
         }
 
@@ -222,6 +286,230 @@ impl IoMap {
     pub fn referenced_digital_outputs(&self) -> BTreeSet<u16> {
         self.digital_outputs.keys().copied().collect()
     }
+}
+
+fn parse_motion_config(v: &toml::Value) -> Result<Option<MotionConfig>, IoMapError> {
+    let Some(motion) = v.get("motion") else {
+        return Ok(None);
+    };
+    let Some(motion) = motion.as_table() else {
+        return Err(IoMapError::InvalidMotion {
+            path: "motion".to_string(),
+            message: "must be a table".to_string(),
+        });
+    };
+
+    let mut cfg = MotionConfig::default();
+
+    if let Some(stepper) = motion.get("stepper") {
+        let Some(stepper) = stepper.as_table() else {
+            return Err(IoMapError::InvalidMotion {
+                path: "motion.stepper".to_string(),
+                message: "must be a table".to_string(),
+            });
+        };
+        for (axis_key, axis_value) in stepper {
+            let axis = parse_axis_key(axis_key, "motion.stepper")?;
+            let Some(t) = axis_value.as_table() else {
+                return Err(IoMapError::InvalidMotion {
+                    path: format!("motion.stepper.{axis_key}"),
+                    message: "must be a table".to_string(),
+                });
+            };
+            let step_gpio = parse_required_gpio(t, "step_gpio", &format!("motion.stepper.{axis_key}"))?;
+            let dir_gpio = parse_required_gpio(t, "dir_gpio", &format!("motion.stepper.{axis_key}"))?;
+            let en_gpio = parse_required_gpio(t, "en_gpio", &format!("motion.stepper.{axis_key}"))?;
+            let dir_inverted = t
+                .get("dir_inverted")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let v_max_sps = parse_optional_u32(t, "v_max_sps", &format!("motion.stepper.{axis_key}"))?;
+            let acc_sps2 = parse_optional_u32(t, "acc_sps2", &format!("motion.stepper.{axis_key}"))?;
+            let dec_sps2 = parse_optional_u32(t, "dec_sps2", &format!("motion.stepper.{axis_key}"))?;
+
+            cfg.stepper.insert(
+                axis,
+                StepperAxisConfig {
+                    step_gpio,
+                    dir_gpio,
+                    en_gpio,
+                    dir_inverted,
+                    v_max_sps,
+                    acc_sps2,
+                    dec_sps2,
+                },
+            );
+        }
+    }
+
+    if let Some(encoder) = motion.get("encoder") {
+        let Some(encoder) = encoder.as_table() else {
+            return Err(IoMapError::InvalidMotion {
+                path: "motion.encoder".to_string(),
+                message: "must be a table".to_string(),
+            });
+        };
+        for (axis_key, axis_value) in encoder {
+            let axis = parse_axis_key(axis_key, "motion.encoder")?;
+            let Some(t) = axis_value.as_table() else {
+                return Err(IoMapError::InvalidMotion {
+                    path: format!("motion.encoder.{axis_key}"),
+                    message: "must be a table".to_string(),
+                });
+            };
+            let a_gpio = parse_required_gpio(t, "a_gpio", &format!("motion.encoder.{axis_key}"))?;
+            let b_gpio = parse_required_gpio(t, "b_gpio", &format!("motion.encoder.{axis_key}"))?;
+            let ppr = parse_required_u32(t, "ppr", &format!("motion.encoder.{axis_key}"))?;
+            if ppr == 0 {
+                return Err(IoMapError::InvalidMotion {
+                    path: format!("motion.encoder.{axis_key}.ppr"),
+                    message: "must be > 0".to_string(),
+                });
+            }
+            let quad = t
+                .get("quad")
+                .and_then(|v| v.as_integer())
+                .map(|v| v as i64)
+                .unwrap_or(4);
+            if quad != 1 && quad != 2 && quad != 4 {
+                return Err(IoMapError::InvalidMotion {
+                    path: format!("motion.encoder.{axis_key}.quad"),
+                    message: "must be one of: 1, 2, 4".to_string(),
+                });
+            }
+
+            let count_sign = match t.get("count_sign").and_then(|v| v.as_str()) {
+                None => CountSignConvention::Normal,
+                Some("normal") => CountSignConvention::Normal,
+                Some("inverted") => CountSignConvention::Inverted,
+                Some(other) => {
+                    return Err(IoMapError::InvalidMotion {
+                        path: format!("motion.encoder.{axis_key}.count_sign"),
+                        message: format!("must be normal|inverted, got {other:?}"),
+                    });
+                }
+            };
+            let scale = t
+                .get("scale")
+                .and_then(|v| v.as_float())
+                .unwrap_or(1.0);
+            if !scale.is_finite() || scale <= 0.0 {
+                return Err(IoMapError::InvalidMotion {
+                    path: format!("motion.encoder.{axis_key}.scale"),
+                    message: "must be a finite number > 0".to_string(),
+                });
+            }
+
+            cfg.encoder.insert(
+                axis,
+                AbEncoderAxisConfig {
+                    a_gpio,
+                    b_gpio,
+                    ppr,
+                    quad: quad as u8,
+                    count_sign,
+                    scale: scale as f32,
+                },
+            );
+        }
+    }
+
+    // If [motion] exists but is empty, treat it as a config error (avoids silent no-op).
+    if cfg.stepper.is_empty() && cfg.encoder.is_empty() {
+        return Err(IoMapError::InvalidMotion {
+            path: "motion".to_string(),
+            message: "must contain at least one of: [motion.stepper], [motion.encoder]".to_string(),
+        });
+    }
+
+    Ok(Some(cfg))
+}
+
+fn parse_axis_key(key: &str, parent: &str) -> Result<u8, IoMapError> {
+    let path = format!("{parent}.{key}");
+    let axis = key
+        .strip_prefix("axis")
+        .ok_or_else(|| IoMapError::InvalidMotion {
+            path: path.clone(),
+            message: "axis key must be `axis0` or `axis1`".to_string(),
+        })?;
+    let axis: u8 = axis.parse().map_err(|_| IoMapError::InvalidMotion {
+        path: path.clone(),
+        message: "axis key must be `axis0` or `axis1`".to_string(),
+    })?;
+    if axis > 1 {
+        return Err(IoMapError::InvalidMotion {
+            path,
+            message: "only axis0 and axis1 are supported in this PRD stage".to_string(),
+        });
+    }
+    Ok(axis)
+}
+
+fn parse_required_u32(t: &toml::value::Table, field: &str, base: &str) -> Result<u32, IoMapError> {
+    let path = format!("{base}.{field}");
+    let v = t.get(field).ok_or_else(|| IoMapError::InvalidMotion {
+        path: path.clone(),
+        message: "missing required field".to_string(),
+    })?;
+    let Some(i) = v.as_integer() else {
+        return Err(IoMapError::InvalidMotion {
+            path,
+            message: "must be an integer".to_string(),
+        });
+    };
+    if i < 0 || i > u32::MAX as i64 {
+        return Err(IoMapError::InvalidMotion {
+            path,
+            message: "out of range".to_string(),
+        });
+    }
+    Ok(i as u32)
+}
+
+fn parse_optional_u32(
+    t: &toml::value::Table,
+    field: &str,
+    base: &str,
+) -> Result<Option<u32>, IoMapError> {
+    let Some(v) = t.get(field) else {
+        return Ok(None);
+    };
+    let path = format!("{base}.{field}");
+    let Some(i) = v.as_integer() else {
+        return Err(IoMapError::InvalidMotion {
+            path,
+            message: "must be an integer".to_string(),
+        });
+    };
+    if i < 0 || i > u32::MAX as i64 {
+        return Err(IoMapError::InvalidMotion {
+            path,
+            message: "out of range".to_string(),
+        });
+    }
+    Ok(Some(i as u32))
+}
+
+fn parse_required_gpio(t: &toml::value::Table, field: &str, base: &str) -> Result<u8, IoMapError> {
+    let path = format!("{base}.{field}");
+    let v = t.get(field).ok_or_else(|| IoMapError::InvalidMotion {
+        path: path.clone(),
+        message: "missing required field".to_string(),
+    })?;
+    let Some(i) = v.as_integer() else {
+        return Err(IoMapError::InvalidMotion {
+            path,
+            message: "must be an integer GPIO number".to_string(),
+        });
+    };
+    if i < 0 || i > 29 {
+        return Err(IoMapError::InvalidMotion {
+            path,
+            message: "gpio must be in 0..=29".to_string(),
+        });
+    }
+    Ok(i as u8)
 }
 
 fn parse_safe_state(v: &toml::Value) -> Result<SafeStateConfig, IoMapError> {
@@ -640,5 +928,53 @@ group = 30
         assert_eq!(map.safe_state.digital_outputs.get(&2).unwrap().group, 10);
         assert_eq!(map.safe_state.digital_outputs.get(&0).unwrap().safe_value, true);
         assert_eq!(map.safe_state.analog_outputs.get(&0).unwrap().group, 30);
+    }
+
+    #[test]
+    fn parses_motion_config_for_axis0_and_reports_path_errors() {
+        let ok = r#"
+[digital_inputs]
+di0 = 0
+
+[digital_outputs]
+do0 = 1
+
+[motion.stepper.axis0]
+step_gpio = 2
+dir_gpio = 3
+en_gpio = 4
+v_max_sps = 20000
+acc_sps2 = 40000
+dec_sps2 = 40000
+
+[motion.encoder.axis0]
+a_gpio = 8
+b_gpio = 9
+ppr = 1024
+quad = 4
+count_sign = "normal"
+scale = 1.0
+"#;
+        let map = IoMap::from_toml_str(ok).expect("parse ok");
+        let motion = map.motion.expect("motion parsed");
+        assert!(motion.stepper.contains_key(&0));
+        assert!(motion.encoder.contains_key(&0));
+
+        let bad = r#"
+[digital_inputs]
+di0 = 0
+
+[digital_outputs]
+do0 = 1
+
+[motion.stepper.axis0]
+dir_gpio = 3
+en_gpio = 4
+"#;
+        let err = IoMap::from_toml_str(bad).unwrap_err().to_string();
+        assert!(
+            err.contains("motion.stepper.axis0.step_gpio"),
+            "expected path in error, got: {err}"
+        );
     }
 }

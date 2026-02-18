@@ -70,6 +70,57 @@ ai0 = 26
 ao0 = 20
 ```
 
+### Motion config (optional, dual-axis template)
+
+When you need board-level Pulse/Dir + AB encoder support, add a `motion` section to `io_map.toml`.
+
+Example:
+
+```toml
+[motion.stepper.axis0]
+step_gpio = 2
+dir_gpio = 3
+en_gpio = 4
+dir_inverted = false
+v_max_sps = 20000
+acc_sps2 = 40000
+dec_sps2 = 40000
+
+[motion.stepper.axis1]
+step_gpio = 5
+dir_gpio = 6
+en_gpio = 7
+dir_inverted = false
+v_max_sps = 20000
+acc_sps2 = 40000
+dec_sps2 = 40000
+
+[motion.encoder.axis0]
+a_gpio = 8
+b_gpio = 9
+ppr = 1024
+quad = 4
+count_sign = "normal"  # normal | inverted
+scale = 1.0
+
+[motion.encoder.axis1]
+a_gpio = 10
+b_gpio = 11
+ppr = 1024
+quad = 4
+count_sign = "normal"
+scale = 1.0
+```
+
+Validation rules (current stage):
+- axis key must be `axis0` or `axis1`
+- GPIO fields must be in `0..=29`
+- encoder `ppr` must be `> 0`
+- encoder `quad` must be one of `1`, `2`, `4`
+- encoder `count_sign` must be `normal` or `inverted`
+- encoder `scale` must be finite and `> 0`
+- all GPIO assignments are validated for duplicates across DI/DO/AI/AO/motion pins
+
 ## End-to-end gate script
 
 For reproducible board comparison, use:

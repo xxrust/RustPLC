@@ -131,6 +131,10 @@ fn cli_build_rp2040_emits_expected_artifacts() {
     assert!(iomap.contains("[digital_outputs]"));
     assert!(iomap.contains("[analog_inputs]"));
     assert!(iomap.contains("[analog_outputs]"));
+    assert!(
+        iomap.contains("[motion.stepper.axis0]") || iomap.contains("motion.stepper.axis0"),
+        "io_map.template.toml should include a motion config skeleton"
+    );
 
     let analog_contract = fs::read_to_string(&analog_contract_path).expect("read analog contract");
     assert!(analog_contract.contains("[analog_inputs.ai0]"));

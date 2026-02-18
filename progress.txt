@@ -18,6 +18,7 @@
 - For CLI-driven docs, add a doc consistency test that checks required commands are present both in the markdown playbook and in `rust_plc` usage output.
 - For docs with fenced ` ```plc` snippets, keep each snippet a complete PLC file (`[topology]` + `[constraints]` + `[tasks]` in order) and add an integration test that extracts and parses those blocks via `parse_plc` to prevent example drift.
 - For repo-local Wiki drafts under `docs/wiki/`, include at least one complete ` ```plc` snippet and gate it with a small test (extract + `parse_plc`) so drafts don't silently drift into non-parseable examples.
+- `build-rp2040` validates `io_map.toml` via `IoMap::validate_for_usage()`: if you add a new pin-owning subsystem (e.g. motion), include its pins in the duplicate-GPIO validation there so conflicts fail fast.
 - For scope-sensitive deliverables, add an explicit “in-scope vs out-of-scope” section in the canonical doc and lock key boundary phrases with a doc regression test to avoid implicit capability creep.
 - For doc deliverables with structural acceptance criteria (required headings/links), add a lightweight regression test that asserts those key strings exist to prevent drift.
 - For JSONL contracts that are diff-sensitive, serialize typed structs (not maps) and keep canonical field declaration order so snapshots stay stable.
@@ -1320,4 +1321,33 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - If TRACE/TIMING parsing rules evolve, update the record-specific modules (`board_trace`, `tick_timing`) first; `board_log` should remain a thin composition layer.
   - Useful context (e.g., "the evaluation panel is in component X")
     - This story intentionally centralizes parse orchestration now so the next CLI story (`board-parse`) can consume one stable API instead of duplicating file-read/parse flow.
+---
+
+## 2026-02-19T00:11:53+08:00 - US-001
+Thread: (ralph.sh tool execution blocked: claude needs /login; codex provider returned 401 quota exhausted)
+- Implemented  motion config schema for dual-axis stepper + AB encoder (axis0/axis1) in .
+- Added path-addressable validation errors for motion config (e.g. missing ).
+- Included motion pins in duplicate-GPIO validation so DI/DO/AI/AO/motion conflicts fail fast.
+- Updated RP2040 board docs and the generated  skeleton to include the motion section.
+- Files changed:
+  - src/io_map.rs
+  - src/main.rs
+  - docs/board_rp2040.md
+  - tests/build_rp2040.rs
+  - prd.json
+- **Learnings for future iterations:**
+  -  validates io_map via , so adding new pin-owning subsystems should hook into its duplicate-GPIO check.
+  -  is the user-facing place to surface new config blocks even if they are not inferable from the PLC program.
+---
+
+## AMENDMENT - US-001 (fix progress log formatting)
+- The previous US-001 log entry lost backticked identifiers due to shell command-substitution when appending.
+- Corrected text (authoritative):
+  - Implemented `io_map.toml` motion config schema for dual-axis stepper + AB encoder (axis0/axis1) in `rust_plc::io_map`.
+  - Added path-addressable validation errors for motion config (e.g. missing `motion.stepper.axis0.step_gpio`).
+  - Included motion pins in duplicate-GPIO validation so DI/DO/AI/AO/motion conflicts fail fast.
+  - Updated RP2040 board docs and the generated `io_map.template.toml` skeleton to include the motion section.
+  - Learnings:
+    - `build-rp2040` validates io_map via `IoMap::validate_for_usage()`, so new pin-owning subsystems should hook into its duplicate-GPIO check.
+    - `io_map.template.toml` is the user-facing place to surface new config blocks even if they are not inferable from the PLC program.
 ---

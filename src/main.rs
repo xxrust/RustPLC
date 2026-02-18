@@ -3719,6 +3719,47 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
     }
 
     out.push('\n');
+    out.push_str("# Motion (optional): Pulse/Dir stepper + AB encoder (PIO-first).\n");
+    out.push_str("# These channels are NOT inferred from the PLC program. Fill in GPIO wiring and\n");
+    out.push_str("# axis parameters if you plan to use board-level motion feedback/commands.\n");
+    out.push_str("#\n");
+    out.push_str("# Note: if you include a [motion] section, it must not be empty.\n");
+    out.push_str("#\n");
+    out.push_str("# [motion.stepper.axis0]\n");
+    out.push_str("# step_gpio = 2\n");
+    out.push_str("# dir_gpio = 3\n");
+    out.push_str("# en_gpio = 4\n");
+    out.push_str("# dir_inverted = false\n");
+    out.push_str("# v_max_sps = 20000  # steps per second\n");
+    out.push_str("# acc_sps2 = 40000   # steps per second^2\n");
+    out.push_str("# dec_sps2 = 40000   # steps per second^2\n");
+    out.push_str("#\n");
+    out.push_str("# [motion.stepper.axis1]\n");
+    out.push_str("# step_gpio = 5\n");
+    out.push_str("# dir_gpio = 6\n");
+    out.push_str("# en_gpio = 7\n");
+    out.push_str("# dir_inverted = false\n");
+    out.push_str("# v_max_sps = 20000\n");
+    out.push_str("# acc_sps2 = 40000\n");
+    out.push_str("# dec_sps2 = 40000\n");
+    out.push_str("#\n");
+    out.push_str("# [motion.encoder.axis0]\n");
+    out.push_str("# a_gpio = 8\n");
+    out.push_str("# b_gpio = 9\n");
+    out.push_str("# ppr = 1024\n");
+    out.push_str("# quad = 4\n");
+    out.push_str("# count_sign = \"normal\"  # normal|inverted\n");
+    out.push_str("# scale = 1.0\n");
+    out.push_str("#\n");
+    out.push_str("# [motion.encoder.axis1]\n");
+    out.push_str("# a_gpio = 10\n");
+    out.push_str("# b_gpio = 11\n");
+    out.push_str("# ppr = 1024\n");
+    out.push_str("# quad = 4\n");
+    out.push_str("# count_sign = \"normal\"\n");
+    out.push_str("# scale = 1.0\n");
+
+    out.push('\n');
     out.push_str("[safe_state]\n");
     out.push_str("# Default: all outputs -> 0 on exit (de-energize)\n");
     out.push_str("# mode = \"all_zero\"  # all_zero | profile\n");
