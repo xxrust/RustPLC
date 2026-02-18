@@ -2489,9 +2489,15 @@ fn region_intersects(op: ComparisonOp, value: f64, min: f64, max: f64) -> bool {
         ComparisonOp::Eq => value >= min && value <= max,
         ComparisonOp::Neq => !(min == max && value == min),
         ComparisonOp::Gt => max > value,
-        ComparisonOp::Gte => max >= value,
+        // For analog waits we need the selected region set to be a *sufficient* condition
+        // (otherwise a wait may be satisfied even when the numeric predicate is false).
+        //
+        // Using intersection semantics for / becomes a tautology when regions overlap
+        // at the split point (e.g. [0..T] and [T..MAX]), because both regions intersect.
+        // So for non-strict comparisons we pick regions that are entirely within the predicate.
+        ComparisonOp::Gte => min >= value,
         ComparisonOp::Lt => min < value,
-        ComparisonOp::Lte => min <= value,
+        ComparisonOp::Lte => max <= value,
     }
 }
 
