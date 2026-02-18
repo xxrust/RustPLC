@@ -53,6 +53,26 @@ enum FaultChange {
     SensorStuck { id: DigitalInputId, value: bool },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ForceChange {
+    DigitalInput {
+        id: DigitalInputId,
+        value: Option<bool>,
+    },
+    AnalogInput {
+        id: AnalogInputId,
+        value: Option<f32>,
+    },
+    DigitalOutput {
+        id: DigitalOutputId,
+        value: Option<bool>,
+    },
+    AnalogOutput {
+        id: AnalogOutputId,
+        value: Option<f32>,
+    },
+}
+
 /// A simple deterministic in-memory `Io` implementation for SIL.
 ///
 /// - Inputs can be scheduled to change at specific ticks.
@@ -71,8 +91,17 @@ pub struct SimIo {
     ai: Vec<f32>,
     ao: Vec<f32>,
 
+    // Persistent per-channel force overrides.
+    // Inputs: affect read_* results (and have higher priority than plant/scheduled updates).
+    forced_di: BTreeMap<u16, bool>,
+    forced_ai: BTreeMap<u16, f32>,
+    // Outputs: override program writes (and are reflected in recorded edges).
+    forced_do: BTreeMap<u16, bool>,
+    forced_ao: BTreeMap<u16, f32>,
+
     scheduled: BTreeMap<u64, Vec<InputChange>>,
     scheduled_faults: BTreeMap<u64, Vec<FaultChange>>,
+    scheduled_forces: BTreeMap<u64, Vec<ForceChange>>,
     stuck_di: BTreeMap<u16, bool>,
 
     plant: Option<Plant>,
@@ -95,8 +124,13 @@ impl SimIo {
             do_: vec![false; num_digital_outputs],
             ai: vec![0.0; num_analog_inputs],
             ao: vec![0.0; num_analog_outputs],
+            forced_di: BTreeMap::new(),
+            forced_ai: BTreeMap::new(),
+            forced_do: BTreeMap::new(),
+            forced_ao: BTreeMap::new(),
             scheduled: BTreeMap::new(),
             scheduled_faults: BTreeMap::new(),
+            scheduled_forces: BTreeMap::new(),
             stuck_di: BTreeMap::new(),
             plant: None,
             digital_edges: Vec::new(),
@@ -104,6 +138,7 @@ impl SimIo {
             digital_input_edges: Vec::new(),
         };
         s.apply_scheduled_for_current_tick();
+        s.apply_forces_for_current_tick();
         s
     }
 
@@ -170,6 +205,102 @@ impl SimIo {
         &self.analog_edges
     }
 
+    pub fn force_digital_input(&mut self, id: DigitalInputId, value: Option<bool>) {
+        match value {
+            Some(v) => {
+                self.forced_di.insert(id.0, v);
+            }
+            None => {
+                self.forced_di.remove(&id.0);
+            }
+        }
+    }
+
+    pub fn schedule_force_digital_input(&mut self, tick: Tick, id: DigitalInputId, value: Option<bool>) {
+        self.scheduled_forces
+            .entry(tick.0)
+            .or_default()
+            .push(ForceChange::DigitalInput { id, value });
+        if tick.0 == self.tick.0 {
+            self.apply_forces_for_current_tick();
+        }
+    }
+
+    pub fn schedule_force_analog_input(&mut self, tick: Tick, id: AnalogInputId, value: Option<f32>) {
+        self.scheduled_forces
+            .entry(tick.0)
+            .or_default()
+            .push(ForceChange::AnalogInput { id, value });
+        if tick.0 == self.tick.0 {
+            self.apply_forces_for_current_tick();
+        }
+    }
+
+    pub fn schedule_force_digital_output(
+        &mut self,
+        tick: Tick,
+        id: DigitalOutputId,
+        value: Option<bool>,
+    ) {
+        self.scheduled_forces
+            .entry(tick.0)
+            .or_default()
+            .push(ForceChange::DigitalOutput { id, value });
+        if tick.0 == self.tick.0 {
+            self.apply_forces_for_current_tick();
+        }
+    }
+
+    pub fn schedule_force_analog_output(
+        &mut self,
+        tick: Tick,
+        id: AnalogOutputId,
+        value: Option<f32>,
+    ) {
+        self.scheduled_forces
+            .entry(tick.0)
+            .or_default()
+            .push(ForceChange::AnalogOutput { id, value });
+        if tick.0 == self.tick.0 {
+            self.apply_forces_for_current_tick();
+        }
+    }
+
+    pub fn force_analog_input(&mut self, id: AnalogInputId, value: Option<f32>) {
+        match value {
+            Some(v) => {
+                self.forced_ai.insert(id.0, v);
+            }
+            None => {
+                self.forced_ai.remove(&id.0);
+            }
+        }
+    }
+
+    pub fn force_digital_output(&mut self, id: DigitalOutputId, value: Option<bool>) {
+        match value {
+            Some(v) => {
+                self.forced_do.insert(id.0, v);
+                self.set_digital_output_final(id, v);
+            }
+            None => {
+                self.forced_do.remove(&id.0);
+            }
+        }
+    }
+
+    pub fn force_analog_output(&mut self, id: AnalogOutputId, value: Option<f32>) {
+        match value {
+            Some(v) => {
+                self.forced_ao.insert(id.0, v);
+                self.set_analog_output_final(id, v);
+            }
+            None => {
+                self.forced_ao.remove(&id.0);
+            }
+        }
+    }
+
     pub fn num_digital_inputs(&self) -> usize {
         self.di.len()
     }
@@ -215,7 +346,23 @@ impl SimIo {
         }
     }
 
+    fn apply_forces_for_current_tick(&mut self) {
+        let Some(changes) = self.scheduled_forces.remove(&self.tick.0) else {
+            return;
+        };
+        for c in changes {
+            match c {
+                ForceChange::DigitalInput { id, value } => self.force_digital_input(id, value),
+                ForceChange::AnalogInput { id, value } => self.force_analog_input(id, value),
+                ForceChange::DigitalOutput { id, value } => self.force_digital_output(id, value),
+                ForceChange::AnalogOutput { id, value } => self.force_analog_output(id, value),
+            }
+        }
+    }
+
     fn set_digital_input(&mut self, id: DigitalInputId, value: bool) {
+        // Faults/stuck override any normal input updates for the tick.
+        // (Force is handled at read-time so plant/scheduled updates keep progressing underneath.)
         let value = self.stuck_di.get(&id.0).copied().unwrap_or(value);
         let idx = id.0 as usize;
         if let Some(slot) = self.di.get_mut(idx) {
@@ -228,6 +375,36 @@ impl SimIo {
                     value,
                 });
             }
+        }
+    }
+
+    fn set_digital_output_final(&mut self, id: DigitalOutputId, value: bool) {
+        let idx = id.0 as usize;
+        let prev = self.do_.get(idx).copied().unwrap_or(false);
+        if let Some(slot) = self.do_.get_mut(idx) {
+            *slot = value;
+        }
+        if prev != value {
+            self.digital_edges.push(DigitalEdge {
+                tick: self.tick,
+                id,
+                value,
+            });
+        }
+    }
+
+    fn set_analog_output_final(&mut self, id: AnalogOutputId, value: f32) {
+        let idx = id.0 as usize;
+        let prev = self.ao.get(idx).copied().unwrap_or(0.0);
+        if let Some(slot) = self.ao.get_mut(idx) {
+            *slot = value;
+        }
+        if prev != value {
+            self.analog_edges.push(AnalogEdge {
+                tick: self.tick,
+                id,
+                value,
+            });
         }
     }
 
@@ -256,9 +433,15 @@ impl Io for SimIo {
         self.apply_plant_for_current_tick(prev);
         // Faults override any normal input updates for the tick.
         self.apply_faults_for_current_tick();
+        // Force events are applied at tick boundaries and persist until explicitly cleared.
+        self.apply_forces_for_current_tick();
     }
 
     fn read_digital_input(&self, id: DigitalInputId) -> bool {
+        // Priority: force input > plant update > scheduled inputs.
+        if let Some(v) = self.forced_di.get(&id.0) {
+            return *v;
+        }
         if let Some(v) = self.stuck_di.get(&id.0) {
             return *v;
         }
@@ -266,37 +449,29 @@ impl Io for SimIo {
     }
 
     fn read_analog_input(&self, id: AnalogInputId) -> f32 {
+        // Priority: force input > plant update > scheduled inputs.
+        if let Some(v) = self.forced_ai.get(&id.0) {
+            return *v;
+        }
         self.ai.get(id.0 as usize).copied().unwrap_or(0.0)
     }
 
     fn write_digital_output(&mut self, id: DigitalOutputId, value: bool) {
-        let idx = id.0 as usize;
-        let prev = self.do_.get(idx).copied().unwrap_or(false);
-        if let Some(slot) = self.do_.get_mut(idx) {
-            *slot = value;
+        // Force outputs have priority over program writes.
+        if let Some(forced) = self.forced_do.get(&id.0).copied() {
+            self.set_digital_output_final(id, forced);
+            return;
         }
-        if prev != value {
-            self.digital_edges.push(DigitalEdge {
-                tick: self.tick,
-                id,
-                value,
-            });
-        }
+        self.set_digital_output_final(id, value);
     }
 
     fn write_analog_output(&mut self, id: AnalogOutputId, value: f32) {
-        let idx = id.0 as usize;
-        let prev = self.ao.get(idx).copied().unwrap_or(0.0);
-        if let Some(slot) = self.ao.get_mut(idx) {
-            *slot = value;
+        // Force outputs have priority over program writes.
+        if let Some(forced) = self.forced_ao.get(&id.0).copied() {
+            self.set_analog_output_final(id, forced);
+            return;
         }
-        if prev != value {
-            self.analog_edges.push(AnalogEdge {
-                tick: self.tick,
-                id,
-                value,
-            });
-        }
+        self.set_analog_output_final(id, value);
     }
 }
 
@@ -504,5 +679,79 @@ mod tests {
             assert_eq!(v["tick"], e.tick.0);
             assert_eq!(v["task"], e.task);
         }
+    }
+
+    #[test]
+    fn force_di_overrides_plant_updates_until_cleared() {
+        // A tiny plant: DO0 energizes a valve -> cylinder -> DI0 extended limit sensor.
+        let mut plant = Plant::new();
+        let valve = plant.add_solenoid_valve(SolenoidValveConfig {
+            extend_coil: 0,
+            retract_coil: None,
+            response_ticks: 1,
+        });
+        let cyl = plant.add_cylinder(CylinderConfig {
+            valve,
+            stroke_ticks: 3,
+            retract_ticks: 3,
+        });
+        plant.add_limit_sensor(LimitSensorConfig {
+            cylinder: cyl,
+            kind: LimitKind::Extended,
+            digital_input: DigitalInputId(0),
+            debounce_ticks: 1,
+        });
+
+        let mut io = SimIo::new(1, 1, 0, 0).with_plant(plant);
+        io.force_digital_input(DigitalInputId(0), Some(false));
+        io.write_digital_output(DigitalOutputId(0), true);
+
+        for _ in 0..10 {
+            assert_eq!(io.read_digital_input(DigitalInputId(0)), false);
+            io.advance_tick();
+        }
+
+        // Once cleared, reads should reflect the latest plant-updated value.
+        io.force_digital_input(DigitalInputId(0), None);
+        assert_eq!(io.read_digital_input(DigitalInputId(0)), true);
+    }
+
+    #[test]
+    fn force_ai_overrides_scheduled_inputs_until_cleared() {
+        let mut io = SimIo::new(0, 0, 1, 0);
+        io.schedule_analog_input(Tick(0), AnalogInputId(0), 1.25);
+        io.force_analog_input(AnalogInputId(0), Some(9.0));
+
+        assert_eq!(io.read_analog_input(AnalogInputId(0)), 9.0);
+
+        io.force_analog_input(AnalogInputId(0), None);
+        assert_eq!(io.read_analog_input(AnalogInputId(0)), 1.25);
+    }
+
+    #[test]
+    fn force_outputs_override_program_writes_and_edges_reflect_final_values() {
+        let mut io = SimIo::new(0, 1, 0, 1);
+
+        // Program writes take effect initially.
+        io.write_digital_output(DigitalOutputId(0), true);
+        io.write_analog_output(AnalogOutputId(0), 1.0);
+        assert_eq!(io.digital_output_edges().len(), 1);
+        assert_eq!(io.analog_output_edges().len(), 1);
+        assert_eq!(io.digital_output_edges()[0].value, true);
+        assert_eq!(io.analog_output_edges()[0].value, 1.0);
+
+        // Force overrides and is recorded as an edge (final values).
+        io.force_digital_output(DigitalOutputId(0), Some(false));
+        io.force_analog_output(AnalogOutputId(0), Some(0.5));
+        assert_eq!(io.digital_output_edges().len(), 2);
+        assert_eq!(io.analog_output_edges().len(), 2);
+        assert_eq!(io.digital_output_edges()[1].value, false);
+        assert_eq!(io.analog_output_edges()[1].value, 0.5);
+
+        // Further program writes are ignored while forced; no extra edges.
+        io.write_digital_output(DigitalOutputId(0), true);
+        io.write_analog_output(AnalogOutputId(0), 1.0);
+        assert_eq!(io.digital_output_edges().len(), 2);
+        assert_eq!(io.analog_output_edges().len(), 2);
     }
 }

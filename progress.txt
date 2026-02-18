@@ -47,6 +47,29 @@
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-18 20:14:36 CST] - US-004
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Implemented persistent FORCE/override support in `crates/sim` `SimIo`:
+    - Inputs: `force_digital_input` / `force_analog_input` override `read_*` results.
+    - Outputs: `force_digital_output` / `force_analog_output` override `write_*` results and are reflected in `digital_edges` / `analog_edges`.
+  - Clarified priority in code comments:
+    - `force input > plant update > scheduled inputs`
+    - `force output > program writes`
+  - Added unit tests covering: forced DI masking plant updates, forced AI masking scheduled inputs, and forced DO/AO overriding program writes without emitting “attempted write” edges.
+  - Ran `cargo test -p sim` and `cargo test --workspace` successfully.
+- Files changed
+  - `crates/sim/src/lib.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep “force semantics” inside `SimIo` so higher-level tools (scenario YAML, CLI) remain simple: they just schedule/trigger forces, and the IO layer enforces final values deterministically.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - For inputs, implementing force at read-time avoids “losing” the underlying plant/scheduled progression; clearing a force should immediately reveal the latest baseline state.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Output force is easiest to reason about when edges always represent the final observable output; ignoring program writes while forced prevents misleading edge histories.
+---
 ## [2026-02-18 20:07:37 CST] - US-003
 Thread: N/A (Codex CLI)
 - What was implemented
