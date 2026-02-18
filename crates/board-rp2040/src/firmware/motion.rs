@@ -506,11 +506,13 @@ impl<SM: rp_pico::hal::pio::StateMachineIndex> StepperAxis<SM> {
 struct AbEncoderAxis<SM: rp_pico::hal::pio::StateMachineIndex> {
     count_sign_inverted: bool,
     scale: f32,
+    quad: u8,
     _a_pin: Pin<DynPinId, FunctionPio0, PullDown>,
     _b_pin: Pin<DynPinId, FunctionPio0, PullDown>,
     sm: StateMachine<(pac::PIO0, SM), Running>,
     rx: Rx<(pac::PIO0, SM)>,
     last_count_raw: i32,
+    speed_filtered: f32,
 }
 
 impl<SM: rp_pico::hal::pio::StateMachineIndex> AbEncoderAxis<SM> {
@@ -530,6 +532,7 @@ impl<SM: rp_pico::hal::pio::StateMachineIndex> AbEncoderAxis<SM> {
             io_map::MOTION_ENCODER_AXIS0_B_GPIO,
             io_map::MOTION_ENCODER_AXIS0_COUNT_SIGN_INVERTED,
             io_map::MOTION_ENCODER_AXIS0_SCALE,
+            io_map::MOTION_ENCODER_AXIS0_QUAD,
         )
     }
 
@@ -549,6 +552,7 @@ impl<SM: rp_pico::hal::pio::StateMachineIndex> AbEncoderAxis<SM> {
             io_map::MOTION_ENCODER_AXIS1_B_GPIO,
             io_map::MOTION_ENCODER_AXIS1_COUNT_SIGN_INVERTED,
             io_map::MOTION_ENCODER_AXIS1_SCALE,
+            io_map::MOTION_ENCODER_AXIS1_QUAD,
         )
     }
 
@@ -560,6 +564,7 @@ impl<SM: rp_pico::hal::pio::StateMachineIndex> AbEncoderAxis<SM> {
         b_gpio: u8,
         count_sign_inverted: bool,
         scale: f32,
+        quad: u8,
     ) -> Option<Self> {
         let a = take_pin(pins, a_gpio)?;
         let b = take_pin(pins, b_gpio)?;
@@ -589,15 +594,17 @@ impl<SM: rp_pico::hal::pio::StateMachineIndex> AbEncoderAxis<SM> {
         Some(Self {
             count_sign_inverted,
             scale: if scale.is_finite() && scale > 0.0 { scale } else { 1.0 },
+            quad: if quad == 1 || quad == 2 || quad == 4 { quad } else { 4 },
             _a_pin: a,
             _b_pin: b,
             sm,
             rx,
             last_count_raw: 0,
+            speed_filtered: 0.0,
         })
     }
 
-    /// Returns (count_eng, delta_raw, speed_eng_per_s).
+    /// Returns (count_eng, delta_raw_signed, speed_eng_per_s_filtered).
     fn snapshot(&mut self, dt_s: f32) -> (f32, i32, f32) {
         // Best-effort: snapshot X into RX FIFO and read it back.
         // Note: these instructions must not stall; we use non-blocking PUSH.
@@ -621,7 +628,13 @@ impl<SM: rp_pico::hal::pio::StateMachineIndex> AbEncoderAxis<SM> {
         self.sm.exec_instruction(mov_isr_x);
         self.sm.exec_instruction(push);
 
-        let raw_u32 = self.rx.read().unwrap_or(self.last_count_raw as u32);
+        // Drain RX FIFO and use the most recent snapshot (avoids "stale" reads if something
+        // delayed consumer code for a few cycles).
+        let mut last = None;
+        while let Some(v) = self.rx.read() {
+            last = Some(v);
+        }
+        let raw_u32 = last.unwrap_or(self.last_count_raw as u32);
         let mut raw = raw_u32 as i32;
         if self.count_sign_inverted {
             raw = raw.wrapping_neg();
@@ -630,11 +643,20 @@ impl<SM: rp_pico::hal::pio::StateMachineIndex> AbEncoderAxis<SM> {
         self.last_count_raw = raw;
 
         let dt_s = if dt_s > 1e-6 { dt_s } else { 1e-3 };
-        let speed = (delta as f32) / dt_s;
+        let speed_inst = (delta as f32) / dt_s;
 
-        let count_eng = (raw as f32) * self.scale;
-        let speed_eng = speed * self.scale;
-        (count_eng, delta, speed_eng)
+        // This PIO program counts both edges of A only (base "quad" = 2).
+        // Convert to requested quad by applying a factor.
+        let quad_factor = (self.quad as f32) / 2.0;
+        let count_eng = (raw as f32) * quad_factor * self.scale;
+        let speed_inst_eng = speed_inst * quad_factor * self.scale;
+
+        // Minimal mitigation: one-pole low-pass filter on speed estimate.
+        // This smooths occasional edge timing jitter and short bursts.
+        let alpha = 0.2;
+        self.speed_filtered = self.speed_filtered + alpha * (speed_inst_eng - self.speed_filtered);
+
+        (count_eng, delta, self.speed_filtered)
     }
 }
 

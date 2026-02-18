@@ -148,6 +148,11 @@ Axis1:
 
 Recommendation: in `io_map.toml`, map these channels to `"virtual"` so they do not collide with physical GPIO/ADC usage.
 
+Encoder signal semantics (current stage):
+- `count` is published as a signed engineering value: `count = raw * (quad/2) * scale`, where the PIO counter tracks A-edge counts (base quad=2).
+- `speed` is derived at tick boundaries: `speed_inst = delta / dt`, then published as a low-pass filtered value (alpha=0.2) to mitigate edge jitter.
+- `enc_dir_positive` is computed from the raw signed delta sign (after applying count_sign).
+
 ## End-to-end gate script
 
 For reproducible board comparison, use:

@@ -1428,3 +1428,22 @@ Thread: N/A (Codex CLI)
   - For dual-axis PIO reuse, install each program once and clone handles with InstalledProgram::share before building multiple state machines.
 ---
 
+## [2026-02-19 01:30:47 CST] - US-006
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Implemented AB encoder decode snapshot path on RP2040 PIO for axis0: each tick executes MOV ISR,X + PUSH, drains RX FIFO, and publishes count/speed/dir signals into virtual channels.
+  - Defined speed semantics at tick boundaries (`delta / dt`), then added a minimal one-pole LPF (alpha=0.2) as noise/jitter mitigation at the board layer.
+  - Added quad conversion in publish path (`count = raw * (quad/2) * scale`) and count-sign inversion support from io_map motion encoder config.
+  - Updated docs/board_rp2040.md with encoder signal semantics and mitigation notes.
+- Quality checks
+  - cargo check -p board-rp2040 --target thumbv6m-none-eabi
+  - cargo test --workspace
+- Files changed
+  - crates/board-rp2040/src/firmware/motion.rs
+  - docs/board_rp2040.md
+  - prd.json
+  - progress.txt
+- Learnings for future iterations:
+  - For PIO snapshot consumers, draining RX FIFO and using the newest value is safer than single-read sampling when runtime load is variable.
+---
+
