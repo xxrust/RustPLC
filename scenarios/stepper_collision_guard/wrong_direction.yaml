@@ -1,0 +1,19 @@
+# Source PLC: examples/stepper_collision_guard.plc
+seed: 2026
+tick_ms: 10
+duration_ms: 1200
+
+inputs:
+  - at_ms: 0
+    set:
+      digital_inputs:
+        alarm_x: false
+        enc_dir_positive: false
+      analog_inputs:
+        zone_code: 0
+        axis_count: 0
+
+  - at_ms: 800
+    set:
+      analog_inputs:
+        axis_count: 200000

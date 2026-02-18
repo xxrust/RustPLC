@@ -14,10 +14,13 @@ device X0: digital_input   # INPOS
 device X1: digital_input   # ALARM
 device X2: digital_input   # clamp extended
 device X3: digital_input   # clamp retracted
+device X4: digital_input   # encoder dir sign (+)
+device AI0: analog_input { range: 0..4000000, unit: "count", external: true } # axis count snapshot
+device AI1: analog_input { range: 0..3, unit: "zone", external: true }        # 0=safe, 1..N=danger
 
-# External feedback provided by the drive / board layer
-device axis_count: analog_input { range: 0..4000000, unit: "count", external: true }
-device zone_code: analog_input { range: 0..3, unit: "zone", external: true } # 0=safe, 1..N=danger
+# External feedback provided by the drive / board layer (logical aliases for scenarios/tests).
+device axis_count: analog_input { connected_to: AI0, range: 0..4000000, unit: "count" }
+device zone_code: analog_input { connected_to: AI1, range: 0..3, unit: "zone" } # 0=safe, 1..N=danger
 
 # Logical devices
 device axis_x: motor {
@@ -54,6 +57,10 @@ device alarm_x: sensor {
     detects: axis_x.alarm
 }
 
+device enc_dir_positive: digital_input {
+    connected_to: X4
+}
+
 device clamp_ext: sensor {
     connected_to: X2
     detects: cyl_clamp.extended
@@ -81,6 +88,11 @@ safety: move_cmd.on conflicts_with cyl_clamp.extended
 [tasks]
 
 task cycle:
+    # Fault scenario hook: alarm input can be driven by scenarios to exercise the fault path.
+    step wait_alarm_clear:
+        wait: alarm_x == false
+        timeout: 200ms -> goto fault
+
     step enable_axis:
         action: set axis_x on
 
@@ -94,6 +106,12 @@ task cycle:
 
     step start_move:
         action: set move_cmd on
+
+    # Fault scenario hook: if encoder direction feedback disagrees with the commanded direction,
+    # we should fail fast instead of waiting forever for a target count that will never arrive.
+    step wait_dir_feedback:
+        wait: enc_dir_positive == true
+        timeout: 500ms -> goto fault
 
     # In a real system, motion happens in the drive; PLC just waits on feedback.
     step wait_target_count:

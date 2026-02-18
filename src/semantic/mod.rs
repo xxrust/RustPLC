@@ -2595,6 +2595,8 @@ fn connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<ConnectionT
         (DeviceKind::SolenoidValve, DeviceKind::Cylinder) => Some(ConnectionType::Pneumatic),
         (DeviceKind::DigitalInput, DeviceKind::DigitalInput)
         | (DeviceKind::DigitalOutput, DeviceKind::DigitalOutput) => Some(ConnectionType::Logical),
+        (DeviceKind::AnalogInput, DeviceKind::AnalogInput)
+        | (DeviceKind::AnalogOutput, DeviceKind::AnalogOutput) => Some(ConnectionType::Logical),
         (DeviceKind::AnalogInput, DeviceKind::Sensor)
         | (DeviceKind::AnalogOutput, DeviceKind::SolenoidValve)
         | (DeviceKind::AnalogOutput, DeviceKind::Motor) => Some(ConnectionType::Analog),
