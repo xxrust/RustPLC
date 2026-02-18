@@ -156,6 +156,7 @@ cargo run --release -- build-rp2040 examples/assembly_station.plc \
 步进轴/AB 编码器专题 Wiki 草稿（仓库内）：
 - [`docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md`](docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md)
 - [`docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md`](docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md)
+- [`docs/wiki/Fail-Safe-Safe-State.md`](docs/wiki/Fail-Safe-Safe-State.md)
 
 ## 📚 详细文档
 

@@ -247,6 +247,100 @@ mod firmware {
             }
         }
 
+        fn enter_safe_state(&mut self) {
+            // Best-effort software safe state. This is reliable only for "controlled stop" paths.
+            // For process crash / power-loss / hard lockups, the machine must still rely on the
+            // hardware safety chain (E-Stop, STO, brake wiring, etc.).
+            match io_map::SAFE_STATE_MODE {
+                0 => self.safe_all_zero(),
+                1 => self.safe_profile(),
+                _ => self.safe_all_zero(),
+            }
+        }
+
+        fn safe_all_zero(&mut self) {
+            for id in 0..io_map::MAX_DO {
+                self.write_digital_output(DigitalOutputId(id as u16), false);
+            }
+            for id in 0..io_map::MAX_AO {
+                self.force_analog_output_immediate(id, 0.0);
+            }
+        }
+
+        fn safe_profile(&mut self) {
+            let mut do_done = [false; io_map::MAX_DO];
+            let mut ao_done = [false; io_map::MAX_AO];
+
+            // Apply outputs in group order (smaller group first). Same-group outputs are applied
+            // in the same pass (no guaranteed intra-group ordering).
+            loop {
+                let mut next: Option<u16> = None;
+
+                for id in 0..io_map::MAX_DO {
+                    if io_map::SAFE_DO_DEFINED[id] && !do_done[id] {
+                        let g = io_map::SAFE_DO_GROUP[id];
+                        next = Some(match next {
+                            Some(cur) if cur <= g => cur,
+                            _ => g,
+                        });
+                    }
+                }
+                for id in 0..io_map::MAX_AO {
+                    if io_map::SAFE_AO_DEFINED[id] && !ao_done[id] {
+                        let g = io_map::SAFE_AO_GROUP[id];
+                        next = Some(match next {
+                            Some(cur) if cur <= g => cur,
+                            _ => g,
+                        });
+                    }
+                }
+
+                let Some(group) = next else {
+                    break;
+                };
+
+                for id in 0..io_map::MAX_DO {
+                    if io_map::SAFE_DO_DEFINED[id]
+                        && !do_done[id]
+                        && io_map::SAFE_DO_GROUP[id] == group
+                    {
+                        self.write_digital_output(
+                            DigitalOutputId(id as u16),
+                            io_map::SAFE_DO_VALUE[id],
+                        );
+                        do_done[id] = true;
+                    }
+                }
+                for id in 0..io_map::MAX_AO {
+                    if io_map::SAFE_AO_DEFINED[id]
+                        && !ao_done[id]
+                        && io_map::SAFE_AO_GROUP[id] == group
+                    {
+                        self.force_analog_output_immediate(id, io_map::SAFE_AO_VALUE[id]);
+                        ao_done[id] = true;
+                    }
+                }
+            }
+        }
+
+        fn force_analog_output_immediate(&mut self, id: usize, value: f32) {
+            if let Some(slot) = self.ao_target.get_mut(id) {
+                *slot = value;
+            }
+            if let Some(slot) = self.ao_current.get_mut(id) {
+                *slot = value;
+            }
+
+            if self.ao_pwm_pins.get(id).and_then(|p| p.as_ref()).is_none() {
+                return;
+            }
+            let Some(binding) = self.ao_pwm_bindings.get(id).and_then(|b| *b) else {
+                return;
+            };
+            let duty = engineering_to_pwm(id, value);
+            set_pwm_channel_duty(&self.pwm, binding, duty);
+        }
+
         fn sample_analog_inputs(&mut self) {
             for (id, pin) in self.ai_pins.iter_mut().enumerate() {
                 let Some(pin) = pin.as_mut() else {
@@ -390,7 +484,7 @@ mod firmware {
             io.sample_analog_inputs();
             let tick = io.tick().0;
             defmt::info!("TICK tick={} ts_ms={}", tick, tick.saturating_mul(TICK_MS));
-            rt.tick_with_trace_and_logs(
+            let tick_res = rt.tick_with_trace_and_logs(
                 &mut io,
                 |e| {
                     defmt::info!(
@@ -414,8 +508,15 @@ mod firmware {
                         log.tick.0.saturating_mul(TICK_MS)
                     );
                 },
-            )
-            .unwrap();
+            );
+            if let Err(err) = tick_res {
+                defmt::error!("RUNTIME_ERR tick={} err={:?} -> entering safe state", tick, err);
+                io.enter_safe_state();
+                defmt::error!("SAFE_STATE_APPLIED tick={}", tick);
+                loop {
+                    cortex_m::asm::nop();
+                }
+            }
 
             // Apply analog outputs after the runtime tick so AO changes are reflected on pins.
             io.apply_analog_outputs();

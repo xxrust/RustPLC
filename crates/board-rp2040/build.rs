@@ -99,6 +99,39 @@ struct IoMap {
     digital_outputs: BTreeMap<u16, u8>,
     analog_inputs: BTreeMap<u16, u8>,
     analog_outputs: BTreeMap<u16, u8>,
+    safe_state: SafeStateConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SafeStateMode {
+    AllZero,
+    Profile,
+}
+
+impl Default for SafeStateMode {
+    fn default() -> Self {
+        Self::AllZero
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SafeDoEntry {
+    safe_value: bool,
+    group: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SafeAoEntry {
+    safe_value: f32,
+    group: u16,
+}
+
+#[derive(Debug, Default)]
+struct SafeStateConfig {
+    mode: SafeStateMode,
+    on_exit_timeout_ms: u64,
+    do_: BTreeMap<u16, SafeDoEntry>,
+    ao: BTreeMap<u16, SafeAoEntry>,
 }
 
 #[derive(Debug, Default)]
@@ -137,6 +170,8 @@ fn parse_io_map(input: &str) -> Result<IoMap, String> {
     let ai = v.get("analog_inputs").and_then(|v| v.as_table());
     let ao = v.get("analog_outputs").and_then(|v| v.as_table());
 
+    let safe_state = parse_safe_state(&v)?;
+
     Ok(IoMap {
         digital_inputs: parse_section(di, "di", 0, 29, "0..=29")?,
         digital_outputs: parse_section(do_, "do", 0, 29, "0..=29")?,
@@ -148,7 +183,141 @@ fn parse_io_map(input: &str) -> Result<IoMap, String> {
             Some(t) => parse_section(t, "ao", 0, 29, "0..=29")?,
             None => BTreeMap::new(),
         },
+        safe_state,
     })
+}
+
+fn parse_safe_state(v: &toml::Value) -> Result<SafeStateConfig, String> {
+    let Some(ss) = v.get("safe_state") else {
+        return Ok(SafeStateConfig::default());
+    };
+    let Some(ss) = ss.as_table() else {
+        return Err("safe_state must be a table".to_string());
+    };
+
+    let mode = match ss.get("mode").and_then(|v| v.as_str()) {
+        None => SafeStateMode::AllZero,
+        Some("all_zero") => SafeStateMode::AllZero,
+        Some("profile") => SafeStateMode::Profile,
+        Some(other) => {
+            return Err(format!(
+                "safe_state.mode must be all_zero|profile, got {other:?}"
+            ));
+        }
+    };
+
+    let on_exit_timeout_ms = ss
+        .get("on_exit_timeout_ms")
+        .and_then(|v| v.as_integer())
+        .unwrap_or(0);
+    if on_exit_timeout_ms < 0 {
+        return Err(format!(
+            "safe_state.on_exit_timeout_ms must be >= 0, got {on_exit_timeout_ms}"
+        ));
+    }
+
+    let do_ = parse_safe_do_section(ss.get("do"))?;
+    let ao = parse_safe_ao_section(ss.get("ao"))?;
+
+    Ok(SafeStateConfig {
+        mode,
+        on_exit_timeout_ms: on_exit_timeout_ms as u64,
+        do_,
+        ao,
+    })
+}
+
+fn parse_safe_do_section(v: Option<&toml::Value>) -> Result<BTreeMap<u16, SafeDoEntry>, String> {
+    let Some(v) = v else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(t) = v.as_table() else {
+        return Err("safe_state.do must be a table".to_string());
+    };
+    let mut out = BTreeMap::new();
+    for (k, v) in t {
+        let Some(entry) = v.as_table() else {
+            return Err(format!("safe_state.do.{k} must be a table"));
+        };
+        let id = parse_safe_state_id(k, &["Y", "do"])?;
+        let safe_value = match entry.get("safe_value") {
+            Some(toml::Value::Boolean(b)) => *b,
+            Some(toml::Value::Integer(n)) => match *n {
+                0 => false,
+                1 => true,
+                other => return Err(format!("safe_state.do.{k}.safe_value must be 0|1|bool, got {other}")),
+            },
+            Some(other) => return Err(format!("safe_state.do.{k}.safe_value must be 0|1|bool, got {other:?}")),
+            None => return Err(format!("safe_state.do.{k}.safe_value is required")),
+        };
+        let group = entry.get("group").and_then(|v| v.as_integer()).unwrap_or(0);
+        if group < 0 || group > (u16::MAX as i64) {
+            return Err(format!("safe_state.do.{k}.group must be 0..={}", u16::MAX));
+        }
+        out.insert(
+            id,
+            SafeDoEntry {
+                safe_value,
+                group: group as u16,
+            },
+        );
+    }
+    Ok(out)
+}
+
+fn parse_safe_ao_section(v: Option<&toml::Value>) -> Result<BTreeMap<u16, SafeAoEntry>, String> {
+    let Some(v) = v else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(t) = v.as_table() else {
+        return Err("safe_state.ao must be a table".to_string());
+    };
+    let mut out = BTreeMap::new();
+    for (k, v) in t {
+        let Some(entry) = v.as_table() else {
+            return Err(format!("safe_state.ao.{k} must be a table"));
+        };
+        let id = parse_safe_state_id(k, &["AO", "ao"])?;
+        let safe_value = match entry.get("safe_value") {
+            Some(toml::Value::Float(n)) => *n as f32,
+            Some(toml::Value::Integer(n)) => *n as f32,
+            Some(other) => {
+                return Err(format!(
+                    "safe_state.ao.{k}.safe_value must be a number, got {other:?}"
+                ))
+            }
+            None => return Err(format!("safe_state.ao.{k}.safe_value is required")),
+        };
+        let group = entry.get("group").and_then(|v| v.as_integer()).unwrap_or(0);
+        if group < 0 || group > (u16::MAX as i64) {
+            return Err(format!("safe_state.ao.{k}.group must be 0..={}", u16::MAX));
+        }
+        out.insert(
+            id,
+            SafeAoEntry {
+                safe_value,
+                group: group as u16,
+            },
+        );
+    }
+    Ok(out)
+}
+
+fn parse_safe_state_id(key: &str, prefixes: &[&str]) -> Result<u16, String> {
+    for p in prefixes {
+        if let Some(rest) = key.strip_prefix(p) {
+            if let Ok(id) = rest.parse::<u16>() {
+                return Ok(id);
+            }
+        }
+    }
+    if let Ok(id) = key.parse::<u16>() {
+        return Ok(id);
+    }
+    Err(format!(
+        "invalid safe_state key {key:?} (expected prefixes {:?} + integer id)",
+        prefixes
+    ))
 }
 
 fn parse_section(
@@ -325,6 +494,13 @@ fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
     let mut ao_scale = [1.0f32; MAX_AO];
     let mut ao_offset = [0.0f32; MAX_AO];
 
+    let mut safe_do_defined = [false; MAX_DO];
+    let mut safe_do_value = [false; MAX_DO];
+    let mut safe_do_group = [0u16; MAX_DO];
+    let mut safe_ao_defined = [false; MAX_AO];
+    let mut safe_ao_value = [0.0f32; MAX_AO];
+    let mut safe_ao_group = [0u16; MAX_AO];
+
     for (&id, &gpio) in &map.digital_inputs {
         let idx = id as usize;
         if idx >= MAX_DI {
@@ -373,6 +549,25 @@ fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
         ao_ramp[idx] = cfg.ramp_ms;
         ao_scale[idx] = cfg.scale;
         ao_offset[idx] = cfg.offset;
+    }
+
+    for (&id, cfg) in &map.safe_state.do_ {
+        let idx = id as usize;
+        if idx >= MAX_DO {
+            panic!("safe_state do{id} exceeds MAX_DO={MAX_DO}");
+        }
+        safe_do_defined[idx] = true;
+        safe_do_value[idx] = cfg.safe_value;
+        safe_do_group[idx] = cfg.group;
+    }
+    for (&id, cfg) in &map.safe_state.ao {
+        let idx = id as usize;
+        if idx >= MAX_AO {
+            panic!("safe_state ao{id} exceeds MAX_AO={MAX_AO}");
+        }
+        safe_ao_defined[idx] = true;
+        safe_ao_value[idx] = cfg.safe_value;
+        safe_ao_group[idx] = cfg.group;
     }
 
     let mut out = String::new();
@@ -445,6 +640,48 @@ fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
     out.push_str("pub const AO_CAL_OFFSET: [f32; MAX_AO] = [\n");
     for v in ao_offset {
         out.push_str(&format!("  {v:.6},\n"));
+    }
+    out.push_str("];\n");
+
+    let safe_mode = match map.safe_state.mode {
+        SafeStateMode::AllZero => 0u8,
+        SafeStateMode::Profile => 1u8,
+    };
+    out.push_str(&format!("pub const SAFE_STATE_MODE: u8 = {safe_mode};\n"));
+    out.push_str(&format!(
+        "pub const SAFE_ON_EXIT_TIMEOUT_MS: u64 = {};\n",
+        map.safe_state.on_exit_timeout_ms
+    ));
+
+    out.push_str("pub const SAFE_DO_DEFINED: [bool; MAX_DO] = [\n");
+    for v in safe_do_defined {
+        out.push_str(&format!("  {v},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const SAFE_DO_VALUE: [bool; MAX_DO] = [\n");
+    for v in safe_do_value {
+        out.push_str(&format!("  {v},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const SAFE_DO_GROUP: [u16; MAX_DO] = [\n");
+    for v in safe_do_group {
+        out.push_str(&format!("  {v},\n"));
+    }
+    out.push_str("];\n");
+
+    out.push_str("pub const SAFE_AO_DEFINED: [bool; MAX_AO] = [\n");
+    for v in safe_ao_defined {
+        out.push_str(&format!("  {v},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const SAFE_AO_VALUE: [f32; MAX_AO] = [\n");
+    for v in safe_ao_value {
+        out.push_str(&format!("  {v:.6},\n"));
+    }
+    out.push_str("];\n");
+    out.push_str("pub const SAFE_AO_GROUP: [u16; MAX_AO] = [\n");
+    for v in safe_ao_group {
+        out.push_str(&format!("  {v},\n"));
     }
     out.push_str("];\n");
     out

@@ -1,7 +1,47 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SafeStateMode {
+    /// Default policy: write 0/false for all outputs on exit.
+    AllZero,
+    /// Use per-output safe values/groups from the io_map's `[safe_state.*]` sections.
+    Profile,
+}
+
+impl Default for SafeStateMode {
+    fn default() -> Self {
+        Self::AllZero
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SafeStateBoolEntry {
+    pub safe_value: bool,
+    pub group: u16,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub struct SafeStateF32Entry {
+    pub safe_value: f32,
+    pub group: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct SafeStateConfig {
+    #[serde(default)]
+    pub mode: SafeStateMode,
+    #[serde(default)]
+    pub on_exit_timeout_ms: u64,
+    /// Digital output safe values (by logical DO id).
+    #[serde(default)]
+    pub digital_outputs: BTreeMap<u16, SafeStateBoolEntry>,
+    /// Analog output safe values (by logical AO id).
+    #[serde(default)]
+    pub analog_outputs: BTreeMap<u16, SafeStateF32Entry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct IoMap {
     pub digital_inputs: BTreeMap<u16, u8>,
     pub digital_outputs: BTreeMap<u16, u8>,
@@ -9,6 +49,8 @@ pub struct IoMap {
     pub analog_inputs: BTreeMap<u16, u8>,
     #[serde(default)]
     pub analog_outputs: BTreeMap<u16, u8>,
+    #[serde(default)]
+    pub safe_state: SafeStateConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +92,9 @@ pub enum IoMapError {
 
     #[error("missing required mapping for {kind}{id}")]
     MissingRequired { kind: &'static str, id: u16 },
+
+    #[error("invalid [safe_state] section: {details}")]
+    InvalidSafeState { details: String },
 }
 
 impl IoMap {
@@ -90,11 +135,14 @@ impl IoMap {
             None => BTreeMap::new(),
         };
 
+        let safe_state = parse_safe_state(&v)?;
+
         Ok(Self {
             digital_inputs,
             digital_outputs,
             analog_inputs,
             analog_outputs,
+            safe_state,
         })
     }
 
@@ -174,6 +222,189 @@ impl IoMap {
     pub fn referenced_digital_outputs(&self) -> BTreeSet<u16> {
         self.digital_outputs.keys().copied().collect()
     }
+}
+
+fn parse_safe_state(v: &toml::Value) -> Result<SafeStateConfig, IoMapError> {
+    let Some(ss) = v.get("safe_state") else {
+        return Ok(SafeStateConfig::default());
+    };
+    let Some(ss) = ss.as_table() else {
+        return Err(IoMapError::InvalidSafeState {
+            details: "safe_state must be a table".to_string(),
+        });
+    };
+
+    let mode = match ss.get("mode").and_then(|v| v.as_str()) {
+        None => SafeStateMode::AllZero,
+        Some("all_zero") => SafeStateMode::AllZero,
+        Some("profile") => SafeStateMode::Profile,
+        Some(other) => {
+            return Err(IoMapError::InvalidSafeState {
+                details: format!("safe_state.mode must be all_zero|profile, got {other:?}"),
+            });
+        }
+    };
+
+    let on_exit_timeout_ms = ss
+        .get("on_exit_timeout_ms")
+        .and_then(|v| v.as_integer())
+        .unwrap_or(0);
+    if on_exit_timeout_ms < 0 {
+        return Err(IoMapError::InvalidSafeState {
+            details: format!("safe_state.on_exit_timeout_ms must be >= 0, got {on_exit_timeout_ms}"),
+        });
+    }
+
+    let digital_outputs = parse_safe_do_section(ss.get("do"))?;
+    let analog_outputs = parse_safe_ao_section(ss.get("ao"))?;
+
+    Ok(SafeStateConfig {
+        mode,
+        on_exit_timeout_ms: on_exit_timeout_ms as u64,
+        digital_outputs,
+        analog_outputs,
+    })
+}
+
+fn parse_safe_do_section(
+    v: Option<&toml::Value>,
+) -> Result<BTreeMap<u16, SafeStateBoolEntry>, IoMapError> {
+    let Some(v) = v else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(t) = v.as_table() else {
+        return Err(IoMapError::InvalidSafeState {
+            details: "safe_state.do must be a table".to_string(),
+        });
+    };
+
+    let mut out = BTreeMap::new();
+    for (k, v) in t {
+        let Some(entry) = v.as_table() else {
+            return Err(IoMapError::InvalidSafeState {
+                details: format!("safe_state.do.{k} must be a table"),
+            });
+        };
+        let id = parse_safe_state_id(k, &["Y", "do"])?;
+
+        let safe_value = match entry.get("safe_value") {
+            Some(toml::Value::Boolean(b)) => *b,
+            Some(toml::Value::Integer(n)) => match *n {
+                0 => false,
+                1 => true,
+                other => {
+                    return Err(IoMapError::InvalidSafeState {
+                        details: format!(
+                            "safe_state.do.{k}.safe_value must be 0|1|bool, got {other}"
+                        ),
+                    });
+                }
+            },
+            Some(other) => {
+                return Err(IoMapError::InvalidSafeState {
+                    details: format!(
+                        "safe_state.do.{k}.safe_value must be 0|1|bool, got {other:?}"
+                    ),
+                });
+            }
+            None => {
+                return Err(IoMapError::InvalidSafeState {
+                    details: format!("safe_state.do.{k}.safe_value is required"),
+                });
+            }
+        };
+
+        let group = entry.get("group").and_then(|v| v.as_integer()).unwrap_or(0);
+        if group < 0 || group > (u16::MAX as i64) {
+            return Err(IoMapError::InvalidSafeState {
+                details: format!("safe_state.do.{k}.group must be 0..={}", u16::MAX),
+            });
+        }
+
+        out.insert(
+            id,
+            SafeStateBoolEntry {
+                safe_value,
+                group: group as u16,
+            },
+        );
+    }
+    Ok(out)
+}
+
+fn parse_safe_ao_section(
+    v: Option<&toml::Value>,
+) -> Result<BTreeMap<u16, SafeStateF32Entry>, IoMapError> {
+    let Some(v) = v else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(t) = v.as_table() else {
+        return Err(IoMapError::InvalidSafeState {
+            details: "safe_state.ao must be a table".to_string(),
+        });
+    };
+
+    let mut out = BTreeMap::new();
+    for (k, v) in t {
+        let Some(entry) = v.as_table() else {
+            return Err(IoMapError::InvalidSafeState {
+                details: format!("safe_state.ao.{k} must be a table"),
+            });
+        };
+        let id = parse_safe_state_id(k, &["AO", "ao"])?;
+
+        let safe_value = match entry.get("safe_value") {
+            Some(toml::Value::Float(n)) => *n as f32,
+            Some(toml::Value::Integer(n)) => *n as f32,
+            Some(other) => {
+                return Err(IoMapError::InvalidSafeState {
+                    details: format!(
+                        "safe_state.ao.{k}.safe_value must be a number, got {other:?}"
+                    ),
+                });
+            }
+            None => {
+                return Err(IoMapError::InvalidSafeState {
+                    details: format!("safe_state.ao.{k}.safe_value is required"),
+                });
+            }
+        };
+
+        let group = entry.get("group").and_then(|v| v.as_integer()).unwrap_or(0);
+        if group < 0 || group > (u16::MAX as i64) {
+            return Err(IoMapError::InvalidSafeState {
+                details: format!("safe_state.ao.{k}.group must be 0..={}", u16::MAX),
+            });
+        }
+
+        out.insert(
+            id,
+            SafeStateF32Entry {
+                safe_value,
+                group: group as u16,
+            },
+        );
+    }
+    Ok(out)
+}
+
+fn parse_safe_state_id(key: &str, prefixes: &[&str]) -> Result<u16, IoMapError> {
+    for p in prefixes {
+        if let Some(rest) = key.strip_prefix(p) {
+            if let Ok(id) = rest.parse::<u16>() {
+                return Ok(id);
+            }
+        }
+    }
+    if let Ok(id) = key.parse::<u16>() {
+        return Ok(id);
+    }
+    Err(IoMapError::InvalidSafeState {
+        details: format!(
+            "invalid safe_state key {key:?} (expected prefixes {:?} + integer id)",
+            prefixes
+        ),
+    })
 }
 
 fn parse_map_section(
@@ -361,5 +592,53 @@ ao0 = 21
             err.to_string()
                 .contains("26..=29 (RP2040 ADC-capable GPIO)")
         );
+    }
+
+    #[test]
+    fn parse_safe_state_all_zero_default_when_missing() {
+        let toml = r#"
+[digital_inputs]
+di0 = 0
+
+[digital_outputs]
+do0 = 1
+"#;
+        let map = IoMap::from_toml_str(toml).unwrap();
+        assert_eq!(map.safe_state.mode, SafeStateMode::AllZero);
+        assert!(map.safe_state.digital_outputs.is_empty());
+        assert!(map.safe_state.analog_outputs.is_empty());
+    }
+
+    #[test]
+    fn parse_safe_state_profile_with_nested_tables() {
+        let toml = r#"
+[digital_inputs]
+di0 = 0
+
+[digital_outputs]
+do0 = 1
+do2 = 3
+
+[safe_state]
+mode = "profile"
+
+[safe_state.do.Y2]
+safe_value = 0
+group = 10
+
+[safe_state.do.do0]
+safe_value = true
+group = 20
+
+[safe_state.ao.AO0]
+safe_value = 0.0
+group = 30
+"#;
+        let map = IoMap::from_toml_str(toml).unwrap();
+        assert_eq!(map.safe_state.mode, SafeStateMode::Profile);
+        assert_eq!(map.safe_state.digital_outputs.get(&2).unwrap().safe_value, false);
+        assert_eq!(map.safe_state.digital_outputs.get(&2).unwrap().group, 10);
+        assert_eq!(map.safe_state.digital_outputs.get(&0).unwrap().safe_value, true);
+        assert_eq!(map.safe_state.analog_outputs.get(&0).unwrap().group, 30);
     }
 }

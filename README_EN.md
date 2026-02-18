@@ -158,6 +158,7 @@ Local playbooks:
 Repo-local Wiki drafts (offline-readable):
 - `docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md`
 - `docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md`
+- `docs/wiki/Fail-Safe-Safe-State.md`
 
 ## 📚 Documentation
 

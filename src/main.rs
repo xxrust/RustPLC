@@ -3622,6 +3622,28 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
             out.push_str(&format!("# ao{id} = 26\n"));
         }
     }
+
+    out.push('\n');
+    out.push_str("[safe_state]\n");
+    out.push_str("# Default: all outputs -> 0 on exit (de-energize)\n");
+    out.push_str("# mode = \"all_zero\"  # all_zero | profile\n");
+    out.push_str("# on_exit_timeout_ms = 300\n");
+    out.push_str("#\n");
+    out.push_str("# If mode = \"profile\", define per-output safe values and ordering groups.\n");
+    out.push_str("# Example (NC brake coil, 0=brake):\n");
+    out.push_str("# [safe_state.do.Y2]\n");
+    out.push_str("# safe_value = 0\n");
+    out.push_str("# group = 10\n");
+    out.push_str("#\n");
+    out.push_str("# Example (disable stepper enable after brake):\n");
+    out.push_str("# [safe_state.do.Y1]\n");
+    out.push_str("# safe_value = 0\n");
+    out.push_str("# group = 20\n");
+    out.push_str("#\n");
+    out.push_str("# Example (analog output safe value):\n");
+    out.push_str("# [safe_state.ao.AO0]\n");
+    out.push_str("# safe_value = 0.0\n");
+    out.push_str("# group = 30\n");
     out
 }
 
