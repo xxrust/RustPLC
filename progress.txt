@@ -17,6 +17,7 @@
 - If you want scenario YAMLs to reference logical analog input aliases by name, ensure the PLC topology models `connected_to` chains from physical `AI<N>` nodes to logical `analog_input` devices (and semantic connection typing allows analog<->analog logical connections).
 - For CLI-driven docs, add a doc consistency test that checks required commands are present both in the markdown playbook and in `rust_plc` usage output.
 - For docs with fenced ` ```plc` snippets, keep each snippet a complete PLC file (`[topology]` + `[constraints]` + `[tasks]` in order) and add an integration test that extracts and parses those blocks via `parse_plc` to prevent example drift.
+- For repo-local Wiki drafts under `docs/wiki/`, include at least one complete ` ```plc` snippet and gate it with a small test (extract + `parse_plc`) so drafts don't silently drift into non-parseable examples.
 - For doc deliverables with structural acceptance criteria (required headings/links), add a lightweight regression test that asserts those key strings exist to prevent drift.
 - For JSONL contracts that are diff-sensitive, serialize typed structs (not maps) and keep canonical field declaration order so snapshots stay stable.
 - For percentile-based gates/reports, use one deterministic nearest-rank rule and lock it with unit tests so threshold behavior stays stable across refactors.
@@ -1057,4 +1058,29 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `tests/stepper_ab_encoder_doc.rs` parses every fenced ` ```plc` block in `docs/stepper_ab_encoder.md`; ensure any new templates remain complete, parseable PLC files.
   - Useful context (e.g., "the evaluation panel is in component X")
     - The scenario workflow lives in `docs/scenario_playbook.md`; stepper safety modeling now points there so example templates and their regression paths stay connected.
+---
+## [2026-02-18 14:27:16 CST] - US-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added two repo-local Wiki drafts under `docs/wiki/`:
+    - `docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md`
+    - `docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md`
+  - Linked the local drafts from `README.md` and `README_EN.md` so they are discoverable without GitHub Wiki sync.
+  - Added `tests/wiki_drafts.rs` to regression-check key terms and ensure fenced ` ```plc` snippets in both drafts remain parseable via `parse_plc`.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md`
+  - `docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md`
+  - `README.md`
+  - `README_EN.md`
+  - `tests/wiki_drafts.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Wiki drafts are safer when gated by a tiny “extract fenced PLC blocks + `parse_plc`” regression test, so examples don't silently drift into non-parseable fragments.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Repo-local wiki drafts are not auto-discoverable unless README/docs include an explicit entry link.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - The canonical modeling source remains `docs/stepper_ab_encoder.md`; wiki drafts should stay terminology-compatible with that file.
 ---

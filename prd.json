@@ -118,8 +118,8 @@
         "cargo test --workspace passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added repo-local wiki drafts under docs/wiki/ plus a small regression test to keep key PLC snippets parseable."
     },
     {
       "id": "US-009",
