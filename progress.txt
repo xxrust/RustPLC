@@ -42,8 +42,25 @@
 - Release-style artifacts should include a `manifest.json` that hashes the exact on-disk files (plus `size_bytes`) so integration tests can verify integrity deterministically.
 - When release-bundle adds new evidence artifacts, add them to both manifest hashing and integration-test required lists in the same change to keep delivery contracts auditable.
 - For example safety-modeling fixtures, assert `verification.safety.rule_statuses` contains one entry per safety rule and keep `skipped_rules == 0` to catch silently unbound constraints.
+- For board text log parsing, use `line.find("TRACE ")` / `line.find("TIMING ")` to tolerate prefixed logs, parse unordered `k=v` tokens, ignore unknown fields, and report missing/invalid required fields with source line numbers.
 
 Started: Sat Feb 14 23:50:11 CST 2026
+---
+## [2026-02-18 19:49:22 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a board-log `TIMING ...` line parser that extracts `tick/ts_start_us/ts_end_us/exec_us/slack_us/overrun` into `TickTimingSample`, tolerating field reordering and ignoring extra fields like `overrun_count`.
+  - Added unit tests for out-of-order fields, mixed non-TIMING output, log prefixes, extra fields, and missing-field errors with a locatable line number.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `src/tick_timing.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For board text logs, `line.find("TIMING ")` is more robust than `starts_with` because real logs may include timestamps/level prefixes before the record marker.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - TIMING lines may include extra fields (e.g. `overrun_count`); treat them as forward-compatible noise and only require the minimal stable set.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - This parser is intentionally strict about required fields and returns errors with source line numbers to make it usable as a building block for `board-parse` (US-003) and realtime gating evidence.
 ---
 ## [2026-02-18 13:12:19 CST] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
