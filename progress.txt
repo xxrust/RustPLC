@@ -383,6 +383,83 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Liveness verifier rejects `wait` steps without `timeout` unless `allow_indefinite_wait: true`; even minimal fixtures in CLI tests must satisfy this.
 ---
 
+## [2026-02-19 02:21:47 CST] - US-009
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Added a dual-axis minimal motion example PLC: `examples/rp2040_motion_minimal.plc`.
+  - Added a matching io_map with `"virtual"` motion channels + `[motion.*]` pin config: `examples/rp2040_motion_minimal.io_map.toml`.
+  - Added three scenarios covering nominal + fault paths:
+    - `scenarios/rp2040_motion_minimal/normal.yaml`
+    - `scenarios/rp2040_motion_minimal/count_stuck.yaml`
+    - `scenarios/rp2040_motion_minimal/wrong_direction.yaml`
+- Quality checks
+  - cargo test --workspace
+- Files changed
+  - examples/rp2040_motion_minimal.plc
+  - examples/rp2040_motion_minimal.io_map.toml
+  - scenarios/rp2040_motion_minimal/*.yaml
+  - prd.json
+  - progress.txt
+- Learnings for future iterations:
+  - When analog waits are used as feedback gates, scenario fixtures should include both a nominal progress path and a “stuck” path so timeouts remain regression-gated.
+---
+
+## [2026-02-19 02:21:47 CST] - US-011
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Added scenario-driven regression tests for the RP2040 minimal motion fixture:
+    - `tests/rp2040_motion_minimal_scenarios.rs`
+  - The test validates each scenario, runs `sim-plc`, and asserts timeout behavior for fault cases.
+- Quality checks
+  - cargo test --workspace
+- Files changed
+  - tests/rp2040_motion_minimal_scenarios.rs
+  - prd.json
+  - progress.txt
+---
+
+## [2026-02-19 02:21:47 CST] - US-012
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Added a doc describing the io_map format delta for RP2040 motion (old vs new), including `"virtual"` bindings and `[motion.*]` sections:
+    - `docs/motion_io_map_format_delta.md`
+- Quality checks
+  - cargo test --workspace
+- Files changed
+  - docs/motion_io_map_format_delta.md
+  - prd.json
+  - progress.txt
+---
+
+## [2026-02-19 02:21:47 CST] - US-013
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Updated wiki drafts for motion implementation + CI repro:
+    - updated `docs/wiki/CI-Runbook.md` with motion regression pointers
+    - updated `docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md` to reference the new fixtures
+    - added `docs/wiki/RP2040-Motion-Minimal-Example.md` (command checklist + convention)
+- Quality checks
+  - cargo test --workspace
+- Files changed
+  - docs/wiki/CI-Runbook.md
+  - docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md
+  - docs/wiki/RP2040-Motion-Minimal-Example.md
+  - prd.json
+  - progress.txt
+---
+
+## [2026-02-19 02:21:47 CST] - Follow-up Fix (not a user story)
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Fixed analog wait lowering for `>=`/`<=` so region-guard predicates are not tautological when regions overlap at the split point.
+    - This ensures `wait: axis_count >= T` does not become `axis_count in {region_0, region_1}`.
+- Quality checks
+  - cargo test --workspace
+- Files changed
+  - src/semantic/mod.rs
+  - progress.txt
+---
+
 ## [2026-02-15 01:46:15 CST] - US-010
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
@@ -1478,4 +1555,3 @@ Thread: N/A (Codex CLI)
   - prd.json
   - progress.txt
 ---
-
