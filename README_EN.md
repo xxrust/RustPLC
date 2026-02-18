@@ -1,11 +1,11 @@
 <p align="center">
   <h1 align="center">RustPLC</h1>
   <p align="center">
-    <strong>Formally Verified Compiler for Industrial Control Systems</strong><br>
-    Don't program devices — declare physical facts and intent, let the compiler prove it's safe.
+    <strong>Formally Verified Industrial Control Compiler</strong><br>
+    Declare physical topology and safety constraints. Compiler proves correctness mathematically.
   </p>
   <p align="center">
-    <a href="README.md">中文</a> | <strong>English</strong>
+    <strong>English</strong> | <a href="README.md">中文</a>
   </p>
 </p>
 
@@ -27,14 +27,14 @@ flowchart TD
 
 **RustPLC**: Engineer describes process → AI generates declarative DSL → compiler mathematically proves safety → all issues caught at compile time
 
+---
+
 ## Quick Start
 
 ```bash
 git clone https://github.com/xxrust/RustPLC.git
 cd RustPLC
 cargo build --release
-cargo run --release -- examples/two_cylinder.plc
-# Summary-only mode (suppresses large IR JSON on stdout)
 cargo run --release -- examples/two_cylinder.plc --no-print-ir
 ```
 
@@ -46,171 +46,202 @@ Verification passed:
   - Causality: Passed — all signal chains connected
 ```
 
-## AI-Assisted Generation Example
+---
 
-Describe your process in plain language in Claude Code, and the AI generates a verified `.plc` file:
+## Core Capabilities
 
-**You**:
+| Capability | Description |
+|------------|-------------|
+| **🔬 Formal Verification** | Four engines (Safety / Liveness / Timing / Causality) with compile-time mathematical proofs |
+| **🤖 AI-Assisted Generation** | Natural language → AI multi-turn dialogue → `.plc` generation → auto-verification |
+| **🧪 SIL Simulation** | Scenario-driven deterministic simulation, fault injection, waveform export, batch regression |
+| **📋 Scenario Engineering** | Scenario init, validation, expansion, batch generation, failure minimization |
+| **🎛️ PID Control** | DSL-declared PID loops, deterministic runtime execution, KPI regression analysis |
+| **🔄 Motion Control** | Stepper + AB encoder, PIO high-speed pulses, collision guard, virtual channels |
+| **📦 RP2040 Deployment** | Cross-compile to Raspberry Pi Pico, I/O mapping, trace comparison gate |
+| **⏱️ Real-Time Gating** | Tick timing sampling, p50/p95/p99 stats, real-time threshold gates |
+| **🚫 No-Board Delivery** | Virtual board runner, SIL vs virtual-board comparison, release-bundle |
+| **🛡️ Recovery Templates** | E-stop/power-loss/sensor-stuck recovery templates, critical wait recoverability lint |
 
-> I have an assembly station: two conveyors deliver workpieces, then push cylinders push them to center, a press cylinder assembles, then an eject cylinder pushes the product out. The press must not act unless both pushers are extended. Eject must not act while press is extended.
+---
 
-**AI infers topology & safety constraints**:
+## Typical Workflow
 
-```
-Left conveyor:   Y0 → motor_left → sensor_left_arrive → X0
-Left push cyl:   Y2 → valve_push_L → cyl_push_L → sensor_push_L_ext → X2
-Press cylinder:  Y4 → valve_press → cyl_press → sensor_press_ext → X6
-...
+### 1. Write / Generate .plc
 
-Safety constraints:
-  cyl_press.extended requires cyl_push_L.extended
-  cyl_press.extended requires cyl_push_R.extended
-  cyl_eject.extended conflicts_with cyl_press.extended
-```
-
-**AI generates `.plc` and auto-verifies**:
-
-```
-Verification passed:
-  - Safety: Complete proof (depth 14) — requires/conflicts_with satisfied
-  - Liveness: Passed — no deadlock risk
-  - Timing: Passed
-  - Causality: Passed — all signal chains connected
-```
-
-Full file: [`examples/assembly_station.plc`](examples/assembly_station.plc)
-
-## Four Verification Engines
-
-| Engine | Checks | Method |
-|--------|--------|--------|
-| **Safety** | Mutual exclusion (`conflicts_with`), dependencies (`requires`) | Bounded Model Checking + k-induction |
-| **Liveness** | Deadlock / livelock (unguarded waits, zero-outdegree states) | Tarjan SCC + reachability |
-| **Timing** | Timing envelope (`must_complete_within` / `worst_case`) | Worst-case critical path |
-| **Causality** | Signal chain integrity (can signals propagate along topology?) | Topology BFS |
-
-All four engines run in parallel — one compilation exposes all issues. On failure, precise diagnostics:
+**Option A: AI Dialogue Generation (Recommended)**
 
 ```
-ERROR [safety] Safety constraint violated
-  Location: task cycle.step together
-  Cause: cyl_A.extended and cyl_B.extended both true in parallel branches
-  Suggestion: Make conflicting actions sequential
-
-ERROR [liveness] Potential deadlock
-  Location: task main.step_wait
-  Cause: wait condition has no timeout branch
-  Suggestion: Add timeout: <duration> -> goto <recovery task>
+> Help me write a PLC program. I have two cylinders that can't extend simultaneously, extend A first then B...
 ```
 
-## From Verification to Deployment
+AI will generate a complete `.plc` file through multi-turn dialogue and auto-verify it.
 
-After `.plc` verification passes, proceed to simulation and board-level deployment:
+**Option B: Hand-write DSL**
 
-```mermaid
-flowchart LR
-    A[".plc verified"] --> B["SIL Simulation"]
-    A --> C["RP2040 Deployment"]
-    B --> D["trace-diff gate"]
-    C --> D
+```plc
+[topology]
+device Y0: digital_output
+device valve_A: solenoid_valve { connected_to: Y0, response_time: 20ms }
+device cyl_A: cylinder { connected_to: valve_A, stroke_time: 300ms }
+device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
+
+[constraints]
+safety:
+    cyl_A.extended conflicts_with cyl_B.extended
+
+[tasks]
+task cycle:
+    step extend_A:
+        action: extend cyl_A
+        wait: sensor_A_ext == true
+        timeout: 500ms -> goto fault_handler
 ```
+
+### 2. Compile & Verify
 
 ```bash
-# Initialize a runnable scenario skeleton from a .plc (for sim/gates/bundles)
-cargo run --release -- scenario-init examples/assembly_station.plc \
-  --out out/assembly_station.scenario.yaml --preset normal
+cargo run --release -- your_file.plc --no-print-ir
+```
 
-# Built-in templates (handy for quickly constructing specific cases):
-#   --preset timeout        # trigger timeout paths (usually by not scripting sensors)
-#   --preset sensor_stuck   # inject a sensor_stuck fault example
-#   --preset bounce         # button bounce example
+### 3. Scenario Simulation
+
+```bash
+# Initialize scenario skeleton
+cargo run --release -- scenario-init examples/assembly_station.plc \
+  --out scenarios/normal.yaml --preset normal
 
 # SIL simulation
 cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
 
-# Scenario YAML also supports device-name keys (from the .plc topology), e.g. in scenarios/normal.yaml:
-#   digital_inputs: { start_button: true }
-# It also supports higher-level sugar (pulse/hold). You can export the fully expanded `inputs` via:
-#   cargo run --release -- scenario-expand examples/assembly_station.plc \
-#     --scenario examples/scenarios/pulse_hold.yaml --out out/pulse_hold.expanded.yaml
-
-# Batch-generate scenarios (parametric config -> multiple YAMLs for regressions/gates)
-cargo run --release -- scenario-gen --plc examples/assembly_station.plc \
-  --config examples/scenario_gen/basic.yaml --out-dir out/scenario_gen
-
-# No-board comparison gate (SIL vs virtual-board; runs sim + virtual-board + trace-diff)
-cargo run --release -- no-board-gate examples/assembly_station.plc \
-  --scenario scenarios/normal.yaml --out-dir out/no_board_gate
-
-# RP2040 firmware build
-cargo run --release -- build-rp2040 examples/assembly_station.plc \
-  --out out/rp2040
+# Batch regression
+cargo run --release -- sim-regress --plc-dir examples --scenario-dir scenarios
 ```
 
-> Tip: the first `build-rp2040` run writes `out/rp2040/io_map.template.toml`. Copy/edit it for your board pins before running `--emit-uf2`.
+### 4. No-Board Gate
 
-Local playbooks:
-- Scenario authoring + regression: `docs/scenario_playbook.md`
-- Failure minimization + feedback loop: `docs/scenario_minimization.md`
-- No-board delivery/gate: `docs/no_board_playbook.md`
+```bash
+# SIL vs virtual-board comparison + real-time threshold check
+cargo run --release -- no-board-gate examples/assembly_station.plc \
+  --scenario scenarios/normal.yaml \
+  --out-dir out/gate \
+  --max-p99-exec-us 500 \
+  --max-overrun-count 0
+```
 
-Repo-local Wiki drafts (offline-readable):
-- `docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md`
-- `docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md`
-- `docs/wiki/Fail-Safe-Safe-State.md`
-- `docs/wiki/OpenPLC-v3-Learnings-Integration.md`
+### 5. RP2040 Deployment
+
+```bash
+# Generate firmware build inputs
+cargo run --release -- build-rp2040 examples/assembly_station.plc --out out/rp2040
+
+# Fill I/O mapping
+cp out/rp2040/io_map.template.toml out/rp2040/io_map.toml
+# Edit io_map.toml to fill GPIO pins
+
+# One-step UF2 firmware build
+cargo run --release -- build-rp2040 examples/assembly_station.plc \
+  --out out/rp2040 \
+  --io-map out/rp2040/io_map.toml \
+  --emit-uf2 out/firmware.uf2
+
+# Flash to Pico
+cargo run --release -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP2
+```
+
+### 6. Release Delivery
+
+```bash
+# Package auditable release artifacts (with SHA manifest, git metadata, real-time evidence)
+cargo run --release -- release-bundle examples/assembly_station.plc \
+  --scenario scenarios/normal.yaml \
+  --out-dir out/release \
+  --max-p99-exec-us 500 \
+  --max-overrun-count 0
+```
+
+---
 
 ## 📚 Documentation
 
-For in-depth content, see the **[Wiki](https://github.com/xxrust/RustPLC/wiki)**:
+Full documentation available on **[GitHub Wiki](https://github.com/xxrust/RustPLC/wiki)**:
 
 | Page | Content |
 |------|---------|
-| [Quick Start](https://github.com/xxrust/RustPLC/wiki/Quick-Start) | 5-minute setup: install, build, run |
-| [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) | Full syntax reference: topology, constraints, control logic, PID |
-| [Architecture](https://github.com/xxrust/RustPLC/wiki/Architecture) | Compilation pipeline, module structure, IR design |
-| [Verification Engines](https://github.com/xxrust/RustPLC/wiki/Verification-Engines) | Engine internals and mathematical foundations |
-| [SIL Simulation](https://github.com/xxrust/RustPLC/wiki/SIL-Simulation) | Simulation loop: scenarios, fault injection, batch regression |
-| [PID Control](https://github.com/xxrust/RustPLC/wiki/PID-Control) | PID loop declaration, runtime semantics, KPI regression |
-| [No-Board Gate](https://github.com/xxrust/RustPLC/wiki/No-Board-Gate) | No-board delivery gate: virtual board + trace diff + release-bundle |
-| [Recovery Templates](https://github.com/xxrust/RustPLC/wiki/Recovery-Templates) | Fault recovery templates and sequence lint |
-| [RP2040 Deployment](https://github.com/xxrust/RustPLC/wiki/RP2040-Deployment) | Cross-compilation, I/O mapping, flashing, trace comparison |
-| [Examples Gallery](https://github.com/xxrust/RustPLC/wiki/Examples-Gallery) | Example files with industrial scenario walkthroughs |
-| [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) | Full AI dialogue workflow for generating `.plc` files |
-| [Contributing](https://github.com/xxrust/RustPLC/wiki/Contributing) | Development guide, testing, code structure |
+| [Quick Start](https://github.com/xxrust/RustPLC/wiki/Quick-Start) | 5-minute getting started guide |
+| [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) | Complete syntax reference |
+| [Architecture](https://github.com/xxrust/RustPLC/wiki/Architecture) | Compilation pipeline & module structure |
+| [Verification Engines](https://github.com/xxrust/RustPLC/wiki/Verification-Engines) | Four engine internals |
+| [SIL Simulation](https://github.com/xxrust/RustPLC/wiki/SIL-Simulation) | Simulation loop |
+| [Scenario System](https://github.com/xxrust/RustPLC/wiki/Scenario-System) | Scenario engineering |
+| [PID Control](https://github.com/xxrust/RustPLC/wiki/PID-Control) | PID loops |
+| [Motion Control](https://github.com/xxrust/RustPLC/wiki/Motion-Control) | Stepper + AB encoder |
+| [No-Board Gate](https://github.com/xxrust/RustPLC/wiki/No-Board-Gate) | No-board delivery gate |
+| [Recovery Templates](https://github.com/xxrust/RustPLC/wiki/Recovery-Templates) | Fault recovery templates |
+| [RP2040 Deployment](https://github.com/xxrust/RustPLC/wiki/RP2040-Deployment) | Board-level deployment |
+| [Examples Gallery](https://github.com/xxrust/RustPLC/wiki/Examples-Gallery) | Example walkthroughs |
+| [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) | AI generation workflow |
+| [Contributing](https://github.com/xxrust/RustPLC/wiki/Contributing) | Development guide |
+
+**Local Documentation (in repo):**
+- Scenario system: [`docs/scenario_playbook.md`](docs/scenario_playbook.md), [`docs/scenario_minimization.md`](docs/scenario_minimization.md)
+- No-board delivery: [`docs/no_board_playbook.md`](docs/no_board_playbook.md)
+- Motion control: [`docs/stepper_ab_encoder.md`](docs/stepper_ab_encoder.md)
+- Recovery templates: [`docs/recovery_templates_sequence_lint.md`](docs/recovery_templates_sequence_lint.md)
+
+---
 
 ## Roadmap
 
-- [x] DSL design and parser
-- [x] Four formal verification engines (Safety / Liveness / Timing / Causality)
-- [x] Structured error reporting (line numbers + fix suggestions)
-- [x] DSL v2: delay / repeat / wait AND|OR / if-else / goto task.step / custom states
-- [x] AI-assisted generation (plc-gen skill)
-- [x] Analog I/O (analog_input / analog_output / set_analog / threshold comparison)
-- [x] SIL simulation loop (SimIO / Plant / fault injection / waveform export / batch regression)
-- [x] Code generation + RP2040 build/flash (build-rp2040 / flash-rp2040)
-- [x] Board-level observability & SIL comparison (board-parse / trace-diff)
-- [x] Unified verification report contract (verification_report.json + warning levels)
-- [x] CLI gate (--deny-warnings)
-- [x] Runtime upper-bound analysis (tick transfer / action / parallel expansion budgets)
-- [x] Virtual board runner + no-board comparison gate (no-board-gate)
-- [x] Release bundle & traceability (release-bundle + sha manifest + git metadata)
-- [x] Analog safety coverage transparency (rule binding rate & abstraction granularity report)
-- [x] Threshold semantic hardening (type / range / unit consistency checks)
-- [x] PID minimal subset (DSL / IR / runtime integration + KPI regression)
-- [x] Simulation object model & KPI regression (overshoot / settling time / steady-state error)
-- [x] Recovery templates & sequence lint (critical waits must be recoverable)
-- [x] Tick timing observability contract (tick_timing.jsonl + per-tick exec/slack/overrun)
-- [x] Timing statistics report (timing-report: p50/p95/p99/max + overrun count)
-- [x] No-board gate real-time thresholds (--max-p99-exec-us / --max-overrun-count)
-- [x] Structural upper-bound to time budget mapping (budget_time_estimate)
-- [x] Release bundle includes real-time evidence artifacts (tick_timing.jsonl / timing_report.json)
-- [x] Worst-case load scenario injection & reproducible replay
-- [x] No-RTOS Real-Time Playbook documentation
-- [ ] Hardware abstraction layer (EtherCAT / Modbus / more GPIO boards)
-- [ ] Multi-controller coordination
-- [ ] Graphical DSL editor
+### Completed
+
+**Core Compiler:**
+- ✅ DSL design and parser
+- ✅ Four formal verification engines (Safety / Liveness / Timing / Causality)
+- ✅ Structured error reporting (line numbers + fix suggestions)
+- ✅ DSL v2 (delay / repeat / wait AND|OR / if-else / goto task.step / custom states)
+- ✅ AI-assisted generation (plc-gen skill)
+
+**I/O & Control:**
+- ✅ Analog I/O (analog_input / analog_output / set_analog / threshold comparison)
+- ✅ PID minimal subset (DSL/IR/runtime integration + KPI regression)
+- ✅ Motion control (stepper + AB encoder + PIO + collision guard + virtual channels)
+
+**Simulation & Testing:**
+- ✅ SIL simulation loop (SimIO / Plant / fault injection / waveform export)
+- ✅ Scenario system (init / validate / expand / gen / batch regression / failure minimization)
+- ✅ Simulation object model & KPI regression (overshoot / settling time / steady-state error)
+
+**Deployment & Gating:**
+- ✅ Code generation + RP2040 build/flash (build-rp2040 / flash-rp2040)
+- ✅ Board-level observability & SIL comparison (board-parse / trace-diff)
+- ✅ Virtual board runner + no-board comparison gate (no-board-gate)
+- ✅ Release bundle & traceability (release-bundle + SHA manifest + git metadata)
+
+**Quality & Real-Time:**
+- ✅ Unified verification report contract (verification_report.json + warning levels)
+- ✅ CLI gate (--deny-warnings)
+- ✅ Runtime upper-bound analysis (tick transfer / action / parallel expansion budgets)
+- ✅ Structural upper-bound to time budget mapping (budget_time_estimate)
+- ✅ Tick timing observability contract (tick_timing.jsonl + per-tick exec/slack/overrun)
+- ✅ Timing statistics report (timing-report: p50/p95/p99/max + overrun count)
+- ✅ No-board gate real-time thresholds (--max-p99-exec-us / --max-overrun-count)
+- ✅ Worst-case load scenario injection & reproducible replay
+- ✅ Recovery templates & sequence lint (critical waits must be recoverable)
+
+**Documentation & Engineering:**
+- ✅ Analog safety coverage transparency (rule binding rate & abstraction granularity report)
+- ✅ Threshold semantic hardening (type / range / unit consistency checks)
+- ✅ No-RTOS Real-Time Playbook documentation
+
+### Planned
+
+- ⏳ Hardware abstraction layer (EtherCAT / Modbus / more GPIO boards)
+- ⏳ Multi-controller coordination
+- ⏳ Graphical DSL editor
+
+---
 
 ## License
 
