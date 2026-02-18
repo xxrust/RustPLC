@@ -1169,6 +1169,13 @@ fn main() {
         }
         return;
     }
+    if first == "io-map-normalize" {
+        if let Err(msg) = run_io_map_normalize_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "no-board-gate" {
         if let Err(msg) = run_no_board_gate_subcommand(&program, args) {
             eprintln!("{msg}");
@@ -1489,6 +1496,7 @@ fn print_usage(program: &str) {
     eprintln!(
         "  {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]"
     );
+    eprintln!("  {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>");
     eprintln!(
         "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
     );
@@ -4015,6 +4023,203 @@ fn run_timing_report_subcommand(
     );
     eprintln!("  timing_report: {}", out.display());
     Ok(())
+}
+
+fn run_io_map_normalize_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let mut input: Option<PathBuf> = None;
+    let mut out: Option<PathBuf> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--in" => {
+                input =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --in <io_map.toml>".to_string()
+                    })?));
+            }
+            "--out" => {
+                out =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out <normalized.toml>".to_string()
+                    })?));
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>"
+                ));
+            }
+            other => return Err(format!("Unknown argument for io-map-normalize: {other}")),
+        }
+    }
+
+    let input = input.ok_or_else(|| {
+        format!("Usage: {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>")
+    })?;
+    let out = out.ok_or_else(|| {
+        format!("Usage: {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>")
+    })?;
+
+    let text =
+        fs::read_to_string(&input).map_err(|err| format!("Failed to read {input:?}: {err}"))?;
+    let v: toml::Value =
+        toml::from_str(&text).map_err(|err| format!("TOML parse error: {err}"))?;
+    let normalized = normalize_io_map_toml(&v)?;
+    let mut out_text =
+        toml::to_string_pretty(&normalized).map_err(|err| format!("TOML serialize error: {err}"))?;
+    if !out_text.ends_with('\n') {
+        out_text.push('\n');
+    }
+
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create output dir {parent:?}: {err}"))?;
+        }
+    }
+    fs::write(&out, out_text).map_err(|err| format!("Failed to write {out:?}: {err}"))?;
+    Ok(())
+}
+
+fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
+    use rust_plc::iec_address::{LogicalChannelKind, parse_iec_address};
+    use toml::value::Table;
+
+    let root = v
+        .as_table()
+        .ok_or_else(|| "io_map.toml must be a TOML table at the root".to_string())?;
+    let mut out_root: Table = root.clone();
+
+    fn section_table<'a>(root: &'a Table, name: &str) -> Result<&'a Table, String> {
+        root.get(name)
+            .and_then(|v| v.as_table())
+            .ok_or_else(|| format!("Missing or invalid [{name}] (expected a table)"))
+    }
+
+    fn opt_section_table<'a>(root: &'a Table, name: &str) -> Result<Option<&'a Table>, String> {
+        match root.get(name) {
+            None => Ok(None),
+            Some(v) => v
+                .as_table()
+                .map(Some)
+                .ok_or_else(|| format!("Invalid [{name}] (expected a table)")),
+        }
+    }
+
+    fn parse_native_key(key: &str, expected_prefix: &str) -> Option<u16> {
+        let rest = key.strip_prefix(expected_prefix)?;
+        if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        rest.parse::<u16>().ok()
+    }
+
+    fn parse_gpio_int(section: &str, key: &str, value: &toml::Value) -> Result<i64, String> {
+        value.as_integer().ok_or_else(|| {
+            format!(
+                "Invalid value for {key:?} in [{section}] (expected integer gpio), got {value:?}"
+            )
+        })
+    }
+
+    fn normalize_section(
+        section: &str,
+        expected_native_prefix: &'static str,
+        expected_kind: LogicalChannelKind,
+        t: &Table,
+    ) -> Result<Table, String> {
+        use std::collections::BTreeMap;
+        let mut by_id: BTreeMap<u16, i64> = BTreeMap::new();
+
+        for (k, v) in t.iter() {
+            let gpio = parse_gpio_int(section, k, v)?;
+
+            let (kind, id) = if let Some(id) = parse_native_key(k, expected_native_prefix) {
+                (expected_kind, id)
+            } else if k.trim_start().starts_with('%') {
+                let parsed = parse_iec_address(k).map_err(|e| e.to_string())?;
+                (parsed.kind, parsed.id)
+            } else {
+                return Err(format!(
+                    "Invalid key {k:?} in [{section}] (expected {expected_native_prefix}<n> or a quoted IEC key like \"%IX0.0\")"
+                ));
+            };
+
+            if kind != expected_kind {
+                return Err(format!(
+                    "Invalid key {k:?} in [{section}] (IEC kind {:?} does not match section kind {:?})",
+                    kind, expected_kind
+                ));
+            }
+
+            if let Some(prev) = by_id.insert(id, gpio) {
+                if prev != gpio {
+                    return Err(format!(
+                        "Conflict for {expected_native_prefix}{id} in [{section}]: {prev} vs {gpio}"
+                    ));
+                }
+            }
+        }
+
+        let mut out = Table::new();
+        for (id, gpio) in by_id {
+            out.insert(
+                format!("{expected_native_prefix}{id}"),
+                toml::Value::Integer(gpio),
+            );
+        }
+        Ok(out)
+    }
+
+    let di = section_table(root, "digital_inputs")?;
+    let do_ = section_table(root, "digital_outputs")?;
+    let ai = opt_section_table(root, "analog_inputs")?;
+    let ao = opt_section_table(root, "analog_outputs")?;
+
+    out_root.insert(
+        "digital_inputs".to_string(),
+        toml::Value::Table(normalize_section(
+            "digital_inputs",
+            "di",
+            LogicalChannelKind::DigitalInput,
+            di,
+        )?),
+    );
+    out_root.insert(
+        "digital_outputs".to_string(),
+        toml::Value::Table(normalize_section(
+            "digital_outputs",
+            "do",
+            LogicalChannelKind::DigitalOutput,
+            do_,
+        )?),
+    );
+    if let Some(ai) = ai {
+        out_root.insert(
+            "analog_inputs".to_string(),
+            toml::Value::Table(normalize_section(
+                "analog_inputs",
+                "ai",
+                LogicalChannelKind::AnalogInput,
+                ai,
+            )?),
+        );
+    }
+    if let Some(ao) = ao {
+        out_root.insert(
+            "analog_outputs".to_string(),
+            toml::Value::Table(normalize_section(
+                "analog_outputs",
+                "ao",
+                LogicalChannelKind::AnalogOutput,
+                ao,
+            )?),
+        );
+    }
+
+    Ok(toml::Value::Table(out_root))
 }
 
 fn run_no_board_gate_subcommand(

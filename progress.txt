@@ -47,6 +47,30 @@
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-18 21:50:24 CST] - US-008
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Added CLI subcommand `io-map-normalize`:
+    - `rust_plc io-map-normalize --in <io_map.toml> --out <normalized.toml>`
+    - Converts quoted IEC keys (e.g. `\"%IX0.0\"`) into native `di/do/ai/ao` keys using the US-007 parser.
+    - Merges native + IEC keys and errors on conflicting assignments for the same logical channel.
+    - Preserves non-IO sections (e.g. `[safe_state]`) by rewriting only the IO tables.
+  - Added unit/integration tests in `tests/io_map_normalize.rs` covering conversion, mixed inputs, and conflict errors.
+  - Updated `print_usage` and main dispatch to expose the new command.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `src/main.rs`
+  - `tests/io_map_normalize.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Treat IEC support as an alias layer: normalize once at the boundary, keep the core IoMap parser canonical (`di/do/ai/ao` only).
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - IEC keys must be TOML quoted keys; tests should include quoted `%...` to avoid false positives.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Normalization is safest when it also checks section-kind consistency (e.g. `%QX...` should not appear under `[digital_inputs]`).
+---
 ## [2026-02-18 21:43:15 CST] - US-007
 Thread: N/A (Codex CLI)
 - What was implemented
