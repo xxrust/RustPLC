@@ -5,6 +5,7 @@
 - In `src/parser/plc.pest`, when an alternation allows both `measured_value` (e.g. `50bar`) and `number`, list `measured_value` first so `50bar` doesn't partially match as `50`.
 - In `src/parser/plc.pest`, when `number` and `integer` are both allowed, list `number` before `integer` to avoid `2.0` being partially consumed as `2`.
 - Safety rules that relate an unconstrained `external: true` analog input (e.g. `zone_code`) to an actuator state can be unverifiable/unsatisfiable unless the actuator state is unreachable or you model assumptions about the external signal's behavior.
+- For multi-coordinate axis setups (count/theta/pos_mm), pick exactly one “primary truth” coordinate; keep conversion + consistency checks in the driver layer and expose discrete health signals (`range_valid`, `pos_consistent`, optional `health_code`) to the DSL.
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
 - For reusable `.plc` templates meant to run via `runtime_bridge`, include explicit physical IO devices (`X<N>`, `Y<N>`) plus logical devices connected via `connected_to`, so IO IDs resolve deterministically.
@@ -997,4 +998,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `sim-plc` exits successfully even when a timeout occurs; tests must inspect the trace (or the sim report) to distinguish nominal vs fault outcomes.
   - Useful context (e.g., "the evaluation panel is in component X")
     - For scenario name-resolution to work reliably, keep logical IO aliases wired via `connected_to` from explicit physical IO devices (`X<N>`, `AI<N>`), otherwise scenarios may need to fall back to numeric IDs.
+---
+## [2026-02-18 13:56:45 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Expanded `docs/stepper_ab_encoder.md` multi-coordinate modeling guidance: made the “primary coordinate + derived coordinates” principle explicit, clarified that conversions/health diagnostics should live in the driver layer, and listed a standard signal surface including `range_valid` + `pos_consistent`.
+  - Added a concrete “fault vs degrade” strategy section so DSL control logic can cleanly choose between hard stop vs limited safe behavior based on discrete health signals.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `docs/stepper_ab_encoder.md`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For multi-coordinate axes, keep one coordinate as the safety/control truth and feed the DSL with discrete health/mode signals; this keeps constraints verifiable and the resulting PLC logic reviewable.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `docs/stepper_ab_encoder.md` is guarded by `tests/stepper_ab_encoder_doc.rs` which parses every fenced ` ```plc` block; avoid adding partial snippets or rearranging blocks into non-parseable fragments.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - A practical split is: driver layer computes `axis_theta/axis_pos_mm/zone_code` plus `range_valid/pos_consistent`; DSL focuses on interlocks, state sequencing, and explicit fault/degrade transitions.
 ---

@@ -324,9 +324,10 @@ safety: axis_theta < 240 conflicts_with cyl_clamp.extended
 
 ### 7.1 选一个“主坐标”做控制闭环
 
+- 原则：**主坐标 + 派生坐标**。同一运动链允许多个坐标同时“可见”，但只能有一个作为控制与安全互锁的“真值源”（主坐标）。
 - 常见主坐标：`count`（编码器计数）或 `pos_mm`（机构实际位移）。
-- 其他量（`theta_deg`, `speed`, `distance_mm`）作为派生观测量。
-- DSL 里优先用主坐标做关键互锁，避免多坐标同时作为“真值源”。
+- 其他量（`theta_deg`, `speed`, `distance_mm`）作为派生观测量；它们用于显示、诊断或形成更工程化的离散信号（如 `zone_code`），不要与主坐标并列成为闭环判定依据。
+- DSL 里优先用主坐标做关键互锁（例如危险窗口/到位/超程），避免多坐标同时参与“真值判断”导致矛盾约束、验证困难与线上歧义。
 
 ### 7.2 把换算留在驱动层
 
@@ -342,10 +343,13 @@ safety: axis_theta < 240 conflicts_with cyl_clamp.extended
 推荐暴露为：
 
 - `analog_input`：`axis_count`, `axis_theta`, `axis_pos_mm`, `axis_speed`
-- `digital_input`：`inpos`, `alarm`, `range_valid`
+- `digital_input`：`inpos`, `alarm`, `range_valid`, `pos_consistent`
 - `analog_input`：`zone_code`（例如 `0=safe`，`1..N=collision window`）
 
-其中 `range_valid`（数据新鲜度/有效性）很重要，可避免“旧值参与互锁”。
+其中：
+
+- `range_valid`（数据新鲜度/有效性）很重要，可避免“旧值参与互锁”。
+- `pos_consistent` 是“多传感器一致性”在驱动层下沉后的结果信号（见 7.4）；DSL 层消费 bool/枚举即可，避免引入差值/滤波等复杂算术。
 
 ### 7.4 多坐标/多传感器如何“比较”
 
@@ -367,6 +371,22 @@ RustPLC DSL 层不适合写复杂算术（差值、绝对值、滤波、置信�
 - 观测链：`机械部件运动 -> 编码器/距离传感 -> count/theta/distance`
 
 这样做的好处是：顺控和几何/计量关系解耦，后续换编码器或换传感器时只改观测链映射。
+
+### 7.6 何时进 fault / 何时降级（degrade）
+
+建议把“数值换算 + 健康诊断 + 降级策略判定”尽量下沉到驱动层，DSL 只消费结果信号（`range_valid` / `pos_consistent` / `alarm` / `zone_code` 等），并用顺控把行为写清楚。
+
+常见经验策略：
+
+- 直接进 `fault`（强制停机/需要人工干预）的情况：
+  - `alarm` 为真（驱动/伺服报警、急停链路断开等）。
+  - `range_valid` 为假持续超过一个短窗口（例如 >N 个周期），意味着反馈链路不可信或冻结。
+  - `pos_consistent` 为假且当前/目标动作涉及危险区（例如 `zone_code > 0` 时仍尝试进入/继续危险运动）。
+- 允许降级（限制功能、只允许“撤离/回零/低速安全移动”）的情况：
+  - `pos_consistent` 为假但 `zone_code == 0` 且系统处于安全姿态：可以禁止危险动作（夹紧/高速进入窗口），只允许安全方向撤离，并持续监控一致性恢复。
+  - `range_valid` 短暂抖动：可以先进入降级态（冻结窗口编码、禁止进入危险动作），若在超时内恢复则回到 normal，否则转 fault。
+
+落地时，推荐让驱动层输出一个离散的健康/模式编码（例如 `sensor_health_code` 或 `safety_mode`），DSL 以它为入口做“进入 fault / 进入降级 / 解除降级”的顺控与互锁，避免把策略分散在多处阈值判断中。
 
 ## 8. 验证友好写法（重要）
 
