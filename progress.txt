@@ -47,6 +47,31 @@
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-18 21:53:36 CST] - US-009
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Refactored `board-rp2040` firmware loop into a minimal HAL-shaped module:
+    - Added `crates/board-rp2040/src/firmware/hal.rs` with `Hal::initialize`, `update_in`, `update_out`, `finalize_on_error`.
+    - Switched firmware main loop to use this HAL wrapper while keeping behavior unchanged.
+  - Preserved existing external behavior:
+    - Input sampling / `TICK` logging in the input phase
+    - Runtime trace/log emission
+    - AO apply + `TIMING` accounting + pacing in the output phase
+    - Safe-state on runtime error
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `crates/board-rp2040/src/firmware/hal.rs`
+  - `crates/board-rp2040/src/main.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - HAL extraction can be done incrementally by first wrapping the existing loop (without changing low-level pin logic), then moving internals in later steps.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Keep `TICK` and `TIMING` log emission points stable; downstream board-log parsers and gates assume those records remain intact.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Keeping safe-state finalization in HAL makes it easier to enforce consistent failure behavior across future board backends.
+---
 ## [2026-02-18 21:50:24 CST] - US-008
 Thread: N/A (Codex CLI)
 - What was implemented

@@ -70,6 +70,8 @@ mod firmware {
     use defmt_rtt as _;
     use panic_probe as _;
 
+    mod hal;
+
     mod generated_program {
         // Filled by build.rs; can be overridden via RUST_PLC_GENERATED_PROGRAM_RS.
         include!(concat!(env!("OUT_DIR"), "/generated_program.rs"));
@@ -472,20 +474,13 @@ mod firmware {
         );
         let mut all_pins = AllPins::new(pins);
         const TICK_MS: u64 = 1;
-        let mut io = PicoIo::new(&mut all_pins, adc, pac.PWM, TICK_MS as u32);
+        let io = PicoIo::new(&mut all_pins, adc, pac.PWM, TICK_MS as u32);
+        let mut hal = hal::Hal::initialize(timer, io, TICK_MS);
 
-        // v1 keeps polling semantics but paces ticks from RP2040 hardware timer.
-        const TICK_US: u64 = TICK_MS * 1000;
-        let mut next_tick_us = timer.get_counter().ticks();
-        let mut overrun_count: u64 = 0;
         loop {
-            let tick_start_us = timer.get_counter().ticks();
-            let deadline_us = next_tick_us.saturating_add(TICK_US);
-            io.sample_analog_inputs();
-            let tick = io.tick().0;
-            defmt::info!("TICK tick={} ts_ms={}", tick, tick.saturating_mul(TICK_MS));
+            let (tick, tick_start_us, deadline_us) = hal.update_in();
             let tick_res = rt.tick_with_trace_and_logs(
-                &mut io,
+                &mut hal.io,
                 |e| {
                     defmt::info!(
                         "TRACE tick={} task={} from={} to={} reason={} ts_ms={}",
@@ -511,36 +506,10 @@ mod firmware {
             );
             if let Err(err) = tick_res {
                 defmt::error!("RUNTIME_ERR tick={} err={:?} -> entering safe state", tick, err);
-                io.enter_safe_state();
-                defmt::error!("SAFE_STATE_APPLIED tick={}", tick);
-                loop {
-                    cortex_m::asm::nop();
-                }
+                hal.finalize_on_error(tick);
             }
 
-            // Apply analog outputs after the runtime tick so AO changes are reflected on pins.
-            io.apply_analog_outputs();
-
-            let tick_end_us = timer.get_counter().ticks();
-            let timing = evaluate_tick_timing(tick_start_us, tick_end_us, deadline_us);
-            if timing.overrun {
-                overrun_count = overrun_count.saturating_add(1);
-            }
-            defmt::info!(
-                "TIMING tick={} ts_start_us={} ts_end_us={} exec_us={} slack_us={} overrun={} overrun_count={}",
-                tick,
-                timing.ts_start_us,
-                timing.ts_end_us,
-                timing.exec_us,
-                timing.slack_us,
-                timing.overrun,
-                overrun_count
-            );
-
-            next_tick_us = deadline_us;
-            while timer.get_counter().ticks() < next_tick_us {
-                cortex_m::asm::nop();
-            }
+            hal.update_out(tick, tick_start_us, deadline_us);
         }
     }
 
