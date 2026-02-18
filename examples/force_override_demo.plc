@@ -1,0 +1,40 @@
+[topology]
+
+# Minimal example demonstrating SIL FORCE/override via scenario YAML:
+# - Force DI0 to start the sequence (even if scheduled inputs keep it false)
+# - Force DO0/AO0 to fixed values (overriding program writes)
+# - Clear forces later to show normal program writes resume
+
+device X0: digital_input
+device Y0: digital_output
+device AO0: analog_output { range: 0..10, unit: "V" }
+
+[constraints]
+
+[tasks]
+
+task ready:
+    step wait_start:
+        wait: X0 == true
+        allow_indefinite_wait: true
+    on_complete: goto run
+
+task run:
+    step set_on:
+        action: set Y0 on
+        action: set_analog AO0 7.5
+        action: log "run:on"
+
+    step hold_on:
+        delay: 20ms
+
+    step set_off:
+        action: set Y0 off
+        action: set_analog AO0 2.5
+        action: log "run:off"
+
+    step hold_off:
+        delay: 20ms
+
+    on_complete: goto run
+

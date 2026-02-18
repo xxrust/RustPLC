@@ -341,6 +341,26 @@ fn parses_stepper_multi_sensor_consistency_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_force_override_demo_example_into_verified_ir_json() {
+    let source = read_example("force_override_demo.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("force_override_demo example should compile");
+
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
 fn parses_and_or_wait_demo_example_into_verified_ir_json() {
     let source = read_example("and_or_wait_demo.plc");
     let ir_json = compile_source_to_json(&source).expect("and_or_wait_demo should compile");

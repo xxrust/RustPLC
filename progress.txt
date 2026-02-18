@@ -47,6 +47,34 @@
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-18 21:39:51 CST] - US-006
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Added `docs/force_override.md` documenting SIL FORCE/override semantics, priority rules, and scenario YAML format (set/clear via `null`).
+  - Added a minimal runnable teaching/regression pair:
+    - `examples/force_override_demo.plc`
+    - `scenarios/force_override_demo/force.yaml`
+    - Includes both an input force (DI) and output forces (DO/AO), and clears output force mid-run to make the effect observable.
+  - Added regression coverage:
+    - `tests/force_override_demo.rs` runs `sim-plc` on the example+scenario.
+    - `tests/examples_integration.rs` compiles/verifies the example to keep DSL usage from drifting.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `docs/force_override.md`
+  - `examples/force_override_demo.plc`
+  - `scenarios/force_override_demo/force.yaml`
+  - `tests/force_override_demo.rs`
+  - `tests/examples_integration.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Pairing docs + (plc + scenario) + a tiny `sim-plc` regression test is a good “teaching asset” pattern for control-plane features like FORCE.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - IR JSON payload shape is not “topology.devices”; doc/tests should avoid depending on internal JSON schema unless it is explicitly stabilized.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Output force becomes easiest to demonstrate when the PLC writes outputs repeatedly (toggle loop) and the scenario clears the force mid-run so edges visibly resume.
+---
 ## [2026-02-18 21:32:24 CST] - US-005
 Thread: N/A (Codex CLI)
 - What was implemented
