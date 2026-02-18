@@ -1,7 +1,7 @@
 use core::fmt;
 use std::collections::BTreeMap;
 
-use io_traits::{AnalogInputId, DigitalInputId, Tick};
+use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Tick};
 use serde::{Deserialize, Serialize};
 
 use crate::SimIo;
@@ -50,6 +50,10 @@ pub struct Scenario {
     /// Scripted fault injections over time.
     #[serde(default)]
     pub faults: Vec<FaultEvent>,
+
+    /// Scripted force/override events over time.
+    #[serde(default)]
+    pub forces: Vec<ForceEvent>,
 }
 
 impl Scenario {
@@ -132,6 +136,27 @@ impl Scenario {
             let tick = at_ms / self.tick_ms;
             fault.apply(io, Tick(tick));
         }
+
+        for (idx, force) in self.forces.iter().enumerate() {
+            let path_prefix = format!("forces[{idx}]");
+            if force.at_ms >= self.duration_ms && self.duration_ms != 0 {
+                return Err(ScenarioError::Validation {
+                    path: format!("{path_prefix}.at_ms"),
+                    message: format!("must be < duration_ms ({})", self.duration_ms),
+                });
+            }
+            if force.at_ms % self.tick_ms != 0 {
+                return Err(ScenarioError::Validation {
+                    path: format!("{path_prefix}.at_ms"),
+                    message: format!(
+                        "must be aligned to tick_ms ({}); got {}",
+                        self.tick_ms, force.at_ms
+                    ),
+                });
+            }
+            let tick = force.at_ms / self.tick_ms;
+            force.apply(io, Tick(tick));
+        }
         Ok(())
     }
 
@@ -192,6 +217,55 @@ impl FaultEvent {
             DigitalInputId(self.sensor_stuck.target),
             self.sensor_stuck.value,
         );
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForceEvent {
+    pub at_ms: u64,
+    pub set: ForceSet,
+}
+
+impl ForceEvent {
+    fn apply(&self, io: &mut SimIo, tick: Tick) {
+        self.set.apply(io, tick);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ForceSet {
+    /// Map from digital input id to forced value.
+    /// Use `null` to clear force (YAML: `0: null`).
+    #[serde(default)]
+    pub digital_inputs: BTreeMap<u16, Option<bool>>,
+    /// Map from analog input id to forced value.
+    /// Use `null` to clear force (YAML: `0: null`).
+    #[serde(default)]
+    pub analog_inputs: BTreeMap<u16, Option<f32>>,
+    /// Map from digital output id to forced value.
+    /// Use `null` to clear force (YAML: `0: null`).
+    #[serde(default)]
+    pub digital_outputs: BTreeMap<u16, Option<bool>>,
+    /// Map from analog output id to forced value.
+    /// Use `null` to clear force (YAML: `0: null`).
+    #[serde(default)]
+    pub analog_outputs: BTreeMap<u16, Option<f32>>,
+}
+
+impl ForceSet {
+    fn apply(&self, io: &mut SimIo, tick: Tick) {
+        for (&id, &value) in &self.digital_inputs {
+            io.schedule_force_digital_input(tick, DigitalInputId(id), value);
+        }
+        for (&id, &value) in &self.analog_inputs {
+            io.schedule_force_analog_input(tick, AnalogInputId(id), value);
+        }
+        for (&id, &value) in &self.digital_outputs {
+            io.schedule_force_digital_output(tick, DigitalOutputId(id), value);
+        }
+        for (&id, &value) in &self.analog_outputs {
+            io.schedule_force_analog_output(tick, AnalogOutputId(id), value);
+        }
     }
 }
 
@@ -463,5 +537,75 @@ faults:
             observed_a,
             vec![true, false, true, false, true, false, false, false]
         );
+    }
+
+    #[test]
+    fn scenario_yaml_supports_force_events_and_clear() {
+        let yaml = r#"
+tick_ms: 10
+duration_ms: 40
+forces:
+  - at_ms: 0
+    set:
+      digital_inputs:
+        0: true
+      analog_inputs:
+        0: 7.5
+      digital_outputs:
+        0: true
+      analog_outputs:
+        0: 0.25
+  - at_ms: 20
+    set:
+      digital_inputs:
+        0: null
+      analog_inputs:
+        0: null
+      digital_outputs:
+        0: null
+      analog_outputs:
+        0: null
+inputs:
+  - at_ms: 0
+    set:
+      digital_inputs:
+        0: false
+      analog_inputs:
+        0: 1.0
+"#;
+
+        let scenario = Scenario::from_yaml_str(yaml).expect("scenario parse");
+        let mut io = SimIo::new(1, 1, 1, 1);
+        scenario
+            .apply_to_simio(&mut io)
+            .expect("scenario apply should succeed");
+
+        // Force active at tick 0.
+        assert_eq!(io.read_digital_input(DigitalInputId(0)), true);
+        assert_eq!(io.read_analog_input(AnalogInputId(0)), 7.5);
+
+        // Output write is overridden while force is active.
+        io.write_digital_output(DigitalOutputId(0), false);
+        io.write_analog_output(AnalogOutputId(0), 1.0);
+        assert_eq!(
+            io.digital_output_edges()
+                .last()
+                .expect("at least one digital edge")
+                .value,
+            true
+        );
+        assert_eq!(
+            io.analog_output_edges()
+                .last()
+                .expect("at least one analog edge")
+                .value,
+            0.25
+        );
+
+        // Advance to tick 2 (20ms): clear force and fall back to scheduled/base values.
+        io.advance_tick();
+        io.advance_tick();
+        assert_eq!(io.read_digital_input(DigitalInputId(0)), false);
+        assert_eq!(io.read_analog_input(AnalogInputId(0)), 1.0);
     }
 }

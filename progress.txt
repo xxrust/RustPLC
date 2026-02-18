@@ -47,6 +47,29 @@
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-18 21:32:24 CST] - US-005
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Extended scenario schema with `forces` (default empty), including tick-aligned `at_ms` validation and apply flow in `Scenario::apply_to_simio`.
+  - Added force event modeling for all channels with set/clear semantics (`null` clears): DI/AI/DO/AO.
+  - Added scheduled force support in `SimIo` so force changes apply at deterministic tick boundaries and persist until cleared.
+  - Updated `scenario-init` output to include a copyable `forces` snippet and default `forces: []`.
+  - Added unit coverage proving force events are parseable, deterministic, effective, and clearable.
+  - Ran `cargo test -p sim` and `cargo test --workspace` successfully.
+- Files changed
+  - `crates/sim/src/lib.rs`
+  - `crates/sim/src/scenario.rs`
+  - `src/main.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For scenario-driven control-plane features, use a dedicated event list (`forces`) with explicit `at_ms` to keep behavior replayable and CI-friendly.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Clearing force needs explicit support in YAML; `Option` values (with `null`) are the simplest robust format for set/clear in one field.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `SimIo` now supports both immediate API-based force and scenario-scheduled force; the scheduled path is the recommended route for regression assets.
+---
 ## [2026-02-18 20:14:36 CST] - US-004
 Thread: N/A (Codex CLI)
 - What was implemented

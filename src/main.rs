@@ -704,6 +704,19 @@ fn render_scenario_init_yaml(
             }
         }
     }
+
+    out.push_str("\n# Force/override (optional). Use YAML `null` to clear a forced value.\n");
+    out.push_str("# Example:\n");
+    out.push_str("# forces:\n");
+    out.push_str("#   - at_ms: 0\n");
+    out.push_str("#     set:\n");
+    out.push_str("#       digital_inputs:\n");
+    out.push_str("#         0: true\n");
+    out.push_str("#   - at_ms: 100\n");
+    out.push_str("#     set:\n");
+    out.push_str("#       digital_inputs:\n");
+    out.push_str("#         0: null\n");
+    out.push_str("forces: []\n");
     out
 }
 
@@ -2194,6 +2207,7 @@ fn run_scenario_gen_subcommand(
                         inputs,
                         digital_bursts: Vec::new(),
                         faults,
+                        forces: Vec::new(),
                     };
                     let mut io = sim::SimIo::new(32, 32, 8, 8);
                     scenario.apply_to_simio(&mut io).map_err(|e| {

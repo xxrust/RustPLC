@@ -17,6 +17,7 @@ pub use report::{ScenarioSummary, SimFailure, SimReport};
 pub use runner::{SimRunError, SimRunOutput, run_program_for_scenario};
 pub use scenario::{
     DigitalBurstEvent, FaultEvent, InputEvent, InputSet, Scenario, ScenarioError, SensorStuckFault,
+    ForceEvent, ForceSet,
 };
 pub use waveform::{export_analog_outputs_csv, export_analog_outputs_jsonl, export_vcd_digital};
 pub use control_kpi::{ControlKpiError, PidControlScenario, PidKpiReport, ProcessModelConfig, run_pid_kpi};
