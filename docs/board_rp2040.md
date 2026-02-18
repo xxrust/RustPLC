@@ -48,8 +48,8 @@ Notes:
 
 ## I/O map notes (RP2040-specific)
 
-- `[digital_inputs]` / `[digital_outputs]` / `[analog_outputs]`: GPIO range `0..=29`
-- `[analog_inputs]`: GPIO range **`26..=29` only** (RP2040 ADC-capable pins)
+- `[digital_inputs]` / `[digital_outputs]` / `[analog_outputs]`: GPIO range `0..=29` or `"virtual"`
+- `[analog_inputs]`: GPIO range **`26..=29` only** (RP2040 ADC-capable pins) or `"virtual"`
 - Firmware samples mapped `analog_inputs` each tick, reads ADC voltage (`0.0..3.3V`), then linearly maps to engineering range from `analog_contract.toml`.
 - Firmware applies optional per-channel calibration: `eng_cal = eng_raw * scale + offset` (from `analog_contract.toml`, override via `build-rp2040 --analog-calibration`).
 - Firmware applies `analog_outputs` via PWM and supports per-channel ramp (`ramp_ms`) from `analog_contract.toml`.
@@ -69,6 +69,16 @@ ai0 = 26
 [analog_outputs]
 ao0 = 20
 ```
+
+### Virtual channels (no physical GPIO binding)
+
+If you set a DI/DO/AI/AO mapping to `"virtual"`, the build toolchain will accept the channel ID, but the RP2040 firmware will **not** bind it to a physical GPIO:
+- virtual DI: firmware returns the last synthetic value written by a board subsystem (e.g. motion)
+- virtual DO: firmware latches the program value, but does not drive a pin
+- virtual AI: firmware does not sample ADC; a board subsystem may publish a synthetic value
+- virtual AO: firmware latches the program value, but does not drive PWM
+
+This is the intended mechanism for exposing motion feedback as DSL-visible AI/DI channels without consuming ADC-capable pins.
 
 ### Motion config (optional, dual-axis template)
 
@@ -123,6 +133,20 @@ Validation rules (current stage):
 - encoder `count_sign` must be `normal` or `inverted`
 - encoder `scale` must be finite and `> 0`
 - all GPIO assignments are validated for duplicates across DI/DO/AI/AO/motion pins
+
+### Motion command/feedback channels (current convention)
+
+In the current dev stage, the firmware motion subsystem consumes command channels and publishes feedback channels using the following fixed IDs:
+
+Axis0:
+- Commands (from PLC outputs): `DO24` = enable, `DO25` = dir, `AO24` = vel_cmd_sps
+- Feedback (to PLC inputs): `AI24` = count, `AI25` = speed, `DI24` = enc_dir_positive
+
+Axis1:
+- Commands (from PLC outputs): `DO26` = enable, `DO27` = dir, `AO26` = vel_cmd_sps
+- Feedback (to PLC inputs): `AI26` = count, `AI27` = speed, `DI26` = enc_dir_positive
+
+Recommendation: in `io_map.toml`, map these channels to `"virtual"` so they do not collide with physical GPIO/ADC usage.
 
 ## End-to-end gate script
 

@@ -1410,3 +1410,21 @@ Thread: N/A (Codex CLI)
   - Virtual IO channels are simplest when they reuse existing DI/DO/AI/AO ids and set io_map GPIO to "virtual" (firmware then skips pin binding and can publish synthetic values).
 ---
 
+## [2026-02-19 01:27:27 CST] - US-005
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Extended the motion firmware path from single-axis to dual-axis by instantiating axis0 + axis1 with one shared StepperAxis implementation (PIO step program reused via InstalledProgram::share).
+  - Added board-level dual-axis command/feedback channel conventions and documented them in docs/board_rp2040.md.
+  - Kept axis logic unified (no axis0/axis1 forked codepaths), with per-axis config wiring from io_map.motion.stepper.axis{0,1}.
+- Quality checks
+  - cargo check -p board-rp2040 --target thumbv6m-none-eabi
+  - cargo test --workspace
+- Files changed
+  - crates/board-rp2040/src/firmware/motion.rs
+  - docs/board_rp2040.md
+  - prd.json
+  - progress.txt
+- Learnings for future iterations:
+  - For dual-axis PIO reuse, install each program once and clone handles with InstalledProgram::share before building multiple state machines.
+---
+
