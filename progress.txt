@@ -47,6 +47,30 @@
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
+## [2026-02-18 21:43:15 CST] - US-007
+Thread: N/A (Codex CLI)
+- What was implemented
+  - Added a tool-chain-only IEC address parser in `src/iec_address.rs` supporting the minimal subset:
+    - `%IXn.m` / `%QXn.m` -> `di/do` with `id = n*8+m`
+    - `%IWn` / `%QWn` -> `ai/ao` with `id = n`
+  - Implemented clear, locatable parse errors and included handling for trimming + case-insensitive `%I/%Q` and `X/W`.
+  - Added doc `docs/iec_address_aliases.md` documenting the mapping and error boundaries.
+  - Added unit tests covering valid/invalid addresses, bit range, trimming, and case-insensitivity.
+  - Ran `cargo test --workspace` successfully.
+- Files changed
+  - `src/iec_address.rs`
+  - `src/lib.rs`
+  - `docs/iec_address_aliases.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep IEC support as a pure parser + tool-chain converter so the core IoMap/DSL stays simple (native `di/do/ai/ao` keys remain the canonical format).
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Be explicit about the bit-address mapping (`n*8+m`) and the supported subset; IEC memory models vary and feature creep is easy.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - This parser is intended to be consumed by `io-map-normalize` rather than by runtime semantics.
+---
 ## [2026-02-18 21:39:51 CST] - US-006
 Thread: N/A (Codex CLI)
 - What was implemented

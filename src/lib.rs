@@ -2,6 +2,7 @@ pub mod ast;
 pub mod board_log;
 pub mod board_trace;
 pub mod error;
+pub mod iec_address;
 pub mod io_map;
 pub mod ir;
 pub mod parser;
