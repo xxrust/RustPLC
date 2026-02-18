@@ -1,0 +1,107 @@
+[topology]
+
+# Minimal, runnable example showing:
+# - external zone_code (0=safe, 1..N=danger window)
+# - a mutual-exclusion safety rule (zone_code vs actuator state)
+# - a timeout -> goto fault path
+
+# Physical IO
+device Y0: digital_output  # DIR
+device Y1: digital_output  # EN
+device Y2: digital_output  # clamp valve
+device X0: digital_input   # INPOS
+device X1: digital_input   # ALARM
+device X2: digital_input   # clamp extended
+device X3: digital_input   # clamp retracted
+
+# External feedback provided by the drive / board layer
+device axis_count: analog_input { range: 0..4000000, unit: "count", external: true }
+device zone_code: analog_input { range: 0..3, unit: "zone", external: true } # 0=safe, 1..N=danger
+
+# Logical devices
+device axis_x: motor {
+    connected_to: Y1
+    ramp_time: 10ms
+}
+
+device dir_positive: digital_output {
+    connected_to: Y0
+}
+
+device clamp_valve: solenoid_valve {
+    connected_to: Y2
+    response_time: 20ms
+}
+
+device cyl_clamp: cylinder {
+    connected_to: clamp_valve
+    stroke_time: 200ms
+    retract_time: 200ms
+}
+
+device inpos_x: sensor {
+    connected_to: X0
+    detects: axis_x.position_ok
+}
+
+device alarm_x: sensor {
+    connected_to: X1
+    detects: axis_x.alarm
+}
+
+device clamp_ext: sensor {
+    connected_to: X2
+    detects: cyl_clamp.extended
+}
+
+device clamp_ret: sensor {
+    connected_to: X3
+    detects: cyl_clamp.retracted
+}
+
+[constraints]
+
+# Basic: do not enable the axis while drive is alarming.
+safety: axis_x.on requires alarm_x.off
+    reason: "Drive alarm must be cleared before enabling axis"
+
+# Collision guard: when we're in any danger window, the clamp must NOT be extended.
+safety: zone_code > 0 conflicts_with cyl_clamp.extended
+    reason: "zone_code indicates a collision window; clamp must stay retracted"
+
+[tasks]
+
+task cycle:
+    step enable_axis:
+        action: set axis_x on
+
+    step set_dir_positive:
+        action: set dir_positive on
+
+    # Wait for safe window before allowing motion progress.
+    step wait_safe_zone:
+        wait: zone_code == 0
+        timeout: 1000ms -> goto fault
+
+    # In a real system, motion happens in the drive; PLC just waits on feedback.
+    step wait_target_count:
+        wait: axis_count >= 120000
+        timeout: 3000ms -> goto fault
+
+    step wait_inpos:
+        wait: inpos_x == true
+        timeout: 1000ms -> goto fault
+
+    on_complete: goto idle
+
+task fault:
+    step safe:
+        action: set axis_x off
+        action: retract cyl_clamp
+    step log:
+        action: log "fault: timeout waiting for safe window / motion feedback"
+    on_complete: goto idle
+
+task idle:
+    step hold:
+        allow_indefinite_wait: true

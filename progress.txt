@@ -4,6 +4,7 @@
 - For `#![no_std]` crates that still want unit tests/doctests, add `#[cfg(test)] extern crate std;`.
 - In `src/parser/plc.pest`, when an alternation allows both `measured_value` (e.g. `50bar`) and `number`, list `measured_value` first so `50bar` doesn't partially match as `50`.
 - In `src/parser/plc.pest`, when `number` and `integer` are both allowed, list `number` before `integer` to avoid `2.0` being partially consumed as `2`.
+- Safety rules that relate an unconstrained `external: true` analog input (e.g. `zone_code`) to an actuator state can be unverifiable/unsatisfiable unless the actuator state is unreachable or you model assumptions about the external signal's behavior.
 - In `runtime-core`, `delay`/`timeout` are evaluated as `elapsed = now_tick - step_entered_tick`, and they fire when `elapsed >= configured_ticks` (so `after_ticks: 0` is immediate on the entry tick).
 - In `crates/sim::SimIo`, input changes scheduled for tick `N` are applied when `advance_tick()` moves to `N`, so they are visible during the runtime's tick-`N` evaluation (tick-0 changes are applied in `SimIo::new`).
 - For reusable `.plc` templates meant to run via `runtime_bridge`, include explicit physical IO devices (`X<N>`, `Y<N>`) plus logical devices connected via `connected_to`, so IO IDs resolve deterministically.
@@ -34,6 +35,22 @@
 - When release-bundle adds new evidence artifacts, add them to both manifest hashing and integration-test required lists in the same change to keep delivery contracts auditable.
 
 Started: Sat Feb 14 23:50:11 CST 2026
+---
+## [2026-02-18 13:12:19 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a minimal runnable example `examples/stepper_collision_guard.plc` showing an external `zone_code` signal, a mutual-exclusion `safety` rule, and a `timeout -> goto fault` path.
+  - Added an integration test to ensure the new example continues to compile + verify (`tests/examples_integration.rs`).
+  - Ran `cargo run --release -- examples/stepper_collision_guard.plc --no-print-ir` and `cargo test --workspace` successfully.
+- Files changed
+  - `examples/stepper_collision_guard.plc`, `tests/examples_integration.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - External analog inputs (`external: true`) are treated as environment-driven; safety rules that directly couple them to slow actuator states can be hard to prove without modeling assumptions.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - A `wait: zone_code == 0` step does not constrain future ticks; the verifier can still find counterexamples where `zone_code` flips while an actuator remains in the conflicting state.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - This example is intended as a syntax/structure template (topology + safety + timeout->fault); drive-side semantics for how `zone_code` evolves should be modeled explicitly in scenarios/tests when needed.
 ---
 ## [2026-02-17 23:27:29 CST] - US-SCENE-005
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID

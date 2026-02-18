@@ -217,6 +217,33 @@ fn parses_repeat_demo_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_stepper_collision_guard_example_into_verified_ir_json() {
+    let source = read_example("stepper_collision_guard.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("stepper_collision_guard example should compile");
+
+    let safety_level = ir_json["verification"]["safety"]["level"]
+        .as_str()
+        .expect("verification.safety.level should be present");
+    assert!(
+        matches!(safety_level, "完备证明" | "有界验证"),
+        "safety level should report proof quality"
+    );
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
 fn parses_and_or_wait_demo_example_into_verified_ir_json() {
     let source = read_example("and_or_wait_demo.plc");
     let ir_json = compile_source_to_json(&source).expect("and_or_wait_demo should compile");
