@@ -1,139 +1,147 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/stepper-ab-encoder-safety-modeling",
-  "description": "将步进轴（Pulse/Dir）+ AB 编码器场景中的防碰撞互锁与多坐标（pls/角度/距离）拓扑抽象沉淀为可验证、可复用、可回归的规范 + 示例 + 场景 + Wiki 草稿资产。",
+  "branchName": "ralph/openplc-v3-learnings",
+  "description": "基于 docs/openplc_v3_analysis.md，将 OpenPLC_v3 的工程落地经验（运行时可观测性、FORCE/override、IEC 地址映射、HAL 最小化、控制面协议等）转化为 RustPLC 可逐步交付的、可验证的小步改进计划。注：fail-safe safe_state 已完成，本 PRD 不再包含该项。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "定义防碰撞建模基线（zone_code + 双向互锁）",
-      "description": "作为控制工程师，我希望有标准化的步进轴防碰撞建模规则（zone_code + 双向互锁），以便不同项目使用同一套安全抽象。",
+      "title": "解析 RP2040 日志中的 TIMING 记录为 tick_timing.jsonl",
+      "description": "作为测试工程师，我希望把板端输出的 TIMING 行解析成统一的 tick_timing.jsonl，以便用同一套 timing-report 工具评估 cycle/jitter/overrun。",
       "acceptanceCriteria": [
-        "在 docs/stepper_ab_encoder.md 中明确 zone_code、危险窗口、双向互锁定义",
-        "明确‘命令互锁 + 窗口互锁’的最小组合规则",
-        "补充至少 2 个正反例（推荐写法/反模式）",
-        "文档中的 DSL 片段可通过语法检查（示例级）",
+        "新增解析函数：从板端日志提取 TIMING tick/exec_us/slack_us/overrun/overrun_count 等字段",
+        "把解析结果映射到现有 TickTimingSample 并可序列化为 tick_timing.jsonl",
+        "为解析器新增单元测试（覆盖乱序字段、混入其他日志行、缺字段报错）",
         "cargo test --workspace passes"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-002",
-      "title": "新增单轴防碰撞示例 PLC",
-      "description": "作为开发者，我希望有最小可运行示例，展示 zone_code 与执行器互斥，以便快速复用。",
+      "title": "新增 CLI 子命令将 board.log 转换为 tick_timing.jsonl",
+      "description": "作为开发者，我希望一个命令即可把 board.log 转成 tick_timing.jsonl，从而能直接接入 rust_plc timing-report 与 no-board-gate 的指标体系。",
       "acceptanceCriteria": [
-        "新增 examples/stepper_collision_guard.plc",
-        "示例包含 zone_code（analog_input external）与至少 1 条互斥 safety",
-        "示例包含 fault 路径（timeout -> goto fault）",
-        "cargo run --release -- examples/stepper_collision_guard.plc --no-print-ir 成功",
+        "新增子命令：rust_plc board-timing --in <board.log> --out <tick_timing.jsonl>",
+        "输出 JSONL 采用现有 TickTimingSample 的字段顺序（保持确定性）",
+        "README 或 docs 中给出最小用法示例（board-timing + timing-report 两步）",
         "cargo test --workspace passes"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "在示例中体现双向互锁（窗口互锁 + 命令互锁）",
-      "description": "作为安全工程师，我希望示例同时约束‘禁区禁止动作’和‘危险姿态禁止继续运动’，避免单向互锁漏洞。",
+      "title": "在 SimIo 中实现 DO/AO 的 FORCE/override（输出强制）",
+      "description": "作为调试工程师，我希望在仿真中强制某些输出点位保持固定值（即使 PLC 程序写了别的值），用于定位互锁与故障路径。",
       "acceptanceCriteria": [
-        "在示例中包含规则 A：zone_code 与执行器状态冲突",
-        "在示例中包含规则 B：move_cmd.on 与执行器危险状态冲突（或 requires 安全状态）",
-        "验证报告能识别这两类约束（Safety 规则绑定或降级信息清晰）",
+        "SimIo 支持对指定 DO/AO 设定 persistent forced value（持续生效，直到解除）",
+        "当输出被 force 时，程序对该点位的写入不会改变最终输出值（trace/edges 体现最终值）",
+        "新增单元测试：force DO 覆盖程序写入；force AO 覆盖程序写入",
         "cargo test --workspace passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-006",
-      "title": "补充场景与回归资产（normal + 3 fault）",
-      "description": "作为测试工程师，我希望有标准场景集覆盖正常与故障路径，保证后续改动不破坏安全逻辑。",
-      "acceptanceCriteria": [
-        "新增场景：normal / count_stuck / wrong_direction / alarm_triggered",
-        "场景覆盖至少 1 条成功路径和 3 条失败路径",
-        "在 tests/ 增加对应回归测试或命令级集成测试",
-        "cargo test --workspace passes"
-      ],
-      "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "定义多坐标抽象规范（pls/角度/距离）",
-      "description": "作为架构师，我希望明确多坐标如何分层与换算下沉，避免在 DSL 中引入难维护的复杂计算。",
+      "title": "在 SimIo 中实现 DI/AI 的 FORCE/override（输入强制）",
+      "description": "作为调试工程师，我希望在仿真中强制某些输入点位保持固定值（覆盖 plant/schedule 的更新），用于复现传感器卡死、短接等现场问题。",
       "acceptanceCriteria": [
-        "文档明确‘主坐标 + 派生坐标’原则（例如 count/pos_mm 为主坐标）",
-        "文档明确换算下沉到驱动层（线性/非线性场景建议）",
-        "给出标准信号清单：axis_count/axis_theta/axis_pos_mm/axis_speed/pos_consistent/range_valid",
-        "给出‘何时进 fault/何时降级’的建议策略",
+        "SimIo 支持对指定 DI/AI 设定 persistent forced value（读取时始终返回 forced value）",
+        "force 输入优先级高于 plant 更新与 scheduled changes（并有清晰的注释说明优先级）",
+        "新增单元测试：force DI 覆盖 plant 更新；force AI 覆盖 scheduled changes",
         "cargo test --workspace passes"
       ],
-      "priority": 5,
-      "passes": true,
+      "priority": 4,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "新增多传感器一致性示例（编码器 vs 测距）",
-      "description": "作为调试工程师，我希望示例体现‘编码器位移 vs 激光位移’一致性判定与故障处理，以便发现机构松动和传感异常。",
+      "title": "为 FORCE/override 增加可复用的场景/文档入口",
+      "description": "作为团队成员，我希望 FORCE 的使用方式被文档化并有可回归的最小示例，避免每次调试都重新发明工具。",
       "acceptanceCriteria": [
-        "新增 examples/stepper_multi_sensor_consistency.plc（或等价示例）",
-        "示例包含 pos_consistent 或 sensor_fault_code 的使用",
-        "当一致性失败时，流程进入 fault 或降级分支",
-        "cargo run --release -- <该示例> --no-print-ir 成功",
+        "新增文档：docs/force_override.md（说明 force 的语义、优先级、适用范围与反模式）",
+        "新增至少 1 个可运行示例（例如 examples/force_override_demo.plc + 对应 scenario.yaml）",
+        "示例能展示 force 输入与 force 输出各 1 个点位的效果",
+        "cargo test --workspace passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "实现 IEC 61131-3 地址字符串解析器（%IX/%QX/%IW/%QW）",
+      "description": "作为自动化工程师，我希望 RustPLC 能理解 IEC 风格的地址字符串（至少能解析到逻辑 id），从而降低从其他 PLC 平台迁移的学习成本。",
+      "acceptanceCriteria": [
+        "新增纯函数解析器：支持 %IXn.m、%QXn.m、%IWn、%QWn（最小子集）",
+        "解析器输出统一的逻辑通道类型（DI/DO/AI/AO）与 id（并明确 bit/word 的映射规则）",
+        "新增单元测试覆盖：合法/非法地址、边界值、空白/大小写处理规则",
         "cargo test --workspace passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "Added examples/stepper_multi_sensor_consistency.plc and regression coverage in tests/examples_integration.rs."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "补齐规则模板与落地指引（含反模式）",
-      "description": "作为一线自动化工程师，我希望快速知道应该写什么 safety、避免写什么，减少建模歧义。",
+      "title": "io_map.toml 支持 IEC 风格 key 作为 DI/DO/AI/AO 的别名输入",
+      "description": "作为现场集成工程师，我希望 io_map.toml 可以直接使用 IEC 地址作为 key（或 alias），以减少手工对照与接线错误。",
       "acceptanceCriteria": [
-        "文档新增‘规则模板’章节（单阈值、区间编码、双向互锁、碰撞矩阵）",
-        "文档新增‘常见误区 -> 修正方式’",
-        "每个模板包含可复制 DSL 片段",
-        "与 docs/scenario_playbook.md 建立交叉引用",
+        "IoMap::from_toml_str 支持在 [digital_inputs]/[digital_outputs]/[analog_inputs]/[analog_outputs] 中使用 IEC 风格 key（必要时允许 TOML quoted keys）",
+        "IEC key 与现有 di/do/ai/ao key 可混用，冲突时有明确报错（指出冲突的两个 key）",
+        "为该能力新增单元测试（至少 2 个混用/冲突用例）",
         "cargo test --workspace passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "Expanded docs/stepper_ab_encoder.md with an explicit rule-template chapter label, added a collision-matrix copyable DSL template, and cross-referenced docs/scenario_playbook.md (guarded by a small doc regression test)."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "补充 Wiki（以仓库内草稿形式交付）",
-      "description": "作为团队成员，我希望该方案在 Wiki 可检索、可培训、可长期维护。",
+      "title": "在 io_map.template.toml 中输出 IEC 地址提示注释",
+      "description": "作为新用户，我希望生成的 io_map 模板直接提示对应 IEC 地址写法，减少文档来回翻找。",
       "acceptanceCriteria": [
-        "新增 docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md（Wiki 草稿）",
-        "新增 docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md（Wiki 草稿）",
-        "草稿内容与 docs/stepper_ab_encoder.md 保持一致（同一结论、同一术语）",
-        "在 README 或 docs 中增加入口链接（指向 GitHub Wiki 或本地草稿）",
+        "io_map.template.toml 的每个 di/do/ai/ao 注释行包含 IEC 地址提示（例如 do0 -> %QX0.0 之类的最小映射）",
+        "模板中清晰说明 bit/word/通道映射规则（用注释写清楚，不引入新配置格式）",
+        "为模板输出新增一个轻量的单元测试（校验关键提示字符串存在）",
         "cargo test --workspace passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "Added repo-local wiki drafts under docs/wiki/ plus a small regression test to keep key PLC snippets parseable."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "固化实现边界与非目标（防 scope 膨胀）",
-      "description": "作为项目负责人，我希望明确当前不做什么，避免 scope 膨胀与团队误解。",
+      "title": "在 board-rp2040 固件中抽出最小 HAL 形状（initialize/update_in/update_out/finalize）",
+      "description": "作为维护者，我希望板端固件结构更接近 OpenPLC 的最小 HAL 形状，从而降低后续移植到其他板卡时的复制成本。",
       "acceptanceCriteria": [
-        "文档明确不在本期实现：实时脉冲轨迹规划、复杂运动学在线求解、原始 AB 边沿在 DSL 直接解码",
-        "文档明确本期边界：DSL 做顺控与互锁，驱动层做高速计算与信号化",
-        "评审记录中无‘隐含新增能力’歧义项",
+        "在 board-rp2040 固件中新增一个内部模块或文件，封装 initialize/update_in/update_out/finalize 的最小形状",
+        "main loop 使用该封装（不改变现有行为：IO 映射、AO ramp、timing 统计、safe_state）",
         "cargo test --workspace passes"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "Added an explicit “本期边界与非目标” section to docs/stepper_ab_encoder.md and gated it with a small doc regression test to prevent future scope ambiguity."
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "定义版本化的本地控制面消息格式（为替代弱类型文本 RPC 做准备）",
+      "description": "作为平台维护者，我希望从一开始就有结构化、可版本化的控制面消息格式，避免未来扩展时被弱类型文本协议卡住。",
+      "acceptanceCriteria": [
+        "新增 docs/control_plane_protocol.md：定义 request/response 的 JSON 结构与 version 字段",
+        "新增最小 Rust 数据结构（serde 可序列化/反序列化），并添加单元测试验证 roundtrip",
+        "明确当前范围：仅定义协议与数据结构，不要求启动服务端",
+        "cargo test --workspace passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
+
