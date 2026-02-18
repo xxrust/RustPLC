@@ -7,6 +7,7 @@ It summarizes how we **translated OpenPLC_v3-style engineering learnings** into 
 Aligned with:
 - `docs/openplc_v3_analysis.md`
 - `docs/prd_openplc_v3_learnings_notes.md`
+- `docs/wiki/CI-Runbook.md`
 
 Date: 2026-02-18
 
@@ -115,3 +116,10 @@ This is now supported in the RP2040 gate scripts:
   - `--max-overrun-count <n>`
 
 This makes “realtime evidence” symmetric between virtual-board and real-board runs.
+
+---
+
+## CI / Regression Notes
+
+If CI reports failures (including `rp2040-cross-build`), start from:
+- `docs/wiki/CI-Runbook.md` (local repro commands + troubleshooting)

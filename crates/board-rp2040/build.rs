@@ -648,6 +648,9 @@ fn render_io_map_rs(map: &IoMap, analog_contract: &AnalogContract) -> String {
         SafeStateMode::Profile => 1u8,
     };
     out.push_str(&format!("pub const SAFE_STATE_MODE: u8 = {safe_mode};\n"));
+    // This constant is part of the io-map contract, but the firmware may choose not to use it
+    // (e.g. "all-zero immediately"). Mark it as allowed so CI doesn't depend on warning policy.
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str(&format!(
         "pub const SAFE_ON_EXIT_TIMEOUT_MS: u64 = {};\n",
         map.safe_state.on_exit_timeout_ms
