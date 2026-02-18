@@ -103,8 +103,8 @@
         "cargo test --workspace passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Expanded docs/stepper_ab_encoder.md with an explicit rule-template chapter label, added a collision-matrix copyable DSL template, and cross-referenced docs/scenario_playbook.md (guarded by a small doc regression test)."
     },
     {
       "id": "US-008",

@@ -17,6 +17,7 @@
 - If you want scenario YAMLs to reference logical analog input aliases by name, ensure the PLC topology models `connected_to` chains from physical `AI<N>` nodes to logical `analog_input` devices (and semantic connection typing allows analog<->analog logical connections).
 - For CLI-driven docs, add a doc consistency test that checks required commands are present both in the markdown playbook and in `rust_plc` usage output.
 - For docs with fenced ` ```plc` snippets, keep each snippet a complete PLC file (`[topology]` + `[constraints]` + `[tasks]` in order) and add an integration test that extracts and parses those blocks via `parse_plc` to prevent example drift.
+- For doc deliverables with structural acceptance criteria (required headings/links), add a lightweight regression test that asserts those key strings exist to prevent drift.
 - For JSONL contracts that are diff-sensitive, serialize typed structs (not maps) and keep canonical field declaration order so snapshots stay stable.
 - For percentile-based gates/reports, use one deterministic nearest-rank rule and lock it with unit tests so threshold behavior stays stable across refactors.
 - For `crates/sim` plant-style dynamics, keep the plant as a deterministic tick-step that *returns* input updates, and call it from `SimIo::advance_tick()` (after applying scenario inputs) to avoid borrow-checker pitfalls with `&mut self` callbacks.
@@ -1036,4 +1037,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `if: ... goto <name>` treats `<name>` as a task; to jump to a step within the same task, use `goto task.step` (e.g., `goto cycle.enable_axis`).
   - Useful context (e.g., "the evaluation panel is in component X")
     - For monitoring-style waits, `wait: <target_reached> OR <health_degraded>` + a follow-up `if:` decision step is a compact way to express “stop early on degraded health” without writing explicit loops.
+---
+## [2026-02-18 14:14:38 CST] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Expanded `docs/stepper_ab_encoder.md` into an explicit “规则模板” chapter and added a copyable collision-matrix DSL template (multi-zone, multi-actuator).
+  - Cross-referenced the scenario workflow playbook from the stepper safety-modeling doc, and added a reciprocal pointer from `docs/scenario_playbook.md`.
+  - Added a small regression test to ensure the stepper doc keeps covering the required rule-template headings and the playbook link.
+- Files changed
+  - `docs/stepper_ab_encoder.md`
+  - `docs/scenario_playbook.md`
+  - `tests/stepper_ab_encoder_doc.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For doc-driven deliverables, pairing the markdown update with a lightweight test that asserts required headings/links exist is an effective anti-drift guard (similar in spirit to the fenced-PLC parse tests).
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `tests/stepper_ab_encoder_doc.rs` parses every fenced ` ```plc` block in `docs/stepper_ab_encoder.md`; ensure any new templates remain complete, parseable PLC files.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - The scenario workflow lives in `docs/scenario_playbook.md`; stepper safety modeling now points there so example templates and their regression paths stay connected.
 ---

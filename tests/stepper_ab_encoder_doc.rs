@@ -59,3 +59,18 @@ fn stepper_ab_encoder_markdown_plc_snippets_parse() {
     }
 }
 
+#[test]
+fn stepper_ab_encoder_doc_covers_rule_templates_and_playbook_link() {
+    let doc = read_doc("docs/stepper_ab_encoder.md");
+    for needle in [
+        "规则模板",
+        "6.1 单阈值互斥",
+        "6.2 区间互斥",
+        "6.3 多执行器碰撞矩阵",
+        "6.4 双向互锁",
+        "常见误区 -> 修正方式",
+        "scenario_playbook.md",
+    ] {
+        assert!(doc.contains(needle), "doc should mention `{needle}`");
+    }
+}

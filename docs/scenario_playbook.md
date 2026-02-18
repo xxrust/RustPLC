@@ -4,6 +4,9 @@
 
 > 约定：以下命令默认在**仓库根目录**运行（确保 `examples/`、`scenarios/` 路径可用）。
 
+相关建模规范/规则模板：
+- 步进轴（Pulse/Dir）+ AB 编码器安全互锁建模：`docs/stepper_ab_encoder.md`
+
 ## 1) 从 .plc 初始化场景骨架（推荐起点）
 
 ```bash

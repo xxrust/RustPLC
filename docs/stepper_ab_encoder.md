@@ -145,9 +145,11 @@ DSL 只负责“何时下命令、何时允许下一步”。
 - `speed`：建议统一成 `count_s` 或 `mm_s`。
 - 若做 `count -> mm` 转换，固定齿距/丝杆导程参数应放在驱动层配置，不放 DSL。
 
-## 6. 角度范围与执行器互斥（防碰撞）
+## 6. 规则模板：角度范围与执行器互斥（防碰撞）
 
 这是步进机构最关键的建模点：**“危险角度窗口” 与 “其他执行器动作” 互斥**。
+
+> 回归场景怎么写/怎么校验/怎么批量回归：见 [Scenario Playbook](scenario_playbook.md)。
 
 ### 6.0 术语与定义（建模基线）
 
@@ -227,6 +229,22 @@ safety: zone_code > 0 conflicts_with cyl_clamp.extended
 - `zone_for_eject`
 
 然后写成多条独立 safety 规则，而不是一条超长复合规则。
+
+可复制模板：
+
+```plc
+[topology]
+device zone_for_clamp: analog_input { range: 0..3, unit: "zone", external: true }
+device zone_for_press: analog_input { range: 0..3, unit: "zone", external: true }
+device cyl_clamp: cylinder
+device cyl_press: cylinder
+
+[constraints]
+safety: zone_for_clamp > 0 conflicts_with cyl_clamp.extended
+safety: zone_for_press > 0 conflicts_with cyl_press.extended
+
+[tasks]
+```
 
 ### 6.4 双向互锁（推荐做成“命令互锁 + 窗口互锁”）
 
@@ -403,6 +421,8 @@ RustPLC DSL 层不适合写复杂算术（差值、绝对值、滤波、置信�
 
 ## 9. SIL 与回归测试建议
 
+场景初始化/校验/仿真/批量回归与最小化失败的标准流程，见 [Scenario Playbook](scenario_playbook.md)。
+
 当前 sim plant 对电机/编码器动态支持仍较基础，建议：
 
 - 短期：在 scenario 里脚本化 `AI0/AI1/X0/X1` 输入序列，验证顺控与故障恢复。
@@ -415,7 +435,7 @@ RustPLC DSL 层不适合写复杂算术（差值、绝对值、滤波、置信�
 3. 方向错误（count 反向，触发安全或超时）
 4. ALARM 触发（立即转 fault）
 
-## 10. 常见误区
+## 10. 常见误区 -> 修正方式
 
 - 误区 1：在 DSL 里直接“逐脉冲”控制步进。
   - 正解：DSL 控流程，驱动层控脉冲。
@@ -425,6 +445,8 @@ RustPLC DSL 层不适合写复杂算术（差值、绝对值、滤波、置信�
   - 正解：计算下沉到驱动层，DSL 只做阈值和状态机决策。
 - 误区 4：直接用“角度上下限”拼接复杂互锁，而不抽象碰撞窗口信号。
   - 正解：先形成 `zone_code`/`collision_window` 这类工程信号，再写 safety 规则。
+- 误区 5：只写“窗口互锁”，不写“命令互锁”（或缺少 `requires` 等价约束）。
+  - 正解：采用 6.4 的双向互锁组合，避免“危险姿态仍可继续下发运动命令”的单向漏洞。
 
 ---
 
