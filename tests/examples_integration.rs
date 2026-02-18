@@ -222,6 +222,49 @@ fn parses_stepper_collision_guard_example_into_verified_ir_json() {
     let ir_json =
         compile_source_to_json(&source).expect("stepper_collision_guard example should compile");
 
+    let safety_rules = ir_json["constraints"]["safety"]
+        .as_array()
+        .expect("constraints.safety should be an array");
+    assert_eq!(
+        safety_rules.len(),
+        3,
+        "stepper_collision_guard should define three safety rules (alarm interlock + window + command interlock)"
+    );
+
+    let safety_statuses = ir_json["verification"]["safety"]["rule_statuses"]
+        .as_array()
+        .expect("verification.safety.rule_statuses should be an array");
+    assert_eq!(
+        safety_statuses.len(),
+        3,
+        "verification report should include a status entry for each safety rule"
+    );
+    assert!(
+        safety_statuses.iter().any(|status| {
+            status["rule"]
+                .as_str()
+                .unwrap_or("")
+                .contains("zone_code > 0")
+        }),
+        "verification report should include the zone_code window interlock rule"
+    );
+    assert!(
+        safety_statuses.iter().any(|status| {
+            status["rule"]
+                .as_str()
+                .unwrap_or("")
+                .contains("move_cmd.on")
+        }),
+        "verification report should include the move_cmd command interlock rule"
+    );
+    assert_eq!(
+        ir_json["verification"]["safety"]["skipped_rules"]
+            .as_u64()
+            .expect("skipped_rules should be numeric"),
+        0,
+        "no safety rules should be skipped in this example"
+    );
+
     let safety_level = ir_json["verification"]["safety"]["level"]
         .as_str()
         .expect("verification.safety.level should be present");

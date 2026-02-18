@@ -33,6 +33,7 @@
 - In embedded crates with host-stub builds, gate firmware-only helpers with `#[cfg(any(test, target_os = "none"))]` so `cargo check --workspace` stays warning-clean on host.
 - Release-style artifacts should include a `manifest.json` that hashes the exact on-disk files (plus `size_bytes`) so integration tests can verify integrity deterministically.
 - When release-bundle adds new evidence artifacts, add them to both manifest hashing and integration-test required lists in the same change to keep delivery contracts auditable.
+- For example safety-modeling fixtures, assert `verification.safety.rule_statuses` contains one entry per safety rule and keep `skipped_rules == 0` to catch silently unbound constraints.
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
@@ -949,4 +950,23 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - parse_plc requires section order ([topology] -> [constraints] -> [tasks]), so doc snippets intended for parser checks must include all three headers even when task bodies are intentionally empty.
   - Useful context (e.g., "the evaluation panel is in component X")
     - docs/stepper_ab_encoder.md now doubles as both guidance and parse-checked fixture material; future edits should preserve full PLC fence structure.
+---
+## [2026-02-18 13:19:07 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Updated `examples/stepper_collision_guard.plc` to include a bi-directional interlock pair:
+    - Window interlock: `zone_code > 0 conflicts_with cyl_clamp.extended`
+    - Command interlock: `move_cmd.on conflicts_with cyl_clamp.extended`
+  - Added explicit `move_cmd` output wiring and start/stop steps to make the command-side rule reachable in the model.
+  - Strengthened `tests/examples_integration.rs` to assert the verification report includes rule-status entries for both interlock rules and that no safety rules are skipped.
+  - Ran `cargo run --release -- examples/stepper_collision_guard.plc --no-print-ir` and `cargo test --workspace` successfully.
+- Files changed
+  - `examples/stepper_collision_guard.plc`, `tests/examples_integration.rs`, `prd.json`, `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Use `verification.safety.rule_statuses` (plus `skipped_rules == 0`) to prevent regressions where a safety rule silently becomes unbound/skipped.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Example fixtures may already include baseline interlocks (e.g., alarm gating); avoid hard-coding “exactly N safety rules” unless the fixture is intended to lock that count.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - With an `external: true` analog threshold rule (`zone_code > 0`), safety is expected to be “有界验证” because threshold modeling uses a discrete region abstraction.
 ---
