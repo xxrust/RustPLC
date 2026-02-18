@@ -327,6 +327,38 @@ fn parse_motion_config(v: &toml::Value) -> Result<Option<MotionConfig>, IoMapErr
             let acc_sps2 = parse_optional_u32(t, "acc_sps2", &format!("motion.stepper.{axis_key}"))?;
             let dec_sps2 = parse_optional_u32(t, "dec_sps2", &format!("motion.stepper.{axis_key}"))?;
 
+            // Semantic checks (keep errors path-addressable and actionable).
+            if step_gpio == dir_gpio || step_gpio == en_gpio || dir_gpio == en_gpio {
+                return Err(IoMapError::InvalidMotion {
+                    path: format!("motion.stepper.{axis_key}"),
+                    message: "step_gpio/dir_gpio/en_gpio must be distinct (hint: assign three different GPIO numbers)"
+                        .to_string(),
+                });
+            }
+            let profile_any = v_max_sps.is_some() || acc_sps2.is_some() || dec_sps2.is_some();
+            let profile_all = v_max_sps.is_some() && acc_sps2.is_some() && dec_sps2.is_some();
+            if profile_any && !profile_all {
+                return Err(IoMapError::InvalidMotion {
+                    path: format!("motion.stepper.{axis_key}"),
+                    message: "if any of v_max_sps/acc_sps2/dec_sps2 is set, all three must be set (hint: set the missing fields or remove the partial profile)"
+                        .to_string(),
+                });
+            }
+            for (field, value) in [
+                ("v_max_sps", v_max_sps),
+                ("acc_sps2", acc_sps2),
+                ("dec_sps2", dec_sps2),
+            ] {
+                if let Some(v) = value {
+                    if v == 0 {
+                        return Err(IoMapError::InvalidMotion {
+                            path: format!("motion.stepper.{axis_key}.{field}"),
+                            message: "must be > 0".to_string(),
+                        });
+                    }
+                }
+            }
+
             cfg.stepper.insert(
                 axis,
                 StepperAxisConfig {
@@ -359,6 +391,13 @@ fn parse_motion_config(v: &toml::Value) -> Result<Option<MotionConfig>, IoMapErr
             };
             let a_gpio = parse_required_gpio(t, "a_gpio", &format!("motion.encoder.{axis_key}"))?;
             let b_gpio = parse_required_gpio(t, "b_gpio", &format!("motion.encoder.{axis_key}"))?;
+            if a_gpio == b_gpio {
+                return Err(IoMapError::InvalidMotion {
+                    path: format!("motion.encoder.{axis_key}"),
+                    message: "a_gpio and b_gpio must be distinct (hint: wire A and B to different GPIOs)"
+                        .to_string(),
+                });
+            }
             let ppr = parse_required_u32(t, "ppr", &format!("motion.encoder.{axis_key}"))?;
             if ppr == 0 {
                 return Err(IoMapError::InvalidMotion {
@@ -975,6 +1014,64 @@ en_gpio = 4
         assert!(
             err.contains("motion.stepper.axis0.step_gpio"),
             "expected path in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn motion_semantic_validation_reports_actionable_errors() {
+        let dup_pins = r#"
+[digital_inputs]
+di0 = 0
+
+[digital_outputs]
+do0 = 1
+
+[motion.stepper.axis0]
+step_gpio = 2
+dir_gpio = 2
+en_gpio = 4
+"#;
+        let err = IoMap::from_toml_str(dup_pins).unwrap_err().to_string();
+        assert!(
+            err.contains("motion.stepper.axis0") && err.contains("distinct"),
+            "expected distinct-pin error, got: {err}"
+        );
+
+        let partial_profile = r#"
+[digital_inputs]
+di0 = 0
+
+[digital_outputs]
+do0 = 1
+
+[motion.stepper.axis0]
+step_gpio = 2
+dir_gpio = 3
+en_gpio = 4
+v_max_sps = 20000
+"#;
+        let err = IoMap::from_toml_str(partial_profile).unwrap_err().to_string();
+        assert!(
+            err.contains("motion.stepper.axis0") && err.contains("all three must be set"),
+            "expected partial-profile error, got: {err}"
+        );
+
+        let ab_same_pin = r#"
+[digital_inputs]
+di0 = 0
+
+[digital_outputs]
+do0 = 1
+
+[motion.encoder.axis0]
+a_gpio = 8
+b_gpio = 8
+ppr = 1024
+"#;
+        let err = IoMap::from_toml_str(ab_same_pin).unwrap_err().to_string();
+        assert!(
+            err.contains("motion.encoder.axis0") && err.contains("distinct"),
+            "expected AB distinct-pin error, got: {err}"
         );
     }
 }

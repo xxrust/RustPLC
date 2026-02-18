@@ -115,6 +115,9 @@ scale = 1.0
 Validation rules (current stage):
 - axis key must be `axis0` or `axis1`
 - GPIO fields must be in `0..=29`
+- stepper `step_gpio/dir_gpio/en_gpio` must be distinct
+- encoder `a_gpio/b_gpio` must be distinct
+- stepper trapezoid defaults: if any of `v_max_sps/acc_sps2/dec_sps2` is set, all three must be set, and each must be `> 0`
 - encoder `ppr` must be `> 0`
 - encoder `quad` must be one of `1`, `2`, `4`
 - encoder `count_sign` must be `normal` or `inverted`

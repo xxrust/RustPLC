@@ -1351,3 +1351,19 @@ Thread: (ralph.sh tool execution blocked: claude needs /login; codex provider re
     - `build-rp2040` validates io_map via `IoMap::validate_for_usage()`, so new pin-owning subsystems should hook into its duplicate-GPIO check.
     - `io_map.template.toml` is the user-facing place to surface new config blocks even if they are not inferable from the PLC program.
 ---
+
+
+## 2026-02-19T00:20:17+08:00 - US-002
+Thread: (manual execution; ralph.sh tool execution blocked by missing/expired CLI auth)
+- What was implemented
+  - Added semantic validation for motion config: distinct pins (step/dir/en and A/B), trapezoid defaults all-or-none, and >0 checks.
+  - Added unit tests for actionable path + hint style errors.
+  - Updated RP2040 board doc validation rules accordingly.
+- Files changed
+  - `src/io_map.rs`
+  - `docs/board_rp2040.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Keep motion config errors path-addressable (e.g. `motion.stepper.axis0`) and include a concrete hint so CI/build logs are self-service.
+---
