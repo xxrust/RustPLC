@@ -17,6 +17,8 @@ Usage:
     --io-map <io_map.toml> \
     --mount <rp2040_mount> \
     --port <tty> \
+    [--max-p99-exec-us <us>] \
+    [--max-overrun-count <n>] \
     [--baud <n>] \
     [--duration <sec>] \
     [--out-dir <dir>] \
@@ -37,6 +39,8 @@ BAUD="115200"
 DURATION="20"
 OUT_DIR="out/rp2040_hil_gate"
 BUNDLE="0"
+MAX_P99_EXEC_US=""
+MAX_OVERRUN_COUNT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -45,6 +49,8 @@ while [[ $# -gt 0 ]]; do
     --io-map) IO_MAP="${2:-}"; shift 2;;
     --mount) MOUNT="${2:-}"; shift 2;;
     --port) PORT="${2:-}"; shift 2;;
+    --max-p99-exec-us) MAX_P99_EXEC_US="${2:-}"; shift 2;;
+    --max-overrun-count) MAX_OVERRUN_COUNT="${2:-}"; shift 2;;
     --baud) BAUD="${2:-}"; shift 2;;
     --duration) DURATION="${2:-}"; shift 2;;
     --out-dir) OUT_DIR="${2:-}"; shift 2;;
@@ -82,6 +88,7 @@ echo "[0/3] SIL trace (sim-plc)"
 echo "[meta] write $META_JSON"
 REPO_ROOT="$REPO_ROOT" PLC="$PLC" SCENARIO="$SCENARIO" IO_MAP="$IO_MAP" MOUNT="$MOUNT" \
 PORT="$PORT" BAUD="$BAUD" DURATION="$DURATION" OUT_DIR="$OUT_DIR" SIL_TRACE="$SIL_TRACE" \
+MAX_P99_EXEC_US="$MAX_P99_EXEC_US" MAX_OVERRUN_COUNT="$MAX_OVERRUN_COUNT" \
 META_JSON="$META_JSON" python3 - <<'PY'
 import json
 import os
@@ -108,6 +115,8 @@ out = {
     "baud": os.environ["BAUD"],
     "duration_sec": os.environ["DURATION"],
     "out_dir": os.environ["OUT_DIR"],
+    "max_p99_exec_us": os.environ.get("MAX_P99_EXEC_US") or None,
+    "max_overrun_count": os.environ.get("MAX_OVERRUN_COUNT") or None,
   },
   "artifacts": {
     "sil_trace": os.path.abspath(os.environ["SIL_TRACE"]),
@@ -123,12 +132,14 @@ echo "[1/3] Board gate (build/flash/collect/trace-diff)"
 set +e
 (
   cd "$REPO_ROOT"
-  scripts/rp2040_trace_gate.sh \
+scripts/rp2040_trace_gate.sh \
     --plc "$PLC" \
     --io-map "$IO_MAP" \
     --sil-trace "$SIL_TRACE" \
     --out-dir "$OUT_DIR" \
     --mount "$MOUNT" \
+    ${MAX_P99_EXEC_US:+--max-p99-exec-us "$MAX_P99_EXEC_US"} \
+    ${MAX_OVERRUN_COUNT:+--max-overrun-count "$MAX_OVERRUN_COUNT"} \
     --collect-mode serial \
     --port "$PORT" \
     --baud "$BAUD" \

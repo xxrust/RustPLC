@@ -820,6 +820,45 @@ fn collect_scenario_referenced_inputs(
         ));
     }
 
+    for (event_idx, force) in scenario.forces.iter().enumerate() {
+        for (&id, _) in &force.set.digital_inputs {
+            digital.push((
+                format!("forces[{event_idx}].set.digital_inputs.{id}"),
+                id,
+            ));
+        }
+        for (&id, _) in &force.set.analog_inputs {
+            analog.push((
+                format!("forces[{event_idx}].set.analog_inputs.{id}"),
+                id,
+            ));
+        }
+    }
+
+    (digital, analog)
+}
+
+fn collect_scenario_referenced_forced_outputs(
+    scenario: &sim::Scenario,
+) -> (Vec<(String, u16)>, Vec<(String, u16)>) {
+    let mut digital = Vec::<(String, u16)>::new();
+    let mut analog = Vec::<(String, u16)>::new();
+
+    for (event_idx, force) in scenario.forces.iter().enumerate() {
+        for (&id, _) in &force.set.digital_outputs {
+            digital.push((
+                format!("forces[{event_idx}].set.digital_outputs.{id}"),
+                id,
+            ));
+        }
+        for (&id, _) in &force.set.analog_outputs {
+            analog.push((
+                format!("forces[{event_idx}].set.analog_outputs.{id}"),
+                id,
+            ));
+        }
+    }
+
     (digital, analog)
 }
 
@@ -1740,6 +1779,40 @@ fn run_scenario_validate_subcommand(
             })?;
         let (num_di, num_do, num_ai, num_ao) =
             io_sizes_for_program_and_scenario(&runtime_program, &scenario);
+
+        // Validate force output ids against program IO sizes (out-of-range forces are almost
+        // always authoring mistakes and should fail early).
+        let (forced_dos, forced_aos) = collect_scenario_referenced_forced_outputs(&scenario);
+        for (path, id) in forced_dos {
+            if id as usize >= num_do {
+                findings.push(ScenarioValidateFinding::error(
+                    path,
+                    format!(
+                        "DO{id} does not exist in `{}` (num_do={num_do})",
+                        display_path_relative_to_cwd(&plc_path)
+                    ),
+                    Some(
+                        "Fix the force id, or add the missing digital_output device in the PLC topology."
+                            .to_string(),
+                    ),
+                ));
+            }
+        }
+        for (path, id) in forced_aos {
+            if id as usize >= num_ao {
+                findings.push(ScenarioValidateFinding::error(
+                    path,
+                    format!(
+                        "AO{id} does not exist in `{}` (num_ao={num_ao})",
+                        display_path_relative_to_cwd(&plc_path)
+                    ),
+                    Some(
+                        "Fix the force id, or add the missing analog_output device in the PLC topology."
+                            .to_string(),
+                    ),
+                ));
+            }
+        }
         let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
 
         // Re-apply the scenario onto the IO we will use for probing.

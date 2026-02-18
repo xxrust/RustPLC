@@ -11,6 +11,8 @@ Usage:
     --io-map <io_map.toml> \
     --sil-trace <trace.jsonl> \
     [--out-dir <dir>] \
+    [--max-p99-exec-us <us>] \
+    [--max-overrun-count <n>] \
     [--mount <rp2040_mount>] \
     [--board-log <board.log>] \
     [--collect-mode serial --port <tty> [--baud <n>] [--duration <sec>]] \
@@ -36,6 +38,8 @@ PORT=""
 BAUD="115200"
 DURATION="20"
 COLLECT_CMD=""
+MAX_P99_EXEC_US=""
+MAX_OVERRUN_COUNT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -43,6 +47,8 @@ while [[ $# -gt 0 ]]; do
     --io-map) IO_MAP="${2:-}"; shift 2;;
     --sil-trace) SIL_TRACE="${2:-}"; shift 2;;
     --out-dir) OUT_DIR="${2:-}"; shift 2;;
+    --max-p99-exec-us) MAX_P99_EXEC_US="${2:-}"; shift 2;;
+    --max-overrun-count) MAX_OVERRUN_COUNT="${2:-}"; shift 2;;
     --mount) MOUNT="${2:-}"; shift 2;;
     --board-log) BOARD_LOG="${2:-}"; shift 2;;
     --collect-mode) COLLECT_MODE="${2:-}"; shift 2;;
@@ -72,6 +78,8 @@ UF2="$OUT_DIR_ABS/firmware.uf2"
 RP2040_OUT="$OUT_DIR_ABS/rp2040"
 BOARD_LOG_DEFAULT="$OUT_DIR_ABS/board.log"
 BOARD_TRACE="$OUT_DIR_ABS/board_trace.jsonl"
+TICK_TIMING="$OUT_DIR_ABS/tick_timing.jsonl"
+TIMING_REPORT="$OUT_DIR_ABS/timing_report.json"
 DIFF_REPORT="$OUT_DIR_ABS/diff_report.json"
 DASHBOARD_HTML="$OUT_DIR_ABS/trace_diff_dashboard.html"
 
@@ -151,12 +159,51 @@ echo "[4/4] board-parse + trace-diff --fail-on-mismatch"
 (
   cd "$REPO_ROOT"
   cargo run --release -- board-parse --in "$BOARD_LOG" --out-dir "$OUT_DIR_ABS"
+  if [[ -s "$TICK_TIMING" ]]; then
+    cargo run --release -- timing-report --in "$TICK_TIMING" --out "$TIMING_REPORT"
+  else
+    echo "WARN: tick_timing.jsonl is empty; skip timing-report (no TIMING records in board log?)" >&2
+  fi
   cargo run --release -- trace-diff \
     --sil "$SIL_TRACE" \
     --board "$BOARD_TRACE" \
     --out "$DIFF_REPORT" \
     --fail-on-mismatch
 )
+
+if [[ -n "$MAX_P99_EXEC_US" || -n "$MAX_OVERRUN_COUNT" ]]; then
+  if [[ ! -s "$TIMING_REPORT" ]]; then
+    echo "timing gate requested but timing_report.json is missing/empty: $TIMING_REPORT" >&2
+    exit 1
+  fi
+  python3 - "$TIMING_REPORT" "$MAX_P99_EXEC_US" "$MAX_OVERRUN_COUNT" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+max_p99 = sys.argv[2].strip() or None
+max_overrun = sys.argv[3].strip() or None
+
+data = json.load(open(path, "r", encoding="utf-8"))
+p99 = int(data.get("exec_us_p99", 0))
+overruns = int(data.get("overrun_count", 0))
+
+fail = False
+if max_p99 is not None:
+    lim = int(max_p99)
+    if p99 > lim:
+        print(f"FAIL: p99 exec_us {p99} > max_p99_exec_us {lim}", file=sys.stderr)
+        fail = True
+if max_overrun is not None:
+    lim = int(max_overrun)
+    if overruns > lim:
+        print(f"FAIL: overrun_count {overruns} > max_overrun_count {lim}", file=sys.stderr)
+        fail = True
+
+if fail:
+    sys.exit(2)
+PY
+fi
 
 if command -v python3 >/dev/null 2>&1; then
   "$REPO_ROOT/scripts/trace_diff_dashboard.py" \
@@ -172,5 +219,7 @@ echo "Pipeline done."
 echo "  UF2: $UF2"
 echo "  Board log: $BOARD_LOG"
 echo "  Board trace: $BOARD_TRACE"
+echo "  Tick timing: $TICK_TIMING"
+echo "  Timing report: $TIMING_REPORT"
 echo "  Diff report: $DIFF_REPORT"
 echo "  Dashboard: $DASHBOARD_HTML"

@@ -83,3 +83,40 @@ inputs:
     );
 }
 
+#[test]
+fn scenario_validate_fails_for_unknown_force_outputs() {
+    let base = temp_dir("rust_plc_scenario_validate_unknown_force");
+    let scenario_path = base.join("bad_force.yaml");
+    fs::write(
+        &scenario_path,
+        r#"
+tick_ms: 10
+duration_ms: 100
+forces:
+  - at_ms: 0
+    set:
+      digital_outputs:
+        999: true
+"#,
+    )
+    .expect("write scenario yaml");
+
+    let plc = repo_path("examples/assembly_station.plc");
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("scenario-validate")
+        .arg(&plc)
+        .arg("--scenario")
+        .arg(&scenario_path)
+        .output()
+        .expect("run scenario-validate");
+
+    assert!(
+        !output.status.success(),
+        "scenario-validate should fail for unknown force outputs"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("DO999 does not exist"),
+        "expected unknown output error; stderr was:\n{stderr}"
+    );
+}

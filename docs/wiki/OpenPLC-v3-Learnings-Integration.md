@@ -105,11 +105,13 @@ This is a structural refactor: it keeps the same external observability records 
 
 ## Suggested Next Step (After This Integration)
 
-If we continue following the same “board-evidence + replayable control-plane” direction, the next most valuable step is:
+If we continue following the same “board-evidence + replayable control-plane” direction, the next most valuable step is to make **real-board timing evidence** first-class in HIL gates (so it matches the virtual-board / no-board evidence chain).
 
-1) Extend HIL gates to also consume `tick_timing.jsonl` from real boards:
-   - generate `timing_report.json` via `timing-report`
-   - add threshold checks similar to `no-board-gate` / release-bundle real-time evidence
+This is now supported in the RP2040 gate scripts:
+
+- `scripts/rp2040_trace_gate.sh` can generate `timing_report.json` from board `tick_timing.jsonl`
+- Optional timing gate thresholds:
+  - `--max-p99-exec-us <us>`
+  - `--max-overrun-count <n>`
 
 This makes “realtime evidence” symmetric between virtual-board and real-board runs.
-
