@@ -81,3 +81,9 @@ For stable safety modeling, pair the rule set with scenario regression:
 
 See `docs/scenario_playbook.md` for scenario authoring + `scenario-validate` + `sim-plc` + batch regression.
 
+Repo fixtures you can copy/adapt:
+- `examples/stepper_collision_guard.plc` + `scenarios/stepper_collision_guard/*.yaml`
+- `examples/rp2040_motion_minimal.plc` + `scenarios/rp2040_motion_minimal/*.yaml` (dual-axis, motion-channel convention)
+
+CI gate for the RP2040 minimal motion fixture:
+- `tests/rp2040_motion_minimal_scenarios.rs`
