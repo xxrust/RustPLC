@@ -1,6 +1,6 @@
 # FORCE / Override（仿真层）设计与用法
 
-日期：2026-02-18
+日期：2026-02-19
 
 本文件描述 RustPLC 在 **SIL（仿真）层**对 OpenPLC “FORCE / override” 能力的最小实现：
 
@@ -21,11 +21,21 @@ FORCE 是一种“控制面”能力：在 PLC 运行时，把某个 IO 通道�
 - `crates/sim` 的 `SimIo`：实现强制覆盖语义；
 - `scenario.yaml` 的 `forces`：实现**可回归**的 force/clear 脚本化注入。
 
-### 1.2 本期不做什么
+### 1.2 开发态在线 force 控制面（`sim-plc`）
 
-- 不提供“在线交互式 force 命令行”（例如 telnet/HTTP 强制修改），因为它不利于回归与证据链；
-- 不在 DSL/runtime 核心语义里引入 IEC 内存模型或在线变量写入；
-- 不承诺与 OpenPLC 的 force 命令/协议兼容（开发期优先整洁实现）。
+`sim-plc` 支持开发态在线 force 控制面，入口参数如下：
+
+- `--enable-online-force-dev`：显式启用（默认关闭）；
+- `--online-force-script <script.jsonl>`：按时间注入 force set/clear；
+- `--online-force-audit-out <audit.jsonl>`：输出审计日志（未指定时默认写到 `online_force_audit.jsonl`）。
+
+控制面仅在 **SIL/开发态仿真** 中工作，不改变板级固件 IO 控制行为。
+
+### 1.3 语义边界
+
+- 不在 DSL/runtime 核心语义中引入 IEC retain 变量在线写入；
+- 不承诺与 OpenPLC force 协议一一兼容；
+- 面向调试与回归证据链，优先可复现与可审计。
 
 ---
 
@@ -107,7 +117,38 @@ forces:
 
 ---
 
-## 4. 最小可运行示例
+## 4. 在线 force 脚本与审计
+
+在线脚本为 JSONL，每行一条命令：
+
+```json
+{"at_ms":0,"actor":"commissioning","source":"panel","channel":"DI0","value":true}
+{"at_ms":20,"actor":"commissioning","source":"panel","channel":"DI0","value":null}
+{"at_ms":30,"actor":"commissioning","source":"panel","channel":"AO0","value":1.25}
+```
+
+字段约束：
+
+- `at_ms`：必须与 `tick_ms` 对齐；
+- `actor/source`：审计来源标识；
+- `channel`：`DI<n>/AI<n>/DO<n>/AO<n>`；
+- `value`：bool/number 为 set，`null` 为 clear。
+
+审计输出为 JSONL，包含：
+
+- `at_ms`/`tick`（时间戳）；
+- `actor`/`source`（操作者与来源）；
+- `channel`/`channel_kind`/`channel_id`；
+- `operation`（`set`/`clear`）；
+- `from`/`to`（值变更）。
+
+与 `scenario.yaml -> forces` 的交互：
+
+- 运行前先加载 `scenario.yaml` 的 `forces`；
+- 再注入在线脚本命令（同一 tick 允许多通道并发变更）；
+- 最终统一按 `at_ms` 排序执行，保持确定性回放。
+
+## 5. 最小可运行示例
 
 示例文件：
 
@@ -127,4 +168,3 @@ cargo run --release -- sim-plc examples/force_override_demo.plc \
 - `X0` 初始为 false，但在 `forces` 中被强制为 true，从而流程能启动；
 - `Y0/AO0` 在一段时间内被强制为固定值，程序写入不会改变最终输出；
 - 清除输出 force 后，后续程序写入会重新反映到最终输出，并在 edges 中可观察到变化。
-

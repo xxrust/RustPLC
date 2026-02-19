@@ -1650,3 +1650,35 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
   - Useful context (e.g., "the evaluation panel is in component X")
     - `scenario-doctor` intentionally reuses `scenario-validate` heuristics so warnings/codes stay aligned and do not drift into two conflicting diagnostic vocabularies.
 ---
+## [2026-02-19 10:02:30 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added development-only online force control plane to `sim-plc` with explicit enable switch and guardrails:
+    - `--enable-online-force-dev`
+    - `--online-force-script <script.jsonl>`
+    - `--online-force-audit-out <audit.jsonl>`
+  - Implemented JSONL online-force script parsing for DI/AI/DO/AO (`set` and `clear` via `null`), tick alignment checks, and deterministic injection into scenario force events.
+  - Added full audit trail emission (actor/source/at_ms/tick/channel/from/to/operation) and default audit path generation when dev mode is enabled.
+  - Updated force documentation with dev control plane contract, script schema, audit fields, and scenario/online-force merge semantics.
+  - Added wiki page for quick operations reference.
+  - Added integration tests covering:
+    - disabled-by-default guard behavior,
+    - set/clear audit JSONL records for digital + analog channels.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --workspace`
+- Files changed
+  - `src/main.rs`
+  - `tests/online_force_control_plane.rs`
+  - `docs/force_override.md`
+  - `docs/wiki/Online-Force-Control-Plane.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `sim-plc` is the right seam for SIL-only developer controls; keep hardware-path commands (`build-rp2040`/`flash-rp2040`) free of debug-only mutators.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - For force command parsing, always include file+line in JSONL errors; otherwise operator feedback is too slow during commissioning rehearsals.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Scenario `forces` and online-force script commands are merged into the same force event stream, so downstream sim semantics stay consistent.
+---

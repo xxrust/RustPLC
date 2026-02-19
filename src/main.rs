@@ -5,12 +5,13 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program,
 };
-use rust_plc::verification::{verify_all, VerificationSummary, WarningEntry, WarningLevel};
+use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use io_traits::{DigitalInputId, DigitalOutputId, Io};
@@ -20,10 +21,10 @@ use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
 use rust_plc::sequence_lint::{
-    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
+    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
 };
-use rust_plc::sim_regress::{run_sim_regress_with_options, SimRegressOptions, SimRegressSummary};
-use rust_plc::tick_timing::{parse_tick_timing_jsonl, to_tick_timing_jsonl, TickTimingSample};
+use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
+use rust_plc::tick_timing::{TickTimingSample, parse_tick_timing_jsonl, to_tick_timing_jsonl};
 use rust_plc::timing_report::build_timing_report;
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -1638,7 +1639,9 @@ fn print_usage(program: &str) {
     eprintln!(
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
     );
-    eprintln!("  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>");
+    eprintln!(
+        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>]"
+    );
     eprintln!(
         "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
     );
@@ -2772,6 +2775,389 @@ fn run_scenario_gen_subcommand(
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnlineForceChannelKind {
+    Di,
+    Ai,
+    Do,
+    Ao,
+}
+
+impl OnlineForceChannelKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Di => "digital_input",
+            Self::Ai => "analog_input",
+            Self::Do => "digital_output",
+            Self::Ao => "analog_output",
+        }
+    }
+
+    fn short(self) -> &'static str {
+        match self {
+            Self::Di => "di",
+            Self::Ai => "ai",
+            Self::Do => "do",
+            Self::Ao => "ao",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum OnlineForceValue {
+    Digital(bool),
+    Analog(f32),
+}
+
+#[derive(Debug, Clone)]
+struct OnlineForceCommand {
+    at_ms: u64,
+    actor: String,
+    source: String,
+    channel_kind: OnlineForceChannelKind,
+    channel_id: u16,
+    value: Option<OnlineForceValue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OnlineForceScriptEntryRaw {
+    at_ms: u64,
+    actor: String,
+    source: String,
+    channel: String,
+    #[serde(default)]
+    value: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+enum ForceAuditValue {
+    Digital(bool),
+    Analog(f32),
+}
+
+#[derive(Debug, Serialize)]
+struct OnlineForceAuditEntry {
+    at_ms: u64,
+    tick: u64,
+    actor: String,
+    source: String,
+    channel: String,
+    channel_kind: &'static str,
+    channel_id: u16,
+    operation: &'static str,
+    from: Option<ForceAuditValue>,
+    to: Option<ForceAuditValue>,
+}
+
+fn parse_online_force_channel(raw: &str) -> Result<(OnlineForceChannelKind, u16), String> {
+    let token = raw.trim().to_ascii_lowercase();
+    let (kind, tail) = if let Some(v) = token.strip_prefix("di") {
+        (OnlineForceChannelKind::Di, v)
+    } else if let Some(v) = token.strip_prefix("ai") {
+        (OnlineForceChannelKind::Ai, v)
+    } else if let Some(v) = token.strip_prefix("do") {
+        (OnlineForceChannelKind::Do, v)
+    } else if let Some(v) = token.strip_prefix("ao") {
+        (OnlineForceChannelKind::Ao, v)
+    } else {
+        return Err(format!(
+            "invalid channel `{raw}` (expected DI<n>/AI<n>/DO<n>/AO<n>)"
+        ));
+    };
+
+    if tail.is_empty() {
+        return Err(format!(
+            "invalid channel `{raw}` (missing numeric id after kind prefix)"
+        ));
+    }
+    let id = tail
+        .parse::<u16>()
+        .map_err(|_| format!("invalid channel `{raw}` (id must be u16)"))?;
+    Ok((kind, id))
+}
+
+fn parse_online_force_value(
+    raw: Option<serde_json::Value>,
+    kind: OnlineForceChannelKind,
+) -> Result<Option<OnlineForceValue>, String> {
+    let Some(v) = raw else {
+        return Ok(None);
+    };
+    match kind {
+        OnlineForceChannelKind::Di | OnlineForceChannelKind::Do => match v {
+            serde_json::Value::Bool(b) => Ok(Some(OnlineForceValue::Digital(b))),
+            serde_json::Value::Null => Ok(None),
+            other => Err(format!(
+                "{} channel expects bool/null value, got {other}",
+                kind.short()
+            )),
+        },
+        OnlineForceChannelKind::Ai | OnlineForceChannelKind::Ao => match v {
+            serde_json::Value::Number(n) => {
+                let f = n.as_f64().ok_or_else(|| {
+                    format!(
+                        "{} channel expects numeric/null value, got non-finite number",
+                        kind.short()
+                    )
+                })?;
+                if !f.is_finite() {
+                    return Err(format!(
+                        "{} channel expects finite numeric/null value",
+                        kind.short()
+                    ));
+                }
+                Ok(Some(OnlineForceValue::Analog(f as f32)))
+            }
+            serde_json::Value::Null => Ok(None),
+            other => Err(format!(
+                "{} channel expects numeric/null value, got {other}",
+                kind.short()
+            )),
+        },
+    }
+}
+
+fn load_online_force_script(path: &Path, tick_ms: u64) -> Result<Vec<OnlineForceCommand>, String> {
+    let body = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "Failed to read online-force script {}: {err}",
+            path.display()
+        )
+    })?;
+    let mut commands = Vec::<OnlineForceCommand>::new();
+    for (lineno, line) in body.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let raw: OnlineForceScriptEntryRaw = serde_json::from_str(trimmed)
+            .map_err(|err| format!("Invalid JSONL at {}:{}: {err}", path.display(), lineno + 1))?;
+        if tick_ms != 0 && raw.at_ms % tick_ms != 0 {
+            return Err(format!(
+                "at_ms={} is not aligned to tick_ms={} at {}:{}",
+                raw.at_ms,
+                tick_ms,
+                path.display(),
+                lineno + 1
+            ));
+        }
+        let (kind, id) = parse_online_force_channel(&raw.channel)
+            .map_err(|err| format!("{err} at {}:{}", path.display(), lineno + 1))?;
+        let value = parse_online_force_value(raw.value, kind)
+            .map_err(|err| format!("{err} at {}:{}", path.display(), lineno + 1))?;
+        commands.push(OnlineForceCommand {
+            at_ms: raw.at_ms,
+            actor: raw.actor,
+            source: raw.source,
+            channel_kind: kind,
+            channel_id: id,
+            value,
+        });
+    }
+    commands.sort_by(|a, b| a.at_ms.cmp(&b.at_ms));
+    Ok(commands)
+}
+
+fn build_online_force_audit(
+    commands: &[OnlineForceCommand],
+    tick_ms: u64,
+) -> Vec<OnlineForceAuditEntry> {
+    let mut out = Vec::<OnlineForceAuditEntry>::new();
+    let mut di = BTreeMap::<u16, bool>::new();
+    let mut ai = BTreeMap::<u16, f32>::new();
+    let mut do_ = BTreeMap::<u16, bool>::new();
+    let mut ao = BTreeMap::<u16, f32>::new();
+
+    for cmd in commands {
+        let (from, to) = match cmd.channel_kind {
+            OnlineForceChannelKind::Di => {
+                let before = di
+                    .get(&cmd.channel_id)
+                    .copied()
+                    .map(ForceAuditValue::Digital);
+                match cmd.value.as_ref() {
+                    Some(OnlineForceValue::Digital(v)) => {
+                        di.insert(cmd.channel_id, *v);
+                        (before, Some(ForceAuditValue::Digital(*v)))
+                    }
+                    None => {
+                        di.remove(&cmd.channel_id);
+                        (before, None)
+                    }
+                    Some(OnlineForceValue::Analog(_)) => continue,
+                }
+            }
+            OnlineForceChannelKind::Ai => {
+                let before = ai
+                    .get(&cmd.channel_id)
+                    .copied()
+                    .map(ForceAuditValue::Analog);
+                match cmd.value.as_ref() {
+                    Some(OnlineForceValue::Analog(v)) => {
+                        ai.insert(cmd.channel_id, *v);
+                        (before, Some(ForceAuditValue::Analog(*v)))
+                    }
+                    None => {
+                        ai.remove(&cmd.channel_id);
+                        (before, None)
+                    }
+                    Some(OnlineForceValue::Digital(_)) => continue,
+                }
+            }
+            OnlineForceChannelKind::Do => {
+                let before = do_
+                    .get(&cmd.channel_id)
+                    .copied()
+                    .map(ForceAuditValue::Digital);
+                match cmd.value.as_ref() {
+                    Some(OnlineForceValue::Digital(v)) => {
+                        do_.insert(cmd.channel_id, *v);
+                        (before, Some(ForceAuditValue::Digital(*v)))
+                    }
+                    None => {
+                        do_.remove(&cmd.channel_id);
+                        (before, None)
+                    }
+                    Some(OnlineForceValue::Analog(_)) => continue,
+                }
+            }
+            OnlineForceChannelKind::Ao => {
+                let before = ao
+                    .get(&cmd.channel_id)
+                    .copied()
+                    .map(ForceAuditValue::Analog);
+                match cmd.value.as_ref() {
+                    Some(OnlineForceValue::Analog(v)) => {
+                        ao.insert(cmd.channel_id, *v);
+                        (before, Some(ForceAuditValue::Analog(*v)))
+                    }
+                    None => {
+                        ao.remove(&cmd.channel_id);
+                        (before, None)
+                    }
+                    Some(OnlineForceValue::Digital(_)) => continue,
+                }
+            }
+        };
+
+        out.push(OnlineForceAuditEntry {
+            at_ms: cmd.at_ms,
+            tick: if tick_ms == 0 { 0 } else { cmd.at_ms / tick_ms },
+            actor: cmd.actor.clone(),
+            source: cmd.source.clone(),
+            channel: format!("{}{}", cmd.channel_kind.short(), cmd.channel_id),
+            channel_kind: cmd.channel_kind.label(),
+            channel_id: cmd.channel_id,
+            operation: if cmd.value.is_some() { "set" } else { "clear" },
+            from,
+            to,
+        });
+    }
+
+    out
+}
+
+fn inject_online_force_commands(
+    scenario: &mut sim::Scenario,
+    commands: &[OnlineForceCommand],
+) -> Result<(), String> {
+    let mut by_at = BTreeMap::<u64, sim::ForceSet>::new();
+    for cmd in commands {
+        let set = by_at.entry(cmd.at_ms).or_default();
+        match (cmd.channel_kind, cmd.value.as_ref()) {
+            (OnlineForceChannelKind::Di, Some(OnlineForceValue::Digital(v))) => {
+                set.digital_inputs.insert(cmd.channel_id, Some(*v));
+            }
+            (OnlineForceChannelKind::Di, None) => {
+                set.digital_inputs.insert(cmd.channel_id, None);
+            }
+            (OnlineForceChannelKind::Ai, Some(OnlineForceValue::Analog(v))) => {
+                set.analog_inputs.insert(cmd.channel_id, Some(*v));
+            }
+            (OnlineForceChannelKind::Ai, None) => {
+                set.analog_inputs.insert(cmd.channel_id, None);
+            }
+            (OnlineForceChannelKind::Do, Some(OnlineForceValue::Digital(v))) => {
+                set.digital_outputs.insert(cmd.channel_id, Some(*v));
+            }
+            (OnlineForceChannelKind::Do, None) => {
+                set.digital_outputs.insert(cmd.channel_id, None);
+            }
+            (OnlineForceChannelKind::Ao, Some(OnlineForceValue::Analog(v))) => {
+                set.analog_outputs.insert(cmd.channel_id, Some(*v));
+            }
+            (OnlineForceChannelKind::Ao, None) => {
+                set.analog_outputs.insert(cmd.channel_id, None);
+            }
+            _ => {
+                return Err(format!(
+                    "online-force value type mismatch at {}{}",
+                    cmd.channel_kind.short(),
+                    cmd.channel_id
+                ));
+            }
+        }
+    }
+
+    for (at_ms, set) in by_at {
+        scenario.forces.push(sim::ForceEvent { at_ms, set });
+    }
+    scenario.forces.sort_by_key(|event| event.at_ms);
+    Ok(())
+}
+
+fn default_online_force_audit_path(trace_out: &Path) -> PathBuf {
+    trace_out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join("online_force_audit.jsonl")
+}
+
+fn write_online_force_audit(path: &Path, entries: &[OnlineForceAuditEntry]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Failed to create online-force audit directory {}: {err}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
+
+    let file = fs::File::create(path).map_err(|err| {
+        format!(
+            "Failed to create online-force audit {}: {err}",
+            path.display()
+        )
+    })?;
+    let mut writer = std::io::BufWriter::new(file);
+    for entry in entries {
+        let line = serde_json::to_string(entry)
+            .map_err(|err| format!("Failed to serialize online-force audit entry: {err}"))?;
+        writer.write_all(line.as_bytes()).map_err(|err| {
+            format!(
+                "Failed to write online-force audit {}: {err}",
+                path.display()
+            )
+        })?;
+        writer.write_all(b"\n").map_err(|err| {
+            format!(
+                "Failed to write online-force audit {}: {err}",
+                path.display()
+            )
+        })?;
+    }
+    writer.flush().map_err(|err| {
+        format!(
+            "Failed to flush online-force audit {}: {err}",
+            path.display()
+        )
+    })
+}
+
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let Some(scenario_path) = args.next() else {
         return Err(format!(
@@ -2887,14 +3273,18 @@ fn run_sim_plc_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = format!(
+        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>]"
+    );
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>"
-        ));
+        return Err(usage);
     };
 
     let mut scenario_path: Option<PathBuf> = None;
     let mut out_path: Option<PathBuf> = None;
+    let mut enable_online_force_dev = false;
+    let mut online_force_script: Option<PathBuf> = None;
+    let mut online_force_audit_out: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--scenario" => {
@@ -2909,25 +3299,37 @@ fn run_sim_plc_subcommand(
                         "Missing value for --out <trace.jsonl>".to_string()
                     })?));
             }
+            "--enable-online-force-dev" => {
+                enable_online_force_dev = true;
+            }
+            "--online-force-script" => {
+                online_force_script = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --online-force-script <script.jsonl>".to_string()
+                })?));
+            }
+            "--online-force-audit-out" => {
+                online_force_audit_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --online-force-audit-out <audit.jsonl>".to_string()
+                })?));
+            }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for sim-plc: {other}")),
         }
     }
 
-    let scenario_path = scenario_path.ok_or_else(|| {
-        format!(
-            "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>"
-        )
-    })?;
-    let out_path = out_path.ok_or_else(|| {
-        format!(
-            "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>"
-        )
-    })?;
+    let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
+    let out_path = out_path.ok_or_else(|| usage.clone())?;
+
+    if (online_force_script.is_some() || online_force_audit_out.is_some())
+        && !enable_online_force_dev
+    {
+        return Err(
+            "online-force dev control plane is disabled by default; add --enable-online-force-dev to use --online-force-script/--online-force-audit-out"
+                .to_string(),
+        );
+    }
 
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -2943,7 +3345,29 @@ fn run_sim_plc_subcommand(
         resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
             format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "sim-plc", &e)
         })?;
-    let scenario = parse_scenario_yaml(&scenario_yaml)?;
+    let mut scenario = parse_scenario_yaml(&scenario_yaml)?;
+
+    let audit_path = if enable_online_force_dev {
+        Some(
+            online_force_audit_out
+                .clone()
+                .unwrap_or_else(|| default_online_force_audit_path(&out_path)),
+        )
+    } else {
+        None
+    };
+
+    let mut online_commands = Vec::new();
+    if let Some(script_path) = &online_force_script {
+        online_commands = load_online_force_script(script_path, scenario.tick_ms)?;
+        inject_online_force_commands(&mut scenario, &online_commands)?;
+    }
+
+    if let Some(path) = &audit_path {
+        let audit_entries = build_online_force_audit(&online_commands, scenario.tick_ms);
+        write_online_force_audit(path, &audit_entries)?;
+    }
+
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
 
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
@@ -2960,6 +3384,9 @@ fn run_sim_plc_subcommand(
     })?;
     fs::write(&out_path, run.trace.into_string())
         .map_err(|err| format!("Failed to write trace file {out_path:?}: {err}"))?;
+    if let Some(path) = audit_path {
+        eprintln!("sim-plc: online-force audit {}", path.display());
+    }
     Ok(())
 }
 
@@ -4683,7 +5110,7 @@ fn run_io_map_normalize_subcommand(
 }
 
 fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
-    use rust_plc::iec_address::{parse_iec_address, LogicalChannelKind};
+    use rust_plc::iec_address::{LogicalChannelKind, parse_iec_address};
     use toml::value::Table;
 
     let root = v
