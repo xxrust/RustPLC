@@ -1,0 +1,17 @@
+# Scenario template: nominal_cycle
+# Contract fields are defined by scenarios/templates/metadata.json
+
+seed: 100
+tick_ms: 10
+duration_ms: 1000
+inputs:
+  - at_ms: 0
+    set:
+      digital_inputs:
+        0: true
+  - at_ms: 50
+    set:
+      digital_inputs:
+        0: false
+forces: []
+faults: []

@@ -1681,7 +1681,9 @@ fn print_usage(program: &str) {
     eprintln!(
         "  {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>"
     );
-    eprintln!("  {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>");
+    eprintln!(
+        "  {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir> [--coverage-mode <pairwise|boundary-first|risk-first>] [--dry-run] [--template-library <metadata.json>]"
+    );
     eprintln!();
     eprintln!("Budget options (also configurable via env vars):");
     eprintln!("  --budget-max-actions-per-transition <n>");
@@ -2400,6 +2402,58 @@ fn scenario_gen_default_max_cases() -> usize {
     16
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScenarioCoverageMode {
+    Pairwise,
+    BoundaryFirst,
+    RiskFirst,
+}
+
+impl ScenarioCoverageMode {
+    fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "pairwise" => Ok(Self::Pairwise),
+            "boundary-first" => Ok(Self::BoundaryFirst),
+            "risk-first" => Ok(Self::RiskFirst),
+            other => Err(format!(
+                "Invalid --coverage-mode `{other}` (expected pairwise|boundary-first|risk-first)"
+            )),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Pairwise => "pairwise",
+            Self::BoundaryFirst => "boundary-first",
+            Self::RiskFirst => "risk-first",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScenarioGenCombo {
+    duration_ms: u64,
+    start_pulse_ms: u64,
+    sensor_window_ms: u64,
+    inject_sensor_stuck: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ScenarioTemplateLibrary {
+    schema_version: u32,
+    templates: Vec<ScenarioTemplateMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScenarioTemplateMeta {
+    id: String,
+    path: String,
+    kind: String,
+    description: String,
+    #[serde(default)]
+    parameters: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ScenarioGenCase {
     name: String,
@@ -2409,6 +2463,7 @@ struct ScenarioGenCase {
     start_pulse_ms: u64,
     sensor_window_ms: u64,
     inject_sensor_stuck: bool,
+    template_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2416,7 +2471,12 @@ struct ScenarioGenSummary {
     schema_version: u32,
     plc: String,
     config: String,
+    coverage_mode: String,
+    dry_run: bool,
+    template_library: String,
     count: usize,
+    #[serde(default)]
+    templates: Vec<ScenarioTemplateMeta>,
     cases: Vec<ScenarioGenCase>,
 }
 
@@ -2498,6 +2558,135 @@ fn dedup_bool_preserve_order_with_default(values: &[bool], default: &[bool]) -> 
     out
 }
 
+fn scenario_gen_default_template_library_path() -> PathBuf {
+    PathBuf::from("scenarios/templates/metadata.json")
+}
+
+fn load_scenario_template_library(path: &Path) -> Result<ScenarioTemplateLibrary, String> {
+    let body = fs::read_to_string(path)
+        .map_err(|err| format!("Failed to read template library {}: {err}", path.display()))?;
+    let lib: ScenarioTemplateLibrary = serde_json::from_str(&body)
+        .map_err(|err| format!("Failed to parse template library {}: {err}", path.display()))?;
+    if lib.schema_version != 1 {
+        return Err(format!(
+            "template library schema_version={} is unsupported (expected 1)",
+            lib.schema_version
+        ));
+    }
+    if lib.templates.is_empty() {
+        return Err(format!(
+            "template library {} has no templates",
+            path.display()
+        ));
+    }
+    Ok(lib)
+}
+
+fn select_template_id(combo: &ScenarioGenCombo, lib: &ScenarioTemplateLibrary) -> String {
+    let preferred_kind = if combo.inject_sensor_stuck {
+        "fault"
+    } else {
+        "nominal"
+    };
+    lib.templates
+        .iter()
+        .find(|tpl| tpl.kind.eq_ignore_ascii_case(preferred_kind))
+        .or_else(|| lib.templates.first())
+        .map(|tpl| tpl.id.clone())
+        .unwrap_or_else(|| "unassigned".to_string())
+}
+
+fn build_scenario_gen_combos(
+    durations: &[u64],
+    start_pulses: &[u64],
+    sensor_windows: &[u64],
+    fault_values: &[bool],
+    mode: ScenarioCoverageMode,
+) -> Vec<ScenarioGenCombo> {
+    let mut combos = Vec::<ScenarioGenCombo>::new();
+    for duration in durations {
+        for pulse in start_pulses {
+            for window in sensor_windows {
+                for inject_fault in fault_values {
+                    combos.push(ScenarioGenCombo {
+                        duration_ms: *duration,
+                        start_pulse_ms: *pulse,
+                        sensor_window_ms: *window,
+                        inject_sensor_stuck: *inject_fault,
+                    });
+                }
+            }
+        }
+    }
+
+    let duration_min = durations.iter().copied().min().unwrap_or(0);
+    let duration_max = durations.iter().copied().max().unwrap_or(0);
+    let pulse_min = start_pulses.iter().copied().min().unwrap_or(0);
+    let pulse_max = start_pulses.iter().copied().max().unwrap_or(0);
+    let window_min = sensor_windows.iter().copied().min().unwrap_or(0);
+    let window_max = sensor_windows.iter().copied().max().unwrap_or(0);
+
+    let boundary_score = |combo: &ScenarioGenCombo| -> u32 {
+        let mut score = 0u32;
+        if combo.duration_ms == duration_min || combo.duration_ms == duration_max {
+            score += 2;
+        }
+        if combo.start_pulse_ms == pulse_min || combo.start_pulse_ms == pulse_max {
+            score += 2;
+        }
+        if combo.sensor_window_ms == window_min || combo.sensor_window_ms == window_max {
+            score += 2;
+        }
+        if combo.inject_sensor_stuck {
+            score += 1;
+        }
+        score
+    };
+
+    let risk_score = |combo: &ScenarioGenCombo| -> u32 {
+        let mut score = 0u32;
+        if combo.inject_sensor_stuck {
+            score += 100;
+        }
+        if combo.duration_ms == duration_min {
+            score += 30;
+        }
+        if combo.start_pulse_ms == pulse_max {
+            score += 20;
+        }
+        if combo.sensor_window_ms == window_max {
+            score += 10;
+        }
+        score
+    };
+
+    match mode {
+        ScenarioCoverageMode::Pairwise => {}
+        ScenarioCoverageMode::BoundaryFirst => {
+            combos.sort_by(|a, b| {
+                boundary_score(b)
+                    .cmp(&boundary_score(a))
+                    .then_with(|| a.duration_ms.cmp(&b.duration_ms))
+                    .then_with(|| a.start_pulse_ms.cmp(&b.start_pulse_ms))
+                    .then_with(|| a.sensor_window_ms.cmp(&b.sensor_window_ms))
+                    .then_with(|| b.inject_sensor_stuck.cmp(&a.inject_sensor_stuck))
+            });
+        }
+        ScenarioCoverageMode::RiskFirst => {
+            combos.sort_by(|a, b| {
+                risk_score(b)
+                    .cmp(&risk_score(a))
+                    .then_with(|| a.duration_ms.cmp(&b.duration_ms))
+                    .then_with(|| b.inject_sensor_stuck.cmp(&a.inject_sensor_stuck))
+                    .then_with(|| b.start_pulse_ms.cmp(&a.start_pulse_ms))
+                    .then_with(|| b.sensor_window_ms.cmp(&a.sensor_window_ms))
+            });
+        }
+    }
+
+    combos
+}
+
 fn round_up_to_tick(ms: u64, tick_ms: u64) -> u64 {
     if tick_ms == 0 {
         return ms;
@@ -2540,9 +2729,15 @@ fn run_scenario_gen_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = format!(
+        "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir> [--coverage-mode <pairwise|boundary-first|risk-first>] [--dry-run] [--template-library <metadata.json>]"
+    );
     let mut plc_path: Option<PathBuf> = None;
     let mut config_path: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
+    let mut coverage_mode = ScenarioCoverageMode::Pairwise;
+    let mut dry_run = false;
+    let mut template_library_path: Option<PathBuf> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -2564,30 +2759,33 @@ fn run_scenario_gen_subcommand(
                         "Missing value for --out-dir <dir>".to_string()
                     })?));
             }
+            "--coverage-mode" => {
+                let raw = args.next().ok_or_else(|| {
+                    "Missing value for --coverage-mode <pairwise|boundary-first|risk-first>"
+                        .to_string()
+                })?;
+                coverage_mode = ScenarioCoverageMode::parse(&raw)?;
+            }
+            "--dry-run" => {
+                dry_run = true;
+            }
+            "--template-library" => {
+                template_library_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --template-library <metadata.json>".to_string()
+                })?));
+            }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for scenario-gen: {other}")),
         }
     }
 
-    let plc_path = plc_path.ok_or_else(|| {
-        format!(
-            "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>"
-        )
-    })?;
-    let config_path = config_path.ok_or_else(|| {
-        format!(
-            "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>"
-        )
-    })?;
-    let out_dir = out_dir.ok_or_else(|| {
-        format!(
-            "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>"
-        )
-    })?;
+    let plc_path = plc_path.ok_or_else(|| usage.clone())?;
+    let config_path = config_path.ok_or_else(|| usage.clone())?;
+    let out_dir = out_dir.ok_or_else(|| usage.clone())?;
+    let template_library_path =
+        template_library_path.unwrap_or_else(scenario_gen_default_template_library_path);
 
     let plc_source = fs::read_to_string(&plc_path)
         .map_err(|err| format!("Failed to read {}: {err}", plc_path.display()))?;
@@ -2600,6 +2798,7 @@ fn run_scenario_gen_subcommand(
         )
     })?;
     config.validate()?;
+    let template_library = load_scenario_template_library(&template_library_path)?;
 
     fs::create_dir_all(&out_dir).map_err(|err| {
         format!(
@@ -2616,147 +2815,150 @@ fn run_scenario_gen_subcommand(
     let start_pulses = config.start_pulse_values();
     let sensor_windows = config.sensor_window_values();
     let fault_values = config.fault_values();
+    let combos = build_scenario_gen_combos(
+        &durations,
+        &start_pulses,
+        &sensor_windows,
+        &fault_values,
+        coverage_mode,
+    );
 
     let mut cases = Vec::<ScenarioGenCase>::new();
-    let mut case_idx = 0usize;
-    'combos: for duration in durations {
-        for pulse in &start_pulses {
-            for window in &sensor_windows {
-                for inject_fault in &fault_values {
-                    if case_idx >= config.max_cases {
-                        break 'combos;
+    for (case_idx, combo) in combos.into_iter().take(config.max_cases).enumerate() {
+        let duration = combo.duration_ms;
+        let pulse = combo.start_pulse_ms;
+        let window = combo.sensor_window_ms;
+        let inject_fault = combo.inject_sensor_stuck;
+
+        let mut inputs = Vec::<sim::InputEvent>::new();
+        let primary_start = start_id.or_else(|| hints.digital_ids.first().copied());
+        if let Some(start) = primary_start {
+            let mut set = sim::InputSet::default();
+            set.digital_inputs.insert(start, true);
+            inputs.push(sim::InputEvent { at_ms: 0, set });
+
+            let mut release_ms = round_up_to_tick(pulse.max(config.tick_ms), config.tick_ms);
+            if release_ms >= duration {
+                let latest = duration.saturating_sub(config.tick_ms);
+                release_ms = round_down_to_tick(latest, config.tick_ms);
+            }
+            if release_ms > 0 && release_ms < duration {
+                let mut set = sim::InputSet::default();
+                set.digital_inputs.insert(start, false);
+                inputs.push(sim::InputEvent {
+                    at_ms: release_ms,
+                    set,
+                });
+            }
+        }
+
+        let sensor_spacing = round_up_to_tick(window.max(config.tick_ms), config.tick_ms);
+        if !sensor_ids.is_empty() {
+            let sensor_targets = sensor_ids
+                .iter()
+                .copied()
+                .filter(|id| Some(*id) != start_id)
+                .take(8)
+                .collect::<Vec<_>>();
+            if !sensor_targets.is_empty() {
+                let mut baseline = sim::InputSet::default();
+                for id in &sensor_targets {
+                    baseline.digital_inputs.insert(*id, false);
+                }
+                inputs.push(sim::InputEvent {
+                    at_ms: 0,
+                    set: baseline,
+                });
+
+                let sensor_start =
+                    round_up_to_tick(pulse.saturating_add(sensor_spacing), config.tick_ms);
+                let mut at_ms = sensor_start.max(config.tick_ms);
+                for id in sensor_targets {
+                    if at_ms >= duration {
+                        break;
                     }
-
-                    let mut inputs = Vec::<sim::InputEvent>::new();
-                    let primary_start = start_id.or_else(|| hints.digital_ids.first().copied());
-                    if let Some(start) = primary_start {
-                        let mut set = sim::InputSet::default();
-                        set.digital_inputs.insert(start, true);
-                        inputs.push(sim::InputEvent { at_ms: 0, set });
-
-                        let mut release_ms =
-                            round_up_to_tick((*pulse).max(config.tick_ms), config.tick_ms);
-                        if release_ms >= duration {
-                            let latest = duration.saturating_sub(config.tick_ms);
-                            release_ms = round_down_to_tick(latest, config.tick_ms);
-                        }
-                        if release_ms > 0 && release_ms < duration {
-                            let mut set = sim::InputSet::default();
-                            set.digital_inputs.insert(start, false);
-                            inputs.push(sim::InputEvent {
-                                at_ms: release_ms,
-                                set,
-                            });
-                        }
-                    }
-
-                    let sensor_spacing =
-                        round_up_to_tick((*window).max(config.tick_ms), config.tick_ms);
-                    if !sensor_ids.is_empty() {
-                        let sensor_targets = sensor_ids
-                            .iter()
-                            .copied()
-                            .filter(|id| Some(*id) != start_id)
-                            .take(8)
-                            .collect::<Vec<_>>();
-                        if !sensor_targets.is_empty() {
-                            let mut baseline = sim::InputSet::default();
-                            for id in &sensor_targets {
-                                baseline.digital_inputs.insert(*id, false);
-                            }
-                            inputs.push(sim::InputEvent {
-                                at_ms: 0,
-                                set: baseline,
-                            });
-
-                            let sensor_start = round_up_to_tick(
-                                (*pulse).saturating_add(sensor_spacing),
-                                config.tick_ms,
-                            );
-                            let mut at_ms = sensor_start.max(config.tick_ms);
-                            for id in sensor_targets {
-                                if at_ms >= duration {
-                                    break;
-                                }
-                                let mut set = sim::InputSet::default();
-                                set.digital_inputs.insert(id, true);
-                                inputs.push(sim::InputEvent { at_ms, set });
-                                at_ms = at_ms.saturating_add(sensor_spacing);
-                            }
-                        }
-                    }
-
-                    inputs.sort_by_key(|e| e.at_ms);
-
-                    let faults = if *inject_fault {
-                        let target = sensor_ids
-                            .first()
-                            .copied()
-                            .or(start_id)
-                            .or_else(|| hints.digital_ids.first().copied())
-                            .unwrap_or(0);
-                        let latest = duration.saturating_sub(config.tick_ms);
-                        let mut at_ms = round_up_to_tick(200, config.tick_ms);
-                        if at_ms >= duration {
-                            at_ms = round_down_to_tick(latest, config.tick_ms);
-                        }
-                        vec![sim::FaultEvent {
-                            sensor_stuck: sim::SensorStuckFault {
-                                at_ms,
-                                target,
-                                value: true,
-                            },
-                        }]
-                    } else {
-                        Vec::new()
-                    };
-
-                    let scenario = sim::Scenario {
-                        seed: Some(seed_base + case_idx as u64),
-                        tick_ms: config.tick_ms,
-                        duration_ms: duration,
-                        inputs,
-                        digital_bursts: Vec::new(),
-                        faults,
-                        forces: Vec::new(),
-                    };
-                    let mut io = sim::SimIo::new(32, 32, 8, 8);
-                    scenario.apply_to_simio(&mut io).map_err(|e| {
-                        format!(
-                            "Generated scenario failed validation (duration_ms={duration}, start_pulse_ms={pulse}, sensor_window_ms={window}, inject_sensor_stuck={inject_fault}): {e}"
-                        )
-                    })?;
-
-                    let name = format!("scenario_{:04}.yaml", case_idx + 1);
-                    let path = out_dir.join(&name);
-                    let mut yaml = serde_yaml::to_string(&scenario)
-                        .map_err(|err| format!("Failed to serialize generated scenario: {err}"))?;
-                    if !yaml.ends_with('\n') {
-                        yaml.push('\n');
-                    }
-                    fs::write(&path, yaml)
-                        .map_err(|err| format!("Failed to write {}: {err}", path.display()))?;
-
-                    cases.push(ScenarioGenCase {
-                        name: format!("case_{:04}", case_idx + 1),
-                        path: name,
-                        seed: scenario.seed,
-                        duration_ms: duration,
-                        start_pulse_ms: *pulse,
-                        sensor_window_ms: *window,
-                        inject_sensor_stuck: *inject_fault,
-                    });
-                    case_idx += 1;
+                    let mut set = sim::InputSet::default();
+                    set.digital_inputs.insert(id, true);
+                    inputs.push(sim::InputEvent { at_ms, set });
+                    at_ms = at_ms.saturating_add(sensor_spacing);
                 }
             }
         }
+
+        inputs.sort_by_key(|e| e.at_ms);
+
+        let faults = if inject_fault {
+            let target = sensor_ids
+                .first()
+                .copied()
+                .or(start_id)
+                .or_else(|| hints.digital_ids.first().copied())
+                .unwrap_or(0);
+            let latest = duration.saturating_sub(config.tick_ms);
+            let mut at_ms = round_up_to_tick(200, config.tick_ms);
+            if at_ms >= duration {
+                at_ms = round_down_to_tick(latest, config.tick_ms);
+            }
+            vec![sim::FaultEvent {
+                sensor_stuck: sim::SensorStuckFault {
+                    at_ms,
+                    target,
+                    value: true,
+                },
+            }]
+        } else {
+            Vec::new()
+        };
+
+        let scenario = sim::Scenario {
+            seed: Some(seed_base + case_idx as u64),
+            tick_ms: config.tick_ms,
+            duration_ms: duration,
+            inputs,
+            digital_bursts: Vec::new(),
+            faults,
+            forces: Vec::new(),
+        };
+        let mut io = sim::SimIo::new(32, 32, 8, 8);
+        scenario.apply_to_simio(&mut io).map_err(|e| {
+            format!(
+                "Generated scenario failed validation (duration_ms={duration}, start_pulse_ms={pulse}, sensor_window_ms={window}, inject_sensor_stuck={inject_fault}): {e}"
+            )
+        })?;
+
+        let name = format!("scenario_{:04}.yaml", case_idx + 1);
+        let path = out_dir.join(&name);
+        if !dry_run {
+            let mut yaml = serde_yaml::to_string(&scenario)
+                .map_err(|err| format!("Failed to serialize generated scenario: {err}"))?;
+            if !yaml.ends_with('\n') {
+                yaml.push('\n');
+            }
+            fs::write(&path, yaml)
+                .map_err(|err| format!("Failed to write {}: {err}", path.display()))?;
+        }
+
+        cases.push(ScenarioGenCase {
+            name: format!("case_{:04}", case_idx + 1),
+            path: name,
+            seed: scenario.seed,
+            duration_ms: duration,
+            start_pulse_ms: pulse,
+            sensor_window_ms: window,
+            inject_sensor_stuck: inject_fault,
+            template_id: select_template_id(&combo, &template_library),
+        });
     }
 
     let summary = ScenarioGenSummary {
         schema_version: 1,
         plc: display_path_relative_to_cwd(&plc_path),
         config: display_path_relative_to_cwd(&config_path),
+        coverage_mode: coverage_mode.as_str().to_string(),
+        dry_run,
+        template_library: display_path_relative_to_cwd(&template_library_path),
         count: cases.len(),
+        templates: template_library.templates.clone(),
         cases,
     };
     let summary_path = out_dir.join("summary.json");
@@ -2766,12 +2968,21 @@ fn run_scenario_gen_subcommand(
     fs::write(&summary_path, json)
         .map_err(|err| format!("Failed to write {}: {err}", summary_path.display()))?;
 
-    eprintln!(
-        "scenario-gen: wrote {} scenarios under {} (summary: {})",
-        summary.count,
-        out_dir.display(),
-        summary_path.display()
-    );
+    if dry_run {
+        eprintln!(
+            "scenario-gen: dry-run planned {} scenarios under {} (summary: {})",
+            summary.count,
+            out_dir.display(),
+            summary_path.display()
+        );
+    } else {
+        eprintln!(
+            "scenario-gen: wrote {} scenarios under {} (summary: {})",
+            summary.count,
+            out_dir.display(),
+            summary_path.display()
+        );
+    }
     Ok(())
 }
 
@@ -3890,6 +4101,10 @@ fn run_sim_regress_subcommand(
     )
     .map_err(|e| format!("sim-regress failed: {e}"))?;
     write_sim_regress_summary(&summary_out, &summary)?;
+    if minimize_failure {
+        let feedback_path = artifacts_dir.join("feedback.json");
+        write_sim_regress_feedback(&feedback_path, &summary)?;
+    }
     Ok(())
 }
 
@@ -5179,6 +5394,93 @@ fn write_sim_regress_summary(path: &Path, summary: &SimRegressSummary) -> Result
     json.push('\n');
     fs::write(path, json).map_err(|err| format!("Failed to write summary file {path:?}: {err}"))?;
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct SimRegressFeedbackFile {
+    schema_version: u32,
+    total_failures: usize,
+    feedback: Vec<SimRegressFeedbackEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct SimRegressFeedbackEntry {
+    plc: String,
+    scenario: String,
+    failure_kind: String,
+    template_hint: String,
+    parameter_hints: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    minimized_scenario_path: Option<String>,
+}
+
+fn feedback_template_hint_for_failure_kind(kind: &str) -> &'static str {
+    match kind {
+        "timeout" => "fault_sensor_stuck",
+        "compile_error" | "scenario_error" => "nominal_cycle",
+        _ => "risk_gate_probe",
+    }
+}
+
+fn feedback_parameter_hints_for_failure(
+    failure: &rust_plc::sim_regress::SimRegressFailure,
+) -> Vec<String> {
+    let mut hints = Vec::<String>::new();
+    match failure.failure.kind.as_str() {
+        "timeout" => {
+            hints.push("increase duration_ms to keep timeout windows observable".to_string());
+            hints.push(
+                "tune start_pulse_ms to align start signal release with task waits".to_string(),
+            );
+            hints.push("adjust sensor_window_ms to control sensor-edge spacing".to_string());
+        }
+        "scenario_error" => {
+            hints.push(
+                "run scenario-validate and fix mapping/tick alignment issues first".to_string(),
+            );
+        }
+        "compile_error" => {
+            hints
+                .push("fix PLC semantic/verification errors before scenario expansion".to_string());
+        }
+        _ => {
+            hints.push(
+                "re-run with --minimize-failure and inspect minimized_scenario.yaml".to_string(),
+            );
+        }
+    }
+    if let Some(mini) = &failure.minimization {
+        hints.push(format!(
+            "duration_ms near {} reproduces this failure signature with lower noise",
+            mini.minimized_duration_ms
+        ));
+    }
+    hints
+}
+
+fn write_sim_regress_feedback(path: &Path, summary: &SimRegressSummary) -> Result<(), String> {
+    let feedback = summary
+        .failures
+        .iter()
+        .map(|failure| SimRegressFeedbackEntry {
+            plc: failure.plc.clone(),
+            scenario: failure.scenario.clone(),
+            failure_kind: failure.failure.kind.clone(),
+            template_hint: feedback_template_hint_for_failure_kind(&failure.failure.kind)
+                .to_string(),
+            parameter_hints: feedback_parameter_hints_for_failure(failure),
+            minimized_scenario_path: failure.minimized_scenario_path.clone(),
+        })
+        .collect::<Vec<_>>();
+    let file = SimRegressFeedbackFile {
+        schema_version: 1,
+        total_failures: summary.failures.len(),
+        feedback,
+    };
+    let mut json = serde_json::to_string_pretty(&file)
+        .map_err(|err| format!("Failed to serialize feedback JSON: {err}"))?;
+    json.push('\n');
+    fs::write(path, json).map_err(|err| format!("Failed to write feedback file {path:?}: {err}"))
 }
 
 fn run_flash_rp2040_subcommand(

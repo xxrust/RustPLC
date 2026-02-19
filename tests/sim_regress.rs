@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 const PLC_FIXTURE: &str = r#"
 [topology]
@@ -368,5 +369,75 @@ hold:
     assert!(
         minimized_yaml.contains("Failure signature:"),
         "minimized scenario should include failure signature"
+    );
+}
+
+#[test]
+fn sim_regress_cli_emits_feedback_json_when_minimize_failure_is_enabled() {
+    let base = std::env::temp_dir().join(format!(
+        "rust_plc_sim_regress_feedback_test_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock works")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&base).expect("create temp dir");
+
+    let plc_dir = base.join("plcs");
+    let scenario_dir = base.join("scenarios");
+    let artifacts_dir = base.join("artifacts");
+    fs::create_dir_all(&plc_dir).unwrap();
+    fs::create_dir_all(&scenario_dir).unwrap();
+
+    fs::write(plc_dir.join("fixture.plc"), PLC_FIXTURE).expect("write plc");
+    fs::write(
+        scenario_dir.join("fail.yaml"),
+        "tick_ms: 10\nduration_ms: 200\n",
+    )
+    .expect("write fail scenario");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("sim-regress")
+        .arg("--plc-dir")
+        .arg(&plc_dir)
+        .arg("--scenario-dir")
+        .arg(&scenario_dir)
+        .arg("--artifacts-dir")
+        .arg(&artifacts_dir)
+        .arg("--minimize-failure")
+        .output()
+        .expect("run sim-regress cli");
+    assert!(
+        output.status.success(),
+        "sim-regress cli should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let feedback_path = artifacts_dir.join("feedback.json");
+    assert!(feedback_path.exists(), "feedback.json should be emitted");
+    let feedback: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(feedback_path).expect("read feedback json"))
+            .expect("feedback json");
+    assert_eq!(feedback["schema_version"], 1);
+    assert_eq!(feedback["total_failures"].as_u64(), Some(1));
+    assert!(
+        feedback["feedback"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(|first| first.get("template_hint"))
+            .and_then(|v| v.as_str())
+            .is_some(),
+        "feedback entry should include template_hint"
+    );
+    assert!(
+        feedback["feedback"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(|first| first.get("parameter_hints"))
+            .and_then(|v| v.as_array())
+            .map(|hints| !hints.is_empty())
+            == Some(true),
+        "feedback entry should include parameter_hints"
     );
 }

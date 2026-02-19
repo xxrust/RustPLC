@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "templates": [
+    {
+      "id": "nominal_cycle",
+      "path": "scenarios/templates/nominal_cycle.yaml",
+      "kind": "nominal",
+      "description": "Nominal startup + sequential sensor progression template.",
+      "parameters": ["duration_ms", "start_pulse_ms", "sensor_window_ms"]
+    },
+    {
+      "id": "fault_sensor_stuck",
+      "path": "scenarios/templates/fault_sensor_stuck.yaml",
+      "kind": "fault",
+      "description": "Injects representative sensor_stuck faults for timeout/recovery coverage.",
+      "parameters": ["duration_ms", "sensor_window_ms", "inject_sensor_stuck"]
+    }
+  ]
+}

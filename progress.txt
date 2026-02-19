@@ -1715,3 +1715,48 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
   - Useful context (e.g., "the evaluation panel is in component X")
     - `sim-plc` now owns both online-force and retain restoration paths, so commissioning/debug startup semantics are concentrated in one deterministic entrypoint.
 ---
+## [2026-02-19 10:23:43 CST] - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added project-level scenario template library assets:
+    - `scenarios/templates/metadata.json` (schema contract)
+    - `scenarios/templates/nominal_cycle.yaml`
+    - `scenarios/templates/fault_sensor_stuck.yaml`
+  - Enhanced `scenario-gen` with coverage strategies:
+    - `--coverage-mode pairwise|boundary-first|risk-first`
+    - deterministic ordering rules per mode
+  - Added `--dry-run` mode to `scenario-gen`:
+    - emits `summary.json` only
+    - does not write `scenario_*.yaml`
+  - Added `--template-library <metadata.json>` to bind generation with template metadata.
+  - Extended `summary.json` contract with:
+    - `coverage_mode`
+    - `dry_run`
+    - `template_library`
+    - `templates[]`
+    - `cases[].template_id`
+  - Added `feedback.json` emission for `sim-regress --minimize-failure` with structured template/parameter hints.
+  - Added docs and wiki describing new contracts and old/new output format delta.
+  - Added deterministic tests for coverage mode behavior, dry-run contract, and feedback schema.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --workspace`
+- Files changed
+  - `src/main.rs`
+  - `tests/scenario_gen.rs`
+  - `tests/sim_regress.rs`
+  - `scenarios/templates/metadata.json`
+  - `scenarios/templates/nominal_cycle.yaml`
+  - `scenarios/templates/fault_sensor_stuck.yaml`
+  - `docs/scenario_assetization.md`
+  - `docs/wiki/Scenario-Assetization-Coverage-Feedback.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `summary.json` is the right extension seam for scenario-gen evolution; downstream automation already depends on it and tolerates additive fields.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - When adding generation coverage modes, keep tie-breakers deterministic; otherwise scenario artifacts become flaky in CI.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `feedback.json` is now the compact bridge from minimized failures back to template choice + parameter tuning in the next generation cycle.
+---
