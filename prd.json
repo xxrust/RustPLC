@@ -1,152 +1,278 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/component-library-fault-model",
-  "description": "构建元件库与元件级异常模型（后端优先）：首批支持气缸/传感器/开关/步进电机，接入 DSL/场景解析与仿真最小闭环，并移除旧 faults/forces 入口。",
+  "branchName": "ralph/rustplc-web-idde",
+  "description": "RustPLC Web 集成开发与诊断环境（IDDE）：以拓扑画布为核心，打通拓扑/场景编辑、运行门禁、Tick 回放、告警诊断与审计闭环。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "定义元件库核心 Schema",
-      "description": "作为后端开发者，我希望有统一元件库 Schema，这样不同元件可以用一致方式被解析和校验。",
+      "title": "建立 Web BFF 基础服务与静态资源托管",
+      "description": "作为前后端集成开发者，我希望有统一的 web-server 入口服务，以便 Web UI 可以通过稳定 HTTP 接口访问 RustPLC 工件。",
       "acceptanceCriteria": [
-        "新增元件库 Schema（含 schema_version）",
-        "首批元件类型包含 cylinder、sensor、switch、stepper_pd",
-        "每个元件包含基础字段 id、name、type、params",
-        "校验规则可返回稳定错误码（字段缺失、类型错误、重复 ID）",
+        "新增 web-server 可执行程序并纳入 workspace",
+        "支持 /api 路由与 web-ui/dist 静态资源托管",
+        "支持 /artifacts 路由访问 out 目录工件",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "已新增 component_library 核心 Schema + 稳定错误码校验与单元测试。"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "拓扑文件接入元件库并落盘",
-      "description": "作为工程师，我希望拓扑文件可直接描述元件实例与连接关系，这样模型可持久化并用于后续运行。",
+      "title": "实现拓扑与场景的读写与校验 API",
+      "description": "作为 UI 工程师，我希望能读取、保存并校验拓扑和场景文件，以便在画布和编辑器里形成完整编辑闭环。",
       "acceptanceCriteria": [
-        "拓扑文件新增 component_library/components/connections 结构（或等效结构）",
-        "支持元件实例化与连接关系校验（端口存在、方向合法、关键连接不悬空）",
-        "保存后的拓扑可被 CLI 重新加载且解析结果一致",
-        "版本不匹配时返回明确错误信息与错误码",
+        "实现 GET/PUT /api/topology/:id 与 POST /api/topology/validate",
+        "实现 GET/PUT /api/scenario/:id 与 POST /api/scenario/validate",
+        "校验失败返回稳定错误码列表（code/path/message）",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "已接入 component_topology 结构与 CLI 校验命令，支持连接关系/端口方向/必需输入连接校验与 roundtrip 持久化。"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "定义元件专属异常模型",
-      "description": "作为调试工程师，我希望每类元件有自己的异常类型，这样故障注入更贴近真实问题。",
+      "title": "实现运行触发与运行记录 API",
+      "description": "作为操作员，我希望从 Web 直接触发运行并查看状态，以便追踪每次执行结果与工件。",
       "acceptanceCriteria": [
-        "新增统一异常容器（at_ms、duration_ms、target_component_id、fault_kind）",
-        "气缸支持 jammed、motion_timeout",
-        "传感器支持 stuck_on、stuck_off、chatter",
-        "开关支持 stuck_on、stuck_off",
-        "步进电机支持 lost_step、stall、direction_reversed",
-        "异常参数具备范围校验并返回稳定错误码",
+        "实现 POST /api/run/no-board-gate 触发运行并返回 run_id",
+        "实现 GET /api/run/:id/status 与 GET /api/run/list",
+        "运行记录包含状态、触发人、触发时间、failure_summary、artifacts",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "已定义元件专属 fault_kind 与参数校验规则，含稳定错误码与单元测试。"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "解析器切换到新模型并移除旧接口",
-      "description": "作为系统维护者，我希望解析器仅接受新模型，避免双轨长期并存造成代码复杂度上升。",
+      "title": "实现 Trace/Range/Keypoints 数据接口",
+      "description": "作为回放使用者，我希望按需读取全量与区间 Tick 数据，并获取关键点列表，以便快速定位异常时刻。",
       "acceptanceCriteria": [
-        "解析器默认走新元件库与新异常模型路径",
-        "遇到旧字段（旧 faults.sensor_stuck/旧 forces）时明确报错并提示迁移",
-        "CLI 帮助与示例更新为新格式",
-        "报错信息包含旧格式到新格式的最小迁移建议",
+        "实现 GET /api/trace/:run_id 返回回放结构",
+        "实现 GET /api/trace/:run_id/range 支持 start/end 区间",
+        "实现 GET /api/trace/:run_id/keypoints 返回关键点列表",
+        "支持 component_trace 到回放结构的适配转换",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "已新增 component-scenario 解析器与 CLI（component-scenario-validate），默认采用新模型；检测 legacy faults/forces 时返回 CSCN-MIG-* 并附迁移提示。"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "气缸/传感器/开关仿真状态机最小闭环",
-      "description": "作为仿真使用者，我希望这些元件在 tick 推进中有可预测状态变化，这样异常注入结果可验证。",
+      "title": "实现诊断与告警接口闭环",
+      "description": "作为排障人员，我希望通过统一 API 查看诊断与告警并执行 Ack，以便形成可追踪的告警处理流程。",
       "acceptanceCriteria": [
-        "气缸状态至少支持伸出、回缩、运动中",
-        "传感器状态可由元件逻辑或异常注入驱动",
-        "开关状态可作为输入源参与仿真",
-        "tick 回放下状态变化具有确定性",
+        "实现 GET /api/diagnosis/:run_id 与 GET /api/timing/:run_id",
+        "实现 GET /api/alarms 与 POST /api/alarms/:id/ack",
+        "告警列表支持 severity/limit 过滤",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "已实现气缸/传感器/开关最小状态机闭环（含 tick 确定性）并通过 unit + integration tests。"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "步进电机（脉冲/方向）最小仿真模型",
-      "description": "作为运动调试工程师，我希望步进电机具备最小可用模型，这样可以在离线阶段验证位置相关逻辑。",
+      "title": "前端三栏工作台与主题变量落地",
+      "description": "作为 UI 用户，我希望看到三栏式工作台与统一主题变量，以便在高信息密度场景下稳定操作。",
       "acceptanceCriteria": [
-        "步进电机支持 pulse/dir/enable 输入语义",
-        "仿真输出位置（step 计数）与方向",
-        "lost_step、stall、direction_reversed 异常会影响位置演化",
-        "异常启停后行为可按定义恢复",
+        "实现顶栏/左栏/中央画布/右侧属性/底部状态栏布局",
+        "颜色与字号使用 CSS 变量与统一排版规范",
+        "支持标签页工作区与栏位折叠",
         "Typecheck passes",
-        "Tests pass"
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "已实现 stepper_pd 的 pulse/direction/enable 仿真与 lost_step/stall/direction_reversed 行为影响。"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "异常注入执行引擎（统一调度）",
-      "description": "作为平台开发者，我希望有统一异常调度器，这样不同元件异常都能按同一规则生效。",
+      "title": "建立 Zustand 全局状态与未保存标记机制",
+      "description": "作为前端开发者，我希望统一管理节点、连线、选中状态和脏数据标记，以便页面联动和拦截逻辑可维护。",
       "acceptanceCriteria": [
-        "异常按 at_ms 与 tick 对齐执行",
-        "支持持续时间窗口与自动失效",
-        "同 tick 多异常冲突有确定优先级且文档化",
-        "注入事件写入 machine-readable 审计工件",
+        "store 至少包含 nodes/edges/selectedNodeId/dirtyFlag",
+        "onSelectionChange 可驱动 selectedNodeId 更新",
+        "未保存状态可驱动标签页与保存按钮高亮",
         "Typecheck passes",
-        "Tests pass"
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "已实现统一异常调度（按 tick 对齐、duration 自动失效、固定优先级）并输出 machine-readable fault_audit.jsonl。"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "诊断输出接入元件异常上下文",
-      "description": "作为排障人员，我希望诊断结果能看到异常注入上下文，这样更快判断是否为注入导致。",
+      "title": "实现 React Flow 自定义节点渲染体系",
+      "description": "作为工艺工程师，我希望在画布上看到气缸/传感器/开关/步进的专属图形与状态，以便快速理解系统行为。",
       "acceptanceCriteria": [
-        "诊断输出可关联组件 ID、异常类型、时间窗等注入上下文",
-        "保持现有核心诊断字段稳定（issue_code 等）",
-        "证据列表可区分程序行为证据与注入证据",
+        "实现 nodeTypes: cylinder/sensor/switch/stepper_pd/generic",
+        "节点图形由 data 状态驱动并实时更新",
+        "支持 stepper 别名兼容并在 UI 统一映射 stepper_pd",
         "Typecheck passes",
-        "Tests pass"
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "已新增 component_diagnostics，诊断结果关联 component_id/fault_kind/time window，且证据区分 fault_injection 与 program_behavior。"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "补齐文档与迁移说明",
-      "description": "作为项目维护者，我希望有明确文档说明新旧差异，这样团队可快速切换并避免误用。",
+      "title": "实现节点内嵌交互与注入入口",
+      "description": "作为调试工程师，我希望在节点上直接注入输入/故障，以便离线快速验证联动逻辑。",
       "acceptanceCriteria": [
-        "在 docs/ 新增元件库与异常模型说明文档",
-        "明确列出旧格式与新格式差异（字段级别）",
-        "提供至少 2 个完整示例（正常 + 异常）",
-        "提供迁移步骤与常见报错对照表",
+        "传感器/开关节点支持 nodrag 内嵌交互控件",
+        "注入操作接入 API 并记录审计字段（操作者/时间/目标）",
+        "故障菜单显示已支持/近似/待实现能力标识",
         "Typecheck passes",
-        "Tests pass"
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "已补齐 docs/component_library_fault_model_migration.md + wiki + runnable examples，并增加文档示例回归测试。"
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "实现右侧上下文参数面板与双向绑定",
+      "description": "作为设计人员，我希望选中不同节点时看到对应参数编辑器，以便完成 Blender 风格参数编辑体验。",
+      "acceptanceCriteria": [
+        "PropertiesPanel 按节点 type 分发专属编辑器",
+        "无选中节点时显示画布级信息（版本/约束状态）",
+        "参数修改实时回写节点 data 并立即反映图形",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "实现拓扑编辑规则与评审状态机",
+      "description": "作为审核员，我希望拓扑编辑具备即时校验和状态机约束，以便降低错误连线与越权修改风险。",
+      "acceptanceCriteria": [
+        "连线时即时校验方向、端口类型、关键输入悬空",
+        "支持 Draft/In Review/Approved/Locked 状态流转",
+        "Locked 状态下画布只读且需新建版本再编辑",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "实现场景编辑页与时间轴可视化",
+      "description": "作为调试工程师，我希望编辑场景并看到事件分布时间轴，以便快速检查 tick/duration/注入是否合理。",
+      "acceptanceCriteria": [
+        "支持 switch_events/sensor_events/component_faults 编辑",
+        "支持场景校验结果显示（含错误码）",
+        "时间轴可视化展示输入与故障事件",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "实现运行页（触发、列表、详情、工件链接）",
+      "description": "作为操作员，我希望在运行页发起任务并查看结果与工件，以便完成从触发到定位的闭环。",
+      "acceptanceCriteria": [
+        "支持触发 component-sim 与 no-board-gate",
+        "支持运行列表轮询刷新与状态标签展示",
+        "详情页展示 trace/diff/timing/diagnosis/keypoints 链接",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "实现 Tick 回放与关键点跳转联动",
+      "description": "作为排障工程师，我希望拖动 Tick 和关键点跳转时画布与侧栏同步刷新，以便快速定位异常。",
+      "acceptanceCriteria": [
+        "支持播放/暂停/倍速/逐帧/滑块拖动",
+        "支持读取 keypoints 并实现上一个/下一个关键点跳转",
+        "支持组件视图与 IO 视图按数据源自动切换",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "实现告警与诊断中心交互",
+      "description": "作为非专业操作员，我希望在告警中心看到可读诊断并跳转证据，以便更快处理问题。",
+      "acceptanceCriteria": [
+        "告警列表支持级别筛选、Ack、详情弹窗",
+        "展示 Top-N issue_code/confidence/evidence 与人话说明区",
+        "证据点击可跳转到回放页对应运行与 tick",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "实现强制控制页的安全防护机制",
+      "description": "作为安全负责人，我希望高风险写操作默认受限并带二次确认，以便降低误操作风险。",
+      "acceptanceCriteria": [
+        "强制写入具备角色门禁与开发态/生产态显式区分",
+        "执行前要求确认文本与倒计时",
+        "支持 TTL 到期自动恢复与操作审计落盘",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "实现审计与报告导出页",
+      "description": "作为管理员，我希望按条件检索审计并导出报告，以便满足追溯和合规需求。",
+      "acceptanceCriteria": [
+        "支持按时间/人/对象/操作类型筛选审计事件",
+        "普通角色不可删除关键审计记录",
+        "支持 JSON 或 CSV 导出",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "实现实时通道降级策略",
+      "description": "作为系统维护者，我希望 WebSocket 断开时自动降级轮询，以便 UI 在弱网络下仍可工作。",
+      "acceptanceCriteria": [
+        "支持 /ws/alarms 与 /ws/run-status 的连接状态提示",
+        "断连时自动切换 fetch+setInterval 轮询并可恢复",
+        "告警风暴场景下启用前端节流防止卡顿",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
