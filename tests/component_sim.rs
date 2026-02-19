@@ -57,6 +57,7 @@ fn component_sim_writes_trace_audit_and_diagnosis_artifacts() {
     let trace_out = base.join("trace.jsonl");
     let audit_out = base.join("fault_audit.jsonl");
     let diagnosis_out = base.join("diagnosis.json");
+    let keypoints_out = base.join("keypoints.json");
 
     write_topology(&topology);
     fs::write(
@@ -91,6 +92,8 @@ fn component_sim_writes_trace_audit_and_diagnosis_artifacts() {
         .arg(&audit_out)
         .arg("--diagnosis-out")
         .arg(&diagnosis_out)
+        .arg("--keypoints-out")
+        .arg(&keypoints_out)
         .arg("--output")
         .arg("json")
         .output()
@@ -118,9 +121,17 @@ fn component_sim_writes_trace_audit_and_diagnosis_artifacts() {
             .unwrap_or(0)
             >= 1
     );
+    assert!(
+        payload
+            .get("keypoint_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            >= 1
+    );
     assert!(trace_out.exists(), "trace output should exist");
     assert!(audit_out.exists(), "fault audit output should exist");
     assert!(diagnosis_out.exists(), "diagnosis output should exist");
+    assert!(keypoints_out.exists(), "keypoints output should exist");
 
     let diagnosis_text = fs::read_to_string(&diagnosis_out).expect("read diagnosis");
     let diagnosis_json: Value = serde_json::from_str(&diagnosis_text).expect("parse diagnosis");
@@ -150,6 +161,21 @@ fn component_sim_writes_trace_audit_and_diagnosis_artifacts() {
                 .is_some_and(|source| source == "program_behavior")
         }),
         "should include program behavior evidence"
+    );
+
+    let keypoints_text = fs::read_to_string(&keypoints_out).expect("read keypoints");
+    let keypoints_json: Value = serde_json::from_str(&keypoints_text).expect("parse keypoints");
+    let keypoints = keypoints_json
+        .get("keypoints")
+        .and_then(Value::as_array)
+        .expect("keypoints array");
+    assert!(
+        keypoints.iter().any(|item| {
+            item.get("category")
+                .and_then(Value::as_str)
+                .is_some_and(|c| c == "fault_activated")
+        }),
+        "keypoints should include fault lifecycle markers"
     );
 }
 

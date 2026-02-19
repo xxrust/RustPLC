@@ -129,6 +129,7 @@ cargo run -- component-sim examples/component_model/topology.json \
   --out out/component_normal_trace.jsonl \
   --fault-audit-out out/component_normal_fault_audit.jsonl \
   --diagnosis-out out/component_normal_diagnosis.json \
+  --keypoints-out out/component_normal_keypoints.json \
   --output json
 ```
 
@@ -147,6 +148,7 @@ cargo run -- component-sim examples/component_model/topology.json \
   --out out/component_fault_trace.jsonl \
   --fault-audit-out out/component_fault_audit.jsonl \
   --diagnosis-out out/component_fault_diagnosis.json \
+  --keypoints-out out/component_fault_keypoints.json \
   --output json
 ```
 
@@ -167,4 +169,5 @@ cargo run -- component-sim examples/component_model/topology.json \
   - 记录每个异常的 `activated/expired` 生命周期
 - `component_diagnosis.json`
   - 保留核心 `issue_code` 思路，并额外给出组件异常上下文（组件ID、异常类型、时间窗）
-
+- `component_keypoints.json`
+  - 提供可跳转关键点列表（事件、故障生命周期、诊断上下文时间窗）

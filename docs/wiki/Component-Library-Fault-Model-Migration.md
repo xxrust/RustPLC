@@ -19,6 +19,7 @@ cargo run -- component-sim examples/component_model/topology.json \
   --out out/component_fault_trace.jsonl \
   --fault-audit-out out/component_fault_audit.jsonl \
   --diagnosis-out out/component_fault_diagnosis.json \
+  --keypoints-out out/component_fault_keypoints.json \
   --output json
 ```
 
@@ -28,4 +29,3 @@ cargo run -- component-sim examples/component_model/topology.json \
 - 新场景统一使用 `component_faults`
 - 同 tick 多异常冲突按固定优先级执行，结果可审计
 - 诊断输出增加了“注入证据 + 程序行为证据”区分
-

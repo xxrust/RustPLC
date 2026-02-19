@@ -34,4 +34,5 @@ members = [
   "crates/sim",
   "crates/board-rp2040",
   "crates/codegen",
+  "crates/web-server",
 ]

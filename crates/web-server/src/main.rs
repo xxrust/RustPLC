@@ -1,0 +1,938 @@
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    response::Json,
+    routing::{get, post},
+    Router,
+};
+use rust_plc::component_scenario::parse_component_scenario_value;
+use rust_plc::component_topology::parse_component_topology_value;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::path::{Path as StdPath, PathBuf};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::process::Command;
+use tokio::sync::RwLock;
+use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
+use tracing::{error, info};
+
+#[derive(Clone)]
+struct AppState {
+    workspace_root: PathBuf,
+    runs: Arc<RwLock<BTreeMap<String, RunRecord>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct RunArtifacts {
+    trace: Option<String>,
+    diff: Option<String>,
+    timing: Option<String>,
+    diagnosis: Option<String>,
+    keypoints: Option<String>,
+    fault_audit: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RunRecord {
+    run_id: String,
+    status: String,
+    triggered_by: String,
+    triggered_at: String,
+    triggered_at_ms: u64,
+    mode: String,
+    artifacts: RunArtifacts,
+    failure_summary: Option<String>,
+    plc_file: Option<String>,
+    scenario_file: Option<String>,
+    topology_file: Option<String>,
+    tick_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TriggerRunRequest {
+    plc_file: Option<String>,
+    scenario_file: Option<String>,
+    topology_file: Option<String>,
+    mode: Option<String>,
+    triggered_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListQuery {
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TickRangeQuery {
+    start: Option<u64>,
+    end: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AlarmQuery {
+    severity: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AckAlarmRequest {
+    comment: Option<String>,
+}
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter("web_server=debug,tower_http=debug")
+        .init();
+
+    let workspace_root = find_workspace_root();
+    let state = Arc::new(AppState {
+        workspace_root: workspace_root.clone(),
+        runs: Arc::new(RwLock::new(BTreeMap::new())),
+    });
+
+    let api_routes = Router::new()
+        .route("/projects", get(list_projects))
+        .route("/topology/:id", get(get_topology).put(save_topology))
+        .route("/topology/validate", post(validate_topology))
+        .route("/scenario/:id", get(get_scenario).put(save_scenario))
+        .route("/scenario/validate", post(validate_scenario))
+        .route("/run/no-board-gate", post(trigger_no_board))
+        .route("/run/:id/status", get(get_run_status))
+        .route("/run/list", get(list_runs))
+        .route("/trace/:id", get(get_trace))
+        .route("/trace/:id/range", get(get_trace_range))
+        .route("/trace/:id/keypoints", get(get_keypoints))
+        .route("/diagnosis/:id", get(get_diagnosis))
+        .route("/timing/:id", get(get_timing))
+        .route("/alarms", get(get_alarms))
+        .route("/alarms/:id/ack", post(ack_alarm))
+        .with_state(state.clone());
+
+    let artifacts_dir = workspace_root.join("out");
+    let static_dist = workspace_root.join("web-ui/dist");
+    let app = Router::new()
+        .nest("/api", api_routes)
+        .nest_service("/artifacts", ServeDir::new(artifacts_dir))
+        .fallback_service(ServeDir::new(static_dist))
+        .layer(CorsLayer::permissive());
+
+    let addr = "0.0.0.0:8080";
+    info!("RustPLC Web Server listening on {}", addr);
+
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("bind web server");
+    axum::serve(listener, app).await.expect("run web server");
+}
+
+fn find_workspace_root() -> PathBuf {
+    let start = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    start.join("../..").canonicalize().unwrap_or(start)
+}
+
+async fn list_projects(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let examples = state.workspace_root.join("examples");
+    let mut projects = Vec::<Value>::new();
+
+    if let Ok(entries) = std::fs::read_dir(&examples) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("plc") {
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                projects.push(serde_json::json!({
+                    "id": stem,
+                    "name": stem,
+                    "path": display_rel(&state.workspace_root, &path),
+                    "type": "plc"
+                }));
+            }
+        }
+    }
+
+    let component_topology = examples.join("component_model/topology.json");
+    if component_topology.exists() {
+        projects.push(serde_json::json!({
+            "id": "component_model",
+            "name": "component_model",
+            "path": display_rel(&state.workspace_root, &component_topology),
+            "type": "component_topology"
+        }));
+    }
+
+    projects.sort_by(|a, b| {
+        a.get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .cmp(b.get("name").and_then(Value::as_str).unwrap_or(""))
+    });
+
+    Json(serde_json::json!({ "projects": projects }))
+}
+
+async fn get_topology(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let json_path = topology_path_for_id(&state.workspace_root, &id);
+    if json_path.exists() {
+        return read_json_file(&json_path);
+    }
+
+    let plc_path = state.workspace_root.join(format!("examples/{id}.plc"));
+    if plc_path.exists() {
+        let content = std::fs::read_to_string(&plc_path).map_err(internal_error)?;
+        return Ok(Json(serde_json::json!({
+            "id": id,
+            "path": display_rel(&state.workspace_root, &plc_path),
+            "content": content,
+            "type": "plc"
+        })));
+    }
+
+    Ok(Json(serde_json::json!({
+        "schema_version": 1,
+        "component_library": { "schema_version": 1, "components": [] },
+        "components": [],
+        "connections": []
+    })))
+}
+
+async fn save_topology(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let path = topology_path_for_id(&state.workspace_root, &id);
+    write_json_pretty(&path, &payload).map_err(internal_error)?;
+    Ok(Json(serde_json::json!({
+        "saved": true,
+        "path": display_rel(&state.workspace_root, &path)
+    })))
+}
+
+async fn validate_topology(Json(payload): Json<Value>) -> Json<Value> {
+    match parse_component_topology_value(&payload) {
+        Ok(_) => Json(serde_json::json!({ "valid": true, "errors": [], "issues": [] })),
+        Err(err) => {
+            let issues = err
+                .issues
+                .iter()
+                .map(|issue| {
+                    serde_json::json!({
+                        "code": issue.code,
+                        "path": issue.path,
+                        "message": issue.message
+                    })
+                })
+                .collect::<Vec<_>>();
+            let errors = err
+                .issues
+                .iter()
+                .map(|issue| format!("[{}] {}: {}", issue.code, issue.path, issue.message))
+                .collect::<Vec<_>>();
+            Json(serde_json::json!({ "valid": false, "errors": errors, "issues": issues }))
+        }
+    }
+}
+
+async fn get_scenario(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let json_path = scenario_path_for_id(&state.workspace_root, &id);
+    if json_path.exists() {
+        return read_json_file(&json_path);
+    }
+
+    let legacy_yaml = state
+        .workspace_root
+        .join(format!("examples/{id}_scenario.yaml"));
+    if legacy_yaml.exists() {
+        let content = std::fs::read_to_string(&legacy_yaml).map_err(internal_error)?;
+        return Ok(Json(serde_json::json!({
+            "id": id,
+            "path": display_rel(&state.workspace_root, &legacy_yaml),
+            "content": content,
+            "type": "yaml"
+        })));
+    }
+
+    Ok(Json(serde_json::json!({
+        "schema_version": 1,
+        "tick_ms": 10,
+        "duration_ms": 1000,
+        "switch_events": [],
+        "sensor_events": [],
+        "component_faults": []
+    })))
+}
+
+async fn save_scenario(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let path = scenario_path_for_id(&state.workspace_root, &id);
+    write_json_pretty(&path, &payload).map_err(internal_error)?;
+    Ok(Json(serde_json::json!({
+        "saved": true,
+        "path": display_rel(&state.workspace_root, &path)
+    })))
+}
+
+async fn validate_scenario(Json(payload): Json<Value>) -> Json<Value> {
+    match parse_component_scenario_value(&payload) {
+        Ok(_) => Json(serde_json::json!({ "valid": true, "errors": [], "issues": [] })),
+        Err(err) => {
+            let issues = err
+                .issues
+                .iter()
+                .map(|issue| {
+                    serde_json::json!({
+                        "code": issue.code,
+                        "path": issue.path,
+                        "message": issue.message
+                    })
+                })
+                .collect::<Vec<_>>();
+            let errors = err
+                .issues
+                .iter()
+                .map(|issue| format!("[{}] {}: {}", issue.code, issue.path, issue.message))
+                .collect::<Vec<_>>();
+            Json(serde_json::json!({ "valid": false, "errors": errors, "issues": issues }))
+        }
+    }
+}
+
+async fn trigger_no_board(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<TriggerRunRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let run_id = format!("run-{}", now_ms());
+    let triggered_at_ms = now_ms();
+    let triggered_by = payload
+        .triggered_by
+        .clone()
+        .unwrap_or_else(|| "web-user".to_string());
+    let mode = if payload.topology_file.is_some()
+        || payload.mode.as_deref() == Some("component")
+        || payload.mode.as_deref() == Some("component_sim")
+    {
+        "component_sim"
+    } else {
+        "no_board_gate"
+    }
+    .to_string();
+
+    {
+        let mut runs = state.runs.write().await;
+        runs.insert(
+            run_id.clone(),
+            RunRecord {
+                run_id: run_id.clone(),
+                status: "running".to_string(),
+                triggered_by,
+                triggered_at: iso_like_timestamp(triggered_at_ms),
+                triggered_at_ms,
+                mode,
+                artifacts: RunArtifacts::default(),
+                failure_summary: None,
+                plc_file: payload.plc_file.clone(),
+                scenario_file: payload.scenario_file.clone(),
+                topology_file: payload.topology_file.clone(),
+                tick_ms: None,
+            },
+        );
+    }
+
+    let task_state = state.clone();
+    let task_payload = payload.clone();
+    let task_run_id = run_id.clone();
+    tokio::spawn(async move {
+        if let Err(err) = execute_run(task_state.clone(), task_run_id.clone(), task_payload).await {
+            error!("run {} failed: {}", task_run_id, err);
+            let mut runs = task_state.runs.write().await;
+            if let Some(run) = runs.get_mut(&task_run_id) {
+                run.status = "fail".to_string();
+                run.failure_summary = Some(err);
+            }
+        }
+    });
+
+    Ok(Json(serde_json::json!({ "run_id": run_id })))
+}
+
+async fn execute_run(
+    state: Arc<AppState>,
+    run_id: String,
+    payload: TriggerRunRequest,
+) -> Result<(), String> {
+    let out_dir = state.workspace_root.join("out/web_runs").join(&run_id);
+    std::fs::create_dir_all(&out_dir)
+        .map_err(|err| format!("failed to create run output directory: {err}"))?;
+
+    let scenario_file = payload
+        .scenario_file
+        .clone()
+        .ok_or_else(|| "scenario_file is required".to_string())?;
+
+    let mut record_updates = RunArtifacts::default();
+    let mut status = "fail".to_string();
+    let mut failure_summary: Option<String> = None;
+
+    if let Some(topology_file) = payload.topology_file.clone() {
+        let trace_path = out_dir.join("component_trace.jsonl");
+        let fault_audit_path = out_dir.join("fault_audit.jsonl");
+        let diagnosis_path = out_dir.join("component_diagnosis.json");
+        let keypoints_path = out_dir.join("component_keypoints.json");
+
+        let args = vec![
+            "component-sim".to_string(),
+            topology_file,
+            "--scenario".to_string(),
+            scenario_file,
+            "--out".to_string(),
+            trace_path.display().to_string(),
+            "--fault-audit-out".to_string(),
+            fault_audit_path.display().to_string(),
+            "--diagnosis-out".to_string(),
+            diagnosis_path.display().to_string(),
+            "--keypoints-out".to_string(),
+            keypoints_path.display().to_string(),
+            "--output".to_string(),
+            "json".to_string(),
+        ];
+
+        let command = run_rust_plc(&state.workspace_root, &args).await?;
+        let output_json = serde_json::from_str::<Value>(&command.stdout).ok();
+
+        if command.success
+            && output_json
+                .as_ref()
+                .and_then(|v| v.get("status"))
+                .and_then(Value::as_str)
+                == Some("pass")
+        {
+            status = "pass".to_string();
+        } else {
+            failure_summary = Some(first_failure_message(&command.stderr, &command.stdout));
+        }
+
+        record_updates.trace = Some(artifact_href(&state.workspace_root, &trace_path));
+        record_updates.fault_audit = Some(artifact_href(&state.workspace_root, &fault_audit_path));
+        record_updates.diagnosis = Some(artifact_href(&state.workspace_root, &diagnosis_path));
+        record_updates.keypoints = Some(artifact_href(&state.workspace_root, &keypoints_path));
+
+        if let Some(tick_ms) =
+            parse_tick_ms_from_scenario(&state.workspace_root, &payload.scenario_file)
+        {
+            let mut runs = state.runs.write().await;
+            if let Some(run) = runs.get_mut(&run_id) {
+                run.tick_ms = Some(tick_ms);
+            }
+        }
+    } else {
+        let plc_file = payload
+            .plc_file
+            .clone()
+            .ok_or_else(|| "plc_file is required for no-board-gate mode".to_string())?;
+
+        let args = vec![
+            "no-board-gate".to_string(),
+            plc_file,
+            "--scenario".to_string(),
+            scenario_file,
+            "--out-dir".to_string(),
+            out_dir.display().to_string(),
+            "--output".to_string(),
+            "json".to_string(),
+        ];
+
+        let command = run_rust_plc(&state.workspace_root, &args).await?;
+        let output_json = serde_json::from_str::<Value>(&command.stdout).ok();
+
+        if command.success
+            && output_json
+                .as_ref()
+                .and_then(|v| v.get("status"))
+                .and_then(Value::as_str)
+                == Some("pass")
+        {
+            status = "pass".to_string();
+        } else {
+            failure_summary = Some(first_failure_message(&command.stderr, &command.stdout));
+        }
+
+        if let Some(v) = output_json {
+            record_updates.trace = v
+                .get("sil_trace")
+                .and_then(Value::as_str)
+                .map(|path| artifact_href_any(&state.workspace_root, path));
+            record_updates.diff = v
+                .get("diff_report")
+                .and_then(Value::as_str)
+                .map(|path| artifact_href_any(&state.workspace_root, path));
+            record_updates.timing = v
+                .get("timing_report")
+                .and_then(Value::as_str)
+                .map(|path| artifact_href_any(&state.workspace_root, path));
+            record_updates.diagnosis = v
+                .get("diagnosis_report")
+                .and_then(Value::as_str)
+                .map(|path| artifact_href_any(&state.workspace_root, path));
+        }
+    }
+
+    let mut runs = state.runs.write().await;
+    if let Some(run) = runs.get_mut(&run_id) {
+        run.status = status;
+        run.failure_summary = failure_summary;
+        run.artifacts = record_updates;
+    }
+    Ok(())
+}
+
+async fn get_run_status(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let runs = state.runs.read().await;
+    let Some(run) = runs.get(&id) else {
+        return Err(not_found(format!("run `{id}` not found")));
+    };
+    Ok(Json(
+        serde_json::to_value(run).unwrap_or_else(|_| serde_json::json!({})),
+    ))
+}
+
+async fn list_runs(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ListQuery>,
+) -> Json<Vec<Value>> {
+    let limit = params.limit.unwrap_or(20).max(1);
+    let runs = state.runs.read().await;
+    let mut values = runs.values().cloned().collect::<Vec<_>>();
+    values.sort_by(|a, b| b.triggered_at_ms.cmp(&a.triggered_at_ms));
+    Json(
+        values
+            .into_iter()
+            .take(limit)
+            .map(|run| serde_json::to_value(run).unwrap_or_else(|_| serde_json::json!({})))
+            .collect(),
+    )
+}
+
+async fn get_trace(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    build_trace_payload(&state, &id, None, None).await
+}
+
+async fn get_trace_range(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(range): Query<TickRangeQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    build_trace_payload(&state, &id, range.start, range.end).await
+}
+
+async fn build_trace_payload(
+    state: &Arc<AppState>,
+    run_id: &str,
+    start: Option<u64>,
+    end: Option<u64>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let runs = state.runs.read().await;
+    let run = runs
+        .get(run_id)
+        .cloned()
+        .ok_or_else(|| not_found(format!("run `{run_id}` not found")))?;
+    drop(runs);
+
+    let Some(trace_ref) = run.artifacts.trace.clone() else {
+        return Ok(Json(serde_json::json!({
+            "schema_version": 1,
+            "tick_ms": run.tick_ms.unwrap_or(10),
+            "ticks": []
+        })));
+    };
+
+    let trace_path = resolve_artifact_reference(&state.workspace_root, &trace_ref)
+        .ok_or_else(|| not_found("trace artifact path is invalid".to_string()))?;
+
+    if trace_path.extension().and_then(|s| s.to_str()) == Some("json") {
+        let value = read_json_file(&trace_path)?.0;
+        return Ok(Json(value));
+    }
+
+    let text = std::fs::read_to_string(&trace_path).map_err(internal_error)?;
+    let mut ticks = Vec::<Value>::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(row) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(tick) = row.get("tick").and_then(Value::as_u64) else {
+            continue;
+        };
+        if let Some(s) = start {
+            if tick < s {
+                continue;
+            }
+        }
+        if let Some(e) = end {
+            if tick > e {
+                continue;
+            }
+        }
+
+        if row.get("components").is_some() {
+            ticks.push(serde_json::json!({
+                "tick": tick,
+                "digital_inputs": [],
+                "analog_inputs": [],
+                "digital_outputs": [],
+                "analog_outputs": [],
+                "component_states": row.get("components").cloned().unwrap_or_else(|| serde_json::json!({}))
+            }));
+        } else {
+            ticks.push(row);
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "schema_version": 1,
+        "tick_ms": run.tick_ms.unwrap_or(10),
+        "ticks": ticks
+    })))
+}
+
+async fn get_keypoints(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let runs = state.runs.read().await;
+    let run = runs
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| not_found(format!("run `{id}` not found")))?;
+    drop(runs);
+
+    let Some(keypoints_ref) = run.artifacts.keypoints.clone() else {
+        return Ok(Json(serde_json::json!({
+            "schema_version": 1,
+            "tick_ms": run.tick_ms.unwrap_or(10),
+            "keypoints": []
+        })));
+    };
+    let Some(path) = resolve_artifact_reference(&state.workspace_root, &keypoints_ref) else {
+        return Ok(Json(serde_json::json!({
+            "schema_version": 1,
+            "tick_ms": run.tick_ms.unwrap_or(10),
+            "keypoints": []
+        })));
+    };
+    read_json_file(&path)
+}
+
+async fn get_diagnosis(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let runs = state.runs.read().await;
+    let run = runs
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| not_found(format!("run `{id}` not found")))?;
+    drop(runs);
+
+    let Some(diag_ref) = run.artifacts.diagnosis.clone() else {
+        return Ok(Json(serde_json::json!({
+            "schema_version": 1,
+            "candidates": []
+        })));
+    };
+    let Some(path) = resolve_artifact_reference(&state.workspace_root, &diag_ref) else {
+        return Ok(Json(serde_json::json!({
+            "schema_version": 1,
+            "candidates": []
+        })));
+    };
+    read_json_file(&path)
+}
+
+async fn get_timing(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let runs = state.runs.read().await;
+    let run = runs
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| not_found(format!("run `{id}` not found")))?;
+    drop(runs);
+
+    let Some(timing_ref) = run.artifacts.timing.clone() else {
+        return Ok(Json(serde_json::json!({
+            "schema_version": 1,
+            "tick_ms": run.tick_ms.unwrap_or(10),
+            "total_ticks": 0,
+            "statistics": {
+                "p50_exec_us": 0,
+                "p95_exec_us": 0,
+                "p99_exec_us": 0,
+                "max_exec_us": 0,
+                "overrun_count": 0
+            }
+        })));
+    };
+    let Some(path) = resolve_artifact_reference(&state.workspace_root, &timing_ref) else {
+        return Ok(Json(serde_json::json!({
+            "schema_version": 1,
+            "tick_ms": run.tick_ms.unwrap_or(10),
+            "total_ticks": 0,
+            "statistics": {
+                "p50_exec_us": 0,
+                "p95_exec_us": 0,
+                "p99_exec_us": 0,
+                "max_exec_us": 0,
+                "overrun_count": 0
+            }
+        })));
+    };
+    read_json_file(&path)
+}
+
+async fn get_alarms(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<AlarmQuery>,
+) -> Json<Vec<Value>> {
+    let runs = state.runs.read().await;
+    let mut alarms = runs
+        .values()
+        .filter(|run| run.status == "fail")
+        .map(|run| {
+            serde_json::json!({
+                "alarm_id": format!("alarm-{}", run.run_id),
+                "severity": infer_alarm_severity(run),
+                "first_seen_ms": run.triggered_at_ms,
+                "top_candidates": [],
+                "evidence_ref": run.artifacts.diagnosis,
+                "evidence_source": if run.mode == "component_sim" { "no_board" } else { "mixed" },
+                "scenario_or_recipe_id": run.scenario_file.clone().unwrap_or_else(|| "unknown".to_string())
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(severity) = params.severity {
+        alarms.retain(|a| a.get("severity").and_then(Value::as_str) == Some(severity.as_str()));
+    }
+    alarms.sort_by(|a, b| {
+        b.get("first_seen_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .cmp(&a.get("first_seen_ms").and_then(Value::as_u64).unwrap_or(0))
+    });
+    if let Some(limit) = params.limit {
+        alarms.truncate(limit);
+    }
+    Json(alarms)
+}
+
+async fn ack_alarm(Path(id): Path<String>, Json(payload): Json<AckAlarmRequest>) -> Json<Value> {
+    Json(serde_json::json!({
+        "acknowledged": true,
+        "alarm_id": id,
+        "comment": payload.comment.unwrap_or_else(|| "".to_string())
+    }))
+}
+
+async fn run_rust_plc(workspace_root: &StdPath, args: &[String]) -> Result<CommandOutput, String> {
+    let bin_name = if cfg!(windows) {
+        "rust_plc.exe"
+    } else {
+        "rust_plc"
+    };
+    let bin_path = workspace_root.join("target/debug").join(bin_name);
+
+    let output = if bin_path.exists() {
+        info!("run {:?} {:?}", bin_path, args);
+        Command::new(&bin_path)
+            .args(args)
+            .current_dir(workspace_root)
+            .output()
+            .await
+            .map_err(|err| format!("failed to run rust_plc binary: {err}"))?
+    } else {
+        info!("run cargo {:?}", args);
+        let mut cargo_args = vec!["run".to_string(), "--quiet".to_string(), "--".to_string()];
+        cargo_args.extend(args.iter().cloned());
+        Command::new("cargo")
+            .args(cargo_args)
+            .current_dir(workspace_root)
+            .output()
+            .await
+            .map_err(|err| format!("failed to run cargo command: {err}"))?
+    };
+
+    Ok(CommandOutput {
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+#[derive(Debug)]
+struct CommandOutput {
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+fn first_failure_message(stderr: &str, stdout: &str) -> String {
+    if let Some(line) = stderr.lines().find(|line| !line.trim().is_empty()) {
+        return line.trim().to_string();
+    }
+    if let Some(line) = stdout.lines().find(|line| !line.trim().is_empty()) {
+        return line.trim().to_string();
+    }
+    "command failed without details".to_string()
+}
+
+fn parse_tick_ms_from_scenario(workspace_root: &StdPath, scenario: &Option<String>) -> Option<u64> {
+    let raw = scenario.as_ref()?;
+    let path = resolve_relative_or_absolute(workspace_root, raw);
+    let text = std::fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<Value>(&text).ok()?;
+    value.get("tick_ms").and_then(Value::as_u64)
+}
+
+fn topology_path_for_id(workspace_root: &StdPath, id: &str) -> PathBuf {
+    if id == "component_model" {
+        workspace_root.join("examples/component_model/topology.json")
+    } else {
+        workspace_root.join(format!("examples/{id}.topology.json"))
+    }
+}
+
+fn scenario_path_for_id(workspace_root: &StdPath, id: &str) -> PathBuf {
+    if id == "component_model" {
+        workspace_root.join("examples/component_model/scenario_normal.json")
+    } else {
+        workspace_root.join(format!("examples/{id}.scenario.json"))
+    }
+}
+
+fn display_rel(workspace_root: &StdPath, path: &StdPath) -> String {
+    path.strip_prefix(workspace_root)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string_lossy().to_string())
+}
+
+fn write_json_pretty(path: &StdPath, payload: &Value) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("failed to create parent directory: {err}"))?;
+    }
+    let mut body = serde_json::to_string_pretty(payload)
+        .map_err(|err| format!("failed to serialize JSON: {err}"))?;
+    body.push('\n');
+    std::fs::write(path, body).map_err(|err| format!("failed to write file: {err}"))
+}
+
+fn read_json_file(path: &StdPath) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let text = std::fs::read_to_string(path).map_err(internal_error)?;
+    let value = serde_json::from_str::<Value>(&text)
+        .map_err(|err| bad_request(format!("invalid JSON {}: {err}", path.display())))?;
+    Ok(Json(value))
+}
+
+fn artifact_href(workspace_root: &StdPath, path: &StdPath) -> String {
+    let rel = path
+        .strip_prefix(workspace_root.join("out"))
+        .map(|p| p.to_string_lossy().replace('\\', "/"));
+    match rel {
+        Ok(rel) => format!("/artifacts/{rel}"),
+        Err(_) => path.to_string_lossy().to_string(),
+    }
+}
+
+fn artifact_href_any(workspace_root: &StdPath, raw_path: &str) -> String {
+    let path = resolve_relative_or_absolute(workspace_root, raw_path);
+    artifact_href(workspace_root, &path)
+}
+
+fn resolve_artifact_reference(workspace_root: &StdPath, reference: &str) -> Option<PathBuf> {
+    if let Some(rel) = reference.strip_prefix("/artifacts/") {
+        return Some(workspace_root.join("out").join(rel));
+    }
+    if reference.starts_with('/') || reference.contains(":\\") {
+        return Some(PathBuf::from(reference));
+    }
+    Some(workspace_root.join(reference))
+}
+
+fn resolve_relative_or_absolute(workspace_root: &StdPath, raw: &str) -> PathBuf {
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        path
+    } else {
+        workspace_root.join(path)
+    }
+}
+
+fn infer_alarm_severity(run: &RunRecord) -> &'static str {
+    if run.failure_summary.is_some() {
+        "critical"
+    } else {
+        "warning"
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn iso_like_timestamp(ms: u64) -> String {
+    // Keep this dependency-free and parseable by `new Date(...)` in UI.
+    format!("{}", ms)
+}
+
+fn bad_request(message: impl Into<String>) -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({
+            "error": message.into()
+        })),
+    )
+}
+
+fn not_found(message: impl Into<String>) -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({
+            "error": message.into()
+        })),
+    )
+}
+
+fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({
+            "error": err.to_string()
+        })),
+    )
+}

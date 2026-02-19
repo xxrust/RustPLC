@@ -17,6 +17,8 @@ impl ComponentType {
             "cylinder" => Some(Self::Cylinder),
             "sensor" => Some(Self::Sensor),
             "switch" => Some(Self::Switch),
+            // UI-side shorthand alias; normalized to `stepper_pd` in serialized output.
+            "stepper" => Some(Self::StepperPd),
             "stepper_pd" => Some(Self::StepperPd),
             _ => None,
         }
@@ -179,7 +181,7 @@ pub fn parse_component_library_value(
                 "CLIB-COMP-010",
                 format!("$.components[{idx}].type"),
                 format!(
-                    "unsupported component type `{raw_type}` (expected one of `cylinder|sensor|switch|stepper_pd`)"
+                    "unsupported component type `{raw_type}` (expected one of `cylinder|sensor|switch|stepper|stepper_pd`)"
                 ),
             ));
             continue;
@@ -299,6 +301,24 @@ mod tests {
         assert_eq!(parsed.components[0].id, "cyl_a");
         assert_eq!(
             parsed.components[3].component_type,
+            ComponentType::StepperPd
+        );
+    }
+
+    #[test]
+    fn accepts_stepper_alias_and_normalizes_to_stepper_pd_variant() {
+        let parsed = parse_component_library_json(
+            r#"{
+  "schema_version": 1,
+  "components": [
+    { "id": "m1", "name": "Axis", "type": "stepper", "params": {} }
+  ]
+}"#,
+        )
+        .expect("stepper alias should parse");
+        assert_eq!(parsed.components.len(), 1);
+        assert_eq!(
+            parsed.components[0].component_type,
             ComponentType::StepperPd
         );
     }
