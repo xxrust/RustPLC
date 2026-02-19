@@ -1797,3 +1797,36 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
   - Useful context (e.g., "the evaluation panel is in component X")
     - VS Code “minimal extension” capability is provided via task + association + recommendations files generated into each scaffolded project.
 ---
+## [2026-02-19 12:44:49 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added a dedicated Stage-3 CI gate job (`stage3-runtime-dev-gates`) to `.github/workflows/rp2040_regression.yml`.
+  - Added `scripts/stage3_runtime_dev_gate.sh` one-shot gate script to enforce runtime/dev contracts for:
+    - `online_force_control_plane`
+    - `retain_persistent`
+    - `scenario_gen`
+    - `sim_regress`
+    - `new_scaffold`
+  - Added schema guard checks in the gate script:
+    - `scenario-gen --dry-run` must emit required `summary.json` keys and not write scenario files.
+    - `sim-regress --minimize-failure` must emit required `feedback.json` keys with non-empty parameter hints.
+  - Added `docs/stage3_ci_gate_runbook.md` with exact local reproduction steps (one-shot + manual breakdown).
+  - Added `docs/stage3_tasks_explained_plain.md` as a plain-language reference for approved Stage-3 tasks and rationale.
+- Quality checks
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `cargo check --workspace`
+- Files changed
+  - `.github/workflows/rp2040_regression.yml`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `docs/stage3_ci_gate_runbook.md`
+  - `docs/stage3_tasks_explained_plain.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For CI contract gates, pair an integration-test bundle with explicit artifact-schema assertions so drift is caught even when binaries still compile.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - `--dry-run` behavior should assert both positive contract keys and negative side effects (no generated scenario files), otherwise regressions can slip in silently.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `stage3_runtime_dev_gate.sh` is now the single local entrypoint to reproduce Stage-3 runtime/dev CI checks before pushing.
+---

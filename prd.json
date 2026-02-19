@@ -1,121 +1,87 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/stage2-safety-delivery",
-  "description": "Execute the next-stage plan with safety-first delivery: normalize motion+fail-safe HIL gating, harden diagnostics UX, and add runtime control/persistence plus scenario and DevEx assets.",
+  "branchName": "ralph/stage3-operability-hardening",
+  "description": "Stage-3 focus: production-grade gate hardening, runtime variable control, D-class safety evidence, commissioning playbook unification, and VS Code developer-experience uplift.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Normalize RP2040 HIL gate for motion + fail-safe as a daily regression baseline",
-      "description": "As a release owner, I want motion and fail-safe behavior to be gated by a reproducible HIL workflow so regressions are caught before deployment.",
+      "title": "Harden CI gates for newly delivered runtime/dev features",
+      "description": "As a release owner, I want the latest online-force/retain/scenario-asset/new-scaffold capabilities to be enforced by CI gates so regressions are blocked before merge.",
       "acceptanceCriteria": [
-        "Provide a single reproducible HIL gate entry for RP2040 covering both motion and fail-safe checks",
-        "Include at least two HIL case bundles: one motion-focused case and one fail-safe-focused case",
-        "Failure artifacts include enough context to locate fault source (axis/step/signal/time)",
-        "Update runbook docs with exact local and CI reproduction commands",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
+        "CI includes explicit gate coverage for `online_force_control_plane`, `retain_persistent`, `scenario_gen`, `sim_regress`, and `new_scaffold` contracts",
+        "Pipeline fails when `scenario-gen` summary or `sim-regress` feedback schema contracts drift",
+        "Runbook docs include exact local reproduction commands for each new gate",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 1,
       "passes": true,
-      "notes": ""
+      "notes": "P0-1 already complete; this story is P0-2 gate hardening."
     },
     {
       "id": "US-002",
-      "title": "Implement abnormal-exit safety matrix (A/B/C/D) with verification evidence",
-      "description": "As a safety engineer, I want abnormal-exit classes to have explicit expected behavior and evidence so safety claims are auditable.",
+      "title": "Add runtime online variable control plane (dev mode) with full audit",
+      "description": "As a commissioning engineer, I want to set/clear runtime variables (not only IO) in dev mode so I can diagnose logic paths faster with a traceable audit trail.",
       "acceptanceCriteria": [
-        "Add an abnormal-exit matrix covering A/B/C/D classes with trigger method, expected IO behavior, and acceptance check",
-        "Add automated verification for at least A/B/C classes and document why D relies on hardware safety chain",
-        "Publish evidence artifacts/log schema for each class (trigger, observed outputs, verdict)",
-        "Include electrical checklist notes for critical actuators (e.g., vertical brake/enable ordering)",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
+        "Introduce a development-only online variable control plane with explicit enable guard (default disabled)",
+        "Support set/clear operations for at least BOOL and REAL variable types",
+        "Provide deterministic replay path via script input and aligned tick semantics",
+        "Emit audit records containing actor/source/time/variable/from/to/operation",
+        "Document safety boundaries against production/hardware paths",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "P0-3 capability gap closure."
     },
     {
       "id": "US-003",
-      "title": "Deliver M6 diagnostics package: error codes + output modes + scenario-doctor",
-      "description": "As a frontline engineer, I want structured diagnostics and a doctor command so I can fix common pipeline issues quickly without reading source code.",
+      "title": "Deliver abnormal-exit Class-D electrical evidence workflow",
+      "description": "As a safety engineer, I want Class-D (hardware-chain) evidence to be standardized and auditable so manual safety validation can be reviewed consistently.",
       "acceptanceCriteria": [
-        "Introduce stable error codes for high-frequency failures in scenario/gate/build flows",
-        "Support unified CLI output mode switch (`--output human|json`) for key commands used in CI and local debugging",
-        "Add `scenario-doctor` MVP to check common issues (path/tick alignment/device mapping/same-tick risk) and provide `--fix-preview` suggestions",
-        "Add tests for error code coverage, output mode serialization, and scenario-doctor checks",
-        "Update docs with troubleshooting examples using new error codes and doctor output",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
+        "Define Class-D electrical test checklist template with required fields (trigger, wiring state, measured result, verdict, operator)",
+        "Extend abnormal-exit evidence schema/verifier to ingest and validate Class-D evidence attachments as manual-hardware artifacts",
+        "Publish documentation linking Class-D procedure to existing abnormal-exit matrix and board safety notes",
+        "Add regression tests for schema/verifier behavior on valid/invalid Class-D evidence",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "P1-1 safety evidence deepening."
     },
     {
       "id": "US-004",
-      "title": "Add runtime online force control plane (dev mode) with full audit trail",
-      "description": "As a commissioning engineer, I want controlled online force operations in development mode so runtime diagnosis is faster and traceable.",
+      "title": "Unify commissioning playbook across doctor/force/retain/gate",
+      "description": "As a field engineer, I want one commissioning playbook that chains diagnostics, online force, retain restore, and gate checks so rehearsals are repeatable and low-friction.",
       "acceptanceCriteria": [
-        "Provide runtime force set/clear capability for DI/AI/DO/AO through an explicit development-only control plane",
-        "Default behavior keeps online force disabled unless explicitly enabled by config/flag",
-        "All force operations are audited with source/actor, timestamp, channel, value change, and clear events",
-        "Document safety boundaries and interactions with existing scenario-based force semantics",
-        "Add integration tests covering enable/disable guards and audit records",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
+        "Provide a single end-to-end commissioning playbook from scenario diagnostics to final no-board gate",
+        "Include at least two runnable rehearsal flows: nominal startup and fault-injection/debug",
+        "Playbook specifies exact artifact locations and pass/fail checkpoints for each step",
+        "Add doc consistency tests to lock required command snippets and key headings",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "P1-2 operations enablement."
     },
     {
       "id": "US-005",
-      "title": "Implement retain/persistent variable lifecycle with corruption-safe fallback",
-      "description": "As a controls developer, I want selected variables to persist across restarts so machine behavior is consistent and recoverable.",
+      "title": "Upgrade VS Code support from minimal tasks to practical day-1 workflow",
+      "description": "As a new developer, I want stronger VS Code support so I can edit PLC files, run common flows, and troubleshoot without manual setup overhead.",
       "acceptanceCriteria": [
-        "Define how retain variables are declared/configured and surfaced in generated/runtime artifacts",
-        "Implement persistent load/save with version/checksum validation and corruption-safe fallback behavior",
-        "Add restart/reload tests proving retained values survive normal restart and fallback works on corrupted data",
-        "Document persistence format and migration/compatibility rules",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
+        "Define VS Code support package contract (syntax association/highlight strategy, snippets or command tasks, recommendations)",
+        "Ensure `rust_plc new` emits the upgraded VS Code assets by default",
+        "Add onboarding documentation for install/use and common troubleshooting",
+        "Add integration tests asserting scaffolded VS Code assets and key command entries",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-006",
-      "title": "Scenario assetization: template library + coverage strategies + feedback.json",
-      "description": "As a test maintainer, I want scenario assets to be reusable and coverage-driven so regression suites stay effective and maintainable.",
-      "acceptanceCriteria": [
-        "Add project-level scenario template library and metadata contract",
-        "Enhance `scenario-gen` with coverage modes (pairwise/boundary-first/risk-first) and `--dry-run` summary",
-        "Emit structured `feedback.json` from minimized failures with actionable template/parameter guidance",
-        "Add deterministic tests for generation modes and feedback output schema",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-007",
-      "title": "Developer bootstrap pack: `rust_plc new` + VS Code minimal extension",
-      "description": "As a new team member, I want one-command project bootstrap and basic IDE support so I can reach CI-ready baseline quickly.",
-      "acceptanceCriteria": [
-        "Add `rust_plc new` scaffold command generating a runnable project with sample PLC/scenario/io_map/CI baseline",
-        "Generated project can complete documented quick path checks (scenario validate + regression gate command)",
-        "Provide minimal VS Code extension capability (syntax highlight + common command entry)",
-        "Add onboarding docs with command checklist from zero to first gate pass",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
-      ],
-      "priority": 7,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "P2 developer-experience uplift."
     }
   ]
 }

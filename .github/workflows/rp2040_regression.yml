@@ -6,6 +6,14 @@ on:
   pull_request:
 
 jobs:
+  stage3-runtime-dev-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Stage-3 runtime/dev contract gates
+        run: scripts/stage3_runtime_dev_gate.sh
+
   workspace-test:
     runs-on: ubuntu-latest
     steps:
