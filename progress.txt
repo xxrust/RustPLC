@@ -118,3 +118,113 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - Keep strict numeric range checks in validators; downstream simulation logic should not need to re-validate malformed fault params.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `validate_fault_params` is now the central location for component fault parameter invariants.
+
+## [2026-02-19 20:05:00 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added new component-scenario contract module: `src/component_scenario.rs`.
+  - Added parser/validator entrypoints:
+    - `parse_component_scenario_json`
+    - `parse_component_scenario_value`
+  - Added stable migration rejection for legacy fields:
+    - `CSCN-MIG-001` for legacy `faults`
+    - `CSCN-MIG-002` for legacy `forces`
+  - Added CLI command:
+    - `component-scenario-validate <scenario.json> [--output <human|json>] [--normalized-out <normalized_scenario.json>]`
+  - Added migration hint in CLI error formatter for legacy format users.
+  - Updated main usage/help to include the new component commands.
+- Quality checks
+  - `cargo test --lib`
+  - `cargo test --test component_scenario_validate`
+- Files changed
+  - `src/component_scenario.rs`
+  - `src/main.rs`
+  - `src/lib.rs`
+  - `tests/component_scenario_validate.rs`
+  - `prd.json`
+  - `progress.txt`
+
+## [2026-02-19 20:08:00 CST] - US-005 / US-006 / US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added component runtime simulation module: `src/component_sim.rs`.
+  - Implemented minimal deterministic runtime for:
+    - Cylinder: `retracted/extended/moving_extend/moving_retract/stopped_mid`
+    - Sensor: event-driven + fault-driven state
+    - Switch: event-driven + fault-driven state
+    - Stepper PD: `pulse/direction/enable` semantics and position evolution
+  - Implemented unified fault scheduler:
+    - tick-aligned activation
+    - duration window expiry
+    - deterministic same-tick priority resolution
+  - Added machine-readable audit artifact model:
+    - `ComponentFaultAuditEntry` (`activated/expired` lifecycle)
+  - Added CLI command:
+    - `component-sim <topology.json> --scenario <scenario.json> ...`
+  - Added CLI artifact outputs:
+    - `--out` component trace JSONL
+    - `--fault-audit-out` fault audit JSONL
+- Quality checks
+  - `cargo test --lib`
+  - `cargo test --test component_sim`
+  - `cargo test --test component_model_examples`
+- Files changed
+  - `src/component_sim.rs`
+  - `src/main.rs`
+  - `src/lib.rs`
+  - `tests/component_sim.rs`
+  - `tests/component_model_examples.rs`
+  - `examples/component_model/topology.json`
+  - `examples/component_model/scenario_normal.json`
+  - `examples/component_model/scenario_faults.json`
+  - `prd.json`
+  - `progress.txt`
+
+## [2026-02-19 20:11:00 CST] - US-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added component diagnosis module: `src/component_diagnostics.rs`.
+  - Added deterministic diagnosis output with stable issue codes per fault kind.
+  - Diagnosis candidate now includes component fault context:
+    - `component_id`
+    - `fault_kind`
+    - `start_ms/end_ms`
+  - Evidence entries are explicitly categorized:
+    - `fault_injection`
+    - `program_behavior`
+  - Integrated component diagnosis into `component-sim` and `--diagnosis-out` artifact.
+- Quality checks
+  - `cargo test --lib`
+  - `cargo test --test component_sim`
+- Files changed
+  - `src/component_diagnostics.rs`
+  - `src/main.rs`
+  - `src/lib.rs`
+  - `tests/component_sim.rs`
+  - `prd.json`
+  - `progress.txt`
+
+## [2026-02-19 20:14:00 CST] - US-009
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added migration and contract doc:
+    - `docs/component_library_fault_model_migration.md`
+  - Added wiki quick-entry page:
+    - `docs/wiki/Component-Library-Fault-Model-Migration.md`
+  - Added runnable example assets (normal + faults):
+    - `examples/component_model/topology.json`
+    - `examples/component_model/scenario_normal.json`
+    - `examples/component_model/scenario_faults.json`
+  - Added regression test to ensure examples validate and run end-to-end.
+- Quality checks
+  - `cargo test --test component_model_examples`
+  - `cargo test --test component_scenario_validate --test component_sim --test component_topology_validate`
+- Files changed
+  - `docs/component_library_fault_model_migration.md`
+  - `docs/wiki/Component-Library-Fault-Model-Migration.md`
+  - `examples/component_model/topology.json`
+  - `examples/component_model/scenario_normal.json`
+  - `examples/component_model/scenario_faults.json`
+  - `tests/component_model_examples.rs`
+  - `prd.json`
+  - `progress.txt`

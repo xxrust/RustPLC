@@ -21,6 +21,9 @@ use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::alarm_runtime::{
     build_alarm_event, AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity,
 };
+use rust_plc::component_diagnostics::diagnose_component_sim;
+use rust_plc::component_scenario::{parse_component_scenario_json, write_component_scenario_json};
+use rust_plc::component_sim::run_component_simulation;
 use rust_plc::component_topology::{parse_component_topology_json, write_component_topology_json};
 use rust_plc::diagnostics::{
     diagnose, DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport,
@@ -1495,6 +1498,20 @@ fn main() {
         }
         return;
     }
+    if first == "component-scenario-validate" {
+        if let Err(msg) = run_component_scenario_validate_subcommand(&program, args) {
+            eprintln!("[CSCN-000] {msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if first == "component-sim" {
+        if let Err(msg) = run_component_sim_subcommand(&program, args) {
+            eprintln!("[CSIM-000] {msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "no-board-gate" {
         if let Err(msg) = run_no_board_gate_subcommand(&program, args) {
             eprintln!("[GATE-000] {msg}");
@@ -1841,6 +1858,12 @@ fn print_usage(program: &str) {
     eprintln!("  {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>");
     eprintln!(
         "  {program} component-topology-validate <topology.json> [--output <human|json>] [--normalized-out <normalized_topology.json>]"
+    );
+    eprintln!(
+        "  {program} component-scenario-validate <scenario.json> [--output <human|json>] [--normalized-out <normalized_scenario.json>]"
+    );
+    eprintln!(
+        "  {program} component-sim <topology.json> --scenario <scenario.json> [--out <component_trace.jsonl>] [--fault-audit-out <fault_audit.jsonl>] [--diagnosis-out <component_diagnosis.json>] [--output <human|json>]"
     );
     eprintln!(
         "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]"
@@ -7196,6 +7219,348 @@ fn format_component_topology_validate_error(
     }
     if err.issues.len() > 8 {
         msg.push_str(&format!("\n- ... {} more issue(s)", err.issues.len() - 8));
+    }
+    msg
+}
+
+fn run_component_scenario_validate_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = format!(
+        "Usage: {program} component-scenario-validate <scenario.json> [--output <human|json>] [--normalized-out <normalized_scenario.json>]"
+    );
+    let Some(scenario_path) = args.next() else {
+        return Err(usage);
+    };
+    let scenario_path = PathBuf::from(scenario_path);
+    let mut output_mode = CliOutputMode::Human;
+    let mut normalized_out: Option<PathBuf> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
+            "--normalized-out" => {
+                normalized_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --normalized-out <normalized_scenario.json>".to_string()
+                })?));
+            }
+            "-h" | "--help" => return Err(usage.clone()),
+            other => {
+                return Err(format!(
+                    "Unknown argument for component-scenario-validate: {other}"
+                ));
+            }
+        }
+    }
+
+    let text = fs::read_to_string(&scenario_path)
+        .map_err(|err| format!("Failed to read {}: {err}", scenario_path.display()))?;
+    let scenario = parse_component_scenario_json(&text)
+        .map_err(|err| format_component_scenario_validate_error(&scenario_path, &err))?;
+
+    if let Some(path) = &normalized_out {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent).map_err(|err| {
+                    format!(
+                        "Failed to create normalized scenario directory {}: {err}",
+                        parent.display()
+                    )
+                })?;
+            }
+        }
+        write_component_scenario_json(path, &scenario)?;
+    }
+
+    if output_mode == CliOutputMode::Json {
+        #[derive(Serialize)]
+        struct ComponentScenarioValidateJson {
+            schema_version: u32,
+            command: &'static str,
+            output: &'static str,
+            status: &'static str,
+            scenario: String,
+            normalized_scenario: Option<String>,
+            tick_ms: u64,
+            duration_ms: u64,
+            switch_event_count: usize,
+            sensor_event_count: usize,
+            component_fault_count: usize,
+        }
+
+        let mut body = serde_json::to_string_pretty(&ComponentScenarioValidateJson {
+            schema_version: 1,
+            command: "component-scenario-validate",
+            output: output_mode.as_str(),
+            status: "pass",
+            scenario: display_path_relative_to_cwd(&scenario_path),
+            normalized_scenario: normalized_out
+                .as_ref()
+                .map(|path| display_path_relative_to_cwd(path)),
+            tick_ms: scenario.tick_ms,
+            duration_ms: scenario.duration_ms,
+            switch_event_count: scenario.switch_events.len(),
+            sensor_event_count: scenario.sensor_events.len(),
+            component_fault_count: scenario.component_faults.len(),
+        })
+        .map_err(|err| format!("Failed to serialize component-scenario JSON output: {err}"))?;
+        body.push('\n');
+        print!("{body}");
+    } else {
+        eprintln!(
+            "component-scenario-validate: PASS (switch_events={}, sensor_events={}, component_faults={})",
+            scenario.switch_events.len(),
+            scenario.sensor_events.len(),
+            scenario.component_faults.len()
+        );
+        eprintln!("  scenario: {}", scenario_path.display());
+        if let Some(path) = normalized_out {
+            eprintln!("  normalized_scenario: {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+fn format_component_scenario_validate_error(
+    path: &Path,
+    err: &rust_plc::component_scenario::ComponentScenarioValidationError,
+) -> String {
+    let mut msg = format!(
+        "component scenario validation failed for {} ({} issue(s))",
+        path.display(),
+        err.issues.len()
+    );
+    for issue in err.issues.iter().take(10) {
+        msg.push_str(&format!(
+            "\n- [{}] {}: {}",
+            issue.code, issue.path, issue.message
+        ));
+    }
+    if err
+        .issues
+        .iter()
+        .any(|issue| issue.code.starts_with("CSCN-MIG-"))
+    {
+        msg.push_str(
+            "\nMigration hint: replace legacy `faults.sensor_stuck` and `forces` with `component_faults` events targeted by component ID.",
+        );
+    }
+    if err.issues.len() > 10 {
+        msg.push_str(&format!("\n- ... {} more issue(s)", err.issues.len() - 10));
+    }
+    msg
+}
+
+fn run_component_sim_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = format!(
+        "Usage: {program} component-sim <topology.json> --scenario <scenario.json> [--out <component_trace.jsonl>] [--fault-audit-out <fault_audit.jsonl>] [--diagnosis-out <component_diagnosis.json>] [--output <human|json>]"
+    );
+    let Some(topology_path) = args.next() else {
+        return Err(usage);
+    };
+    let topology_path = PathBuf::from(topology_path);
+    let mut scenario_path: Option<PathBuf> = None;
+    let mut trace_out: Option<PathBuf> = None;
+    let mut fault_audit_out: Option<PathBuf> = None;
+    let mut diagnosis_out: Option<PathBuf> = None;
+    let mut output_mode = CliOutputMode::Human;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.json>".to_string()
+                    })?));
+            }
+            "--out" => {
+                trace_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --out <component_trace.jsonl>".to_string()
+                })?));
+            }
+            "--fault-audit-out" => {
+                fault_audit_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --fault-audit-out <fault_audit.jsonl>".to_string()
+                })?));
+            }
+            "--diagnosis-out" => {
+                diagnosis_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --diagnosis-out <component_diagnosis.json>".to_string()
+                })?));
+            }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
+            "-h" | "--help" => return Err(usage.clone()),
+            other => return Err(format!("Unknown argument for component-sim: {other}")),
+        }
+    }
+
+    let scenario_path = scenario_path.ok_or(usage)?;
+    let topology_text = fs::read_to_string(&topology_path)
+        .map_err(|err| format!("Failed to read {}: {err}", topology_path.display()))?;
+    let topology = parse_component_topology_json(&topology_text)
+        .map_err(|err| format_component_topology_validate_error(&topology_path, &err))?;
+
+    let scenario_text = fs::read_to_string(&scenario_path)
+        .map_err(|err| format!("Failed to read {}: {err}", scenario_path.display()))?;
+    let scenario = parse_component_scenario_json(&scenario_text)
+        .map_err(|err| format_component_scenario_validate_error(&scenario_path, &err))?;
+
+    let report = run_component_simulation(&topology, &scenario)
+        .map_err(|err| format_component_sim_error(&err))?;
+
+    let diagnosis = diagnose_component_sim(&report);
+
+    if let Some(path) = &trace_out {
+        write_jsonl(path, report.ticks.iter())?;
+    }
+    if let Some(path) = &fault_audit_out {
+        write_jsonl(path, report.fault_audit.iter())?;
+    }
+    if let Some(path) = &diagnosis_out {
+        write_json_pretty(path, &diagnosis)?;
+    }
+
+    if output_mode == CliOutputMode::Json {
+        #[derive(Serialize)]
+        struct ComponentSimJson {
+            schema_version: u32,
+            command: &'static str,
+            output: &'static str,
+            status: &'static str,
+            topology: String,
+            scenario: String,
+            tick_count: usize,
+            fault_audit_count: usize,
+            diagnosis_count: usize,
+            trace_out: Option<String>,
+            fault_audit_out: Option<String>,
+            diagnosis_out: Option<String>,
+        }
+
+        let mut body = serde_json::to_string_pretty(&ComponentSimJson {
+            schema_version: 1,
+            command: "component-sim",
+            output: output_mode.as_str(),
+            status: "pass",
+            topology: display_path_relative_to_cwd(&topology_path),
+            scenario: display_path_relative_to_cwd(&scenario_path),
+            tick_count: report.ticks.len(),
+            fault_audit_count: report.fault_audit.len(),
+            diagnosis_count: diagnosis.candidates.len(),
+            trace_out: trace_out
+                .as_ref()
+                .map(|path| display_path_relative_to_cwd(path)),
+            fault_audit_out: fault_audit_out
+                .as_ref()
+                .map(|path| display_path_relative_to_cwd(path)),
+            diagnosis_out: diagnosis_out
+                .as_ref()
+                .map(|path| display_path_relative_to_cwd(path)),
+        })
+        .map_err(|err| format!("Failed to serialize component-sim JSON output: {err}"))?;
+        body.push('\n');
+        print!("{body}");
+    } else {
+        eprintln!(
+            "component-sim: PASS (ticks={}, fault_audit={}, diagnosis={})",
+            report.ticks.len(),
+            report.fault_audit.len(),
+            diagnosis.candidates.len()
+        );
+        eprintln!("  topology: {}", topology_path.display());
+        eprintln!("  scenario: {}", scenario_path.display());
+        if let Some(path) = trace_out {
+            eprintln!("  trace: {}", path.display());
+        }
+        if let Some(path) = fault_audit_out {
+            eprintln!("  fault_audit: {}", path.display());
+        }
+        if let Some(path) = diagnosis_out {
+            eprintln!("  diagnosis: {}", path.display());
+        }
+    }
+
+    Ok(())
+}
+
+fn write_jsonl<T: Serialize>(path: &Path, rows: impl Iterator<Item = T>) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Failed to create output directory {}: {err}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
+    let mut file = fs::File::create(path)
+        .map_err(|err| format!("Failed to create output file {}: {err}", path.display()))?;
+    for row in rows {
+        let line = serde_json::to_string(&row).map_err(|err| {
+            format!(
+                "Failed to serialize JSONL row for {}: {err}",
+                path.display()
+            )
+        })?;
+        writeln!(file, "{line}")
+            .map_err(|err| format!("Failed to write {}: {err}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn write_json_pretty<T: Serialize>(path: &Path, payload: &T) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Failed to create output directory {}: {err}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
+    let mut body = serde_json::to_string_pretty(payload).map_err(|err| {
+        format!(
+            "Failed to serialize JSON payload for {}: {err}",
+            path.display()
+        )
+    })?;
+    body.push('\n');
+    fs::write(path, body).map_err(|err| format!("Failed to write {}: {err}", path.display()))
+}
+
+fn format_component_sim_error(err: &rust_plc::component_sim::ComponentSimError) -> String {
+    let mut msg = format!(
+        "component simulation failed ({} issue(s))",
+        err.issues.len()
+    );
+    for issue in err.issues.iter().take(10) {
+        msg.push_str(&format!(
+            "\n- [{}] {}: {}",
+            issue.code, issue.path, issue.message
+        ));
+    }
+    if err.issues.len() > 10 {
+        msg.push_str(&format!("\n- ... {} more issue(s)", err.issues.len() - 10));
     }
     msg
 }

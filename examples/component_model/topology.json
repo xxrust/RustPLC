@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "component_library": {
+    "schema_version": 1,
+    "components": [
+      { "id": "switch", "name": "Start Switch", "type": "switch", "params": {} },
+      { "id": "sensor", "name": "Front Sensor", "type": "sensor", "params": {} },
+      { "id": "cylinder", "name": "Lift Cylinder", "type": "cylinder", "params": { "stroke_ticks": 4 } },
+      { "id": "stepper", "name": "Axis M1", "type": "stepper_pd", "params": {} }
+    ]
+  },
+  "components": [
+    { "id": "s_start", "component_id": "switch", "params": {} },
+    { "id": "x_front", "component_id": "sensor", "params": {} },
+    { "id": "cyl_a", "component_id": "cylinder", "params": {} },
+    { "id": "m1", "component_id": "stepper", "params": {} }
+  ],
+  "connections": [
+    { "from": "s_start.state", "to": "cyl_a.cmd_extend" },
+    { "from": "x_front.state", "to": "cyl_a.cmd_retract" },
+    { "from": "s_start.state", "to": "m1.pulse" },
+    { "from": "x_front.state", "to": "m1.direction" },
+    { "from": "s_start.state", "to": "m1.enable" }
+  ]
+}

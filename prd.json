@@ -66,8 +66,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已新增 component-scenario 解析器与 CLI（component-scenario-validate），默认采用新模型；检测 legacy faults/forces 时返回 CSCN-MIG-* 并附迁移提示。"
     },
     {
       "id": "US-005",
@@ -82,8 +82,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现气缸/传感器/开关最小状态机闭环（含 tick 确定性）并通过 unit + integration tests。"
     },
     {
       "id": "US-006",
@@ -98,8 +98,8 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现 stepper_pd 的 pulse/direction/enable 仿真与 lost_step/stall/direction_reversed 行为影响。"
     },
     {
       "id": "US-007",
@@ -114,8 +114,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现统一异常调度（按 tick 对齐、duration 自动失效、固定优先级）并输出 machine-readable fault_audit.jsonl。"
     },
     {
       "id": "US-008",
@@ -129,8 +129,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已新增 component_diagnostics，诊断结果关联 component_id/fault_kind/time window，且证据区分 fault_injection 与 program_behavior。"
     },
     {
       "id": "US-009",
@@ -145,8 +145,8 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已补齐 docs/component_library_fault_model_migration.md + wiki + runnable examples，并增加文档示例回归测试。"
     }
   ]
 }
