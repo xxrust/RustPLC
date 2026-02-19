@@ -1907,3 +1907,39 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
   - Useful context (e.g., "the evaluation panel is in component X")
     - `class_d_checklist_template.json` is now the canonical fill-in template for manual Class-D electrical evidence.
 ---
+## [2026-02-19 13:04:01 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added a unified commissioning playbook document:
+    - `docs/commissioning_playbook.md`
+    - Chains diagnostics (`scenario-doctor`) -> runtime rehearsal (`sim-plc` with retain + online control plane) -> final `no-board-gate`.
+  - Included two runnable rehearsal flows with explicit commands:
+    - Flow A: nominal startup
+    - Flow B: fault-injection debug
+  - Added explicit artifact paths and per-step pass/fail checkpoints in both flows.
+  - Added doc consistency regression test:
+    - `tests/commissioning_playbook_doc.rs`
+    - Locks required headings and command snippets.
+  - Added wiki bridge page:
+    - `docs/wiki/Commissioning-Playbook.md`
+  - Updated Stage-3 gate script and runbook to include `commissioning_playbook_doc` checks.
+- Quality checks
+  - `cargo test --test commissioning_playbook_doc`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `cargo check --workspace`
+- Files changed
+  - `docs/commissioning_playbook.md`
+  - `docs/wiki/Commissioning-Playbook.md`
+  - `tests/commissioning_playbook_doc.rs`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `docs/stage3_ci_gate_runbook.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Commissioning docs are most robust when each step binds command + artifact path + pass/fail checkpoint, not command-only prose.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Playbook command examples can drift silently; lock key headings/snippets with a dedicated doc regression test.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `docs/commissioning_playbook.md` is now the canonical end-to-end operator runbook across doctor/force/retain/gate.
+---

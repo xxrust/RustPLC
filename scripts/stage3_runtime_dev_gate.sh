@@ -10,6 +10,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 echo "[stage3-gate] Running focused integration tests"
 cargo test --test online_force_control_plane --test online_variable_control_plane --test retain_persistent --test scenario_gen --test sim_regress --test new_scaffold
 cargo test --test abnormal_exit_matrix --test abnormal_exit_matrix_doc
+cargo test --test commissioning_playbook_doc
 
 echo "[stage3-gate] Checking scenario-gen summary contract"
 cargo run -- scenario-gen \
