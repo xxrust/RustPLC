@@ -50,100 +50,99 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 
 ## 系统架构
 
-```mermaid
-flowchart TB
-    subgraph INPUT["📝 输入层"]
-        DSL[".plc DSL 文件"]
-        SCENARIO["场景 YAML"]
-    end
-
-    subgraph COMPILER["⚙️ 编译器核心"]
-        PARSER["Parser (PEG)"]
-        AST["AST"]
-        SEMANTIC["语义分析 + 预处理"]
-        IR["IR (拓扑图 + 状态机 + 约束集)"]
-
-        PARSER --> AST
-        AST --> SEMANTIC
-        SEMANTIC --> IR
-    end
-
-    subgraph VERIFY["🔬 验证引擎（并行）"]
-        SAFETY["Safety 引擎<br/>BMC + k-归纳"]
-        LIVENESS["Liveness 引擎<br/>SCC + 可达性"]
-        TIMING["Timing 引擎<br/>关键路径分析"]
-        CAUSALITY["Causality 引擎<br/>拓扑 BFS"]
-    end
-
-    subgraph RUNTIME["🏃 运行时层"]
-        RUNTIME_CORE["runtime-core<br/>确定性状态机执行器"]
-        SIM_IO["SimIO<br/>仿真 I/O 层"]
-        VIRTUAL_BOARD["Virtual Board<br/>虚拟板级 Runner"]
-        RP2040_HAL["RP2040 HAL<br/>硬件抽象层"]
-    end
-
-    subgraph ANALYSIS["📊 分析与门禁"]
-        TRACE_DIFF["trace-diff<br/>SIL vs Board 对比"]
-        TIMING_REPORT["timing-report<br/>p50/p95/p99 统计"]
-        NO_BOARD_GATE["no-board-gate<br/>实时阈值门禁"]
-        RELEASE_BUNDLE["release-bundle<br/>可审计交付包"]
-    end
-
-    subgraph OUTPUT["📦 输出层"]
-        REPORT["verification_report.json"]
-        TRACE["trace.jsonl"]
-        FIRMWARE["RP2040 固件 (UF2)"]
-        BUNDLE["release-bundle<br/>(SHA 清单 + 元数据)"]
-    end
-
-    DSL --> PARSER
-    IR --> SAFETY
-    IR --> LIVENESS
-    IR --> TIMING
-    IR --> CAUSALITY
-
-    SAFETY --> REPORT
-    LIVENESS --> REPORT
-    TIMING --> REPORT
-    CAUSALITY --> REPORT
-
-    IR --> RUNTIME_CORE
-    SCENARIO --> SIM_IO
-    RUNTIME_CORE --> SIM_IO
-    RUNTIME_CORE --> VIRTUAL_BOARD
-    RUNTIME_CORE --> RP2040_HAL
-
-    SIM_IO --> TRACE
-    VIRTUAL_BOARD --> TRACE
-    RP2040_HAL --> FIRMWARE
-
-    TRACE --> TRACE_DIFF
-    TRACE --> TIMING_REPORT
-    TRACE_DIFF --> NO_BOARD_GATE
-    TIMING_REPORT --> NO_BOARD_GATE
-    NO_BOARD_GATE --> RELEASE_BUNDLE
-    RELEASE_BUNDLE --> BUNDLE
-
-    style COMPILER fill:#e1f5ff
-    style VERIFY fill:#fff4e1
-    style RUNTIME fill:#e8f5e9
-    style ANALYSIS fill:#f3e5f5
 ```
-
-### 关键模块说明
-
-| 模块 | 职责 | 关键技术 |
-|------|------|----------|
-| **Parser** | `.plc` → AST | PEG 解析器（pest） |
-| **语义分析** | AST → IR，repeat/delay 展开 | 拓扑推断、类型检查 |
-| **IR** | 中间表示 | petgraph DiGraph（拓扑 + 状态机） |
-| **四大验证引擎** | 并行证明安全性/活性/时序/因果 | BMC、k-归纳、SCC、BFS |
-| **runtime-core** | 确定性状态机执行 | no_std 兼容，可插拔 I/O |
-| **SimIO** | SIL 仿真 I/O 层 | 场景驱动、故障注入、Plant 模型 |
-| **Virtual Board** | 虚拟板级 Runner | 模拟真实板行为 + tick_timing 采样 |
-| **RP2040 HAL** | 硬件抽象层 | GPIO、ADC、PWM、PIO（运动控制） |
-| **trace-diff** | SIL vs Board 对比 | 逐 tick 差异检测 |
-| **no-board-gate** | 无板门禁 | 实时阈值检查（p99、overrun） |
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                  📝 输入层                                           │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  .plc DSL 文件                    场景 YAML (scenario.yaml)                         │
+│  - topology (拓扑)                - digital_inputs / analog_inputs                   │
+│  - constraints (约束)             - tick_ms / duration_ticks                         │
+│  - tasks (控制逻辑)               - fault injection (故障注入)                       │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              ⚙️ 编译器核心 (src/)                                   │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  Parser (pest PEG) ──▶ AST ──▶ 语义分析 + 预处理 ──▶ IR                            │
+│                                (repeat/delay 展开)   (TopologyGraph + StateMachine) │
+│                                                                                      │
+│  关键模块：                                                                          │
+│  • parser/plc.pest    - PEG 语法定义                                                │
+│  • ast/mod.rs         - AST 类型 (PlcProgram, DeviceDeclaration, StepStatement)    │
+│  • semantic/mod.rs    - 语义分析 + IR 降级                                          │
+│  • ir/mod.rs          - IR 类型 (petgraph DiGraph)                                  │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                        🔬 验证引擎（并行执行）(src/verification/)                    │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐│
+│  │  Safety 引擎    │  │ Liveness 引擎   │  │  Timing 引擎    │  │ Causality 引擎  ││
+│  │  BMC + k-归纳   │  │ SCC + 可达性    │  │  关键路径分析   │  │   拓扑 BFS      ││
+│  │  conflicts_with │  │  死锁检测       │  │  response_time  │  │  connected_to   ││
+│  │  requires       │  │  活锁检测       │  │  budget 上界    │  │  detects 链路   ││
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘  └─────────────────┘│
+│                                      ▼                                               │
+│                          verification_report.json                                    │
+│                          (结构化验证报告 + warnings 分级)                            │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          🏃 运行时层 (crates/)                                       │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                        ┌─────────────────────────────┐                              │
+│                        │   runtime-core (no_std)     │                              │
+│                        │   确定性状态机执行器         │                              │
+│                        │   - Program / Task / Step   │                              │
+│                        │   - Instr / Action          │                              │
+│                        └──────────┬──────────────────┘                              │
+│                                   │                                                  │
+│              ┌────────────────────┼────────────────────┐                            │
+│              ▼                    ▼                    ▼                            │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐                 │
+│  │   SimIO (sim)    │  │  Virtual Board   │  │  RP2040 HAL      │                 │
+│  │   SIL 仿真 I/O   │  │  虚拟板级 Runner │  │  硬件抽象层      │                 │
+│  │   - Plant 模型   │  │  - tick_timing   │  │  - GPIO/ADC/PWM  │                 │
+│  │   - 故障注入     │  │  - 模拟真实板    │  │  - PIO (运动)    │                 │
+│  │   - 波形导出     │  │  - overrun 标记  │  │  - RTT 日志      │                 │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘                 │
+│          │                      │                      │                            │
+│          ▼                      ▼                      ▼                            │
+│   sil_trace.jsonl      board_trace.jsonl      RP2040 固件 (UF2)                    │
+│   sim_report.json      tick_timing.jsonl      + board.log (RTT)                    │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          📊 分析与门禁 (src/)                                        │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  trace-diff              timing-report           no-board-gate                      │
+│  SIL vs Board 对比       p50/p95/p99 统计       实时阈值门禁                        │
+│  - 逐 tick 差异检测      - exec_us / slack_us   - --max-p99-exec-us                │
+│  - context 上下文        - overrun_count        - --max-overrun-count               │
+│  - fail-on-mismatch      - timing_report.json   - 轨迹一致性 + 实时性               │
+│                                                                                      │
+│  release-bundle                                                                      │
+│  可审计交付包                                                                        │
+│  - manifest.json (SHA256 清单)                                                      │
+│  - build_meta.json (git commit / dirty / tool_version)                             │
+│  - 所有验证报告 + trace + timing 证据                                               │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                📦 输出层                                             │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  ✅ 编译期：verification_report.json (四引擎证明结果)                               │
+│  🧪 仿真期：trace.jsonl + wave.vcd + sim_report.json                               │
+│  📦 部署期：firmware.uf2 + io_map.toml + analog_contract.toml                      │
+│  🚫 门禁期：diff_report.json + timing_report.json + gate_summary.json              │
+│  📋 交付期：release-bundle/ (manifest + 所有工件 + SHA 清单)                        │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 

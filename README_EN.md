@@ -50,100 +50,99 @@ Verification passed:
 
 ## System Architecture
 
-```mermaid
-flowchart TB
-    subgraph INPUT["📝 Input Layer"]
-        DSL[".plc DSL File"]
-        SCENARIO["Scenario YAML"]
-    end
-
-    subgraph COMPILER["⚙️ Compiler Core"]
-        PARSER["Parser (PEG)"]
-        AST["AST"]
-        SEMANTIC["Semantic Analysis + Preprocessing"]
-        IR["IR (Topology Graph + State Machine + Constraint Set)"]
-
-        PARSER --> AST
-        AST --> SEMANTIC
-        SEMANTIC --> IR
-    end
-
-    subgraph VERIFY["🔬 Verification Engines (Parallel)"]
-        SAFETY["Safety Engine<br/>BMC + k-induction"]
-        LIVENESS["Liveness Engine<br/>SCC + Reachability"]
-        TIMING["Timing Engine<br/>Critical Path Analysis"]
-        CAUSALITY["Causality Engine<br/>Topology BFS"]
-    end
-
-    subgraph RUNTIME["🏃 Runtime Layer"]
-        RUNTIME_CORE["runtime-core<br/>Deterministic State Machine Executor"]
-        SIM_IO["SimIO<br/>Simulation I/O Layer"]
-        VIRTUAL_BOARD["Virtual Board<br/>Virtual Board Runner"]
-        RP2040_HAL["RP2040 HAL<br/>Hardware Abstraction Layer"]
-    end
-
-    subgraph ANALYSIS["📊 Analysis & Gating"]
-        TRACE_DIFF["trace-diff<br/>SIL vs Board Comparison"]
-        TIMING_REPORT["timing-report<br/>p50/p95/p99 Statistics"]
-        NO_BOARD_GATE["no-board-gate<br/>Real-Time Threshold Gate"]
-        RELEASE_BUNDLE["release-bundle<br/>Auditable Delivery Package"]
-    end
-
-    subgraph OUTPUT["📦 Output Layer"]
-        REPORT["verification_report.json"]
-        TRACE["trace.jsonl"]
-        FIRMWARE["RP2040 Firmware (UF2)"]
-        BUNDLE["release-bundle<br/>(SHA Manifest + Metadata)"]
-    end
-
-    DSL --> PARSER
-    IR --> SAFETY
-    IR --> LIVENESS
-    IR --> TIMING
-    IR --> CAUSALITY
-
-    SAFETY --> REPORT
-    LIVENESS --> REPORT
-    TIMING --> REPORT
-    CAUSALITY --> REPORT
-
-    IR --> RUNTIME_CORE
-    SCENARIO --> SIM_IO
-    RUNTIME_CORE --> SIM_IO
-    RUNTIME_CORE --> VIRTUAL_BOARD
-    RUNTIME_CORE --> RP2040_HAL
-
-    SIM_IO --> TRACE
-    VIRTUAL_BOARD --> TRACE
-    RP2040_HAL --> FIRMWARE
-
-    TRACE --> TRACE_DIFF
-    TRACE --> TIMING_REPORT
-    TRACE_DIFF --> NO_BOARD_GATE
-    TIMING_REPORT --> NO_BOARD_GATE
-    NO_BOARD_GATE --> RELEASE_BUNDLE
-    RELEASE_BUNDLE --> BUNDLE
-
-    style COMPILER fill:#e1f5ff
-    style VERIFY fill:#fff4e1
-    style RUNTIME fill:#e8f5e9
-    style ANALYSIS fill:#f3e5f5
 ```
-
-### Key Module Descriptions
-
-| Module | Responsibility | Key Technology |
-|--------|----------------|----------------|
-| **Parser** | `.plc` → AST | PEG parser (pest) |
-| **Semantic Analysis** | AST → IR, repeat/delay expansion | Topology inference, type checking |
-| **IR** | Intermediate Representation | petgraph DiGraph (topology + state machine) |
-| **Four Verification Engines** | Parallel proof of safety/liveness/timing/causality | BMC, k-induction, SCC, BFS |
-| **runtime-core** | Deterministic state machine execution | no_std compatible, pluggable I/O |
-| **SimIO** | SIL simulation I/O layer | Scenario-driven, fault injection, Plant model |
-| **Virtual Board** | Virtual board runner | Simulates real board behavior + tick_timing sampling |
-| **RP2040 HAL** | Hardware abstraction layer | GPIO, ADC, PWM, PIO (motion control) |
-| **trace-diff** | SIL vs Board comparison | Tick-by-tick difference detection |
-| **no-board-gate** | No-board gate | Real-time threshold checks (p99, overrun) |
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                  📝 Input Layer                                      │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  .plc DSL File                    Scenario YAML (scenario.yaml)                     │
+│  - topology                       - digital_inputs / analog_inputs                   │
+│  - constraints                    - tick_ms / duration_ticks                         │
+│  - tasks (control logic)          - fault injection                                  │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              ⚙️ Compiler Core (src/)                                 │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  Parser (pest PEG) ──▶ AST ──▶ Semantic Analysis + Preprocessing ──▶ IR            │
+│                                (repeat/delay expansion)   (TopologyGraph + StateMachine)│
+│                                                                                      │
+│  Key Modules:                                                                        │
+│  • parser/plc.pest    - PEG grammar definition                                      │
+│  • ast/mod.rs         - AST types (PlcProgram, DeviceDeclaration, StepStatement)   │
+│  • semantic/mod.rs    - Semantic analysis + IR lowering                             │
+│  • ir/mod.rs          - IR types (petgraph DiGraph)                                 │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                    🔬 Verification Engines (Parallel) (src/verification/)            │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐│
+│  │  Safety Engine  │  │ Liveness Engine │  │  Timing Engine  │  │ Causality Engine││
+│  │  BMC + k-induct │  │ SCC + Reachable │  │  Critical Path  │  │   Topology BFS  ││
+│  │  conflicts_with │  │  Deadlock check │  │  response_time  │  │  connected_to   ││
+│  │  requires       │  │  Livelock check │  │  budget bounds  │  │  detects chain  ││
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘  └─────────────────┘│
+│                                      ▼                                               │
+│                          verification_report.json                                    │
+│                          (Structured verification report + warning levels)           │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          🏃 Runtime Layer (crates/)                                  │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                        ┌─────────────────────────────┐                              │
+│                        │   runtime-core (no_std)     │                              │
+│                        │   Deterministic State Machine│                             │
+│                        │   - Program / Task / Step   │                              │
+│                        │   - Instr / Action          │                              │
+│                        └──────────┬──────────────────┘                              │
+│                                   │                                                  │
+│              ┌────────────────────┼────────────────────┐                            │
+│              ▼                    ▼                    ▼                            │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐                 │
+│  │   SimIO (sim)    │  │  Virtual Board   │  │  RP2040 HAL      │                 │
+│  │   SIL Simulation │  │  Virtual Runner  │  │  Hardware Layer  │                 │
+│  │   - Plant model  │  │  - tick_timing   │  │  - GPIO/ADC/PWM  │                 │
+│  │   - Fault inject │  │  - Real board sim│  │  - PIO (motion)  │                 │
+│  │   - Waveform     │  │  - Overrun mark  │  │  - RTT logging   │                 │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘                 │
+│          │                      │                      │                            │
+│          ▼                      ▼                      ▼                            │
+│   sil_trace.jsonl      board_trace.jsonl      RP2040 Firmware (UF2)                │
+│   sim_report.json      tick_timing.jsonl      + board.log (RTT)                    │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          📊 Analysis & Gating (src/)                                 │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  trace-diff              timing-report           no-board-gate                      │
+│  SIL vs Board Compare    p50/p95/p99 Stats      Real-Time Threshold Gate           │
+│  - Tick-by-tick diff     - exec_us / slack_us   - --max-p99-exec-us                │
+│  - Context window        - overrun_count        - --max-overrun-count               │
+│  - fail-on-mismatch      - timing_report.json   - Trace consistency + RT checks    │
+│                                                                                      │
+│  release-bundle                                                                      │
+│  Auditable Delivery Package                                                          │
+│  - manifest.json (SHA256 manifest)                                                  │
+│  - build_meta.json (git commit / dirty / tool_version)                             │
+│  - All verification reports + trace + timing evidence                               │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                📦 Output Layer                                       │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  ✅ Compile-time: verification_report.json (four engine proof results)              │
+│  🧪 Simulation:   trace.jsonl + wave.vcd + sim_report.json                         │
+│  📦 Deployment:   firmware.uf2 + io_map.toml + analog_contract.toml                │
+│  🚫 Gating:       diff_report.json + timing_report.json + gate_summary.json        │
+│  📋 Delivery:     release-bundle/ (manifest + all artifacts + SHA manifest)        │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
