@@ -1,16 +1,17 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/rp2040-stepper-ab-encoder",
-  "description": "Implement RP2040 real-board motion support: dual-axis Pulse/Dir stepper + AB encoder, with PIO-first design, trapezoid profile, and a clean motion config + virtual feedback channel mapping for the DSL.",
+  "branchName": "ralph/stage2-safety-delivery",
+  "description": "Execute the next-stage plan with safety-first delivery: normalize motion+fail-safe HIL gating, harden diagnostics UX, and add runtime control/persistence plus scenario and DevEx assets.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Define io_map motion config section (dual-axis, clean-first)",
-      "description": "As a firmware developer, I want to declare stepper/encoder channels in io_map (axis0/axis1) so the motion mapping is explicit, reviewable, and not scattered across code.",
+      "title": "Normalize RP2040 HIL gate for motion + fail-safe as a daily regression baseline",
+      "description": "As a release owner, I want motion and fail-safe behavior to be gated by a reproducible HIL workflow so regressions are caught before deployment.",
       "acceptanceCriteria": [
-        "Add a documented motion config section (e.g. `motion.stepper.axis0`, `motion.stepper.axis1`, `motion.encoder.axis0`, `motion.encoder.axis1`)",
-        "Per-axis required fields are specified: STEP/DIR/EN pins, encoder A/B pins, count sign convention, PPR/multiplier/scale parameters",
-        "Invalid configs fail with path-addressable errors (field path + reason)",
+        "Provide a single reproducible HIL gate entry for RP2040 covering both motion and fail-safe checks",
+        "Include at least two HIL case bundles: one motion-focused case and one fail-safe-focused case",
+        "Failure artifacts include enough context to locate fault source (axis/step/signal/time)",
+        "Update runbook docs with exact local and CI reproduction commands",
         "Tests pass (`cargo test --workspace`)",
         "Typecheck passes"
       ],
@@ -20,166 +21,100 @@
     },
     {
       "id": "US-002",
-      "title": "Implement motion config parsing + semantic validation",
-      "description": "As a maintainer, I want motion config parsing to catch conflicts and invalid ranges early so board debugging time is reduced.",
+      "title": "Implement abnormal-exit safety matrix (A/B/C/D) with verification evidence",
+      "description": "As a safety engineer, I want abnormal-exit classes to have explicit expected behavior and evidence so safety claims are auditable.",
       "acceptanceCriteria": [
-        "Implement parsing/validation for motion config (pin conflicts, duplicate axis ids, invalid parameter ranges)",
-        "Add unit tests covering success and failure paths",
-        "Failure messages include config path and a concrete fix suggestion",
+        "Add an abnormal-exit matrix covering A/B/C/D classes with trigger method, expected IO behavior, and acceptance check",
+        "Add automated verification for at least A/B/C classes and document why D relies on hardware safety chain",
+        "Publish evidence artifacts/log schema for each class (trigger, observed outputs, verdict)",
+        "Include electrical checklist notes for critical actuators (e.g., vertical brake/enable ordering)",
         "Tests pass (`cargo test --workspace`)",
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Integrate motion subsystem into board-rp2040 HAL lifecycle",
-      "description": "As an architecture maintainer, I want the motion subsystem to plug into the existing board-rp2040 HAL shape so the main loop stays readable and trace/timing evidence remains stable.",
+      "title": "Deliver M6 diagnostics package: error codes + output modes + scenario-doctor",
+      "description": "As a frontline engineer, I want structured diagnostics and a doctor command so I can fix common pipeline issues quickly without reading source code.",
       "acceptanceCriteria": [
-        "Add motion hooks into the firmware lifecycle (`initialize`/`update_in`/`update_out`/`finalize_on_error`)",
-        "Motion code is organized into dedicated module(s), avoiding large logic blocks in main.rs",
-        "Existing TRACE/TIMING output and safe-state behavior are not broken",
-        "Cross build passes (`cargo build -p board-rp2040 --target thumbv6m-none-eabi --release`)",
+        "Introduce stable error codes for high-frequency failures in scenario/gate/build flows",
+        "Support unified CLI output mode switch (`--output human|json`) for key commands used in CI and local debugging",
+        "Add `scenario-doctor` MVP to check common issues (path/tick alignment/device mapping/same-tick risk) and provide `--fix-preview` suggestions",
+        "Add tests for error code coverage, output mode serialization, and scenario-doctor checks",
+        "Update docs with troubleshooting examples using new error codes and doctor output",
+        "Tests pass (`cargo test --workspace`)",
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "PIO step generator for axis0 (Pulse/Dir/EN) with trapezoid profile",
-      "description": "As a machine/controls engineer, I want axis0 to generate stable Pulse/Dir/EN signals using PIO and support a trapezoid speed profile so basic motion is possible without complex planning.",
+      "title": "Add runtime online force control plane (dev mode) with full audit trail",
+      "description": "As a commissioning engineer, I want controlled online force operations in development mode so runtime diagnosis is faster and traceable.",
       "acceptanceCriteria": [
-        "Axis0 STEP/DIR/EN pins are bound from motion config and can be driven in firmware",
-        "Support minimal command surface: enable/disable, start/stop, direction, and target steps/count or target velocity",
-        "Support trapezoid profile (accel/const/decel) with a minimal parameter set (documented defaults allowed)",
-        "Direction switching is protected (e.g. requires stop/deadtime before flipping direction)",
+        "Provide runtime force set/clear capability for DI/AI/DO/AO through an explicit development-only control plane",
+        "Default behavior keeps online force disabled unless explicitly enabled by config/flag",
+        "All force operations are audited with source/actor, timestamp, channel, value change, and clear events",
+        "Document safety boundaries and interactions with existing scenario-based force semantics",
+        "Add integration tests covering enable/disable guards and audit records",
         "Tests pass (`cargo test --workspace`)",
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "PIO step generator for axis1 (shared implementation, no copy-paste fork)",
-      "description": "As a firmware developer, I want axis1 to have the same motion capability as axis0 while sharing the same implementation skeleton to keep the codebase maintainable.",
+      "title": "Implement retain/persistent variable lifecycle with corruption-safe fallback",
+      "description": "As a controls developer, I want selected variables to persist across restarts so machine behavior is consistent and recoverable.",
       "acceptanceCriteria": [
-        "Axis1 STEP/DIR/EN pins are bound from motion config and can be driven in firmware",
-        "Axis0/axis1 share a common core implementation (axis struct/trait or equivalent), not duplicated logic",
-        "Cross build passes (`cargo build -p board-rp2040 --target thumbv6m-none-eabi --release`)",
+        "Define how retain variables are declared/configured and surfaced in generated/runtime artifacts",
+        "Implement persistent load/save with version/checksum validation and corruption-safe fallback behavior",
+        "Add restart/reload tests proving retained values survive normal restart and fallback works on corrupted data",
+        "Document persistence format and migration/compatibility rules",
         "Tests pass (`cargo test --workspace`)",
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "AB decode + high-rate counting for axis0 (count/dir/speed snapshot per tick)",
-      "description": "As a controls developer, I want axis0 to publish encoder-derived count, direction sign, and speed estimates so the RustPLC DSL can consume stable engineering signals.",
+      "title": "Scenario assetization: template library + coverage strategies + feedback.json",
+      "description": "As a test maintainer, I want scenario assets to be reusable and coverage-driven so regression suites stay effective and maintainable.",
       "acceptanceCriteria": [
-        "Axis0 AB decode produces a monotonic count snapshot (with a well-defined signed/unsigned convention) and direction sign",
-        "Axis0 speed estimate is defined at tick boundaries with clear dt and unit semantics",
-        "A minimal noise/bounce mitigation strategy is implemented and documented (driver/board-layer responsibility)",
+        "Add project-level scenario template library and metadata contract",
+        "Enhance `scenario-gen` with coverage modes (pairwise/boundary-first/risk-first) and `--dry-run` summary",
+        "Emit structured `feedback.json` from minimized failures with actionable template/parameter guidance",
+        "Add deterministic tests for generation modes and feedback output schema",
         "Tests pass (`cargo test --workspace`)",
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-007",
-      "title": "AB decode + high-rate counting for axis1 (shared implementation)",
-      "description": "As a controls developer, I want axis1 to publish the same count/dir/speed signals with shared core logic so behavior stays consistent across axes.",
+      "title": "Developer bootstrap pack: `rust_plc new` + VS Code minimal extension",
+      "description": "As a new team member, I want one-command project bootstrap and basic IDE support so I can reach CI-ready baseline quickly.",
       "acceptanceCriteria": [
-        "Axis1 AB decode and speed estimation work and are covered by unit/integration tests",
-        "Axis0/axis1 share common AB decode core logic (no duplicated fork)",
+        "Add `rust_plc new` scaffold command generating a runnable project with sample PLC/scenario/io_map/CI baseline",
+        "Generated project can complete documented quick path checks (scenario validate + regression gate command)",
+        "Provide minimal VS Code extension capability (syntax highlight + common command entry)",
+        "Add onboarding docs with command checklist from zero to first gate pass",
         "Tests pass (`cargo test --workspace`)",
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-008",
-      "title": "Map motion feedback into RustPLC virtual input channels (DSL-visible signals)",
-      "description": "As a DSL author, I want to use axis_count/axis_speed/enc_dir_positive style signals without relying on ADC-only analog_inputs semantics, so the topology stays clear and portable.",
-      "acceptanceCriteria": [
-        "Define and implement a mapping from motion feedback signals to DSL-visible virtual DI/AI channels (for axis0 and axis1)",
-        "`scenario-validate` recognizes the virtual motion channels and validates ids correctly",
-        "Trace artifacts include observable changes for key motion feedback signals (count/speed/dir)",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
-      ],
-      "priority": 8,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-009",
-      "title": "Add dual-axis minimal board example (plc + scenario + io_map) covering nominal + faults",
-      "description": "As a project user, I want a minimal runnable example demonstrating motion commands + encoder feedback + fault paths so I can replicate and extend it for real machines.",
-      "acceptanceCriteria": [
-        "Add a new example set (.plc + scenario + io_map) covering axis0/axis1 nominal motion and at least: count-stuck timeout, wrong-direction fault",
-        "Example includes timeout -> fault path with visible trace/report evidence",
-        "Commands are documented and reproducible locally (produce trace/report artifacts)",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-011",
-      "title": "Add motion regression tests and wire them into CI gates",
-      "description": "As a CI maintainer, I want motion capabilities to be regression-gated so later refactors do not silently break real-board motion behavior.",
-      "acceptanceCriteria": [
-        "Add motion regression tests covering at least: nominal + two fault categories (>= 3 scenarios) across dual axes",
-        "The tests are integrated into existing CI workflow and are locally reproducible",
-        "Failure logs include axis id/signal name/timestamp to speed debugging",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
-      ],
-      "priority": 11,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-012",
-      "title": "Add docs for motion config + format delta (old vs new)",
-      "description": "As a team member, I want a clear migration note describing motion-related io_map changes and any output/trace format changes so adoption is straightforward.",
-      "acceptanceCriteria": [
-        "Add a new doc under docs/ describing the motion io_map changes and how to configure axis0/axis1",
-        "Document old format vs new format field mapping with a concrete example",
-        "Document any new trace/report fields introduced and their semantics",
-        "Typecheck passes"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-013",
-      "title": "Update wiki drafts for motion implementation + troubleshooting",
-      "description": "As a future maintainer, I want offline-readable wiki pages documenting setup, test steps, and troubleshooting for PIO stepper + AB encoder on RP2040.",
-      "acceptanceCriteria": [
-        "Update/add at least two docs/wiki pages: motion implementation guide + troubleshooting/CI repro notes",
-        "Terminology stays consistent with docs/stepper_ab_encoder.md and existing wiki drafts",
-        "Provide a command checklist from zero to regression pass (build, run, parse, gate)",
-        "Tests pass (`cargo test --workspace`)",
-        "Typecheck passes"
-      ],
-      "priority": 13,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]

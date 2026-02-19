@@ -1,0 +1,52 @@
+{
+  "case_id": "motion_nominal",
+  "checks": [
+    {
+      "id": "axis0_dir_feedback",
+      "description": "Axis0 direction feedback is observed quickly",
+      "axis": "axis0",
+      "signal": "axis0_enc_dir_positive",
+      "step": {
+        "task": 0,
+        "from_step": 3,
+        "to_step": 4,
+        "reason": "wait_satisfied"
+      },
+      "tick": {
+        "max": 50
+      }
+    },
+    {
+      "id": "axis0_count_reaches_target",
+      "description": "Axis0 count reaches threshold in the motion window",
+      "axis": "axis0",
+      "signal": "axis0_count",
+      "step": {
+        "task": 0,
+        "from_step": 4,
+        "to_step": 5,
+        "reason": "wait_satisfied"
+      },
+      "tick": {
+        "min": 50,
+        "max": 120
+      }
+    },
+    {
+      "id": "axis1_count_reaches_target",
+      "description": "Axis1 count reaches threshold in the motion window",
+      "axis": "axis1",
+      "signal": "axis1_count",
+      "step": {
+        "task": 0,
+        "from_step": 5,
+        "to_step": 6,
+        "reason": "wait_satisfied"
+      },
+      "tick": {
+        "min": 50,
+        "max": 120
+      }
+    }
+  ]
+}

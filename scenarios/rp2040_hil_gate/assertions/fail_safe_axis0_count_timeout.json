@@ -1,0 +1,53 @@
+{
+  "case_id": "fail_safe_axis0_count_timeout",
+  "checks": [
+    {
+      "id": "axis0_count_timeout",
+      "description": "Axis0 count timeout routes to fail-safe task",
+      "axis": "axis0",
+      "signal": "axis0_count",
+      "step": {
+        "task": 0,
+        "from_step": 4,
+        "to_step": 7,
+        "reason": "timeout"
+      },
+      "tick": {
+        "min": 120,
+        "max": 220
+      }
+    },
+    {
+      "id": "fail_safe_stop_step",
+      "description": "Fail-safe stop step executes immediately after timeout",
+      "axis": "axis0",
+      "signal": "axis0_enable",
+      "step": {
+        "task": 0,
+        "from_step": 7,
+        "to_step": 8,
+        "reason": "action"
+      },
+      "tick": {
+        "min": 120,
+        "max": 220
+      }
+    },
+    {
+      "id": "fail_safe_log_step",
+      "description": "Fail-safe log step reaches done task",
+      "axis": "axis1",
+      "signal": "axis1_enable",
+      "step": {
+        "task": 0,
+        "from_step": 8,
+        "to_step": 9,
+        "reason": "action"
+      },
+      "tick": {
+        "min": 120,
+        "max": 220
+      }
+    }
+  ]
+}

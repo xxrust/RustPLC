@@ -46,22 +46,18 @@ jobs:
           echo "mount=$MOUNT" >> "$GITHUB_OUTPUT"
           echo "port=$PORT" >> "$GITHUB_OUTPUT"
           echo "duration=$DURATION" >> "$GITHUB_OUTPUT"
-      - name: Run RP2040 HIL gate
+      - name: Run RP2040 daily HIL gate (motion + fail-safe bundles)
         run: |
-          scripts/rp2040_hil_gate.sh \
-            --plc examples/rp2040_end_to_end/pressure_station.plc \
-            --scenario examples/rp2040_end_to_end/scenarios/normal.yaml \
-            --io-map examples/rp2040_end_to_end/io_map.toml \
+          scripts/rp2040_hil_daily_gate.sh \
             --mount "${{ steps.args.outputs.mount }}" \
             --port "${{ steps.args.outputs.port }}" \
             --duration "${{ steps.args.outputs.duration }}" \
-            --out-dir out/ci_hil_gate \
+            --out-root out/ci_hil_daily_gate \
             --bundle
       - name: Upload HIL artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rp2040-hil-gate-${{ github.run_id }}
-          path: out/ci_hil_gate
+          path: out/ci_hil_daily_gate
           if-no-files-found: warn
-

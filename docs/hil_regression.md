@@ -6,7 +6,7 @@
 - 输入：按 `scenario.yaml` 驱动（SIL 与板级使用同一份场景）
 - 观测：采集板级 `board.log`（RTT 或串口转存为文本）
 - 对比：`board-parse` + `trace-diff --fail-on-mismatch`
-- 产物：`diff_report.json` + `trace_diff_dashboard.html` + (可选) `hil_bundle.tgz`
+- 断言：按 case bundle 校验关键事件（axis/step/signal/tick）
 
 ## 1) 准备一台自托管 Runner
 
@@ -26,48 +26,79 @@
 sudo usermod -a -G dialout $USER
 ```
 
-## 2) 一条命令跑 HIL gate
+## 2) 本地一条命令（daily gate，含 motion + fail-safe）
 
-仓库提供脚本：`scripts/rp2040_hil_gate.sh`
-
-推荐用 end-to-end 示例（包含 `.plc / io_map / scenario`）：
+仓库提供统一入口：`scripts/rp2040_hil_daily_gate.sh`
 
 ```bash
-scripts/rp2040_hil_gate.sh \
-  --plc examples/rp2040_end_to_end/pressure_station.plc \
-  --scenario examples/rp2040_end_to_end/scenarios/normal.yaml \
-  --io-map examples/rp2040_end_to_end/io_map.toml \
+scripts/rp2040_hil_daily_gate.sh \
   --mount /media/RPI-RP2 \
   --port /dev/ttyACM0 \
   --baud 115200 \
   --duration 20 \
-  --out-dir out/rp2040_hil_gate \
+  --out-root out/rp2040_hil_daily_gate \
   --bundle
 ```
 
-输出目录包含：
+默认 case bundles（`scenarios/rp2040_hil_gate/cases.json`）：
 
-- `sil_trace.jsonl`：SIL 轨迹
-- `firmware.uf2` / `rp2040/`：构建产物
-- `board.log`：板级日志
-- `board_trace.jsonl`：板级 trace
-- `diff_report.json`：对比报告（首个偏差 tick + 上下文）
-- `trace_diff_dashboard.html`：可直接打开的 HTML 报告
-- `hil_meta.json`：本次 gate 的元信息（commit/时间/输入参数）
-- `hil_bundle.tgz`：可上传/留存的归档包（如果用了 `--bundle`）
+- `motion_nominal`（motion-focused）
+- `fail_safe_axis0_count_timeout`（fail-safe-focused）
 
-## 3) 报告查看
+输出目录结构：
+
+- `out/.../<case-id>/hil_summary.json`：单 case gate 结果
+- `out/.../<case-id>/diff_report.json`：SIL vs Board 对比
+- `out/.../<case-id>/assertions_report.json`：断言检查，包含 `axis/signal/step/tick`
+- `out/.../hil_daily_summary.json`：全量汇总（是否整体通过 + 各 case 详情）
+
+当断言失败时，`assertions_report.json.first_failure_context` 会给出可定位字段：
+
+- `axis`（例如 `axis0`）
+- `signal`（例如 `axis0_count`）
+- `expected.step`（`task/from_step/to_step/reason`）
+- `observed.tick`（触发时间）
+
+## 3) CI 复现命令（与 nightly workflow 一致）
+
+`.github/workflows/rp2040_hil_nightly.yml` 中执行的命令如下，可在自托管机本地直接复现：
+
+```bash
+scripts/rp2040_hil_daily_gate.sh \
+  --mount /media/RPI-RP2 \
+  --port /dev/ttyACM0 \
+  --duration 20 \
+  --out-root out/ci_hil_daily_gate \
+  --bundle
+```
+
+## 4) 单 case 调试（可选）
+
+若只想调试某个 case，可直接调用 `scripts/rp2040_hil_gate.sh`：
+
+```bash
+scripts/rp2040_hil_gate.sh \
+  --plc examples/rp2040_motion_minimal.plc \
+  --scenario scenarios/rp2040_motion_minimal/count_stuck.yaml \
+  --io-map examples/rp2040_motion_minimal.io_map.toml \
+  --mount /media/RPI-RP2 \
+  --port /dev/ttyACM0 \
+  --out-dir out/rp2040_hil_single_case \
+  --bundle
+```
+
+## 5) 报告查看
 
 优先看：
 
-- `out/.../trace_diff_dashboard.html`
-- 或用静态 Viewer：`tools/trace_viewer/index.html`（加载 `diff_report.json`）
+- `out/.../<case-id>/trace_diff_dashboard.html`
+- 或静态 Viewer：`tools/trace_viewer/index.html`（加载 `diff_report.json`）
 
-## 4) GitHub Actions（可选）
+## 6) GitHub Actions 说明
 
 如果你有一台长期在线且连着 Pico 的机器，可以安装 GitHub self-hosted runner，并在该机器上运行 HIL workflow：
 
-- 工作流建议 `runs-on: [self-hosted, rp2040-hil]`
+- 工作流建议 `runs-on: [self-hosted, linux]`
 - 由 `workflow_dispatch` 手工触发或 schedule 定时触发
 
 注意：公共 CI（`ubuntu-latest`）不具备真实硬件，因此只能跑 PIL/SIL 基线，不能替代 HIL。

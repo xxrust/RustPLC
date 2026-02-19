@@ -45,6 +45,7 @@
 - For example safety-modeling fixtures, assert `verification.safety.rule_statuses` contains one entry per safety rule and keep `skipped_rules == 0` to catch silently unbound constraints.
 - For board text log parsing, use `line.find("TRACE ")` / `line.find("TIMING ")` to tolerate prefixed logs, parse unordered `k=v` tokens, ignore unknown fields, and report missing/invalid required fields with source line numbers.
 - Prefer `rust_plc::board_log::parse_board_log_text` as the single entrypoint for mixed `board.log` parsing (TRACE + TIMING), and keep record-specific parsers in `board_trace` / `tick_timing`.
+- For RP2040 daily HIL gating, keep multi-case bundles in `scenarios/rp2040_hil_gate/cases.json` and attach per-case assertion specs (`axis/signal/step/tick`) so failures are locatable from `assertions_report.json`.
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
@@ -1554,4 +1555,33 @@ Thread: N/A (Codex CLI)
   - docs/motion_virtual_channels.md
   - prd.json
   - progress.txt
+---
+## [2026-02-19 08:51:36 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a single daily RP2040 HIL gate entrypoint: `scripts/rp2040_hil_daily_gate.sh`, which runs bundled motion + fail-safe cases from `scenarios/rp2040_hil_gate/cases.json`.
+  - Added two explicit HIL case bundles:
+    - `motion_nominal` (motion-focused)
+    - `fail_safe_axis0_count_timeout` (fail-safe-focused)
+  - Added `scripts/hil_case_assert.py` to evaluate case assertions against trace events and emit `assertions_report.json` with `axis/signal/step/tick` failure context.
+  - Updated nightly self-hosted HIL workflow to run the new daily gate entrypoint.
+  - Updated runbook docs with exact local and CI reproduction commands and artifact expectations.
+- Files changed
+  - `.github/workflows/rp2040_hil_nightly.yml`
+  - `docs/board_rp2040.md`
+  - `docs/hil_regression.md`
+  - `scripts/rp2040_hil_daily_gate.sh`
+  - `scripts/hil_case_assert.py`
+  - `scenarios/rp2040_hil_gate/cases.json`
+  - `scenarios/rp2040_hil_gate/assertions/motion_nominal.json`
+  - `scenarios/rp2040_hil_gate/assertions/fail_safe_axis0_count_timeout.json`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Multi-case HIL entrypoints are easier to maintain when case inventory (`cases.json`) and case evidence checks (`assertions/*.json`) are data-driven instead of hard-coded.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Keep the case assertion step/task ids aligned with PLC step order; if the PLC flow changes, update assertion specs or daily gate will fail even when trace-diff passes.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `assertions_report.json` is the quickest place to inspect first-failure diagnostics because it carries axis + signal + step + tick in one object.
 ---

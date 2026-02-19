@@ -176,21 +176,32 @@ What it does:
 
 ## HIL regression script (real board)
 
-When you want a nightly/CI-friendly artifact bundle with one command:
+Daily multi-case gate entry (motion + fail-safe bundles):
 
 ```bash
-scripts/rp2040_hil_gate.sh \
-  --plc examples/rp2040_end_to_end/pressure_station.plc \
-  --scenario examples/rp2040_end_to_end/scenarios/normal.yaml \
-  --io-map examples/rp2040_end_to_end/io_map.toml \
+scripts/rp2040_hil_daily_gate.sh \
   --mount /media/RPI-RP2 \
   --port /dev/ttyACM0 \
   --duration 20 \
-  --out-dir out/rp2040_hil_gate \
+  --out-root out/rp2040_hil_daily_gate \
   --bundle
 ```
 
-Artifacts include `hil_meta.json`, `hil_summary.json`, and (optional) `hil_bundle.tgz`.
+Per-case outputs include `hil_summary.json`, `diff_report.json`, `trace_diff_dashboard.html`,
+and `assertions_report.json` (`axis/signal/step/tick` context on failure).
+
+For a single-case debug run, use the lower-level script:
+
+```bash
+scripts/rp2040_hil_gate.sh \
+  --plc examples/rp2040_motion_minimal.plc \
+  --scenario scenarios/rp2040_motion_minimal/count_stuck.yaml \
+  --io-map examples/rp2040_motion_minimal.io_map.toml \
+  --mount /media/RPI-RP2 \
+  --port /dev/ttyACM0 \
+  --out-dir out/rp2040_hil_single_case \
+  --bundle
+```
 
 ## PIL-style gate (no physical board)
 

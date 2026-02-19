@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "id": "motion_nominal",
+      "title": "Dual-axis motion nominal",
+      "focus": "motion",
+      "plc": "examples/rp2040_motion_minimal.plc",
+      "scenario": "scenarios/rp2040_motion_minimal/normal.yaml",
+      "io_map": "examples/rp2040_motion_minimal.io_map.toml",
+      "assertions": "scenarios/rp2040_hil_gate/assertions/motion_nominal.json",
+      "duration_sec": 20
+    },
+    {
+      "id": "fail_safe_axis0_count_timeout",
+      "title": "Axis0 count timeout enters fail-safe path",
+      "focus": "fail-safe",
+      "plc": "examples/rp2040_motion_minimal.plc",
+      "scenario": "scenarios/rp2040_motion_minimal/count_stuck.yaml",
+      "io_map": "examples/rp2040_motion_minimal.io_map.toml",
+      "assertions": "scenarios/rp2040_hil_gate/assertions/fail_safe_axis0_count_timeout.json",
+      "duration_sec": 20
+    }
+  ]
+}
