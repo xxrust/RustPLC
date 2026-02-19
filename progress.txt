@@ -52,6 +52,7 @@
 - Cross-platform CI for shell tooling should run `scripts/ci_script_contract_preflight.sh` early, enforce git mode `100755` on required gate scripts, and reject CRLF in tracked `*.sh`.
 - For board HIL timing SLAs, generate a standalone `timing_gate_verdict.json` artifact (thresholds + observed metrics + violations) and make summary artifacts reference it directly.
 - For `hardware_only` Class-D evidence, require per-attachment `provenance.source_path` and keep optional digest/operator/time metadata for audit traceability.
+- For multi-step operator rehearsals, provide one orchestration CLI that both executes the chain and writes a machine-readable step index (pass/fail/skipped + artifact paths).
 
 Started: Thu Feb 19 14:03:44  2026
 ## [2026-02-19 14:08:29 CST] - US-001
@@ -191,4 +192,39 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - If Class-D evidence shape changes, update schema + template + D fixture + verifier + tests together to avoid drift.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Verifier errors now include precise attachment field paths (`class_d_manual.attachments[i].provenance.*`) for fast audit remediation.
+---
+## [2026-02-19 14:39:52 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added new CLI subcommand: `commissioning-run <file.plc> --out-dir <dir> [--output <human|json>]`.
+  - `commissioning-run` now executes the full documented nominal + fault rehearsal chain in one command:
+    - scenario init/doctor
+    - retain config generation
+    - `sim-plc` nominal + fault runs
+    - fault online-force/online-variable scripts (with explicit `online_var_bindings.toml`)
+    - final `no-board-gate` checks for both flows.
+  - Added structured artifact index output: `commissioning_index.json` with per-step `pass|fail|skipped`, command string, artifact paths, and failure details.
+  - Updated commissioning docs/wiki to make unified command the recommended entrypoint while preserving manual step breakdown for debugging.
+  - Added regression coverage:
+    - `tests/commissioning_run.rs` verifies command success path and artifact contract.
+    - `tests/commissioning_playbook_doc.rs` now locks `commissioning-run`/`commissioning_index.json`/bindings documentation.
+- Quality checks
+  - `cargo test --test commissioning_run --test commissioning_playbook_doc`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `cargo check --workspace`
+- Files changed
+  - `src/main.rs`
+  - `tests/commissioning_run.rs`
+  - `tests/commissioning_playbook_doc.rs`
+  - `docs/commissioning_playbook.md`
+  - `docs/wiki/Commissioning-Playbook.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For operator workflows, a unified command plus step-index artifact reduces ambiguity and keeps both CI and field usage aligned.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Online variable scripts using domain names need explicit bindings; include `--online-var-bindings` in automated flows or the run will fail fast.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `commissioning_index.json` is now the canonical machine-readable output for commissioning chain status and artifact discovery.
 ---
