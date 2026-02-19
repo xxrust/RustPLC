@@ -1943,3 +1943,45 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
   - Useful context (e.g., "the evaluation panel is in component X")
     - `docs/commissioning_playbook.md` is now the canonical end-to-end operator runbook across doctor/force/retain/gate.
 ---
+## [2026-02-19 13:08:41 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Upgraded `rust_plc new` scaffold output to ship a practical VS Code day-1 package by default.
+  - Expanded generated `.vscode/tasks.json` from minimal 2-task set to commissioning-ready task set:
+    - `scenario-init`, `scenario-validate`, `scenario-doctor`, `sim-plc`, `no-board-gate`, `build-rp2040`.
+  - Strengthened generated `.vscode/settings.json` and `.vscode/extensions.json` contract:
+    - explicit `*.plc` association strategy (`ini` fallback)
+    - stable editor defaults
+    - expanded extension recommendations.
+  - Added generated snippet/support assets:
+    - `.vscode/plc.code-snippets` (PLC skeleton + wait-timeout snippet)
+    - `.vscode/README.md` (highlight strategy + troubleshooting)
+  - Updated scaffolded `README.md` quick checklist to include `scenario-doctor` and VS Code task usage hints.
+  - Extended integration test `tests/new_scaffold.rs` to assert new VS Code assets and key task entries.
+  - Added doc and wiki updates for VS Code day-1 support contract and troubleshooting:
+    - `docs/developer_bootstrap_pack.md`
+    - `docs/wiki/Developer-Bootstrap-Pack.md`
+  - Added doc consistency test `tests/developer_bootstrap_pack_doc.rs`.
+  - Updated Stage-3 gate script/runbook to include the new bootstrap doc test.
+- Quality checks
+  - `cargo test --test new_scaffold --test developer_bootstrap_pack_doc`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `cargo check --workspace`
+- Files changed
+  - `src/main.rs`
+  - `tests/new_scaffold.rs`
+  - `tests/developer_bootstrap_pack_doc.rs`
+  - `docs/developer_bootstrap_pack.md`
+  - `docs/wiki/Developer-Bootstrap-Pack.md`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `docs/stage3_ci_gate_runbook.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Scaffold DX uplift is most reliable when asset generation and runnable integration checks are updated together (file presence + command viability).
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - VS Code support changes should update three layers in one pass: generated assets, onboarding docs, and doc consistency tests.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `.vscode/README.md` in generated projects is now the local troubleshooting entrypoint for day-1 editor setup issues.
+---

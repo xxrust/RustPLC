@@ -22,6 +22,7 @@ This command covers:
 - `new_scaffold` bootstrap contract
 - `abnormal_exit_matrix` + `abnormal_exit_matrix_doc` contracts (Class-D manual evidence workflow)
 - `commissioning_playbook_doc` contract (playbook headings + command snippets lock)
+- `developer_bootstrap_pack_doc` contract (VS Code day-1 onboarding/troubleshooting lock)
 
 ## 2) Manual breakdown (if one-shot fails)
 
@@ -31,6 +32,7 @@ This command covers:
 cargo test --test online_force_control_plane --test online_variable_control_plane --test retain_persistent --test scenario_gen --test sim_regress --test new_scaffold
 cargo test --test abnormal_exit_matrix --test abnormal_exit_matrix_doc
 cargo test --test commissioning_playbook_doc
+cargo test --test developer_bootstrap_pack_doc
 ```
 
 ### B. scenario-gen schema check

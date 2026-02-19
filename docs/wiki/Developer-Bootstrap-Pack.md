@@ -15,6 +15,22 @@ cargo run --release -- new my_plc_project
 - `io_map.toml`
 - `.github/workflows/no_board_gate.yml`
 - `.vscode/tasks.json` + `.vscode/settings.json` + `.vscode/extensions.json`
+- `.vscode/plc.code-snippets`
+- `.vscode/README.md`
+
+## VS Code Day-1 Package
+
+- Highlight strategy: `*.plc -> ini` (fallback, no custom extension required)
+- Task entrypoints:
+  - `RustPLC: scenario-init (normal)`
+  - `RustPLC: scenario-validate`
+  - `RustPLC: scenario-doctor`
+  - `RustPLC: sim-plc`
+  - `RustPLC: no-board-gate`
+  - `RustPLC: build-rp2040`
+- Snippets:
+  - `plc-skeleton`
+  - `plc-wait-timeout`
 
 ## First Checks
 

@@ -40,6 +40,8 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
         ".vscode/tasks.json",
         ".vscode/settings.json",
         ".vscode/extensions.json",
+        ".vscode/plc.code-snippets",
+        ".vscode/README.md",
     ] {
         assert!(
             project_dir.join(rel).exists(),
@@ -51,8 +53,22 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
         fs::read_to_string(project_dir.join(".vscode/tasks.json")).expect("read tasks.json");
     assert!(
         tasks_json.contains("RustPLC: scenario-validate")
+            && tasks_json.contains("RustPLC: scenario-doctor")
+            && tasks_json.contains("RustPLC: sim-plc")
             && tasks_json.contains("RustPLC: no-board-gate"),
         "tasks.json should contain quick command entries"
+    );
+    let settings_json =
+        fs::read_to_string(project_dir.join(".vscode/settings.json")).expect("read settings.json");
+    assert!(
+        settings_json.contains("\"*.plc\"") && settings_json.contains("\"ini\""),
+        "settings.json should define PLC file association"
+    );
+    let snippets = fs::read_to_string(project_dir.join(".vscode/plc.code-snippets"))
+        .expect("read plc.code-snippets");
+    assert!(
+        snippets.contains("plc-skeleton") && snippets.contains("[topology]"),
+        "plc.code-snippets should include PLC skeleton snippet"
     );
 
     let validate = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
@@ -68,6 +84,21 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
         validate.status.success(),
         "generated scenario-validate should pass, stderr: {}",
         String::from_utf8_lossy(&validate.stderr)
+    );
+
+    let doctor = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("scenario-doctor")
+        .arg(project_dir.join("plc/main.plc"))
+        .arg("--scenario")
+        .arg(project_dir.join("scenarios/normal.yaml"))
+        .arg("--output")
+        .arg("json")
+        .output()
+        .expect("run scenario-doctor");
+    assert!(
+        doctor.status.success(),
+        "generated scenario-doctor should pass, stderr: {}",
+        String::from_utf8_lossy(&doctor.stderr)
     );
 
     let gate = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
