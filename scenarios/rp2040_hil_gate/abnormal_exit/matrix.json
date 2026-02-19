@@ -1,0 +1,125 @@
+{
+  "schema_version": "abnormal_exit_matrix.v1",
+  "classes": [
+    {
+      "id": "A",
+      "title": "Controlled stop",
+      "automation": "auto",
+      "trigger_method": "ui_stop_or_sigterm",
+      "expected_io_behavior": "Software safe-state executes and drives critical outputs into configured safe values.",
+      "expected_outputs": [
+        {
+          "channel": "do2",
+          "value": 0,
+          "order": 10,
+          "description": "Vertical brake coil (NC): 0 means brake engaged."
+        },
+        {
+          "channel": "do1",
+          "value": 0,
+          "order": 20,
+          "description": "Axis enable: 0 means disabled."
+        },
+        {
+          "channel": "ao0",
+          "value": 0.0,
+          "order": 30,
+          "description": "Motion command output zeroed."
+        }
+      ],
+      "acceptance_checks": [
+        "safe_state_applied",
+        "ordering_brake_before_enable",
+        "critical_outputs_safe"
+      ]
+    },
+    {
+      "id": "B",
+      "title": "Recoverable runtime exception",
+      "automation": "auto",
+      "trigger_method": "recoverable_runtime_error",
+      "expected_io_behavior": "Fault handling path completes and safe-state output profile is applied.",
+      "expected_outputs": [
+        {
+          "channel": "do2",
+          "value": 0,
+          "order": 10,
+          "description": "Brake first."
+        },
+        {
+          "channel": "do1",
+          "value": 0,
+          "order": 20,
+          "description": "Then disable drive."
+        },
+        {
+          "channel": "ao0",
+          "value": 0.0,
+          "order": 30,
+          "description": "Clear motion command."
+        }
+      ],
+      "acceptance_checks": [
+        "fault_path_reached",
+        "safe_state_applied",
+        "critical_outputs_safe"
+      ]
+    },
+    {
+      "id": "C",
+      "title": "Process crash / abort",
+      "automation": "auto",
+      "trigger_method": "panic_abort_or_hardfault",
+      "expected_io_behavior": "Software cleanup is best-effort only; hardware safety chain still de-energizes critical actuators.",
+      "expected_outputs": [
+        {
+          "channel": "do2",
+          "value": 0,
+          "order": 10,
+          "description": "Brake coil is de-energized by safety chain."
+        },
+        {
+          "channel": "do1",
+          "value": 0,
+          "order": 20,
+          "description": "Enable is de-energized by safety chain."
+        }
+      ],
+      "acceptance_checks": [
+        "panic_detected",
+        "hardware_chain_opened",
+        "critical_outputs_safe"
+      ]
+    },
+    {
+      "id": "D",
+      "title": "Uncontrollable termination",
+      "automation": "hardware_only",
+      "trigger_method": "kill9_power_loss_kernel_hang",
+      "expected_io_behavior": "No software callback is guaranteed; safety depends entirely on independent hardware safety chain.",
+      "expected_outputs": [
+        {
+          "channel": "do2",
+          "value": 0,
+          "order": 10,
+          "description": "Brake channel must be safe with power/process loss."
+        },
+        {
+          "channel": "do1",
+          "value": 0,
+          "order": 20,
+          "description": "Enable channel must drop without PLC cooperation."
+        }
+      ],
+      "acceptance_checks": [
+        "manual_electrical_checklist_completed",
+        "hardware_chain_validated"
+      ],
+      "electrical_checklist_notes": [
+        "Verify vertical brake coil (do2) de-energizes before or at the same instant as axis enable (do1) for controlled fault paths.",
+        "For process abort/power-loss conditions, confirm independent safety relay/STO path drops both do2 and do1 without software callbacks.",
+        "Capture measured channel waveform timestamps and attach them to class-D evidence artifacts."
+      ]
+    }
+  ]
+}

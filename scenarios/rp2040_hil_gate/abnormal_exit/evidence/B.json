@@ -1,0 +1,40 @@
+{
+  "class": "B",
+  "trigger": {
+    "method": "recoverable_runtime_error",
+    "source": "fault handler timeout path",
+    "tick": 158,
+    "timestamp": "2026-02-19T02:12:00Z"
+  },
+  "observed_outputs": [
+    {
+      "channel": "do2",
+      "value": 0,
+      "order": 10,
+      "source": "safe_state_profile"
+    },
+    {
+      "channel": "do1",
+      "value": 0,
+      "order": 20,
+      "source": "safe_state_profile"
+    },
+    {
+      "channel": "ao0",
+      "value": 0.0,
+      "order": 30,
+      "source": "safe_state_profile"
+    }
+  ],
+  "checks": {
+    "fault_path_reached": true,
+    "safe_state_applied": true,
+    "critical_outputs_safe": true
+  },
+  "verdict": "pass",
+  "artifacts": {
+    "trigger_log": "out/rp2040_hil_daily_gate/class_b/board.log",
+    "output_log": "out/rp2040_hil_daily_gate/class_b/io_snapshot.jsonl",
+    "notes": "B-class evidence is expected from a recoverable module/runtime fault injection run."
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "class": "C",
+  "trigger": {
+    "method": "panic_abort_or_hardfault",
+    "source": "panic injection build",
+    "tick": 74,
+    "timestamp": "2026-02-19T02:15:00Z"
+  },
+  "observed_outputs": [
+    {
+      "channel": "do2",
+      "value": 0,
+      "order": 10,
+      "source": "hardware_safety_chain",
+      "note": "Brake channel dropped by safety relay/STO path."
+    },
+    {
+      "channel": "do1",
+      "value": 0,
+      "order": 20,
+      "source": "hardware_safety_chain",
+      "note": "Enable dropped without software cleanup guarantee."
+    }
+  ],
+  "checks": {
+    "panic_detected": true,
+    "hardware_chain_opened": true,
+    "critical_outputs_safe": true
+  },
+  "verdict": "pass",
+  "artifacts": {
+    "trigger_log": "out/rp2040_hil_daily_gate/class_c/board.log",
+    "output_log": "out/rp2040_hil_daily_gate/class_c/safety_chain_capture.jsonl",
+    "notes": "C-class is accepted only when hardware chain evidence confirms safe outputs."
+  }
+}

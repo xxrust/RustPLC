@@ -1,0 +1,31 @@
+{
+  "class": "D",
+  "trigger": {
+    "method": "kill9_power_loss_kernel_hang",
+    "source": "power pull test",
+    "timestamp": "2026-02-19T02:18:00Z"
+  },
+  "observed_outputs": [
+    {
+      "channel": "do2",
+      "value": 0,
+      "order": 10,
+      "source": "hardware_safety_chain"
+    },
+    {
+      "channel": "do1",
+      "value": 0,
+      "order": 20,
+      "source": "hardware_safety_chain"
+    }
+  ],
+  "checks": {
+    "manual_electrical_checklist_completed": true,
+    "hardware_chain_validated": true
+  },
+  "verdict": "manual",
+  "artifacts": {
+    "trigger_log": "out/rp2040_hil_daily_gate/class_d/power_loss_notes.md",
+    "output_log": "out/rp2040_hil_daily_gate/class_d/safety_chain_capture.jsonl"
+  }
+}

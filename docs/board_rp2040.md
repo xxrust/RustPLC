@@ -203,6 +203,22 @@ scripts/rp2040_hil_gate.sh \
   --bundle
 ```
 
+## Abnormal-exit safety matrix (A/B/C/D)
+
+Reference assets:
+- `scenarios/rp2040_hil_gate/abnormal_exit/matrix.json`
+- `scenarios/rp2040_hil_gate/abnormal_exit/evidence_schema.json`
+- `scenarios/rp2040_hil_gate/abnormal_exit/evidence/*.json`
+
+Verifier command (A/B/C auto, D manual hardware chain):
+
+```bash
+python3 scripts/abnormal_exit_matrix_verify.py \
+  --matrix scenarios/rp2040_hil_gate/abnormal_exit/matrix.json \
+  --evidence-dir scenarios/rp2040_hil_gate/abnormal_exit/evidence \
+  --out out/rp2040_hil_daily_gate/abnormal_exit_report.json
+```
+
 ## PIL-style gate (no physical board)
 
 ```bash

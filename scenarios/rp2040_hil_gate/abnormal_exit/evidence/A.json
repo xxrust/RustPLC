@@ -1,0 +1,41 @@
+{
+  "class": "A",
+  "trigger": {
+    "method": "ui_stop_or_sigterm",
+    "source": "service SIGTERM injection",
+    "tick": 124,
+    "timestamp": "2026-02-19T02:10:00Z"
+  },
+  "observed_outputs": [
+    {
+      "channel": "do2",
+      "value": 0,
+      "order": 10,
+      "source": "safe_state_profile",
+      "note": "Vertical brake engaged before disable."
+    },
+    {
+      "channel": "do1",
+      "value": 0,
+      "order": 20,
+      "source": "safe_state_profile"
+    },
+    {
+      "channel": "ao0",
+      "value": 0.0,
+      "order": 30,
+      "source": "safe_state_profile"
+    }
+  ],
+  "checks": {
+    "safe_state_applied": true,
+    "ordering_brake_before_enable": true,
+    "critical_outputs_safe": true
+  },
+  "verdict": "pass",
+  "artifacts": {
+    "trigger_log": "out/rp2040_hil_daily_gate/class_a/board.log",
+    "output_log": "out/rp2040_hil_daily_gate/class_a/io_snapshot.jsonl",
+    "notes": "Evidence template: replace with real artifact paths in daily runs."
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RP2040 abnormal-exit evidence",
+  "type": "object",
+  "required": [
+    "class",
+    "trigger",
+    "observed_outputs",
+    "checks",
+    "verdict",
+    "artifacts"
+  ],
+  "properties": {
+    "class": {
+      "type": "string",
+      "enum": ["A", "B", "C", "D"]
+    },
+    "trigger": {
+      "type": "object",
+      "required": ["method", "source"],
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timestamp": {
+          "type": "string"
+        }
+      }
+    },
+    "observed_outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["channel", "value", "order", "source"],
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "value": {},
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "object"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail", "manual"]
+    },
+    "artifacts": {
+      "type": "object",
+      "required": ["trigger_log", "output_log"],
+      "properties": {
+        "trigger_log": {
+          "type": "string"
+        },
+        "output_log": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -46,6 +46,7 @@
 - For board text log parsing, use `line.find("TRACE ")` / `line.find("TIMING ")` to tolerate prefixed logs, parse unordered `k=v` tokens, ignore unknown fields, and report missing/invalid required fields with source line numbers.
 - Prefer `rust_plc::board_log::parse_board_log_text` as the single entrypoint for mixed `board.log` parsing (TRACE + TIMING), and keep record-specific parsers in `board_trace` / `tick_timing`.
 - For RP2040 daily HIL gating, keep multi-case bundles in `scenarios/rp2040_hil_gate/cases.json` and attach per-case assertion specs (`axis/signal/step/tick`) so failures are locatable from `assertions_report.json`.
+- For RP2040 abnormal-exit safety audits, keep the A/B/C/D source matrix in `scenarios/rp2040_hil_gate/abnormal_exit/matrix.json`, per-class evidence in `.../evidence/<class>.json`, and verify with `scripts/abnormal_exit_matrix_verify.py` (default auto-required classes are A/B/C; D remains `hardware_only` manual-chain validation).
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
@@ -1584,4 +1585,35 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Keep the case assertion step/task ids aligned with PLC step order; if the PLC flow changes, update assertion specs or daily gate will fail even when trace-diff passes.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `assertions_report.json` is the quickest place to inspect first-failure diagnostics because it carries axis + signal + step + tick in one object.
+---
+## [2026-02-19 09:10:35 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added the abnormal-exit safety matrix assets for classes A/B/C/D under `scenarios/rp2040_hil_gate/abnormal_exit/`, including matrix definition, evidence schema, and per-class evidence templates.
+  - Completed and fixed `scripts/abnormal_exit_matrix_verify.py` to validate class evidence, enforce default automated checks for A/B/C, and explicitly report class D as `manual_hardware_chain` (hardware-only boundary).
+  - Added documentation for the matrix, verification command, D-class hardware-chain rationale, and electrical checklist notes for critical actuators (`do2` brake / `do1` enable) in `docs/abnormal_exit_matrix.md`, with links from HIL runbooks.
+  - Added regression tests for matrix/evidence contract and verifier behavior (`tests/abnormal_exit_matrix.rs`) plus doc coverage (`tests/abnormal_exit_matrix_doc.rs`).
+  - Ran quality checks: `cargo check --workspace` and `cargo test --workspace` (pass).
+- Files changed
+  - `docs/abnormal_exit_matrix.md`
+  - `docs/hil_regression.md`
+  - `docs/board_rp2040.md`
+  - `scripts/abnormal_exit_matrix_verify.py`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/matrix.json`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/evidence_schema.json`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/evidence/A.json`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/evidence/B.json`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/evidence/C.json`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/evidence/D.json`
+  - `tests/abnormal_exit_matrix.rs`
+  - `tests/abnormal_exit_matrix_doc.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep A/B/C as auto-verifiable classes and represent D as explicit `manual_hardware_chain` in machine-readable reports so CI gates stay deterministic while preserving safety boundaries.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - In Python report validators, a single unquoted dict key in an f-string (`obj.get(key)` vs `obj.get("key")`) can silently break the whole gate; run the verifier script in tests to catch this early.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - The abnormal-exit verifier is file-contract driven and can run without hardware, so it is suitable for CI baseline checks even when class D still requires physical electrical validation.
 ---

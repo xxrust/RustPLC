@@ -87,14 +87,33 @@ scripts/rp2040_hil_gate.sh \
   --bundle
 ```
 
-## 5) 报告查看
+## 5) 异常退出分级矩阵（A/B/C/D）
+
+异常退出矩阵与证据模板位于：
+
+- `scenarios/rp2040_hil_gate/abnormal_exit/matrix.json`
+- `scenarios/rp2040_hil_gate/abnormal_exit/evidence/*.json`
+
+自动化验证（A/B/C）：
+
+```bash
+python3 scripts/abnormal_exit_matrix_verify.py \
+  --matrix scenarios/rp2040_hil_gate/abnormal_exit/matrix.json \
+  --evidence-dir scenarios/rp2040_hil_gate/abnormal_exit/evidence \
+  --out out/rp2040_hil_daily_gate/abnormal_exit_report.json
+```
+
+说明：`D` 类（`kill9/power_loss/kernel_hang`）属于 `hardware_only`，
+依赖独立硬件安全链电气实测，不纳入自动通过条件。详见：`docs/abnormal_exit_matrix.md`。
+
+## 6) 报告查看
 
 优先看：
 
 - `out/.../<case-id>/trace_diff_dashboard.html`
 - 或静态 Viewer：`tools/trace_viewer/index.html`（加载 `diff_report.json`）
 
-## 6) GitHub Actions 说明
+## 7) GitHub Actions 说明
 
 如果你有一台长期在线且连着 Pico 的机器，可以安装 GitHub self-hosted runner，并在该机器上运行 HIL workflow：
 
