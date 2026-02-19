@@ -1760,3 +1760,40 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
   - Useful context (e.g., "the evaluation panel is in component X")
     - `feedback.json` is now the compact bridge from minimized failures back to template choice + parameter tuning in the next generation cycle.
 ---
+## [2026-02-19 10:28:36 CST] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added `rust_plc new <project_dir> [--force]` scaffold command.
+  - Generated bootstrap package now includes runnable baseline assets:
+    - `plc/main.plc`
+    - `scenarios/normal.yaml`
+    - `io_map.toml`
+    - `.github/workflows/no_board_gate.yml`
+    - `README.md` quick checklist
+  - Added minimal VS Code support in scaffold output:
+    - `.vscode/tasks.json` (scenario-validate + no-board-gate entry tasks)
+    - `.vscode/settings.json` (`*.plc` association)
+    - `.vscode/extensions.json` recommendations
+  - Updated CLI usage/dispatch for the new subcommand.
+  - Added onboarding docs from zero to first gate pass and wiki summary.
+  - Added integration test verifying:
+    - scaffold generation,
+    - quick path checks (`scenario-validate` + `no-board-gate`) pass on generated project.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --workspace`
+- Files changed
+  - `src/main.rs`
+  - `tests/new_scaffold.rs`
+  - `docs/developer_bootstrap_pack.md`
+  - `docs/wiki/Developer-Bootstrap-Pack.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - A scaffold is most reliable when it is validated through the same CLI binaries that end users run, not just by file existence checks.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - `new` must be intercepted in top-level command dispatch before fallback `.plc` compile mode, otherwise it is treated as a file path.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - VS Code “minimal extension” capability is provided via task + association + recommendations files generated into each scaffolded project.
+---

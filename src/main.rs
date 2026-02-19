@@ -1397,6 +1397,13 @@ fn main() {
         }
         return;
     }
+    if first == "new" {
+        if let Err(msg) = run_new_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let path = first;
     let mut report_path: Option<PathBuf> = None;
@@ -1664,6 +1671,7 @@ fn print_usage(program: &str) {
     eprintln!(
         "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]"
     );
+    eprintln!("  {program} new <project_dir> [--force]");
     eprintln!("  {program} pil-run <file.plc> --scenario <scenario.yaml>");
     eprintln!("  {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>");
     eprintln!(
@@ -1695,6 +1703,89 @@ fn print_usage(program: &str) {
     eprintln!("  --budget-transition-cost-us <n>");
     eprintln!("  --budget-parallel-expand-cost-us <n>");
     eprintln!("  --budget-max-time-estimate-us <n>");
+}
+
+fn write_scaffold_file(path: &Path, content: &str, force: bool) -> Result<(), String> {
+    if path.exists() && !force {
+        return Err(format!(
+            "Refusing to overwrite existing file {} (use --force to allow overwrite)",
+            path.display()
+        ));
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create directory {}: {err}", parent.display()))?;
+        }
+    }
+    fs::write(path, content).map_err(|err| format!("Failed to write {}: {err}", path.display()))
+}
+
+fn run_new_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
+    let usage = format!("Usage: {program} new <project_dir> [--force]");
+    let Some(project_dir) = args.next() else {
+        return Err(usage);
+    };
+    let mut force = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--force" => force = true,
+            "-h" | "--help" => return Err(usage.clone()),
+            other => return Err(format!("Unknown argument for new: {other}")),
+        }
+    }
+
+    let root = PathBuf::from(project_dir);
+    if root.exists() {
+        if !root.is_dir() {
+            return Err(format!(
+                "Target path exists but is not a directory: {}",
+                root.display()
+            ));
+        }
+        if !force {
+            let mut entries = fs::read_dir(&root)
+                .map_err(|err| format!("Failed to inspect {}: {err}", root.display()))?;
+            if entries.next().is_some() {
+                return Err(format!(
+                    "Target directory {} is not empty (use --force to overwrite known files)",
+                    root.display()
+                ));
+            }
+        }
+    } else {
+        fs::create_dir_all(&root)
+            .map_err(|err| format!("Failed to create {}: {err}", root.display()))?;
+    }
+
+    let readme = "# RustPLC Bootstrap Project\n\n## Quick Start Checklist\n\n1. Validate scenario contract:\n\n```bash\ncargo run --release -- scenario-validate plc/main.plc --scenario scenarios/normal.yaml --output human\n```\n\n2. Run no-board regression gate:\n\n```bash\ncargo run --release -- no-board-gate plc/main.plc --scenario scenarios/normal.yaml --out-dir out/no_board_gate --output human\n```\n\n3. Optional RP2040 build baseline:\n\n```bash\ncargo run --release -- build-rp2040 plc/main.plc --out out/rp2040 --io-map io_map.toml\n```\n";
+    let plc = "[topology]\n\ndevice X0: digital_input\ndevice Y0: digital_output\n\n[constraints]\n\n[tasks]\n\ntask main:\n    step wait_start:\n        wait: X0 == true\n        timeout: 100ms -> goto fault\n\n    step run:\n        action: set Y0 on\n        delay: 20ms\n\n    step stop:\n        action: set Y0 off\n\n    on_complete: goto done\n\ntask fault:\n    step safe_stop:\n        action: set Y0 off\n    on_complete: goto done\n\ntask done:\n    step halt:\n";
+    let scenario = "tick_ms: 10\nduration_ms: 300\ninputs:\n  - at_ms: 0\n    set:\n      digital_inputs:\n        0: true\n  - at_ms: 50\n    set:\n      digital_inputs:\n        0: false\nforces: []\n";
+    let io_map = "schema_version = 1\n\n[digital_inputs]\ndi0 = { gpio = 2, pull = \"up\" }\n\n[digital_outputs]\ndo0 = { gpio = 10, active_low = false }\n\n[safe_state]\nmode = \"all_zero\"\non_exit_timeout_ms = 0\n";
+    let workflow = "name: rustplc-no-board-gate\n\non:\n  push:\n  pull_request:\n\njobs:\n  no-board-gate:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: dtolnay/rust-toolchain@stable\n      - name: Scenario validate\n        run: cargo run --release -- scenario-validate plc/main.plc --scenario scenarios/normal.yaml --output json\n      - name: No-board gate\n        run: cargo run --release -- no-board-gate plc/main.plc --scenario scenarios/normal.yaml --out-dir out/no_board_gate --output json\n";
+    let vscode_tasks = "{\n  \"version\": \"2.0.0\",\n  \"tasks\": [\n    {\n      \"label\": \"RustPLC: scenario-validate\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release -- scenario-validate plc/main.plc --scenario scenarios/normal.yaml --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: no-board-gate\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release -- no-board-gate plc/main.plc --scenario scenarios/normal.yaml --out-dir out/no_board_gate --output human\",\n      \"problemMatcher\": []\n    }\n  ]\n}\n";
+    let vscode_settings = "{\n  \"files.associations\": {\n    \"*.plc\": \"ini\"\n  }\n}\n";
+    let vscode_extensions = "{\n  \"recommendations\": [\n    \"rust-lang.rust-analyzer\",\n    \"redhat.vscode-yaml\",\n    \"tamasfe.even-better-toml\"\n  ]\n}\n";
+
+    write_scaffold_file(&root.join("README.md"), readme, force)?;
+    write_scaffold_file(&root.join("plc/main.plc"), plc, force)?;
+    write_scaffold_file(&root.join("scenarios/normal.yaml"), scenario, force)?;
+    write_scaffold_file(&root.join("io_map.toml"), io_map, force)?;
+    write_scaffold_file(
+        &root.join(".github/workflows/no_board_gate.yml"),
+        workflow,
+        force,
+    )?;
+    write_scaffold_file(&root.join(".vscode/tasks.json"), vscode_tasks, force)?;
+    write_scaffold_file(&root.join(".vscode/settings.json"), vscode_settings, force)?;
+    write_scaffold_file(
+        &root.join(".vscode/extensions.json"),
+        vscode_extensions,
+        force,
+    )?;
+
+    eprintln!("new: scaffold created at {}", root.display());
+    Ok(())
 }
 
 fn run_sequence_lint_subcommand(
