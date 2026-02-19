@@ -43,6 +43,13 @@ For class `D`, the evidence must also include `class_d_manual` with required fie
 - `operator`
 - `attachments[]` (manual-hardware evidence attachments)
 
+Each `class_d_manual.attachments[]` entry must include provenance metadata:
+
+- `provenance.source_path` (required): original capture path/location
+- `provenance.digest_sha256` (optional): attachment digest if available
+- `provenance.captured_by` (optional): who exported/captured the file
+- `provenance.captured_at` (optional): capture/export timestamp
+
 ## Automated verification (A/B/C)
 
 Run verifier:
@@ -69,3 +76,4 @@ For vertical-axis systems (example channels: `do2` brake, `do1` enable):
 Board-level implementation and safety context:
 
 - `docs/board_rp2040.md` (see abnormal-exit matrix and safety-chain notes)
+- `docs/wiki/Class-D-Abnormal-Exit-Evidence-Workflow.md` (manual checklist + provenance workflow)

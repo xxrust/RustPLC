@@ -1,0 +1,5 @@
+# Keep shell scripts LF-only for Linux CI runners.
+*.sh text eol=lf
+
+# Keep Python scripts LF-only for cross-platform deterministic execution.
+*.py text eol=lf

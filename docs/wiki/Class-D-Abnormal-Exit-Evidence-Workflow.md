@@ -22,6 +22,15 @@ Standardize Class-D (`hardware_only`) manual electrical evidence so hardware-cha
 - `operator`
 - `attachments[]`
 
+## Attachment Provenance Contract
+
+Each `attachments[]` item must provide provenance metadata:
+
+- Required: `provenance.source_path`
+- Optional: `provenance.digest_sha256`, `provenance.captured_by`, `provenance.captured_at`
+
+Purpose: make Class-D manual files traceable to their original capture/export source during audits.
+
 ## Verifier Behavior
 
 `python3 scripts/abnormal_exit_matrix_verify.py` now validates Class-D manual evidence attachments even when D stays `hardware_only`.

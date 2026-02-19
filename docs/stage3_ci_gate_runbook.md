@@ -14,6 +14,7 @@ scripts/stage3_runtime_dev_gate.sh
 
 This command covers:
 
+- script mode/EOL preflight (`ci_script_contract_preflight.sh`)
 - `online_force_control_plane` contract
 - `online_variable_control_plane` contract
 - `retain_persistent` contract
@@ -29,11 +30,19 @@ This command covers:
 ### A. Focused tests
 
 ```bash
+scripts/ci_script_contract_preflight.sh
 cargo test --test online_force_control_plane --test online_variable_control_plane --test retain_persistent --test scenario_gen --test sim_regress --test new_scaffold
 cargo test --test abnormal_exit_matrix --test abnormal_exit_matrix_doc
 cargo test --test commissioning_playbook_doc
 cargo test --test developer_bootstrap_pack_doc
+cargo test --test stage3_ci_gate_runbook_doc
 ```
+
+If preflight fails:
+
+- ensure required scripts are tracked with executable mode (`100755`)
+- convert CRLF to LF for all tracked `*.sh` files
+- re-run `scripts/ci_script_contract_preflight.sh` before pushing
 
 ### B. scenario-gen schema check
 

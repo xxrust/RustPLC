@@ -8,10 +8,26 @@ This playbook provides one end-to-end commissioning flow from diagnostics to fin
 
 - PLC fixture: `examples/force_override_demo.plc`
 - Artifact root: `out/commissioning/`
-- Tools chained in this playbook:
+- Preferred entrypoint: `commissioning-run` (executes both nominal + fault rehearsal chains)
+- Under the hood, `commissioning-run` orchestrates:
   - `scenario-doctor`
   - `sim-plc` (`--retain-*`, `--online-force-*`, `--online-var-*`)
   - `no-board-gate`
+
+## One-command execution (recommended)
+
+```bash
+cargo run -- commissioning-run examples/force_override_demo.plc \
+  --out-dir out/commissioning \
+  --output json > out/commissioning/commissioning_report.json
+```
+
+Primary outputs:
+
+- `out/commissioning/commissioning_index.json` (structured step-by-step pass/fail index)
+- `out/commissioning/commissioning_report.json` (stdout mirror when `--output json`)
+
+The remaining sections keep the manual breakdown for troubleshooting each internal step.
 
 ---
 
@@ -119,6 +135,16 @@ Pass/Fail checkpoint:
 {"at_ms":40,"actor":"commissioning","source":"panel","variable":"BOOL:diag_latch","value":null}
 ```
 
+`out/commissioning/online_var_bindings.toml`:
+
+```toml
+schema_version = 1
+[bool]
+diag_latch = "DI0"
+[real]
+gain_k = "AI0"
+```
+
 ### Step 4) Simulate with retain + online force + online variable control
 
 ```bash
@@ -131,6 +157,7 @@ cargo run -- sim-plc examples/force_override_demo.plc \
   --online-force-script out/commissioning/online_force.jsonl \
   --online-force-audit-out out/commissioning/online_force_audit.jsonl \
   --online-var-script out/commissioning/online_var.jsonl \
+  --online-var-bindings out/commissioning/online_var_bindings.toml \
   --online-var-audit-out out/commissioning/online_var_audit.jsonl
 ```
 
@@ -158,6 +185,7 @@ Pass/Fail checkpoint:
 
 ## Acceptance checklist for this playbook
 
-- Both rehearsal flows are runnable with documented commands.
+- `commissioning-run` can execute both rehearsal flows in one command.
+- `commissioning_index.json` provides structured per-step pass/fail outcomes.
 - Each step defines artifact paths and pass/fail checkpoint.
 - Final gate step is always `no-board-gate`.

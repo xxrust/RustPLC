@@ -49,6 +49,8 @@ scripts/rp2040_hil_daily_gate.sh \
 
 - `out/.../<case-id>/hil_summary.json`：单 case gate 结果
 - `out/.../<case-id>/diff_report.json`：SIL vs Board 对比
+- `out/.../<case-id>/timing_report.json`：板级 tick 执行统计（p50/p95/p99/max/overrun）
+- `out/.../<case-id>/timing_gate_verdict.json`：实时阈值门禁结论（阈值、观测值、违规项）
 - `out/.../<case-id>/assertions_report.json`：断言检查，包含 `axis/signal/step/tick`
 - `out/.../hil_daily_summary.json`：全量汇总（是否整体通过 + 各 case 详情）
 
@@ -87,7 +89,34 @@ scripts/rp2040_hil_gate.sh \
   --bundle
 ```
 
-## 5) 异常退出分级矩阵（A/B/C/D）
+## 5) 实时阈值门禁（建议纳入 nightly）
+
+可以在 daily gate 或单 case gate 上增加阈值：
+
+```bash
+scripts/rp2040_hil_daily_gate.sh \
+  --mount /media/RPI-RP2 \
+  --port /dev/ttyACM0 \
+  --max-p99-exec-us 2000 \
+  --max-overrun-count 0 \
+  --out-root out/rp2040_hil_daily_gate \
+  --bundle
+```
+
+判定规则：
+
+- `exec_us_p99 <= max_p99_exec_us`
+- `overrun_count <= max_overrun_count`
+- 任一超限即 case 失败，并在 `timing_gate_verdict.json.violations` 给出超限指标
+
+阈值调优建议（避免一开始就过严）：
+
+1. 先连续采集 3~5 次无故障基线，记录每次 `timing_report.json.exec_us_p99`。
+2. 初始阈值取“基线最大 p99 的 1.2~1.5 倍”。
+3. `max_overrun_count` 建议先设 `0`，如现场噪声较高可短期放宽并记录原因。
+4. 每次改阈值都要在评审记录中附上对应工件（`timing_report.json` + `timing_gate_verdict.json`）。
+
+## 6) 异常退出分级矩阵（A/B/C/D）
 
 异常退出矩阵与证据模板位于：
 
@@ -106,14 +135,14 @@ python3 scripts/abnormal_exit_matrix_verify.py \
 说明：`D` 类（`kill9/power_loss/kernel_hang`）属于 `hardware_only`，
 依赖独立硬件安全链电气实测，不纳入自动通过条件。详见：`docs/abnormal_exit_matrix.md`。
 
-## 6) 报告查看
+## 7) 报告查看
 
 优先看：
 
 - `out/.../<case-id>/trace_diff_dashboard.html`
 - 或静态 Viewer：`tools/trace_viewer/index.html`（加载 `diff_report.json`）
 
-## 7) GitHub Actions 说明
+## 8) GitHub Actions 说明
 
 如果你有一台长期在线且连着 Pico 的机器，可以安装 GitHub self-hosted runner，并在该机器上运行 HIL workflow：
 

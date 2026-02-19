@@ -173,6 +173,26 @@ fn abnormal_exit_evidence_files_publish_required_fields() {
                 !attachments.is_empty(),
                 "class_d_manual.attachments should not be empty"
             );
+            for (idx, attachment) in attachments.iter().enumerate() {
+                let provenance = attachment
+                    .get("provenance")
+                    .and_then(Value::as_object)
+                    .unwrap_or_else(|| {
+                        panic!("class_d_manual.attachments[{idx}].provenance must be object")
+                    });
+                let source_path = provenance
+                    .get("source_path")
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "class_d_manual.attachments[{idx}].provenance.source_path should be string"
+                        )
+                    });
+                assert!(
+                    !source_path.trim().is_empty(),
+                    "class_d_manual.attachments[{idx}].provenance.source_path should not be empty"
+                );
+            }
         }
     }
 }
@@ -203,6 +223,22 @@ fn abnormal_exit_class_d_template_declares_required_fields() {
         !attachments.is_empty(),
         "class D template should include at least one attachment example"
     );
+    for (idx, attachment) in attachments.iter().enumerate() {
+        let provenance = attachment
+            .get("provenance")
+            .and_then(Value::as_object)
+            .unwrap_or_else(|| panic!("template attachments[{idx}].provenance must be object"));
+        let source_path = provenance
+            .get("source_path")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| {
+                panic!("template attachments[{idx}].provenance.source_path must be string")
+            });
+        assert!(
+            !source_path.trim().is_empty(),
+            "template attachments[{idx}].provenance.source_path cannot be empty"
+        );
+    }
 }
 
 #[test]
@@ -417,5 +453,91 @@ fn abnormal_exit_verifier_fails_when_class_d_manual_artifact_is_invalid() {
                 .unwrap_or(false)
         }),
         "invalid operator should be reported in class D errors"
+    );
+}
+
+#[test]
+fn abnormal_exit_verifier_fails_when_class_d_attachment_provenance_is_missing() {
+    if !has_python3() {
+        eprintln!("python3 not available; skipping abnormal_exit_verifier test");
+        return;
+    }
+
+    let out_dir = temp_dir("rust_plc_abnormal_exit_verify_invalid_d_provenance");
+    let evidence_dir = out_dir.join("evidence");
+    fs::create_dir_all(&evidence_dir).expect("create evidence dir");
+
+    for class_id in ["A", "B", "C", "D"] {
+        let src = repo_path(&format!(
+            "scenarios/rp2040_hil_gate/abnormal_exit/evidence/{class_id}.json"
+        ));
+        let dst = evidence_dir.join(format!("{class_id}.json"));
+        fs::copy(src, dst).expect("copy evidence fixture");
+    }
+
+    let d_path = evidence_dir.join("D.json");
+    let mut d_json = read_json(&d_path);
+    let attachments = d_json
+        .get_mut("class_d_manual")
+        .and_then(Value::as_object_mut)
+        .and_then(|manual| manual.get_mut("attachments"))
+        .and_then(Value::as_array_mut)
+        .expect("class_d_manual.attachments should exist");
+    let first = attachments
+        .first_mut()
+        .and_then(Value::as_object_mut)
+        .expect("first attachment should be object");
+    first.remove("provenance");
+    fs::write(
+        &d_path,
+        serde_json::to_string_pretty(&d_json).expect("serialize invalid D evidence") + "\n",
+    )
+    .expect("write invalid D evidence");
+
+    let report_path = out_dir.join("report.json");
+    let matrix_path = repo_path("scenarios/rp2040_hil_gate/abnormal_exit/matrix.json");
+    let script_path = repo_path("scripts/abnormal_exit_matrix_verify.py");
+    let output = Command::new("python3")
+        .arg(&script_path)
+        .arg("--matrix")
+        .arg(&matrix_path)
+        .arg("--evidence-dir")
+        .arg(&evidence_dir)
+        .arg("--out")
+        .arg(&report_path)
+        .output()
+        .expect("run abnormal_exit_matrix_verify.py with invalid D provenance");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "missing class D attachment provenance should fail verifier, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report = read_json(&report_path);
+    assert_eq!(report.get("status").and_then(Value::as_str), Some("fail"));
+    let class_d = report
+        .get("results")
+        .and_then(Value::as_array)
+        .expect("results should be array")
+        .iter()
+        .find(|row| row.get("class").and_then(Value::as_str) == Some("D"))
+        .expect("result row for class D should exist");
+    assert_eq!(
+        class_d.get("status").and_then(Value::as_str),
+        Some("manual_hardware_chain_invalid")
+    );
+    let errors = class_d
+        .get("errors")
+        .and_then(Value::as_array)
+        .expect("class D errors should be array");
+    assert!(
+        errors.iter().any(|err| {
+            err.as_str()
+                .map(|text| text.contains("provenance"))
+                .unwrap_or(false)
+        }),
+        "missing provenance should be reported in class D errors"
     );
 }

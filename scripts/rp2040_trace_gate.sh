@@ -80,6 +80,7 @@ BOARD_LOG_DEFAULT="$OUT_DIR_ABS/board.log"
 BOARD_TRACE="$OUT_DIR_ABS/board_trace.jsonl"
 TICK_TIMING="$OUT_DIR_ABS/tick_timing.jsonl"
 TIMING_REPORT="$OUT_DIR_ABS/timing_report.json"
+TIMING_VERDICT="$OUT_DIR_ABS/timing_gate_verdict.json"
 DIFF_REPORT="$OUT_DIR_ABS/diff_report.json"
 DASHBOARD_HTML="$OUT_DIR_ABS/trace_diff_dashboard.html"
 
@@ -171,38 +172,54 @@ echo "[4/4] board-parse + trace-diff --fail-on-mismatch"
     --fail-on-mismatch
 )
 
-if [[ -n "$MAX_P99_EXEC_US" || -n "$MAX_OVERRUN_COUNT" ]]; then
-  if [[ ! -s "$TIMING_REPORT" ]]; then
-    echo "timing gate requested but timing_report.json is missing/empty: $TIMING_REPORT" >&2
-    exit 1
-  fi
-  python3 - "$TIMING_REPORT" "$MAX_P99_EXEC_US" "$MAX_OVERRUN_COUNT" <<'PY'
+timing_gate_args=(
+  --timing-report "$TIMING_REPORT"
+  --out "$TIMING_VERDICT"
+)
+if [[ -n "$MAX_P99_EXEC_US" ]]; then
+  timing_gate_args+=(--max-p99-exec-us "$MAX_P99_EXEC_US")
+fi
+if [[ -n "$MAX_OVERRUN_COUNT" ]]; then
+  timing_gate_args+=(--max-overrun-count "$MAX_OVERRUN_COUNT")
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  set +e
+  python3 "$REPO_ROOT/scripts/timing_gate_verdict.py" "${timing_gate_args[@]}"
+  timing_gate_status=$?
+  set -e
+  if [[ -f "$TIMING_VERDICT" ]]; then
+    python3 - "$TIMING_VERDICT" <<'PY'
 import json
 import sys
 
-path = sys.argv[1]
-max_p99 = sys.argv[2].strip() or None
-max_overrun = sys.argv[3].strip() or None
-
-data = json.load(open(path, "r", encoding="utf-8"))
-p99 = int(data.get("exec_us_p99", 0))
-overruns = int(data.get("overrun_count", 0))
-
-fail = False
-if max_p99 is not None:
-    lim = int(max_p99)
-    if p99 > lim:
-        print(f"FAIL: p99 exec_us {p99} > max_p99_exec_us {lim}", file=sys.stderr)
-        fail = True
-if max_overrun is not None:
-    lim = int(max_overrun)
-    if overruns > lim:
-        print(f"FAIL: overrun_count {overruns} > max_overrun_count {lim}", file=sys.stderr)
-        fail = True
-
-if fail:
-    sys.exit(2)
+obj = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+status = obj.get("status", "unknown")
+message = obj.get("message", "")
+observed = obj.get("observed") or {}
+thresholds = obj.get("thresholds") or {}
+print(
+    "[timing-gate] status={status} p99={p99} overrun={overrun} "
+    "max_p99={max_p99} max_overrun={max_overrun} message={message}".format(
+        status=status,
+        p99=observed.get("exec_us_p99"),
+        overrun=observed.get("overrun_count"),
+        max_p99=thresholds.get("max_p99_exec_us"),
+        max_overrun=thresholds.get("max_overrun_count"),
+        message=message,
+    )
+)
 PY
+  fi
+  if [[ "$timing_gate_status" -ne 0 ]]; then
+    exit "$timing_gate_status"
+  fi
+else
+  echo "WARN: python3 not found; skip timing gate verdict generation" >&2
+  if [[ -n "$MAX_P99_EXEC_US" || -n "$MAX_OVERRUN_COUNT" ]]; then
+    echo "timing gate thresholds were requested but cannot be evaluated without python3" >&2
+    exit 2
+  fi
 fi
 
 if command -v python3 >/dev/null 2>&1; then
@@ -221,5 +238,6 @@ echo "  Board log: $BOARD_LOG"
 echo "  Board trace: $BOARD_TRACE"
 echo "  Tick timing: $TICK_TIMING"
 echo "  Timing report: $TIMING_REPORT"
+echo "  Timing verdict: $TIMING_VERDICT"
 echo "  Diff report: $DIFF_REPORT"
 echo "  Dashboard: $DASHBOARD_HTML"

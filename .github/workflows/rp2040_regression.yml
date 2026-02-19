@@ -6,6 +6,13 @@ on:
   pull_request:
 
 jobs:
+  script-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Script mode/EOL preflight
+        run: scripts/ci_script_contract_preflight.sh
+
   stage3-runtime-dev-gates:
     runs-on: ubuntu-latest
     steps:

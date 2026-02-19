@@ -16,11 +16,14 @@ fn commissioning_playbook_locks_required_headings_and_command_snippets() {
         "Flow A: Nominal startup rehearsal",
         "Flow B: Fault-injection debug rehearsal",
         "Pass/Fail checkpoint",
+        "commissioning-run",
+        "commissioning_index.json",
         "scenario-doctor",
         "sim-plc",
         "--retain-config",
         "--online-force-script",
         "--online-var-script",
+        "--online-var-bindings",
         "no-board-gate",
         "out/commissioning/",
     ] {
@@ -31,7 +34,12 @@ fn commissioning_playbook_locks_required_headings_and_command_snippets() {
         .output()
         .expect("run rust_plc without args");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    for cmd in ["scenario-doctor", "sim-plc", "no-board-gate"] {
+    for cmd in [
+        "commissioning-run",
+        "scenario-doctor",
+        "sim-plc",
+        "no-board-gate",
+    ] {
         assert!(
             stderr.contains(cmd),
             "CLI usage should include `{cmd}`; got: {stderr}"

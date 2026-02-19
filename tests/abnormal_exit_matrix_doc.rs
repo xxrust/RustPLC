@@ -18,6 +18,8 @@ fn abnormal_exit_doc_mentions_matrix_contract_and_verifier_command() {
         "vertical",
         "do2",
         "do1",
+        "provenance.source_path",
+        "Class-D-Abnormal-Exit-Evidence-Workflow",
     ] {
         assert!(doc.contains(needle), "doc should mention `{needle}`");
     }

@@ -1,87 +1,87 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/stage3-operability-hardening",
-  "description": "Stage-3 focus: production-grade gate hardening, runtime variable control, D-class safety evidence, commissioning playbook unification, and VS Code developer-experience uplift.",
+  "branchName": "ralph/stage4-runtime-semantic-hardening",
+  "description": "Stage-4 focus: make online variable control semantically effective at runtime, harden cross-platform CI script contracts, and advance operability/safety gates.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Harden CI gates for newly delivered runtime/dev features",
-      "description": "As a release owner, I want the latest online-force/retain/scenario-asset/new-scaffold capabilities to be enforced by CI gates so regressions are blocked before merge.",
+      "title": "Make online variable control plane semantically effective at runtime",
+      "description": "As a commissioning engineer, I want online variable operations to deterministically influence runtime evaluation (not audit-only) so diagnosis scripts can reproduce real logic behavior.",
       "acceptanceCriteria": [
-        "CI includes explicit gate coverage for `online_force_control_plane`, `retain_persistent`, `scenario_gen`, `sim_regress`, and `new_scaffold` contracts",
-        "Pipeline fails when `scenario-gen` summary or `sim-regress` feedback schema contracts drift",
-        "Runbook docs include exact local reproduction commands for each new gate",
+        "`sim-plc` online variable commands can bind BOOL/REAL variables to runtime-evaluated input channels via explicit binding contract",
+        "Missing/invalid variable binding fails fast with actionable error messages",
+        "Replay remains deterministic under tick-aligned scripts (same inputs -> same audit output)",
+        "Docs clearly describe variable binding format, runtime effect, and safety boundary",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "P0-1 already complete; this story is P0-2 gate hardening."
+      "notes": "P0-1 semantic gap closure."
     },
     {
       "id": "US-002",
-      "title": "Add runtime online variable control plane (dev mode) with full audit",
-      "description": "As a commissioning engineer, I want to set/clear runtime variables (not only IO) in dev mode so I can diagnose logic paths faster with a traceable audit trail.",
+      "title": "Harden CI against cross-platform script mode and EOL drift",
+      "description": "As a release owner, I want script executability and line-ending assumptions enforced in CI so Linux runners do not fail on permission/EOL regressions.",
       "acceptanceCriteria": [
-        "Introduce a development-only online variable control plane with explicit enable guard (default disabled)",
-        "Support set/clear operations for at least BOOL and REAL variable types",
-        "Provide deterministic replay path via script input and aligned tick semantics",
-        "Emit audit records containing actor/source/time/variable/from/to/operation",
-        "Document safety boundaries against production/hardware paths",
+        "CI includes an explicit check that required gate scripts are executable in git metadata",
+        "Repository defines line-ending policy for shell scripts and keeps scripts LF-clean",
+        "Add a local/CI preflight command that fails on script mode or CRLF drift",
+        "Runbook documents how to reproduce/fix mode/EOL failures",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "P0-3 capability gap closure."
+      "notes": "P0-2 delivery hardening."
     },
     {
       "id": "US-003",
-      "title": "Deliver abnormal-exit Class-D electrical evidence workflow",
-      "description": "As a safety engineer, I want Class-D (hardware-chain) evidence to be standardized and auditable so manual safety validation can be reviewed consistently.",
+      "title": "Promote real-board timing evidence to first-class HIL gate",
+      "description": "As a safety/release engineer, I want board timing evidence thresholds to be a first-class HIL pass/fail gate so trace match and realtime evidence are enforced together.",
       "acceptanceCriteria": [
-        "Define Class-D electrical test checklist template with required fields (trigger, wiring state, measured result, verdict, operator)",
-        "Extend abnormal-exit evidence schema/verifier to ingest and validate Class-D evidence attachments as manual-hardware artifacts",
-        "Publish documentation linking Class-D procedure to existing abnormal-exit matrix and board safety notes",
-        "Add regression tests for schema/verifier behavior on valid/invalid Class-D evidence",
+        "HIL gate can fail on configurable realtime thresholds from board timing evidence",
+        "Gate outputs include concise timing verdict and threshold context in artifacts",
+        "Docs explain threshold selection and expected tuning workflow",
+        "Add regression tests for pass/fail timing threshold behavior",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "P1-1 safety evidence deepening."
+      "notes": "P0-3 safety evidence hardening."
     },
     {
       "id": "US-004",
-      "title": "Unify commissioning playbook across doctor/force/retain/gate",
-      "description": "As a field engineer, I want one commissioning playbook that chains diagnostics, online force, retain restore, and gate checks so rehearsals are repeatable and low-friction.",
+      "title": "Add provenance metadata for Class-D manual evidence attachments",
+      "description": "As a safety auditor, I want Class-D manual attachments to carry provenance metadata so evidence origin and integrity are reviewable.",
       "acceptanceCriteria": [
-        "Provide a single end-to-end commissioning playbook from scenario diagnostics to final no-board gate",
-        "Include at least two runnable rehearsal flows: nominal startup and fault-injection/debug",
-        "Playbook specifies exact artifact locations and pass/fail checkpoints for each step",
-        "Add doc consistency tests to lock required command snippets and key headings",
+        "Class-D checklist/evidence supports attachment provenance fields (at least source path + optional digest/operator/time)",
+        "Verifier validates provenance field presence/shape for Class-D manual artifacts",
+        "Docs link provenance requirements to abnormal-exit workflow",
+        "Regression tests cover valid/invalid provenance payloads",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "P1-2 operations enablement."
+      "notes": "P1-4 auditability uplift."
     },
     {
       "id": "US-005",
-      "title": "Upgrade VS Code support from minimal tasks to practical day-1 workflow",
-      "description": "As a new developer, I want stronger VS Code support so I can edit PLC files, run common flows, and troubleshoot without manual setup overhead.",
+      "title": "Provide commissioning-run command to execute standard nominal/fault rehearsal",
+      "description": "As a field engineer, I want one command to execute the documented commissioning rehearsal flow so operator execution is consistent and less error-prone.",
       "acceptanceCriteria": [
-        "Define VS Code support package contract (syntax association/highlight strategy, snippets or command tasks, recommendations)",
-        "Ensure `rust_plc new` emits the upgraded VS Code assets by default",
-        "Add onboarding documentation for install/use and common troubleshooting",
-        "Add integration tests asserting scaffolded VS Code assets and key command entries",
+        "Add a `commissioning-run` command (or equivalent) that executes documented nominal and fault rehearsal chains",
+        "Command writes structured artifact index with per-step pass/fail outcomes",
+        "Commissioning playbook docs are updated to use the unified command",
+        "Regression tests verify artifact contract and command success path",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "P2 developer-experience uplift."
+      "notes": "P1-5 operator workflow automation."
     }
   ]
 }

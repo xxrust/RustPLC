@@ -8,10 +8,12 @@ TMP_DIR="$(mktemp -d -t rust_plc_stage3_gate.XXXXXX)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "[stage3-gate] Running focused integration tests"
+scripts/ci_script_contract_preflight.sh
 cargo test --test online_force_control_plane --test online_variable_control_plane --test retain_persistent --test scenario_gen --test sim_regress --test new_scaffold
 cargo test --test abnormal_exit_matrix --test abnormal_exit_matrix_doc
 cargo test --test commissioning_playbook_doc
 cargo test --test developer_bootstrap_pack_doc
+cargo test --test stage3_ci_gate_runbook_doc
 
 echo "[stage3-gate] Checking scenario-gen summary contract"
 cargo run -- scenario-gen \

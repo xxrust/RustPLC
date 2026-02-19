@@ -239,6 +239,8 @@ summary = {
         "summary": str(Path(os.environ["CASE_OUT"]) / "hil_summary.json"),
         "diff_report": str(Path(os.environ["CASE_OUT"]) / "diff_report.json"),
         "dashboard": str(Path(os.environ["CASE_OUT"]) / "trace_diff_dashboard.html"),
+        "timing_report": str(Path(os.environ["CASE_OUT"]) / "timing_report.json"),
+        "timing_verdict": str(Path(os.environ["CASE_OUT"]) / "timing_gate_verdict.json"),
     },
     "assertions": {
         "status_code": int(os.environ["ASSERTIONS_STATUS"]),

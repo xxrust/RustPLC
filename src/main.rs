@@ -13,6 +13,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use io_traits::{DigitalInputId, DigitalOutputId, Io};
 use petgraph::Direction;
@@ -1341,6 +1342,13 @@ fn main() {
         }
         return;
     }
+    if first == "commissioning-run" {
+        if let Err(msg) = run_commissioning_run_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "pil-run" {
         if let Err(msg) = run_pil_run_subcommand(&program, args) {
             eprintln!("{msg}");
@@ -1647,7 +1655,7 @@ fn print_usage(program: &str) {
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
     );
     eprintln!(
-        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-audit-out <audit.jsonl>]"
+        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>]"
     );
     eprintln!(
         "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
@@ -1671,6 +1679,7 @@ fn print_usage(program: &str) {
     eprintln!(
         "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]"
     );
+    eprintln!("  {program} commissioning-run <file.plc> --out-dir <dir> [--output <human|json>]");
     eprintln!("  {program} new <project_dir> [--force]");
     eprintln!("  {program} pil-run <file.plc> --scenario <scenario.yaml>");
     eprintln!("  {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>");
@@ -3496,6 +3505,7 @@ struct OnlineVariableCommand {
     source: String,
     variable_kind: OnlineVariableKind,
     variable_name: String,
+    variable_key: String,
     value: Option<OnlineVariableValue>,
 }
 
@@ -3524,9 +3534,114 @@ struct OnlineVariableAuditEntry {
     source: String,
     variable: String,
     variable_kind: &'static str,
+    bound_channel: Option<String>,
     operation: &'static str,
     from: Option<OnlineVariableAuditValue>,
     to: Option<OnlineVariableAuditValue>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct OnlineVariableBindings {
+    bool_to_di: BTreeMap<String, u16>,
+    real_to_ai: BTreeMap<String, u16>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OnlineVariableBindingsFileRaw {
+    #[serde(default = "online_var_binding_schema_version")]
+    schema_version: u32,
+    #[serde(default)]
+    bool: BTreeMap<String, toml::Value>,
+    #[serde(default)]
+    real: BTreeMap<String, toml::Value>,
+}
+
+fn online_var_binding_schema_version() -> u32 {
+    1
+}
+
+fn normalize_online_variable_name(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase()
+}
+
+fn parse_online_variable_binding_channel(
+    raw: &toml::Value,
+    kind: OnlineVariableKind,
+    var_name: &str,
+) -> Result<u16, String> {
+    let prefixes = match kind {
+        OnlineVariableKind::Bool => ["di", "x"].as_slice(),
+        OnlineVariableKind::Real => ["ai"].as_slice(),
+    };
+    match raw {
+        toml::Value::Integer(v) => {
+            if *v < 0 || *v > u16::MAX as i64 {
+                return Err(format!(
+                    "invalid {} binding for `{}`: integer id out of range for u16",
+                    kind.label(),
+                    var_name
+                ));
+            }
+            Ok(*v as u16)
+        }
+        toml::Value::String(s) => parse_retain_channel_id(s, prefixes)
+            .map_err(|err| format!("invalid {} binding for `{}`: {err}", kind.label(), var_name)),
+        _ => Err(format!(
+            "invalid {} binding for `{}`: expected integer id or channel string",
+            kind.label(),
+            var_name
+        )),
+    }
+}
+
+fn load_online_variable_bindings(path: &Path) -> Result<OnlineVariableBindings, String> {
+    let body = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "Failed to read online-variable bindings {}: {err}",
+            path.display()
+        )
+    })?;
+    let raw: OnlineVariableBindingsFileRaw = toml::from_str(&body).map_err(|err| {
+        format!(
+            "Failed to parse online-variable bindings {}: {err}",
+            path.display()
+        )
+    })?;
+    if raw.schema_version != online_var_binding_schema_version() {
+        return Err(format!(
+            "online-variable bindings schema_version={} is unsupported (expected {})",
+            raw.schema_version,
+            online_var_binding_schema_version()
+        ));
+    }
+
+    let mut out = OnlineVariableBindings::default();
+    for (name, channel) in &raw.bool {
+        let key = normalize_online_variable_name(name);
+        if key.is_empty() {
+            return Err("online-variable bool binding name cannot be empty".to_string());
+        }
+        let id = parse_online_variable_binding_channel(channel, OnlineVariableKind::Bool, name)?;
+        if out.bool_to_di.insert(key.clone(), id).is_some() {
+            return Err(format!(
+                "duplicate BOOL binding for `{name}` after normalization"
+            ));
+        }
+    }
+    for (name, channel) in &raw.real {
+        let key = normalize_online_variable_name(name);
+        if key.is_empty() {
+            return Err("online-variable real binding name cannot be empty".to_string());
+        }
+        let id = parse_online_variable_binding_channel(channel, OnlineVariableKind::Real, name)?;
+        if out.real_to_ai.insert(key.clone(), id).is_some() {
+            return Err(format!(
+                "duplicate REAL binding for `{name}` after normalization"
+            ));
+        }
+    }
+
+    Ok(out)
 }
 
 fn parse_online_variable_target(raw: &str) -> Result<(OnlineVariableKind, String), String> {
@@ -3571,7 +3686,9 @@ fn parse_online_variable_value(
         OnlineVariableKind::Bool => match v {
             serde_json::Value::Bool(value) => Ok(Some(OnlineVariableValue::Bool(value))),
             serde_json::Value::Null => Ok(None),
-            other => Err(format!("BOOL variable expects bool/null value, got {other}")),
+            other => Err(format!(
+                "BOOL variable expects bool/null value, got {other}"
+            )),
         },
         OnlineVariableKind::Real => match v {
             serde_json::Value::Number(value) => {
@@ -3584,7 +3701,9 @@ fn parse_online_variable_value(
                 Ok(Some(OnlineVariableValue::Real(parsed as f32)))
             }
             serde_json::Value::Null => Ok(None),
-            other => Err(format!("REAL variable expects numeric/null value, got {other}")),
+            other => Err(format!(
+                "REAL variable expects numeric/null value, got {other}"
+            )),
         },
     }
 }
@@ -3625,6 +3744,7 @@ fn load_online_variable_script(
             actor: raw.actor,
             source: raw.source,
             variable_kind: kind,
+            variable_key: normalize_online_variable_name(&name),
             variable_name: name,
             value,
         });
@@ -3633,15 +3753,91 @@ fn load_online_variable_script(
     Ok(commands)
 }
 
+fn parse_auto_online_variable_channel_id(
+    kind: OnlineVariableKind,
+    variable_key: &str,
+) -> Option<u16> {
+    let prefixes = match kind {
+        OnlineVariableKind::Bool => ["di", "x"].as_slice(),
+        OnlineVariableKind::Real => ["ai"].as_slice(),
+    };
+    parse_retain_channel_id(variable_key, prefixes).ok()
+}
+
+fn resolve_online_variable_channel(
+    cmd: &OnlineVariableCommand,
+    bindings: Option<&OnlineVariableBindings>,
+) -> Result<u16, String> {
+    let from_bindings = bindings.and_then(|defs| match cmd.variable_kind {
+        OnlineVariableKind::Bool => defs.bool_to_di.get(&cmd.variable_key).copied(),
+        OnlineVariableKind::Real => defs.real_to_ai.get(&cmd.variable_key).copied(),
+    });
+    if let Some(id) = from_bindings {
+        return Ok(id);
+    }
+    if let Some(id) = parse_auto_online_variable_channel_id(cmd.variable_kind, &cmd.variable_key) {
+        return Ok(id);
+    }
+    Err(format!(
+        "missing {} binding for variable `{}`; add --online-var-bindings <bindings.toml> or use auto-mappable names (BOOL:DI<n>, REAL:AI<n>)",
+        cmd.variable_kind.label().to_ascii_uppercase(),
+        cmd.variable_name
+    ))
+}
+
+fn inject_online_variable_commands(
+    scenario: &mut sim::Scenario,
+    commands: &[OnlineVariableCommand],
+    bindings: Option<&OnlineVariableBindings>,
+) -> Result<(), String> {
+    let mut by_at = BTreeMap::<u64, sim::ForceSet>::new();
+    for cmd in commands {
+        let id = resolve_online_variable_channel(cmd, bindings)?;
+        let set = by_at.entry(cmd.at_ms).or_default();
+        match (cmd.variable_kind, cmd.value.as_ref()) {
+            (OnlineVariableKind::Bool, Some(OnlineVariableValue::Bool(v))) => {
+                set.digital_inputs.insert(id, Some(*v));
+            }
+            (OnlineVariableKind::Bool, None) => {
+                set.digital_inputs.insert(id, None);
+            }
+            (OnlineVariableKind::Real, Some(OnlineVariableValue::Real(v))) => {
+                set.analog_inputs.insert(id, Some(*v));
+            }
+            (OnlineVariableKind::Real, None) => {
+                set.analog_inputs.insert(id, None);
+            }
+            _ => {
+                return Err(format!(
+                    "online-variable value type mismatch at {}:{}",
+                    cmd.variable_kind.label(),
+                    cmd.variable_name
+                ));
+            }
+        }
+    }
+    for (at_ms, set) in by_at {
+        scenario.forces.push(sim::ForceEvent { at_ms, set });
+    }
+    scenario.forces.sort_by_key(|event| event.at_ms);
+    Ok(())
+}
+
 fn build_online_variable_audit(
     commands: &[OnlineVariableCommand],
     tick_ms: u64,
-) -> Vec<OnlineVariableAuditEntry> {
+    bindings: Option<&OnlineVariableBindings>,
+) -> Result<Vec<OnlineVariableAuditEntry>, String> {
     let mut out = Vec::<OnlineVariableAuditEntry>::new();
     let mut bool_values = BTreeMap::<String, bool>::new();
     let mut real_values = BTreeMap::<String, f32>::new();
 
     for cmd in commands {
+        let bound_channel =
+            resolve_online_variable_channel(cmd, bindings).map(|id| match cmd.variable_kind {
+                OnlineVariableKind::Bool => format!("di{id}"),
+                OnlineVariableKind::Real => format!("ai{id}"),
+            })?;
         let (from, to) = match cmd.variable_kind {
             OnlineVariableKind::Bool => {
                 let before = bool_values
@@ -3686,13 +3882,14 @@ fn build_online_variable_audit(
             source: cmd.source.clone(),
             variable: format!("{}:{}", cmd.variable_kind.label(), cmd.variable_name),
             variable_kind: cmd.variable_kind.label(),
+            bound_channel: Some(bound_channel),
             operation: if cmd.value.is_some() { "set" } else { "clear" },
             from,
             to,
         });
     }
 
-    out
+    Ok(out)
 }
 
 fn default_online_variable_audit_path(trace_out: &Path) -> PathBuf {
@@ -4245,7 +4442,7 @@ fn run_sim_plc_subcommand(
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let usage = format!(
-        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-audit-out <audit.jsonl>]"
+        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>]"
     );
     let Some(plc_path) = args.next() else {
         return Err(usage);
@@ -4259,6 +4456,7 @@ fn run_sim_plc_subcommand(
     let mut online_force_script: Option<PathBuf> = None;
     let mut online_force_audit_out: Option<PathBuf> = None;
     let mut online_var_script: Option<PathBuf> = None;
+    let mut online_var_bindings_path: Option<PathBuf> = None;
     let mut online_var_audit_out: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -4302,6 +4500,11 @@ fn run_sim_plc_subcommand(
                     "Missing value for --online-var-script <script.jsonl>".to_string()
                 })?));
             }
+            "--online-var-bindings" => {
+                online_var_bindings_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --online-var-bindings <bindings.toml>".to_string()
+                })?));
+            }
             "--online-var-audit-out" => {
                 online_var_audit_out = Some(PathBuf::from(args.next().ok_or_else(|| {
                     "Missing value for --online-var-audit-out <audit.jsonl>".to_string()
@@ -4323,11 +4526,12 @@ fn run_sim_plc_subcommand(
     if (online_force_script.is_some()
         || online_force_audit_out.is_some()
         || online_var_script.is_some()
+        || online_var_bindings_path.is_some()
         || online_var_audit_out.is_some())
         && !enable_online_force_dev
     {
         return Err(
-            "online-force/variable dev control plane is disabled by default; add --enable-online-force-dev to use --online-force-script/--online-force-audit-out/--online-var-script/--online-var-audit-out"
+            "online-force/variable dev control plane is disabled by default; add --enable-online-force-dev to use --online-force-script/--online-force-audit-out/--online-var-script/--online-var-bindings/--online-var-audit-out"
                 .to_string(),
         );
     }
@@ -4400,11 +4604,25 @@ fn run_sim_plc_subcommand(
         write_online_force_audit(path, &audit_entries)?;
     }
     let mut online_variable_commands = Vec::new();
+    let online_variable_bindings = if let Some(path) = &online_var_bindings_path {
+        Some(load_online_variable_bindings(path)?)
+    } else {
+        None
+    };
     if let Some(script_path) = &online_var_script {
         online_variable_commands = load_online_variable_script(script_path, scenario.tick_ms)?;
+        inject_online_variable_commands(
+            &mut scenario,
+            &online_variable_commands,
+            online_variable_bindings.as_ref(),
+        )?;
     }
     if let Some(path) = &variable_audit_path {
-        let variable_audit = build_online_variable_audit(&online_variable_commands, scenario.tick_ms);
+        let variable_audit = build_online_variable_audit(
+            &online_variable_commands,
+            scenario.tick_ms,
+            online_variable_bindings.as_ref(),
+        )?;
         write_online_variable_audit(path, &variable_audit)?;
     }
 
@@ -6385,6 +6603,744 @@ fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
     }
 
     Ok(toml::Value::Table(out_root))
+}
+
+#[derive(Debug, Serialize)]
+struct CommissioningStepReport {
+    id: &'static str,
+    title: &'static str,
+    command: String,
+    status: &'static str,
+    artifacts: Vec<String>,
+    detail: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct CommissioningArtifacts {
+    nominal_scenario: String,
+    doctor_nominal: String,
+    retain_config: String,
+    retain_state: String,
+    nominal_trace: String,
+    gate_nominal_json: String,
+    gate_nominal_dir: String,
+    fault_scenario: String,
+    doctor_fault: String,
+    online_force_script: String,
+    online_var_script: String,
+    online_var_bindings: String,
+    fault_trace: String,
+    online_force_audit: String,
+    online_var_audit: String,
+    gate_fault_json: String,
+    gate_fault_dir: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CommissioningRunReport {
+    schema_version: u32,
+    command: &'static str,
+    output: &'static str,
+    status: &'static str,
+    plc: String,
+    out_dir: String,
+    artifact_index: String,
+    steps: Vec<CommissioningStepReport>,
+    artifacts: CommissioningArtifacts,
+}
+
+fn commissioning_command_display(program: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        return program.to_string();
+    }
+    format!("{program} {}", args.join(" "))
+}
+
+fn run_commissioning_child(
+    binary_path: &Path,
+    args: &[String],
+    stdout_capture: Option<&Path>,
+) -> Result<(), String> {
+    let output = Command::new(binary_path)
+        .args(args)
+        .output()
+        .map_err(|err| format!("Failed to execute {}: {err}", binary_path.display()))?;
+
+    if let Some(path) = stdout_capture {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Failed to create stdout capture directory {}: {err}",
+                    parent.display()
+                )
+            })?;
+        }
+        fs::write(path, &output.stdout)
+            .map_err(|err| format!("Failed to write stdout capture {}: {err}", path.display()))?;
+    }
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr_trimmed = stderr.trim();
+    if stderr_trimmed.is_empty() {
+        Err(format!(
+            "Command failed (status {:?}): {}",
+            output.status.code(),
+            args.join(" ")
+        ))
+    } else {
+        Err(format!(
+            "Command failed (status {:?}): {}\n{}",
+            output.status.code(),
+            args.join(" "),
+            stderr_trimmed
+        ))
+    }
+}
+
+fn read_status_from_json(path: &Path) -> Result<String, String> {
+    let body = fs::read_to_string(path)
+        .map_err(|err| format!("Failed to read JSON file {}: {err}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|err| format!("Failed to parse JSON file {}: {err}", path.display()))?;
+    let status = value
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "JSON file {} is missing string field `status`",
+                path.display()
+            )
+        })?;
+    Ok(status.to_string())
+}
+
+fn commissioning_paths_to_relative(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|p| display_path_relative_to_cwd(p))
+        .collect()
+}
+
+fn push_commissioning_step(
+    steps: &mut Vec<CommissioningStepReport>,
+    id: &'static str,
+    title: &'static str,
+    command: String,
+    status: &'static str,
+    artifacts: Vec<String>,
+    detail: Option<String>,
+) {
+    steps.push(CommissioningStepReport {
+        id,
+        title,
+        command,
+        status,
+        artifacts,
+        detail,
+    });
+}
+
+fn run_commissioning_step(
+    steps: &mut Vec<CommissioningStepReport>,
+    failure_reason: &mut Option<String>,
+    program: &str,
+    binary_path: &Path,
+    id: &'static str,
+    title: &'static str,
+    cmd_args: Vec<String>,
+    stdout_capture: Option<&Path>,
+    artifact_paths: Vec<PathBuf>,
+    checker: impl FnOnce() -> Result<(), String>,
+) {
+    let command = commissioning_command_display(program, &cmd_args);
+    let artifacts_rel = commissioning_paths_to_relative(&artifact_paths);
+    if failure_reason.is_some() {
+        push_commissioning_step(
+            steps,
+            id,
+            title,
+            command,
+            "skipped",
+            artifacts_rel,
+            Some("Skipped because an earlier commissioning step failed".to_string()),
+        );
+        return;
+    }
+
+    let result =
+        run_commissioning_child(binary_path, &cmd_args, stdout_capture).and_then(|_| checker());
+    match result {
+        Ok(()) => push_commissioning_step(steps, id, title, command, "pass", artifacts_rel, None),
+        Err(err) => {
+            *failure_reason = Some(err.clone());
+            push_commissioning_step(steps, id, title, command, "fail", artifacts_rel, Some(err));
+        }
+    }
+}
+
+fn run_commissioning_run_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = format!(
+        "Usage: {program} commissioning-run <file.plc> --out-dir <dir> [--output <human|json>]"
+    );
+    let Some(plc_path_raw) = args.next() else {
+        return Err(usage);
+    };
+    let plc_path = PathBuf::from(plc_path_raw);
+
+    let mut out_dir: Option<PathBuf> = None;
+    let mut output_mode = CliOutputMode::Human;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--out-dir" => {
+                out_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out-dir <dir>".to_string()
+                    })?));
+            }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
+            "-h" | "--help" => return Err(usage),
+            other => return Err(format!("Unknown argument for commissioning-run: {other}")),
+        }
+    }
+
+    let out_dir = out_dir.ok_or(usage)?;
+    fs::create_dir_all(&out_dir).map_err(|err| {
+        format!(
+            "Failed to create commissioning output directory {}: {err}",
+            out_dir.display()
+        )
+    })?;
+
+    let binary_path = env::current_exe()
+        .map_err(|err| format!("Failed to resolve current binary path: {err}"))?;
+
+    let nominal_yaml = out_dir.join("nominal.yaml");
+    let doctor_nominal_json = out_dir.join("doctor_nominal.json");
+    let retain_toml = out_dir.join("retain.toml");
+    let retain_state_json = out_dir.join("retain_state.json");
+    let nominal_trace_jsonl = out_dir.join("nominal_trace.jsonl");
+    let gate_nominal_dir = out_dir.join("gate_nominal");
+    let gate_nominal_json = out_dir.join("gate_nominal.json");
+
+    let fault_yaml = out_dir.join("fault.yaml");
+    let doctor_fault_json = out_dir.join("doctor_fault.json");
+    let online_force_jsonl = out_dir.join("online_force.jsonl");
+    let online_var_jsonl = out_dir.join("online_var.jsonl");
+    let online_var_bindings_toml = out_dir.join("online_var_bindings.toml");
+    let fault_trace_jsonl = out_dir.join("fault_trace.jsonl");
+    let online_force_audit_jsonl = out_dir.join("online_force_audit.jsonl");
+    let online_var_audit_jsonl = out_dir.join("online_var_audit.jsonl");
+    let gate_fault_dir = out_dir.join("gate_fault");
+    let gate_fault_json = out_dir.join("gate_fault.json");
+    let artifact_index_path = out_dir.join("commissioning_index.json");
+
+    let artifacts = CommissioningArtifacts {
+        nominal_scenario: display_path_relative_to_cwd(&nominal_yaml),
+        doctor_nominal: display_path_relative_to_cwd(&doctor_nominal_json),
+        retain_config: display_path_relative_to_cwd(&retain_toml),
+        retain_state: display_path_relative_to_cwd(&retain_state_json),
+        nominal_trace: display_path_relative_to_cwd(&nominal_trace_jsonl),
+        gate_nominal_json: display_path_relative_to_cwd(&gate_nominal_json),
+        gate_nominal_dir: display_path_relative_to_cwd(&gate_nominal_dir),
+        fault_scenario: display_path_relative_to_cwd(&fault_yaml),
+        doctor_fault: display_path_relative_to_cwd(&doctor_fault_json),
+        online_force_script: display_path_relative_to_cwd(&online_force_jsonl),
+        online_var_script: display_path_relative_to_cwd(&online_var_jsonl),
+        online_var_bindings: display_path_relative_to_cwd(&online_var_bindings_toml),
+        fault_trace: display_path_relative_to_cwd(&fault_trace_jsonl),
+        online_force_audit: display_path_relative_to_cwd(&online_force_audit_jsonl),
+        online_var_audit: display_path_relative_to_cwd(&online_var_audit_jsonl),
+        gate_fault_json: display_path_relative_to_cwd(&gate_fault_json),
+        gate_fault_dir: display_path_relative_to_cwd(&gate_fault_dir),
+    };
+
+    let mut steps: Vec<CommissioningStepReport> = Vec::new();
+    let mut failure_reason: Option<String> = None;
+
+    run_commissioning_step(
+        &mut steps,
+        &mut failure_reason,
+        program,
+        &binary_path,
+        "A1",
+        "Nominal scenario-init",
+        vec![
+            "scenario-init".to_string(),
+            plc_path.display().to_string(),
+            "--preset".to_string(),
+            "normal".to_string(),
+            "--out".to_string(),
+            nominal_yaml.display().to_string(),
+        ],
+        None,
+        vec![nominal_yaml.clone()],
+        || {
+            if nominal_yaml.exists() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Expected nominal scenario output {}",
+                    nominal_yaml.display()
+                ))
+            }
+        },
+    );
+
+    run_commissioning_step(
+        &mut steps,
+        &mut failure_reason,
+        program,
+        &binary_path,
+        "A2",
+        "Nominal scenario-doctor",
+        vec![
+            "scenario-doctor".to_string(),
+            plc_path.display().to_string(),
+            "--scenario".to_string(),
+            nominal_yaml.display().to_string(),
+            "--output".to_string(),
+            "json".to_string(),
+        ],
+        Some(&doctor_nominal_json),
+        vec![doctor_nominal_json.clone()],
+        || {
+            let status = read_status_from_json(&doctor_nominal_json)?;
+            if status == "pass" {
+                Ok(())
+            } else {
+                Err(format!(
+                    "doctor_nominal status must be `pass`, got `{status}`"
+                ))
+            }
+        },
+    );
+
+    let retain_write_command = format!("write {}", retain_toml.display());
+    if failure_reason.is_some() {
+        push_commissioning_step(
+            &mut steps,
+            "A3",
+            "Write retain config",
+            retain_write_command,
+            "skipped",
+            vec![display_path_relative_to_cwd(&retain_toml)],
+            Some("Skipped because an earlier commissioning step failed".to_string()),
+        );
+    } else {
+        let retain_body = "schema_version = 1\n[digital_inputs]\ndi0 = false\n[digital_outputs]\ndo0 = false\n[analog_outputs]\nao0 = 0.0\n";
+        let retain_result = fs::write(&retain_toml, retain_body).map_err(|err| {
+            format!(
+                "Failed to write retain config {}: {err}",
+                retain_toml.display()
+            )
+        });
+        match retain_result {
+            Ok(()) => push_commissioning_step(
+                &mut steps,
+                "A3",
+                "Write retain config",
+                retain_write_command,
+                "pass",
+                vec![display_path_relative_to_cwd(&retain_toml)],
+                None,
+            ),
+            Err(err) => {
+                failure_reason = Some(err.clone());
+                push_commissioning_step(
+                    &mut steps,
+                    "A3",
+                    "Write retain config",
+                    retain_write_command,
+                    "fail",
+                    vec![display_path_relative_to_cwd(&retain_toml)],
+                    Some(err),
+                );
+            }
+        }
+    }
+
+    run_commissioning_step(
+        &mut steps,
+        &mut failure_reason,
+        program,
+        &binary_path,
+        "A4",
+        "Nominal sim-plc with retain",
+        vec![
+            "sim-plc".to_string(),
+            plc_path.display().to_string(),
+            "--scenario".to_string(),
+            nominal_yaml.display().to_string(),
+            "--out".to_string(),
+            nominal_trace_jsonl.display().to_string(),
+            "--retain-config".to_string(),
+            retain_toml.display().to_string(),
+            "--retain-state".to_string(),
+            retain_state_json.display().to_string(),
+        ],
+        None,
+        vec![nominal_trace_jsonl.clone(), retain_state_json.clone()],
+        || {
+            if !nominal_trace_jsonl.exists() {
+                return Err(format!(
+                    "Expected nominal trace output {}",
+                    nominal_trace_jsonl.display()
+                ));
+            }
+            if !retain_state_json.exists() {
+                return Err(format!(
+                    "Expected retain state output {}",
+                    retain_state_json.display()
+                ));
+            }
+            Ok(())
+        },
+    );
+
+    run_commissioning_step(
+        &mut steps,
+        &mut failure_reason,
+        program,
+        &binary_path,
+        "A5",
+        "Nominal no-board-gate",
+        vec![
+            "no-board-gate".to_string(),
+            plc_path.display().to_string(),
+            "--scenario".to_string(),
+            nominal_yaml.display().to_string(),
+            "--out-dir".to_string(),
+            gate_nominal_dir.display().to_string(),
+            "--output".to_string(),
+            "json".to_string(),
+        ],
+        Some(&gate_nominal_json),
+        vec![
+            gate_nominal_json.clone(),
+            gate_nominal_dir.join("sil_trace.jsonl"),
+            gate_nominal_dir.join("board_trace.jsonl"),
+            gate_nominal_dir.join("diff_report.json"),
+            gate_nominal_dir.join("timing_report.json"),
+        ],
+        || {
+            let status = read_status_from_json(&gate_nominal_json)?;
+            if status != "pass" {
+                return Err(format!(
+                    "gate_nominal status must be `pass`, got `{status}`"
+                ));
+            }
+            for required in [
+                gate_nominal_dir.join("sil_trace.jsonl"),
+                gate_nominal_dir.join("board_trace.jsonl"),
+                gate_nominal_dir.join("diff_report.json"),
+                gate_nominal_dir.join("timing_report.json"),
+            ] {
+                if !required.exists() {
+                    return Err(format!(
+                        "Missing nominal gate artifact {}",
+                        required.display()
+                    ));
+                }
+            }
+            Ok(())
+        },
+    );
+
+    run_commissioning_step(
+        &mut steps,
+        &mut failure_reason,
+        program,
+        &binary_path,
+        "B1",
+        "Fault scenario-init",
+        vec![
+            "scenario-init".to_string(),
+            plc_path.display().to_string(),
+            "--preset".to_string(),
+            "sensor_stuck".to_string(),
+            "--out".to_string(),
+            fault_yaml.display().to_string(),
+        ],
+        None,
+        vec![fault_yaml.clone()],
+        || {
+            if fault_yaml.exists() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Expected fault scenario output {}",
+                    fault_yaml.display()
+                ))
+            }
+        },
+    );
+
+    run_commissioning_step(
+        &mut steps,
+        &mut failure_reason,
+        program,
+        &binary_path,
+        "B2",
+        "Fault scenario-doctor",
+        vec![
+            "scenario-doctor".to_string(),
+            plc_path.display().to_string(),
+            "--scenario".to_string(),
+            fault_yaml.display().to_string(),
+            "--fix-preview".to_string(),
+            "--output".to_string(),
+            "json".to_string(),
+        ],
+        Some(&doctor_fault_json),
+        vec![doctor_fault_json.clone()],
+        || {
+            let status = read_status_from_json(&doctor_fault_json)?;
+            if status == "pass" {
+                Ok(())
+            } else {
+                Err(format!(
+                    "doctor_fault status must be `pass`, got `{status}`"
+                ))
+            }
+        },
+    );
+
+    let scripts_write_command = format!(
+        "write {}, {}, {}",
+        online_force_jsonl.display(),
+        online_var_jsonl.display(),
+        online_var_bindings_toml.display()
+    );
+    if failure_reason.is_some() {
+        push_commissioning_step(
+            &mut steps,
+            "B3",
+            "Write online control scripts",
+            scripts_write_command,
+            "skipped",
+            vec![
+                display_path_relative_to_cwd(&online_force_jsonl),
+                display_path_relative_to_cwd(&online_var_jsonl),
+                display_path_relative_to_cwd(&online_var_bindings_toml),
+            ],
+            Some("Skipped because an earlier commissioning step failed".to_string()),
+        );
+    } else {
+        let force_script = concat!(
+            "{\"at_ms\":0,\"actor\":\"commissioning\",\"source\":\"panel\",\"channel\":\"DI0\",\"value\":true}\n",
+            "{\"at_ms\":40,\"actor\":\"commissioning\",\"source\":\"panel\",\"channel\":\"DI0\",\"value\":null}\n",
+        );
+        let var_script = concat!(
+            "{\"at_ms\":0,\"actor\":\"commissioning\",\"source\":\"panel\",\"variable\":\"BOOL:diag_latch\",\"value\":true}\n",
+            "{\"at_ms\":20,\"actor\":\"commissioning\",\"source\":\"panel\",\"variable\":\"REAL:gain_k\",\"value\":1.25}\n",
+            "{\"at_ms\":40,\"actor\":\"commissioning\",\"source\":\"panel\",\"variable\":\"BOOL:diag_latch\",\"value\":null}\n",
+            "{\"at_ms\":50,\"actor\":\"commissioning\",\"source\":\"panel\",\"variable\":\"REAL:gain_k\",\"value\":null}\n",
+        );
+        let bindings_body = concat!(
+            "schema_version = 1\n",
+            "[bool]\n",
+            "diag_latch = \"DI0\"\n",
+            "[real]\n",
+            "gain_k = \"AI0\"\n",
+        );
+
+        let write_result = fs::write(&online_force_jsonl, force_script)
+            .and_then(|_| fs::write(&online_var_jsonl, var_script))
+            .and_then(|_| fs::write(&online_var_bindings_toml, bindings_body))
+            .map_err(|err| format!("Failed to write online control scripts: {err}"));
+
+        match write_result {
+            Ok(()) => push_commissioning_step(
+                &mut steps,
+                "B3",
+                "Write online control scripts",
+                scripts_write_command,
+                "pass",
+                vec![
+                    display_path_relative_to_cwd(&online_force_jsonl),
+                    display_path_relative_to_cwd(&online_var_jsonl),
+                    display_path_relative_to_cwd(&online_var_bindings_toml),
+                ],
+                None,
+            ),
+            Err(err) => {
+                failure_reason = Some(err.clone());
+                push_commissioning_step(
+                    &mut steps,
+                    "B3",
+                    "Write online control scripts",
+                    scripts_write_command,
+                    "fail",
+                    vec![
+                        display_path_relative_to_cwd(&online_force_jsonl),
+                        display_path_relative_to_cwd(&online_var_jsonl),
+                        display_path_relative_to_cwd(&online_var_bindings_toml),
+                    ],
+                    Some(err),
+                );
+            }
+        }
+    }
+
+    run_commissioning_step(
+        &mut steps,
+        &mut failure_reason,
+        program,
+        &binary_path,
+        "B4",
+        "Fault sim-plc with online controls",
+        vec![
+            "sim-plc".to_string(),
+            plc_path.display().to_string(),
+            "--scenario".to_string(),
+            fault_yaml.display().to_string(),
+            "--out".to_string(),
+            fault_trace_jsonl.display().to_string(),
+            "--retain-config".to_string(),
+            retain_toml.display().to_string(),
+            "--retain-state".to_string(),
+            retain_state_json.display().to_string(),
+            "--enable-online-force-dev".to_string(),
+            "--online-force-script".to_string(),
+            online_force_jsonl.display().to_string(),
+            "--online-force-audit-out".to_string(),
+            online_force_audit_jsonl.display().to_string(),
+            "--online-var-script".to_string(),
+            online_var_jsonl.display().to_string(),
+            "--online-var-bindings".to_string(),
+            online_var_bindings_toml.display().to_string(),
+            "--online-var-audit-out".to_string(),
+            online_var_audit_jsonl.display().to_string(),
+        ],
+        None,
+        vec![
+            fault_trace_jsonl.clone(),
+            online_force_audit_jsonl.clone(),
+            online_var_audit_jsonl.clone(),
+        ],
+        || {
+            for required in [
+                fault_trace_jsonl.clone(),
+                online_force_audit_jsonl.clone(),
+                online_var_audit_jsonl.clone(),
+            ] {
+                if !required.exists() {
+                    return Err(format!(
+                        "Missing fault simulation artifact {}",
+                        required.display()
+                    ));
+                }
+            }
+            Ok(())
+        },
+    );
+
+    run_commissioning_step(
+        &mut steps,
+        &mut failure_reason,
+        program,
+        &binary_path,
+        "B5",
+        "Fault no-board-gate",
+        vec![
+            "no-board-gate".to_string(),
+            plc_path.display().to_string(),
+            "--scenario".to_string(),
+            fault_yaml.display().to_string(),
+            "--out-dir".to_string(),
+            gate_fault_dir.display().to_string(),
+            "--output".to_string(),
+            "json".to_string(),
+        ],
+        Some(&gate_fault_json),
+        vec![
+            gate_fault_json.clone(),
+            gate_fault_dir.join("diff_report.json"),
+        ],
+        || {
+            let status = read_status_from_json(&gate_fault_json)?;
+            if status != "pass" {
+                return Err(format!("gate_fault status must be `pass`, got `{status}`"));
+            }
+            let diff_report = gate_fault_dir.join("diff_report.json");
+            if !diff_report.exists() {
+                return Err(format!(
+                    "Missing fault gate artifact {}",
+                    diff_report.display()
+                ));
+            }
+            Ok(())
+        },
+    );
+
+    let report_status = if failure_reason.is_none() {
+        "pass"
+    } else {
+        "fail"
+    };
+
+    let report = CommissioningRunReport {
+        schema_version: 1,
+        command: "commissioning-run",
+        output: output_mode.as_str(),
+        status: report_status,
+        plc: display_path_relative_to_cwd(&plc_path),
+        out_dir: display_path_relative_to_cwd(&out_dir),
+        artifact_index: display_path_relative_to_cwd(&artifact_index_path),
+        steps,
+        artifacts,
+    };
+
+    let mut report_json = serde_json::to_string_pretty(&report)
+        .map_err(|err| format!("Failed to serialize commissioning index JSON: {err}"))?;
+    report_json.push('\n');
+    fs::write(&artifact_index_path, &report_json).map_err(|err| {
+        format!(
+            "Failed to write commissioning index {}: {err}",
+            artifact_index_path.display()
+        )
+    })?;
+
+    if output_mode == CliOutputMode::Json {
+        print!("{report_json}");
+    } else {
+        eprintln!(
+            "commissioning-run: {}",
+            if report_status == "pass" {
+                "PASS"
+            } else {
+                "FAIL"
+            }
+        );
+        eprintln!(
+            "  commissioning_index: {}",
+            display_path_relative_to_cwd(&artifact_index_path)
+        );
+    }
+
+    if let Some(reason) = failure_reason {
+        return Err(format!(
+            "commissioning-run failed: {reason} (index: {})",
+            artifact_index_path.display()
+        ));
+    }
+
+    Ok(())
 }
 
 fn run_no_board_gate_subcommand(
