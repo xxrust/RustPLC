@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::Mutex;
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::thread;
 use tungstenite::Message;
 
@@ -271,8 +271,8 @@ fn write_alarm_line(
     writer: &mut BufWriter<fs::File>,
     event: &AlarmEvent,
 ) -> Result<(), AlarmDispatchError> {
-    let line =
-        serde_json::to_string(event).map_err(|err| AlarmDispatchError::Serialize(err.to_string()))?;
+    let line = serde_json::to_string(event)
+        .map_err(|err| AlarmDispatchError::Serialize(err.to_string()))?;
     writer
         .write_all(line.as_bytes())
         .map_err(|err| AlarmDispatchError::WriteAudit {
@@ -301,8 +301,8 @@ fn run_alarm_worker(rx: Receiver<AlarmEvent>, audit_path: &Path, websocket_url: 
 fn publish_to_websocket(url: &str, event: &AlarmEvent) -> Result<(), String> {
     let payload = serde_json::to_string(event)
         .map_err(|err| format!("serialize alarm event for websocket failed: {err}"))?;
-    let (mut socket, _) =
-        tungstenite::connect(url).map_err(|err| format!("websocket connect failed for {url}: {err}"))?;
+    let (mut socket, _) = tungstenite::connect(url)
+        .map_err(|err| format!("websocket connect failed for {url}: {err}"))?;
     socket
         .send(Message::Text(payload.into()))
         .map_err(|err| format!("websocket send failed for {url}: {err}"))?;
@@ -372,7 +372,9 @@ impl AlarmRateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostics::{AnchorKind, DiagnosisAnchor, DiagnosisCategory, DiagnosisReport};
+    use crate::diagnostics::{
+        AnchorKind, DiagnosisAnchor, DiagnosisCategory, DiagnosisReport, EvidenceInputKind,
+    };
     use std::fs;
     use std::net::TcpListener;
     use std::sync::mpsc;
@@ -409,6 +411,7 @@ mod tests {
                 suggested_fix: "inject DI earlier".to_string(),
                 evidence_source: EvidenceSource::RuntimeLive,
             }],
+            evidence_inputs: vec![EvidenceInputKind::Trace],
         }
     }
 

@@ -117,6 +117,7 @@
 - `--alarm-top <n>`：上送候选原因 Top-N
 - `--alarm-dedup-window-ms <ms>`：去重窗口
 - `--alarm-min-interval-ms <ms>`：最小发送间隔
+- `--io-snapshot-out <io_snapshot.json>`：可选 tick 级 IO 快照工件（用于增强诊断证据）
 
 运行态在 timeout 触发时生成 `alarm_event`，并同时尝试：
 
@@ -124,3 +125,5 @@
 2. 推送 WebSocket（HMI 实时显示）
 
 若 WebSocket 不可用，系统会继续运行且保留审计日志，不影响主控制循环。
+
+> 详细方法学（规则图、评分策略、字段定义、AI 边界、格式变更）见：`docs/diagnostics_backend_methodology.md`

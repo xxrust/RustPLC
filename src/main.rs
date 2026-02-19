@@ -5,7 +5,7 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program,
 };
-use rust_plc::verification::{verify_all, VerificationSummary, WarningEntry, WarningLevel};
+use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
@@ -15,24 +15,25 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use io_traits::{DigitalInputId, DigitalOutputId, Io};
+use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io};
 use petgraph::Direction;
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::alarm_runtime::{
     AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity, build_alarm_event,
 };
 use rust_plc::diagnostics::{
-    diagnose, DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport, EvidenceSource,
+    DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport, EvidenceInputKind,
+    EvidenceSource, IoSnapshotArtifact, IoTickSnapshot, diagnose,
 };
 use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
 use rust_plc::sequence_lint::{
-    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
+    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
 };
-use rust_plc::sim_regress::{run_sim_regress_with_options, SimRegressOptions, SimRegressSummary};
-use rust_plc::tick_timing::{parse_tick_timing_jsonl, to_tick_timing_jsonl, TickTimingSample};
-use rust_plc::timing_report::{build_timing_report, TimingReport};
+use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
+use rust_plc::tick_timing::{TickTimingSample, parse_tick_timing_jsonl, to_tick_timing_jsonl};
+use rust_plc::timing_report::{TimingReport, build_timing_report};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -796,6 +797,7 @@ struct TraceDoctorArtifacts {
     trace: Option<String>,
     diff: Option<String>,
     timing_report: Option<String>,
+    io_snapshot: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -804,6 +806,7 @@ struct TraceDoctorJsonReport {
     command: &'static str,
     output: &'static str,
     evidence_source: EvidenceSource,
+    evidence_inputs: Vec<EvidenceInputKind>,
     anchors: Vec<DiagnosisAnchor>,
     candidates: Vec<DiagnosisCandidate>,
     summary: TraceDoctorSummary,
@@ -865,6 +868,7 @@ fn build_trace_doctor_json_report(
         command: "trace-doctor",
         output: output_mode.as_str(),
         evidence_source,
+        evidence_inputs: diagnosis.evidence_inputs,
         anchors: diagnosis.anchors,
         candidates: diagnosis.candidates,
         summary: TraceDoctorSummary {
@@ -894,6 +898,9 @@ fn print_trace_doctor_human(report: &TraceDoctorJsonReport, top_n: usize) {
     }
     if let Some(timing_report) = &report.artifacts.timing_report {
         eprintln!("  timing_report: {timing_report}");
+    }
+    if let Some(io_snapshot) = &report.artifacts.io_snapshot {
+        eprintln!("  io_snapshot: {io_snapshot}");
     }
 
     let top_n = top_n.max(1).min(report.candidates.len());
@@ -1800,7 +1807,7 @@ fn print_usage(program: &str) {
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
     );
     eprintln!(
-        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>]"
+        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>] [--io-snapshot-out <io_snapshot.json>]"
     );
     eprintln!(
         "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
@@ -1820,7 +1827,7 @@ fn print_usage(program: &str) {
         "  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
     );
     eprintln!(
-        "  {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]"
+        "  {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--io-snapshot <io_snapshot.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]"
     );
     eprintln!("  {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]");
     eprintln!("  {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>");
@@ -4056,6 +4063,79 @@ fn default_alarm_event_audit_path(trace_out: &Path) -> PathBuf {
         .join("alarm_events.ndjson")
 }
 
+fn capture_io_tick_snapshot(io: &sim::SimIo) -> IoTickSnapshot {
+    let mut digital_inputs = Vec::with_capacity(io.num_digital_inputs());
+    for idx in 0..io.num_digital_inputs() {
+        let Ok(id) = u16::try_from(idx) else {
+            break;
+        };
+        digital_inputs.push(io.read_digital_input(DigitalInputId(id)));
+    }
+
+    let mut analog_inputs = Vec::with_capacity(io.num_analog_inputs());
+    for idx in 0..io.num_analog_inputs() {
+        let Ok(id) = u16::try_from(idx) else {
+            break;
+        };
+        analog_inputs.push(io.read_analog_input(AnalogInputId(id)));
+    }
+
+    let mut digital_outputs = Vec::with_capacity(io.num_digital_outputs());
+    for idx in 0..io.num_digital_outputs() {
+        let Ok(id) = u16::try_from(idx) else {
+            break;
+        };
+        digital_outputs.push(io.read_digital_output_value(DigitalOutputId(id)));
+    }
+
+    let mut analog_outputs = Vec::with_capacity(io.num_analog_outputs());
+    for idx in 0..io.num_analog_outputs() {
+        let Ok(id) = u16::try_from(idx) else {
+            break;
+        };
+        analog_outputs.push(io.read_analog_output_value(AnalogOutputId(id)));
+    }
+
+    IoTickSnapshot {
+        tick: io.tick().0,
+        digital_inputs,
+        analog_inputs,
+        digital_outputs,
+        analog_outputs,
+    }
+}
+
+fn write_io_snapshot_artifact(
+    path: &Path,
+    tick_ms: u64,
+    ticks: Vec<IoTickSnapshot>,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Failed to create io-snapshot artifact directory {}: {err}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
+
+    let mut json = serde_json::to_string_pretty(&IoSnapshotArtifact {
+        schema_version: 1,
+        tick_ms,
+        ticks,
+    })
+    .map_err(|err| format!("Failed to serialize io-snapshot artifact JSON: {err}"))?;
+    json.push('\n');
+    fs::write(path, json).map_err(|err| {
+        format!(
+            "Failed to write io-snapshot artifact {}: {err}",
+            path.display()
+        )
+    })
+}
+
 fn default_alarm_scenario_or_recipe_id(scenario_path: &Path) -> String {
     scenario_path
         .file_stem()
@@ -4607,7 +4687,7 @@ fn run_sim_plc_subcommand(
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let usage = format!(
-        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>]"
+        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>] [--io-snapshot-out <io_snapshot.json>]"
     );
     let Some(plc_path) = args.next() else {
         return Err(usage);
@@ -4630,6 +4710,7 @@ fn run_sim_plc_subcommand(
     let mut alarm_top_n: usize = 3;
     let mut alarm_dedup_window_ms: u64 = 1_000;
     let mut alarm_min_interval_ms: u64 = 200;
+    let mut io_snapshot_out: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--scenario" => {
@@ -4690,10 +4771,9 @@ fn run_sim_plc_subcommand(
             }
             "--alarm-hmi-ws" => {
                 alarm_options_seen = true;
-                alarm_hmi_ws =
-                    Some(args.next().ok_or_else(|| {
-                        "Missing value for --alarm-hmi-ws <ws://host:port/path>".to_string()
-                    })?);
+                alarm_hmi_ws = Some(args.next().ok_or_else(|| {
+                    "Missing value for --alarm-hmi-ws <ws://host:port/path>".to_string()
+                })?);
             }
             "--alarm-scenario-id" => {
                 alarm_options_seen = true;
@@ -4719,21 +4799,26 @@ fn run_sim_plc_subcommand(
             }
             "--alarm-dedup-window-ms" => {
                 alarm_options_seen = true;
-                let raw = args.next().ok_or_else(|| {
-                    "Missing value for --alarm-dedup-window-ms <ms>".to_string()
-                })?;
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --alarm-dedup-window-ms <ms>".to_string())?;
                 alarm_dedup_window_ms = raw.parse::<u64>().map_err(|_| {
                     format!("Invalid --alarm-dedup-window-ms value (expected u64): {raw}")
                 })?;
             }
             "--alarm-min-interval-ms" => {
                 alarm_options_seen = true;
-                let raw = args.next().ok_or_else(|| {
-                    "Missing value for --alarm-min-interval-ms <ms>".to_string()
-                })?;
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --alarm-min-interval-ms <ms>".to_string())?;
                 alarm_min_interval_ms = raw.parse::<u64>().map_err(|_| {
                     format!("Invalid --alarm-min-interval-ms value (expected u64): {raw}")
                 })?;
+            }
+            "--io-snapshot-out" => {
+                io_snapshot_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --io-snapshot-out <io_snapshot.json>".to_string()
+                })?));
             }
             "-h" | "--help" => {
                 return Err(usage.clone());
@@ -4765,6 +4850,15 @@ fn run_sim_plc_subcommand(
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)
                 .map_err(|err| format!("Failed to create output directory {parent:?}: {err}"))?;
+        }
+    }
+    if let Some(path) = &io_snapshot_out {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent).map_err(|err| {
+                    format!("Failed to create io-snapshot output directory {parent:?}: {err}")
+                })?;
+            }
         }
     }
 
@@ -4886,7 +4980,15 @@ fn run_sim_plc_subcommand(
 
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
-    let run = sim::run_program_for_scenario(&program, &scenario, &mut io).map_err(|e| {
+    let mut io_snapshots = Vec::new();
+    let run = if io_snapshot_out.is_some() {
+        sim::run_program_for_scenario_with_tick_observer(&program, &scenario, &mut io, |io| {
+            io_snapshots.push(capture_io_tick_snapshot(io));
+        })
+    } else {
+        sim::run_program_for_scenario(&program, &scenario, &mut io)
+    }
+    .map_err(|e| {
         let mut msg = format!("{e}");
         if let Some(hint) =
             scenario_mismatch_hint_for_example(&plc_path, &scenario_path, &e, "sim-plc")
@@ -4896,6 +4998,9 @@ fn run_sim_plc_subcommand(
         }
         msg
     })?;
+    if let Some(path) = &io_snapshot_out {
+        write_io_snapshot_artifact(path, scenario.tick_ms, io_snapshots)?;
+    }
     let trace_text = run.trace.into_string();
     fs::write(&out_path, &trace_text)
         .map_err(|err| format!("Failed to write trace file {out_path:?}: {err}"))?;
@@ -4914,6 +5019,7 @@ fn run_sim_plc_subcommand(
                 diff_report: None,
                 timing_report: None,
                 evidence_source: EvidenceSource::RuntimeLive,
+                io_snapshot: None,
             })
             .map_err(|err| format!("Failed to build runtime alarm diagnosis: {err}"))?;
             let evidence_ref = display_path_relative_to_cwd(&out_path);
@@ -4952,6 +5058,9 @@ fn run_sim_plc_subcommand(
     }
     if let Some(ws_url) = alarm_hmi_ws_display {
         eprintln!("sim-plc: alarm-event realtime {}", ws_url);
+    }
+    if let Some(path) = io_snapshot_out {
+        eprintln!("sim-plc: io-snapshot {}", path.display());
     }
     Ok(())
 }
@@ -6640,7 +6749,7 @@ fn run_trace_doctor_subcommand(
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let usage = format!(
-        "Usage: {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]"
+        "Usage: {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--io-snapshot <io_snapshot.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]"
     );
 
     let Some(plc_path) = args.next() else {
@@ -6651,6 +6760,7 @@ fn run_trace_doctor_subcommand(
     let mut trace_path: Option<PathBuf> = None;
     let mut diff_path: Option<PathBuf> = None;
     let mut timing_report_path: Option<PathBuf> = None;
+    let mut io_snapshot_path: Option<PathBuf> = None;
     let mut evidence_source = EvidenceSource::Mixed;
     let mut top_n: usize = 3;
     let mut output_mode = CliOutputMode::Human;
@@ -6677,6 +6787,11 @@ fn run_trace_doctor_subcommand(
             "--timing-report" => {
                 timing_report_path = Some(PathBuf::from(args.next().ok_or_else(|| {
                     "Missing value for --timing-report <timing_report.json>".to_string()
+                })?));
+            }
+            "--io-snapshot" => {
+                io_snapshot_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --io-snapshot <io_snapshot.json>".to_string()
                 })?));
             }
             "--evidence-source" => {
@@ -6767,6 +6882,18 @@ fn run_trace_doctor_subcommand(
         None
     };
 
+    let io_snapshot = if let Some(path) = &io_snapshot_path {
+        let text = fs::read_to_string(path)
+            .map_err(|err| format!("Failed to read io-snapshot {}: {err}", path.display()))?;
+        Some(
+            serde_json::from_str::<IoSnapshotArtifact>(&text).map_err(|err| {
+                format!("Failed to parse io-snapshot JSON {}: {err}", path.display())
+            })?,
+        )
+    } else {
+        None
+    };
+
     let diagnosis = diagnose(DiagnosisInput {
         plc_source: &plc_source,
         scenario: &scenario,
@@ -6774,6 +6901,7 @@ fn run_trace_doctor_subcommand(
         diff_report: diff_report.as_ref(),
         timing_report: timing_report.as_ref(),
         evidence_source,
+        io_snapshot: io_snapshot.as_ref(),
     })
     .map_err(|err| format!("trace-doctor failed: {err}"))?;
 
@@ -6791,6 +6919,9 @@ fn run_trace_doctor_subcommand(
                 .as_ref()
                 .map(|path| display_path_relative_to_cwd(path)),
             timing_report: timing_report_path
+                .as_ref()
+                .map(|path| display_path_relative_to_cwd(path)),
+            io_snapshot: io_snapshot_path
                 .as_ref()
                 .map(|path| display_path_relative_to_cwd(path)),
         },
@@ -6939,7 +7070,7 @@ fn run_io_map_normalize_subcommand(
 }
 
 fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
-    use rust_plc::iec_address::{parse_iec_address, LogicalChannelKind};
+    use rust_plc::iec_address::{LogicalChannelKind, parse_iec_address};
     use toml::value::Table;
 
     let root = v
@@ -7096,6 +7227,7 @@ struct CommissioningArtifacts {
     nominal_trace: String,
     gate_nominal_json: String,
     gate_nominal_dir: String,
+    gate_nominal_diagnosis: String,
     fault_scenario: String,
     doctor_fault: String,
     online_force_script: String,
@@ -7106,6 +7238,7 @@ struct CommissioningArtifacts {
     online_var_audit: String,
     gate_fault_json: String,
     gate_fault_dir: String,
+    gate_fault_diagnosis: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -7308,6 +7441,7 @@ fn run_commissioning_run_subcommand(
     let nominal_trace_jsonl = out_dir.join("nominal_trace.jsonl");
     let gate_nominal_dir = out_dir.join("gate_nominal");
     let gate_nominal_json = out_dir.join("gate_nominal.json");
+    let gate_nominal_diagnosis = gate_nominal_dir.join("diagnosis_report.json");
 
     let fault_yaml = out_dir.join("fault.yaml");
     let doctor_fault_json = out_dir.join("doctor_fault.json");
@@ -7319,6 +7453,7 @@ fn run_commissioning_run_subcommand(
     let online_var_audit_jsonl = out_dir.join("online_var_audit.jsonl");
     let gate_fault_dir = out_dir.join("gate_fault");
     let gate_fault_json = out_dir.join("gate_fault.json");
+    let gate_fault_diagnosis = gate_fault_dir.join("diagnosis_report.json");
     let artifact_index_path = out_dir.join("commissioning_index.json");
 
     let artifacts = CommissioningArtifacts {
@@ -7329,6 +7464,7 @@ fn run_commissioning_run_subcommand(
         nominal_trace: display_path_relative_to_cwd(&nominal_trace_jsonl),
         gate_nominal_json: display_path_relative_to_cwd(&gate_nominal_json),
         gate_nominal_dir: display_path_relative_to_cwd(&gate_nominal_dir),
+        gate_nominal_diagnosis: display_path_relative_to_cwd(&gate_nominal_diagnosis),
         fault_scenario: display_path_relative_to_cwd(&fault_yaml),
         doctor_fault: display_path_relative_to_cwd(&doctor_fault_json),
         online_force_script: display_path_relative_to_cwd(&online_force_jsonl),
@@ -7339,6 +7475,7 @@ fn run_commissioning_run_subcommand(
         online_var_audit: display_path_relative_to_cwd(&online_var_audit_jsonl),
         gate_fault_json: display_path_relative_to_cwd(&gate_fault_json),
         gate_fault_dir: display_path_relative_to_cwd(&gate_fault_dir),
+        gate_fault_diagnosis: display_path_relative_to_cwd(&gate_fault_diagnosis),
     };
 
     let mut steps: Vec<CommissioningStepReport> = Vec::new();
@@ -7508,6 +7645,7 @@ fn run_commissioning_run_subcommand(
             gate_nominal_dir.join("board_trace.jsonl"),
             gate_nominal_dir.join("diff_report.json"),
             gate_nominal_dir.join("timing_report.json"),
+            gate_nominal_diagnosis.clone(),
         ],
         || {
             let status = read_status_from_json(&gate_nominal_json)?;
@@ -7743,6 +7881,7 @@ fn run_commissioning_run_subcommand(
         vec![
             gate_fault_json.clone(),
             gate_fault_dir.join("diff_report.json"),
+            gate_fault_diagnosis.clone(),
         ],
         || {
             let status = read_status_from_json(&gate_fault_json)?;
@@ -8017,6 +8156,41 @@ fn run_no_board_gate_subcommand(
         }
     }
 
+    let gate_failed = !report.is_match || !realtime_failures.is_empty();
+    let diagnosis_report_path = out_dir.join("diagnosis_report.json");
+    let mut diagnosis_report_rel: Option<String> = None;
+    let mut diagnosis_top_candidate_code: Option<String> = None;
+    let mut diagnosis_evidence_source: Option<String> = None;
+
+    if gate_failed {
+        let diagnosis = diagnose(DiagnosisInput {
+            plc_source: &plc_source,
+            scenario: &sil_scenario,
+            trace_events: Some(&sil_events),
+            diff_report: Some(&report),
+            timing_report: Some(&timing_report),
+            evidence_source: EvidenceSource::NoBoard,
+            io_snapshot: None,
+        })
+        .map_err(|err| format!("Failed to build no-board diagnosis report: {err}"))?;
+        diagnosis_top_candidate_code = diagnosis
+            .candidates
+            .first()
+            .map(|candidate| candidate.issue_code.clone());
+        diagnosis_evidence_source =
+            Some(evidence_source_label(EvidenceSource::NoBoard).to_string());
+        let mut diagnosis_json = serde_json::to_string_pretty(&diagnosis)
+            .map_err(|err| format!("Failed to serialize diagnosis report JSON: {err}"))?;
+        diagnosis_json.push('\n');
+        fs::write(&diagnosis_report_path, diagnosis_json).map_err(|err| {
+            format!(
+                "Failed to write diagnosis report {}: {err}",
+                diagnosis_report_path.display()
+            )
+        })?;
+        diagnosis_report_rel = Some(display_path_relative_to_cwd(&diagnosis_report_path));
+    }
+
     if output_mode == CliOutputMode::Human {
         if report.is_match {
             eprintln!(
@@ -8042,6 +8216,9 @@ fn run_no_board_gate_subcommand(
         for reason in &realtime_failures {
             eprintln!("  realtime-gate: {reason}");
         }
+        if let Some(path) = &diagnosis_report_rel {
+            eprintln!("  diagnosis_report: {path}");
+        }
     } else {
         #[derive(Serialize)]
         struct NoBoardGateJson<'a> {
@@ -8057,9 +8234,12 @@ fn run_no_board_gate_subcommand(
             timing_report: String,
             p99_exec_us: u64,
             overrun_count: u64,
+            diagnosis_report: Option<String>,
+            diagnosis_top_candidate_code: Option<String>,
+            diagnosis_evidence_source: Option<String>,
         }
         let payload = NoBoardGateJson {
-            schema_version: 1,
+            schema_version: 2,
             command: "no-board-gate",
             output: output_mode.as_str(),
             status: if report.is_match && realtime_failures.is_empty() {
@@ -8075,6 +8255,9 @@ fn run_no_board_gate_subcommand(
             timing_report: display_path_relative_to_cwd(&timing_report_path),
             p99_exec_us: timing_report.exec_us_p99,
             overrun_count: timing_report.overrun_count,
+            diagnosis_report: diagnosis_report_rel.clone(),
+            diagnosis_top_candidate_code: diagnosis_top_candidate_code.clone(),
+            diagnosis_evidence_source: diagnosis_evidence_source.clone(),
         };
         let mut json = serde_json::to_string_pretty(&payload)
             .map_err(|err| format!("Failed to serialize no-board-gate JSON output: {err}"))?;

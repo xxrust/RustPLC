@@ -109,7 +109,8 @@ inputs:
 
 - `schema_version`
 - `evidence_source` (`no_board|hil_board|runtime_live|mixed`)
+- `evidence_inputs` (`trace|diff|timing_report|io_snapshot` used in this run)
 - `anchors`
 - `candidates` (stable `DIAG-*` issue codes)
 - `summary`
-- `artifacts` (PLC/scenario/trace/diff/timing paths)
+- `artifacts` (PLC/scenario/trace/diff/timing/io_snapshot paths)

@@ -155,6 +155,19 @@ inputs: []
         report.get("evidence_source").and_then(Value::as_str),
         Some("no_board")
     );
+    let evidence_inputs = report
+        .get("evidence_inputs")
+        .and_then(Value::as_array)
+        .expect("evidence_inputs should exist");
+    let evidence_labels = evidence_inputs
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        evidence_labels,
+        vec!["trace", "diff", "timing_report"],
+        "trace-doctor should mark consumed evidence inputs"
+    );
     assert!(
         report.get("anchors").and_then(Value::as_array).is_some(),
         "anchors should exist"

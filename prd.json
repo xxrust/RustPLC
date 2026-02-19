@@ -67,7 +67,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "保证离线评审结果与在线告警编码可对齐。"
     },
     {
@@ -83,7 +83,7 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "属于可选增强，不得破坏现有流水线。"
     },
     {
@@ -99,7 +99,7 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "兼顾审计可解释性、现场可读性与后续扩展空间。"
     }
   ]

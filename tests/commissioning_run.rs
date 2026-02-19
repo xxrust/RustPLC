@@ -79,6 +79,50 @@ fn commissioning_run_executes_nominal_and_fault_rehearsals_and_emits_index() {
         assert_eq!(step.get("status").and_then(Value::as_str), Some("pass"));
     }
 
+    let a5 = steps
+        .iter()
+        .find(|step| step.get("id").and_then(Value::as_str) == Some("A5"))
+        .expect("A5 step exists");
+    let b5 = steps
+        .iter()
+        .find(|step| step.get("id").and_then(Value::as_str) == Some("B5"))
+        .expect("B5 step exists");
+    for step in [a5, b5] {
+        let artifacts = step
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .expect("artifacts should be array");
+        assert!(
+            artifacts.iter().any(|item| {
+                item.as_str()
+                    .map(|path| path.ends_with("diagnosis_report.json"))
+                    .unwrap_or(false)
+            }),
+            "no-board commissioning steps should reserve diagnosis_report artifact path"
+        );
+    }
+
+    let artifacts_root = index_json
+        .get("artifacts")
+        .and_then(Value::as_object)
+        .expect("artifacts root should exist");
+    assert!(
+        artifacts_root
+            .get("gate_nominal_diagnosis")
+            .and_then(Value::as_str)
+            .map(|path| path.ends_with("gate_nominal/diagnosis_report.json"))
+            .unwrap_or(false),
+        "index should expose gate_nominal_diagnosis path"
+    );
+    assert!(
+        artifacts_root
+            .get("gate_fault_diagnosis")
+            .and_then(Value::as_str)
+            .map(|path| path.ends_with("gate_fault/diagnosis_report.json"))
+            .unwrap_or(false),
+        "index should expose gate_fault_diagnosis path"
+    );
+
     for required in [
         out_dir.join("nominal.yaml"),
         out_dir.join("doctor_nominal.json"),

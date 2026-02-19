@@ -20,6 +20,65 @@ pub enum EvidenceSource {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
+pub enum EvidenceInputKind {
+    Trace,
+    Diff,
+    TimingReport,
+    IoSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IoTickSnapshot {
+    pub tick: u64,
+    pub digital_inputs: Vec<bool>,
+    pub analog_inputs: Vec<f32>,
+    pub digital_outputs: Vec<bool>,
+    pub analog_outputs: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IoSnapshotArtifact {
+    pub schema_version: u32,
+    pub tick_ms: u64,
+    pub ticks: Vec<IoTickSnapshot>,
+}
+
+impl IoSnapshotArtifact {
+    fn unchanged_digital_inputs_until(
+        &self,
+        ids: &BTreeSet<u16>,
+        until_tick: u64,
+    ) -> BTreeSet<u16> {
+        let mut unchanged = BTreeSet::new();
+        for id in ids {
+            let idx = usize::from(*id);
+            let mut seen_any = false;
+            let mut baseline: Option<bool> = None;
+            let mut changed = false;
+            for row in self.ticks.iter().filter(|row| row.tick <= until_tick) {
+                let Some(value) = row.digital_inputs.get(idx).copied() else {
+                    continue;
+                };
+                seen_any = true;
+                match baseline {
+                    None => baseline = Some(value),
+                    Some(first) if first != value => {
+                        changed = true;
+                        break;
+                    }
+                    Some(_) => {}
+                }
+            }
+            if seen_any && !changed {
+                unchanged.insert(*id);
+            }
+        }
+        unchanged
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
 pub enum DiagnosisCategory {
     ExpectedInputNeverChanged,
     ActuatorCommandMissing,
@@ -91,6 +150,7 @@ pub struct DiagnosisReport {
     pub schema_version: u32,
     pub anchors: Vec<DiagnosisAnchor>,
     pub candidates: Vec<DiagnosisCandidate>,
+    pub evidence_inputs: Vec<EvidenceInputKind>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -101,6 +161,7 @@ pub struct DiagnosisInput<'a> {
     pub diff_report: Option<&'a TraceDiffReport>,
     pub timing_report: Option<&'a TimingReport>,
     pub evidence_source: EvidenceSource,
+    pub io_snapshot: Option<&'a IoSnapshotArtifact>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -122,6 +183,7 @@ pub fn diagnose(input: DiagnosisInput<'_>) -> Result<DiagnosisReport, DiagnosisE
     let plc = PlcEvidence::collect(&parsed, input.scenario.tick_ms);
     let scenario = ScenarioEvidence::collect(input.scenario);
     let anchors = collect_anchors(input.trace_events, input.diff_report);
+    let evidence_inputs = collect_evidence_inputs(&input);
 
     let timeout_anchor = anchors.iter().find(|a| a.kind == AnchorKind::Timeout);
     let mismatch_anchor = anchors
@@ -129,7 +191,7 @@ pub fn diagnose(input: DiagnosisInput<'_>) -> Result<DiagnosisReport, DiagnosisE
         .find(|a| a.kind == AnchorKind::FirstTraceMismatch);
 
     let mut drafts = vec![
-        score_expected_input_never_changed(timeout_anchor, &plc, &scenario),
+        score_expected_input_never_changed(timeout_anchor, &plc, &scenario, input.io_snapshot),
         score_actuator_command_missing(mismatch_anchor, input.diff_report, &plc),
         score_interlock_or_requires_blocked(timeout_anchor, &plc),
         score_mapping_or_alias_mismatch(mismatch_anchor, input.diff_report, &plc, &scenario),
@@ -168,7 +230,25 @@ pub fn diagnose(input: DiagnosisInput<'_>) -> Result<DiagnosisReport, DiagnosisE
         schema_version: 1,
         anchors,
         candidates,
+        evidence_inputs,
     })
+}
+
+fn collect_evidence_inputs(input: &DiagnosisInput<'_>) -> Vec<EvidenceInputKind> {
+    let mut out = Vec::new();
+    if input.trace_events.is_some() {
+        out.push(EvidenceInputKind::Trace);
+    }
+    if input.diff_report.is_some() {
+        out.push(EvidenceInputKind::Diff);
+    }
+    if input.timing_report.is_some() {
+        out.push(EvidenceInputKind::TimingReport);
+    }
+    if input.io_snapshot.is_some() {
+        out.push(EvidenceInputKind::IoSnapshot);
+    }
+    out
 }
 
 #[derive(Debug)]
@@ -433,6 +513,7 @@ fn score_expected_input_never_changed(
     timeout_anchor: Option<&DiagnosisAnchor>,
     plc: &PlcEvidence,
     scenario: &ScenarioEvidence,
+    io_snapshot: Option<&IoSnapshotArtifact>,
 ) -> CandidateDraft {
     let mut confidence = 0.20;
     let mut evidence = Vec::new();
@@ -477,6 +558,24 @@ fn score_expected_input_never_changed(
             "wait predicates reference {}",
             preview_set(&plc.wait_input_names, 3)
         ));
+    }
+    if let Some(snapshot) = io_snapshot {
+        evidence.push(format!(
+            "io snapshot artifact schema_version={} ticks={}",
+            snapshot.schema_version,
+            snapshot.ticks.len()
+        ));
+        if let Some(timeout_tick) = timeout_anchor.and_then(|anchor| anchor.tick) {
+            let unchanged =
+                snapshot.unchanged_digital_inputs_until(&plc.wait_input_ids, timeout_tick);
+            if !unchanged.is_empty() {
+                confidence += 0.10;
+                evidence.push(format!(
+                    "io snapshot shows wait DI channels unchanged until timeout: {}",
+                    preview_u16_set(&unchanged, 6)
+                ));
+            }
+        }
     }
 
     CandidateDraft {
@@ -834,6 +933,43 @@ inputs: []
         }
     }
 
+    fn fixture_io_snapshot() -> IoSnapshotArtifact {
+        IoSnapshotArtifact {
+            schema_version: 1,
+            tick_ms: 10,
+            ticks: vec![
+                IoTickSnapshot {
+                    tick: 0,
+                    digital_inputs: vec![false, false],
+                    analog_inputs: vec![],
+                    digital_outputs: vec![false],
+                    analog_outputs: vec![],
+                },
+                IoTickSnapshot {
+                    tick: 1,
+                    digital_inputs: vec![false, false],
+                    analog_inputs: vec![],
+                    digital_outputs: vec![false],
+                    analog_outputs: vec![],
+                },
+                IoTickSnapshot {
+                    tick: 2,
+                    digital_inputs: vec![false, false],
+                    analog_inputs: vec![],
+                    digital_outputs: vec![false],
+                    analog_outputs: vec![],
+                },
+                IoTickSnapshot {
+                    tick: 3,
+                    digital_inputs: vec![false, false],
+                    analog_inputs: vec![],
+                    digital_outputs: vec![false],
+                    analog_outputs: vec![],
+                },
+            ],
+        }
+    }
+
     #[test]
     fn diagnose_recognizes_timeout_and_mismatch_anchors() {
         let scenario = fixture_scenario();
@@ -848,6 +984,7 @@ inputs: []
             diff_report: Some(&diff),
             timing_report: Some(&timing),
             evidence_source: EvidenceSource::NoBoard,
+            io_snapshot: None,
         })
         .expect("diagnosis should succeed");
 
@@ -906,6 +1043,7 @@ inputs: []
             diff_report: Some(&diff),
             timing_report: None,
             evidence_source: EvidenceSource::Mixed,
+            io_snapshot: None,
         })
         .expect("first run should succeed");
 
@@ -916,6 +1054,7 @@ inputs: []
             diff_report: Some(&diff),
             timing_report: None,
             evidence_source: EvidenceSource::Mixed,
+            io_snapshot: None,
         })
         .expect("second run should succeed");
 
@@ -937,12 +1076,15 @@ inputs: []
             diff_report: None,
             timing_report: None,
             evidence_source: EvidenceSource::RuntimeLive,
+            io_snapshot: None,
         })
         .expect("trace-only diagnosis should succeed");
-        assert!(trace_only
-            .anchors
-            .iter()
-            .any(|anchor| anchor.kind == AnchorKind::Timeout));
+        assert!(
+            trace_only
+                .anchors
+                .iter()
+                .any(|anchor| anchor.kind == AnchorKind::Timeout)
+        );
 
         let diff_only = diagnose(DiagnosisInput {
             plc_source: fixture_plc(),
@@ -951,12 +1093,97 @@ inputs: []
             diff_report: Some(&diff),
             timing_report: None,
             evidence_source: EvidenceSource::HilBoard,
+            io_snapshot: None,
         })
         .expect("diff-only diagnosis should succeed");
-        assert!(diff_only
-            .anchors
+        assert!(
+            diff_only
+                .anchors
+                .iter()
+                .any(|anchor| anchor.kind == AnchorKind::FirstTraceMismatch)
+        );
+    }
+
+    #[test]
+    fn diagnose_records_evidence_inputs_when_snapshot_is_present() {
+        let scenario = fixture_scenario();
+        let trace = fixture_trace();
+        let diff = fixture_diff(&trace);
+        let timing = fixture_timing();
+        let snapshot = fixture_io_snapshot();
+
+        let report = diagnose(DiagnosisInput {
+            plc_source: fixture_plc(),
+            scenario: &scenario,
+            trace_events: Some(&trace),
+            diff_report: Some(&diff),
+            timing_report: Some(&timing),
+            evidence_source: EvidenceSource::NoBoard,
+            io_snapshot: Some(&snapshot),
+        })
+        .expect("diagnosis should succeed");
+
+        assert_eq!(
+            report.evidence_inputs,
+            vec![
+                EvidenceInputKind::Trace,
+                EvidenceInputKind::Diff,
+                EvidenceInputKind::TimingReport,
+                EvidenceInputKind::IoSnapshot,
+            ]
+        );
+    }
+
+    #[test]
+    fn io_snapshot_boosts_expected_input_candidate_when_wait_channel_is_flat() {
+        let scenario = fixture_scenario();
+        let trace = fixture_trace();
+        let diff = fixture_diff(&trace);
+        let snapshot = fixture_io_snapshot();
+
+        let without_snapshot = diagnose(DiagnosisInput {
+            plc_source: fixture_plc(),
+            scenario: &scenario,
+            trace_events: Some(&trace),
+            diff_report: Some(&diff),
+            timing_report: None,
+            evidence_source: EvidenceSource::NoBoard,
+            io_snapshot: None,
+        })
+        .expect("baseline diagnosis should succeed");
+        let with_snapshot = diagnose(DiagnosisInput {
+            plc_source: fixture_plc(),
+            scenario: &scenario,
+            trace_events: Some(&trace),
+            diff_report: Some(&diff),
+            timing_report: None,
+            evidence_source: EvidenceSource::NoBoard,
+            io_snapshot: Some(&snapshot),
+        })
+        .expect("snapshot diagnosis should succeed");
+
+        let base = without_snapshot
+            .candidates
             .iter()
-            .any(|anchor| anchor.kind == AnchorKind::FirstTraceMismatch));
+            .find(|candidate| candidate.category == DiagnosisCategory::ExpectedInputNeverChanged)
+            .expect("baseline expected-input candidate");
+        let boosted = with_snapshot
+            .candidates
+            .iter()
+            .find(|candidate| candidate.category == DiagnosisCategory::ExpectedInputNeverChanged)
+            .expect("snapshot expected-input candidate");
+
+        assert!(
+            boosted.confidence >= base.confidence,
+            "snapshot should not reduce confidence"
+        );
+        assert!(
+            boosted
+                .evidence
+                .iter()
+                .any(|line| line.contains("io snapshot")),
+            "snapshot evidence should be retained"
+        );
     }
 
     #[test]
@@ -969,6 +1196,7 @@ inputs: []
             diff_report: None,
             timing_report: None,
             evidence_source: EvidenceSource::NoBoard,
+            io_snapshot: None,
         })
         .expect_err("missing artifacts should fail");
 
