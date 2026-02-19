@@ -1647,7 +1647,7 @@ fn print_usage(program: &str) {
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
     );
     eprintln!(
-        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-audit-out <audit.jsonl>]"
+        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>]"
     );
     eprintln!(
         "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
@@ -3496,6 +3496,7 @@ struct OnlineVariableCommand {
     source: String,
     variable_kind: OnlineVariableKind,
     variable_name: String,
+    variable_key: String,
     value: Option<OnlineVariableValue>,
 }
 
@@ -3524,9 +3525,115 @@ struct OnlineVariableAuditEntry {
     source: String,
     variable: String,
     variable_kind: &'static str,
+    bound_channel: Option<String>,
     operation: &'static str,
     from: Option<OnlineVariableAuditValue>,
     to: Option<OnlineVariableAuditValue>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct OnlineVariableBindings {
+    bool_to_di: BTreeMap<String, u16>,
+    real_to_ai: BTreeMap<String, u16>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OnlineVariableBindingsFileRaw {
+    #[serde(default = "online_var_binding_schema_version")]
+    schema_version: u32,
+    #[serde(default)]
+    bool: BTreeMap<String, toml::Value>,
+    #[serde(default)]
+    real: BTreeMap<String, toml::Value>,
+}
+
+fn online_var_binding_schema_version() -> u32 {
+    1
+}
+
+fn normalize_online_variable_name(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase()
+}
+
+fn parse_online_variable_binding_channel(
+    raw: &toml::Value,
+    kind: OnlineVariableKind,
+    var_name: &str,
+) -> Result<u16, String> {
+    let prefixes = match kind {
+        OnlineVariableKind::Bool => ["di", "x"].as_slice(),
+        OnlineVariableKind::Real => ["ai"].as_slice(),
+    };
+    match raw {
+        toml::Value::Integer(v) => {
+            if *v < 0 || *v > u16::MAX as i64 {
+                return Err(format!(
+                    "invalid {} binding for `{}`: integer id out of range for u16",
+                    kind.label(),
+                    var_name
+                ));
+            }
+            Ok(*v as u16)
+        }
+        toml::Value::String(s) => parse_retain_channel_id(s, prefixes).map_err(|err| {
+            format!(
+                "invalid {} binding for `{}`: {err}",
+                kind.label(),
+                var_name
+            )
+        }),
+        _ => Err(format!(
+            "invalid {} binding for `{}`: expected integer id or channel string",
+            kind.label(),
+            var_name
+        )),
+    }
+}
+
+fn load_online_variable_bindings(path: &Path) -> Result<OnlineVariableBindings, String> {
+    let body = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "Failed to read online-variable bindings {}: {err}",
+            path.display()
+        )
+    })?;
+    let raw: OnlineVariableBindingsFileRaw = toml::from_str(&body).map_err(|err| {
+        format!(
+            "Failed to parse online-variable bindings {}: {err}",
+            path.display()
+        )
+    })?;
+    if raw.schema_version != online_var_binding_schema_version() {
+        return Err(format!(
+            "online-variable bindings schema_version={} is unsupported (expected {})",
+            raw.schema_version,
+            online_var_binding_schema_version()
+        ));
+    }
+
+    let mut out = OnlineVariableBindings::default();
+    for (name, channel) in &raw.bool {
+        let key = normalize_online_variable_name(name);
+        if key.is_empty() {
+            return Err("online-variable bool binding name cannot be empty".to_string());
+        }
+        let id = parse_online_variable_binding_channel(channel, OnlineVariableKind::Bool, name)?;
+        if out.bool_to_di.insert(key.clone(), id).is_some() {
+            return Err(format!("duplicate BOOL binding for `{name}` after normalization"));
+        }
+    }
+    for (name, channel) in &raw.real {
+        let key = normalize_online_variable_name(name);
+        if key.is_empty() {
+            return Err("online-variable real binding name cannot be empty".to_string());
+        }
+        let id = parse_online_variable_binding_channel(channel, OnlineVariableKind::Real, name)?;
+        if out.real_to_ai.insert(key.clone(), id).is_some() {
+            return Err(format!("duplicate REAL binding for `{name}` after normalization"));
+        }
+    }
+
+    Ok(out)
 }
 
 fn parse_online_variable_target(raw: &str) -> Result<(OnlineVariableKind, String), String> {
@@ -3625,6 +3732,7 @@ fn load_online_variable_script(
             actor: raw.actor,
             source: raw.source,
             variable_kind: kind,
+            variable_key: normalize_online_variable_name(&name),
             variable_name: name,
             value,
         });
@@ -3633,15 +3741,90 @@ fn load_online_variable_script(
     Ok(commands)
 }
 
+fn parse_auto_online_variable_channel_id(
+    kind: OnlineVariableKind,
+    variable_key: &str,
+) -> Option<u16> {
+    let prefixes = match kind {
+        OnlineVariableKind::Bool => ["di", "x"].as_slice(),
+        OnlineVariableKind::Real => ["ai"].as_slice(),
+    };
+    parse_retain_channel_id(variable_key, prefixes).ok()
+}
+
+fn resolve_online_variable_channel(
+    cmd: &OnlineVariableCommand,
+    bindings: Option<&OnlineVariableBindings>,
+) -> Result<u16, String> {
+    let from_bindings = bindings.and_then(|defs| match cmd.variable_kind {
+        OnlineVariableKind::Bool => defs.bool_to_di.get(&cmd.variable_key).copied(),
+        OnlineVariableKind::Real => defs.real_to_ai.get(&cmd.variable_key).copied(),
+    });
+    if let Some(id) = from_bindings {
+        return Ok(id);
+    }
+    if let Some(id) = parse_auto_online_variable_channel_id(cmd.variable_kind, &cmd.variable_key) {
+        return Ok(id);
+    }
+    Err(format!(
+        "missing {} binding for variable `{}`; add --online-var-bindings <bindings.toml> or use auto-mappable names (BOOL:DI<n>, REAL:AI<n>)",
+        cmd.variable_kind.label().to_ascii_uppercase(),
+        cmd.variable_name
+    ))
+}
+
+fn inject_online_variable_commands(
+    scenario: &mut sim::Scenario,
+    commands: &[OnlineVariableCommand],
+    bindings: Option<&OnlineVariableBindings>,
+) -> Result<(), String> {
+    let mut by_at = BTreeMap::<u64, sim::ForceSet>::new();
+    for cmd in commands {
+        let id = resolve_online_variable_channel(cmd, bindings)?;
+        let set = by_at.entry(cmd.at_ms).or_default();
+        match (cmd.variable_kind, cmd.value.as_ref()) {
+            (OnlineVariableKind::Bool, Some(OnlineVariableValue::Bool(v))) => {
+                set.digital_inputs.insert(id, Some(*v));
+            }
+            (OnlineVariableKind::Bool, None) => {
+                set.digital_inputs.insert(id, None);
+            }
+            (OnlineVariableKind::Real, Some(OnlineVariableValue::Real(v))) => {
+                set.analog_inputs.insert(id, Some(*v));
+            }
+            (OnlineVariableKind::Real, None) => {
+                set.analog_inputs.insert(id, None);
+            }
+            _ => {
+                return Err(format!(
+                    "online-variable value type mismatch at {}:{}",
+                    cmd.variable_kind.label(),
+                    cmd.variable_name
+                ));
+            }
+        }
+    }
+    for (at_ms, set) in by_at {
+        scenario.forces.push(sim::ForceEvent { at_ms, set });
+    }
+    scenario.forces.sort_by_key(|event| event.at_ms);
+    Ok(())
+}
+
 fn build_online_variable_audit(
     commands: &[OnlineVariableCommand],
     tick_ms: u64,
-) -> Vec<OnlineVariableAuditEntry> {
+    bindings: Option<&OnlineVariableBindings>,
+) -> Result<Vec<OnlineVariableAuditEntry>, String> {
     let mut out = Vec::<OnlineVariableAuditEntry>::new();
     let mut bool_values = BTreeMap::<String, bool>::new();
     let mut real_values = BTreeMap::<String, f32>::new();
 
     for cmd in commands {
+        let bound_channel = resolve_online_variable_channel(cmd, bindings).map(|id| match cmd.variable_kind {
+            OnlineVariableKind::Bool => format!("di{id}"),
+            OnlineVariableKind::Real => format!("ai{id}"),
+        })?;
         let (from, to) = match cmd.variable_kind {
             OnlineVariableKind::Bool => {
                 let before = bool_values
@@ -3686,13 +3869,14 @@ fn build_online_variable_audit(
             source: cmd.source.clone(),
             variable: format!("{}:{}", cmd.variable_kind.label(), cmd.variable_name),
             variable_kind: cmd.variable_kind.label(),
+            bound_channel: Some(bound_channel),
             operation: if cmd.value.is_some() { "set" } else { "clear" },
             from,
             to,
         });
     }
 
-    out
+    Ok(out)
 }
 
 fn default_online_variable_audit_path(trace_out: &Path) -> PathBuf {
@@ -4245,7 +4429,7 @@ fn run_sim_plc_subcommand(
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let usage = format!(
-        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-audit-out <audit.jsonl>]"
+        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>]"
     );
     let Some(plc_path) = args.next() else {
         return Err(usage);
@@ -4259,6 +4443,7 @@ fn run_sim_plc_subcommand(
     let mut online_force_script: Option<PathBuf> = None;
     let mut online_force_audit_out: Option<PathBuf> = None;
     let mut online_var_script: Option<PathBuf> = None;
+    let mut online_var_bindings_path: Option<PathBuf> = None;
     let mut online_var_audit_out: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -4302,6 +4487,11 @@ fn run_sim_plc_subcommand(
                     "Missing value for --online-var-script <script.jsonl>".to_string()
                 })?));
             }
+            "--online-var-bindings" => {
+                online_var_bindings_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --online-var-bindings <bindings.toml>".to_string()
+                })?));
+            }
             "--online-var-audit-out" => {
                 online_var_audit_out = Some(PathBuf::from(args.next().ok_or_else(|| {
                     "Missing value for --online-var-audit-out <audit.jsonl>".to_string()
@@ -4323,11 +4513,12 @@ fn run_sim_plc_subcommand(
     if (online_force_script.is_some()
         || online_force_audit_out.is_some()
         || online_var_script.is_some()
+        || online_var_bindings_path.is_some()
         || online_var_audit_out.is_some())
         && !enable_online_force_dev
     {
         return Err(
-            "online-force/variable dev control plane is disabled by default; add --enable-online-force-dev to use --online-force-script/--online-force-audit-out/--online-var-script/--online-var-audit-out"
+            "online-force/variable dev control plane is disabled by default; add --enable-online-force-dev to use --online-force-script/--online-force-audit-out/--online-var-script/--online-var-bindings/--online-var-audit-out"
                 .to_string(),
         );
     }
@@ -4400,11 +4591,25 @@ fn run_sim_plc_subcommand(
         write_online_force_audit(path, &audit_entries)?;
     }
     let mut online_variable_commands = Vec::new();
+    let online_variable_bindings = if let Some(path) = &online_var_bindings_path {
+        Some(load_online_variable_bindings(path)?)
+    } else {
+        None
+    };
     if let Some(script_path) = &online_var_script {
         online_variable_commands = load_online_variable_script(script_path, scenario.tick_ms)?;
+        inject_online_variable_commands(
+            &mut scenario,
+            &online_variable_commands,
+            online_variable_bindings.as_ref(),
+        )?;
     }
     if let Some(path) = &variable_audit_path {
-        let variable_audit = build_online_variable_audit(&online_variable_commands, scenario.tick_ms);
+        let variable_audit = build_online_variable_audit(
+            &online_variable_commands,
+            scenario.tick_ms,
+            online_variable_bindings.as_ref(),
+        )?;
         write_online_variable_audit(path, &variable_audit)?;
     }
 

@@ -65,6 +65,7 @@ fn sim_plc_online_variable_writes_bool_and_real_audit_entries() {
     let base = temp_dir("rust_plc_online_var_audit");
     let scenario_path = base.join("scenario.yaml");
     let script_path = base.join("online_var.jsonl");
+    let bindings_path = base.join("online_var_bindings.toml");
     let trace_out = base.join("trace.jsonl");
     let audit_out = base.join("online_var_audit.jsonl");
 
@@ -83,6 +84,17 @@ fn sim_plc_online_variable_writes_bool_and_real_audit_entries() {
         ),
     )
     .expect("write script");
+    fs::write(
+        &bindings_path,
+        concat!(
+            "schema_version = 1\n",
+            "[bool]\n",
+            "diag_latch = \"DI0\"\n",
+            "[real]\n",
+            "gain_k = \"AI0\"\n",
+        ),
+    )
+    .expect("write bindings");
 
     let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
         .arg("sim-plc")
@@ -94,6 +106,8 @@ fn sim_plc_online_variable_writes_bool_and_real_audit_entries() {
         .arg("--enable-online-force-dev")
         .arg("--online-var-script")
         .arg(&script_path)
+        .arg("--online-var-bindings")
+        .arg(&bindings_path)
         .arg("--online-var-audit-out")
         .arg(&audit_out)
         .output()
@@ -106,6 +120,11 @@ fn sim_plc_online_variable_writes_bool_and_real_audit_entries() {
     );
     assert!(trace_out.exists(), "trace should be generated");
     assert!(audit_out.exists(), "variable audit should be generated");
+    let trace_text = fs::read_to_string(&trace_out).expect("read trace");
+    assert!(
+        trace_text.contains("\"reason\":\"action\""),
+        "variable binding should influence runtime and produce action transitions"
+    );
 
     let first_lines = fs::read_to_string(&audit_out).expect("read variable audit jsonl");
     let entries = first_lines
@@ -116,11 +135,13 @@ fn sim_plc_online_variable_writes_bool_and_real_audit_entries() {
 
     assert_eq!(entries[0]["operation"], "set");
     assert_eq!(entries[0]["variable"], "bool:diag_latch");
+    assert_eq!(entries[0]["bound_channel"], "di0");
     assert_eq!(entries[0]["from"], serde_json::Value::Null);
     assert_eq!(entries[0]["to"], serde_json::Value::Bool(true));
 
     assert_eq!(entries[1]["operation"], "set");
     assert_eq!(entries[1]["variable"], "real:gain_k");
+    assert_eq!(entries[1]["bound_channel"], "ai0");
     let to_real = entries[1]["to"]
         .as_f64()
         .expect("REAL set should be numeric");
@@ -151,6 +172,8 @@ fn sim_plc_online_variable_writes_bool_and_real_audit_entries() {
         .arg("--enable-online-force-dev")
         .arg("--online-var-script")
         .arg(&script_path)
+        .arg("--online-var-bindings")
+        .arg(&bindings_path)
         .arg("--online-var-audit-out")
         .arg(&replay_audit)
         .output()
@@ -165,6 +188,48 @@ fn sim_plc_online_variable_writes_bool_and_real_audit_entries() {
     assert_eq!(
         first_lines, replay_lines,
         "same script + tick alignment should replay deterministically"
+    );
+}
+
+#[test]
+fn sim_plc_online_variable_fails_without_binding_for_non_auto_name() {
+    let base = temp_dir("rust_plc_online_var_missing_binding");
+    let scenario_path = base.join("scenario.yaml");
+    let script_path = base.join("online_var.jsonl");
+    let trace_out = base.join("trace.jsonl");
+
+    fs::write(
+        &scenario_path,
+        "tick_ms: 10\nduration_ms: 80\ninputs: []\nforces: []\n",
+    )
+    .expect("write scenario yaml");
+    fs::write(
+        &script_path,
+        r#"{"at_ms":0,"actor":"commissioning","source":"panel","variable":"BOOL:diag_latch","value":true}"#,
+    )
+    .expect("write script");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("sim-plc")
+        .arg(repo_path("examples/force_override_demo.plc"))
+        .arg("--scenario")
+        .arg(&scenario_path)
+        .arg("--out")
+        .arg(&trace_out)
+        .arg("--enable-online-force-dev")
+        .arg("--online-var-script")
+        .arg(&script_path)
+        .output()
+        .expect("run sim-plc");
+
+    assert!(
+        !output.status.success(),
+        "non-auto variable names should fail without explicit bindings"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--online-var-bindings"),
+        "expected missing binding hint in stderr, got: {stderr}"
     );
 }
 
