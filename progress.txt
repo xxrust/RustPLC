@@ -1682,3 +1682,36 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
   - Useful context (e.g., "the evaluation panel is in component X")
     - Scenario `forces` and online-force script commands are merged into the same force event stream, so downstream sim semantics stay consistent.
 ---
+## [2026-02-19 10:14:23 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added retain/persistent lifecycle to `sim-plc` via:
+    - `--retain-config <retain.toml>`
+    - `--retain-state <retain_state.json>`
+  - Implemented retain config declaration contract (schema-versioned TOML) for selected DI/AI/DO/AO channels with per-channel defaults.
+  - Implemented persistent state envelope with payload checksum (`checksum_sha256`) and schema/version checks.
+  - Added corruption-safe fallback behavior: invalid JSON, version mismatch, or checksum mismatch now falls back to config defaults and emits `[RET-201]` warning (run continues).
+  - Implemented restart bootstrap + persistence semantics:
+    - DI/AI restore at `at_ms=0`;
+    - DO/AO restore via one-tick bootstrap force, then auto-clear at `tick_ms` for runtime ownership;
+    - post-run capture writes updated `retain_state.json`.
+  - Added docs for config/state format and migration rules, plus wiki quick guide.
+  - Added integration tests for restart persistence and corruption fallback.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --workspace`
+- Files changed
+  - `src/main.rs`
+  - `tests/retain_persistent.rs`
+  - `docs/retain_persistence.md`
+  - `docs/wiki/Retain-Persistence-Dev-Mode.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Schema+checksum envelopes are a good fit for small runtime state artifacts: validation is cheap and fallback behavior is explicit.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Retain bootstrap must be applied before scenario events at the same tick; otherwise defaults can accidentally override explicit scenario scripting.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `sim-plc` now owns both online-force and retain restoration paths, so commissioning/debug startup semantics are concentrated in one deterministic entrypoint.
+---

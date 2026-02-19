@@ -5,7 +5,7 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program,
 };
-use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
+use rust_plc::verification::{verify_all, VerificationSummary, WarningEntry, WarningLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
@@ -21,10 +21,10 @@ use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
 use rust_plc::sequence_lint::{
-    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
+    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
 };
-use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
-use rust_plc::tick_timing::{TickTimingSample, parse_tick_timing_jsonl, to_tick_timing_jsonl};
+use rust_plc::sim_regress::{run_sim_regress_with_options, SimRegressOptions, SimRegressSummary};
+use rust_plc::tick_timing::{parse_tick_timing_jsonl, to_tick_timing_jsonl, TickTimingSample};
 use rust_plc::timing_report::build_timing_report;
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -1640,7 +1640,7 @@ fn print_usage(program: &str) {
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
     );
     eprintln!(
-        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>]"
+        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>]"
     );
     eprintln!(
         "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
@@ -3158,6 +3158,386 @@ fn write_online_force_audit(path: &Path, entries: &[OnlineForceAuditEntry]) -> R
     })
 }
 
+#[derive(Debug, Clone)]
+struct RetainConfig {
+    digital_inputs: BTreeMap<u16, bool>,
+    analog_inputs: BTreeMap<u16, f32>,
+    digital_outputs: BTreeMap<u16, bool>,
+    analog_outputs: BTreeMap<u16, f32>,
+}
+
+impl RetainConfig {
+    fn is_empty(&self) -> bool {
+        self.digital_inputs.is_empty()
+            && self.analog_inputs.is_empty()
+            && self.digital_outputs.is_empty()
+            && self.analog_outputs.is_empty()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RetainConfigFileRaw {
+    #[serde(default = "retain_schema_version")]
+    schema_version: u32,
+    #[serde(default)]
+    digital_inputs: BTreeMap<String, bool>,
+    #[serde(default)]
+    analog_inputs: BTreeMap<String, f32>,
+    #[serde(default)]
+    digital_outputs: BTreeMap<String, bool>,
+    #[serde(default)]
+    analog_outputs: BTreeMap<String, f32>,
+}
+
+fn retain_schema_version() -> u32 {
+    1
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RetainStatePayload {
+    schema_version: u32,
+    #[serde(default)]
+    digital_inputs: BTreeMap<u16, bool>,
+    #[serde(default)]
+    analog_inputs: BTreeMap<u16, f32>,
+    #[serde(default)]
+    digital_outputs: BTreeMap<u16, bool>,
+    #[serde(default)]
+    analog_outputs: BTreeMap<u16, f32>,
+}
+
+impl RetainStatePayload {
+    fn from_config_defaults(config: &RetainConfig) -> Self {
+        Self {
+            schema_version: retain_schema_version(),
+            digital_inputs: config.digital_inputs.clone(),
+            analog_inputs: config.analog_inputs.clone(),
+            digital_outputs: config.digital_outputs.clone(),
+            analog_outputs: config.analog_outputs.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RetainStateEnvelope {
+    schema_version: u32,
+    checksum_sha256: String,
+    payload: RetainStatePayload,
+}
+
+fn parse_retain_channel_id(raw: &str, prefixes: &[&str]) -> Result<u16, String> {
+    let token = raw.trim();
+    if token.is_empty() {
+        return Err("channel id key cannot be empty".to_string());
+    }
+    if let Ok(id) = token.parse::<u16>() {
+        return Ok(id);
+    }
+    let lower = token.to_ascii_lowercase();
+    for prefix in prefixes {
+        if let Some(rest) = lower.strip_prefix(prefix) {
+            return rest.parse::<u16>().map_err(|_| {
+                format!(
+                    "invalid retain channel key `{raw}` (expected <id> or {}<id>)",
+                    prefix
+                )
+            });
+        }
+    }
+    Err(format!(
+        "invalid retain channel key `{raw}` (expected prefixes {:?} + integer id)",
+        prefixes
+    ))
+}
+
+fn normalize_retain_bool_map(
+    raw: &BTreeMap<String, bool>,
+    prefixes: &[&str],
+    label: &str,
+) -> Result<BTreeMap<u16, bool>, String> {
+    let mut out = BTreeMap::<u16, bool>::new();
+    for (k, v) in raw {
+        let id = parse_retain_channel_id(k, prefixes)
+            .map_err(|err| format!("invalid {label} key `{k}`: {err}"))?;
+        if out.insert(id, *v).is_some() {
+            return Err(format!(
+                "duplicate retain {label} id {id} after key normalization"
+            ));
+        }
+    }
+    Ok(out)
+}
+
+fn normalize_retain_f32_map(
+    raw: &BTreeMap<String, f32>,
+    prefixes: &[&str],
+    label: &str,
+) -> Result<BTreeMap<u16, f32>, String> {
+    let mut out = BTreeMap::<u16, f32>::new();
+    for (k, v) in raw {
+        if !v.is_finite() {
+            return Err(format!("retain {label}.{k} must be finite"));
+        }
+        let id = parse_retain_channel_id(k, prefixes)
+            .map_err(|err| format!("invalid {label} key `{k}`: {err}"))?;
+        if out.insert(id, *v).is_some() {
+            return Err(format!(
+                "duplicate retain {label} id {id} after key normalization"
+            ));
+        }
+    }
+    Ok(out)
+}
+
+fn load_retain_config(path: &Path) -> Result<RetainConfig, String> {
+    let body = fs::read_to_string(path)
+        .map_err(|err| format!("Failed to read retain config {}: {err}", path.display()))?;
+    let raw: RetainConfigFileRaw = toml::from_str(&body)
+        .map_err(|err| format!("Failed to parse retain config {}: {err}", path.display()))?;
+    if raw.schema_version != retain_schema_version() {
+        return Err(format!(
+            "retain config schema_version={} is unsupported (expected {})",
+            raw.schema_version,
+            retain_schema_version()
+        ));
+    }
+
+    Ok(RetainConfig {
+        digital_inputs: normalize_retain_bool_map(
+            &raw.digital_inputs,
+            &["di", "x"],
+            "digital_inputs",
+        )?,
+        analog_inputs: normalize_retain_f32_map(&raw.analog_inputs, &["ai"], "analog_inputs")?,
+        digital_outputs: normalize_retain_bool_map(
+            &raw.digital_outputs,
+            &["do", "y"],
+            "digital_outputs",
+        )?,
+        analog_outputs: normalize_retain_f32_map(&raw.analog_outputs, &["ao"], "analog_outputs")?,
+    })
+}
+
+fn default_retain_state_path(trace_out: &Path) -> PathBuf {
+    trace_out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join("retain_state.json")
+}
+
+fn compute_retain_checksum(payload: &RetainStatePayload) -> Result<String, String> {
+    let bytes = serde_json::to_vec(payload)
+        .map_err(|err| format!("Failed to serialize retain payload for checksum: {err}"))?;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn load_retain_state(path: &Path, config: &RetainConfig) -> (RetainStatePayload, Option<String>) {
+    if !path.exists() {
+        return (
+            RetainStatePayload::from_config_defaults(config),
+            Some(format!(
+                "retain state {} does not exist; using config defaults",
+                path.display()
+            )),
+        );
+    }
+    let body = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                RetainStatePayload::from_config_defaults(config),
+                Some(format!(
+                    "failed to read retain state {} ({err}); using config defaults",
+                    path.display()
+                )),
+            );
+        }
+    };
+
+    let envelope: RetainStateEnvelope = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                RetainStatePayload::from_config_defaults(config),
+                Some(format!(
+                    "retain state {} is invalid JSON ({err}); using config defaults",
+                    path.display()
+                )),
+            );
+        }
+    };
+    if envelope.schema_version != retain_schema_version() {
+        return (
+            RetainStatePayload::from_config_defaults(config),
+            Some(format!(
+                "retain state {} schema_version={} is unsupported; using config defaults",
+                path.display(),
+                envelope.schema_version
+            )),
+        );
+    }
+    if envelope.payload.schema_version != retain_schema_version() {
+        return (
+            RetainStatePayload::from_config_defaults(config),
+            Some(format!(
+                "retain payload schema_version={} is unsupported in {}; using config defaults",
+                envelope.payload.schema_version,
+                path.display()
+            )),
+        );
+    }
+    let checksum = match compute_retain_checksum(&envelope.payload) {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                RetainStatePayload::from_config_defaults(config),
+                Some(format!(
+                    "failed to verify retain checksum for {} ({err}); using config defaults",
+                    path.display()
+                )),
+            );
+        }
+    };
+    if checksum != envelope.checksum_sha256 {
+        return (
+            RetainStatePayload::from_config_defaults(config),
+            Some(format!(
+                "retain checksum mismatch for {}; using config defaults",
+                path.display()
+            )),
+        );
+    }
+
+    let mut payload = RetainStatePayload::from_config_defaults(config);
+    for id in config.digital_inputs.keys() {
+        if let Some(v) = envelope.payload.digital_inputs.get(id) {
+            payload.digital_inputs.insert(*id, *v);
+        }
+    }
+    for id in config.analog_inputs.keys() {
+        if let Some(v) = envelope.payload.analog_inputs.get(id) {
+            payload.analog_inputs.insert(*id, *v);
+        }
+    }
+    for id in config.digital_outputs.keys() {
+        if let Some(v) = envelope.payload.digital_outputs.get(id) {
+            payload.digital_outputs.insert(*id, *v);
+        }
+    }
+    for id in config.analog_outputs.keys() {
+        if let Some(v) = envelope.payload.analog_outputs.get(id) {
+            payload.analog_outputs.insert(*id, *v);
+        }
+    }
+    (payload, None)
+}
+
+fn write_retain_state(path: &Path, payload: &RetainStatePayload) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Failed to create retain state directory {}: {err}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
+    let envelope = RetainStateEnvelope {
+        schema_version: retain_schema_version(),
+        checksum_sha256: compute_retain_checksum(payload)?,
+        payload: payload.clone(),
+    };
+    let mut json = serde_json::to_string_pretty(&envelope)
+        .map_err(|err| format!("Failed to serialize retain state JSON: {err}"))?;
+    json.push('\n');
+    fs::write(path, json)
+        .map_err(|err| format!("Failed to write retain state {}: {err}", path.display()))
+}
+
+fn apply_retain_payload_to_scenario(scenario: &mut sim::Scenario, payload: &RetainStatePayload) {
+    if !payload.digital_inputs.is_empty() || !payload.analog_inputs.is_empty() {
+        let mut set = sim::InputSet::default();
+        for (id, value) in &payload.digital_inputs {
+            set.digital_inputs.insert(*id, *value);
+        }
+        for (id, value) in &payload.analog_inputs {
+            set.analog_inputs.insert(*id, *value);
+        }
+        // Place retain bootstrap first so explicit scenario scripting at the same tick can override it.
+        scenario.inputs.insert(0, sim::InputEvent { at_ms: 0, set });
+        scenario.inputs.sort_by_key(|event| event.at_ms);
+    }
+
+    if !payload.digital_outputs.is_empty() || !payload.analog_outputs.is_empty() {
+        let mut set = sim::ForceSet::default();
+        for (id, value) in &payload.digital_outputs {
+            set.digital_outputs.insert(*id, Some(*value));
+        }
+        for (id, value) in &payload.analog_outputs {
+            set.analog_outputs.insert(*id, Some(*value));
+        }
+        scenario.forces.insert(0, sim::ForceEvent { at_ms: 0, set });
+
+        // Outputs use a one-tick bootstrap force so runtime writes can take over afterwards.
+        if scenario.tick_ms > 0
+            && (scenario.duration_ms == 0 || scenario.tick_ms < scenario.duration_ms)
+        {
+            let mut clear = sim::ForceSet::default();
+            for id in payload.digital_outputs.keys() {
+                clear.digital_outputs.insert(*id, None);
+            }
+            for id in payload.analog_outputs.keys() {
+                clear.analog_outputs.insert(*id, None);
+            }
+            scenario.forces.push(sim::ForceEvent {
+                at_ms: scenario.tick_ms,
+                set: clear,
+            });
+        }
+
+        scenario.forces.sort_by_key(|event| event.at_ms);
+    }
+}
+
+fn capture_retain_payload(config: &RetainConfig, io: &sim::SimIo) -> RetainStatePayload {
+    let mut payload = RetainStatePayload::from_config_defaults(config);
+    for id in config.digital_inputs.keys() {
+        payload
+            .digital_inputs
+            .insert(*id, io.read_digital_input(io_traits::DigitalInputId(*id)));
+    }
+    for id in config.analog_inputs.keys() {
+        payload
+            .analog_inputs
+            .insert(*id, io.read_analog_input(io_traits::AnalogInputId(*id)));
+    }
+    for id in config.digital_outputs.keys() {
+        let value = io
+            .digital_output_edges()
+            .iter()
+            .rev()
+            .find(|edge| edge.id.0 == *id)
+            .map(|edge| edge.value)
+            .unwrap_or(false);
+        payload.digital_outputs.insert(*id, value);
+    }
+    for id in config.analog_outputs.keys() {
+        let value = io
+            .analog_output_edges()
+            .iter()
+            .rev()
+            .find(|edge| edge.id.0 == *id)
+            .map(|edge| edge.value)
+            .unwrap_or(0.0);
+        payload.analog_outputs.insert(*id, value);
+    }
+    payload
+}
+
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let Some(scenario_path) = args.next() else {
         return Err(format!(
@@ -3274,7 +3654,7 @@ fn run_sim_plc_subcommand(
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let usage = format!(
-        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>]"
+        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>]"
     );
     let Some(plc_path) = args.next() else {
         return Err(usage);
@@ -3282,6 +3662,8 @@ fn run_sim_plc_subcommand(
 
     let mut scenario_path: Option<PathBuf> = None;
     let mut out_path: Option<PathBuf> = None;
+    let mut retain_config_path: Option<PathBuf> = None;
+    let mut retain_state_path: Option<PathBuf> = None;
     let mut enable_online_force_dev = false;
     let mut online_force_script: Option<PathBuf> = None;
     let mut online_force_audit_out: Option<PathBuf> = None;
@@ -3298,6 +3680,16 @@ fn run_sim_plc_subcommand(
                     Some(PathBuf::from(args.next().ok_or_else(|| {
                         "Missing value for --out <trace.jsonl>".to_string()
                     })?));
+            }
+            "--retain-config" => {
+                retain_config_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --retain-config <retain.toml>".to_string()
+                })?));
+            }
+            "--retain-state" => {
+                retain_state_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --retain-state <retain_state.json>".to_string()
+                })?));
             }
             "--enable-online-force-dev" => {
                 enable_online_force_dev = true;
@@ -3322,6 +3714,9 @@ fn run_sim_plc_subcommand(
     let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
     let out_path = out_path.ok_or_else(|| usage.clone())?;
 
+    if retain_state_path.is_some() && retain_config_path.is_none() {
+        return Err("--retain-state requires --retain-config".to_string());
+    }
     if (online_force_script.is_some() || online_force_audit_out.is_some())
         && !enable_online_force_dev
     {
@@ -3346,6 +3741,26 @@ fn run_sim_plc_subcommand(
             format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "sim-plc", &e)
         })?;
     let mut scenario = parse_scenario_yaml(&scenario_yaml)?;
+
+    let mut retain_session: Option<(RetainConfig, PathBuf)> = None;
+    if let Some(config_path) = retain_config_path {
+        let config = load_retain_config(&config_path)?;
+        if config.is_empty() {
+            return Err(format!(
+                "retain config {} has no retained channels configured",
+                config_path.display()
+            ));
+        }
+        let state_path = retain_state_path
+            .clone()
+            .unwrap_or_else(|| default_retain_state_path(&out_path));
+        let (payload, warning) = load_retain_state(&state_path, &config);
+        if let Some(msg) = warning {
+            eprintln!("[RET-201] {msg}");
+        }
+        apply_retain_payload_to_scenario(&mut scenario, &payload);
+        retain_session = Some((config, state_path));
+    }
 
     let audit_path = if enable_online_force_dev {
         Some(
@@ -3384,6 +3799,11 @@ fn run_sim_plc_subcommand(
     })?;
     fs::write(&out_path, run.trace.into_string())
         .map_err(|err| format!("Failed to write trace file {out_path:?}: {err}"))?;
+    if let Some((config, state_path)) = retain_session {
+        let payload = capture_retain_payload(&config, &io);
+        write_retain_state(&state_path, &payload)?;
+        eprintln!("sim-plc: retain state {}", state_path.display());
+    }
     if let Some(path) = audit_path {
         eprintln!("sim-plc: online-force audit {}", path.display());
     }
@@ -5110,7 +5530,7 @@ fn run_io_map_normalize_subcommand(
 }
 
 fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
-    use rust_plc::iec_address::{LogicalChannelKind, parse_iec_address};
+    use rust_plc::iec_address::{parse_iec_address, LogicalChannelKind};
     use toml::value::Table;
 
     let root = v
