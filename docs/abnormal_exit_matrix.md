@@ -25,6 +25,7 @@ Evidence files live in:
 JSON schema contract:
 
 - `scenarios/rp2040_hil_gate/abnormal_exit/evidence_schema.json`
+- `scenarios/rp2040_hil_gate/abnormal_exit/class_d_checklist_template.json` (Class-D manual checklist template)
 
 Each evidence file must include these key fields used by audits:
 
@@ -32,6 +33,15 @@ Each evidence file must include these key fields used by audits:
 - `observed_outputs`
 - `verdict`
 - `artifacts.trigger_log` and `artifacts.output_log`
+
+For class `D`, the evidence must also include `class_d_manual` with required fields:
+
+- `trigger`
+- `wiring_state`
+- `measured_result`
+- `verdict`
+- `operator`
+- `attachments[]` (manual-hardware evidence attachments)
 
 ## Automated verification (A/B/C)
 
@@ -46,7 +56,7 @@ python3 scripts/abnormal_exit_matrix_verify.py \
 
 Default required classes are `A,B,C`. Class `D` is marked `hardware_only` and is intentionally excluded from auto-pass criteria.
 
-If `D` is added to `--require-classes`, the verifier returns non-zero and reports `manual_hardware_chain` to make the boundary explicit.
+Class `D` evidence is schema-validated as manual hardware artifacts (`manual_hardware_chain_validated` / `manual_hardware_chain_invalid`). If `D` is added to `--require-classes`, the verifier still returns non-zero because `hardware_only` classes cannot be auto-verified.
 
 ## Electrical checklist notes (critical actuators)
 
@@ -55,3 +65,7 @@ For vertical-axis systems (example channels: `do2` brake, `do1` enable):
 1. Verify brake de-energize timing is before (or at worst simultaneous with) enable drop during controlled safe-state paths.
 2. Verify crash/power-loss paths de-energize brake and enable via independent hardware safety chain (relay/STO), without software cleanup.
 3. Attach instrument capture IDs and measured timestamps in class-D evidence artifacts.
+
+Board-level implementation and safety context:
+
+- `docs/board_rp2040.md` (see abnormal-exit matrix and safety-chain notes)

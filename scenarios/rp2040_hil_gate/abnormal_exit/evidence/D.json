@@ -24,8 +24,28 @@
     "hardware_chain_validated": true
   },
   "verdict": "manual",
+  "class_d_manual": {
+    "trigger": "kill9_power_loss_kernel_hang",
+    "wiring_state": "Safety relay K1 and STO chain break both do2(brake) and do1(enable) power feeds independent of PLC software.",
+    "measured_result": "Oscilloscope capture shows do2=0 at t0+18ms and do1=0 at t0+19ms after power pull.",
+    "verdict": "pass",
+    "operator": "integration_lab",
+    "attachments": [
+      {
+        "name": "scope_capture",
+        "path": "out/rp2040_hil_daily_gate/class_d/scope_capture.csv",
+        "note": "CH1=do2 brake, CH2=do1 enable, trigger=power pull"
+      },
+      {
+        "name": "wiring_photo",
+        "path": "out/rp2040_hil_daily_gate/class_d/wiring_photo.jpg",
+        "note": "Safety relay and STO wiring state at test time"
+      }
+    ]
+  },
   "artifacts": {
     "trigger_log": "out/rp2040_hil_daily_gate/class_d/power_loss_notes.md",
-    "output_log": "out/rp2040_hil_daily_gate/class_d/safety_chain_capture.jsonl"
+    "output_log": "out/rp2040_hil_daily_gate/class_d/safety_chain_capture.jsonl",
+    "notes": "Class-D manual checklist evidence is stored under class_d_manual.attachments."
   }
 }

@@ -1,0 +1,16 @@
+{
+  "schema_version": "class_d_electrical_checklist.v1",
+  "trigger": "kill9_power_loss_kernel_hang",
+  "wiring_state": "Relay K1 opened, STO active, brake coil do2 and enable do1 both fed through independent safety chain.",
+  "measured_result": "Scope capture confirms do2=0 at t0+18ms and do1=0 at t0+19ms after power pull.",
+  "verdict": "pass",
+  "operator": "<name>",
+  "attachments": [
+    {
+      "name": "scope_capture",
+      "path": "out/rp2040_hil_daily_gate/class_d/scope_capture.csv",
+      "sha256": "<optional_sha256>",
+      "note": "CH1=do2(brake), CH2=do1(enable), trigger=power pull"
+    }
+  ]
+}

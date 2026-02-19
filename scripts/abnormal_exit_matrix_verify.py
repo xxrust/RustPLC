@@ -49,7 +49,13 @@ def values_match(expected: Any, observed: Any) -> bool:
     return expected == observed
 
 
-def validate_evidence(class_spec: Dict[str, Any], evidence: Dict[str, Any]) -> List[str]:
+def _is_nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def validate_evidence(
+    class_spec: Dict[str, Any], evidence: Dict[str, Any], *, expected_verdict: str = "pass"
+) -> List[str]:
     errors: List[str] = []
     class_id = class_spec.get("id")
 
@@ -107,8 +113,10 @@ def validate_evidence(class_spec: Dict[str, Any], evidence: Dict[str, Any]) -> L
         if checks.get(check) is not True:
             errors.append(f"acceptance check `{check}` is not true")
 
-    if evidence.get("verdict") != "pass":
-        errors.append(f"verdict must be `pass`, got {evidence.get('verdict')}")
+    if evidence.get("verdict") != expected_verdict:
+        errors.append(
+            f"verdict must be `{expected_verdict}`, got {evidence.get('verdict')}"
+        )
 
     artifacts = evidence.get("artifacts")
     if not isinstance(artifacts, dict):
@@ -117,6 +125,39 @@ def validate_evidence(class_spec: Dict[str, Any], evidence: Dict[str, Any]) -> L
         for required in ("trigger_log", "output_log"):
             if not artifacts.get(required):
                 errors.append(f"artifacts.{required} is required")
+
+    return errors
+
+
+def validate_class_d_manual_artifacts(evidence: Dict[str, Any]) -> List[str]:
+    errors: List[str] = []
+    manual = evidence.get("class_d_manual")
+    if not isinstance(manual, dict):
+        return ["missing class_d_manual object"]
+
+    for field in ("trigger", "wiring_state", "measured_result", "operator"):
+        if not _is_nonempty_string(manual.get(field)):
+            errors.append(f"class_d_manual.{field} must be a non-empty string")
+
+    if manual.get("verdict") != "pass":
+        errors.append(
+            f"class_d_manual.verdict must be `pass`, got {manual.get('verdict')}"
+        )
+
+    attachments = manual.get("attachments")
+    if not isinstance(attachments, list) or not attachments:
+        errors.append("class_d_manual.attachments must be a non-empty array")
+        return errors
+
+    for idx, attachment in enumerate(attachments):
+        if not isinstance(attachment, dict):
+            errors.append(f"class_d_manual.attachments[{idx}] must be an object")
+            continue
+        for field in ("name", "path"):
+            if not _is_nonempty_string(attachment.get(field)):
+                errors.append(
+                    f"class_d_manual.attachments[{idx}].{field} must be a non-empty string"
+                )
 
     return errors
 
@@ -156,15 +197,30 @@ def main() -> int:
         }
 
         if automation == "hardware_only":
-            result["status"] = "manual_hardware_chain"
             result["manual_reason"] = (
                 "class is marked hardware_only; verify via independent hardware safety chain"
             )
-            result["errors"] = []
+            evidence_path = evidence_dir / f"{class_id}.json"
+            if not evidence_path.exists():
+                result["status"] = "missing_evidence"
+                result["errors"] = [f"evidence file not found: {evidence_path}"]
+                overall_pass = False
+                results.append(result)
+                continue
+
+            evidence = load_json(evidence_path)
+            errors = validate_evidence(class_spec, evidence, expected_verdict="manual")
+            errors.extend(validate_class_d_manual_artifacts(evidence))
+
             if class_id in required_classes:
-                result["errors"] = [
-                    "class is marked hardware_only and cannot be auto-verified"
-                ]
+                errors.append("class is marked hardware_only and cannot be auto-verified")
+
+            result["evidence"] = str(evidence_path)
+            result["errors"] = errors
+            result["status"] = (
+                "manual_hardware_chain_validated" if not errors else "manual_hardware_chain_invalid"
+            )
+            if errors:
                 overall_pass = False
             results.append(result)
             continue

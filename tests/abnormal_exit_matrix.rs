@@ -143,7 +143,66 @@ fn abnormal_exit_evidence_files_publish_required_fields() {
                 "{class_id} artifacts.{key} should not be empty"
             );
         }
+
+        if class_id == "D" {
+            let manual = evidence
+                .get("class_d_manual")
+                .and_then(Value::as_object)
+                .expect("D evidence must include class_d_manual object");
+            for key in [
+                "trigger",
+                "wiring_state",
+                "measured_result",
+                "verdict",
+                "operator",
+            ] {
+                let value = manual
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .expect("class_d_manual fields must be strings");
+                assert!(
+                    !value.trim().is_empty(),
+                    "class_d_manual.{key} should not be empty"
+                );
+            }
+            let attachments = manual
+                .get("attachments")
+                .and_then(Value::as_array)
+                .expect("class_d_manual.attachments must be array");
+            assert!(
+                !attachments.is_empty(),
+                "class_d_manual.attachments should not be empty"
+            );
+        }
     }
+}
+
+#[test]
+fn abnormal_exit_class_d_template_declares_required_fields() {
+    let template = read_json(&repo_path(
+        "scenarios/rp2040_hil_gate/abnormal_exit/class_d_checklist_template.json",
+    ));
+    for key in [
+        "trigger",
+        "wiring_state",
+        "measured_result",
+        "verdict",
+        "operator",
+    ] {
+        let value = template
+            .get(key)
+            .and_then(Value::as_str)
+            .expect("class D template fields must be strings");
+        assert!(!value.trim().is_empty(), "template {key} cannot be empty");
+    }
+    let attachments = template
+        .get("attachments")
+        .and_then(Value::as_array)
+        .expect("class D template attachments must be array");
+    assert!(
+        !attachments.is_empty(),
+        "class D template should include at least one attachment example"
+    );
 }
 
 #[test]
@@ -207,7 +266,15 @@ fn abnormal_exit_verifier_passes_for_abc_and_marks_d_manual() {
         .expect("class D should be present in report");
     assert_eq!(
         class_d.get("status").and_then(Value::as_str),
-        Some("manual_hardware_chain")
+        Some("manual_hardware_chain_validated")
+    );
+    assert_eq!(
+        class_d
+            .get("errors")
+            .and_then(Value::as_array)
+            .map(|rows| rows.len()),
+        Some(0),
+        "class D manual evidence should be schema-valid"
     );
 }
 
@@ -257,7 +324,7 @@ fn abnormal_exit_verifier_fails_when_hardware_only_class_is_required() {
         .expect("result row for class D should exist");
     assert_eq!(
         class_d.get("status").and_then(Value::as_str),
-        Some("manual_hardware_chain")
+        Some("manual_hardware_chain_invalid")
     );
     let errors = class_d
         .get("errors")
@@ -270,5 +337,85 @@ fn abnormal_exit_verifier_fails_when_hardware_only_class_is_required() {
                 .unwrap_or(false)
         }),
         "class D should explain why it cannot be auto-verified"
+    );
+}
+
+#[test]
+fn abnormal_exit_verifier_fails_when_class_d_manual_artifact_is_invalid() {
+    if !has_python3() {
+        eprintln!("python3 not available; skipping abnormal_exit_verifier test");
+        return;
+    }
+
+    let out_dir = temp_dir("rust_plc_abnormal_exit_verify_invalid_d_artifact");
+    let evidence_dir = out_dir.join("evidence");
+    fs::create_dir_all(&evidence_dir).expect("create evidence dir");
+
+    for class_id in ["A", "B", "C", "D"] {
+        let src = repo_path(&format!(
+            "scenarios/rp2040_hil_gate/abnormal_exit/evidence/{class_id}.json"
+        ));
+        let dst = evidence_dir.join(format!("{class_id}.json"));
+        fs::copy(src, dst).expect("copy evidence fixture");
+    }
+
+    let d_path = evidence_dir.join("D.json");
+    let mut d_json = read_json(&d_path);
+    let manual = d_json
+        .get_mut("class_d_manual")
+        .and_then(Value::as_object_mut)
+        .expect("class_d_manual should exist");
+    manual.insert("operator".to_string(), Value::String("".to_string()));
+    fs::write(
+        &d_path,
+        serde_json::to_string_pretty(&d_json).expect("serialize invalid D evidence") + "\n",
+    )
+    .expect("write invalid D evidence");
+
+    let report_path = out_dir.join("report.json");
+    let matrix_path = repo_path("scenarios/rp2040_hil_gate/abnormal_exit/matrix.json");
+    let script_path = repo_path("scripts/abnormal_exit_matrix_verify.py");
+    let output = Command::new("python3")
+        .arg(&script_path)
+        .arg("--matrix")
+        .arg(&matrix_path)
+        .arg("--evidence-dir")
+        .arg(&evidence_dir)
+        .arg("--out")
+        .arg(&report_path)
+        .output()
+        .expect("run abnormal_exit_matrix_verify.py with invalid D evidence");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "invalid class D manual artifact should fail verifier, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report = read_json(&report_path);
+    assert_eq!(report.get("status").and_then(Value::as_str), Some("fail"));
+    let class_d = report
+        .get("results")
+        .and_then(Value::as_array)
+        .expect("results should be array")
+        .iter()
+        .find(|row| row.get("class").and_then(Value::as_str) == Some("D"))
+        .expect("result row for class D should exist");
+    assert_eq!(
+        class_d.get("status").and_then(Value::as_str),
+        Some("manual_hardware_chain_invalid")
+    );
+    let errors = class_d
+        .get("errors")
+        .and_then(Value::as_array)
+        .expect("class D errors should be array");
+    assert!(
+        errors.iter().any(|err| {
+            err.as_str()
+                .map(|text| text.contains("class_d_manual.operator"))
+                .unwrap_or(false)
+        }),
+        "invalid operator should be reported in class D errors"
     );
 }

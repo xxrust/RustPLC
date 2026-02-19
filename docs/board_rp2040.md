@@ -209,6 +209,7 @@ Reference assets:
 - `scenarios/rp2040_hil_gate/abnormal_exit/matrix.json`
 - `scenarios/rp2040_hil_gate/abnormal_exit/evidence_schema.json`
 - `scenarios/rp2040_hil_gate/abnormal_exit/evidence/*.json`
+- `scenarios/rp2040_hil_gate/abnormal_exit/class_d_checklist_template.json`
 
 Verifier command (A/B/C auto, D manual hardware chain):
 

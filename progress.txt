@@ -1867,3 +1867,43 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
   - Useful context (e.g., "the evaluation panel is in component X")
     - Online variable audit records are now a separate JSONL artifact (`online_var_audit.jsonl`) from online-force audit records (`online_force_audit.jsonl`).
 ---
+## [2026-02-19 12:59:07 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added a standardized Class-D manual electrical checklist template:
+    - `scenarios/rp2040_hil_gate/abnormal_exit/class_d_checklist_template.json`
+    - Required fields: `trigger`, `wiring_state`, `measured_result`, `verdict`, `operator`, `attachments[]`.
+  - Extended abnormal-exit evidence schema (`evidence_schema.json`) with `class_d_manual` contract and conditional requirement for class `D`.
+  - Updated Class-D fixture evidence (`evidence/D.json`) to include structured manual checklist content and attachment metadata.
+  - Extended verifier (`scripts/abnormal_exit_matrix_verify.py`) to ingest/validate Class-D manual artifacts:
+    - class-D manual status now reports `manual_hardware_chain_validated` or `manual_hardware_chain_invalid`.
+    - invalid/missing Class-D manual evidence now fails verifier report status.
+    - requiring class `D` still fails by design because `hardware_only` classes are not auto-verifiable.
+  - Added regression coverage for valid/invalid Class-D manual evidence and template field checks in `tests/abnormal_exit_matrix.rs`.
+  - Updated docs to link matrix ↔ class-D checklist template ↔ board safety context, plus wiki summary page.
+  - Updated Stage-3 CI gate script/runbook to include abnormal-exit matrix verifier tests.
+- Quality checks
+  - `cargo test --test abnormal_exit_matrix --test abnormal_exit_matrix_doc`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `cargo check --workspace`
+- Files changed
+  - `scripts/abnormal_exit_matrix_verify.py`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/evidence_schema.json`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/evidence/D.json`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/class_d_checklist_template.json`
+  - `tests/abnormal_exit_matrix.rs`
+  - `docs/abnormal_exit_matrix.md`
+  - `docs/board_rp2040.md`
+  - `docs/wiki/Class-D-Abnormal-Exit-Evidence-Workflow.md`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `docs/stage3_ci_gate_runbook.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For `hardware_only` safety classes, keep hardware behavior out of auto-pass criteria but still schema-validate manual evidence attachments to preserve auditability.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - When verifier status labels change, update both script expectations and regression tests together (report row assertions are part of the contract).
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `class_d_checklist_template.json` is now the canonical fill-in template for manual Class-D electrical evidence.
+---

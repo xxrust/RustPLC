@@ -20,6 +20,7 @@ This command covers:
 - `scenario_gen` contract (including `summary.json` dry-run schema)
 - `sim_regress` contract (including `feedback.json` schema)
 - `new_scaffold` bootstrap contract
+- `abnormal_exit_matrix` + `abnormal_exit_matrix_doc` contracts (Class-D manual evidence workflow)
 
 ## 2) Manual breakdown (if one-shot fails)
 
@@ -27,6 +28,7 @@ This command covers:
 
 ```bash
 cargo test --test online_force_control_plane --test online_variable_control_plane --test retain_persistent --test scenario_gen --test sim_regress --test new_scaffold
+cargo test --test abnormal_exit_matrix --test abnormal_exit_matrix_doc
 ```
 
 ### B. scenario-gen schema check
