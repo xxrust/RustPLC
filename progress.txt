@@ -1830,3 +1830,40 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
   - Useful context (e.g., "the evaluation panel is in component X")
     - `stage3_runtime_dev_gate.sh` is now the single local entrypoint to reproduce Stage-3 runtime/dev CI checks before pushing.
 ---
+## [2026-02-19 12:53:08 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Extended `sim-plc` dev control-plane CLI with runtime variable options:
+    - `--online-var-script <script.jsonl>`
+    - `--online-var-audit-out <audit.jsonl>`
+  - Added typed runtime-variable command parsing with explicit schema:
+    - `variable: BOOL:<name> | REAL:<name>`
+    - set via bool/number, clear via `null`
+    - strict tick alignment (`at_ms % tick_ms == 0`) for deterministic replay semantics.
+  - Added full audit pipeline for online variable operations with fields:
+    - `at_ms`, `tick`, `actor`, `source`, `variable`, `variable_kind`, `operation`, `from`, `to`
+  - Kept dev-mode explicit guard (default disabled) and wired variable options into the same dev enable gate.
+  - Added integration tests for guard behavior, BOOL/REAL set+clear audit output, deterministic replay, and tick-alignment rejection.
+  - Added docs and wiki pages documenting command usage, script contract, audit contract, and safety boundaries.
+  - Updated Stage-3 CI gate script/runbook to include `online_variable_control_plane` coverage.
+- Quality checks
+  - `cargo test --test online_variable_control_plane --test online_force_control_plane`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `cargo check --workspace`
+- Files changed
+  - `src/main.rs`
+  - `tests/online_variable_control_plane.rs`
+  - `docs/runtime_online_variable_control.md`
+  - `docs/wiki/Runtime-Online-Variable-Control-Plane.md`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `docs/stage3_ci_gate_runbook.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For dev-only control planes, keep parser contracts type-strict and tick-aligned so replay behavior stays deterministic and auditable.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - `sim-plc` usage/help strings, argument parsing, and guard error text must be updated together when adding new flags; tests should assert guard paths to prevent drift.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Online variable audit records are now a separate JSONL artifact (`online_var_audit.jsonl`) from online-force audit records (`online_force_audit.jsonl`).
+---

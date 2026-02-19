@@ -1647,7 +1647,7 @@ fn print_usage(program: &str) {
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
     );
     eprintln!(
-        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>]"
+        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-audit-out <audit.jsonl>]"
     );
     eprintln!(
         "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
@@ -3460,6 +3460,287 @@ fn write_online_force_audit(path: &Path, entries: &[OnlineForceAuditEntry]) -> R
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnlineVariableKind {
+    Bool,
+    Real,
+}
+
+impl OnlineVariableKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Bool => "bool",
+            Self::Real => "real",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum OnlineVariableValue {
+    Bool(bool),
+    Real(f32),
+}
+
+#[derive(Debug, Clone)]
+struct OnlineVariableCommand {
+    at_ms: u64,
+    actor: String,
+    source: String,
+    variable_kind: OnlineVariableKind,
+    variable_name: String,
+    value: Option<OnlineVariableValue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OnlineVariableScriptEntryRaw {
+    at_ms: u64,
+    actor: String,
+    source: String,
+    variable: String,
+    #[serde(default)]
+    value: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+enum OnlineVariableAuditValue {
+    Bool(bool),
+    Real(f32),
+}
+
+#[derive(Debug, Serialize)]
+struct OnlineVariableAuditEntry {
+    at_ms: u64,
+    tick: u64,
+    actor: String,
+    source: String,
+    variable: String,
+    variable_kind: &'static str,
+    operation: &'static str,
+    from: Option<OnlineVariableAuditValue>,
+    to: Option<OnlineVariableAuditValue>,
+}
+
+fn parse_online_variable_target(raw: &str) -> Result<(OnlineVariableKind, String), String> {
+    let token = raw.trim();
+    let Some((kind_raw, name_raw)) = token.split_once(':') else {
+        return Err(format!(
+            "invalid variable `{raw}` (expected BOOL:<name> or REAL:<name>)"
+        ));
+    };
+    let kind = match kind_raw.trim().to_ascii_lowercase().as_str() {
+        "bool" | "boolean" => OnlineVariableKind::Bool,
+        "real" | "float" | "f32" => OnlineVariableKind::Real,
+        _ => {
+            return Err(format!(
+                "invalid variable `{raw}` (unknown type prefix `{kind_raw}`; expected BOOL or REAL)"
+            ));
+        }
+    };
+    let name = name_raw.trim();
+    if name.is_empty() {
+        return Err(format!("invalid variable `{raw}` (name cannot be empty)"));
+    }
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+    {
+        return Err(format!(
+            "invalid variable `{raw}` (name must contain only [A-Za-z0-9_.-])"
+        ));
+    }
+    Ok((kind, name.to_string()))
+}
+
+fn parse_online_variable_value(
+    raw: Option<serde_json::Value>,
+    kind: OnlineVariableKind,
+) -> Result<Option<OnlineVariableValue>, String> {
+    let Some(v) = raw else {
+        return Ok(None);
+    };
+    match kind {
+        OnlineVariableKind::Bool => match v {
+            serde_json::Value::Bool(value) => Ok(Some(OnlineVariableValue::Bool(value))),
+            serde_json::Value::Null => Ok(None),
+            other => Err(format!("BOOL variable expects bool/null value, got {other}")),
+        },
+        OnlineVariableKind::Real => match v {
+            serde_json::Value::Number(value) => {
+                let parsed = value
+                    .as_f64()
+                    .ok_or_else(|| "REAL variable expects finite numeric/null value".to_string())?;
+                if !parsed.is_finite() {
+                    return Err("REAL variable expects finite numeric/null value".to_string());
+                }
+                Ok(Some(OnlineVariableValue::Real(parsed as f32)))
+            }
+            serde_json::Value::Null => Ok(None),
+            other => Err(format!("REAL variable expects numeric/null value, got {other}")),
+        },
+    }
+}
+
+fn load_online_variable_script(
+    path: &Path,
+    tick_ms: u64,
+) -> Result<Vec<OnlineVariableCommand>, String> {
+    let body = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "Failed to read online-variable script {}: {err}",
+            path.display()
+        )
+    })?;
+    let mut commands = Vec::<OnlineVariableCommand>::new();
+    for (lineno, line) in body.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let raw: OnlineVariableScriptEntryRaw = serde_json::from_str(trimmed)
+            .map_err(|err| format!("Invalid JSONL at {}:{}: {err}", path.display(), lineno + 1))?;
+        if tick_ms != 0 && raw.at_ms % tick_ms != 0 {
+            return Err(format!(
+                "at_ms={} is not aligned to tick_ms={} at {}:{}",
+                raw.at_ms,
+                tick_ms,
+                path.display(),
+                lineno + 1
+            ));
+        }
+        let (kind, name) = parse_online_variable_target(&raw.variable)
+            .map_err(|err| format!("{err} at {}:{}", path.display(), lineno + 1))?;
+        let value = parse_online_variable_value(raw.value, kind)
+            .map_err(|err| format!("{err} at {}:{}", path.display(), lineno + 1))?;
+        commands.push(OnlineVariableCommand {
+            at_ms: raw.at_ms,
+            actor: raw.actor,
+            source: raw.source,
+            variable_kind: kind,
+            variable_name: name,
+            value,
+        });
+    }
+    commands.sort_by(|a, b| a.at_ms.cmp(&b.at_ms));
+    Ok(commands)
+}
+
+fn build_online_variable_audit(
+    commands: &[OnlineVariableCommand],
+    tick_ms: u64,
+) -> Vec<OnlineVariableAuditEntry> {
+    let mut out = Vec::<OnlineVariableAuditEntry>::new();
+    let mut bool_values = BTreeMap::<String, bool>::new();
+    let mut real_values = BTreeMap::<String, f32>::new();
+
+    for cmd in commands {
+        let (from, to) = match cmd.variable_kind {
+            OnlineVariableKind::Bool => {
+                let before = bool_values
+                    .get(&cmd.variable_name)
+                    .copied()
+                    .map(OnlineVariableAuditValue::Bool);
+                match cmd.value.as_ref() {
+                    Some(OnlineVariableValue::Bool(v)) => {
+                        bool_values.insert(cmd.variable_name.clone(), *v);
+                        (before, Some(OnlineVariableAuditValue::Bool(*v)))
+                    }
+                    None => {
+                        bool_values.remove(&cmd.variable_name);
+                        (before, None)
+                    }
+                    Some(OnlineVariableValue::Real(_)) => continue,
+                }
+            }
+            OnlineVariableKind::Real => {
+                let before = real_values
+                    .get(&cmd.variable_name)
+                    .copied()
+                    .map(OnlineVariableAuditValue::Real);
+                match cmd.value.as_ref() {
+                    Some(OnlineVariableValue::Real(v)) => {
+                        real_values.insert(cmd.variable_name.clone(), *v);
+                        (before, Some(OnlineVariableAuditValue::Real(*v)))
+                    }
+                    None => {
+                        real_values.remove(&cmd.variable_name);
+                        (before, None)
+                    }
+                    Some(OnlineVariableValue::Bool(_)) => continue,
+                }
+            }
+        };
+
+        out.push(OnlineVariableAuditEntry {
+            at_ms: cmd.at_ms,
+            tick: if tick_ms == 0 { 0 } else { cmd.at_ms / tick_ms },
+            actor: cmd.actor.clone(),
+            source: cmd.source.clone(),
+            variable: format!("{}:{}", cmd.variable_kind.label(), cmd.variable_name),
+            variable_kind: cmd.variable_kind.label(),
+            operation: if cmd.value.is_some() { "set" } else { "clear" },
+            from,
+            to,
+        });
+    }
+
+    out
+}
+
+fn default_online_variable_audit_path(trace_out: &Path) -> PathBuf {
+    trace_out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join("online_var_audit.jsonl")
+}
+
+fn write_online_variable_audit(
+    path: &Path,
+    entries: &[OnlineVariableAuditEntry],
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Failed to create online-variable audit directory {}: {err}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
+
+    let file = fs::File::create(path).map_err(|err| {
+        format!(
+            "Failed to create online-variable audit {}: {err}",
+            path.display()
+        )
+    })?;
+    let mut writer = std::io::BufWriter::new(file);
+    for entry in entries {
+        let line = serde_json::to_string(entry)
+            .map_err(|err| format!("Failed to serialize online-variable audit entry: {err}"))?;
+        writer.write_all(line.as_bytes()).map_err(|err| {
+            format!(
+                "Failed to write online-variable audit {}: {err}",
+                path.display()
+            )
+        })?;
+        writer.write_all(b"\n").map_err(|err| {
+            format!(
+                "Failed to write online-variable audit {}: {err}",
+                path.display()
+            )
+        })?;
+    }
+    writer.flush().map_err(|err| {
+        format!(
+            "Failed to flush online-variable audit {}: {err}",
+            path.display()
+        )
+    })
+}
+
 #[derive(Debug, Clone)]
 struct RetainConfig {
     digital_inputs: BTreeMap<u16, bool>,
@@ -3956,7 +4237,7 @@ fn run_sim_plc_subcommand(
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let usage = format!(
-        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>]"
+        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-audit-out <audit.jsonl>]"
     );
     let Some(plc_path) = args.next() else {
         return Err(usage);
@@ -3969,6 +4250,8 @@ fn run_sim_plc_subcommand(
     let mut enable_online_force_dev = false;
     let mut online_force_script: Option<PathBuf> = None;
     let mut online_force_audit_out: Option<PathBuf> = None;
+    let mut online_var_script: Option<PathBuf> = None;
+    let mut online_var_audit_out: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--scenario" => {
@@ -4006,6 +4289,16 @@ fn run_sim_plc_subcommand(
                     "Missing value for --online-force-audit-out <audit.jsonl>".to_string()
                 })?));
             }
+            "--online-var-script" => {
+                online_var_script = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --online-var-script <script.jsonl>".to_string()
+                })?));
+            }
+            "--online-var-audit-out" => {
+                online_var_audit_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --online-var-audit-out <audit.jsonl>".to_string()
+                })?));
+            }
             "-h" | "--help" => {
                 return Err(usage.clone());
             }
@@ -4019,11 +4312,14 @@ fn run_sim_plc_subcommand(
     if retain_state_path.is_some() && retain_config_path.is_none() {
         return Err("--retain-state requires --retain-config".to_string());
     }
-    if (online_force_script.is_some() || online_force_audit_out.is_some())
+    if (online_force_script.is_some()
+        || online_force_audit_out.is_some()
+        || online_var_script.is_some()
+        || online_var_audit_out.is_some())
         && !enable_online_force_dev
     {
         return Err(
-            "online-force dev control plane is disabled by default; add --enable-online-force-dev to use --online-force-script/--online-force-audit-out"
+            "online-force/variable dev control plane is disabled by default; add --enable-online-force-dev to use --online-force-script/--online-force-audit-out/--online-var-script/--online-var-audit-out"
                 .to_string(),
         );
     }
@@ -4073,6 +4369,17 @@ fn run_sim_plc_subcommand(
     } else {
         None
     };
+    let variable_audit_path = if enable_online_force_dev
+        && (online_var_script.is_some() || online_var_audit_out.is_some())
+    {
+        Some(
+            online_var_audit_out
+                .clone()
+                .unwrap_or_else(|| default_online_variable_audit_path(&out_path)),
+        )
+    } else {
+        None
+    };
 
     let mut online_commands = Vec::new();
     if let Some(script_path) = &online_force_script {
@@ -4083,6 +4390,14 @@ fn run_sim_plc_subcommand(
     if let Some(path) = &audit_path {
         let audit_entries = build_online_force_audit(&online_commands, scenario.tick_ms);
         write_online_force_audit(path, &audit_entries)?;
+    }
+    let mut online_variable_commands = Vec::new();
+    if let Some(script_path) = &online_var_script {
+        online_variable_commands = load_online_variable_script(script_path, scenario.tick_ms)?;
+    }
+    if let Some(path) = &variable_audit_path {
+        let variable_audit = build_online_variable_audit(&online_variable_commands, scenario.tick_ms);
+        write_online_variable_audit(path, &variable_audit)?;
     }
 
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
@@ -4108,6 +4423,9 @@ fn run_sim_plc_subcommand(
     }
     if let Some(path) = audit_path {
         eprintln!("sim-plc: online-force audit {}", path.display());
+    }
+    if let Some(path) = variable_audit_path {
+        eprintln!("sim-plc: online-variable audit {}", path.display());
     }
     Ok(())
 }

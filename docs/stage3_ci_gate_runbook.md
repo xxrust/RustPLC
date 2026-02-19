@@ -15,6 +15,7 @@ scripts/stage3_runtime_dev_gate.sh
 This command covers:
 
 - `online_force_control_plane` contract
+- `online_variable_control_plane` contract
 - `retain_persistent` contract
 - `scenario_gen` contract (including `summary.json` dry-run schema)
 - `sim_regress` contract (including `feedback.json` schema)
@@ -25,7 +26,7 @@ This command covers:
 ### A. Focused tests
 
 ```bash
-cargo test --test online_force_control_plane --test retain_persistent --test scenario_gen --test sim_regress --test new_scaffold
+cargo test --test online_force_control_plane --test online_variable_control_plane --test retain_persistent --test scenario_gen --test sim_regress --test new_scaffold
 ```
 
 ### B. scenario-gen schema check
