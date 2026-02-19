@@ -164,6 +164,8 @@ scripts/rp2040_trace_gate.sh \
   --sil-trace out/trace.jsonl \
   --out-dir out/rp2040_gate \
   --mount /media/RPI-RP2 \
+  --max-p99-exec-us 2000 \
+  --max-overrun-count 0 \
   --collect-mode serial --port /dev/ttyACM0 --baud 115200 --duration 20
 ```
 
@@ -172,7 +174,8 @@ What it does:
 2. `flash-rp2040` (dry-run + actual, when `--mount` is set)
 3. collect board log (`serial` or custom `cmd`)
 4. `board-parse` + `trace-diff --fail-on-mismatch`
-5. render `trace_diff_dashboard.html`
+5. evaluate realtime timing thresholds and write `timing_gate_verdict.json`
+6. render `trace_diff_dashboard.html`
 
 ## HIL regression script (real board)
 
@@ -183,12 +186,22 @@ scripts/rp2040_hil_daily_gate.sh \
   --mount /media/RPI-RP2 \
   --port /dev/ttyACM0 \
   --duration 20 \
+  --max-p99-exec-us 2000 \
+  --max-overrun-count 0 \
   --out-root out/rp2040_hil_daily_gate \
   --bundle
 ```
 
-Per-case outputs include `hil_summary.json`, `diff_report.json`, `trace_diff_dashboard.html`,
-and `assertions_report.json` (`axis/signal/step/tick` context on failure).
+Per-case outputs include `hil_summary.json`, `diff_report.json`, `timing_report.json`,
+`timing_gate_verdict.json`, `trace_diff_dashboard.html`, and `assertions_report.json`
+(`axis/signal/step/tick` context on failure).
+
+Timing threshold tuning workflow:
+
+1. Run nightly without strict limits for several days and collect baseline `timing_report.json`.
+2. Set `max_p99_exec_us` around baseline peak p99 with a practical margin (usually 1.2~1.5x).
+3. Keep `max_overrun_count` at `0` unless you have a documented temporary waiver.
+4. Treat `timing_gate_verdict.json.violations` as the single source for threshold-fail root cause.
 
 For a single-case debug run, use the lower-level script:
 

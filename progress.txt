@@ -50,6 +50,7 @@
 - For RP2040 abnormal-exit safety audits, keep the A/B/C/D source matrix in `scenarios/rp2040_hil_gate/abnormal_exit/matrix.json`, per-class evidence in `.../evidence/<class>.json`, and verify with `scripts/abnormal_exit_matrix_verify.py` (default auto-required classes are A/B/C; D remains `hardware_only` manual-chain validation).
 - For command-line diagnostics in CI, prefer `--output json` on `scenario-validate`, `scenario-doctor`, `no-board-gate`, and `build-rp2040`, and consume stable issue codes (`SCN-*`, `GATE-*`, `BLD-*`) instead of brittle free-text matching.
 - Cross-platform CI for shell tooling should run `scripts/ci_script_contract_preflight.sh` early, enforce git mode `100755` on required gate scripts, and reject CRLF in tracked `*.sh`.
+- For board HIL timing SLAs, generate a standalone `timing_gate_verdict.json` artifact (thresholds + observed metrics + violations) and make summary artifacts reference it directly.
 
 Started: Thu Feb 19 14:03:44  2026
 ## [2026-02-19 14:08:29 CST] - US-001
@@ -122,4 +123,38 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - `git ls-files --stage` reflects tracked metadata only; new scripts must be `git add --chmod=+x` to ensure CI sees executable mode.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `scripts/stage3_runtime_dev_gate.sh` is the local developer parity entrypoint for `stage3-runtime-dev-gates` workflow behavior.
+---
+## [2026-02-19 14:24:08 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added `scripts/timing_gate_verdict.py` to evaluate `timing_report.json` against optional thresholds and emit a stable verdict artifact (`timing_gate_verdict.json`).
+  - Updated `scripts/rp2040_trace_gate.sh` to always generate timing verdicts, print concise timing gate status context, and fail deterministically when thresholds are violated.
+  - Updated `scripts/rp2040_hil_gate.sh` and `scripts/rp2040_hil_daily_gate.sh` summaries to include timing artifacts (`timing_report.json` + `timing_gate_verdict.json`) as first-class outputs.
+  - Expanded docs with threshold usage and tuning workflow:
+    - `docs/hil_regression.md`
+    - `docs/board_rp2040.md`
+  - Added regression tests:
+    - `tests/timing_gate_verdict_script.rs` (threshold pass/fail contract)
+    - `tests/hil_regression_doc.rs` (doc contract for timing gate workflow)
+- Quality checks
+  - `cargo test --test timing_gate_verdict_script --test hil_regression_doc`
+  - `cargo check --workspace`
+- Files changed
+  - `scripts/timing_gate_verdict.py`
+  - `scripts/rp2040_trace_gate.sh`
+  - `scripts/rp2040_hil_gate.sh`
+  - `scripts/rp2040_hil_daily_gate.sh`
+  - `docs/hil_regression.md`
+  - `docs/board_rp2040.md`
+  - `tests/timing_gate_verdict_script.rs`
+  - `tests/hil_regression_doc.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - HIL threshold outcomes are easier to audit when pass/fail logic emits its own machine-readable verdict artifact instead of only stderr text.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - If threshold checks live in shell wrappers, wire verdict file paths through all summary levels (`trace_gate` -> `hil_summary` -> `daily_case_summary`) or operators lose visibility.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `timing_gate_verdict.json.violations` is now the canonical location for realtime threshold breach details.
 ---

@@ -78,6 +78,8 @@ META_JSON="$OUT_DIR_ABS/hil_meta.json"
 SUMMARY_JSON="$OUT_DIR_ABS/hil_summary.json"
 DIFF_REPORT="$OUT_DIR_ABS/diff_report.json"
 DASHBOARD_HTML="$OUT_DIR_ABS/trace_diff_dashboard.html"
+TIMING_REPORT="$OUT_DIR_ABS/timing_report.json"
+TIMING_VERDICT="$OUT_DIR_ABS/timing_gate_verdict.json"
 
 echo "[0/3] SIL trace (sim-plc)"
 (
@@ -160,7 +162,8 @@ fi
 
 REPO_ROOT="$REPO_ROOT" OUT_DIR_ABS="$OUT_DIR_ABS" META_JSON="$META_JSON" \
 SUMMARY_JSON="$SUMMARY_JSON" DIFF_REPORT="$DIFF_REPORT" SIL_TRACE="$SIL_TRACE" \
-DASHBOARD_HTML="$DASHBOARD_HTML" STATUS="$STATUS" python3 - <<'PY'
+DASHBOARD_HTML="$DASHBOARD_HTML" STATUS="$STATUS" TIMING_REPORT="$TIMING_REPORT" \
+TIMING_VERDICT="$TIMING_VERDICT" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -169,10 +172,15 @@ meta_path = Path(os.environ["META_JSON"])
 summary_path = Path(os.environ["SUMMARY_JSON"])
 diff_path = Path(os.environ["DIFF_REPORT"])
 status = int(os.environ["STATUS"])
+timing_verdict_path = Path(os.environ["TIMING_VERDICT"])
 
 meta = {}
 if meta_path.exists():
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+timing_gate = None
+if timing_verdict_path.exists():
+    timing_gate = json.loads(timing_verdict_path.read_text(encoding="utf-8"))
 
 summary = {
     "status_code": status,
@@ -182,7 +190,10 @@ summary = {
         "sil_trace": os.environ["SIL_TRACE"],
         "diff_report": str(diff_path),
         "dashboard_html": os.environ["DASHBOARD_HTML"],
+        "timing_report": os.environ["TIMING_REPORT"],
+        "timing_verdict": os.environ["TIMING_VERDICT"],
     },
+    "timing_gate": timing_gate,
     "meta": meta,
 }
 summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
