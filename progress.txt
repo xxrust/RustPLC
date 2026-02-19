@@ -47,6 +47,7 @@
 - Prefer `rust_plc::board_log::parse_board_log_text` as the single entrypoint for mixed `board.log` parsing (TRACE + TIMING), and keep record-specific parsers in `board_trace` / `tick_timing`.
 - For RP2040 daily HIL gating, keep multi-case bundles in `scenarios/rp2040_hil_gate/cases.json` and attach per-case assertion specs (`axis/signal/step/tick`) so failures are locatable from `assertions_report.json`.
 - For RP2040 abnormal-exit safety audits, keep the A/B/C/D source matrix in `scenarios/rp2040_hil_gate/abnormal_exit/matrix.json`, per-class evidence in `.../evidence/<class>.json`, and verify with `scripts/abnormal_exit_matrix_verify.py` (default auto-required classes are A/B/C; D remains `hardware_only` manual-chain validation).
+- For command-line diagnostics in CI, prefer `--output json` on `scenario-validate`, `scenario-doctor`, `no-board-gate`, and `build-rp2040`, and consume stable issue codes (`SCN-*`, `GATE-*`, `BLD-*`) instead of brittle free-text matching.
 
 Started: Sat Feb 14 23:50:11 CST 2026
 ---
@@ -1616,4 +1617,36 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - In Python report validators, a single unquoted dict key in an f-string (`obj.get(key)` vs `obj.get("key")`) can silently break the whole gate; run the verifier script in tests to catch this early.
   - Useful context (e.g., "the evaluation panel is in component X")
     - The abnormal-exit verifier is file-contract driven and can run without hardware, so it is suitable for CI baseline checks even when class D still requires physical electrical validation.
+---
+## [2026-02-19 09:47:27 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added stable M6 diagnostics plumbing for scenario/build/gate workflows:
+    - scenario findings now carry stable code families (`SCN-*`) and are available in human + JSON output.
+    - command-level failure prefixes were standardized for build/gate dispatch paths (`BLD-*`, `GATE-*`).
+  - Added unified output-mode switch (`--output human|json`) to key commands used in local debugging and CI (`scenario-validate`, `scenario-doctor`, `no-board-gate`, `build-rp2040`).
+  - Implemented `scenario-doctor` MVP with `--fix-preview`, covering common checks:
+    - path/source mismatch hints,
+    - device mapping issues,
+    - tick-alignment issues,
+    - same-tick risk heuristics (e.g., held start signal).
+  - Added M6 runbook doc with troubleshooting examples and concrete command snippets: `docs/m6_diagnostics.md`.
+  - Added integration tests for:
+    - error-code presence in JSON diagnostics,
+    - scenario-doctor JSON/fix-preview behavior,
+    - output-mode JSON serialization for no-board-gate/build flows.
+  - Ran quality checks: `cargo test --workspace` (pass).
+- Files changed
+  - `src/main.rs`
+  - `tests/m6_diagnostics.rs`
+  - `docs/m6_diagnostics.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep the diagnostics contract explicit: human output is for operators, JSON output is for automation; both should include the same stable issue codes.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Avoid CI tests that depend on fragile example scenarios; use self-contained fixture PLC/scenario inputs for command-level JSON/output tests.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `scenario-doctor` intentionally reuses `scenario-validate` heuristics so warnings/codes stay aligned and do not drift into two conflicting diagnostic vocabularies.
 ---

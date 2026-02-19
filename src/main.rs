@@ -5,7 +5,7 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program,
 };
-use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
+use rust_plc::verification::{verify_all, VerificationSummary, WarningEntry, WarningLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
@@ -20,10 +20,10 @@ use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
 use rust_plc::sequence_lint::{
-    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
+    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
 };
-use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
-use rust_plc::tick_timing::{TickTimingSample, parse_tick_timing_jsonl, to_tick_timing_jsonl};
+use rust_plc::sim_regress::{run_sim_regress_with_options, SimRegressOptions, SimRegressSummary};
+use rust_plc::tick_timing::{parse_tick_timing_jsonl, to_tick_timing_jsonl, TickTimingSample};
 use rust_plc::timing_report::build_timing_report;
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -193,7 +193,10 @@ static SIM_TASKS: [Task<'static>; 1] = [Task {
     entry: StepId(0),
 }];
 
-static SIM_PROGRAM: Program<'static> = Program { tasks: &SIM_TASKS, pid_loops: &[] };
+static SIM_PROGRAM: Program<'static> = Program {
+    tasks: &SIM_TASKS,
+    pid_loops: &[],
+};
 
 const SCENARIO_YAML_MINIMAL_TEMPLATE: &str = r#"tick_ms: 10
 duration_ms: 1000
@@ -336,7 +339,12 @@ fn read_scenario_yaml_file(path: &Path) -> Result<String, String> {
 }
 
 fn parse_scenario_yaml(yaml: &str) -> Result<sim::Scenario, String> {
-    sim::Scenario::from_yaml_str(yaml).map_err(|e| format!("Failed to parse scenario YAML: {e}\n\n{}", scenario_yaml_help()))
+    sim::Scenario::from_yaml_str(yaml).map_err(|e| {
+        format!(
+            "Failed to parse scenario YAML: {e}\n\n{}",
+            scenario_yaml_help()
+        )
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -430,8 +438,8 @@ fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHint
             .collect::<Vec<_>>()
             .join("\n")
     })?;
-    let runtime =
-        state_machine_to_runtime_program(&topology, &state_machine, 10).map_err(|e| e.to_string())?;
+    let runtime = state_machine_to_runtime_program(&topology, &state_machine, 10)
+        .map_err(|e| e.to_string())?;
 
     let mut used_di = BTreeSet::<u16>::new();
     let mut used_ai = BTreeSet::<u16>::new();
@@ -459,11 +467,8 @@ fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHint
         match device.kind {
             DeviceKind::DigitalInput => {
                 if let Some(id) = parse_prefixed_u16(&device.name, 'X') {
-                    let aliases = collect_downstream_aliases(
-                        &topology,
-                        node,
-                        is_physical_digital_input_name,
-                    );
+                    let aliases =
+                        collect_downstream_aliases(&topology, node, is_physical_digital_input_name);
                     digital_aliases.insert(id, aliases);
                 }
             }
@@ -570,16 +575,13 @@ fn render_scenario_init_yaml(
         out.push_str("# No physical X*/AI* inputs were discovered from this PLC topology.\n");
     }
 
-    let start_id = hints
-        .digital_aliases
-        .iter()
-        .find_map(|(&id, aliases)| {
-            if aliases_contain_keyword(aliases, "start") {
-                Some(id)
-            } else {
-                None
-            }
-        });
+    let start_id = hints.digital_aliases.iter().find_map(|(&id, aliases)| {
+        if aliases_contain_keyword(aliases, "start") {
+            Some(id)
+        } else {
+            None
+        }
+    });
     let mut sensor_ids = hints
         .digital_aliases
         .iter()
@@ -616,17 +618,26 @@ fn render_scenario_init_yaml(
                 match preset {
                     ScenarioInitPreset::Bounce => {
                         // A few quick toggles to emulate a bouncy button, ending released.
-                        let toggles = [(0, true), (10, false), (20, true), (30, false), (40, true), (50, false)];
+                        let toggles = [
+                            (0, true),
+                            (10, false),
+                            (20, true),
+                            (30, false),
+                            (40, true),
+                            (50, false),
+                        ];
                         for (at_ms, value) in toggles {
                             out.push_str(&format!("  - at_ms: {at_ms}\n"));
                             out.push_str("    set:\n");
                             out.push_str("      digital_inputs:\n");
-                            let suffix = render_input_alias_comment(&hints.digital_aliases, start_id);
+                            let suffix =
+                                render_input_alias_comment(&hints.digital_aliases, start_id);
                             out.push_str(&format!("        {start_id}: {value}{suffix}\n"));
                             if at_ms == 0 && !hints.analog_ids.is_empty() {
                                 out.push_str("      analog_inputs:\n");
                                 for id in &hints.analog_ids {
-                                    let suffix = render_input_alias_comment(&hints.analog_aliases, *id);
+                                    let suffix =
+                                        render_input_alias_comment(&hints.analog_aliases, *id);
                                     out.push_str(&format!("        {id}: 0.0{suffix}\n"));
                                 }
                             }
@@ -689,11 +700,7 @@ fn render_scenario_init_yaml(
 
             // Inject one representative stuck fault for the template.
             if preset == ScenarioInitPreset::SensorStuck {
-                let target = sensor_ids
-                    .first()
-                    .copied()
-                    .or(start_id)
-                    .unwrap_or(0);
+                let target = sensor_ids.first().copied().or(start_id).unwrap_or(0);
                 out.push_str("\n# Fault injection example:\n");
                 out.push_str("faults:\n");
                 out.push_str("  - sensor_stuck:\n");
@@ -733,6 +740,37 @@ impl ScenarioValidateSeverity {
             Self::Warn => "WARN",
         }
     }
+
+    fn json_label(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warn => "warn",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum CliOutputMode {
+    Human,
+    Json,
+}
+
+impl CliOutputMode {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "human" => Some(Self::Human),
+            "json" => Some(Self::Json),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Human => "human",
+            Self::Json => "json",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -744,7 +782,11 @@ struct ScenarioValidateFinding {
 }
 
 impl ScenarioValidateFinding {
-    fn error(tag: impl Into<String>, message: impl Into<String>, suggestion: Option<String>) -> Self {
+    fn error(
+        tag: impl Into<String>,
+        message: impl Into<String>,
+        suggestion: Option<String>,
+    ) -> Self {
         Self {
             severity: ScenarioValidateSeverity::Error,
             tag: tag.into(),
@@ -753,7 +795,11 @@ impl ScenarioValidateFinding {
         }
     }
 
-    fn warn(tag: impl Into<String>, message: impl Into<String>, suggestion: Option<String>) -> Self {
+    fn warn(
+        tag: impl Into<String>,
+        message: impl Into<String>,
+        suggestion: Option<String>,
+    ) -> Self {
         Self {
             severity: ScenarioValidateSeverity::Warn,
             tag: tag.into(),
@@ -761,9 +807,48 @@ impl ScenarioValidateFinding {
             suggestion,
         }
     }
+
+    fn code(&self) -> &'static str {
+        match self.tag.as_str() {
+            "duration_ms" => "SCN-VAL-001",
+            "runtime.probe" => "SCN-VAL-002",
+            "risk.start_button_held" => "SCN-RISK-001",
+            "risk.sensors_all_true_at_start" => "SCN-RISK-002",
+            "risk.scenario_plc_mismatch" => "SCN-MAP-001",
+            tag if tag.ends_with(".at_ms") => "SCN-TICK-001",
+            tag if tag.contains("digital_inputs") => "SCN-MAP-002",
+            tag if tag.contains("analog_inputs") => "SCN-MAP-003",
+            tag if tag.contains("digital_outputs") => "SCN-MAP-004",
+            tag if tag.contains("analog_outputs") => "SCN-MAP-005",
+            _ => match self.severity {
+                ScenarioValidateSeverity::Error => "SCN-VAL-999",
+                ScenarioValidateSeverity::Warn => "SCN-RISK-999",
+            },
+        }
+    }
 }
 
-fn print_scenario_validate_findings(findings: &[ScenarioValidateFinding]) {
+#[derive(Debug, Serialize)]
+struct ScenarioValidateIssueJson<'a> {
+    code: &'static str,
+    severity: &'static str,
+    tag: &'a str,
+    message: &'a str,
+    suggestion: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+struct ScenarioValidateJsonReport<'a> {
+    schema_version: u32,
+    command: &'static str,
+    output: &'static str,
+    status: &'static str,
+    error_count: usize,
+    warn_count: usize,
+    issues: Vec<ScenarioValidateIssueJson<'a>>,
+}
+
+fn print_scenario_validate_findings(findings: &[ScenarioValidateFinding], output: CliOutputMode) {
     let errors = findings
         .iter()
         .filter(|f| f.severity == ScenarioValidateSeverity::Error)
@@ -772,6 +857,35 @@ fn print_scenario_validate_findings(findings: &[ScenarioValidateFinding]) {
         .iter()
         .filter(|f| f.severity == ScenarioValidateSeverity::Warn)
         .count();
+
+    if output == CliOutputMode::Json {
+        let report = ScenarioValidateJsonReport {
+            schema_version: 1,
+            command: "scenario-validate",
+            output: output.as_str(),
+            status: if errors == 0 { "pass" } else { "fail" },
+            error_count: errors,
+            warn_count: warnings,
+            issues: findings
+                .iter()
+                .map(|f| ScenarioValidateIssueJson {
+                    code: f.code(),
+                    severity: f.severity.json_label(),
+                    tag: &f.tag,
+                    message: &f.message,
+                    suggestion: f.suggestion.as_deref(),
+                })
+                .collect(),
+        };
+        match serde_json::to_string_pretty(&report) {
+            Ok(mut body) => {
+                body.push('\n');
+                print!("{body}");
+            }
+            Err(err) => eprintln!("Failed to serialize scenario-validate JSON output: {err}"),
+        }
+        return;
+    }
 
     if errors == 0 && warnings == 0 {
         eprintln!("scenario-validate: PASS (no issues)");
@@ -785,8 +899,9 @@ fn print_scenario_validate_findings(findings: &[ScenarioValidateFinding]) {
 
     for finding in findings {
         eprintln!(
-            "{} [{}] {}",
+            "{} [{}:{}] {}",
             finding.severity.label(),
+            finding.code(),
             finding.tag,
             finding.message
         );
@@ -822,16 +937,10 @@ fn collect_scenario_referenced_inputs(
 
     for (event_idx, force) in scenario.forces.iter().enumerate() {
         for (&id, _) in &force.set.digital_inputs {
-            digital.push((
-                format!("forces[{event_idx}].set.digital_inputs.{id}"),
-                id,
-            ));
+            digital.push((format!("forces[{event_idx}].set.digital_inputs.{id}"), id));
         }
         for (&id, _) in &force.set.analog_inputs {
-            analog.push((
-                format!("forces[{event_idx}].set.analog_inputs.{id}"),
-                id,
-            ));
+            analog.push((format!("forces[{event_idx}].set.analog_inputs.{id}"), id));
         }
     }
 
@@ -846,16 +955,10 @@ fn collect_scenario_referenced_forced_outputs(
 
     for (event_idx, force) in scenario.forces.iter().enumerate() {
         for (&id, _) in &force.set.digital_outputs {
-            digital.push((
-                format!("forces[{event_idx}].set.digital_outputs.{id}"),
-                id,
-            ));
+            digital.push((format!("forces[{event_idx}].set.digital_outputs.{id}"), id));
         }
         for (&id, _) in &force.set.analog_outputs {
-            analog.push((
-                format!("forces[{event_idx}].set.analog_outputs.{id}"),
-                id,
-            ));
+            analog.push((format!("forces[{event_idx}].set.analog_outputs.{id}"), id));
         }
     }
 
@@ -940,17 +1043,29 @@ fn validate_scenario_against_plc(
             } else {
                 "Check the scenario field value and retry".to_string()
             };
-            findings.push(ScenarioValidateFinding::error(path, message, Some(tick_suggestion)));
+            findings.push(ScenarioValidateFinding::error(
+                path,
+                message,
+                Some(tick_suggestion),
+            ));
         }
     }
 
     let valid_di = if !hints.physical_digital_ids.is_empty() {
-        hints.physical_digital_ids.iter().copied().collect::<BTreeSet<_>>()
+        hints
+            .physical_digital_ids
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
     } else {
         hints.digital_ids.iter().copied().collect::<BTreeSet<_>>()
     };
     let valid_ai = if !hints.physical_analog_ids.is_empty() {
-        hints.physical_analog_ids.iter().copied().collect::<BTreeSet<_>>()
+        hints
+            .physical_analog_ids
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
     } else {
         hints.analog_ids.iter().copied().collect::<BTreeSet<_>>()
     };
@@ -1064,7 +1179,8 @@ fn validate_scenario_against_plc(
         snippet.push_str("  # add later `at_ms` edges to set each sensor true when reached");
         findings.push(ScenarioValidateFinding::warn(
             "risk.sensors_all_true_at_start",
-            "all known sensor inputs start true; waits/guards may be satisfied immediately".to_string(),
+            "all known sensor inputs start true; waits/guards may be satisfied immediately"
+                .to_string(),
             Some(snippet),
         ));
     }
@@ -1122,7 +1238,9 @@ fn format_resolve_scenario_yaml_error(
         "Failed to resolve device-name inputs in scenario {}:\n{err}",
         scenario_path.display()
     );
-    if let Some(hint) = scenario_mismatch_hint_for_example_paths(plc_path, scenario_path, subcommand) {
+    if let Some(hint) =
+        scenario_mismatch_hint_for_example_paths(plc_path, scenario_path, subcommand)
+    {
         msg.push_str("\n\n");
         msg.push_str(&hint);
     }
@@ -1168,7 +1286,7 @@ fn main() {
     }
     if first == "build-rp2040" {
         if let Err(msg) = run_build_rp2040_subcommand(&program, args) {
-            eprintln!("{msg}");
+            eprintln!("[BLD-000] {msg}");
             std::process::exit(1);
         }
         return;
@@ -1217,7 +1335,7 @@ fn main() {
     }
     if first == "no-board-gate" {
         if let Err(msg) = run_no_board_gate_subcommand(&program, args) {
-            eprintln!("{msg}");
+            eprintln!("[GATE-000] {msg}");
             std::process::exit(1);
         }
         return;
@@ -1252,6 +1370,13 @@ fn main() {
     }
     if first == "scenario-validate" {
         if let Err(msg) = run_scenario_validate_subcommand(&program, args) {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if first == "scenario-doctor" {
+        if let Err(msg) = run_scenario_doctor_subcommand(&program, args) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
@@ -1331,10 +1456,11 @@ fn main() {
                     eprintln!("Missing value for --budget-max-parallel-branches <n>");
                     std::process::exit(1);
                 });
-                budget_thresholds.max_parallel_branches = value.parse::<usize>().unwrap_or_else(|_| {
-                    eprintln!("Invalid integer for --budget-max-parallel-branches: {value}");
-                    std::process::exit(1);
-                });
+                budget_thresholds.max_parallel_branches =
+                    value.parse::<usize>().unwrap_or_else(|_| {
+                        eprintln!("Invalid integer for --budget-max-parallel-branches: {value}");
+                        std::process::exit(1);
+                    });
             }
             "--budget-max-race-branches" => {
                 let value = args.next().unwrap_or_else(|| {
@@ -1353,9 +1479,7 @@ fn main() {
                 });
                 budget_thresholds.warn_on_same_tick_cycle =
                     value.parse::<bool>().unwrap_or_else(|_| {
-                        eprintln!(
-                            "Invalid boolean for --budget-warn-on-same-tick-cycle: {value}"
-                        );
+                        eprintln!("Invalid boolean for --budget-warn-on-same-tick-cycle: {value}");
                         std::process::exit(1);
                     });
             }
@@ -1522,7 +1646,7 @@ fn print_usage(program: &str) {
         "  {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]"
     );
     eprintln!(
-        "  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
+        "  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]"
     );
     eprintln!(
         "  {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
@@ -1532,12 +1656,10 @@ fn print_usage(program: &str) {
     eprintln!(
         "  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
     );
-    eprintln!(
-        "  {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]"
-    );
+    eprintln!("  {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]");
     eprintln!("  {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>");
     eprintln!(
-        "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
+        "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]"
     );
     eprintln!("  {program} pil-run <file.plc> --scenario <scenario.yaml>");
     eprintln!("  {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>");
@@ -1548,14 +1670,15 @@ fn print_usage(program: &str) {
         "  {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]"
     );
     eprintln!(
-        "  {program} scenario-validate <file.plc> --scenario <scenario.yaml>"
+        "  {program} scenario-validate <file.plc> --scenario <scenario.yaml> [--output <human|json>]"
+    );
+    eprintln!(
+        "  {program} scenario-doctor <file.plc> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]"
     );
     eprintln!(
         "  {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>"
     );
-    eprintln!(
-        "  {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>"
-    );
+    eprintln!("  {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>");
     eprintln!();
     eprintln!("Budget options (also configurable via env vars):");
     eprintln!("  --budget-max-actions-per-transition <n>");
@@ -1654,14 +1777,15 @@ fn run_scenario_init_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => {
-                out_path = Some(PathBuf::from(args.next().ok_or_else(|| {
-                    "Missing value for --out <scenario.yaml>".to_string()
-                })?));
+                out_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out <scenario.yaml>".to_string()
+                    })?));
             }
             "--preset" => {
-                let raw = args.next().ok_or_else(|| {
-                    "Missing value for --preset <minimal|normal>".to_string()
-                })?;
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --preset <minimal|normal>".to_string())?;
                 preset = ScenarioInitPreset::parse(&raw).ok_or_else(|| {
                     format!("Invalid preset `{raw}` (expected `minimal` or `normal`)")
                 })?;
@@ -1678,22 +1802,29 @@ fn run_scenario_init_subcommand(
     }
 
     let plc_path = PathBuf::from(plc_path);
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
+    let plc_source = fs::read_to_string(&plc_path)
+        .map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
 
     let out_path = out_path.unwrap_or_else(|| default_scenario_init_out_path(&plc_path));
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|err| {
-                format!("Failed to create output directory {}: {err}", parent.display())
+                format!(
+                    "Failed to create output directory {}: {err}",
+                    parent.display()
+                )
             })?;
         }
     }
 
     let hints = collect_scenario_init_hints(&plc_source)?;
     let yaml = render_scenario_init_yaml(&plc_path, preset, &hints);
-    fs::write(&out_path, yaml)
-        .map_err(|err| format!("Failed to write scenario YAML {}: {err}", out_path.display()))?;
+    fs::write(&out_path, yaml).map_err(|err| {
+        format!(
+            "Failed to write scenario YAML {}: {err}",
+            out_path.display()
+        )
+    })?;
 
     eprintln!("scenario-init: wrote {}", out_path.display());
     Ok(())
@@ -1705,21 +1836,31 @@ fn run_scenario_validate_subcommand(
 ) -> Result<(), String> {
     let Some(plc_path) = args.next() else {
         return Err(format!(
-            "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml>"
+            "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml> [--output <human|json>]"
         ));
     };
 
     let mut scenario_path: Option<PathBuf> = None;
+    let mut output_mode = CliOutputMode::Human;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--scenario" => {
-                scenario_path = Some(PathBuf::from(args.next().ok_or_else(|| {
-                    "Missing value for --scenario <scenario.yaml>".to_string()
-                })?));
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
             }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml>"
+                    "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml> [--output <human|json>]"
                 ));
             }
             other => {
@@ -1733,22 +1874,29 @@ fn run_scenario_validate_subcommand(
     };
 
     let plc_path = PathBuf::from(plc_path);
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
+    let plc_source = fs::read_to_string(&plc_path)
+        .map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
 
     let raw_scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &raw_scenario_yaml)
-        .map_err(|e| format_resolve_scenario_yaml_error(plc_path.to_string_lossy().as_ref(), &scenario_path, "scenario-validate", &e))?;
+    let scenario_yaml =
+        resolve_scenario_yaml_for_plc(&plc_source, &raw_scenario_yaml).map_err(|e| {
+            format_resolve_scenario_yaml_error(
+                plc_path.to_string_lossy().as_ref(),
+                &scenario_path,
+                "scenario-validate",
+                &e,
+            )
+        })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let hints = collect_scenario_init_hints(&plc_source)?;
     let mut findings = validate_scenario_against_plc(&plc_path, &scenario_path, &scenario, &hints);
 
     // If the scenario was generated by `scenario-init`, it includes a header we can sanity-check.
-    let header_source = raw_scenario_yaml
-        .lines()
-        .take(40)
-        .find_map(|line| line.strip_prefix("# Source PLC: ").map(|s| s.trim().to_string()));
+    let header_source = raw_scenario_yaml.lines().take(40).find_map(|line| {
+        line.strip_prefix("# Source PLC: ")
+            .map(|s| s.trim().to_string())
+    });
     if let (Some(expected), Some(actual)) = (
         header_source.as_deref(),
         plc_path.file_name().and_then(|s| s.to_str()),
@@ -1773,8 +1921,8 @@ fn run_scenario_validate_subcommand(
         .any(|f| f.severity == ScenarioValidateSeverity::Error);
 
     if !has_error {
-        let runtime_program =
-            compile_plc_to_runtime_program(&plc_source, scenario.tick_ms).map_err(|e| {
+        let runtime_program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)
+            .map_err(|e| {
                 format!("scenario-validate: failed to compile PLC to runtime program: {e}")
             })?;
         let (num_di, num_do, num_ai, num_ao) =
@@ -1871,13 +2019,274 @@ inputs:\n\
         }
     }
 
-    print_scenario_validate_findings(&findings);
+    print_scenario_validate_findings(&findings, output_mode);
 
     if findings
         .iter()
         .any(|f| f.severity == ScenarioValidateSeverity::Error)
     {
         return Err("scenario-validate failed".to_string());
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct ScenarioDoctorIssue {
+    code: &'static str,
+    severity: &'static str,
+    category: &'static str,
+    tag: String,
+    message: String,
+    suggestion: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ScenarioDoctorReport {
+    schema_version: u32,
+    command: &'static str,
+    output: &'static str,
+    plc: String,
+    scenario: String,
+    status: &'static str,
+    error_count: usize,
+    warn_count: usize,
+    issues: Vec<ScenarioDoctorIssue>,
+}
+
+fn doctor_category_from_tag(tag: &str) -> &'static str {
+    if tag.ends_with(".at_ms") || tag == "duration_ms" {
+        return "tick_alignment";
+    }
+    if tag.contains("digital_inputs")
+        || tag.contains("analog_inputs")
+        || tag.contains("digital_outputs")
+        || tag.contains("analog_outputs")
+        || tag.contains("scenario_plc_mismatch")
+    {
+        return "device_mapping";
+    }
+    if tag.starts_with("risk.") || tag == "runtime.probe" {
+        return "same_tick_risk";
+    }
+    "general"
+}
+
+fn finding_to_doctor_issue(
+    f: &ScenarioValidateFinding,
+    include_suggestion: bool,
+) -> ScenarioDoctorIssue {
+    ScenarioDoctorIssue {
+        code: f.code(),
+        severity: f.severity.json_label(),
+        category: doctor_category_from_tag(&f.tag),
+        tag: f.tag.clone(),
+        message: f.message.clone(),
+        suggestion: if include_suggestion {
+            f.suggestion.clone()
+        } else {
+            None
+        },
+    }
+}
+
+fn print_scenario_doctor_report(report: &ScenarioDoctorReport, output: CliOutputMode) {
+    if output == CliOutputMode::Json {
+        match serde_json::to_string_pretty(report) {
+            Ok(mut body) => {
+                body.push('\n');
+                print!("{body}");
+            }
+            Err(err) => eprintln!("Failed to serialize scenario-doctor JSON output: {err}"),
+        }
+        return;
+    }
+
+    if report.error_count == 0 && report.warn_count == 0 {
+        eprintln!("scenario-doctor: PASS (no issues)");
+        return;
+    }
+    if report.error_count == 0 {
+        eprintln!("scenario-doctor: PASS ({} warning(s))", report.warn_count);
+    } else {
+        eprintln!(
+            "scenario-doctor: FAIL ({} error(s), {} warning(s))",
+            report.error_count, report.warn_count
+        );
+    }
+
+    for issue in &report.issues {
+        eprintln!(
+            "{} [{}:{}] {}",
+            issue.severity.to_ascii_uppercase(),
+            issue.code,
+            issue.tag,
+            issue.message
+        );
+        if let Some(suggestion) = &issue.suggestion {
+            eprintln!("  Fix:\n{suggestion}");
+        }
+    }
+}
+
+fn run_scenario_doctor_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let Some(plc_path) = args.next() else {
+        return Err(format!(
+            "Usage: {program} scenario-doctor <file.plc> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]"
+        ));
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    let mut include_fix_preview = false;
+    let mut output_mode = CliOutputMode::Human;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "--fix-preview" => {
+                include_fix_preview = true;
+            }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
+            "-h" | "--help" => {
+                return Err(format!(
+                    "Usage: {program} scenario-doctor <file.plc> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]"
+                ));
+            }
+            other => return Err(format!("Unknown argument for scenario-doctor: {other}")),
+        }
+    }
+
+    let Some(scenario_path) = scenario_path else {
+        return Err("Missing required argument: --scenario <scenario.yaml>".to_string());
+    };
+
+    let plc_path = PathBuf::from(plc_path);
+    let plc_source = fs::read_to_string(&plc_path)
+        .map_err(|err| format!("[SCN-DOCTOR-001] Failed to read {plc_path:?}: {err}"))?;
+    let raw_scenario_yaml =
+        read_scenario_yaml_file(&scenario_path).map_err(|err| format!("[SCN-DOCTOR-002] {err}"))?;
+
+    let mut issues = Vec::<ScenarioDoctorIssue>::new();
+    let header_source = raw_scenario_yaml.lines().take(40).find_map(|line| {
+        line.strip_prefix("# Source PLC: ")
+            .map(|s| s.trim().to_string())
+    });
+    if let (Some(expected), Some(actual)) = (
+        header_source.as_deref(),
+        plc_path.file_name().and_then(|s| s.to_str()),
+    ) {
+        if expected != actual {
+            issues.push(ScenarioDoctorIssue {
+                code: "SCN-MAP-001",
+                severity: "warn",
+                category: "path_mismatch",
+                tag: "risk.scenario_plc_mismatch".to_string(),
+                message: format!(
+                    "scenario header says `{expected}`, but doctor is running against `{actual}`"
+                ),
+                suggestion: if include_fix_preview {
+                    Some(format!(
+                        "Regenerate with matched source:\n  rust_plc scenario-init {} --out {} --preset normal",
+                        display_path_relative_to_cwd(&plc_path),
+                        display_path_relative_to_cwd(&scenario_path)
+                    ))
+                } else {
+                    None
+                },
+            });
+        }
+    }
+
+    let resolved = match resolve_scenario_yaml_for_plc(&plc_source, &raw_scenario_yaml) {
+        Ok(v) => Some(v),
+        Err(err) => {
+            issues.push(ScenarioDoctorIssue {
+                code: "SCN-MAP-010",
+                severity: "error",
+                category: "device_mapping",
+                tag: "resolve.device_name".to_string(),
+                message: format_resolve_scenario_yaml_error(
+                    plc_path.to_string_lossy().as_ref(),
+                    &scenario_path,
+                    "scenario-doctor",
+                    &err,
+                ),
+                suggestion: if include_fix_preview {
+                    Some("Fix device aliases/paths first, then rerun scenario-doctor.".to_string())
+                } else {
+                    None
+                },
+            });
+            None
+        }
+    };
+
+    if let Some(resolved_yaml) = resolved {
+        match parse_scenario_yaml(&resolved_yaml) {
+            Ok(scenario) => {
+                let hints = collect_scenario_init_hints(&plc_source)
+                    .map_err(|err| format!("[SCN-DOCTOR-003] {err}"))?;
+                let findings =
+                    validate_scenario_against_plc(&plc_path, &scenario_path, &scenario, &hints);
+                issues.extend(
+                    findings
+                        .iter()
+                        .map(|f| finding_to_doctor_issue(f, include_fix_preview)),
+                );
+            }
+            Err(err) => {
+                issues.push(ScenarioDoctorIssue {
+                    code: "SCN-TICK-010",
+                    severity: "error",
+                    category: "tick_alignment",
+                    tag: "parse.scenario_yaml".to_string(),
+                    message: err,
+                    suggestion: if include_fix_preview {
+                        Some(
+                            "Ensure all `at_ms` fields align to `tick_ms`, then rerun scenario-doctor."
+                                .to_string(),
+                        )
+                    } else {
+                        None
+                    },
+                });
+            }
+        }
+    }
+
+    let error_count = issues.iter().filter(|i| i.severity == "error").count();
+    let warn_count = issues.iter().filter(|i| i.severity == "warn").count();
+    let report = ScenarioDoctorReport {
+        schema_version: 1,
+        command: "scenario-doctor",
+        output: output_mode.as_str(),
+        plc: display_path_relative_to_cwd(&plc_path),
+        scenario: display_path_relative_to_cwd(&scenario_path),
+        status: if error_count == 0 { "pass" } else { "fail" },
+        error_count,
+        warn_count,
+        issues,
+    };
+    print_scenario_doctor_report(&report, output_mode);
+
+    if error_count > 0 {
+        return Err(format!(
+            "[SCN-DOCTOR-900] scenario-doctor found {error_count} blocking issue(s)"
+        ));
     }
 
     Ok(())
@@ -1898,15 +2307,16 @@ fn run_scenario_expand_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--scenario" => {
-                scenario_path = Some(PathBuf::from(args.next().ok_or_else(|| {
-                    "Missing value for --scenario <scenario.yaml>".to_string()
-                })?));
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
             }
             "--out" => {
-                out_path = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --out <expanded.yaml>".to_string())?,
-                ));
+                out_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out <expanded.yaml>".to_string()
+                    })?));
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -1946,13 +2356,17 @@ fn run_scenario_expand_subcommand(
     })?;
     let scenario = parse_scenario_yaml(&resolved)?;
 
-    let mut out =
-        serde_yaml::to_string(&scenario).map_err(|err| format!("Failed to serialize scenario: {err}"))?;
+    let mut out = serde_yaml::to_string(&scenario)
+        .map_err(|err| format!("Failed to serialize scenario: {err}"))?;
     if !out.ends_with('\n') {
         out.push('\n');
     }
-    fs::write(&out_path, out)
-        .map_err(|err| format!("Failed to write expanded scenario {}: {err}", out_path.display()))?;
+    fs::write(&out_path, out).map_err(|err| {
+        format!(
+            "Failed to write expanded scenario {}: {err}",
+            out_path.display()
+        )
+    })?;
     eprintln!("scenario-expand: wrote {}", out_path.display());
     Ok(())
 }
@@ -2096,16 +2510,13 @@ fn round_down_to_tick(ms: u64, tick_ms: u64) -> u64 {
 }
 
 fn discover_start_and_sensor_ids(hints: &ScenarioInitInputHints) -> (Option<u16>, Vec<u16>) {
-    let start_id = hints
-        .digital_aliases
-        .iter()
-        .find_map(|(&id, aliases)| {
-            if aliases_contain_keyword(aliases, "start") {
-                Some(id)
-            } else {
-                None
-            }
-        });
+    let start_id = hints.digital_aliases.iter().find_map(|(&id, aliases)| {
+        if aliases_contain_keyword(aliases, "start") {
+            Some(id)
+        } else {
+            None
+        }
+    });
     let mut sensor_ids = hints
         .digital_aliases
         .iter()
@@ -2133,22 +2544,22 @@ fn run_scenario_gen_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--plc" => {
-                plc_path = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --plc <file.plc>".to_string())?,
-                ));
+                plc_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --plc <file.plc>".to_string()
+                    })?));
             }
             "--config" => {
-                config_path = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --config <gen.yaml>".to_string())?,
-                ));
+                config_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --config <gen.yaml>".to_string()
+                    })?));
             }
             "--out-dir" => {
-                out_dir = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --out-dir <dir>".to_string())?,
-                ));
+                out_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out-dir <dir>".to_string()
+                    })?));
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -2160,25 +2571,39 @@ fn run_scenario_gen_subcommand(
     }
 
     let plc_path = plc_path.ok_or_else(|| {
-        format!("Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>")
+        format!(
+            "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>"
+        )
     })?;
     let config_path = config_path.ok_or_else(|| {
-        format!("Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>")
+        format!(
+            "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>"
+        )
     })?;
     let out_dir = out_dir.ok_or_else(|| {
-        format!("Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>")
+        format!(
+            "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir>"
+        )
     })?;
 
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {}: {err}", plc_path.display()))?;
+    let plc_source = fs::read_to_string(&plc_path)
+        .map_err(|err| format!("Failed to read {}: {err}", plc_path.display()))?;
     let config_yaml = fs::read_to_string(&config_path)
         .map_err(|err| format!("Failed to read {}: {err}", config_path.display()))?;
-    let config: ScenarioGenConfig = serde_yaml::from_str(&config_yaml)
-        .map_err(|err| format!("Failed to parse scenario-gen config {}: {err}", config_path.display()))?;
+    let config: ScenarioGenConfig = serde_yaml::from_str(&config_yaml).map_err(|err| {
+        format!(
+            "Failed to parse scenario-gen config {}: {err}",
+            config_path.display()
+        )
+    })?;
     config.validate()?;
 
-    fs::create_dir_all(&out_dir)
-        .map_err(|err| format!("Failed to create output directory {}: {err}", out_dir.display()))?;
+    fs::create_dir_all(&out_dir).map_err(|err| {
+        format!(
+            "Failed to create output directory {}: {err}",
+            out_dir.display()
+        )
+    })?;
 
     let hints = collect_scenario_init_hints(&plc_source)?;
     let (start_id, sensor_ids) = discover_start_and_sensor_ids(&hints);
@@ -2206,7 +2631,8 @@ fn run_scenario_gen_subcommand(
                         set.digital_inputs.insert(start, true);
                         inputs.push(sim::InputEvent { at_ms: 0, set });
 
-                        let mut release_ms = round_up_to_tick((*pulse).max(config.tick_ms), config.tick_ms);
+                        let mut release_ms =
+                            round_up_to_tick((*pulse).max(config.tick_ms), config.tick_ms);
                         if release_ms >= duration {
                             let latest = duration.saturating_sub(config.tick_ms);
                             release_ms = round_down_to_tick(latest, config.tick_ms);
@@ -2221,7 +2647,8 @@ fn run_scenario_gen_subcommand(
                         }
                     }
 
-                    let sensor_spacing = round_up_to_tick((*window).max(config.tick_ms), config.tick_ms);
+                    let sensor_spacing =
+                        round_up_to_tick((*window).max(config.tick_ms), config.tick_ms);
                     if !sensor_ids.is_empty() {
                         let sensor_targets = sensor_ids
                             .iter()
@@ -2512,8 +2939,10 @@ fn run_sim_plc_subcommand(
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml)
-        .map_err(|e| format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "sim-plc", &e))?;
+    let scenario_yaml =
+        resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
+            format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "sim-plc", &e)
+        })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
 
@@ -2521,7 +2950,8 @@ fn run_sim_plc_subcommand(
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
     let run = sim::run_program_for_scenario(&program, &scenario, &mut io).map_err(|e| {
         let mut msg = format!("{e}");
-        if let Some(hint) = scenario_mismatch_hint_for_example(&plc_path, &scenario_path, &e, "sim-plc")
+        if let Some(hint) =
+            scenario_mismatch_hint_for_example(&plc_path, &scenario_path, &e, "sim-plc")
         {
             msg.push_str("\n\n");
             msg.push_str(&hint);
@@ -2632,16 +3062,15 @@ fn run_sim_pid_kpi_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--scenario" => {
-                scenario_path =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --scenario <pid_scenario.yaml>".to_string()
-                    })?));
+                scenario_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --scenario <pid_scenario.yaml>".to_string()
+                })?));
             }
             "--out" => {
-                out_path = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --out <kpi.json>".to_string())?,
-                ));
+                out_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out <kpi.json>".to_string()
+                    })?));
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -2818,7 +3247,7 @@ fn run_build_rp2040_subcommand(
 ) -> Result<(), String> {
     let Some(plc_path) = args.next() else {
         return Err(format!(
-            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
+            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]"
         ));
     };
 
@@ -2826,6 +3255,7 @@ fn run_build_rp2040_subcommand(
     let mut io_map_path: Option<PathBuf> = None;
     let mut analog_calibration_path: Option<PathBuf> = None;
     let mut emit_uf2: Option<PathBuf> = None;
+    let mut output_mode = CliOutputMode::Human;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => {
@@ -2852,9 +3282,17 @@ fn run_build_rp2040_subcommand(
                         "Missing value for --emit-uf2 <file.uf2>".to_string()
                     })?));
             }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
+                    "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]"
                 ));
             }
             other => return Err(format!("Unknown argument for build-rp2040: {other}")),
@@ -2863,7 +3301,7 @@ fn run_build_rp2040_subcommand(
 
     let out_dir = out_dir.ok_or_else(|| {
         format!(
-            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>]"
+            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]"
         )
     })?;
     fs::create_dir_all(&out_dir)
@@ -2998,6 +3436,45 @@ Start from the generated `io_map.template.toml` under `--out <dir>` and fill in 
         )?;
     }
 
+    if output_mode == CliOutputMode::Json {
+        #[derive(Serialize)]
+        struct BuildRp2040Json {
+            schema_version: u32,
+            command: &'static str,
+            output: &'static str,
+            status: &'static str,
+            out_dir: String,
+            artifacts: BTreeMap<&'static str, String>,
+        }
+        let mut artifacts = BTreeMap::<&'static str, String>::new();
+        artifacts.insert(
+            "generated_program",
+            display_path_relative_to_cwd(&generated_path),
+        );
+        artifacts.insert("io_map_template", display_path_relative_to_cwd(&iomap_path));
+        artifacts.insert(
+            "analog_contract",
+            display_path_relative_to_cwd(&analog_contract_path),
+        );
+        artifacts.insert(
+            "analog_calibration_template",
+            display_path_relative_to_cwd(&analog_cal_template_path),
+        );
+        artifacts.insert("build_meta", display_path_relative_to_cwd(&meta_path));
+        let payload = BuildRp2040Json {
+            schema_version: 1,
+            command: "build-rp2040",
+            output: output_mode.as_str(),
+            status: "pass",
+            out_dir: display_path_relative_to_cwd(&out_dir),
+            artifacts,
+        };
+        let mut json = serde_json::to_string_pretty(&payload)
+            .map_err(|err| format!("Failed to serialize build-rp2040 JSON output: {err}"))?;
+        json.push('\n');
+        print!("{json}");
+    }
+
     Ok(())
 }
 
@@ -3025,10 +3502,10 @@ fn run_release_bundle_subcommand(
                     })?));
             }
             "--out-dir" => {
-                out_dir = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --out-dir <dir>".to_string())?,
-                ));
+                out_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out-dir <dir>".to_string()
+                    })?));
             }
             "--io-map" => {
                 io_map_path =
@@ -3091,8 +3568,10 @@ fn run_release_bundle_subcommand(
     let plc_sha256 = sha256_hex(&plc_bytes);
 
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml)
-        .map_err(|e| format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "release-bundle", &e))?;
+    let scenario_yaml =
+        resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
+            format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "release-bundle", &e)
+        })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
@@ -3145,8 +3624,9 @@ Start from the generated `io_map.template.toml` under `--out-dir <dir>` and fill
     // Always include an io_map file in the bundle: either the user-provided map or a template.
     let bundled_io_map_path = out_dir.join("io_map.toml");
     if let Some(src) = io_map_path.as_ref() {
-        fs::copy(src, &bundled_io_map_path)
-            .map_err(|err| format!("Failed to copy io map {src:?} -> {bundled_io_map_path:?}: {err}"))?;
+        fs::copy(src, &bundled_io_map_path).map_err(|err| {
+            format!("Failed to copy io map {src:?} -> {bundled_io_map_path:?}: {err}")
+        })?;
     } else {
         fs::write(&bundled_io_map_path, &io_map_template)
             .map_err(|err| format!("Failed to write {bundled_io_map_path:?}: {err}"))?;
@@ -3171,12 +3651,16 @@ Start from the generated `io_map.template.toml` under `--out-dir <dir>` and fill
     )?;
 
     // SIL artifacts for trace/report packaging.
-    let sil_program =
-        state_machine_to_runtime_program(&ir_bundle.topology, &ir_bundle.state_machine, scenario.tick_ms)
-            .map_err(|err| format!("Failed to bridge to SIL runtime Program: {err}"))?;
+    let sil_program = state_machine_to_runtime_program(
+        &ir_bundle.topology,
+        &ir_bundle.state_machine,
+        scenario.tick_ms,
+    )
+    .map_err(|err| format!("Failed to bridge to SIL runtime Program: {err}"))?;
     let sil_trace_path = out_dir.join("sil_trace.jsonl");
     let sim_report_path = out_dir.join("sim_report.json");
-    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&sil_program, &scenario);
+    let (num_di, num_do, num_ai, num_ao) =
+        io_sizes_for_program_and_scenario(&sil_program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
     let run = sim::run_program_for_scenario(&sil_program, &scenario, &mut io)
         .map_err(|err| format!("SIL simulation failed: {err}"))?;
@@ -3723,7 +4207,9 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
 
     out.push('\n');
     out.push_str("# Motion (optional): Pulse/Dir stepper + AB encoder (PIO-first).\n");
-    out.push_str("# These channels are NOT inferred from the PLC program. Fill in GPIO wiring and\n");
+    out.push_str(
+        "# These channels are NOT inferred from the PLC program. Fill in GPIO wiring and\n",
+    );
     out.push_str("# axis parameters if you plan to use board-level motion feedback/commands.\n");
     out.push_str("#\n");
     out.push_str("# Note: if you include a [motion] section, it must not be empty.\n");
@@ -3929,10 +4415,10 @@ fn run_board_parse_subcommand(
                     })?));
             }
             "--out-dir" => {
-                out_dir = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --out-dir <dir>".to_string())?,
-                ));
+                out_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out-dir <dir>".to_string()
+                    })?));
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -3943,12 +4429,10 @@ fn run_board_parse_subcommand(
         }
     }
 
-    let input = input.ok_or_else(|| {
-        format!("Usage: {program} board-parse --in <board.log> --out-dir <dir>")
-    })?;
-    let out_dir = out_dir.ok_or_else(|| {
-        format!("Usage: {program} board-parse --in <board.log> --out-dir <dir>")
-    })?;
+    let input = input
+        .ok_or_else(|| format!("Usage: {program} board-parse --in <board.log> --out-dir <dir>"))?;
+    let out_dir = out_dir
+        .ok_or_else(|| format!("Usage: {program} board-parse --in <board.log> --out-dir <dir>"))?;
 
     let text = fs::read_to_string(&input)
         .map_err(|err| format!("Failed to read board log {input:?}: {err}"))?;
@@ -4077,16 +4561,14 @@ fn run_timing_report_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--in" => {
-                input =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --in <tick_timing.jsonl>".to_string()
-                    })?));
+                input = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --in <tick_timing.jsonl>".to_string()
+                })?));
             }
             "--out" => {
-                out =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --out <timing_report.json>".to_string()
-                    })?));
+                out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --out <timing_report.json>".to_string()
+                })?));
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -4098,7 +4580,9 @@ fn run_timing_report_subcommand(
     }
 
     let input = input.ok_or_else(|| {
-        format!("Usage: {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]")
+        format!(
+            "Usage: {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]"
+        )
     })?;
 
     let out = out.unwrap_or_else(|| {
@@ -4158,10 +4642,9 @@ fn run_io_map_normalize_subcommand(
                     })?));
             }
             "--out" => {
-                out =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --out <normalized.toml>".to_string()
-                    })?));
+                out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --out <normalized.toml>".to_string()
+                })?));
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -4181,11 +4664,10 @@ fn run_io_map_normalize_subcommand(
 
     let text =
         fs::read_to_string(&input).map_err(|err| format!("Failed to read {input:?}: {err}"))?;
-    let v: toml::Value =
-        toml::from_str(&text).map_err(|err| format!("TOML parse error: {err}"))?;
+    let v: toml::Value = toml::from_str(&text).map_err(|err| format!("TOML parse error: {err}"))?;
     let normalized = normalize_io_map_toml(&v)?;
-    let mut out_text =
-        toml::to_string_pretty(&normalized).map_err(|err| format!("TOML serialize error: {err}"))?;
+    let mut out_text = toml::to_string_pretty(&normalized)
+        .map_err(|err| format!("TOML serialize error: {err}"))?;
     if !out_text.ends_with('\n') {
         out_text.push('\n');
     }
@@ -4201,7 +4683,7 @@ fn run_io_map_normalize_subcommand(
 }
 
 fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
-    use rust_plc::iec_address::{LogicalChannelKind, parse_iec_address};
+    use rust_plc::iec_address::{parse_iec_address, LogicalChannelKind};
     use toml::value::Table;
 
     let root = v
@@ -4345,7 +4827,7 @@ fn run_no_board_gate_subcommand(
 ) -> Result<(), String> {
     let Some(plc_path) = args.next() else {
         return Err(format!(
-            "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
+            "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]"
         ));
     };
 
@@ -4356,6 +4838,7 @@ fn run_no_board_gate_subcommand(
     let mut context_window: usize = 3;
     let mut max_p99_exec_us: Option<u64> = None;
     let mut max_overrun_count: Option<u64> = None;
+    let mut output_mode = CliOutputMode::Human;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -4366,22 +4849,20 @@ fn run_no_board_gate_subcommand(
                     })?));
             }
             "--sil-scenario" => {
-                sil_scenario_path =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --sil-scenario <scenario.yaml>".to_string()
-                    })?));
+                sil_scenario_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --sil-scenario <scenario.yaml>".to_string()
+                })?));
             }
             "--board-scenario" => {
-                board_scenario_path =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --board-scenario <scenario.yaml>".to_string()
-                    })?));
+                board_scenario_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --board-scenario <scenario.yaml>".to_string()
+                })?));
             }
             "--out-dir" => {
-                out_dir = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --out-dir <dir>".to_string())?,
-                ));
+                out_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out-dir <dir>".to_string()
+                    })?));
             }
             "--context" => {
                 let raw = args
@@ -4407,9 +4888,17 @@ fn run_no_board_gate_subcommand(
                     format!("Invalid --max-overrun-count value (expected u64): {raw}")
                 })?);
             }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
             "-h" | "--help" => {
                 return Err(format!(
-                    "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
+                    "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]"
                 ));
             }
             other => return Err(format!("Unknown argument for no-board-gate: {other}")),
@@ -4417,15 +4906,15 @@ fn run_no_board_gate_subcommand(
     }
 
     let out_dir = out_dir.ok_or_else(|| {
-        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]")
+        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]")
     })?;
 
     let sil_scenario_path = sil_scenario_path.or_else(|| scenario_path.clone()).ok_or_else(|| {
-        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]")
+        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]")
     })?;
     let board_scenario_path =
         board_scenario_path.or_else(|| scenario_path.clone()).ok_or_else(|| {
-            format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]")
+            format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]")
         })?;
 
     fs::create_dir_all(&out_dir)
@@ -4456,10 +4945,11 @@ fn run_no_board_gate_subcommand(
     let program = compile_plc_to_runtime_program(&plc_source, sil_scenario.tick_ms)?;
 
     let sil_trace_path = out_dir.join("sil_trace.jsonl");
-    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &sil_scenario);
+    let (num_di, num_do, num_ai, num_ao) =
+        io_sizes_for_program_and_scenario(&program, &sil_scenario);
     let mut sil_io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
-    let sil_run = sim::run_program_for_scenario(&program, &sil_scenario, &mut sil_io).map_err(
-        |e| {
+    let sil_run =
+        sim::run_program_for_scenario(&program, &sil_scenario, &mut sil_io).map_err(|e| {
             let mut msg = format!("SIL simulation failed: {e}");
             if let Some(hint) = scenario_mismatch_hint_for_example(
                 &plc_path,
@@ -4471,8 +4961,7 @@ fn run_no_board_gate_subcommand(
                 msg.push_str(&hint);
             }
             msg
-        },
-    )?;
+        })?;
 
     fs::write(&sil_trace_path, sil_run.trace.into_string())
         .map_err(|err| format!("Failed to write SIL trace file {sil_trace_path:?}: {err}"))?;
@@ -4534,29 +5023,69 @@ fn run_no_board_gate_subcommand(
         }
     }
 
-    if report.is_match {
+    if output_mode == CliOutputMode::Human {
+        if report.is_match {
+            eprintln!(
+                "no-board-gate: PASS (sil_events={}, board_events={})",
+                report.sil_events, report.board_events
+            );
+        } else {
+            eprintln!(
+                "no-board-gate: FAIL (tick={:?}, type={:?}, index={:?})",
+                report.first_mismatch_tick, report.mismatch_type, report.mismatch_index
+            );
+        }
+        eprintln!("  sil_trace: {}", sil_trace_path.display());
+        eprintln!("  board_trace: {}", board_trace_path.display());
+        eprintln!("  diff_report: {}", diff_report_path.display());
         eprintln!(
-            "no-board-gate: PASS (sil_events={}, board_events={})",
-            report.sil_events, report.board_events
+            "  timing_report: {} (p99_exec_us={}, overrun_count={})",
+            timing_report_path.display(),
+            timing_report.exec_us_p99,
+            timing_report.overrun_count
         );
-    } else {
-        eprintln!(
-            "no-board-gate: FAIL (tick={:?}, type={:?}, index={:?})",
-            report.first_mismatch_tick, report.mismatch_type, report.mismatch_index
-        );
-    }
-    eprintln!("  sil_trace: {}", sil_trace_path.display());
-    eprintln!("  board_trace: {}", board_trace_path.display());
-    eprintln!("  diff_report: {}", diff_report_path.display());
-    eprintln!(
-        "  timing_report: {} (p99_exec_us={}, overrun_count={})",
-        timing_report_path.display(),
-        timing_report.exec_us_p99,
-        timing_report.overrun_count
-    );
 
-    for reason in &realtime_failures {
-        eprintln!("  realtime-gate: {reason}");
+        for reason in &realtime_failures {
+            eprintln!("  realtime-gate: {reason}");
+        }
+    } else {
+        #[derive(Serialize)]
+        struct NoBoardGateJson<'a> {
+            schema_version: u32,
+            command: &'static str,
+            output: &'static str,
+            status: &'static str,
+            trace_match: bool,
+            realtime_failures: &'a [String],
+            sil_trace: String,
+            board_trace: String,
+            diff_report: String,
+            timing_report: String,
+            p99_exec_us: u64,
+            overrun_count: u64,
+        }
+        let payload = NoBoardGateJson {
+            schema_version: 1,
+            command: "no-board-gate",
+            output: output_mode.as_str(),
+            status: if report.is_match && realtime_failures.is_empty() {
+                "pass"
+            } else {
+                "fail"
+            },
+            trace_match: report.is_match,
+            realtime_failures: &realtime_failures,
+            sil_trace: display_path_relative_to_cwd(&sil_trace_path),
+            board_trace: display_path_relative_to_cwd(&board_trace_path),
+            diff_report: display_path_relative_to_cwd(&diff_report_path),
+            timing_report: display_path_relative_to_cwd(&timing_report_path),
+            p99_exec_us: timing_report.exec_us_p99,
+            overrun_count: timing_report.overrun_count,
+        };
+        let mut json = serde_json::to_string_pretty(&payload)
+            .map_err(|err| format!("Failed to serialize no-board-gate JSON output: {err}"))?;
+        json.push('\n');
+        print!("{json}");
     }
 
     if !report.is_match || !realtime_failures.is_empty() {
@@ -4612,8 +5141,10 @@ fn run_pil_run_subcommand(
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml)
-        .map_err(|e| format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "pil-run", &e))?;
+    let scenario_yaml =
+        resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
+            format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "pil-run", &e)
+        })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
@@ -4805,7 +5336,12 @@ fn write_virtual_board_artifacts(
     fs::write(&meta_path, meta_json)
         .map_err(|err| format!("Failed to write virtual board meta {meta_path:?}: {err}"))?;
 
-    Ok((board_log_path, board_trace_path, meta_path, tick_timing_path))
+    Ok((
+        board_log_path,
+        board_trace_path,
+        meta_path,
+        tick_timing_path,
+    ))
 }
 
 fn run_virtual_board_subcommand(
@@ -4829,10 +5365,10 @@ fn run_virtual_board_subcommand(
                     })?));
             }
             "--out-dir" => {
-                out_dir = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| "Missing value for --out-dir <dir>".to_string())?,
-                ));
+                out_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out-dir <dir>".to_string()
+                    })?));
             }
             "-h" | "--help" => {
                 return Err(format!(
@@ -4844,10 +5380,14 @@ fn run_virtual_board_subcommand(
     }
 
     let scenario_path = scenario_path.ok_or_else(|| {
-        format!("Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>")
+        format!(
+            "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>"
+        )
     })?;
     let out_dir = out_dir.ok_or_else(|| {
-        format!("Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>")
+        format!(
+            "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>"
+        )
     })?;
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create output directory {out_dir:?}: {err}"))?;
@@ -4855,8 +5395,10 @@ fn run_virtual_board_subcommand(
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let scenario_yaml = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml)
-        .map_err(|e| format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "virtual-board", &e))?;
+    let scenario_yaml =
+        resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
+            format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "virtual-board", &e)
+        })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
     let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
@@ -5142,7 +5684,10 @@ fn write_verification_report(
     Ok(())
 }
 
-fn analyze_runtime_budget(program: &rust_plc::ast::PlcProgram, state_machine: &StateMachine) -> RuntimeBudget {
+fn analyze_runtime_budget(
+    program: &rust_plc::ast::PlcProgram,
+    state_machine: &StateMachine,
+) -> RuntimeBudget {
     let (max_actions_per_transition, max_parallel_branches, max_race_branches) =
         analyze_program_budget_facts(program);
 
@@ -5206,7 +5751,8 @@ fn analyze_runtime_budget(program: &rust_plc::ast::PlcProgram, state_machine: &S
             exceeds_budget: false,
         },
     };
-    budget.budget_time_estimate = estimate_budget_time(&budget, &RuntimeBudgetThresholds::default());
+    budget.budget_time_estimate =
+        estimate_budget_time(&budget, &RuntimeBudgetThresholds::default());
     budget
 }
 
@@ -5248,13 +5794,23 @@ fn analyze_statements_budget_facts(
             rust_plc::ast::StepStatement::Parallel(block) => {
                 *max_parallel = (*max_parallel).max(block.branches.len());
                 for b in &block.branches {
-                    analyze_statements_budget_facts(&b.statements, actions_in_step, max_parallel, max_race);
+                    analyze_statements_budget_facts(
+                        &b.statements,
+                        actions_in_step,
+                        max_parallel,
+                        max_race,
+                    );
                 }
             }
             rust_plc::ast::StepStatement::Race(block) => {
                 *max_race = (*max_race).max(block.branches.len());
                 for b in &block.branches {
-                    analyze_statements_budget_facts(&b.statements, actions_in_step, max_parallel, max_race);
+                    analyze_statements_budget_facts(
+                        &b.statements,
+                        actions_in_step,
+                        max_parallel,
+                        max_race,
+                    );
                 }
             }
             _ => {}
@@ -5298,9 +5854,8 @@ fn analyze_longest_chain(outgoing: &[Vec<usize>], edges: &[(usize, usize)]) -> (
         let mut best = 0usize;
         for &eid in &outgoing[u] {
             let (_from, to) = edges[eid];
-            let candidate = 1usize.saturating_add(dfs(
-                to, outgoing, edges, visiting, visited, memo, has_cycle,
-            ));
+            let candidate =
+                1usize.saturating_add(dfs(to, outgoing, edges, visiting, visited, memo, has_cycle));
             best = best.max(candidate);
         }
         visiting[u] = false;
@@ -5348,7 +5903,8 @@ fn apply_runtime_budget_warnings(
             level: WarningLevel::Warn,
             message: format!(
                 "runtime budget: max_actions_per_tick_upper_bound={} exceeds threshold {}",
-                budget.max_actions_per_tick_upper_bound, thresholds.max_actions_per_tick_upper_bound
+                budget.max_actions_per_tick_upper_bound,
+                thresholds.max_actions_per_tick_upper_bound
             ),
         });
     }
@@ -5394,14 +5950,15 @@ fn estimate_budget_time(
     budget: &RuntimeBudget,
     thresholds: &RuntimeBudgetThresholds,
 ) -> BudgetTimeEstimate {
-    let action_component_us = (budget.max_actions_per_tick_upper_bound as u64)
-        .saturating_mul(thresholds.action_cost_us);
+    let action_component_us =
+        (budget.max_actions_per_tick_upper_bound as u64).saturating_mul(thresholds.action_cost_us);
     let transition_component_us = (budget.max_transitions_same_tick_upper_bound as u64)
         .saturating_mul(thresholds.transition_cost_us);
     let parallel_expansion = budget
         .max_parallel_branches
         .saturating_sub(1)
-        .saturating_add(budget.max_race_branches.saturating_sub(1)) as u64;
+        .saturating_add(budget.max_race_branches.saturating_sub(1))
+        as u64;
     let parallel_component_us =
         parallel_expansion.saturating_mul(thresholds.parallel_expand_cost_us);
     let total_estimate_us = action_component_us
