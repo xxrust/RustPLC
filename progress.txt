@@ -51,6 +51,7 @@
 - For command-line diagnostics in CI, prefer `--output json` on `scenario-validate`, `scenario-doctor`, `no-board-gate`, and `build-rp2040`, and consume stable issue codes (`SCN-*`, `GATE-*`, `BLD-*`) instead of brittle free-text matching.
 - Cross-platform CI for shell tooling should run `scripts/ci_script_contract_preflight.sh` early, enforce git mode `100755` on required gate scripts, and reject CRLF in tracked `*.sh`.
 - For board HIL timing SLAs, generate a standalone `timing_gate_verdict.json` artifact (thresholds + observed metrics + violations) and make summary artifacts reference it directly.
+- For `hardware_only` Class-D evidence, require per-attachment `provenance.source_path` and keep optional digest/operator/time metadata for audit traceability.
 
 Started: Thu Feb 19 14:03:44  2026
 ## [2026-02-19 14:08:29 CST] - US-001
@@ -157,4 +158,37 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - If threshold checks live in shell wrappers, wire verdict file paths through all summary levels (`trace_gate` -> `hil_summary` -> `daily_case_summary`) or operators lose visibility.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `timing_gate_verdict.json.violations` is now the canonical location for realtime threshold breach details.
+---
+## [2026-02-19 14:27:23 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Extended Class-D evidence schema so every manual attachment carries provenance metadata (`provenance.source_path` required; digest/operator/time optional).
+  - Updated Class-D template + live D evidence fixture to include provenance payloads.
+  - Hardened verifier (`scripts/abnormal_exit_matrix_verify.py`) to validate provenance structure/required fields and report precise attachment-path errors.
+  - Updated abnormal-exit docs/wiki to explicitly describe provenance requirements and link the workflow docs.
+  - Expanded regression coverage:
+    - fixture-level checks for provenance presence in D evidence/template
+    - verifier failure test for missing attachment provenance
+    - doc contract test now locks provenance wording.
+- Quality checks
+  - `cargo test --test abnormal_exit_matrix --test abnormal_exit_matrix_doc`
+  - `cargo check --workspace`
+- Files changed
+  - `scenarios/rp2040_hil_gate/abnormal_exit/evidence_schema.json`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/class_d_checklist_template.json`
+  - `scenarios/rp2040_hil_gate/abnormal_exit/evidence/D.json`
+  - `scripts/abnormal_exit_matrix_verify.py`
+  - `docs/abnormal_exit_matrix.md`
+  - `docs/wiki/Class-D-Abnormal-Exit-Evidence-Workflow.md`
+  - `tests/abnormal_exit_matrix.rs`
+  - `tests/abnormal_exit_matrix_doc.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Manual safety evidence becomes reviewable at scale only when attachments include provenance fields that point back to original captures.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - If Class-D evidence shape changes, update schema + template + D fixture + verifier + tests together to avoid drift.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Verifier errors now include precise attachment field paths (`class_d_manual.attachments[i].provenance.*`) for fast audit remediation.
 ---

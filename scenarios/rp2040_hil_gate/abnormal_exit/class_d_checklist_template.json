@@ -10,7 +10,13 @@
       "name": "scope_capture",
       "path": "out/rp2040_hil_daily_gate/class_d/scope_capture.csv",
       "sha256": "<optional_sha256>",
-      "note": "CH1=do2(brake), CH2=do1(enable), trigger=power pull"
+      "note": "CH1=do2(brake), CH2=do1(enable), trigger=power pull",
+      "provenance": {
+        "source_path": "lab_scope_exports/2026-02-19/scope_capture.csv",
+        "digest_sha256": "<optional_sha256>",
+        "captured_by": "<operator>",
+        "captured_at": "2026-02-19T10:20:00+08:00"
+      }
     }
   ]
 }

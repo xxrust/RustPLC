@@ -34,12 +34,22 @@
       {
         "name": "scope_capture",
         "path": "out/rp2040_hil_daily_gate/class_d/scope_capture.csv",
-        "note": "CH1=do2 brake, CH2=do1 enable, trigger=power pull"
+        "note": "CH1=do2 brake, CH2=do1 enable, trigger=power pull",
+        "provenance": {
+          "source_path": "lab_scope_exports/2026-02-19/scope_capture.csv",
+          "captured_by": "integration_lab",
+          "captured_at": "2026-02-19T10:20:00+08:00"
+        }
       },
       {
         "name": "wiring_photo",
         "path": "out/rp2040_hil_daily_gate/class_d/wiring_photo.jpg",
-        "note": "Safety relay and STO wiring state at test time"
+        "note": "Safety relay and STO wiring state at test time",
+        "provenance": {
+          "source_path": "lab_camera_uploads/2026-02-19/wiring_photo.jpg",
+          "captured_by": "integration_lab",
+          "captured_at": "2026-02-19T10:25:00+08:00"
+        }
       }
     ]
   },

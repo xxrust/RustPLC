@@ -115,7 +115,7 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["name", "path"],
+            "required": ["name", "path", "provenance"],
             "properties": {
               "name": {
                 "type": "string",
@@ -130,6 +130,25 @@
               },
               "note": {
                 "type": "string"
+              },
+              "provenance": {
+                "type": "object",
+                "required": ["source_path"],
+                "properties": {
+                  "source_path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "digest_sha256": {
+                    "type": "string"
+                  },
+                  "captured_by": {
+                    "type": "string"
+                  },
+                  "captured_at": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }

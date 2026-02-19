@@ -159,6 +159,25 @@ def validate_class_d_manual_artifacts(evidence: Dict[str, Any]) -> List[str]:
                     f"class_d_manual.attachments[{idx}].{field} must be a non-empty string"
                 )
 
+        provenance = attachment.get("provenance")
+        if not isinstance(provenance, dict):
+            errors.append(
+                f"class_d_manual.attachments[{idx}].provenance must be an object"
+            )
+            continue
+
+        if not _is_nonempty_string(provenance.get("source_path")):
+            errors.append(
+                f"class_d_manual.attachments[{idx}].provenance.source_path must be a non-empty string"
+            )
+
+        for optional_field in ("digest_sha256", "captured_by", "captured_at"):
+            optional_value = provenance.get(optional_field)
+            if optional_value is not None and not _is_nonempty_string(optional_value):
+                errors.append(
+                    f"class_d_manual.attachments[{idx}].provenance.{optional_field} must be a non-empty string when present"
+                )
+
     return errors
 
 
