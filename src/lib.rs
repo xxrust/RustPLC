@@ -1,3 +1,4 @@
+pub mod alarm_runtime;
 pub mod ast;
 pub mod board_log;
 pub mod board_trace;

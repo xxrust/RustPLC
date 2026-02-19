@@ -51,7 +51,7 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "本故事只交付后端告警发布与契约，不包含 HMI 页面开发。"
     },
     {

@@ -55,6 +55,7 @@
 - For multi-step operator rehearsals, provide one orchestration CLI that both executes the chain and writes a machine-readable step index (pass/fail/skipped + artifact paths).
 - Diagnostics backend candidates should always be emitted in deterministic order (confidence desc, category tie-break), with stable `DIAG-*` issue codes and per-candidate `evidence_source` for cross-source diffability.
 - Keep diagnosis CLI output as a layered contract: top-level `schema_version/evidence_source/anchors/candidates/summary/artifacts` for machines, plus Top-N evidence+next-step rendering for humans.
+- For runtime alarm publishing, keep dispatch non-blocking (`try_send`) with audit-file fallback, and apply per-alarm dedup/rate-limit before enqueueing so HMI outages never stall control execution.
 
 Started: Thu Feb 19 14:03:44  2026
 ## [2026-02-19 14:08:29 CST] - US-001
@@ -297,4 +298,40 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - `trace-doctor` must reject runs with neither `--trace` nor `--diff`; keep that guard explicit at CLI parsing so failures are immediate and deterministic.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Human output for trace-doctor is emitted on stderr (consistent with other CLI summaries), while JSON output is emitted on stdout.
+---
+
+## [2026-02-19 16:43:38] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added runtime alarm backend module `src/alarm_runtime.rs` with standardized `alarm_event` contract (`alarm_id`, `severity`, `first_seen_ms`, `top_candidates`, `evidence_ref`, `evidence_source`, `scenario_or_recipe_id`).
+  - Added HMI publish adapter paths: realtime WebSocket publishing + NDJSON audit persistence, with graceful fallback to audit-only when WebSocket is unavailable.
+  - Added deterministic dedup/rate-limit guard per alarm ID (`dedup_window_ms`, `min_emit_interval_ms`) to prevent alarm storms.
+  - Integrated runtime alarm generation into `sim-plc` timeout flow, including new CLI flags:
+    - `--alarm-audit-out`
+    - `--alarm-hmi-ws`
+    - `--alarm-scenario-id`
+    - `--alarm-top`
+    - `--alarm-dedup-window-ms`
+    - `--alarm-min-interval-ms`
+  - Added regression coverage for runtime alarm emission and HMI channel outage fallback.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --test runtime_alarm_events --test trace_doctor --test m6_diagnostics`
+  - `cargo test --workspace`
+- Files changed
+  - `Cargo.toml`
+  - `Cargo.lock`
+  - `src/alarm_runtime.rs`
+  - `src/lib.rs`
+  - `src/main.rs`
+  - `tests/runtime_alarm_events.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Runtime alarm transport should always be dual-channel (realtime + audit) so operator visibility and post-mortem traceability remain coupled.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - When adding `sim-plc` optional alarm features, keep alarm path fully opt-in to avoid behavior drift for existing traces.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `AlarmDispatcher::publish` and `AlarmDispatcher::close` in `src/alarm_runtime.rs` are the central control points for realtime/audit publish behavior.
 ---

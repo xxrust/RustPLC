@@ -18,6 +18,9 @@ use std::process::Command;
 use io_traits::{DigitalInputId, DigitalOutputId, Io};
 use petgraph::Direction;
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
+use rust_plc::alarm_runtime::{
+    AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity, build_alarm_event,
+};
 use rust_plc::diagnostics::{
     diagnose, DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport, EvidenceSource,
 };
@@ -1797,7 +1800,7 @@ fn print_usage(program: &str) {
         "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
     );
     eprintln!(
-        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>]"
+        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>]"
     );
     eprintln!(
         "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
@@ -4045,6 +4048,23 @@ fn default_online_variable_audit_path(trace_out: &Path) -> PathBuf {
         .join("online_var_audit.jsonl")
 }
 
+fn default_alarm_event_audit_path(trace_out: &Path) -> PathBuf {
+    trace_out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join("alarm_events.ndjson")
+}
+
+fn default_alarm_scenario_or_recipe_id(scenario_path: &Path) -> String {
+    scenario_path
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("scenario")
+        .to_string()
+}
+
 fn write_online_variable_audit(
     path: &Path,
     entries: &[OnlineVariableAuditEntry],
@@ -4587,7 +4607,7 @@ fn run_sim_plc_subcommand(
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let usage = format!(
-        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>]"
+        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>]"
     );
     let Some(plc_path) = args.next() else {
         return Err(usage);
@@ -4603,6 +4623,13 @@ fn run_sim_plc_subcommand(
     let mut online_var_script: Option<PathBuf> = None;
     let mut online_var_bindings_path: Option<PathBuf> = None;
     let mut online_var_audit_out: Option<PathBuf> = None;
+    let mut alarm_options_seen = false;
+    let mut alarm_audit_out: Option<PathBuf> = None;
+    let mut alarm_hmi_ws: Option<String> = None;
+    let mut alarm_scenario_id: Option<String> = None;
+    let mut alarm_top_n: usize = 3;
+    let mut alarm_dedup_window_ms: u64 = 1_000;
+    let mut alarm_min_interval_ms: u64 = 200;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--scenario" => {
@@ -4654,6 +4681,59 @@ fn run_sim_plc_subcommand(
                 online_var_audit_out = Some(PathBuf::from(args.next().ok_or_else(|| {
                     "Missing value for --online-var-audit-out <audit.jsonl>".to_string()
                 })?));
+            }
+            "--alarm-audit-out" => {
+                alarm_options_seen = true;
+                alarm_audit_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --alarm-audit-out <alarm_events.ndjson>".to_string()
+                })?));
+            }
+            "--alarm-hmi-ws" => {
+                alarm_options_seen = true;
+                alarm_hmi_ws =
+                    Some(args.next().ok_or_else(|| {
+                        "Missing value for --alarm-hmi-ws <ws://host:port/path>".to_string()
+                    })?);
+            }
+            "--alarm-scenario-id" => {
+                alarm_options_seen = true;
+                let value = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --alarm-scenario-id <id>".to_string())?;
+                if value.trim().is_empty() {
+                    return Err("--alarm-scenario-id cannot be empty".to_string());
+                }
+                alarm_scenario_id = Some(value);
+            }
+            "--alarm-top" => {
+                alarm_options_seen = true;
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --alarm-top <n>".to_string())?;
+                alarm_top_n = raw
+                    .parse::<usize>()
+                    .map_err(|_| format!("Invalid --alarm-top value (expected usize): {raw}"))?;
+                if alarm_top_n == 0 {
+                    return Err("Invalid --alarm-top value (expected >= 1)".to_string());
+                }
+            }
+            "--alarm-dedup-window-ms" => {
+                alarm_options_seen = true;
+                let raw = args.next().ok_or_else(|| {
+                    "Missing value for --alarm-dedup-window-ms <ms>".to_string()
+                })?;
+                alarm_dedup_window_ms = raw.parse::<u64>().map_err(|_| {
+                    format!("Invalid --alarm-dedup-window-ms value (expected u64): {raw}")
+                })?;
+            }
+            "--alarm-min-interval-ms" => {
+                alarm_options_seen = true;
+                let raw = args.next().ok_or_else(|| {
+                    "Missing value for --alarm-min-interval-ms <ms>".to_string()
+                })?;
+                alarm_min_interval_ms = raw.parse::<u64>().map_err(|_| {
+                    format!("Invalid --alarm-min-interval-ms value (expected u64): {raw}")
+                })?;
             }
             "-h" | "--help" => {
                 return Err(usage.clone());
@@ -4737,6 +4817,37 @@ fn run_sim_plc_subcommand(
     } else {
         None
     };
+    let alarm_audit_path = if alarm_options_seen {
+        Some(
+            alarm_audit_out
+                .clone()
+                .unwrap_or_else(|| default_alarm_event_audit_path(&out_path)),
+        )
+    } else {
+        None
+    };
+    let alarm_scenario_or_recipe_id = if alarm_options_seen {
+        alarm_scenario_id
+            .clone()
+            .unwrap_or_else(|| default_alarm_scenario_or_recipe_id(&scenario_path))
+    } else {
+        String::new()
+    };
+    let alarm_hmi_ws_display = alarm_hmi_ws.clone();
+    let alarm_dispatcher = if let Some(path) = &alarm_audit_path {
+        Some(
+            AlarmDispatcher::new(AlarmDispatchConfig {
+                audit_path: path.clone(),
+                websocket_url: alarm_hmi_ws.clone(),
+                dedup_window_ms: alarm_dedup_window_ms,
+                min_emit_interval_ms: alarm_min_interval_ms,
+                queue_capacity: 64,
+            })
+            .map_err(|err| format!("Failed to initialize alarm dispatcher: {err}"))?,
+        )
+    } else {
+        None
+    };
 
     let mut online_commands = Vec::new();
     if let Some(script_path) = &online_force_script {
@@ -4785,8 +4896,46 @@ fn run_sim_plc_subcommand(
         }
         msg
     })?;
-    fs::write(&out_path, run.trace.into_string())
+    let trace_text = run.trace.into_string();
+    fs::write(&out_path, &trace_text)
         .map_err(|err| format!("Failed to write trace file {out_path:?}: {err}"))?;
+    if let Some(dispatcher) = alarm_dispatcher {
+        let trace_events = rust_plc::trace_diff::parse_trace_jsonl(&trace_text)
+            .map_err(|err| format!("Failed to parse generated trace for alarm events: {err}"))?;
+        let timeout_events = trace_events
+            .iter()
+            .filter(|event| event.reason == "timeout")
+            .collect::<Vec<_>>();
+        if !timeout_events.is_empty() {
+            let diagnosis = diagnose(DiagnosisInput {
+                plc_source: &plc_source,
+                scenario: &scenario,
+                trace_events: Some(trace_events.as_slice()),
+                diff_report: None,
+                timing_report: None,
+                evidence_source: EvidenceSource::RuntimeLive,
+            })
+            .map_err(|err| format!("Failed to build runtime alarm diagnosis: {err}"))?;
+            let evidence_ref = display_path_relative_to_cwd(&out_path);
+            for timeout in timeout_events {
+                let alarm_event = build_alarm_event(AlarmBuildInput {
+                    diagnosis: &diagnosis,
+                    severity: AlarmSeverity::Critical,
+                    first_seen_ms: timeout.tick.saturating_mul(scenario.tick_ms),
+                    top_n: alarm_top_n,
+                    evidence_ref: &evidence_ref,
+                    evidence_source: EvidenceSource::RuntimeLive,
+                    scenario_or_recipe_id: &alarm_scenario_or_recipe_id,
+                });
+                let _ = dispatcher.publish(alarm_event).map_err(|err| {
+                    format!("Failed to enqueue runtime alarm event for publishing: {err}")
+                })?;
+            }
+        }
+        dispatcher
+            .close()
+            .map_err(|err| format!("Failed to finalize runtime alarm dispatcher: {err}"))?;
+    }
     if let Some((config, state_path)) = retain_session {
         let payload = capture_retain_payload(&config, &io);
         write_retain_state(&state_path, &payload)?;
@@ -4797,6 +4946,12 @@ fn run_sim_plc_subcommand(
     }
     if let Some(path) = variable_audit_path {
         eprintln!("sim-plc: online-variable audit {}", path.display());
+    }
+    if let Some(path) = alarm_audit_path {
+        eprintln!("sim-plc: alarm-event audit {}", path.display());
+    }
+    if let Some(ws_url) = alarm_hmi_ws_display {
+        eprintln!("sim-plc: alarm-event realtime {}", ws_url);
     }
     Ok(())
 }

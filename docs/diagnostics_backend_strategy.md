@@ -105,3 +105,22 @@
 - HMI 实时看到：告警级别 + Top-N 原因 + 关键证据
 - 离线报告看到：同一编码体系的完整诊断 JSON
 - 有板/无板/现场三类链路的结论可互相对照
+
+
+## 7. 运行态接入（sim-plc 的最小可用链路）
+
+新增 `sim-plc` 可选参数（仅在需要时开启）：
+
+- `--alarm-audit-out <alarm_events.ndjson>`：审计通道（必需落地）
+- `--alarm-hmi-ws <ws://host:port/path>`：实时通道（可选，失败不阻断）
+- `--alarm-scenario-id <id>`：场景/配方标识
+- `--alarm-top <n>`：上送候选原因 Top-N
+- `--alarm-dedup-window-ms <ms>`：去重窗口
+- `--alarm-min-interval-ms <ms>`：最小发送间隔
+
+运行态在 timeout 触发时生成 `alarm_event`，并同时尝试：
+
+1. 写入 NDJSON 审计文件（追溯）
+2. 推送 WebSocket（HMI 实时显示）
+
+若 WebSocket 不可用，系统会继续运行且保留审计日志，不影响主控制循环。
