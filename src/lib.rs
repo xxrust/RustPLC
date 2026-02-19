@@ -1,6 +1,8 @@
+pub mod alarm_runtime;
 pub mod ast;
 pub mod board_log;
 pub mod board_trace;
+pub mod diagnostics;
 pub mod error;
 pub mod iec_address;
 pub mod io_map;

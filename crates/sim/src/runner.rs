@@ -61,6 +61,15 @@ pub fn run_program_for_scenario<'a>(
     scenario: &Scenario,
     io: &mut SimIo,
 ) -> Result<SimRunOutput, SimRunError> {
+    run_program_for_scenario_with_tick_observer(program, scenario, io, |_| {})
+}
+
+pub fn run_program_for_scenario_with_tick_observer<'a>(
+    program: &'a Program<'a>,
+    scenario: &Scenario,
+    io: &mut SimIo,
+    mut on_tick_start: impl FnMut(&SimIo),
+) -> Result<SimRunOutput, SimRunError> {
     scenario.apply_to_simio(io)?;
 
     let mut rt = Runtime::new(program)?;
@@ -68,6 +77,7 @@ pub fn run_program_for_scenario<'a>(
 
     let mut failure: Option<SimFailure> = None;
     for _ in 0..scenario.duration_ticks() {
+        on_tick_start(io);
         rt.tick_with_trace(io, |e| {
             trace.record(e);
             if failure.is_none() && e.reason == TransitionReason::Timeout {
@@ -145,7 +155,10 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+        };
 
         let yaml = r#"
 seed: 123

@@ -230,3 +230,29 @@ inputs:
         Some("pass")
     );
 }
+
+#[test]
+fn diagnostics_doc_and_cli_usage_include_trace_doctor_and_diag_codes() {
+    let doc =
+        fs::read_to_string(repo_path("docs/m6_diagnostics.md")).expect("read diagnostics doc");
+    for needle in [
+        "trace-doctor",
+        "DIAG-IN-001",
+        "DIAG-ACT-001",
+        "DIAG-INT-001",
+        "DIAG-MAP-001",
+        "DIAG-TIME-001",
+        "evidence_source",
+    ] {
+        assert!(doc.contains(needle), "doc should contain `{needle}`");
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .output()
+        .expect("run rust_plc without args");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("trace-doctor"),
+        "CLI usage should include trace-doctor; got: {stderr}"
+    );
+}

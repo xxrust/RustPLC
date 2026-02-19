@@ -6,21 +6,26 @@ use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, 
 use runtime_core::{TraceEvent, TransitionReason};
 use serde::Serialize;
 
+mod control_kpi;
 mod plant;
 mod report;
 mod runner;
 mod scenario;
 mod waveform;
-mod control_kpi;
+pub use control_kpi::{
+    ControlKpiError, PidControlScenario, PidKpiReport, ProcessModelConfig, run_pid_kpi,
+};
 pub use plant::{CylinderConfig, LimitKind, LimitSensorConfig, Plant, SolenoidValveConfig};
 pub use report::{ScenarioSummary, SimFailure, SimReport};
-pub use runner::{SimRunError, SimRunOutput, run_program_for_scenario};
+pub use runner::{
+    SimRunError, SimRunOutput, run_program_for_scenario,
+    run_program_for_scenario_with_tick_observer,
+};
 pub use scenario::{
-    DigitalBurstEvent, FaultEvent, InputEvent, InputSet, Scenario, ScenarioError, SensorStuckFault,
-    ForceEvent, ForceSet,
+    DigitalBurstEvent, FaultEvent, ForceEvent, ForceSet, InputEvent, InputSet, Scenario,
+    ScenarioError, SensorStuckFault,
 };
 pub use waveform::{export_analog_outputs_csv, export_analog_outputs_jsonl, export_vcd_digital};
-pub use control_kpi::{ControlKpiError, PidControlScenario, PidKpiReport, ProcessModelConfig, run_pid_kpi};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DigitalEdge {
@@ -217,7 +222,12 @@ impl SimIo {
         }
     }
 
-    pub fn schedule_force_digital_input(&mut self, tick: Tick, id: DigitalInputId, value: Option<bool>) {
+    pub fn schedule_force_digital_input(
+        &mut self,
+        tick: Tick,
+        id: DigitalInputId,
+        value: Option<bool>,
+    ) {
         self.scheduled_forces
             .entry(tick.0)
             .or_default()
@@ -227,7 +237,12 @@ impl SimIo {
         }
     }
 
-    pub fn schedule_force_analog_input(&mut self, tick: Tick, id: AnalogInputId, value: Option<f32>) {
+    pub fn schedule_force_analog_input(
+        &mut self,
+        tick: Tick,
+        id: AnalogInputId,
+        value: Option<f32>,
+    ) {
         self.scheduled_forces
             .entry(tick.0)
             .or_default()
@@ -310,8 +325,20 @@ impl SimIo {
         self.do_.len()
     }
 
+    pub fn num_analog_inputs(&self) -> usize {
+        self.ai.len()
+    }
+
     pub fn num_analog_outputs(&self) -> usize {
         self.ao.len()
+    }
+
+    pub fn read_digital_output_value(&self, id: DigitalOutputId) -> bool {
+        self.do_.get(id.0 as usize).copied().unwrap_or(false)
+    }
+
+    pub fn read_analog_output_value(&self, id: AnalogOutputId) -> f32 {
+        self.ao.get(id.0 as usize).copied().unwrap_or(0.0)
     }
 
     fn apply_scheduled_for_current_tick(&mut self) {
@@ -595,7 +622,10 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+        };
 
         let mut io = SimIo::new(1, 1, 0, 0);
         io.schedule_digital_input(Tick(2), DigitalInputId(0), true);

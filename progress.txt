@@ -53,6 +53,9 @@
 - For board HIL timing SLAs, generate a standalone `timing_gate_verdict.json` artifact (thresholds + observed metrics + violations) and make summary artifacts reference it directly.
 - For `hardware_only` Class-D evidence, require per-attachment `provenance.source_path` and keep optional digest/operator/time metadata for audit traceability.
 - For multi-step operator rehearsals, provide one orchestration CLI that both executes the chain and writes a machine-readable step index (pass/fail/skipped + artifact paths).
+- Diagnostics backend candidates should always be emitted in deterministic order (confidence desc, category tie-break), with stable `DIAG-*` issue codes and per-candidate `evidence_source` for cross-source diffability.
+- Keep diagnosis CLI output as a layered contract: top-level `schema_version/evidence_source/anchors/candidates/summary/artifacts` for machines, plus Top-N evidence+next-step rendering for humans.
+- For runtime alarm publishing, keep dispatch non-blocking (`try_send`) with audit-file fallback, and apply per-alarm dedup/rate-limit before enqueueing so HMI outages never stall control execution.
 
 Started: Thu Feb 19 14:03:44  2026
 ## [2026-02-19 14:08:29 CST] - US-001
@@ -227,4 +230,207 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - Online variable scripts using domain names need explicit bindings; include `--online-var-bindings` in automated flows or the run will fail fast.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `commissioning_index.json` is now the canonical machine-readable output for commissioning chain status and artifact discovery.
+---
+
+## [2026-02-19 16:02:17 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added a new deterministic diagnostics backend module (`rust_plc::diagnostics`) that consumes a unified input contract: PLC source + scenario + trace and/or diff, with optional timing report.
+  - Implemented anchor extraction for timeout and first trace mismatch (`AnchorKind::Timeout`, `AnchorKind::FirstTraceMismatch`).
+  - Implemented deterministic rule-scored candidate generation for required categories:
+    - `expected_input_never_changed`
+    - `actuator_command_missing`
+    - `interlock_or_requires_blocked`
+    - `mapping_or_alias_mismatch`
+    - `timeout_budget_too_short`
+  - Added stable per-candidate output fields and coding contract:
+    - `issue_code`, `category`, `rank`, `confidence`, `evidence`, `suggested_fix`, `evidence_source`
+    - evidence source enum supports `no_board|hil_board|runtime_live|mixed`
+  - Added unit-test coverage for contract validity, trace/diff input permutations, anchor detection, deterministic JSON output, and evidence_source serialization stability.
+- Quality checks
+  - `cargo test --lib diagnostics::`
+  - `cargo check --workspace`
+  - `cargo test --workspace`
+- Files changed
+  - `src/diagnostics.rs`
+  - `src/lib.rs`
+  - `prd.json`
+  - `progress.txt`
+  - `docs/diagnostics_backend_strategy.md`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For backend diagnosis contracts, keep all categories emitted each run and sort deterministically (score desc + category tie-break) so CI/HMI/offline consumers can compare outputs reliably.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Running `rustfmt` on `src/lib.rs` can recursively reformat module files; avoid crate-root formatting unless intended.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `rust_plc::diagnostics::diagnose` is now the single entrypoint for Stage-5 deterministic candidate ranking and anchor extraction.
+---
+## [2026-02-19 16:18:27 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added new `trace-doctor` CLI subcommand with deterministic diagnosis output modes:
+    - `--output json` machine contract includes `schema_version`, `evidence_source`, `anchors`, `candidates`, `summary`, `artifacts`
+    - `--output human` prints Top-N candidates with evidence snippets and actionable next-step suggestions.
+  - Added trace-doctor argument support for unified input contract artifacts:
+    - required: `<file.plc> --scenario <scenario.yaml>`
+    - at least one of `--trace <trace.jsonl>` or `--diff <diff_report.json>`
+    - optional `--timing-report <timing_report.json>`, `--evidence-source`, `--top`.
+  - Wired CLI usage/help and stable command-level failure prefix (`[DIAG-000]`) for trace-doctor.
+  - Documented `DIAG-*` diagnosis code family and trace-doctor JSON contract in diagnostics docs.
+  - Added integration coverage:
+    - `tests/trace_doctor.rs` validates JSON contract fields + DIAG issue codes and human Top-N rendering.
+    - `tests/m6_diagnostics.rs` now locks docs/usage visibility for trace-doctor + DIAG code family.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --test trace_doctor --test m6_diagnostics`
+  - `cargo test --workspace`
+- Files changed
+  - `src/main.rs`
+  - `tests/trace_doctor.rs`
+  - `tests/m6_diagnostics.rs`
+  - `docs/m6_diagnostics.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Stage-5 diagnostics consumers are easiest to keep aligned when they all read one JSON contract shape from `trace-doctor` and avoid re-deriving summary/artifact metadata ad hoc.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - `trace-doctor` must reject runs with neither `--trace` nor `--diff`; keep that guard explicit at CLI parsing so failures are immediate and deterministic.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Human output for trace-doctor is emitted on stderr (consistent with other CLI summaries), while JSON output is emitted on stdout.
+---
+
+## [2026-02-19 16:43:38] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added runtime alarm backend module `src/alarm_runtime.rs` with standardized `alarm_event` contract (`alarm_id`, `severity`, `first_seen_ms`, `top_candidates`, `evidence_ref`, `evidence_source`, `scenario_or_recipe_id`).
+  - Added HMI publish adapter paths: realtime WebSocket publishing + NDJSON audit persistence, with graceful fallback to audit-only when WebSocket is unavailable.
+  - Added deterministic dedup/rate-limit guard per alarm ID (`dedup_window_ms`, `min_emit_interval_ms`) to prevent alarm storms.
+  - Integrated runtime alarm generation into `sim-plc` timeout flow, including new CLI flags:
+    - `--alarm-audit-out`
+    - `--alarm-hmi-ws`
+    - `--alarm-scenario-id`
+    - `--alarm-top`
+    - `--alarm-dedup-window-ms`
+    - `--alarm-min-interval-ms`
+  - Added regression coverage for runtime alarm emission and HMI channel outage fallback.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --test runtime_alarm_events --test trace_doctor --test m6_diagnostics`
+  - `cargo test --workspace`
+- Files changed
+  - `Cargo.toml`
+  - `Cargo.lock`
+  - `src/alarm_runtime.rs`
+  - `src/lib.rs`
+  - `src/main.rs`
+  - `tests/runtime_alarm_events.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Runtime alarm transport should always be dual-channel (realtime + audit) so operator visibility and post-mortem traceability remain coupled.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - When adding `sim-plc` optional alarm features, keep alarm path fully opt-in to avoid behavior drift for existing traces.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `AlarmDispatcher::publish` and `AlarmDispatcher::close` in `src/alarm_runtime.rs` are the central control points for realtime/audit publish behavior.
+---
+
+## [2026-02-19 17:41:12] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - `no-board-gate` now auto-generates `diagnosis_report.json` when gate result is fail (trace mismatch and/or realtime threshold fail).
+  - `no-board-gate --output json` contract upgraded (schema_version=2) with fail-path diagnosis fields:
+    - `diagnosis_report`
+    - `diagnosis_top_candidate_code`
+    - `diagnosis_evidence_source`
+  - `commissioning-run` index now pre-registers diagnosis artifact paths for both no-board gate steps:
+    - `gate_nominal_diagnosis`
+    - `gate_fault_diagnosis`
+  - No-board commissioning step artifact lists (A5/B5) now include `diagnosis_report.json` path for failure-time audit alignment.
+  - Added regression tests for fail-path diagnosis artifact generation and commissioning index linkage.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --test no_board_gate --test commissioning_run`
+- Files changed
+  - `src/main.rs`
+  - `tests/no_board_gate.rs`
+  - `tests/commissioning_run.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Gate failures should always emit machine-readable diagnosis artifacts so CI and commissioning indexes can remain audit-complete even when commands return non-zero.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - For failing subcommands called by `commissioning-run`, JSON payloads are still useful and should be captured before status checks.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `run_no_board_gate_subcommand` is now the canonical place where gate failure diagnosis artifacts are materialized.
+---
+
+## [2026-02-19 17:41:13] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added optional tick-level IO snapshot artifact support to `sim-plc`:
+    - `--io-snapshot-out <io_snapshot.json>`
+    - artifact schema includes `schema_version`, `tick_ms`, and per-tick DI/AI/DO/AO vectors.
+  - Extended `sim` runner with tick observer hook (`run_program_for_scenario_with_tick_observer`) to capture deterministic tick-start snapshots without changing existing call sites.
+  - Added `SimIo` getters needed for output-state snapshot capture (`num_analog_inputs`, output read helpers).
+  - Extended diagnostics input contract with optional `io_snapshot`.
+  - Diagnostics output now records `evidence_inputs` and can explicitly mark `io_snapshot` consumption.
+  - Trace-doctor now supports `--io-snapshot <io_snapshot.json>` and reports the snapshot path in artifacts.
+  - Added regression tests for snapshot artifact schema and snapshot-aware trace-doctor evidence reporting.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --lib diagnostics::`
+  - `cargo test --test trace_doctor --test io_snapshot_diagnostics`
+- Files changed
+  - `crates/sim/src/lib.rs`
+  - `crates/sim/src/runner.rs`
+  - `src/diagnostics.rs`
+  - `src/main.rs`
+  - `src/alarm_runtime.rs`
+  - `tests/trace_doctor.rs`
+  - `tests/io_snapshot_diagnostics.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Adding optional evidence artifacts works best when the diagnosis contract explicitly declares consumed inputs (`evidence_inputs`) instead of relying on inference by downstream tools.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Snapshot collection timing semantics must be documented (tick-start snapshot) to avoid confusion when comparing input/output transitions.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `capture_io_tick_snapshot` in `src/main.rs` defines the current snapshot semantics for `sim-plc`.
+---
+
+## [2026-02-19 17:41:14] - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added comprehensive methodology supplement doc:
+    - `docs/diagnostics_backend_methodology.md`
+    - includes rule graph, scoring strategy, HMI `alarm_event` field definitions, AI boundary statement, timeout/sensor-no-response examples, and output-format change notes.
+  - Updated strategy doc to reference optional IO snapshot artifact and methodology supplement:
+    - `docs/diagnostics_backend_strategy.md`
+  - Updated diagnostics contract doc to include `evidence_inputs` and `io_snapshot` artifact visibility:
+    - `docs/m6_diagnostics.md`
+  - Added wiki pointer page:
+    - `docs/wiki/Diagnostics-Backend-Methodology.md`
+  - Added lightweight doc contract test to prevent drift of required policy/methodology sections.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --test diagnostics_backend_doc_contract --test m6_diagnostics`
+- Files changed
+  - `docs/diagnostics_backend_methodology.md`
+  - `docs/diagnostics_backend_strategy.md`
+  - `docs/m6_diagnostics.md`
+  - `docs/wiki/Diagnostics-Backend-Methodology.md`
+  - `tests/diagnostics_backend_doc_contract.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Documentation drift is easiest to control with one contract test that checks critical policy phrases instead of broad snapshot diffs.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - When contracts evolve (e.g., no-board JSON schema bump), a plain-language format-diff section is necessary for downstream integration teams.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `docs/diagnostics_backend_methodology.md` is now the canonical reference for Stage-5 diagnostics backend method and governance boundaries.
 ---

@@ -7,12 +7,18 @@ This document introduces the M6 diagnostics package for scenario/build/gate work
 - `SCN-*`: scenario authoring/validation diagnostics
 - `GATE-*`: no-board gate command failures
 - `BLD-*`: RP2040 build-flow failures
+- `DIAG-*`: deterministic trace diagnosis candidates/errors
 
 Examples:
 
 - `SCN-MAP-002`: referenced digital input id does not exist in PLC topology
 - `SCN-TICK-001`: a scenario `at_ms` field is not aligned to `tick_ms`
 - `SCN-RISK-001`: start input is held true without release (same-tick-loop risk)
+- `DIAG-IN-001`: expected input never changed before timeout anchor
+- `DIAG-ACT-001`: actuator command likely missing around mismatch anchor
+- `DIAG-INT-001`: interlock/requires preconditions likely blocked
+- `DIAG-MAP-001`: mapping or alias mismatch likely
+- `DIAG-TIME-001`: timeout budget likely too short
 
 ## 2) Unified Output Mode (`--output human|json`)
 
@@ -30,6 +36,14 @@ rust_plc no-board-gate examples/two_cylinder.plc \
 
 rust_plc build-rp2040 examples/two_cylinder.plc \
   --out out/build_rp2040 \
+  --output json
+
+rust_plc trace-doctor examples/two_cylinder.plc \
+  --scenario scenarios/two_cylinder.yaml \
+  --trace out/no_board_gate/sil_trace.jsonl \
+  --diff out/no_board_gate/diff_report.json \
+  --timing-report out/no_board_gate/timing_report.json \
+  --evidence-source no_board \
   --output json
 ```
 
@@ -88,3 +102,15 @@ inputs:
       digital_inputs:
         10: false
 ```
+
+## 5) `trace-doctor` JSON Contract
+
+`trace-doctor --output json` returns deterministic machine-readable fields:
+
+- `schema_version`
+- `evidence_source` (`no_board|hil_board|runtime_live|mixed`)
+- `evidence_inputs` (`trace|diff|timing_report|io_snapshot` used in this run)
+- `anchors`
+- `candidates` (stable `DIAG-*` issue codes)
+- `summary`
+- `artifacts` (PLC/scenario/trace/diff/timing/io_snapshot paths)
