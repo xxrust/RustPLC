@@ -53,6 +53,7 @@
 - For board HIL timing SLAs, generate a standalone `timing_gate_verdict.json` artifact (thresholds + observed metrics + violations) and make summary artifacts reference it directly.
 - For `hardware_only` Class-D evidence, require per-attachment `provenance.source_path` and keep optional digest/operator/time metadata for audit traceability.
 - For multi-step operator rehearsals, provide one orchestration CLI that both executes the chain and writes a machine-readable step index (pass/fail/skipped + artifact paths).
+- Diagnostics backend candidates should always be emitted in deterministic order (confidence desc, category tie-break), with stable `DIAG-*` issue codes and per-candidate `evidence_source` for cross-source diffability.
 
 Started: Thu Feb 19 14:03:44  2026
 ## [2026-02-19 14:08:29 CST] - US-001
@@ -227,4 +228,38 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - Online variable scripts using domain names need explicit bindings; include `--online-var-bindings` in automated flows or the run will fail fast.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `commissioning_index.json` is now the canonical machine-readable output for commissioning chain status and artifact discovery.
+---
+
+## [2026-02-19 16:02:17 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added a new deterministic diagnostics backend module (`rust_plc::diagnostics`) that consumes a unified input contract: PLC source + scenario + trace and/or diff, with optional timing report.
+  - Implemented anchor extraction for timeout and first trace mismatch (`AnchorKind::Timeout`, `AnchorKind::FirstTraceMismatch`).
+  - Implemented deterministic rule-scored candidate generation for required categories:
+    - `expected_input_never_changed`
+    - `actuator_command_missing`
+    - `interlock_or_requires_blocked`
+    - `mapping_or_alias_mismatch`
+    - `timeout_budget_too_short`
+  - Added stable per-candidate output fields and coding contract:
+    - `issue_code`, `category`, `rank`, `confidence`, `evidence`, `suggested_fix`, `evidence_source`
+    - evidence source enum supports `no_board|hil_board|runtime_live|mixed`
+  - Added unit-test coverage for contract validity, trace/diff input permutations, anchor detection, deterministic JSON output, and evidence_source serialization stability.
+- Quality checks
+  - `cargo test --lib diagnostics::`
+  - `cargo check --workspace`
+  - `cargo test --workspace`
+- Files changed
+  - `src/diagnostics.rs`
+  - `src/lib.rs`
+  - `prd.json`
+  - `progress.txt`
+  - `docs/diagnostics_backend_strategy.md`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For backend diagnosis contracts, keep all categories emitted each run and sort deterministically (score desc + category tie-break) so CI/HMI/offline consumers can compare outputs reliably.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Running `rustfmt` on `src/lib.rs` can recursively reformat module files; avoid crate-root formatting unless intended.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `rust_plc::diagnostics::diagnose` is now the single entrypoint for Stage-5 deterministic candidate ranking and anchor extraction.
 ---

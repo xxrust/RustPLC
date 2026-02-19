@@ -1,87 +1,106 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/stage4-runtime-semantic-hardening",
-  "description": "Stage-4 focus: make online variable control semantically effective at runtime, harden cross-platform CI script contracts, and advance operability/safety gates.",
+  "branchName": "ralph/stage5-diagnostics-backend",
+  "description": "Stage-5 聚焦（后端优先，前端可后接）：构建统一诊断引擎（无板/有板/真实运行时通用），针对超时与传感器无响应给出确定性根因排序，并把告警与原因推测在真实工况下直接上送 HMI。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Make online variable control plane semantically effective at runtime",
-      "description": "As a commissioning engineer, I want online variable operations to deterministically influence runtime evaluation (not audit-only) so diagnosis scripts can reproduce real logic behavior.",
+      "title": "构建有/无板与真实运行时通用的确定性诊断引擎",
+      "description": "作为调试工程师，当传感器未按预期响应并导致等待超时时，我希望系统给出按概率排序的候选原因及证据，且在 no-board、HIL/board、runtime live 三类数据源下结论口径一致。",
       "acceptanceCriteria": [
-        "`sim-plc` online variable commands can bind BOOL/REAL variables to runtime-evaluated input channels via explicit binding contract",
-        "Missing/invalid variable binding fails fast with actionable error messages",
-        "Replay remains deterministic under tick-aligned scripts (same inputs -> same audit output)",
-        "Docs clearly describe variable binding format, runtime effect, and safety boundary",
+        "诊断可消费统一输入契约：PLC 源文件 + scenario + trace/diff（可选 timing_report）",
+        "引擎可识别失败锚点（至少包含 timeout 锚点与首个 trace mismatch 锚点）",
+        "输出稳定字段：issue_code、category、rank、confidence、evidence、suggested_fix、evidence_source",
+        "`evidence_source` 至少支持 `no_board|hil_board|runtime_live|mixed`",
+        "至少支持以下候选类别：expected_input_never_changed、actuator_command_missing、interlock_or_requires_blocked、mapping_or_alias_mismatch、timeout_budget_too_short",
+        "相同输入工件必须产生确定性的排序与确定性的 JSON 输出",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "P0-1 semantic gap closure."
+      "notes": "先采用规则驱动反向推断；门禁判定不依赖 AI。"
     },
     {
       "id": "US-002",
-      "title": "Harden CI against cross-platform script mode and EOL drift",
-      "description": "As a release owner, I want script executability and line-ending assumptions enforced in CI so Linux runners do not fail on permission/EOL regressions.",
+      "title": "新增 trace-doctor CLI 与机器可读诊断契约",
+      "description": "作为工具使用者，我希望有独立命令生成 human/json 两种诊断结果，便于命令行、CI 和后续前端共享同一份后端诊断产物。",
       "acceptanceCriteria": [
-        "CI includes an explicit check that required gate scripts are executable in git metadata",
-        "Repository defines line-ending policy for shell scripts and keeps scripts LF-clean",
-        "Add a local/CI preflight command that fails on script mode or CRLF drift",
-        "Runbook documents how to reproduce/fix mode/EOL failures",
+        "新增 `trace-doctor` CLI 命令，支持 `--output human|json`",
+        "JSON 契约至少包含 schema_version、anchors、candidates、summary、artifacts、evidence_source",
+        "human 输出可打印 Top-N 候选原因、关键证据摘要和下一步建议",
+        "错误码族 `DIAG-*` 稳定并有文档说明",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "P0-2 delivery hardening."
+      "passes": false,
+      "notes": "为前后端解耦提供统一后端契约。"
     },
     {
       "id": "US-003",
-      "title": "Promote real-board timing evidence to first-class HIL gate",
-      "description": "As a safety/release engineer, I want board timing evidence thresholds to be a first-class HIL pass/fail gate so trace match and realtime evidence are enforced together.",
+      "title": "在真实工况把告警与原因推测直接上送 HMI",
+      "description": "作为产线值班人员，当现场发生 timeout 或传感器无响应时，我希望 HMI 可以直接看到告警与 Top-N 可能原因，而不是只看到单一超时现象。",
       "acceptanceCriteria": [
-        "HIL gate can fail on configurable realtime thresholds from board timing evidence",
-        "Gate outputs include concise timing verdict and threshold context in artifacts",
-        "Docs explain threshold selection and expected tuning workflow",
-        "Add regression tests for pass/fail timing threshold behavior",
+        "运行态产生标准化 `alarm_event`（包含 alarm_id、severity、first_seen_ms、top_candidates、evidence_ref）",
+        "提供 HMI 发布适配层，至少支持一个实时通道（如 WebSocket）和一个审计通道（NDJSON 文件）",
+        "发布消息必须携带 `evidence_source` 与 `scenario_or_recipe_id`，便于追溯",
+        "同一故障在抖动期间支持去重/限流，避免 HMI 告警风暴",
+        "HMI 通道不可用时不影响主控制循环，且补写本地审计日志",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "P0-3 safety evidence hardening."
+      "passes": false,
+      "notes": "本故事只交付后端告警发布与契约，不包含 HMI 页面开发。"
     },
     {
       "id": "US-004",
-      "title": "Add provenance metadata for Class-D manual evidence attachments",
-      "description": "As a safety auditor, I want Class-D manual attachments to carry provenance metadata so evidence origin and integrity are reviewable.",
+      "title": "把诊断工件接入 no-board-gate 与 commissioning-run",
+      "description": "作为发布负责人，我希望 no-board/commissioning 失败时自动产出诊断工件，并与运行态告警使用同一诊断编码体系，提升排障与审计一致性。",
       "acceptanceCriteria": [
-        "Class-D checklist/evidence supports attachment provenance fields (at least source path + optional digest/operator/time)",
-        "Verifier validates provenance field presence/shape for Class-D manual artifacts",
-        "Docs link provenance requirements to abnormal-exit workflow",
-        "Regression tests cover valid/invalid provenance payloads",
+        "`no-board-gate` 失败时自动写出 `diagnosis_report.json`",
+        "`no-board-gate --output json` 包含 diagnosis 工件路径、top candidate code、evidence_source",
+        "`commissioning-run` 在 `commissioning_index.json` 中记录失败步骤的 diagnosis 工件路径",
+        "回归测试覆盖受控失败样例，验证工件存在与 schema 合法性",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "P1-4 auditability uplift."
+      "passes": false,
+      "notes": "保证离线评审结果与在线告警编码可对齐。"
     },
     {
       "id": "US-005",
-      "title": "Provide commissioning-run command to execute standard nominal/fault rehearsal",
-      "description": "As a field engineer, I want one command to execute the documented commissioning rehearsal flow so operator execution is consistent and less error-prone.",
+      "title": "用可选 Tick 级 IO 快照增强诊断证据",
+      "description": "作为诊断分析者，我希望在需要时使用 Tick 级 IO 快照提升诊断置信度，而在快照缺失时仍可降级运行。",
       "acceptanceCriteria": [
-        "Add a `commissioning-run` command (or equivalent) that executes documented nominal and fault rehearsal chains",
-        "Command writes structured artifact index with per-step pass/fail outcomes",
-        "Commissioning playbook docs are updated to use the unified command",
-        "Regression tests verify artifact contract and command success path",
+        "`sim-plc` 支持可选 IO 快照工件（例如逐 tick DI/AI/DO/AO 状态）",
+        "诊断引擎在快照存在时可利用快照；不存在时可平滑降级",
+        "诊断输出可标注当前使用了哪些证据来源",
+        "快照 schema 版本化并有回归测试保护",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "P1-5 operator workflow automation."
+      "passes": false,
+      "notes": "属于可选增强，不得破坏现有流水线。"
+    },
+    {
+      "id": "US-006",
+      "title": "补齐诊断方法学文档与 AI 使用边界",
+      "description": "作为安全/合规评审者，我希望有清晰的方法学文档，说明规则推断流程、置信度计算、HMI 告警字段定义，以及 AI 在系统中的边界。",
+      "acceptanceCriteria": [
+        "在 `docs/` 新增或更新诊断后端方法学文档，包含规则图、评分策略、HMI 事件字段",
+        "文档明确声明：门禁关键诊断采用确定性规则；AI（若后续引入）仅用于解释增强且不阻断",
+        "包含传感器无响应与 timeout 的诊断示例，以及 HMI 呈现示例",
+        "新增轻量文档契约测试，防止关键策略文本漂移",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "兼顾审计可解释性、现场可读性与后续扩展空间。"
     }
   ]
 }
