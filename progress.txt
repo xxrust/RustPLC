@@ -49,6 +49,7 @@
 - For RP2040 daily HIL gating, keep multi-case bundles in `scenarios/rp2040_hil_gate/cases.json` and attach per-case assertion specs (`axis/signal/step/tick`) so failures are locatable from `assertions_report.json`.
 - For RP2040 abnormal-exit safety audits, keep the A/B/C/D source matrix in `scenarios/rp2040_hil_gate/abnormal_exit/matrix.json`, per-class evidence in `.../evidence/<class>.json`, and verify with `scripts/abnormal_exit_matrix_verify.py` (default auto-required classes are A/B/C; D remains `hardware_only` manual-chain validation).
 - For command-line diagnostics in CI, prefer `--output json` on `scenario-validate`, `scenario-doctor`, `no-board-gate`, and `build-rp2040`, and consume stable issue codes (`SCN-*`, `GATE-*`, `BLD-*`) instead of brittle free-text matching.
+- Cross-platform CI for shell tooling should run `scripts/ci_script_contract_preflight.sh` early, enforce git mode `100755` on required gate scripts, and reject CRLF in tracked `*.sh`.
 
 Started: Thu Feb 19 14:03:44  2026
 ## [2026-02-19 14:08:29 CST] - US-001
@@ -90,4 +91,35 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - If online-variable names are domain-friendly (e.g., `diag_latch`), you need explicit bindings; auto mapping is only safe for channel-like names (`DI<n>/AI<n>`).
   - Useful context (e.g., "the evaluation panel is in component X")
     - `bound_channel` in `online_var_audit.jsonl` is now the direct bridge between variable-level commands and runtime IO-level effects.
+---
+## [2026-02-19 14:18:42 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added repository-level script line-ending policy in `.gitattributes` (`*.sh`/`*.py` => LF) to stop platform drift.
+  - Added `scripts/ci_script_contract_preflight.sh` to enforce required gate-script executable metadata (`100755`) and fail on CRLF in tracked shell scripts.
+  - Hooked preflight into both CI (`.github/workflows/rp2040_regression.yml`) and local umbrella gate (`scripts/stage3_runtime_dev_gate.sh`) so failures surface early.
+  - Updated Stage-3 CI runbook with preflight execution and remediation guidance.
+  - Added `tests/stage3_ci_gate_runbook_doc.rs` to lock required runbook preflight content.
+- Quality checks
+  - `scripts/ci_script_contract_preflight.sh`
+  - `cargo test --test stage3_ci_gate_runbook_doc`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `cargo check --workspace`
+- Files changed
+  - `.gitattributes`
+  - `.github/workflows/rp2040_regression.yml`
+  - `scripts/ci_script_contract_preflight.sh`
+  - `scripts/rp2040_hil_daily_gate.sh` (mode fix to executable)
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `docs/stage3_ci_gate_runbook.md`
+  - `tests/stage3_ci_gate_runbook_doc.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For CI script reliability, enforce mode and EOL contracts via a dedicated preflight script and run it before longer test suites.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - `git ls-files --stage` reflects tracked metadata only; new scripts must be `git add --chmod=+x` to ensure CI sees executable mode.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `scripts/stage3_runtime_dev_gate.sh` is the local developer parity entrypoint for `stage3-runtime-dev-gates` workflow behavior.
 ---
