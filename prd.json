@@ -32,8 +32,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已接入 component_topology 结构与 CLI 校验命令，支持连接关系/端口方向/必需输入连接校验与 roundtrip 持久化。"
     },
     {
       "id": "US-003",

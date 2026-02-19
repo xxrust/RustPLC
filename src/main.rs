@@ -5,7 +5,7 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program,
 };
-use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
+use rust_plc::verification::{verify_all, VerificationSummary, WarningEntry, WarningLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
@@ -19,21 +19,22 @@ use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, 
 use petgraph::Direction;
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::alarm_runtime::{
-    AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity, build_alarm_event,
+    build_alarm_event, AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity,
 };
+use rust_plc::component_topology::{parse_component_topology_json, write_component_topology_json};
 use rust_plc::diagnostics::{
-    DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport, EvidenceInputKind,
-    EvidenceSource, IoSnapshotArtifact, IoTickSnapshot, diagnose,
+    diagnose, DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport,
+    EvidenceInputKind, EvidenceSource, IoSnapshotArtifact, IoTickSnapshot,
 };
 use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
 use rust_plc::sequence_lint::{
-    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
+    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
 };
-use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
-use rust_plc::tick_timing::{TickTimingSample, parse_tick_timing_jsonl, to_tick_timing_jsonl};
-use rust_plc::timing_report::{TimingReport, build_timing_report};
+use rust_plc::sim_regress::{run_sim_regress_with_options, SimRegressOptions, SimRegressSummary};
+use rust_plc::tick_timing::{parse_tick_timing_jsonl, to_tick_timing_jsonl, TickTimingSample};
+use rust_plc::timing_report::{build_timing_report, TimingReport};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -1487,6 +1488,13 @@ fn main() {
         }
         return;
     }
+    if first == "component-topology-validate" {
+        if let Err(msg) = run_component_topology_validate_subcommand(&program, args) {
+            eprintln!("[CTOP-000] {msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "no-board-gate" {
         if let Err(msg) = run_no_board_gate_subcommand(&program, args) {
             eprintln!("[GATE-000] {msg}");
@@ -1831,6 +1839,9 @@ fn print_usage(program: &str) {
     );
     eprintln!("  {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]");
     eprintln!("  {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>");
+    eprintln!(
+        "  {program} component-topology-validate <topology.json> [--output <human|json>] [--normalized-out <normalized_topology.json>]"
+    );
     eprintln!(
         "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]"
     );
@@ -7069,8 +7080,128 @@ fn run_io_map_normalize_subcommand(
     Ok(())
 }
 
+fn run_component_topology_validate_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = format!(
+        "Usage: {program} component-topology-validate <topology.json> [--output <human|json>] [--normalized-out <normalized_topology.json>]"
+    );
+    let Some(topology_path) = args.next() else {
+        return Err(usage);
+    };
+    let topology_path = PathBuf::from(topology_path);
+    let mut output_mode = CliOutputMode::Human;
+    let mut normalized_out: Option<PathBuf> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
+            "--normalized-out" => {
+                normalized_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --normalized-out <normalized_topology.json>".to_string()
+                })?));
+            }
+            "-h" | "--help" => return Err(usage.clone()),
+            other => {
+                return Err(format!(
+                    "Unknown argument for component-topology-validate: {other}"
+                ));
+            }
+        }
+    }
+
+    let text = fs::read_to_string(&topology_path)
+        .map_err(|err| format!("Failed to read {}: {err}", topology_path.display()))?;
+    let topology = parse_component_topology_json(&text)
+        .map_err(|err| format_component_topology_validate_error(&topology_path, &err))?;
+
+    if let Some(path) = &normalized_out {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent).map_err(|err| {
+                    format!(
+                        "Failed to create normalized topology directory {}: {err}",
+                        parent.display()
+                    )
+                })?;
+            }
+        }
+        write_component_topology_json(path, &topology)?;
+    }
+
+    if output_mode == CliOutputMode::Json {
+        #[derive(Serialize)]
+        struct ComponentTopologyValidateJson {
+            schema_version: u32,
+            command: &'static str,
+            output: &'static str,
+            status: &'static str,
+            topology: String,
+            normalized_topology: Option<String>,
+            component_count: usize,
+            connection_count: usize,
+        }
+
+        let mut body = serde_json::to_string_pretty(&ComponentTopologyValidateJson {
+            schema_version: 1,
+            command: "component-topology-validate",
+            output: output_mode.as_str(),
+            status: "pass",
+            topology: display_path_relative_to_cwd(&topology_path),
+            normalized_topology: normalized_out
+                .as_ref()
+                .map(|path| display_path_relative_to_cwd(path)),
+            component_count: topology.components.len(),
+            connection_count: topology.connections.len(),
+        })
+        .map_err(|err| format!("Failed to serialize component-topology JSON output: {err}"))?;
+        body.push('\n');
+        print!("{body}");
+    } else {
+        eprintln!(
+            "component-topology-validate: PASS (components={}, connections={})",
+            topology.components.len(),
+            topology.connections.len()
+        );
+        eprintln!("  topology: {}", topology_path.display());
+        if let Some(path) = normalized_out {
+            eprintln!("  normalized_topology: {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+fn format_component_topology_validate_error(
+    path: &Path,
+    err: &rust_plc::component_topology::ComponentTopologyValidationError,
+) -> String {
+    let mut msg = format!(
+        "component topology validation failed for {} ({} issue(s))",
+        path.display(),
+        err.issues.len()
+    );
+    for issue in err.issues.iter().take(8) {
+        msg.push_str(&format!(
+            "\n- [{}] {}: {}",
+            issue.code, issue.path, issue.message
+        ));
+    }
+    if err.issues.len() > 8 {
+        msg.push_str(&format!("\n- ... {} more issue(s)", err.issues.len() - 8));
+    }
+    msg
+}
+
 fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
-    use rust_plc::iec_address::{LogicalChannelKind, parse_iec_address};
+    use rust_plc::iec_address::{parse_iec_address, LogicalChannelKind};
     use toml::value::Table;
 
     let root = v

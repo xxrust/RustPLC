@@ -39,3 +39,45 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - Running `cargo fmt` at workspace scope can touch many unrelated files in this repo; prefer file-scoped formatting during focused story work.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `parse_component_library_json` is now the single entrypoint for component-library schema validation.
+
+## [2026-02-19 18:18:30 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added new topology contract module: `src/component_topology.rs`.
+  - Introduced topology schema:
+    - `ComponentTopology` (`schema_version`, `component_library`, `components`, `connections`)
+    - `ComponentInstance` (`id`, `component_id`, `params`)
+    - `ComponentConnection` (`from`, `to`)
+  - Implemented deterministic validation with stable issue codes:
+    - schema version checks
+    - component-library embedding checks
+    - instance duplicate/unknown component checks
+    - endpoint format checks (`instance.port`)
+    - connection direction checks (output -> input only)
+    - required-input connectivity checks for critical ports
+  - Added topology persistence helper:
+    - `write_component_topology_json` (normalized JSON write)
+  - Added CLI command:
+    - `component-topology-validate <topology.json> [--output <human|json>] [--normalized-out <normalized_topology.json>]`
+  - Added CLI usage wiring, dispatch wiring, and structured JSON output contract.
+  - Added tests:
+    - module tests for parse + invalid direction + missing required connection
+    - CLI integration tests for JSON pass payload and failure stable-code reporting.
+- Quality checks
+  - `cargo test --lib component_topology::`
+  - `cargo test --test component_topology_validate`
+  - `cargo check --workspace`
+- Files changed
+  - `src/component_topology.rs`
+  - `src/main.rs`
+  - `src/lib.rs`
+  - `tests/component_topology_validate.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Embedding one validated schema (`component_library`) inside another (`component_topology`) is easier to maintain by remapping issue codes rather than duplicating validation logic.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Port-direction validation must happen after instance-to-component resolution, otherwise unknown instance and wrong-port errors become ambiguous.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `run_component_topology_validate_subcommand` in `src/main.rs` is now the command-level validation entrypoint for topology JSON files.
