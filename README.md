@@ -48,6 +48,105 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 
 ---
 
+## 系统架构
+
+```mermaid
+flowchart TB
+    subgraph INPUT["📝 输入层"]
+        DSL[".plc DSL 文件"]
+        SCENARIO["场景 YAML"]
+    end
+
+    subgraph COMPILER["⚙️ 编译器核心"]
+        PARSER["Parser (PEG)"]
+        AST["AST"]
+        SEMANTIC["语义分析 + 预处理"]
+        IR["IR (拓扑图 + 状态机 + 约束集)"]
+
+        PARSER --> AST
+        AST --> SEMANTIC
+        SEMANTIC --> IR
+    end
+
+    subgraph VERIFY["🔬 验证引擎（并行）"]
+        SAFETY["Safety 引擎<br/>BMC + k-归纳"]
+        LIVENESS["Liveness 引擎<br/>SCC + 可达性"]
+        TIMING["Timing 引擎<br/>关键路径分析"]
+        CAUSALITY["Causality 引擎<br/>拓扑 BFS"]
+    end
+
+    subgraph RUNTIME["🏃 运行时层"]
+        RUNTIME_CORE["runtime-core<br/>确定性状态机执行器"]
+        SIM_IO["SimIO<br/>仿真 I/O 层"]
+        VIRTUAL_BOARD["Virtual Board<br/>虚拟板级 Runner"]
+        RP2040_HAL["RP2040 HAL<br/>硬件抽象层"]
+    end
+
+    subgraph ANALYSIS["📊 分析与门禁"]
+        TRACE_DIFF["trace-diff<br/>SIL vs Board 对比"]
+        TIMING_REPORT["timing-report<br/>p50/p95/p99 统计"]
+        NO_BOARD_GATE["no-board-gate<br/>实时阈值门禁"]
+        RELEASE_BUNDLE["release-bundle<br/>可审计交付包"]
+    end
+
+    subgraph OUTPUT["📦 输出层"]
+        REPORT["verification_report.json"]
+        TRACE["trace.jsonl"]
+        FIRMWARE["RP2040 固件 (UF2)"]
+        BUNDLE["release-bundle<br/>(SHA 清单 + 元数据)"]
+    end
+
+    DSL --> PARSER
+    IR --> SAFETY
+    IR --> LIVENESS
+    IR --> TIMING
+    IR --> CAUSALITY
+
+    SAFETY --> REPORT
+    LIVENESS --> REPORT
+    TIMING --> REPORT
+    CAUSALITY --> REPORT
+
+    IR --> RUNTIME_CORE
+    SCENARIO --> SIM_IO
+    RUNTIME_CORE --> SIM_IO
+    RUNTIME_CORE --> VIRTUAL_BOARD
+    RUNTIME_CORE --> RP2040_HAL
+
+    SIM_IO --> TRACE
+    VIRTUAL_BOARD --> TRACE
+    RP2040_HAL --> FIRMWARE
+
+    TRACE --> TRACE_DIFF
+    TRACE --> TIMING_REPORT
+    TRACE_DIFF --> NO_BOARD_GATE
+    TIMING_REPORT --> NO_BOARD_GATE
+    NO_BOARD_GATE --> RELEASE_BUNDLE
+    RELEASE_BUNDLE --> BUNDLE
+
+    style COMPILER fill:#e1f5ff
+    style VERIFY fill:#fff4e1
+    style RUNTIME fill:#e8f5e9
+    style ANALYSIS fill:#f3e5f5
+```
+
+### 关键模块说明
+
+| 模块 | 职责 | 关键技术 |
+|------|------|----------|
+| **Parser** | `.plc` → AST | PEG 解析器（pest） |
+| **语义分析** | AST → IR，repeat/delay 展开 | 拓扑推断、类型检查 |
+| **IR** | 中间表示 | petgraph DiGraph（拓扑 + 状态机） |
+| **四大验证引擎** | 并行证明安全性/活性/时序/因果 | BMC、k-归纳、SCC、BFS |
+| **runtime-core** | 确定性状态机执行 | no_std 兼容，可插拔 I/O |
+| **SimIO** | SIL 仿真 I/O 层 | 场景驱动、故障注入、Plant 模型 |
+| **Virtual Board** | 虚拟板级 Runner | 模拟真实板行为 + tick_timing 采样 |
+| **RP2040 HAL** | 硬件抽象层 | GPIO、ADC、PWM、PIO（运动控制） |
+| **trace-diff** | SIL vs Board 对比 | 逐 tick 差异检测 |
+| **no-board-gate** | 无板门禁 | 实时阈值检查（p99、overrun） |
+
+---
+
 ## 核心能力
 
 | 能力 | 说明 |

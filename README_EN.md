@@ -48,6 +48,105 @@ Verification passed:
 
 ---
 
+## System Architecture
+
+```mermaid
+flowchart TB
+    subgraph INPUT["📝 Input Layer"]
+        DSL[".plc DSL File"]
+        SCENARIO["Scenario YAML"]
+    end
+
+    subgraph COMPILER["⚙️ Compiler Core"]
+        PARSER["Parser (PEG)"]
+        AST["AST"]
+        SEMANTIC["Semantic Analysis + Preprocessing"]
+        IR["IR (Topology Graph + State Machine + Constraint Set)"]
+
+        PARSER --> AST
+        AST --> SEMANTIC
+        SEMANTIC --> IR
+    end
+
+    subgraph VERIFY["🔬 Verification Engines (Parallel)"]
+        SAFETY["Safety Engine<br/>BMC + k-induction"]
+        LIVENESS["Liveness Engine<br/>SCC + Reachability"]
+        TIMING["Timing Engine<br/>Critical Path Analysis"]
+        CAUSALITY["Causality Engine<br/>Topology BFS"]
+    end
+
+    subgraph RUNTIME["🏃 Runtime Layer"]
+        RUNTIME_CORE["runtime-core<br/>Deterministic State Machine Executor"]
+        SIM_IO["SimIO<br/>Simulation I/O Layer"]
+        VIRTUAL_BOARD["Virtual Board<br/>Virtual Board Runner"]
+        RP2040_HAL["RP2040 HAL<br/>Hardware Abstraction Layer"]
+    end
+
+    subgraph ANALYSIS["📊 Analysis & Gating"]
+        TRACE_DIFF["trace-diff<br/>SIL vs Board Comparison"]
+        TIMING_REPORT["timing-report<br/>p50/p95/p99 Statistics"]
+        NO_BOARD_GATE["no-board-gate<br/>Real-Time Threshold Gate"]
+        RELEASE_BUNDLE["release-bundle<br/>Auditable Delivery Package"]
+    end
+
+    subgraph OUTPUT["📦 Output Layer"]
+        REPORT["verification_report.json"]
+        TRACE["trace.jsonl"]
+        FIRMWARE["RP2040 Firmware (UF2)"]
+        BUNDLE["release-bundle<br/>(SHA Manifest + Metadata)"]
+    end
+
+    DSL --> PARSER
+    IR --> SAFETY
+    IR --> LIVENESS
+    IR --> TIMING
+    IR --> CAUSALITY
+
+    SAFETY --> REPORT
+    LIVENESS --> REPORT
+    TIMING --> REPORT
+    CAUSALITY --> REPORT
+
+    IR --> RUNTIME_CORE
+    SCENARIO --> SIM_IO
+    RUNTIME_CORE --> SIM_IO
+    RUNTIME_CORE --> VIRTUAL_BOARD
+    RUNTIME_CORE --> RP2040_HAL
+
+    SIM_IO --> TRACE
+    VIRTUAL_BOARD --> TRACE
+    RP2040_HAL --> FIRMWARE
+
+    TRACE --> TRACE_DIFF
+    TRACE --> TIMING_REPORT
+    TRACE_DIFF --> NO_BOARD_GATE
+    TIMING_REPORT --> NO_BOARD_GATE
+    NO_BOARD_GATE --> RELEASE_BUNDLE
+    RELEASE_BUNDLE --> BUNDLE
+
+    style COMPILER fill:#e1f5ff
+    style VERIFY fill:#fff4e1
+    style RUNTIME fill:#e8f5e9
+    style ANALYSIS fill:#f3e5f5
+```
+
+### Key Module Descriptions
+
+| Module | Responsibility | Key Technology |
+|--------|----------------|----------------|
+| **Parser** | `.plc` → AST | PEG parser (pest) |
+| **Semantic Analysis** | AST → IR, repeat/delay expansion | Topology inference, type checking |
+| **IR** | Intermediate Representation | petgraph DiGraph (topology + state machine) |
+| **Four Verification Engines** | Parallel proof of safety/liveness/timing/causality | BMC, k-induction, SCC, BFS |
+| **runtime-core** | Deterministic state machine execution | no_std compatible, pluggable I/O |
+| **SimIO** | SIL simulation I/O layer | Scenario-driven, fault injection, Plant model |
+| **Virtual Board** | Virtual board runner | Simulates real board behavior + tick_timing sampling |
+| **RP2040 HAL** | Hardware abstraction layer | GPIO, ADC, PWM, PIO (motion control) |
+| **trace-diff** | SIL vs Board comparison | Tick-by-tick difference detection |
+| **no-board-gate** | No-board gate | Real-time threshold checks (p99, overrun) |
+
+---
+
 ## Core Capabilities
 
 | Capability | Description |
