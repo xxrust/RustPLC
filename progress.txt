@@ -81,3 +81,40 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - Port-direction validation must happen after instance-to-component resolution, otherwise unknown instance and wrong-port errors become ambiguous.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `run_component_topology_validate_subcommand` in `src/main.rs` is now the command-level validation entrypoint for topology JSON files.
+
+## [2026-02-19 18:23:52 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added new component-fault contract module: `src/component_faults.rs`.
+  - Introduced explicit per-component fault kind enum:
+    - `jammed`, `motion_timeout`
+    - `stuck_on`, `stuck_off`, `chatter`
+    - `lost_step`, `stall`, `direction_reversed`
+  - Added unified fault event container:
+    - `ComponentFaultEvent { at_ms, duration_ms, target_component_id, fault_kind, params }`
+  - Added parser/validator entrypoints:
+    - `parse_component_fault_events_json`
+    - `parse_component_fault_events_value`
+  - Added stable validation issue contract:
+    - `ComponentFaultIssue { code, path, message }`
+    - `ComponentFaultValidationError`
+  - Implemented parameter validation rules:
+    - `motion_timeout` requires `params.timeout_ms >= 1`
+    - `chatter` requires `period_ms >= 1` and `duty_percent` in `1..=99`
+    - `lost_step` requires `ratio` in `(0.0, 1.0]`
+  - Exported module in crate root: `src/lib.rs`.
+- Quality checks
+  - `cargo test --lib component_faults::`
+  - `cargo check --workspace`
+- Files changed
+  - `src/component_faults.rs`
+  - `src/lib.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - A single fault-event envelope with typed `fault_kind` plus kind-specific `params` checks keeps schema compact while preserving strong validation.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Keep strict numeric range checks in validators; downstream simulation logic should not need to re-validate malformed fault params.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `validate_fault_params` is now the central location for component fault parameter invariants.

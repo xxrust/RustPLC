@@ -3,6 +3,7 @@ pub mod ast;
 pub mod board_log;
 pub mod board_trace;
 pub mod component_library;
+pub mod component_faults;
 pub mod component_topology;
 pub mod diagnostics;
 pub mod error;

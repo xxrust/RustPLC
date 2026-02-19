@@ -50,8 +50,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已定义元件专属 fault_kind 与参数校验规则，含稳定错误码与单元测试。"
     },
     {
       "id": "US-004",
