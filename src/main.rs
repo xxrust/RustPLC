@@ -18,6 +18,9 @@ use std::process::Command;
 use io_traits::{DigitalInputId, DigitalOutputId, Io};
 use petgraph::Direction;
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
+use rust_plc::diagnostics::{
+    diagnose, DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport, EvidenceSource,
+};
 use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
@@ -26,7 +29,7 @@ use rust_plc::sequence_lint::{
 };
 use rust_plc::sim_regress::{run_sim_regress_with_options, SimRegressOptions, SimRegressSummary};
 use rust_plc::tick_timing::{parse_tick_timing_jsonl, to_tick_timing_jsonl, TickTimingSample};
-use rust_plc::timing_report::build_timing_report;
+use rust_plc::timing_report::{build_timing_report, TimingReport};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -775,6 +778,138 @@ impl CliOutputMode {
     }
 }
 
+#[derive(Debug, Serialize)]
+struct TraceDoctorSummary {
+    anchor_count: usize,
+    candidate_count: usize,
+    top_issue_code: Option<String>,
+    top_confidence: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+struct TraceDoctorArtifacts {
+    plc: String,
+    scenario: String,
+    trace: Option<String>,
+    diff: Option<String>,
+    timing_report: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TraceDoctorJsonReport {
+    schema_version: u32,
+    command: &'static str,
+    output: &'static str,
+    evidence_source: EvidenceSource,
+    anchors: Vec<DiagnosisAnchor>,
+    candidates: Vec<DiagnosisCandidate>,
+    summary: TraceDoctorSummary,
+    artifacts: TraceDoctorArtifacts,
+}
+
+fn parse_evidence_source(raw: &str) -> Option<EvidenceSource> {
+    match raw {
+        "no_board" => Some(EvidenceSource::NoBoard),
+        "hil_board" => Some(EvidenceSource::HilBoard),
+        "runtime_live" => Some(EvidenceSource::RuntimeLive),
+        "mixed" => Some(EvidenceSource::Mixed),
+        _ => None,
+    }
+}
+
+fn evidence_source_label(source: EvidenceSource) -> &'static str {
+    match source {
+        EvidenceSource::NoBoard => "no_board",
+        EvidenceSource::HilBoard => "hil_board",
+        EvidenceSource::RuntimeLive => "runtime_live",
+        EvidenceSource::Mixed => "mixed",
+    }
+}
+
+fn diagnosis_category_label(category: rust_plc::diagnostics::DiagnosisCategory) -> &'static str {
+    match category {
+        rust_plc::diagnostics::DiagnosisCategory::ExpectedInputNeverChanged => {
+            "expected_input_never_changed"
+        }
+        rust_plc::diagnostics::DiagnosisCategory::ActuatorCommandMissing => {
+            "actuator_command_missing"
+        }
+        rust_plc::diagnostics::DiagnosisCategory::InterlockOrRequiresBlocked => {
+            "interlock_or_requires_blocked"
+        }
+        rust_plc::diagnostics::DiagnosisCategory::MappingOrAliasMismatch => {
+            "mapping_or_alias_mismatch"
+        }
+        rust_plc::diagnostics::DiagnosisCategory::TimeoutBudgetTooShort => {
+            "timeout_budget_too_short"
+        }
+    }
+}
+
+fn build_trace_doctor_json_report(
+    diagnosis: DiagnosisReport,
+    output_mode: CliOutputMode,
+    evidence_source: EvidenceSource,
+    artifacts: TraceDoctorArtifacts,
+) -> TraceDoctorJsonReport {
+    let anchor_count = diagnosis.anchors.len();
+    let candidate_count = diagnosis.candidates.len();
+    let top = diagnosis.candidates.first();
+    let top_issue_code = top.map(|candidate| candidate.issue_code.clone());
+    let top_confidence = top.map(|candidate| candidate.confidence);
+    TraceDoctorJsonReport {
+        schema_version: diagnosis.schema_version,
+        command: "trace-doctor",
+        output: output_mode.as_str(),
+        evidence_source,
+        anchors: diagnosis.anchors,
+        candidates: diagnosis.candidates,
+        summary: TraceDoctorSummary {
+            anchor_count,
+            candidate_count,
+            top_issue_code,
+            top_confidence,
+        },
+        artifacts,
+    }
+}
+
+fn print_trace_doctor_human(report: &TraceDoctorJsonReport, top_n: usize) {
+    eprintln!(
+        "trace-doctor: PASS (evidence_source={}, anchors={}, candidates={})",
+        evidence_source_label(report.evidence_source),
+        report.summary.anchor_count,
+        report.summary.candidate_count
+    );
+    eprintln!("  plc: {}", report.artifacts.plc);
+    eprintln!("  scenario: {}", report.artifacts.scenario);
+    if let Some(trace) = &report.artifacts.trace {
+        eprintln!("  trace: {trace}");
+    }
+    if let Some(diff) = &report.artifacts.diff {
+        eprintln!("  diff: {diff}");
+    }
+    if let Some(timing_report) = &report.artifacts.timing_report {
+        eprintln!("  timing_report: {timing_report}");
+    }
+
+    let top_n = top_n.max(1).min(report.candidates.len());
+    eprintln!("Top {top_n} candidate(s):");
+    for candidate in report.candidates.iter().take(top_n) {
+        eprintln!(
+            "  {}. [{}] {} (confidence={:.3})",
+            candidate.rank,
+            candidate.issue_code,
+            diagnosis_category_label(candidate.category),
+            candidate.confidence
+        );
+        if let Some(first_evidence) = candidate.evidence.first() {
+            eprintln!("     evidence: {first_evidence}");
+        }
+        eprintln!("     next: {}", candidate.suggested_fix);
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ScenarioValidateFinding {
     severity: ScenarioValidateSeverity,
@@ -1321,6 +1456,13 @@ fn main() {
         }
         return;
     }
+    if first == "trace-doctor" {
+        if let Err(msg) = run_trace_doctor_subcommand(&program, args) {
+            eprintln!("[DIAG-000] {msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "timing-report" {
         if let Err(msg) = run_timing_report_subcommand(&program, args) {
             eprintln!("{msg}");
@@ -1673,6 +1815,9 @@ fn print_usage(program: &str) {
     eprintln!("  {program} board-parse --in <board.log> --out-dir <dir>");
     eprintln!(
         "  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
+    );
+    eprintln!(
+        "  {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]"
     );
     eprintln!("  {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]");
     eprintln!("  {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>");
@@ -6331,6 +6476,178 @@ fn run_trace_diff_subcommand(
             "Trace mismatch detected (tick={:?}, type={:?}); see report {:?}",
             report.first_mismatch_tick, report.mismatch_type, out
         ));
+    }
+    Ok(())
+}
+
+fn run_trace_doctor_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = format!(
+        "Usage: {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]"
+    );
+
+    let Some(plc_path) = args.next() else {
+        return Err(usage);
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    let mut trace_path: Option<PathBuf> = None;
+    let mut diff_path: Option<PathBuf> = None;
+    let mut timing_report_path: Option<PathBuf> = None;
+    let mut evidence_source = EvidenceSource::Mixed;
+    let mut top_n: usize = 3;
+    let mut output_mode = CliOutputMode::Human;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "--trace" => {
+                trace_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --trace <trace.jsonl>".to_string()
+                    })?));
+            }
+            "--diff" => {
+                diff_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --diff <diff_report.json>".to_string()
+                })?));
+            }
+            "--timing-report" => {
+                timing_report_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --timing-report <timing_report.json>".to_string()
+                })?));
+            }
+            "--evidence-source" => {
+                let raw = args.next().ok_or_else(|| {
+                    "Missing value for --evidence-source <no_board|hil_board|runtime_live|mixed>"
+                        .to_string()
+                })?;
+                evidence_source = parse_evidence_source(&raw).ok_or_else(|| {
+                    format!(
+                        "Invalid --evidence-source value `{raw}` (expected `no_board`, `hil_board`, `runtime_live`, or `mixed`)"
+                    )
+                })?;
+            }
+            "--top" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --top <n>".to_string())?;
+                top_n = raw
+                    .parse::<usize>()
+                    .map_err(|_| format!("Invalid --top value (expected usize): {raw}"))?;
+                if top_n == 0 {
+                    return Err("Invalid --top value (expected >= 1)".to_string());
+                }
+            }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
+            "-h" | "--help" => return Err(usage.clone()),
+            other => return Err(format!("Unknown argument for trace-doctor: {other}")),
+        }
+    }
+
+    let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
+    if trace_path.is_none() && diff_path.is_none() {
+        return Err(
+            "trace-doctor requires at least one input artifact: --trace <trace.jsonl> or --diff <diff_report.json>"
+                .to_string(),
+        );
+    }
+
+    let plc_source =
+        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
+    let scenario_yaml =
+        resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
+            format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "trace-doctor", &e)
+        })?;
+    let scenario = parse_scenario_yaml(&scenario_yaml)?;
+
+    let trace_events = if let Some(path) = &trace_path {
+        let text = fs::read_to_string(path)
+            .map_err(|err| format!("Failed to read trace JSONL {}: {err}", path.display()))?;
+        Some(
+            rust_plc::trace_diff::parse_trace_jsonl(&text)
+                .map_err(|err| format!("Failed to parse trace JSONL {}: {err}", path.display()))?,
+        )
+    } else {
+        None
+    };
+
+    let diff_report = if let Some(path) = &diff_path {
+        let text = fs::read_to_string(path)
+            .map_err(|err| format!("Failed to read diff report {}: {err}", path.display()))?;
+        Some(
+            serde_json::from_str::<rust_plc::trace_diff::TraceDiffReport>(&text).map_err(
+                |err| format!("Failed to parse diff report JSON {}: {err}", path.display()),
+            )?,
+        )
+    } else {
+        None
+    };
+
+    let timing_report = if let Some(path) = &timing_report_path {
+        let text = fs::read_to_string(path)
+            .map_err(|err| format!("Failed to read timing report {}: {err}", path.display()))?;
+        Some(serde_json::from_str::<TimingReport>(&text).map_err(|err| {
+            format!(
+                "Failed to parse timing report JSON {}: {err}",
+                path.display()
+            )
+        })?)
+    } else {
+        None
+    };
+
+    let diagnosis = diagnose(DiagnosisInput {
+        plc_source: &plc_source,
+        scenario: &scenario,
+        trace_events: trace_events.as_deref(),
+        diff_report: diff_report.as_ref(),
+        timing_report: timing_report.as_ref(),
+        evidence_source,
+    })
+    .map_err(|err| format!("trace-doctor failed: {err}"))?;
+
+    let report = build_trace_doctor_json_report(
+        diagnosis,
+        output_mode,
+        evidence_source,
+        TraceDoctorArtifacts {
+            plc: display_path_relative_to_cwd(Path::new(&plc_path)),
+            scenario: display_path_relative_to_cwd(&scenario_path),
+            trace: trace_path
+                .as_ref()
+                .map(|path| display_path_relative_to_cwd(path)),
+            diff: diff_path
+                .as_ref()
+                .map(|path| display_path_relative_to_cwd(path)),
+            timing_report: timing_report_path
+                .as_ref()
+                .map(|path| display_path_relative_to_cwd(path)),
+        },
+    );
+
+    if output_mode == CliOutputMode::Json {
+        let mut json = serde_json::to_string_pretty(&report)
+            .map_err(|err| format!("Failed to serialize trace-doctor JSON output: {err}"))?;
+        json.push('\n');
+        print!("{json}");
+    } else {
+        print_trace_doctor_human(&report, top_n);
     }
     Ok(())
 }

@@ -54,6 +54,7 @@
 - For `hardware_only` Class-D evidence, require per-attachment `provenance.source_path` and keep optional digest/operator/time metadata for audit traceability.
 - For multi-step operator rehearsals, provide one orchestration CLI that both executes the chain and writes a machine-readable step index (pass/fail/skipped + artifact paths).
 - Diagnostics backend candidates should always be emitted in deterministic order (confidence desc, category tie-break), with stable `DIAG-*` issue codes and per-candidate `evidence_source` for cross-source diffability.
+- Keep diagnosis CLI output as a layered contract: top-level `schema_version/evidence_source/anchors/candidates/summary/artifacts` for machines, plus Top-N evidence+next-step rendering for humans.
 
 Started: Thu Feb 19 14:03:44  2026
 ## [2026-02-19 14:08:29 CST] - US-001
@@ -262,4 +263,38 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in thi
     - Running `rustfmt` on `src/lib.rs` can recursively reformat module files; avoid crate-root formatting unless intended.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `rust_plc::diagnostics::diagnose` is now the single entrypoint for Stage-5 deterministic candidate ranking and anchor extraction.
+---
+## [2026-02-19 16:18:27 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (not available in this Codex CLI environment)
+- What was implemented
+  - Added new `trace-doctor` CLI subcommand with deterministic diagnosis output modes:
+    - `--output json` machine contract includes `schema_version`, `evidence_source`, `anchors`, `candidates`, `summary`, `artifacts`
+    - `--output human` prints Top-N candidates with evidence snippets and actionable next-step suggestions.
+  - Added trace-doctor argument support for unified input contract artifacts:
+    - required: `<file.plc> --scenario <scenario.yaml>`
+    - at least one of `--trace <trace.jsonl>` or `--diff <diff_report.json>`
+    - optional `--timing-report <timing_report.json>`, `--evidence-source`, `--top`.
+  - Wired CLI usage/help and stable command-level failure prefix (`[DIAG-000]`) for trace-doctor.
+  - Documented `DIAG-*` diagnosis code family and trace-doctor JSON contract in diagnostics docs.
+  - Added integration coverage:
+    - `tests/trace_doctor.rs` validates JSON contract fields + DIAG issue codes and human Top-N rendering.
+    - `tests/m6_diagnostics.rs` now locks docs/usage visibility for trace-doctor + DIAG code family.
+- Quality checks
+  - `cargo check --workspace`
+  - `cargo test --test trace_doctor --test m6_diagnostics`
+  - `cargo test --workspace`
+- Files changed
+  - `src/main.rs`
+  - `tests/trace_doctor.rs`
+  - `tests/m6_diagnostics.rs`
+  - `docs/m6_diagnostics.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Stage-5 diagnostics consumers are easiest to keep aligned when they all read one JSON contract shape from `trace-doctor` and avoid re-deriving summary/artifact metadata ad hoc.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - `trace-doctor` must reject runs with neither `--trace` nor `--diff`; keep that guard explicit at CLI parsing so failures are immediate and deterministic.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Human output for trace-doctor is emitted on stderr (consistent with other CLI summaries), while JSON output is emitted on stdout.
 ---
