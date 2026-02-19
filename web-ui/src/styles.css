@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-app-bg text-text-primary font-sans;
+    margin: 0;
+    font-size: 14px;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  code, pre {
+    @apply font-mono;
+  }
+}
+
+@layer components {
+  /* Custom scrollbar for dark theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #1a1a1a;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #4a4a4a;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #5a5a5a;
+  }
+}
