@@ -299,8 +299,8 @@ async fn parse_plc_topology(
                 let pair = (upstream.clone(), device.name.clone());
                 if seen_edges.insert(pair.clone()) {
                     connections.push(serde_json::json!({
-                        "from": pair.0,
-                        "to": pair.1,
+                        "from": pair.1,
+                        "to": pair.0,
                     }));
                 }
             }
