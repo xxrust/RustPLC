@@ -422,11 +422,11 @@ export default IDDELayout;
 function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ id: string; source: string; target: string }> } {
   const nodes: Node<NodeData>[] = (data.components || []).map((comp: any, i: number) => ({
     id: comp.id,
-    type: mapComponentType(comp.component_id || comp.type || 'generic'),
+    type: mapComponentType(comp.component_id || comp.type || 'generic', comp.params?.device_type),
     position: comp.position || { x: 150 + (i % 3) * 200, y: 100 + Math.floor(i / 3) * 160 },
     data: {
       label: comp.id,
-      type: mapComponentType(comp.component_id || comp.type || 'generic'),
+      type: mapComponentType(comp.component_id || comp.type || 'generic', comp.params?.device_type),
       status: 'idle',
       ...comp.params,
     },
@@ -459,7 +459,17 @@ function normalizeEndpointId(raw: string): string {
   return idx >= 0 ? raw.slice(0, idx) : raw;
 }
 
-function mapComponentType(raw: string): string {
+function mapComponentType(raw: string, deviceType?: string): string {
+  // 优先根据 device_type 判断
+  if (deviceType) {
+    const dt = deviceType.toLowerCase();
+    if (dt === 'digital_input') return 'input_terminal';
+    if (dt === 'digital_output') return 'output_terminal';
+    if (dt === 'analog_input') return 'input_terminal';
+    if (dt === 'analog_output') return 'output_terminal';
+  }
+
+  // 回退到 component_id 判断
   const t = raw.toLowerCase();
   if (t.includes('cylinder')) return 'cylinder';
   if (t.includes('sensor')) return 'sensor';

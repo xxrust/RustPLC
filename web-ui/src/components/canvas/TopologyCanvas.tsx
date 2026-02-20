@@ -22,6 +22,8 @@ import SensorNode from '../nodes/SensorNode';
 import SwitchNode from '../nodes/SwitchNode';
 import StepperNode from '../nodes/StepperNode';
 import GenericNode from '../nodes/GenericNode';
+import InputTerminalNode from '../nodes/InputTerminalNode';
+import OutputTerminalNode from '../nodes/OutputTerminalNode';
 import ContextMenu, { type MenuItem } from '../ContextMenu';
 
 const nodeTypes = {
@@ -31,6 +33,8 @@ const nodeTypes = {
   stepper_pd: StepperNode,
   stepper: StepperNode,
   generic: GenericNode,
+  input_terminal: InputTerminalNode,
+  output_terminal: OutputTerminalNode,
 };
 
 const TopologyCanvas: React.FC = () => {
