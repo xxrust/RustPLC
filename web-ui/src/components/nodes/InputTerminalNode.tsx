@@ -34,8 +34,8 @@ const InputTerminalNode: React.FC<NodeProps> = ({ data, selected }) => {
           {isActive ? 'ON' : 'OFF'}
         </div>
       </div>
-      {/* 输入端子只有右侧输出，没有左侧输入 */}
-      <Handle type="source" id="out" position={Position.Right} style={{ background: '#00bcd4', width: 8, height: 8 }} />
+      {/* 输入端子只有左侧输入（从外部接收信号） */}
+      <Handle type="target" id="in" position={Position.Left} style={{ background: '#00bcd4', width: 8, height: 8 }} />
     </div>
   );
 };
