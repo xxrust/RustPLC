@@ -1,11 +1,15 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { Node } from '@xyflow/react';
+import { useTranslation } from 'react-i18next';
 import TopBar from '../components/TopBar';
 import StatusBar from '../components/StatusBar';
 import ComponentLibrary from '../components/ComponentLibrary';
 import PropertiesPanel from '../components/PropertiesPanel';
 import TopologyCanvas from '../components/canvas/TopologyCanvas';
 import TickTimeline from '../components/replay/TickTimeline';
+import RunPage from '../pages/RunPage';
+import DiagnosisPage from '../pages/DiagnosisPage';
+import ScenarioPage from '../pages/ScenarioPage';
 import { useTopologyStore } from '../stores/topologyStore';
 import { useReplayStore } from '../stores/replayStore';
 import { useAppStore } from '../stores/appStore';
@@ -25,8 +29,13 @@ const SIDEBAR_WIDTH = 280;
 const PANEL_WIDTH = 320;
 
 const IDDELayout: React.FC = () => {
+  const { t } = useTranslation();
   const [tabs, setTabs] = useState<Tab[]>([
-    { id: 'topology-1', label: 'Topology', view: 'topology' },
+    { id: 'topology-1', label: t('tabs.topology'), view: 'topology' },
+    { id: 'scenario-1', label: t('tabs.scenario'), view: 'scenario' },
+    { id: 'run-1', label: t('tabs.run'), view: 'run' },
+    { id: 'diagnosis-1', label: t('tabs.diagnosis'), view: 'diagnosis' },
+    { id: 'replay-1', label: t('tabs.replay'), view: 'replay' },
   ]);
   const [activeTabId, setActiveTabId] = useState('topology-1');
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -34,7 +43,7 @@ const IDDELayout: React.FC = () => {
 
   const { setNodes, setEdges, hasUnsavedChanges } = useTopologyStore();
   const { setSnapshots } = useReplayStore();
-  const { currentProject } = useAppStore();
+  const { currentProject, currentProjectContent } = useAppStore();
 
   const dragTypeRef = useRef<{ type: string; label: string } | null>(null);
 
@@ -51,65 +60,108 @@ const IDDELayout: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedChanges]);
 
-  // Load topology from API (or fall back to demo data)
+  // Load topology from API (or parse local PLC content)
   useEffect(() => {
-    const projectId = currentProject || 'two_cylinder';
+    const projectId = currentProject;
+    let cancelled = false;
 
-    topologyApi.getTopology(projectId)
-      .then((res) => {
-        const data = res.data as any;
-        // If it's a component topology JSON with components array
-        if (data.components && Array.isArray(data.components)) {
-          const nodes: Node<NodeData>[] = data.components.map((comp: any, i: number) => ({
-            id: comp.id,
-            type: mapComponentType(comp.component_id || comp.type || 'generic'),
-            position: comp.position || { x: 150 + (i % 3) * 200, y: 100 + Math.floor(i / 3) * 160 },
-            data: {
-              label: comp.id,
-              type: mapComponentType(comp.component_id || comp.type || 'generic'),
-              status: 'idle',
-              ...comp.params,
-            },
-          }));
-          const edges = (data.connections || []).map((conn: any, i: number) => ({
-            id: `e-${i}`,
-            source: conn.from,
-            target: conn.to,
-          }));
-          setNodes(nodes);
-          setEdges(edges);
+    const applyTopology = (data: any) => {
+      const { nodes, edges } = toCanvasTopology(data);
+      if (!cancelled) {
+        setNodes(nodes);
+        setEdges(edges);
+      }
+    };
+
+    const clearTopology = () => {
+      if (!cancelled) {
+        setNodes([]);
+        setEdges([]);
+      }
+    };
+
+    const loadTopology = async () => {
+      if (!projectId) {
+        if (!cancelled) {
+          loadDemoData(setNodes, setEdges);
+        }
+        return;
+      }
+
+      try {
+        if (currentProjectContent) {
+          const parsed = await topologyApi.parsePlc(currentProjectContent);
+          applyTopology(parsed.data);
           return;
         }
-        // Fall back to demo data
-        loadDemoData(setNodes, setEdges);
-      })
-      .catch(() => loadDemoData(setNodes, setEdges));
 
-    // Load latest run trace for replay
-    runApi.listRuns(1)
-      .then((res) => {
+        const res = await topologyApi.getTopology(projectId);
+        const data = res.data as any;
+
+        if (data.components && Array.isArray(data.components)) {
+          applyTopology(data);
+          return;
+        }
+
+        if (typeof data.content === 'string') {
+          const parsed = await topologyApi.parsePlc(data.content);
+          applyTopology(parsed.data);
+          return;
+        }
+
+        clearTopology();
+      } catch {
+        clearTopology();
+      }
+    };
+
+    const loadReplay = async () => {
+      try {
+        const res = await runApi.listRuns(1);
         const runs = res.data as any[];
-        if (runs.length === 0) { loadDemoSnapshots(setSnapshots); return; }
+        if (runs.length === 0) {
+          if (!cancelled) {
+            loadDemoSnapshots(setSnapshots);
+          }
+          return;
+        }
         const latestRun = runs[0];
-        return traceApi.getTrace(latestRun.run_id).then((traceRes) => {
-          const trace = traceRes.data as any;
-          if (!trace.ticks || trace.ticks.length === 0) { loadDemoSnapshots(setSnapshots); return; }
-          const snapshots = trace.ticks.map((tick: any) => ({
-            tick: tick.tick,
-            components: tick.component_states || {},
-            io: {
-              di: tick.digital_inputs,
-              do: tick.digital_outputs,
-              ai: tick.analog_inputs,
-              ao: tick.analog_outputs,
-            },
-            events: [],
-          }));
+        const traceRes = await traceApi.getTrace(latestRun.run_id);
+        const trace = traceRes.data as any;
+        if (!trace.ticks || trace.ticks.length === 0) {
+          if (!cancelled) {
+            loadDemoSnapshots(setSnapshots);
+          }
+          return;
+        }
+        const snapshots = trace.ticks.map((tick: any) => ({
+          tick: tick.tick,
+          components: tick.component_states || {},
+          io: {
+            di: tick.digital_inputs,
+            do: tick.digital_outputs,
+            ai: tick.analog_inputs,
+            ao: tick.analog_outputs,
+          },
+          events: [],
+        }));
+        if (!cancelled) {
           setSnapshots(snapshots);
-        });
-      })
-      .catch(() => loadDemoSnapshots(setSnapshots));
-  }, [currentProject, setNodes, setEdges, setSnapshots]);
+        }
+      } catch {
+        if (!cancelled) {
+          loadDemoSnapshots(setSnapshots);
+        }
+      }
+    };
+
+    loadTopology();
+    loadReplay();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProject, currentProjectContent, setNodes, setEdges, setSnapshots]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
@@ -118,7 +170,7 @@ const IDDELayout: React.FC = () => {
   const handleTabClose = (id: string) => {
     const remaining = tabs.filter((t) => t.id !== id);
     if (remaining.length === 0) {
-      const newTab: Tab = { id: `topology-${++tabCounter}`, label: 'Topology', view: 'topology' };
+      const newTab: Tab = { id: `topology-${++tabCounter}`, label: t('tabs.topology'), view: 'topology' };
       setTabs([newTab]);
       setActiveTabId(newTab.id);
     } else {
@@ -194,7 +246,7 @@ const IDDELayout: React.FC = () => {
               }}
             >
               <span style={{ color: '#a0a0a0', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                Components
+                {t('componentLibrary.title')}
               </span>
               <button
                 onClick={() => setLeftCollapsed(true)}
@@ -221,7 +273,7 @@ const IDDELayout: React.FC = () => {
               fontSize: 12,
               flexShrink: 0,
             }}
-            title="Show sidebar"
+            title={t('idde.showSidebar')}
           >
             ›
           </button>
@@ -230,16 +282,22 @@ const IDDELayout: React.FC = () => {
         {/* Main content area */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Canvas / view area */}
-          <div
-            style={{ flex: 1, overflow: 'hidden', position: 'relative' }}
-            onDrop={handleCanvasDrop}
-            onDragOver={handleCanvasDragOver}
-          >
-            <ViewContent view={activeTab?.view || 'topology'} />
-          </div>
-
-          {/* Tick timeline (only in replay view) */}
-          {activeTab?.view === 'replay' && <TickTimeline />}
+          {(activeTab?.view === 'topology' || activeTab?.view === 'replay' || !activeTab) ? (
+            <>
+              <div
+                style={{ flex: 1, overflow: 'hidden', position: 'relative' }}
+                onDrop={handleCanvasDrop}
+                onDragOver={handleCanvasDragOver}
+              >
+                <ViewContent view={activeTab?.view || 'topology'} />
+              </div>
+              {activeTab?.view === 'replay' && <TickTimeline />}
+            </>
+          ) : (
+            <div style={{ flex: 1, overflowY: 'auto', background: '#1e1e1e' }}>
+              <ViewContent view={activeTab.view} />
+            </div>
+          )}
         </div>
 
         {/* Right properties panel */}
@@ -271,7 +329,7 @@ const IDDELayout: React.FC = () => {
                 ›
               </button>
               <span style={{ color: '#a0a0a0', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                Properties
+                {t('properties.title')}
               </span>
             </div>
             <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -294,7 +352,7 @@ const IDDELayout: React.FC = () => {
               fontSize: 12,
               flexShrink: 0,
             }}
-            title="Show properties"
+            title={t('idde.showProperties')}
           >
             ‹
           </button>
@@ -308,6 +366,7 @@ const IDDELayout: React.FC = () => {
 
 // View content dispatcher
 const ViewContent: React.FC<{ view: Tab['view'] }> = ({ view }) => {
+  const { t } = useTranslation();
   const { snapshots, currentTick } = useReplayStore();
   const { nodes, updateNodeData } = useTopologyStore();
 
@@ -327,13 +386,13 @@ const ViewContent: React.FC<{ view: Tab['view'] }> = ({ view }) => {
     case 'replay':
       return <TopologyCanvas />;
     case 'scenario':
-      return <PlaceholderView title="Scenario / Recipe" description="Scenario YAML editor and visual timeline — Phase 2" />;
+      return <div style={{ padding: 24 }}><ScenarioPage /></div>;
     case 'run':
-      return <PlaceholderView title="Run & Gate" description="Trigger no-board-gate, commissioning-run, trace-doctor — Phase 2" />;
+      return <div style={{ padding: 24 }}><RunPage /></div>;
     case 'diagnosis':
-      return <PlaceholderView title="Alarm & Diagnosis" description="Real-time alarms and diagnosis report — Phase 2" />;
+      return <div style={{ padding: 24 }}><DiagnosisPage /></div>;
     case 'audit':
-      return <PlaceholderView title="Audit & Reports" description="Audit log and report export — Phase 3" />;
+      return <PlaceholderView title={t('placeholders.audit')} description={t('placeholders.auditDesc')} />;
     default:
       return null;
   }
@@ -359,6 +418,34 @@ const PlaceholderView: React.FC<{ title: string; description: string }> = ({ tit
 export default IDDELayout;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ id: string; source: string; target: string }> } {
+  const nodes: Node<NodeData>[] = (data.components || []).map((comp: any, i: number) => ({
+    id: comp.id,
+    type: mapComponentType(comp.component_id || comp.type || 'generic'),
+    position: comp.position || { x: 150 + (i % 3) * 200, y: 100 + Math.floor(i / 3) * 160 },
+    data: {
+      label: comp.id,
+      type: mapComponentType(comp.component_id || comp.type || 'generic'),
+      status: 'idle',
+      ...comp.params,
+    },
+  }));
+  const edges = (data.connections || []).map((conn: any, i: number) => ({
+    id: `e-${i}`,
+    source: normalizeEndpointId(conn.from),
+    target: normalizeEndpointId(conn.to),
+  }));
+  return { nodes, edges };
+}
+
+function normalizeEndpointId(raw: string): string {
+  if (!raw) {
+    return raw;
+  }
+  const idx = raw.indexOf('.');
+  return idx >= 0 ? raw.slice(0, idx) : raw;
+}
 
 function mapComponentType(raw: string): string {
   const t = raw.toLowerCase();

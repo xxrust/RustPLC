@@ -6,6 +6,9 @@ export const en = {
       saving: 'Saving...',
       newTab: 'New tab',
       unsavedChanges: 'Unsaved changes',
+      switchLanguage: '切换到中文',
+      clickToSwitchProject: 'Click to switch project',
+      noProject: '(no project)',
     },
 
     // Tabs
@@ -36,6 +39,7 @@ export const en = {
       warning: 'warning',
       info: 'info',
       mode: 'Mode',
+      version: 'RustPLC IDDE v1.0',
     },
 
     // Component Library
@@ -172,6 +176,13 @@ export const en = {
       auditDesc: 'Audit log and report export — Phase 3',
     },
 
+    // IDDE Layout
+    idde: {
+      showSidebar: 'Show sidebar',
+      showProperties: 'Show properties',
+      noProjectSelected: 'No project selected',
+    },
+
     // Replay
     replay: {
       play: 'Play',
@@ -179,6 +190,12 @@ export const en = {
       speed: 'Speed',
       tick: 'Tick',
       keypoints: 'Keypoints',
+      prevKeypoint: 'Prev keypoint',
+      nextKeypoint: 'Next keypoint',
+      stepBack: 'Step back',
+      stepForward: 'Step forward',
+      errorAtTick: 'Error at tick',
+      eventAtTick: 'Event at tick',
     },
 
     // Common
@@ -192,6 +209,158 @@ export const en = {
       edit: 'Edit',
       add: 'Add',
       remove: 'Remove',
+    },
+
+    // Diagnosis
+    diagnosis: {
+      title: 'Diagnosis Center',
+      severity: 'Severity',
+      alarmId: 'Alarm ID',
+      firstSeen: 'First Seen',
+      scenario: 'Scenario / Recipe',
+      evidenceSource: 'Evidence Source',
+      actions: 'Actions',
+      viewDetails: 'View Details',
+      acknowledge: 'Acknowledge',
+      acknowledgeAlarm: 'Acknowledge Alarm',
+      alarmList: 'Alarm List',
+      alarmDetails: 'Alarm Details',
+      acknowledged: 'acknowledged',
+      ackSuccess: 'Alarm acknowledged',
+      ackFailed: 'Failed to acknowledge',
+      candidates: 'Diagnosis Candidates',
+      issueCode: 'Issue Code',
+      rank: 'Rank',
+      confidence: 'Confidence',
+      category: 'Category',
+      evidence: 'Evidence',
+      suggestedFix: 'Suggested Fix',
+      evidenceRef: 'Evidence Ref',
+    },
+
+    // Main Layout
+    mainLayout: {
+      profile: 'Profile',
+      settings: 'Settings',
+      logout: 'Logout',
+    },
+
+    // Topology Page
+    topologyPage: {
+      title: 'Topology Editor',
+      validate: 'Validate',
+      validateSuccess: 'Topology validation passed',
+      validateFailed: 'Validation failed',
+      saveSuccess: 'Topology saved',
+      jsonError: 'Invalid JSON format',
+      plcCode: 'PLC Code',
+      plcFile: 'PLC File',
+      placeholder: 'PLC code...',
+      visualEditor: 'Visual Editor (WIP)',
+      visualEditorWip: 'Visual topology editor coming soon...',
+      visualEditorPlan: 'Planned: drag-and-drop components, wiring, property config, live validation',
+    },
+
+    // Scenario Page
+    scenarioPage: {
+      title: 'Scenario Manager',
+      validate: 'Validate',
+      validateSuccess: 'Scenario validation passed',
+      validateFailed: 'Validation failed',
+      saveSuccess: 'Scenario saved',
+      jsonError: 'Invalid JSON format',
+      scenarioFile: 'Scenario File',
+      placeholder: 'Scenario YAML or JSON...',
+      visualEditor: 'Visual Editor (WIP)',
+      visualEditorWip: 'Visual scenario editor coming soon...',
+      visualEditorPlan: 'Planned: timeline editing, event drag-and-drop, fault injection config',
+    },
+
+    // Replay Page (full page, not timeline)
+    replayPage: {
+      selectRun: 'Select Run',
+      selectRunPlaceholder: 'Select a run record',
+      playbackControl: 'Playback Control',
+      prevFrame: 'Prev Frame',
+      nextFrame: 'Next Frame',
+      playSpeed: 'Play Speed',
+      currentTick: 'Current Tick',
+      timeMs: 'Time (ms)',
+      digitalInputs: 'Digital Inputs',
+      digitalOutputs: 'Digital Outputs',
+      digitalSignals: 'Digital Signals',
+      analogSignals: 'Analog Signals',
+      inputs: 'Inputs',
+      outputs: 'Outputs',
+      signal: 'Signal',
+      state: 'State',
+    },
+
+    // Dashboard
+    dashboard: {
+      title: 'Overview',
+      runMode: 'Run Mode',
+      currentProject: 'Current Project',
+      latestRunStatus: 'Latest Run Status',
+      alarmCount: 'Alarm Count',
+      quickAccess: 'Quick Access',
+      runGate: 'Run Gate',
+      auditReport: 'Audit Report',
+      recentRuns: 'Recent Runs',
+      recentAlarms: 'Recent Alarms',
+      viewAll: 'View All',
+    },
+
+    // Run Page
+    run: {
+      title: 'Run Monitor',
+      triggerGate: 'Trigger No-Board Gate',
+      plcFile: 'PLC File',
+      plcFileRequired: 'Please enter PLC file path',
+      scenarioFile: 'Scenario File',
+      scenarioFileRequired: 'Please enter scenario file path',
+      run: 'Run',
+      triggered: 'Run triggered',
+      triggerFailed: 'Run failed',
+      runHistory: 'Run History',
+      refresh: 'Refresh',
+      runDetails: 'Run Details',
+      runId: 'Run ID',
+      status: 'Status',
+      triggeredBy: 'Triggered By',
+      triggeredAt: 'Triggered At',
+      failureSummary: 'Failure Summary',
+      actions: 'Actions',
+      viewDetails: 'View Details',
+      diagnosis: 'Diagnosis',
+      artifacts: 'Artifacts',
+      traceData: 'Trace Data',
+      diffReport: 'Diff Report',
+      timingReport: 'Timing Report',
+      diagnosisReport: 'Diagnosis Report',
+    },
+
+    // Project Selector
+    projectSelector: {
+      title: 'Select Project',
+      select: 'Select Project',
+      current: 'Current Project',
+      selectNew: 'Select New Project',
+      placeholder: 'Select a PLC project',
+      path: 'Path',
+      switched: 'Switched to project',
+      openLocal: 'Open local .plc file',
+      browseFile: 'Browse file...',
+      orFromServer: 'or from server',
+    },
+
+    // Canvas Controls
+    canvas: {
+      zoomIn: 'Zoom In',
+      zoomOut: 'Zoom Out',
+      fitView: 'Fit View',
+      lockView: 'Lock View',
+      unlockView: 'Unlock View',
     },
 
     // Notifications

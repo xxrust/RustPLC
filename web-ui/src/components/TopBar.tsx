@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/appStore';
 import { useTopologyStore } from '../stores/topologyStore';
 import { topologyApi } from '../services/api';
 import ValidationErrorPanel from './ValidationErrorPanel';
+import { ProjectSelector } from './ProjectSelector';
 import type { ComponentTopology } from '../types';
 
 interface Tab {
@@ -45,7 +46,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
 
   const handleSave = async () => {
     if (!currentProject) {
-      alert('No project selected');
+      alert(t('idde.noProjectSelected'));
       return;
     }
 
@@ -115,7 +116,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
         zIndex: 10,
       }}
     >
-      {/* Logo */}
+      {/* Logo + project switcher */}
       <div
         style={{
           padding: '0 16px',
@@ -129,9 +130,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
         <span style={{ color: '#00bcd4', fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>
           RustPLC
         </span>
-        {currentProject && (
-          <span style={{ color: '#a0a0a0', fontSize: 12 }}>/ {currentProject}</span>
-        )}
+        <ProjectSelector />
         {hasUnsavedChanges && (
           <span style={{ color: '#faad14', fontSize: 14 }} title={t('topBar.unsavedChanges')}>●</span>
         )}
@@ -219,7 +218,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
               display: 'flex',
               alignItems: 'center',
             }}
-            title="New tab"
+            title={t('topBar.newTab')}
           >
             +
           </button>
@@ -323,7 +322,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
             cursor: 'pointer',
             letterSpacing: '0.04em',
           }}
-          title={i18n.language === 'en' ? '切换到中文' : 'Switch to English'}
+          title={t('topBar.switchLanguage')}
         >
           {i18n.language === 'en' ? '中文' : 'EN'}
         </button>

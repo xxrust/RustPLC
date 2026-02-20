@@ -4,10 +4,12 @@ import {
   ReactFlow,
   Background,
   Controls,
+  ControlButton,
   MiniMap,
   BackgroundVariant,
   SelectionMode,
   addEdge,
+  useReactFlow,
   type Node,
 } from '@xyflow/react';
 import type { Connection } from '@xyflow/react';
@@ -46,6 +48,7 @@ const TopologyCanvas: React.FC = () => {
   } = useTopologyStore();
 
   const { currentUser } = useAppStore();
+  const [isInteractive, setIsInteractive] = useState(true);
 
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -249,7 +252,7 @@ const TopologyCanvas: React.FC = () => {
       console.log(`Injected fault ${faultType} to node ${nodeId}`);
     } catch (error) {
       console.error('Failed to inject fault:', error);
-      alert('Failed to inject fault');
+      alert(t('notifications.injectFailed'));
     }
   };
 
@@ -260,7 +263,7 @@ const TopologyCanvas: React.FC = () => {
       console.log(`Cleared faults for node ${nodeId}`);
     } catch (error) {
       console.error('Failed to clear faults:', error);
-      alert('Failed to clear faults');
+      alert(t('notifications.clearFailed'));
     }
   };
 
@@ -276,6 +279,9 @@ const TopologyCanvas: React.FC = () => {
         onNodeContextMenu={onNodeContextMenu}
         nodeTypes={nodeTypes}
         selectionMode={SelectionMode.Partial}
+        nodesDraggable={isInteractive}
+        nodesConnectable={isInteractive}
+        elementsSelectable={isInteractive}
         fitView
         style={{ background: '#1e1e1e' }}
         proOptions={{ hideAttribution: true }}
@@ -287,12 +293,17 @@ const TopologyCanvas: React.FC = () => {
           color="#2a2a2a"
         />
         <Controls
+          showZoom={false}
+          showFitView={false}
+          showInteractive={false}
           style={{
             background: '#2d2d2d',
             border: '1px solid #3a3a3a',
             borderRadius: 6,
           }}
-        />
+        >
+          <CanvasControls isInteractive={isInteractive} onToggleInteractive={() => setIsInteractive(v => !v)} />
+        </Controls>
         <MiniMap
           style={{
             background: '#1a1a1a',
@@ -324,3 +335,24 @@ const TopologyCanvas: React.FC = () => {
 };
 
 export default TopologyCanvas;
+
+const CanvasControls: React.FC<{ isInteractive: boolean; onToggleInteractive: () => void }> = ({
+  isInteractive,
+  onToggleInteractive,
+}) => {
+  const { t } = useTranslation();
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  return (
+    <>
+      <ControlButton onClick={() => zoomIn()} title={t('canvas.zoomIn')}>+</ControlButton>
+      <ControlButton onClick={() => zoomOut()} title={t('canvas.zoomOut')}>−</ControlButton>
+      <ControlButton onClick={() => fitView()} title={t('canvas.fitView')}>⊡</ControlButton>
+      <ControlButton
+        onClick={onToggleInteractive}
+        title={isInteractive ? t('canvas.lockView') : t('canvas.unlockView')}
+      >
+        {isInteractive ? '🔓' : '🔒'}
+      </ControlButton>
+    </>
+  );
+};

@@ -6,6 +6,9 @@ export const zh = {
       saving: '保存中...',
       newTab: '新建标签页',
       unsavedChanges: '未保存的更改',
+      switchLanguage: 'Switch to English',
+      clickToSwitchProject: '点击切换项目',
+      noProject: '(未选择项目)',
     },
 
     // Tabs
@@ -36,6 +39,7 @@ export const zh = {
       warning: '警告',
       info: '信息',
       mode: '模式',
+      version: 'RustPLC IDDE v1.0',
     },
 
     // Component Library
@@ -172,6 +176,13 @@ export const zh = {
       auditDesc: '审计日志和报告导出 — 第三阶段',
     },
 
+    // IDDE Layout
+    idde: {
+      showSidebar: '显示侧边栏',
+      showProperties: '显示属性面板',
+      noProjectSelected: '未选择项目',
+    },
+
     // Replay
     replay: {
       play: '播放',
@@ -179,6 +190,12 @@ export const zh = {
       speed: '速度',
       tick: 'Tick',
       keypoints: '关键点',
+      prevKeypoint: '上一关键点',
+      nextKeypoint: '下一关键点',
+      stepBack: '后退一帧',
+      stepForward: '前进一帧',
+      errorAtTick: '错误于 Tick',
+      eventAtTick: '事件于 Tick',
     },
 
     // Common
@@ -192,6 +209,158 @@ export const zh = {
       edit: '编辑',
       add: '添加',
       remove: '移除',
+    },
+
+    // Diagnosis
+    diagnosis: {
+      title: '诊断中心',
+      severity: '严重程度',
+      alarmId: '告警 ID',
+      firstSeen: '首次发现',
+      scenario: '场景/配方',
+      evidenceSource: '证据来源',
+      actions: '操作',
+      viewDetails: '查看详情',
+      acknowledge: '确认',
+      acknowledgeAlarm: '确认告警',
+      alarmList: '告警列表',
+      alarmDetails: '告警详情',
+      acknowledged: '已确认',
+      ackSuccess: '告警已确认',
+      ackFailed: '确认失败',
+      candidates: '诊断候选项',
+      issueCode: '问题代码',
+      rank: '排名',
+      confidence: '置信度',
+      category: '类别',
+      evidence: '证据',
+      suggestedFix: '建议修复',
+      evidenceRef: '证据引用',
+    },
+
+    // Main Layout
+    mainLayout: {
+      profile: '个人信息',
+      settings: '设置',
+      logout: '退出登录',
+    },
+
+    // Topology Page
+    topologyPage: {
+      title: '拓扑编辑器',
+      validate: '验证',
+      validateSuccess: '拓扑验证通过',
+      validateFailed: '验证失败',
+      saveSuccess: '拓扑已保存',
+      jsonError: 'JSON 格式错误',
+      plcCode: 'PLC 代码',
+      plcFile: 'PLC 文件',
+      placeholder: 'PLC 代码...',
+      visualEditor: '可视化编辑（开发中）',
+      visualEditorWip: '可视化拓扑编辑器开发中...',
+      visualEditorPlan: '功能规划：拖拽组件、连线编辑、属性配置、实时验证',
+    },
+
+    // Scenario Page
+    scenarioPage: {
+      title: '场景管理器',
+      validate: '验证',
+      validateSuccess: '场景验证通过',
+      validateFailed: '验证失败',
+      saveSuccess: '场景已保存',
+      jsonError: 'JSON 格式错误',
+      scenarioFile: '场景文件',
+      placeholder: '场景 YAML 或 JSON...',
+      visualEditor: '可视化编辑（开发中）',
+      visualEditorWip: '可视化场景编辑器开发中...',
+      visualEditorPlan: '功能规划：时间线编辑、事件拖拽、故障注入配置',
+    },
+
+    // Replay Page (full page, not timeline)
+    replayPage: {
+      selectRun: '选择运行记录',
+      selectRunPlaceholder: '选择运行记录',
+      playbackControl: '播放控制',
+      prevFrame: '上一帧',
+      nextFrame: '下一帧',
+      playSpeed: '播放速度',
+      currentTick: '当前 Tick',
+      timeMs: '时间 (ms)',
+      digitalInputs: '数字输入',
+      digitalOutputs: '数字输出',
+      digitalSignals: '数字信号',
+      analogSignals: '模拟信号',
+      inputs: '输入',
+      outputs: '输出',
+      signal: '信号',
+      state: '状态',
+    },
+
+    // Dashboard
+    dashboard: {
+      title: '总览看板',
+      runMode: '运行模式',
+      currentProject: '当前项目',
+      latestRunStatus: '最新运行状态',
+      alarmCount: '告警数量',
+      quickAccess: '快速入口',
+      runGate: '运行门禁',
+      auditReport: '审计报告',
+      recentRuns: '最近运行记录',
+      recentAlarms: '最新告警',
+      viewAll: '查看全部',
+    },
+
+    // Run Page
+    run: {
+      title: '运行监控',
+      triggerGate: '触发 No-Board Gate',
+      plcFile: 'PLC 文件',
+      plcFileRequired: '请输入 PLC 文件路径',
+      scenarioFile: '场景文件',
+      scenarioFileRequired: '请输入场景文件路径',
+      run: '运行',
+      triggered: '运行已触发',
+      triggerFailed: '运行失败',
+      runHistory: '运行记录',
+      refresh: '刷新',
+      runDetails: '运行详情',
+      runId: '运行 ID',
+      status: '状态',
+      triggeredBy: '触发人',
+      triggeredAt: '触发时间',
+      failureSummary: '失败原因',
+      actions: '操作',
+      viewDetails: '查看详情',
+      diagnosis: '诊断',
+      artifacts: '工件',
+      traceData: 'Trace 数据',
+      diffReport: 'Diff 报告',
+      timingReport: '时序报告',
+      diagnosisReport: '诊断报告',
+    },
+
+    // Project Selector
+    projectSelector: {
+      title: '选择项目',
+      select: '选择项目',
+      current: '当前项目',
+      selectNew: '选择新项目',
+      placeholder: '选择一个 PLC 项目',
+      path: '路径',
+      switched: '已切换到项目',
+      openLocal: '打开本地 .plc 文件',
+      browseFile: '浏览文件...',
+      orFromServer: '或从服务器选择',
+    },
+
+    // Canvas Controls
+    canvas: {
+      zoomIn: '放大',
+      zoomOut: '缩小',
+      fitView: '适应视图',
+      lockView: '锁定视图',
+      unlockView: '解锁视图',
     },
 
     // Notifications

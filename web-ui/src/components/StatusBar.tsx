@@ -81,7 +81,7 @@ const StatusBar: React.FC = () => {
 
       {/* Right side */}
       <div style={{ marginLeft: 'auto', color: '#4a4a4a' }}>
-        RustPLC IDDE v1.0
+        {t('statusBar.version')}
       </div>
     </div>
   );

@@ -17,7 +17,9 @@ interface AppState {
 
   // 当前项目
   currentProject: string | null;
-  setCurrentProject: (project: string | null) => void;
+  currentProjectPath: string | null;
+  currentProjectContent: string | null;
+  setCurrentProject: (project: string | null, path?: string | null, content?: string | null) => void;
 
   // 未保存状态
   hasUnsavedChanges: boolean;
@@ -46,7 +48,10 @@ export const useAppStore = create<AppState>()(
       setCurrentUser: (user) => set({ currentUser: user }),
 
       currentProject: null,
-      setCurrentProject: (project) => set({ currentProject: project }),
+      currentProjectPath: null,
+      currentProjectContent: null,
+      setCurrentProject: (project, path = null, content = null) =>
+        set({ currentProject: project, currentProjectPath: path, currentProjectContent: content }),
 
       hasUnsavedChanges: false,
       setHasUnsavedChanges: (hasChanges) => set({ hasUnsavedChanges: hasChanges }),

@@ -12,6 +12,7 @@ import {
   SaveOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../stores/appStore';
 import { ProjectSelector } from '../components/ProjectSelector';
 import type { MenuProps } from 'antd';
@@ -23,92 +24,38 @@ interface MainLayoutProps {
 }
 
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const {
-    runMode,
-    currentUser,
-    hasUnsavedChanges,
-    alarmCount,
-  } = useAppStore();
+  const { runMode, currentUser, hasUnsavedChanges, alarmCount } = useAppStore();
 
   const totalAlarms = alarmCount.critical + alarmCount.warning;
 
   const menuItems: MenuProps['items'] = [
-    {
-      key: '/',
-      icon: <DashboardOutlined />,
-      label: '总览',
-    },
-    {
-      key: '/topology',
-      icon: <ApartmentOutlined />,
-      label: '拓扑',
-    },
-    {
-      key: '/scenario',
-      icon: <ExperimentOutlined />,
-      label: '场景',
-    },
-    {
-      key: '/run',
-      icon: <PlayCircleOutlined />,
-      label: '运行',
-    },
-    {
-      key: '/replay',
-      icon: <HistoryOutlined />,
-      label: '回放',
-    },
+    { key: '/', icon: <DashboardOutlined />, label: t('dashboard.title') },
+    { key: '/topology', icon: <ApartmentOutlined />, label: t('tabs.topology') },
+    { key: '/scenario', icon: <ExperimentOutlined />, label: t('tabs.scenario') },
+    { key: '/run', icon: <PlayCircleOutlined />, label: t('tabs.run') },
+    { key: '/replay', icon: <HistoryOutlined />, label: t('tabs.replay') },
     {
       key: '/diagnosis',
       icon: <WarningOutlined />,
       label: totalAlarms > 0 ? (
-        <Badge count={totalAlarms} offset={[10, 0]}>
-          诊断
-        </Badge>
-      ) : '诊断',
+        <Badge count={totalAlarms} offset={[10, 0]}>{t('tabs.diagnosis')}</Badge>
+      ) : t('tabs.diagnosis'),
     },
-    {
-      key: '/audit',
-      icon: <AuditOutlined />,
-      label: '审计',
-    },
+    { key: '/audit', icon: <AuditOutlined />, label: t('tabs.audit') },
   ];
 
-  const handleMenuClick: MenuProps['onClick'] = (e) => {
-    navigate(e.key);
-  };
+  const handleMenuClick: MenuProps['onClick'] = (e) => navigate(e.key);
 
-  const runModeColor = {
-    no_board: 'blue',
-    hil_board: 'orange',
-    runtime_live: 'green',
-  }[runMode];
-
-  const runModeLabel = {
-    no_board: 'No-Board',
-    hil_board: 'HIL',
-    runtime_live: 'Live',
-  }[runMode];
+  const runModeColor = { no_board: 'blue', hil_board: 'orange', runtime_live: 'green' }[runMode];
 
   const userMenuItems: MenuProps['items'] = [
-    {
-      key: 'profile',
-      label: '个人信息',
-    },
-    {
-      key: 'settings',
-      label: '设置',
-    },
-    {
-      type: 'divider',
-    },
-    {
-      key: 'logout',
-      label: '退出登录',
-      danger: true,
-    },
+    { key: 'profile', label: t('mainLayout.profile') },
+    { key: 'settings', label: t('mainLayout.settings') },
+    { type: 'divider' },
+    { key: 'logout', label: t('mainLayout.logout'), danger: true },
   ];
 
   const totalAlarmsHeader = alarmCount.info + alarmCount.warning + alarmCount.critical;
@@ -125,19 +72,15 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <h1 style={{ color: 'white', margin: 0, fontSize: '20px' }}>
-            RustPLC Web
-          </h1>
+          <h1 style={{ color: 'white', margin: 0, fontSize: '20px' }}>RustPLC</h1>
           <ProjectSelector />
           {hasUnsavedChanges && (
-            <Tag icon={<SaveOutlined />} color="warning">
-              未保存
-            </Tag>
+            <Tag icon={<SaveOutlined />} color="warning">{t('topBar.unsavedChanges')}</Tag>
           )}
         </div>
 
         <Space size="large">
-          <Tag color={runModeColor}>{runModeLabel}</Tag>
+          <Tag color={runModeColor}>{t(`runMode.${runMode}`)}</Tag>
 
           <Badge count={totalAlarmsHeader} overflowCount={99}>
             <WarningOutlined

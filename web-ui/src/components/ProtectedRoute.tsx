@@ -1,5 +1,6 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../stores/appStore';
 import { hasRole, type UserRole } from '../utils/permissions';
 
@@ -9,6 +10,7 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole }) => {
+  const { t } = useTranslation();
   const { currentUser } = useAppStore();
 
   if (!currentUser) {
@@ -53,14 +55,14 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole 
             🚫
           </div>
           <h2 style={{ margin: '0 0 8px 0', fontSize: 18, color: '#e0e0e0' }}>
-            Access Denied
+            {t('protectedRoute.accessDenied')}
           </h2>
           <p style={{ margin: 0, fontSize: 13, color: '#a0a0a0', lineHeight: 1.6 }}>
-            You do not have permission to access this page.
+            {t('protectedRoute.noPermission')}
             <br />
-            Required role: <strong>{requiredRole}</strong>
+            {t('protectedRoute.requiredRole')}: <strong>{requiredRole}</strong>
             <br />
-            Your role: <strong>{currentUser.role}</strong>
+            {t('protectedRoute.yourRole')}: <strong>{currentUser.role}</strong>
           </p>
           <button
             onClick={() => window.history.back()}
@@ -75,7 +77,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole 
               cursor: 'pointer',
             }}
           >
-            Go Back
+            {t('protectedRoute.goBack')}
           </button>
         </div>
       </div>

@@ -9,24 +9,24 @@ import {
   FastBackwardOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { traceApi, runApi } from '../services/api';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
 
 const ReplayPage: React.FC = () => {
+  const { t } = useTranslation();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [currentTick, setCurrentTick] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(1);
 
-  // 获取运行列表
   const { data: runsData } = useQuery({
     queryKey: ['runs'],
     queryFn: () => runApi.listRuns(20),
   });
 
-  // 获取 Trace 数据
   const { data: traceData } = useQuery({
     queryKey: ['trace', selectedRunId],
     queryFn: () => traceApi.getTrace(selectedRunId!),
@@ -38,16 +38,11 @@ const ReplayPage: React.FC = () => {
   const maxTick = ticks.length - 1;
   const currentSnapshot = ticks[currentTick];
 
-  // 播放控制
   React.useEffect(() => {
-    if (!isPlaying || currentTick >= maxTick) {
-      return;
-    }
-
+    if (!isPlaying || currentTick >= maxTick) return;
     const interval = setInterval(() => {
       setCurrentTick((prev) => Math.min(prev + 1, maxTick));
     }, 1000 / playSpeed);
-
     return () => clearInterval(interval);
   }, [isPlaying, currentTick, maxTick, playSpeed]);
 
@@ -60,19 +55,14 @@ const ReplayPage: React.FC = () => {
 
   return (
     <div>
-      <Title level={2}>Tick 回放</Title>
+      <Title level={2}>{t('tabs.replay')}</Title>
 
-      {/* 选择运行 */}
-      <Card title="选择运行记录" style={{ marginBottom: 24 }}>
+      <Card title={t('replayPage.selectRun')} style={{ marginBottom: 24 }}>
         <Select
           style={{ width: 400 }}
-          placeholder="选择运行记录"
+          placeholder={t('replayPage.selectRunPlaceholder')}
           value={selectedRunId}
-          onChange={(value) => {
-            setSelectedRunId(value);
-            setCurrentTick(0);
-            setIsPlaying(false);
-          }}
+          onChange={(value) => { setSelectedRunId(value); setCurrentTick(0); setIsPlaying(false); }}
         >
           {runsData?.data?.map((run: any) => (
             <Option key={run.run_id} value={run.run_id}>
@@ -84,56 +74,28 @@ const ReplayPage: React.FC = () => {
 
       {selectedRunId && (
         <>
-          {/* 播放控制 */}
-          <Card title="播放控制" style={{ marginBottom: 24 }}>
+          <Card title={t('replayPage.playbackControl')} style={{ marginBottom: 24 }}>
             <Space direction="vertical" style={{ width: '100%' }} size="large">
               <Space>
-                <Button
-                  icon={<FastBackwardOutlined />}
-                  onClick={handleFastBackward}
-                  disabled={currentTick === 0}
-                >
-                  -10
-                </Button>
-                <Button
-                  icon={<StepBackwardOutlined />}
-                  onClick={handleStepBackward}
-                  disabled={currentTick === 0}
-                >
-                  上一帧
+                <Button icon={<FastBackwardOutlined />} onClick={handleFastBackward} disabled={currentTick === 0}>-10</Button>
+                <Button icon={<StepBackwardOutlined />} onClick={handleStepBackward} disabled={currentTick === 0}>
+                  {t('replayPage.prevFrame')}
                 </Button>
                 {isPlaying ? (
-                  <Button icon={<PauseOutlined />} onClick={handlePause} type="primary">
-                    暂停
-                  </Button>
+                  <Button icon={<PauseOutlined />} onClick={handlePause} type="primary">{t('replay.pause')}</Button>
                 ) : (
-                  <Button
-                    icon={<PlayCircleOutlined />}
-                    onClick={handlePlay}
-                    type="primary"
-                    disabled={currentTick >= maxTick}
-                  >
-                    播放
+                  <Button icon={<PlayCircleOutlined />} onClick={handlePlay} type="primary" disabled={currentTick >= maxTick}>
+                    {t('replay.play')}
                   </Button>
                 )}
-                <Button
-                  icon={<StepForwardOutlined />}
-                  onClick={handleStepForward}
-                  disabled={currentTick >= maxTick}
-                >
-                  下一帧
+                <Button icon={<StepForwardOutlined />} onClick={handleStepForward} disabled={currentTick >= maxTick}>
+                  {t('replayPage.nextFrame')}
                 </Button>
-                <Button
-                  icon={<FastForwardOutlined />}
-                  onClick={handleFastForward}
-                  disabled={currentTick >= maxTick}
-                >
-                  +10
-                </Button>
+                <Button icon={<FastForwardOutlined />} onClick={handleFastForward} disabled={currentTick >= maxTick}>+10</Button>
               </Space>
 
               <div>
-                <Text>播放速度: </Text>
+                <Text>{t('replayPage.playSpeed')}: </Text>
                 <Select value={playSpeed} onChange={setPlaySpeed} style={{ width: 120 }}>
                   <Option value={0.5}>0.5x</Option>
                   <Option value={1}>1x</Option>
@@ -144,7 +106,7 @@ const ReplayPage: React.FC = () => {
               </div>
 
               <div>
-                <Text>Tick: {currentTick} / {maxTick}</Text>
+                <Text>{t('replay.tick')}: {currentTick} / {maxTick}</Text>
                 <Slider
                   min={0}
                   max={maxTick}
@@ -156,27 +118,19 @@ const ReplayPage: React.FC = () => {
             </Space>
           </Card>
 
-          {/* 当前状态 */}
           {currentSnapshot && (
             <>
               <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
                 <Col span={6}>
-                  <Card>
-                    <Statistic title="当前 Tick" value={currentSnapshot.tick} />
-                  </Card>
+                  <Card><Statistic title={t('replayPage.currentTick')} value={currentSnapshot.tick} /></Card>
+                </Col>
+                <Col span={6}>
+                  <Card><Statistic title={t('replayPage.timeMs')} value={currentSnapshot.tick * (trace?.tick_ms || 10)} /></Card>
                 </Col>
                 <Col span={6}>
                   <Card>
                     <Statistic
-                      title="时间 (ms)"
-                      value={currentSnapshot.tick * (trace?.tick_ms || 10)}
-                    />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card>
-                    <Statistic
-                      title="数字输入"
+                      title={t('replayPage.digitalInputs')}
                       value={currentSnapshot.digital_inputs?.filter(Boolean).length || 0}
                       suffix={`/ ${currentSnapshot.digital_inputs?.length || 0}`}
                     />
@@ -185,7 +139,7 @@ const ReplayPage: React.FC = () => {
                 <Col span={6}>
                   <Card>
                     <Statistic
-                      title="数字输出"
+                      title={t('replayPage.digitalOutputs')}
                       value={currentSnapshot.digital_outputs?.filter(Boolean).length || 0}
                       suffix={`/ ${currentSnapshot.digital_outputs?.length || 0}`}
                     />
@@ -193,46 +147,32 @@ const ReplayPage: React.FC = () => {
                 </Col>
               </Row>
 
-              {/* 信号表 */}
-              <Card title="数字信号" style={{ marginBottom: 24 }}>
+              <Card title={t('replayPage.digitalSignals')} style={{ marginBottom: 24 }}>
                 <Row gutter={[16, 16]}>
                   <Col span={12}>
-                    <Title level={5}>输入</Title>
-                    <SignalTable
-                      signals={currentSnapshot.digital_inputs || []}
-                      prefix="DI"
-                    />
+                    <Title level={5}>{t('replayPage.inputs')}</Title>
+                    <SignalTable signals={currentSnapshot.digital_inputs || []} prefix="DI" />
                   </Col>
                   <Col span={12}>
-                    <Title level={5}>输出</Title>
-                    <SignalTable
-                      signals={currentSnapshot.digital_outputs || []}
-                      prefix="DO"
-                    />
+                    <Title level={5}>{t('replayPage.outputs')}</Title>
+                    <SignalTable signals={currentSnapshot.digital_outputs || []} prefix="DO" />
                   </Col>
                 </Row>
               </Card>
 
-              {/* 模拟信号 */}
               {(currentSnapshot.analog_inputs?.length || currentSnapshot.analog_outputs?.length) && (
-                <Card title="模拟信号">
+                <Card title={t('replayPage.analogSignals')}>
                   <Row gutter={[16, 16]}>
                     {currentSnapshot.analog_inputs && currentSnapshot.analog_inputs.length > 0 && (
                       <Col span={12}>
-                        <Title level={5}>输入</Title>
-                        <AnalogTable
-                          signals={currentSnapshot.analog_inputs}
-                          prefix="AI"
-                        />
+                        <Title level={5}>{t('replayPage.inputs')}</Title>
+                        <AnalogTable signals={currentSnapshot.analog_inputs} prefix="AI" />
                       </Col>
                     )}
                     {currentSnapshot.analog_outputs && currentSnapshot.analog_outputs.length > 0 && (
                       <Col span={12}>
-                        <Title level={5}>输出</Title>
-                        <AnalogTable
-                          signals={currentSnapshot.analog_outputs}
-                          prefix="AO"
-                        />
+                        <Title level={5}>{t('replayPage.outputs')}</Title>
+                        <AnalogTable signals={currentSnapshot.analog_outputs} prefix="AO" />
                       </Col>
                     )}
                   </Row>
@@ -246,55 +186,37 @@ const ReplayPage: React.FC = () => {
   );
 };
 
-// 数字信号表
 const SignalTable: React.FC<{ signals: boolean[]; prefix: string }> = ({ signals, prefix }) => {
-  const data = signals.map((value, index) => ({
-    key: index,
-    name: `${prefix}${index}`,
-    value,
-  }));
-
+  const { t } = useTranslation();
+  const data = signals.map((value, index) => ({ key: index, name: `${prefix}${index}`, value }));
   const columns = [
-    { title: '信号', dataIndex: 'name', key: 'name' },
+    { title: t('replayPage.signal'), dataIndex: 'name', key: 'name' },
     {
-      title: '状态',
+      title: t('replayPage.state'),
       dataIndex: 'value',
       key: 'value',
       render: (value: boolean) => (
-        <Text
-          strong
-          style={{
-            color: value ? '#52c41a' : '#d9d9d9',
-            fontSize: '16px',
-          }}
-        >
-          {value ? '● ON' : '○ OFF'}
+        <Text strong style={{ color: value ? '#52c41a' : '#d9d9d9', fontSize: '16px' }}>
+          {value ? `● ${t('properties.statusOn')}` : `○ ${t('properties.statusOff')}`}
         </Text>
       ),
     },
   ];
-
   return <Table dataSource={data} columns={columns} pagination={false} size="small" />;
 };
 
-// 模拟信号表
 const AnalogTable: React.FC<{ signals: number[]; prefix: string }> = ({ signals, prefix }) => {
-  const data = signals.map((value, index) => ({
-    key: index,
-    name: `${prefix}${index}`,
-    value,
-  }));
-
+  const { t } = useTranslation();
+  const data = signals.map((value, index) => ({ key: index, name: `${prefix}${index}`, value }));
   const columns = [
-    { title: '信号', dataIndex: 'name', key: 'name' },
+    { title: t('replayPage.signal'), dataIndex: 'name', key: 'name' },
     {
-      title: '值',
+      title: t('properties.value'),
       dataIndex: 'value',
       key: 'value',
       render: (value: number) => <Text code>{value.toFixed(2)}</Text>,
     },
   ];
-
   return <Table dataSource={data} columns={columns} pagination={false} size="small" />;
 };
 

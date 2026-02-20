@@ -8,7 +8,7 @@ import type {
   TimingReport,
 } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -49,6 +49,9 @@ apiClient.interceptors.response.use(
 export const topologyApi = {
   getTopology: (id: string) =>
     apiClient.get<ComponentTopology>(`/topology/${id}`),
+
+  parsePlc: (content: string) =>
+    apiClient.post<ComponentTopology>('/topology/parse-plc', { content }),
 
   validateTopology: (topology: ComponentTopology) =>
     apiClient.post<{ valid: boolean; errors: string[] }>('/topology/validate', topology),

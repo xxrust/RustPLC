@@ -1,9 +1,11 @@
 import React, { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useReplayStore } from '../../stores/replayStore';
 
 const SPEEDS = [0.5, 1, 2, 5];
 
 const TickTimeline: React.FC = () => {
+  const { t } = useTranslation();
   const {
     snapshots,
     currentTick,
@@ -66,17 +68,13 @@ const TickTimeline: React.FC = () => {
       {/* Controls row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {/* Prev keypoint */}
-        <IconBtn title="Prev keypoint" onClick={jumpToPrevKeypoint}>⏮</IconBtn>
-        {/* Step back */}
-        <IconBtn title="Step back" onClick={stepBackward}>◀</IconBtn>
-        {/* Play/Pause */}
-        <IconBtn title={isPlaying ? 'Pause' : 'Play'} onClick={() => setIsPlaying(!isPlaying)} accent>
+        <IconBtn title={t('replay.prevKeypoint')} onClick={jumpToPrevKeypoint}>⏮</IconBtn>
+        <IconBtn title={t('replay.stepBack')} onClick={stepBackward}>◀</IconBtn>
+        <IconBtn title={isPlaying ? t('replay.pause') : t('replay.play')} onClick={() => setIsPlaying(!isPlaying)} accent>
           {isPlaying ? '⏸' : '▶'}
         </IconBtn>
-        {/* Step forward */}
-        <IconBtn title="Step forward" onClick={stepForward}>▶</IconBtn>
-        {/* Next keypoint */}
-        <IconBtn title="Next keypoint" onClick={jumpToNextKeypoint}>⏭</IconBtn>
+        <IconBtn title={t('replay.stepForward')} onClick={stepForward}>▶</IconBtn>
+        <IconBtn title={t('replay.nextKeypoint')} onClick={jumpToNextKeypoint}>⏭</IconBtn>
 
         {/* Speed selector */}
         <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
@@ -151,7 +149,7 @@ const TickTimeline: React.FC = () => {
               transform: 'translate(-50%, -50%)',
               zIndex: 2,
             }}
-            title={`Error at tick ${tick}`}
+            title={`${t('replay.errorAtTick')} ${tick}`}
           />
         ))}
         {maxTick > 0 && Array.from(infoTicks).map((tick) => (
@@ -168,7 +166,7 @@ const TickTimeline: React.FC = () => {
               transform: 'translate(-50%, -50%)',
               zIndex: 2,
             }}
-            title={`Event at tick ${tick}`}
+            title={`${t('replay.eventAtTick')} ${tick}`}
           />
         ))}
         {/* Range input (invisible, on top) */}

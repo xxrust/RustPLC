@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
+import { useTranslation } from 'react-i18next';
 import type { NodeData } from '../../stores/topologyStore';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useAppStore } from '../../stores/appStore';
 import { simulationApi } from '../../services/api';
 
 const SwitchNode: React.FC<NodeProps> = ({ data, selected, id }) => {
+  const { t } = useTranslation();
   const d = data as NodeData;
   const isClosed = d.status === 'closed' || d.value === true;
   const color = isClosed ? '#52c41a' : '#a0a0a0';
@@ -23,16 +25,11 @@ const SwitchNode: React.FC<NodeProps> = ({ data, selected, id }) => {
 
     try {
       setLoading(true);
-      await simulationApi.injectEvent(
-        id,
-        'switch',
-        newValue,
-        currentUser?.name || 'unknown'
-      );
+      await simulationApi.injectEvent(id, 'switch', newValue, currentUser?.name || 'unknown');
       updateNodeData(id, { status: newStatus, value: newValue });
     } catch (error) {
       console.error('Failed to inject switch event:', error);
-      alert('Failed to inject switch event');
+      alert(t('notifications.toggleFailed'));
     } finally {
       setLoading(false);
     }
@@ -53,14 +50,10 @@ const SwitchNode: React.FC<NodeProps> = ({ data, selected, id }) => {
       </div>
       <div style={{ padding: '8px 12px' }}>
         <svg width="76" height="40" viewBox="0 0 76 40">
-          {/* Left terminal */}
           <line x1="0" y1="20" x2="20" y2="20" stroke="#5a5a5a" strokeWidth="2" />
-          {/* Right terminal */}
           <line x1="56" y1="20" x2="76" y2="20" stroke="#5a5a5a" strokeWidth="2" />
-          {/* Contact dots */}
           <circle cx="20" cy="20" r="3" fill="#5a5a5a" />
           <circle cx="56" cy="20" r="3" fill="#5a5a5a" />
-          {/* Switch arm */}
           <line
             x1="20" y1="20"
             x2="56" y2={isClosed ? 20 : 10}
@@ -70,9 +63,8 @@ const SwitchNode: React.FC<NodeProps> = ({ data, selected, id }) => {
           />
         </svg>
         <div style={{ color: '#a0a0a0', fontSize: 10, marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
-          {isClosed ? 'closed' : 'open'}
+          {isClosed ? t('properties.statusClosed') : t('properties.statusOpen')}
         </div>
-        {/* Interactive control for no-board mode */}
         {showControls && (
           <button
             className="nodrag"
@@ -92,7 +84,7 @@ const SwitchNode: React.FC<NodeProps> = ({ data, selected, id }) => {
               opacity: loading ? 0.6 : 1,
             }}
           >
-            {loading ? '...' : isClosed ? 'CLOSE' : 'OPEN'}
+            {loading ? '...' : isClosed ? t('properties.statusClosed') : t('properties.statusOpen')}
           </button>
         )}
       </div>

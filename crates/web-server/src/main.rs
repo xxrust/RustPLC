@@ -5,11 +5,13 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use rust_plc::ast::DeviceType;
 use rust_plc::component_scenario::parse_component_scenario_value;
 use rust_plc::component_topology::parse_component_topology_value;
+use rust_plc::parser::parse_plc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -82,6 +84,11 @@ struct AckAlarmRequest {
     comment: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ParsePlcTopologyRequest {
+    content: String,
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -96,6 +103,7 @@ async fn main() {
 
     let api_routes = Router::new()
         .route("/projects", get(list_projects))
+        .route("/topology/parse-plc", post(parse_plc_topology))
         .route("/topology/:id", get(get_topology).put(save_topology))
         .route("/topology/validate", post(validate_topology))
         .route("/scenario/:id", get(get_scenario).put(save_scenario))
@@ -240,6 +248,127 @@ async fn validate_topology(Json(payload): Json<Value>) -> Json<Value> {
                 .collect::<Vec<_>>();
             Json(serde_json::json!({ "valid": false, "errors": errors, "issues": issues }))
         }
+    }
+}
+
+async fn parse_plc_topology(
+    Json(payload): Json<ParsePlcTopologyRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let normalized = payload.content.trim_start_matches('\u{feff}');
+    let preview_plc =
+        build_topology_preview_plc(normalized).unwrap_or_else(|| normalized.to_string());
+    let program = parse_plc(&preview_plc)
+        .map_err(|err| bad_request(format!("failed to parse PLC: {err}")))?;
+
+    let devices = &program.topology.devices;
+    let mut name_to_index = HashMap::<String, usize>::new();
+    for (idx, device) in devices.iter().enumerate() {
+        name_to_index.insert(device.name.clone(), idx);
+    }
+
+    let components = devices
+        .iter()
+        .enumerate()
+        .map(|(idx, device)| {
+            let col = idx % 4;
+            let row = idx / 4;
+            serde_json::json!({
+                "id": device.name,
+                "component_id": map_plc_device_to_component_id(&device.device_type),
+                "params": {
+                    "name": device.name,
+                    "device_type": plc_device_type_name(&device.device_type),
+                },
+                "position": {
+                    "x": 160 + col as i64 * 220,
+                    "y": 120 + row as i64 * 180,
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut seen_edges = HashSet::<(String, String)>::new();
+    let mut connections = Vec::new();
+    for device in devices {
+        if let Some(upstream) = &device.attributes.connected_to {
+            if name_to_index.contains_key(upstream) {
+                let pair = (upstream.clone(), device.name.clone());
+                if seen_edges.insert(pair.clone()) {
+                    connections.push(serde_json::json!({
+                        "from": pair.0,
+                        "to": pair.1,
+                    }));
+                }
+            }
+        }
+
+        if let Some(detects) = &device.attributes.detects {
+            if name_to_index.contains_key(&detects.device) {
+                let pair = (detects.device.clone(), device.name.clone());
+                if seen_edges.insert(pair.clone()) {
+                    connections.push(serde_json::json!({
+                        "from": pair.0,
+                        "to": pair.1,
+                    }));
+                }
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "schema_version": 1,
+        "component_library": {
+            "schema_version": 1,
+            "components": []
+        },
+        "components": components,
+        "connections": connections
+    })))
+}
+
+fn build_topology_preview_plc(input: &str) -> Option<String> {
+    let topology = extract_section(input, "topology")?;
+    Some(format!(
+        "{topology}\n\n[constraints]\n\n[tasks]\n\ntask __topology_preview__:\n    step halt:\n"
+    ))
+}
+
+fn extract_section(input: &str, name: &str) -> Option<String> {
+    let mut offset = 0usize;
+    let mut start: Option<usize> = None;
+    let mut end: Option<usize> = None;
+
+    for chunk in input.split_inclusive('\n') {
+        if let Some(section) = parse_section_header(chunk) {
+            if start.is_none() && section.eq_ignore_ascii_case(name) {
+                start = Some(offset);
+            } else if start.is_some() {
+                end = Some(offset);
+                break;
+            }
+        }
+        offset += chunk.len();
+    }
+
+    if let Some(begin) = start {
+        let finish = end.unwrap_or(input.len());
+        Some(input[begin..finish].trim_end().to_string())
+    } else {
+        None
+    }
+}
+
+fn parse_section_header(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    if !(trimmed.starts_with('[') && trimmed.ends_with(']')) {
+        return None;
+    }
+    let inner = &trimmed[1..trimmed.len() - 1];
+    let section = inner.trim();
+    if section.is_empty() {
+        None
+    } else {
+        Some(section)
     }
 }
 
@@ -908,6 +1037,34 @@ fn now_ms() -> u64 {
 fn iso_like_timestamp(ms: u64) -> String {
     // Keep this dependency-free and parseable by `new Date(...)` in UI.
     format!("{}", ms)
+}
+
+fn map_plc_device_to_component_id(kind: &DeviceType) -> &'static str {
+    match kind {
+        DeviceType::DigitalOutput => "switch",
+        DeviceType::DigitalInput => "sensor",
+        DeviceType::SolenoidValve => "switch",
+        DeviceType::Cylinder => "cylinder",
+        DeviceType::Sensor => "sensor",
+        DeviceType::Motor => "stepper_pd",
+        DeviceType::AnalogInput => "sensor",
+        DeviceType::AnalogOutput => "stepper_pd",
+        DeviceType::Pid => "generic",
+    }
+}
+
+fn plc_device_type_name(kind: &DeviceType) -> &'static str {
+    match kind {
+        DeviceType::DigitalOutput => "digital_output",
+        DeviceType::DigitalInput => "digital_input",
+        DeviceType::SolenoidValve => "solenoid_valve",
+        DeviceType::Cylinder => "cylinder",
+        DeviceType::Sensor => "sensor",
+        DeviceType::Motor => "motor",
+        DeviceType::AnalogInput => "analog_input",
+        DeviceType::AnalogOutput => "analog_output",
+        DeviceType::Pid => "pid",
+    }
 }
 
 fn bad_request(message: impl Into<String>) -> (StatusCode, Json<Value>) {

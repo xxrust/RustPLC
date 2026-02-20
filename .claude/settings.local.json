@@ -46,7 +46,8 @@
       "Bash(perl -i -0pe:*)",
       "Bash(node -e:*)",
       "Bash(npx tsc:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(npx vite build)"
     ]
   }
 }

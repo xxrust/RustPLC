@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { authApi } from '../services/api';
 import { useAppStore } from '../stores/appStore';
 
 const LoginPage: React.FC = () => {
+  const { t } = useTranslation();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -16,7 +18,7 @@ const LoginPage: React.FC = () => {
     setError('');
 
     if (!username || !password) {
-      setError('Username and password are required');
+      setError(t('login.errorRequired'));
       return;
     }
 
@@ -28,7 +30,7 @@ const LoginPage: React.FC = () => {
       navigate('/');
     } catch (err: any) {
       console.error('Login failed:', err);
-      setError(err.response?.data?.message || 'Login failed: Invalid credentials');
+      setError(err.response?.data?.message || t('login.errorFailed'));
     } finally {
       setLoading(false);
     }
@@ -67,7 +69,7 @@ const LoginPage: React.FC = () => {
             RustPLC Web UI
           </h1>
           <p style={{ margin: '8px 0 0 0', fontSize: 13, color: '#a0a0a0' }}>
-            Industrial Control System IDDE
+            {t('login.subtitle')}
           </p>
         </div>
 
@@ -83,13 +85,13 @@ const LoginPage: React.FC = () => {
                 letterSpacing: '0.08em',
               }}
             >
-              Username
+              {t('login.username')}
             </label>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="Enter username"
+              placeholder={t('login.usernamePlaceholder')}
               disabled={loading}
               style={{
                 width: '100%',
@@ -117,13 +119,13 @@ const LoginPage: React.FC = () => {
                 letterSpacing: '0.08em',
               }}
             >
-              Password
+              {t('login.password')}
             </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password"
+              placeholder={t('login.passwordPlaceholder')}
               disabled={loading}
               style={{
                 width: '100%',
@@ -172,7 +174,7 @@ const LoginPage: React.FC = () => {
               transition: 'all 0.2s',
             }}
           >
-            {loading ? 'Logging in...' : 'Login'}
+            {loading ? t('login.loggingIn') : t('login.loginButton')}
           </button>
         </form>
 
@@ -186,7 +188,7 @@ const LoginPage: React.FC = () => {
             textAlign: 'center',
           }}
         >
-          <p style={{ margin: 0 }}>Demo Credentials:</p>
+          <p style={{ margin: 0 }}>{t('login.demoCredentials')}</p>
           <p style={{ margin: '4px 0 0 0', fontFamily: 'JetBrains Mono, monospace' }}>
             engineer / password
           </p>

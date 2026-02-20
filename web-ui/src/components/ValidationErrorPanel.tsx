@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface ValidationErrorPanelProps {
   errors: Array<{
@@ -10,6 +11,7 @@ interface ValidationErrorPanelProps {
 }
 
 const ValidationErrorPanel: React.FC<ValidationErrorPanelProps> = ({ errors, onClose }) => {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -66,10 +68,10 @@ const ValidationErrorPanel: React.FC<ValidationErrorPanelProps> = ({ errors, onC
             </div>
             <div>
               <h3 style={{ margin: 0, fontSize: 16, color: '#e0e0e0', fontWeight: 600 }}>
-                Validation Failed
+                {t('validation.title')}
               </h3>
               <p style={{ margin: '2px 0 0 0', fontSize: 12, color: '#a0a0a0' }}>
-                {errors.length} error{errors.length > 1 ? 's' : ''} found
+                {errors.length} {errors.length > 1 ? t('validation.errorsFoundPlural') : t('validation.errorsFound')}
               </p>
             </div>
           </div>
@@ -175,7 +177,7 @@ const ValidationErrorPanel: React.FC<ValidationErrorPanelProps> = ({ errors, onC
               cursor: 'pointer',
             }}
           >
-            Close
+            {t('validation.close')}
           </button>
         </div>
       </div>

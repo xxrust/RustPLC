@@ -17,7 +17,10 @@ export const useAlarmWebSocket = () => {
 
   useEffect(() => {
     const connectWebSocket = () => {
-      const ws = new WebSocket('ws://localhost:8080/ws/alarms');
+      // Use relative WebSocket URL to go through Vite proxy
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/alarms`;
+      const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         console.log('WebSocket connected');

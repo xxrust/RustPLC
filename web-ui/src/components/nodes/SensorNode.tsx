@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
+import { useTranslation } from 'react-i18next';
 import type { NodeData } from '../../stores/topologyStore';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useAppStore } from '../../stores/appStore';
 import { simulationApi } from '../../services/api';
 
 const SensorNode: React.FC<NodeProps> = ({ data, selected, id }) => {
+  const { t } = useTranslation();
   const d = data as NodeData;
   const isOn = d.status === 'on' || d.value === true;
   const isFault = d.status === 'fault';
@@ -24,16 +26,11 @@ const SensorNode: React.FC<NodeProps> = ({ data, selected, id }) => {
 
     try {
       setLoading(true);
-      await simulationApi.injectEvent(
-        id,
-        'sensor',
-        newValue,
-        currentUser?.name || 'unknown'
-      );
+      await simulationApi.injectEvent(id, 'sensor', newValue, currentUser?.name || 'unknown');
       updateNodeData(id, { status: newStatus, value: newValue });
     } catch (error) {
       console.error('Failed to inject sensor event:', error);
-      alert('Failed to inject sensor event');
+      alert(t('notifications.toggleFailed'));
     } finally {
       setLoading(false);
     }
@@ -54,17 +51,13 @@ const SensorNode: React.FC<NodeProps> = ({ data, selected, id }) => {
       </div>
       <div style={{ padding: '8px 12px' }}>
         <svg width="76" height="40" viewBox="0 0 76 40">
-          {/* Sensor body */}
           <rect x="8" y="8" width="60" height="24" rx="12" fill="#3a3a3a" stroke="#5a5a5a" strokeWidth="1" />
-          {/* LED indicator */}
           <circle cx="38" cy="20" r="8" fill={ledColor} style={{ filter: isOn ? `drop-shadow(0 0 4px ${ledColor})` : 'none', transition: 'all 0.2s' }} />
-          {/* Detection beam */}
           {isOn && <line x1="68" y1="20" x2="76" y2="20" stroke={ledColor} strokeWidth="2" strokeDasharray="2,2" />}
         </svg>
         <div style={{ color: '#a0a0a0', fontSize: 10, marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
-          {d.status || 'off'}
+          {d.status ? t(`properties.status${d.status.charAt(0).toUpperCase() + d.status.slice(1)}`, d.status) : t('properties.statusOff')}
         </div>
-        {/* Interactive control for no-board mode */}
         {showControls && (
           <button
             className="nodrag"
@@ -84,7 +77,7 @@ const SensorNode: React.FC<NodeProps> = ({ data, selected, id }) => {
               opacity: loading ? 0.6 : 1,
             }}
           >
-            {loading ? '...' : isOn ? 'ON' : 'OFF'}
+            {loading ? '...' : isOn ? t('properties.statusOn') : t('properties.statusOff')}
           </button>
         )}
       </div>
