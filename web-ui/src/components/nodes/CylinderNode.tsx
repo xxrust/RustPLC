@@ -87,8 +87,9 @@ const CylinderNode: React.FC<NodeProps> = ({ data, selected }) => {
         </div>
       </div>
 
-      <Handle type="target" position={Position.Left} style={{ background: '#00bcd4', width: 8, height: 8 }} />
-      <Handle type="source" position={Position.Right} style={{ background: '#00bcd4', width: 8, height: 8 }} />
+      <Handle type="target" id="cmd" position={Position.Left} style={{ background: '#00bcd4', width: 8, height: 8, top: '50%' }} />
+      <Handle type="source" id="extended" position={Position.Right} style={{ background: '#00bcd4', width: 8, height: 8, top: '30%' }} />
+      <Handle type="source" id="retracted" position={Position.Right} style={{ background: '#a0a0a0', width: 8, height: 8, top: '70%' }} />
     </div>
   );
 };

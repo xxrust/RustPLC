@@ -278,6 +278,10 @@ async fn parse_plc_topology(
                 "params": {
                     "name": device.name,
                     "device_type": plc_device_type_name(&device.device_type),
+                    "connected_to": device.attributes.connected_to,
+                    "detects": device.attributes.detects.as_ref().map(|d| format!("{}.{}", d.device, d.state)),
+                    "detects_device": device.attributes.detects.as_ref().map(|d| d.device.clone()),
+                    "detects_state": device.attributes.detects.as_ref().map(|d| d.state.clone()),
                 },
                 "position": {
                     "x": 160 + col as i64 * 220,
@@ -306,9 +310,23 @@ async fn parse_plc_topology(
             if name_to_index.contains_key(&detects.device) {
                 let pair = (detects.device.clone(), device.name.clone());
                 if seen_edges.insert(pair.clone()) {
+                    let from_port = match (
+                        name_to_index
+                            .get(&detects.device)
+                            .map(|idx| &devices[*idx].device_type),
+                        detects.state.as_str(),
+                    ) {
+                        (Some(DeviceType::Cylinder), "extended") => Some("extended"),
+                        (Some(DeviceType::Cylinder), "retracted") => Some("retracted"),
+                        _ => None,
+                    };
                     connections.push(serde_json::json!({
                         "from": pair.0,
                         "to": pair.1,
+                        "relation": "detects",
+                        "signal": detects.state,
+                        "from_port": from_port,
+                        "to_port": "in",
                     }));
                 }
             }

@@ -431,11 +431,23 @@ function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ 
       ...comp.params,
     },
   }));
-  const edges = (data.connections || []).map((conn: any, i: number) => ({
-    id: `e-${i}`,
-    source: normalizeEndpointId(conn.from),
-    target: normalizeEndpointId(conn.to),
-  }));
+  const edges = (data.connections || []).map((conn: any, i: number) => {
+    const edge: any = {
+      id: `e-${i}`,
+      source: normalizeEndpointId(conn.from),
+      target: normalizeEndpointId(conn.to),
+    };
+    if (typeof conn.from_port === 'string' && conn.from_port) {
+      edge.sourceHandle = conn.from_port;
+    }
+    if (typeof conn.to_port === 'string' && conn.to_port) {
+      edge.targetHandle = conn.to_port;
+    }
+    if (typeof conn.signal === 'string' && conn.signal) {
+      edge.label = conn.signal;
+    }
+    return edge;
+  });
   return { nodes, edges };
 }
 

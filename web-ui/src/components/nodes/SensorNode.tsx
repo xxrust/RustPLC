@@ -13,6 +13,7 @@ const SensorNode: React.FC<NodeProps> = ({ data, selected, id }) => {
   const isOn = d.status === 'on' || d.value === true;
   const isFault = d.status === 'fault';
   const ledColor = isFault ? '#f5222d' : isOn ? '#52c41a' : '#4a4a4a';
+  const detectsLabel = d.detects as string | undefined;
 
   const { updateNodeData } = useTopologyStore();
   const { runMode, currentUser } = useAppStore();
@@ -58,6 +59,11 @@ const SensorNode: React.FC<NodeProps> = ({ data, selected, id }) => {
         <div style={{ color: '#a0a0a0', fontSize: 10, marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
           {d.status ? t(`properties.status${d.status.charAt(0).toUpperCase() + d.status.slice(1)}`, d.status) : t('properties.statusOff')}
         </div>
+        {detectsLabel && (
+          <div style={{ color: '#8ad7e0', fontSize: 9, marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
+            {t('properties.detects')}: {detectsLabel}
+          </div>
+        )}
         {showControls && (
           <button
             className="nodrag"
@@ -81,8 +87,8 @@ const SensorNode: React.FC<NodeProps> = ({ data, selected, id }) => {
           </button>
         )}
       </div>
-      <Handle type="target" position={Position.Left} style={{ background: '#00bcd4', width: 8, height: 8 }} />
-      <Handle type="source" position={Position.Right} style={{ background: '#00bcd4', width: 8, height: 8 }} />
+      <Handle type="target" id="in" position={Position.Left} style={{ background: '#00bcd4', width: 8, height: 8 }} />
+      <Handle type="source" id="state" position={Position.Right} style={{ background: '#00bcd4', width: 8, height: 8 }} />
     </div>
   );
 };
