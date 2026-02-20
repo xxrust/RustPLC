@@ -1,18 +1,18 @@
 {
   "project": "RustPLC",
   "branchName": "ralph/rustplc-web-idde",
-  "description": "RustPLC Web 集成开发与诊断环境（IDDE）：以拓扑画布为核心，打通拓扑/场景编辑、运行门禁、Tick 回放、告警诊断与审计闭环。",
+  "description": "RustPLC Web IDDE 全量实现：以拓扑画布为核心，覆盖可视编辑、离线注入、运行门禁、Tick 回放、告警诊断、审计与权限。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "建立 Web BFF 基础服务与静态资源托管",
-      "description": "作为前后端集成开发者，我希望有统一的 web-server 入口服务，以便 Web UI 可以通过稳定 HTTP 接口访问 RustPLC 工件。",
+      "title": "落实视觉主题令牌与排版规范",
+      "description": "作为前端开发者，我希望先固定主题变量和排版基线，以便后续页面实现保持一致。",
       "acceptanceCriteria": [
-        "新增 web-server 可执行程序并纳入 workspace",
-        "支持 /api 路由与 web-ui/dist 静态资源托管",
-        "支持 /artifacts 路由访问 out 目录工件",
-        "Typecheck passes",
-        "Tests pass"
+        "定义深色主题 CSS 变量并包含文档给定颜色值（背景/面板/画布/强调/告警色）",
+        "代码与数值区域使用等宽字体策略（JetBrains Mono/Fira Code）",
+        "全局间距按 4px 基准实现",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 1,
       "passes": false,
@@ -20,14 +20,14 @@
     },
     {
       "id": "US-002",
-      "title": "实现拓扑与场景的读写与校验 API",
-      "description": "作为 UI 工程师，我希望能读取、保存并校验拓扑和场景文件，以便在画布和编辑器里形成完整编辑闭环。",
+      "title": "搭建三栏工作台主框架",
+      "description": "作为用户，我希望看到顶栏+左栏+中央画布+右侧属性+底栏状态的固定框架，以便形成统一操作心智。",
       "acceptanceCriteria": [
-        "实现 GET/PUT /api/topology/:id 与 POST /api/topology/validate",
-        "实现 GET/PUT /api/scenario/:id 与 POST /api/scenario/validate",
-        "校验失败返回稳定错误码列表（code/path/message）",
-        "Typecheck passes",
-        "Tests pass"
+        "实现顶栏高度 56px、底栏高度 32px、左栏默认 280px、右栏默认 320px",
+        "三栏支持折叠与展开",
+        "中央区域支持多标签页容器",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 2,
       "passes": false,
@@ -35,14 +35,14 @@
     },
     {
       "id": "US-003",
-      "title": "实现运行触发与运行记录 API",
-      "description": "作为操作员，我希望从 Web 直接触发运行并查看状态，以便追踪每次执行结果与工件。",
+      "title": "实现工作区标签与命令面板入口",
+      "description": "作为工程师，我希望像编辑器一样使用多标签和命令入口，以便高效切换任务。",
       "acceptanceCriteria": [
-        "实现 POST /api/run/no-board-gate 触发运行并返回 run_id",
-        "实现 GET /api/run/:id/status 与 GET /api/run/list",
-        "运行记录包含状态、触发人、触发时间、failure_summary、artifacts",
-        "Typecheck passes",
-        "Tests pass"
+        "支持多标签页打开拓扑/场景/回放/诊断页面",
+        "支持 Ctrl+P（或等效快捷键）打开命令面板入口",
+        "标签未保存状态可显示明显标记（如 ●）",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 3,
       "passes": false,
@@ -50,15 +50,14 @@
     },
     {
       "id": "US-004",
-      "title": "实现 Trace/Range/Keypoints 数据接口",
-      "description": "作为回放使用者，我希望按需读取全量与区间 Tick 数据，并获取关键点列表，以便快速定位异常时刻。",
+      "title": "建立 Zustand 核心状态模型",
+      "description": "作为前端开发者，我希望有统一 store 承载画布核心状态，以便页面联动可靠。",
       "acceptanceCriteria": [
-        "实现 GET /api/trace/:run_id 返回回放结构",
-        "实现 GET /api/trace/:run_id/range 支持 start/end 区间",
-        "实现 GET /api/trace/:run_id/keypoints 返回关键点列表",
-        "支持 component_trace 到回放结构的适配转换",
-        "Typecheck passes",
-        "Tests pass"
+        "store 至少包含 nodes/edges/selectedNodeId/dirtyFlag/currentTick/runContext",
+        "onSelectionChange 能正确更新 selectedNodeId",
+        "dirtyFlag 能驱动离开拦截与保存按钮高亮",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 4,
       "passes": false,
@@ -66,14 +65,14 @@
     },
     {
       "id": "US-005",
-      "title": "实现诊断与告警接口闭环",
-      "description": "作为排障人员，我希望通过统一 API 查看诊断与告警并执行 Ack，以便形成可追踪的告警处理流程。",
+      "title": "实现 React Flow 节点类型注册与回退逻辑",
+      "description": "作为前端开发者，我希望节点类型映射完整且有兜底，以便未知类型不阻断页面。",
       "acceptanceCriteria": [
-        "实现 GET /api/diagnosis/:run_id 与 GET /api/timing/:run_id",
-        "实现 GET /api/alarms 与 POST /api/alarms/:id/ack",
-        "告警列表支持 severity/limit 过滤",
-        "Typecheck passes",
-        "Tests pass"
+        "nodeTypes 注册 cylinder/sensor/switch/stepper_pd/generic",
+        "type=stepper 时能兼容映射到 stepper_pd",
+        "未知类型自动回退 generic 节点",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 5,
       "passes": false,
@@ -81,14 +80,14 @@
     },
     {
       "id": "US-006",
-      "title": "前端三栏工作台与主题变量落地",
-      "description": "作为 UI 用户，我希望看到三栏式工作台与统一主题变量，以便在高信息密度场景下稳定操作。",
+      "title": "实现气缸节点 SVG 与状态驱动渲染",
+      "description": "作为工程师，我希望气缸图形可视化伸缩状态，以便快速判断机构动作。",
       "acceptanceCriteria": [
-        "实现顶栏/左栏/中央画布/右侧属性/底部状态栏布局",
-        "颜色与字号使用 CSS 变量与统一排版规范",
-        "支持标签页工作区与栏位折叠",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "CylinderNode 使用 SVG 表达缸体与活塞杆",
+        "data.status=extended/retracted/moving 时图形位置或颜色变化",
+        "节点头部显示实例名与状态 LED",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 6,
       "passes": false,
@@ -96,14 +95,14 @@
     },
     {
       "id": "US-007",
-      "title": "建立 Zustand 全局状态与未保存标记机制",
-      "description": "作为前端开发者，我希望统一管理节点、连线、选中状态和脏数据标记，以便页面联动和拦截逻辑可维护。",
+      "title": "实现传感器与开关节点 SVG 与内嵌交互",
+      "description": "作为调试工程师，我希望在节点上直接切换传感器/开关状态，以便离线注入更高效。",
       "acceptanceCriteria": [
-        "store 至少包含 nodes/edges/selectedNodeId/dirtyFlag",
-        "onSelectionChange 可驱动 selectedNodeId 更新",
-        "未保存状态可驱动标签页与保存按钮高亮",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "SensorNode/SwitchNode 有 ON/OFF 可视状态",
+        "内嵌按钮或输入控件带 className=nodrag",
+        "点击控件触发注入 action（不触发节点拖拽）",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 7,
       "passes": false,
@@ -111,14 +110,14 @@
     },
     {
       "id": "US-008",
-      "title": "实现 React Flow 自定义节点渲染体系",
-      "description": "作为工艺工程师，我希望在画布上看到气缸/传感器/开关/步进的专属图形与状态，以便快速理解系统行为。",
+      "title": "实现步进节点 SVG 与方向指示",
+      "description": "作为工程师，我希望步进电机节点显示方向/使能/位置信息，以便观察运动逻辑。",
       "acceptanceCriteria": [
-        "实现 nodeTypes: cylinder/sensor/switch/stepper_pd/generic",
-        "节点图形由 data 状态驱动并实时更新",
-        "支持 stepper 别名兼容并在 UI 统一映射 stepper_pd",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "StepperNode 显示方向指示与状态灯",
+        "data 中的方向、使能、位置可驱动图形变化",
+        "支持异常状态（stall/lost_step/direction_reversed）的可视标记",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 8,
       "passes": false,
@@ -126,14 +125,14 @@
     },
     {
       "id": "US-009",
-      "title": "实现节点内嵌交互与注入入口",
-      "description": "作为调试工程师，我希望在节点上直接注入输入/故障，以便离线快速验证联动逻辑。",
+      "title": "实现右侧上下文属性面板分发机制",
+      "description": "作为用户，我希望选中不同节点看到不同参数编辑器，以便精准修改配置。",
       "acceptanceCriteria": [
-        "传感器/开关节点支持 nodrag 内嵌交互控件",
-        "注入操作接入 API 并记录审计字段（操作者/时间/目标）",
-        "故障菜单显示已支持/近似/待实现能力标识",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "PropertiesPanel 基于 selectedNodeId 和节点 type 分发编辑器",
+        "未选中节点时展示画布级属性与约束摘要",
+        "参数编辑与节点 data 双向绑定并实时反映画布",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 9,
       "passes": false,
@@ -141,14 +140,14 @@
     },
     {
       "id": "US-010",
-      "title": "实现右侧上下文参数面板与双向绑定",
-      "description": "作为设计人员，我希望选中不同节点时看到对应参数编辑器，以便完成 Blender 风格参数编辑体验。",
+      "title": "实现拓扑页数据接入与保存闭环",
+      "description": "作为工程师，我希望拓扑可读写并实时校验，以便可视编辑能真正落盘。",
       "acceptanceCriteria": [
-        "PropertiesPanel 按节点 type 分发专属编辑器",
-        "无选中节点时显示画布级信息（版本/约束状态）",
-        "参数修改实时回写节点 data 并立即反映图形",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "接入 GET/PUT /api/topology/:id 和 POST /api/topology/validate",
+        "支持可视化编辑与文本编辑共存",
+        "保存后 dirtyFlag 清零并提示成功",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 10,
       "passes": false,
@@ -156,14 +155,14 @@
     },
     {
       "id": "US-011",
-      "title": "实现拓扑编辑规则与评审状态机",
-      "description": "作为审核员，我希望拓扑编辑具备即时校验和状态机约束，以便降低错误连线与越权修改风险。",
+      "title": "实现连线即时校验与错误高亮",
+      "description": "作为工程师，我希望连线时立即知道是否合法，以便减少后续返工。",
       "acceptanceCriteria": [
-        "连线时即时校验方向、端口类型、关键输入悬空",
-        "支持 Draft/In Review/Approved/Locked 状态流转",
-        "Locked 状态下画布只读且需新建版本再编辑",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "对端口类型不匹配给出即时红色提示",
+        "对方向错误给出即时提示",
+        "对关键输入悬空给出即时提示",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 11,
       "passes": false,
@@ -171,14 +170,14 @@
     },
     {
       "id": "US-012",
-      "title": "实现场景编辑页与时间轴可视化",
-      "description": "作为调试工程师，我希望编辑场景并看到事件分布时间轴，以便快速检查 tick/duration/注入是否合理。",
+      "title": "实现拓扑评审状态机与只读锁定",
+      "description": "作为审核员，我希望拓扑状态流转可控，以便杜绝已批准版本被直接改写。",
       "acceptanceCriteria": [
-        "支持 switch_events/sensor_events/component_faults 编辑",
-        "支持场景校验结果显示（含错误码）",
-        "时间轴可视化展示输入与故障事件",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "支持 Draft/In Review/Approved/Locked 状态",
+        "Locked 状态下禁用编辑操作",
+        "必须通过新建版本才能再次修改",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 12,
       "passes": false,
@@ -186,14 +185,14 @@
     },
     {
       "id": "US-013",
-      "title": "实现运行页（触发、列表、详情、工件链接）",
-      "description": "作为操作员，我希望在运行页发起任务并查看结果与工件，以便完成从触发到定位的闭环。",
+      "title": "实现未保存拦截与提交流程保护",
+      "description": "作为用户，我希望系统阻止带脏数据的提交流程，以便避免误发布。",
       "acceptanceCriteria": [
-        "支持触发 component-sim 与 no-board-gate",
-        "支持运行列表轮询刷新与状态标签展示",
-        "详情页展示 trace/diff/timing/diagnosis/keypoints 链接",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "关闭标签/离开页面时若 dirtyFlag=true 弹出拦截",
+        "未保存状态禁止提交评审或放行动作",
+        "保存按钮与顶栏状态有明显视觉提示",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 13,
       "passes": false,
@@ -201,14 +200,14 @@
     },
     {
       "id": "US-014",
-      "title": "实现 Tick 回放与关键点跳转联动",
-      "description": "作为排障工程师，我希望拖动 Tick 和关键点跳转时画布与侧栏同步刷新，以便快速定位异常。",
+      "title": "实现场景页编辑与校验结果展示",
+      "description": "作为调试工程师，我希望编辑场景并即时看到校验反馈，以便快速修正输入。",
       "acceptanceCriteria": [
-        "支持播放/暂停/倍速/逐帧/滑块拖动",
-        "支持读取 keypoints 并实现上一个/下一个关键点跳转",
-        "支持组件视图与 IO 视图按数据源自动切换",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "接入 GET/PUT /api/scenario/:id 和 POST /api/scenario/validate",
+        "支持编辑 tick_ms/duration_ms/switch_events/sensor_events/component_faults",
+        "校验错误显示 code/path/message",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 14,
       "passes": false,
@@ -216,14 +215,14 @@
     },
     {
       "id": "US-015",
-      "title": "实现告警与诊断中心交互",
-      "description": "作为非专业操作员，我希望在告警中心看到可读诊断并跳转证据，以便更快处理问题。",
+      "title": "实现场景可视化时间轴",
+      "description": "作为工程师，我希望图形化看到事件分布，以便直观检查时间逻辑。",
       "acceptanceCriteria": [
-        "告警列表支持级别筛选、Ack、详情弹窗",
-        "展示 Top-N issue_code/confidence/evidence 与人话说明区",
-        "证据点击可跳转到回放页对应运行与 tick",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "时间轴显示输入事件与故障注入点",
+        "支持点击事件定位到对应编辑条目",
+        "长场景支持缩放或滚动查看",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 15,
       "passes": false,
@@ -231,14 +230,14 @@
     },
     {
       "id": "US-016",
-      "title": "实现强制控制页的安全防护机制",
-      "description": "作为安全负责人，我希望高风险写操作默认受限并带二次确认，以便降低误操作风险。",
+      "title": "实现运行页触发与运行记录",
+      "description": "作为操作员，我希望在 UI 中触发运行并查看结果列表，以便形成标准操作路径。",
       "acceptanceCriteria": [
-        "强制写入具备角色门禁与开发态/生产态显式区分",
-        "执行前要求确认文本与倒计时",
-        "支持 TTL 到期自动恢复与操作审计落盘",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "支持触发 component-sim 与 no-board-gate 两类运行",
+        "运行列表展示 run_id/status/triggered_by/triggered_at/failure_summary",
+        "运行详情展示 artifacts 链接",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 16,
       "passes": false,
@@ -246,14 +245,14 @@
     },
     {
       "id": "US-017",
-      "title": "实现审计与报告导出页",
-      "description": "作为管理员，我希望按条件检索审计并导出报告，以便满足追溯和合规需求。",
+      "title": "实现 Tick 回放控制器",
+      "description": "作为调试工程师，我希望按 tick 播放与跳帧，以便快速查看状态演化。",
       "acceptanceCriteria": [
-        "支持按时间/人/对象/操作类型筛选审计事件",
-        "普通角色不可删除关键审计记录",
-        "支持 JSON 或 CSV 导出",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "实现播放/暂停/上一帧/下一帧/快进快退",
+        "支持 0.5x/1x/2x/5x 播放速度",
+        "滑块可在 0..maxTick 间拖动定位",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 17,
       "passes": false,
@@ -261,16 +260,151 @@
     },
     {
       "id": "US-018",
-      "title": "实现实时通道降级策略",
-      "description": "作为系统维护者，我希望 WebSocket 断开时自动降级轮询，以便 UI 在弱网络下仍可工作。",
+      "title": "实现关键点跳转与列表导航",
+      "description": "作为调试工程师，我希望一键跳到关键时间点，以便减少人工拖动成本。",
       "acceptanceCriteria": [
-        "支持 /ws/alarms 与 /ws/run-status 的连接状态提示",
-        "断连时自动切换 fetch+setInterval 轮询并可恢复",
-        "告警风暴场景下启用前端节流防止卡顿",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "接入 GET /api/trace/:run_id/keypoints",
+        "提供上一个/下一个关键点按钮",
+        "支持关键点列表点击跳转",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "实现回放双视图适配（组件视图/IO视图）",
+      "description": "作为用户，我希望在不同数据源下都能回放，以便无板与有板模式统一。",
+      "acceptanceCriteria": [
+        "component_trace 数据时展示 component_states 联动",
+        "io_snapshot 数据时展示 DI/AI/DO/AO 联动",
+        "数据源切换时 UI 不报错且状态一致",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "实现离线注入面板与节点右键故障注入",
+      "description": "作为调试工程师，我希望在 no-board 模式直接注入输入和故障，以便快速复现实验。",
+      "acceptanceCriteria": [
+        "支持 switch_events/sensor_events 即时注入",
+        "故障菜单覆盖 jammed/motion_timeout/stuck_on/stuck_off/chatter/lost_step/stall/direction_reversed",
+        "每次注入写入审计字段（操作者、时间、目标、参数）",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "实现强制控制页高风险防护",
+      "description": "作为安全负责人，我希望高风险操作默认受控，以便降低误操作风险。",
+      "acceptanceCriteria": [
+        "强制写入需要角色权限校验",
+        "执行前要求确认文本和倒计时",
+        "支持 TTL 到期自动恢复与手动解除",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "实现告警与诊断中心页面",
+      "description": "作为操作员，我希望在一个页面完成告警处理与诊断阅读，以便快速闭环。",
+      "acceptanceCriteria": [
+        "告警列表支持 severity 筛选、Ack、详情",
+        "诊断展示 issue_code/confidence/evidence/suggested_fix",
+        "证据项支持跳转回放定位",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "实现实时通道与降级轮询机制",
+      "description": "作为维护者，我希望实时链路断开时自动降级，以便系统在弱网下仍可用。",
+      "acceptanceCriteria": [
+        "实现 WebSocket 通道状态展示（alarms/run-status）",
+        "断连自动切换轮询并可恢复",
+        "告警流前端节流避免卡顿",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "实现审计与报告导出页",
+      "description": "作为管理员，我希望筛选审计并导出报告，以便满足追溯与合规。",
+      "acceptanceCriteria": [
+        "支持按时间/人/对象/操作类型筛选",
+        "普通角色不可删除关键审计",
+        "支持导出 JSON 或 CSV",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "实现角色权限与页面能力门禁",
+      "description": "作为管理员，我希望不同角色看到不同操作能力，以便符合安全职责分离。",
+      "acceptanceCriteria": [
+        "至少支持 operator/engineer/auditor/admin 四类角色",
+        "高风险按钮按角色显隐与禁用",
+        "禁止自己提交流程自己审批",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "实现前端状态持久化与大数据量优化",
+      "description": "作为用户，我希望刷新后恢复上下文且大规模回放不卡顿，以便稳定使用。",
+      "acceptanceCriteria": [
+        "当前标签、选中节点、当前 tick 可持久化恢复",
+        "超过 10 万 tick 时启用虚拟化渲染",
+        "页面交互在大数据场景下无明显阻塞",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "补齐浏览器兼容与发布验收清单",
+      "description": "作为项目负责人，我希望发布前有明确兼容性检查，以便减少上线风险。",
+      "acceptanceCriteria": [
+        "在 Chrome/Firefox/Edge 指定最低版本完成冒烟",
+        "最小分辨率 1280x800 下布局不破坏",
+        "输出发布验收清单文档并关联关键功能截图",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 27,
       "passes": false,
       "notes": ""
     }

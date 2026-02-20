@@ -1,13 +1,43 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import type { NodeData } from '../../stores/topologyStore';
+import { useTopologyStore } from '../../stores/topologyStore';
+import { useAppStore } from '../../stores/appStore';
+import { simulationApi } from '../../services/api';
 
-const SensorNode: React.FC<NodeProps> = ({ data, selected }) => {
+const SensorNode: React.FC<NodeProps> = ({ data, selected, id }) => {
   const d = data as NodeData;
   const isOn = d.status === 'on' || d.value === true;
   const isFault = d.status === 'fault';
   const ledColor = isFault ? '#f5222d' : isOn ? '#52c41a' : '#4a4a4a';
+
+  const { updateNodeData } = useTopologyStore();
+  const { runMode, currentUser } = useAppStore();
+  const showControls = runMode === 'no_board';
+  const [loading, setLoading] = useState(false);
+
+  const handleToggle = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newStatus = isOn ? 'off' : 'on';
+    const newValue = !isOn;
+
+    try {
+      setLoading(true);
+      await simulationApi.injectEvent(
+        id,
+        'sensor',
+        newValue,
+        currentUser?.name || 'unknown'
+      );
+      updateNodeData(id, { status: newStatus, value: newValue });
+    } catch (error) {
+      console.error('Failed to inject sensor event:', error);
+      alert('Failed to inject sensor event');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div
@@ -34,6 +64,29 @@ const SensorNode: React.FC<NodeProps> = ({ data, selected }) => {
         <div style={{ color: '#a0a0a0', fontSize: 10, marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
           {d.status || 'off'}
         </div>
+        {/* Interactive control for no-board mode */}
+        {showControls && (
+          <button
+            className="nodrag"
+            onClick={handleToggle}
+            disabled={loading}
+            style={{
+              marginTop: 4,
+              width: '100%',
+              padding: '2px 6px',
+              background: isOn ? '#52c41a' : '#3a3a3a',
+              border: '1px solid #5a5a5a',
+              borderRadius: 3,
+              color: '#e0e0e0',
+              fontSize: 10,
+              cursor: loading ? 'wait' : 'pointer',
+              fontFamily: 'JetBrains Mono, monospace',
+              opacity: loading ? 0.6 : 1,
+            }}
+          >
+            {loading ? '...' : isOn ? 'ON' : 'OFF'}
+          </button>
+        )}
       </div>
       <Handle type="target" position={Position.Left} style={{ background: '#00bcd4', width: 8, height: 8 }} />
       <Handle type="source" position={Position.Right} style={{ background: '#00bcd4', width: 8, height: 8 }} />

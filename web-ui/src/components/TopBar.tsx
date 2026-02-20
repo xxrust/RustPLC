@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../stores/appStore';
+import { useTopologyStore } from '../stores/topologyStore';
+import { topologyApi } from '../services/api';
+import ValidationErrorPanel from './ValidationErrorPanel';
+import type { ComponentTopology } from '../types';
 
 interface Tab {
   id: string;
@@ -30,9 +34,62 @@ const RUN_MODE_LABELS: Record<string, string> = {
 
 const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClose, onNewTab }) => {
   const { runMode, currentProject, hasUnsavedChanges, alarmCount, currentUser } = useAppStore();
+  const { nodes, edges, setHasUnsavedChanges } = useTopologyStore();
   const [showNewTab, setShowNewTab] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<any[]>([]);
 
   const totalAlarms = alarmCount.critical + alarmCount.warning;
+
+  const handleSave = async () => {
+    if (!currentProject) {
+      alert('No project selected');
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      // Convert React Flow state to ComponentTopology format
+      const topology: ComponentTopology = {
+        schema_version: 1,
+        component_library: { schema_version: 1, components: [] },
+        components: nodes.map((n) => ({
+          id: n.id,
+          component_id: n.type || 'generic',
+          params: n.data,
+          position: n.position,
+        })),
+        connections: edges.map((e) => ({
+          from: e.source,
+          to: e.target,
+        })),
+      };
+
+      // Validate via API
+      const validation = await topologyApi.validateTopology(topology);
+      if (!validation.data.valid) {
+        setValidationErrors(
+          validation.data.errors.map((err: string) => ({
+            code: 'VALIDATION_ERROR',
+            path: 'topology',
+            message: err,
+          }))
+        );
+        return;
+      }
+
+      // Save via API
+      await topologyApi.saveTopology(currentProject, topology);
+      setHasUnsavedChanges(false);
+      alert('Topology saved successfully');
+    } catch (error: any) {
+      console.error('Failed to save topology:', error);
+      alert(error.response?.data?.message || 'Failed to save topology');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const NEW_TAB_OPTIONS: Array<{ view: Tab['view']; label: string }> = [
     { view: 'topology', label: 'Topology' },
@@ -77,6 +134,29 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
           <span style={{ color: '#faad14', fontSize: 14 }} title="Unsaved changes">●</span>
         )}
       </div>
+
+      {/* Save button */}
+      {hasUnsavedChanges && (
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          style={{
+            padding: '0 16px',
+            background: saving ? '#3a3a3a' : '#00bcd4',
+            border: 'none',
+            borderRight: '1px solid #3a3a3a',
+            color: saving ? '#5a5a5a' : '#1e1e1e',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: saving ? 'wait' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          {saving ? '⏳ Saving...' : '💾 Save'}
+        </button>
+      )}
 
       {/* Tabs */}
       <div style={{ display: 'flex', alignItems: 'stretch', flex: 1, overflowX: 'auto' }}>
@@ -233,6 +313,14 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
           <span style={{ color: '#4a4a4a', marginLeft: 4 }}>({currentUser?.role})</span>
         </div>
       </div>
+
+      {/* Validation error panel */}
+      {validationErrors.length > 0 && (
+        <ValidationErrorPanel
+          errors={validationErrors}
+          onClose={() => setValidationErrors([])}
+        />
+      )}
     </div>
   );
 };

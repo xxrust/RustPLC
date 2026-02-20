@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   ReactFlow,
   Background,
@@ -7,15 +7,19 @@ import {
   BackgroundVariant,
   SelectionMode,
   addEdge,
+  type Node,
 } from '@xyflow/react';
 import type { Connection } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useTopologyStore } from '../../stores/topologyStore';
+import { useAppStore } from '../../stores/appStore';
+import { simulationApi } from '../../services/api';
 import CylinderNode from '../nodes/CylinderNode';
 import SensorNode from '../nodes/SensorNode';
 import SwitchNode from '../nodes/SwitchNode';
 import StepperNode from '../nodes/StepperNode';
 import GenericNode from '../nodes/GenericNode';
+import ContextMenu, { type MenuItem } from '../ContextMenu';
 
 const nodeTypes = {
   cylinder: CylinderNode,
@@ -34,7 +38,53 @@ const TopologyCanvas: React.FC = () => {
     onEdgesChange,
     setEdges,
     setSelectedNodeId,
+    updateNodeData,
+    deleteNode,
+    deleteEdge,
   } = useTopologyStore();
+
+  const { currentUser } = useAppStore();
+
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    node: Node;
+  } | null>(null);
+
+  // Delete key handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Delete') {
+        const selectedNodes = nodes.filter(n => n.selected);
+        const selectedEdges = edges.filter(e => e.selected);
+
+        if (selectedNodes.length > 0) {
+          // Check for safety-critical nodes
+          const hasCritical = selectedNodes.some(n =>
+            ['cylinder', 'stepper_pd'].includes(n.type || '')
+          );
+
+          if (hasCritical) {
+            const confirmed = window.confirm(
+              'Delete safety-critical nodes? This action cannot be undone.'
+            );
+            if (confirmed) {
+              selectedNodes.forEach(n => deleteNode(n.id));
+            }
+          } else {
+            selectedNodes.forEach(n => deleteNode(n.id));
+          }
+        }
+
+        if (selectedEdges.length > 0) {
+          selectedEdges.forEach(e => deleteEdge(e.id));
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [nodes, edges, deleteNode, deleteEdge]);
 
   const onSelectionChange = useCallback(
     ({ nodes: selectedNodes }: { nodes: any[] }) => {
@@ -50,6 +100,172 @@ const TopologyCanvas: React.FC = () => {
     [edges, setEdges]
   );
 
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      event.preventDefault();
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        node,
+      });
+    },
+    []
+  );
+
+  const getFaultMenuItems = (node: Node): MenuItem[] => {
+    const nodeType = node.type || 'generic';
+    const items: MenuItem[] = [];
+
+    // Fault injection options based on node type
+    switch (nodeType) {
+      case 'cylinder':
+        items.push(
+          {
+            label: 'Inject: Jammed',
+            onClick: () => injectFault(node.id, 'jammed'),
+            badge: 'native',
+            danger: true,
+          },
+          {
+            label: 'Inject: Motion Timeout',
+            onClick: () => injectFault(node.id, 'motion_timeout'),
+            badge: 'native',
+            danger: true,
+          }
+        );
+        break;
+      case 'sensor':
+        items.push(
+          {
+            label: 'Inject: Stuck On',
+            onClick: () => injectFault(node.id, 'stuck_on'),
+            badge: 'native',
+            danger: true,
+          },
+          {
+            label: 'Inject: Stuck Off',
+            onClick: () => injectFault(node.id, 'stuck_off'),
+            badge: 'native',
+            danger: true,
+          },
+          {
+            label: 'Inject: Chatter',
+            onClick: () => injectFault(node.id, 'chatter'),
+            badge: 'native',
+            danger: true,
+          }
+        );
+        break;
+      case 'switch':
+        items.push(
+          {
+            label: 'Inject: Stuck On',
+            onClick: () => injectFault(node.id, 'stuck_on'),
+            badge: 'native',
+            danger: true,
+          },
+          {
+            label: 'Inject: Stuck Off',
+            onClick: () => injectFault(node.id, 'stuck_off'),
+            badge: 'native',
+            danger: true,
+          }
+        );
+        break;
+      case 'stepper':
+      case 'stepper_pd':
+        items.push(
+          {
+            label: 'Inject: Lost Step',
+            onClick: () => injectFault(node.id, 'lost_step'),
+            badge: 'native',
+            danger: true,
+          },
+          {
+            label: 'Inject: Stall',
+            onClick: () => injectFault(node.id, 'stall'),
+            badge: 'native',
+            danger: true,
+          },
+          {
+            label: 'Inject: Direction Reversed',
+            onClick: () => injectFault(node.id, 'direction_reversed'),
+            badge: 'native',
+            danger: true,
+          }
+        );
+        break;
+    }
+
+    if (items.length > 0) {
+      items.push({
+        label: '─────────',
+        onClick: () => {},
+        disabled: true,
+      });
+    }
+
+    items.push(
+      {
+        label: 'Clear Faults',
+        onClick: () => clearFaults(node.id),
+      },
+      {
+        label: '─────────',
+        onClick: () => {},
+        disabled: true,
+      },
+      {
+        label: 'Delete Node',
+        onClick: () => {
+          const isCritical = ['cylinder', 'stepper_pd'].includes(nodeType);
+          if (isCritical) {
+            const confirmed = window.confirm(
+              'Delete safety-critical node? This action cannot be undone.'
+            );
+            if (confirmed) {
+              deleteNode(node.id);
+              setContextMenu(null);
+            }
+          } else {
+            deleteNode(node.id);
+            setContextMenu(null);
+          }
+        },
+        danger: true,
+      }
+    );
+
+    return items;
+  };
+
+  const injectFault = async (nodeId: string, faultType: string) => {
+    try {
+      await simulationApi.injectFault(
+        nodeId,
+        faultType,
+        undefined,
+        currentUser?.name || 'unknown'
+      );
+      updateNodeData(nodeId, { status: 'fault', faultType });
+      console.log(`Injected fault ${faultType} to node ${nodeId}`);
+    } catch (error) {
+      console.error('Failed to inject fault:', error);
+      alert('Failed to inject fault');
+    }
+  };
+
+  const clearFaults = async (nodeId: string) => {
+    try {
+      await simulationApi.clearFaults(nodeId, currentUser?.name || 'unknown');
+      updateNodeData(nodeId, { status: 'idle', faultType: undefined });
+      console.log(`Cleared faults for node ${nodeId}`);
+    } catch (error) {
+      console.error('Failed to clear faults:', error);
+      alert('Failed to clear faults');
+    }
+  };
+
   return (
     <div style={{ width: '100%', height: '100%' }}>
       <ReactFlow
@@ -59,6 +275,7 @@ const TopologyCanvas: React.FC = () => {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onSelectionChange={onSelectionChange}
+        onNodeContextMenu={onNodeContextMenu}
         nodeTypes={nodeTypes}
         selectionMode={SelectionMode.Partial}
         fitView
@@ -96,6 +313,14 @@ const TopologyCanvas: React.FC = () => {
           maskColor="rgba(0,0,0,0.4)"
         />
       </ReactFlow>
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={getFaultMenuItems(contextMenu.node)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 };

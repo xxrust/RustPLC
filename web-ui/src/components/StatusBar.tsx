@@ -1,10 +1,30 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
+import { useAlarmWebSocket } from '../hooks/useAlarmWebSocket';
+import { useAlarmPolling } from '../hooks/useAlarmPolling';
 
 const StatusBar: React.FC = () => {
-  const { alarmCount, runMode } = useAppStore();
+  const { alarmCount, setAlarmCount, runMode } = useAppStore();
+  const { connected, alarms: wsAlarms } = useAlarmWebSocket();
+  const { alarms: polledAlarms } = useAlarmPolling(!connected);
+  const alarms = connected ? wsAlarms : polledAlarms;
 
-  const connectionStatus = 'connected'; // TODO: real WS status
+  const connectionStatus = connected ? 'Connected (WebSocket)' : 'Connected (Polling)';
+  const statusColor = connected ? '#52c41a' : '#faad14';
+
+  // Update alarm counts when alarms change
+  useEffect(() => {
+    const counts = alarms.reduce(
+      (acc, alarm) => {
+        if (!alarm.acknowledged) {
+          acc[alarm.severity] += 1;
+        }
+        return acc;
+      },
+      { info: 0, warning: 0, critical: 0 }
+    );
+    setAlarmCount(counts);
+  }, [alarms, setAlarmCount]);
 
   return (
     <div
@@ -28,12 +48,10 @@ const StatusBar: React.FC = () => {
             width: 6,
             height: 6,
             borderRadius: '50%',
-            background: connectionStatus === 'connected' ? '#52c41a' : '#f5222d',
+            background: statusColor,
           }}
         />
-        <span style={{ color: '#a0a0a0' }}>
-          {connectionStatus === 'connected' ? 'Connected' : 'Disconnected'}
-        </span>
+        <span style={{ color: '#a0a0a0' }}>{connectionStatus}</span>
       </div>
 
       <span style={{ color: '#3a3a3a' }}>|</span>

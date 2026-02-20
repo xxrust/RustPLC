@@ -39,7 +39,14 @@
       "Bash(where:*)",
       "Bash(ssh:*)",
       "Bash(# Try to find a GitHub token from various sources cat ~/.config/gh/hosts.yml)",
-      "Bash(do sed -i 's/｜/|/g' \"$f\")"
+      "Bash(do sed -i 's/｜/|/g' \"$f\")",
+      "Bash(npm install:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(npm run build:*)",
+      "Bash(perl -i -0pe:*)",
+      "Bash(node -e:*)",
+      "Bash(npx tsc:*)",
+      "Bash(taskkill:*)"
     ]
   }
 }

@@ -32,11 +32,24 @@ const IDDELayout: React.FC = () => {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
-  const { setNodes, setEdges } = useTopologyStore();
+  const { setNodes, setEdges, hasUnsavedChanges } = useTopologyStore();
   const { setSnapshots } = useReplayStore();
   const { currentProject } = useAppStore();
 
   const dragTypeRef = useRef<{ type: string; label: string } | null>(null);
+
+  // Warn on navigation with unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   // Load topology from API (or fall back to demo data)
   useEffect(() => {

@@ -113,4 +113,41 @@ export const alarmApi = {
     apiClient.post(`/alarms/${alarmId}/ack`, { comment }),
 };
 
+// 仿真注入相关 API
+export const simulationApi = {
+  injectEvent: (target: string, eventType: string, value: boolean, triggeredBy: string) =>
+    apiClient.post('/simulation/inject-event', {
+      target,
+      event_type: eventType,
+      value,
+      triggered_by: triggeredBy,
+    }),
+
+  injectFault: (target: string, faultKind: string, durationMs: number | undefined, triggeredBy: string) =>
+    apiClient.post('/simulation/inject-fault', {
+      target,
+      fault_kind: faultKind,
+      duration_ms: durationMs,
+      triggered_by: triggeredBy,
+    }),
+
+  clearFaults: (target: string, triggeredBy: string) =>
+    apiClient.post('/simulation/clear-faults', {
+      target,
+      triggered_by: triggeredBy,
+    }),
+};
+
+// 认证相关 API
+export const authApi = {
+  login: (username: string, password: string) =>
+    apiClient.post('/auth/login', { username, password }),
+
+  logout: () =>
+    apiClient.post('/auth/logout'),
+
+  getCurrentUser: () =>
+    apiClient.get('/auth/me'),
+};
+
 export default apiClient;
