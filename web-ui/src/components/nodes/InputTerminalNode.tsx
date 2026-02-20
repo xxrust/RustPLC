@@ -34,8 +34,7 @@ const InputTerminalNode: React.FC<NodeProps> = ({ data, selected }) => {
           {isActive ? 'ON' : 'OFF'}
         </div>
       </div>
-      {/* 输入端子：左侧接收传感器信号，右侧输出到控制逻辑 */}
-      <Handle type="target" id="in" position={Position.Left} style={{ background: '#00bcd4', width: 8, height: 8 }} />
+      {/* 输入端子 X：只有右侧输出，传递信号给其他模块 */}
       <Handle type="source" id="out" position={Position.Right} style={{ background: '#00bcd4', width: 8, height: 8 }} />
     </div>
   );
