@@ -1,15 +1,17 @@
 import React, { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../stores/appStore';
 import { useAlarmWebSocket } from '../hooks/useAlarmWebSocket';
 import { useAlarmPolling } from '../hooks/useAlarmPolling';
 
 const StatusBar: React.FC = () => {
+  const { t } = useTranslation();
   const { alarmCount, setAlarmCount, runMode } = useAppStore();
   const { connected, alarms: wsAlarms } = useAlarmWebSocket();
   const { alarms: polledAlarms } = useAlarmPolling(!connected);
   const alarms = connected ? wsAlarms : polledAlarms;
 
-  const connectionStatus = connected ? 'Connected (WebSocket)' : 'Connected (Polling)';
+  const connectionStatus = connected ? t('statusBar.connectedWebSocket') : t('statusBar.connectedPolling');
   const statusColor = connected ? '#52c41a' : '#faad14';
 
   // Update alarm counts when alarms change
@@ -59,23 +61,23 @@ const StatusBar: React.FC = () => {
       {/* Alarm counts */}
       <div style={{ display: 'flex', gap: 8 }}>
         {alarmCount.critical > 0 && (
-          <span style={{ color: '#f5222d' }}>● {alarmCount.critical} critical</span>
+          <span style={{ color: '#f5222d' }}>● {alarmCount.critical} {t('statusBar.critical')}</span>
         )}
         {alarmCount.warning > 0 && (
-          <span style={{ color: '#faad14' }}>● {alarmCount.warning} warning</span>
+          <span style={{ color: '#faad14' }}>● {alarmCount.warning} {t('statusBar.warning')}</span>
         )}
         {alarmCount.info > 0 && (
-          <span style={{ color: '#1890ff' }}>● {alarmCount.info} info</span>
+          <span style={{ color: '#1890ff' }}>● {alarmCount.info} {t('statusBar.info')}</span>
         )}
         {alarmCount.critical === 0 && alarmCount.warning === 0 && alarmCount.info === 0 && (
-          <span style={{ color: '#4a4a4a' }}>No alarms</span>
+          <span style={{ color: '#4a4a4a' }}>{t('statusBar.noAlarms')}</span>
         )}
       </div>
 
       <span style={{ color: '#3a3a3a' }}>|</span>
 
       {/* Run mode */}
-      <span style={{ color: '#a0a0a0' }}>Mode: <span style={{ color: '#e0e0e0' }}>{runMode}</span></span>
+      <span style={{ color: '#a0a0a0' }}>{t('statusBar.mode')}: <span style={{ color: '#e0e0e0' }}>{t(`runMode.${runMode}`)}</span></span>
 
       {/* Right side */}
       <div style={{ marginLeft: 'auto', color: '#4a4a4a' }}>

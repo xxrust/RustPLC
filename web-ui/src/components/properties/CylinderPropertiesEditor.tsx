@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cylinderSchema, type CylinderData } from '../../schemas/nodeSchemas';
 
 interface CylinderPropertiesEditorProps {
@@ -12,6 +13,7 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
   data,
   onUpdate,
 }) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState<CylinderData>({
     label: data.label || '',
     response_time: data.response_time || 100,
@@ -60,12 +62,12 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
   return (
     <div style={{ padding: 16, color: '#e0e0e0' }}>
       <h3 style={{ margin: '0 0 16px 0', fontSize: 14, fontWeight: 600, color: '#00bcd4' }}>
-        Cylinder Properties
+        {t('properties.cylinderTitle')}
       </h3>
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Label
+          {t('properties.label')}
         </label>
         <input
           type="text"
@@ -88,7 +90,7 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Response Time (ms)
+          {t('properties.responseTime')}
         </label>
         <input
           type="number"
@@ -111,7 +113,7 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Status
+          {t('properties.status')}
         </label>
         <select
           value={formData.status}
@@ -126,10 +128,10 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
             fontSize: 12,
           }}
         >
-          <option value="retracted">Retracted</option>
-          <option value="extended">Extended</option>
-          <option value="moving">Moving</option>
-          <option value="fault">Fault</option>
+          <option value="retracted">{t('properties.statusRetracted')}</option>
+          <option value="extended">{t('properties.statusExtended')}</option>
+          <option value="moving">{t('properties.statusMoving')}</option>
+          <option value="fault">{t('properties.statusFault')}</option>
         </select>
       </div>
 
@@ -149,7 +151,7 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
               cursor: 'pointer',
             }}
           >
-            Save
+            {t('properties.save')}
           </button>
           <button
             onClick={handleRevert}
@@ -164,7 +166,7 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
               cursor: 'pointer',
             }}
           >
-            Revert
+            {t('properties.revert')}
           </button>
         </div>
       )}

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../stores/appStore';
 import { useTopologyStore } from '../stores/topologyStore';
 import { topologyApi } from '../services/api';
@@ -26,13 +27,8 @@ const RUN_MODE_COLORS: Record<string, string> = {
   runtime_live: '#52c41a',
 };
 
-const RUN_MODE_LABELS: Record<string, string> = {
-  no_board: 'No-Board',
-  hil_board: 'HIL',
-  runtime_live: 'Live',
-};
-
 const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClose, onNewTab }) => {
+  const { t, i18n } = useTranslation();
   const { runMode, currentProject, hasUnsavedChanges, alarmCount, currentUser } = useAppStore();
   const { nodes, edges, setHasUnsavedChanges } = useTopologyStore();
   const [showNewTab, setShowNewTab] = useState(false);
@@ -40,6 +36,12 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
   const [validationErrors, setValidationErrors] = useState<any[]>([]);
 
   const totalAlarms = alarmCount.critical + alarmCount.warning;
+
+  const toggleLanguage = () => {
+    const newLang = i18n.language === 'en' ? 'zh' : 'en';
+    i18n.changeLanguage(newLang);
+    localStorage.setItem('language', newLang);
+  };
 
   const handleSave = async () => {
     if (!currentProject) {
@@ -82,22 +84,22 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
       // Save via API
       await topologyApi.saveTopology(currentProject, topology);
       setHasUnsavedChanges(false);
-      alert('Topology saved successfully');
+      alert(t('notifications.saveSuccess'));
     } catch (error: any) {
       console.error('Failed to save topology:', error);
-      alert(error.response?.data?.message || 'Failed to save topology');
+      alert(error.response?.data?.message || t('notifications.saveFailed'));
     } finally {
       setSaving(false);
     }
   };
 
   const NEW_TAB_OPTIONS: Array<{ view: Tab['view']; label: string }> = [
-    { view: 'topology', label: 'Topology' },
-    { view: 'replay', label: 'Tick Replay' },
-    { view: 'scenario', label: 'Scenario' },
-    { view: 'run', label: 'Run & Gate' },
-    { view: 'diagnosis', label: 'Diagnosis' },
-    { view: 'audit', label: 'Audit' },
+    { view: 'topology', label: t('tabs.topology') },
+    { view: 'replay', label: t('tabs.replay') },
+    { view: 'scenario', label: t('tabs.scenario') },
+    { view: 'run', label: t('tabs.run') },
+    { view: 'diagnosis', label: t('tabs.diagnosis') },
+    { view: 'audit', label: t('tabs.audit') },
   ];
 
   return (
@@ -131,7 +133,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
           <span style={{ color: '#a0a0a0', fontSize: 12 }}>/ {currentProject}</span>
         )}
         {hasUnsavedChanges && (
-          <span style={{ color: '#faad14', fontSize: 14 }} title="Unsaved changes">●</span>
+          <span style={{ color: '#faad14', fontSize: 14 }} title={t('topBar.unsavedChanges')}>●</span>
         )}
       </div>
 
@@ -154,7 +156,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
             gap: 6,
           }}
         >
-          {saving ? '⏳ Saving...' : '💾 Save'}
+          {saving ? `⏳ ${t('topBar.saving')}` : `💾 ${t('topBar.save')}`}
         </button>
       )}
 
@@ -261,7 +263,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
         </div>
       </div>
 
-      {/* Right side: run mode + alarms + user */}
+      {/* Right side: run mode + alarms + language + user */}
       <div
         style={{
           display: 'flex',
@@ -285,7 +287,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
             letterSpacing: '0.04em',
           }}
         >
-          {RUN_MODE_LABELS[runMode]}
+          {t(`runMode.${runMode}`)}
         </div>
 
         {/* Alarm counter */}
@@ -301,11 +303,30 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
               fontWeight: 600,
               cursor: 'pointer',
             }}
-            title={`${alarmCount.critical} critical, ${alarmCount.warning} warning`}
+            title={`${alarmCount.critical} ${t('statusBar.critical')}, ${alarmCount.warning} ${t('statusBar.warning')}`}
           >
             ⚠ {totalAlarms}
           </div>
         )}
+
+        {/* Language toggle */}
+        <button
+          onClick={toggleLanguage}
+          style={{
+            background: '#3a3a3a',
+            border: '1px solid #5a5a5a',
+            borderRadius: 4,
+            padding: '2px 8px',
+            color: '#e0e0e0',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer',
+            letterSpacing: '0.04em',
+          }}
+          title={i18n.language === 'en' ? '切换到中文' : 'Switch to English'}
+        >
+          {i18n.language === 'en' ? '中文' : 'EN'}
+        </button>
 
         {/* User */}
         <div style={{ color: '#a0a0a0', fontSize: 12 }}>

@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ReactFlow,
   Background,
@@ -31,6 +32,7 @@ const nodeTypes = {
 };
 
 const TopologyCanvas: React.FC = () => {
+  const { t } = useTranslation();
   const {
     nodes,
     edges,
@@ -65,9 +67,7 @@ const TopologyCanvas: React.FC = () => {
           );
 
           if (hasCritical) {
-            const confirmed = window.confirm(
-              'Delete safety-critical nodes? This action cannot be undone.'
-            );
+            const confirmed = window.confirm(t('contextMenu.deleteConfirm'));
             if (confirmed) {
               selectedNodes.forEach(n => deleteNode(n.id));
             }
@@ -84,7 +84,7 @@ const TopologyCanvas: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nodes, edges, deleteNode, deleteEdge]);
+  }, [nodes, edges, deleteNode, deleteEdge, t]);
 
   const onSelectionChange = useCallback(
     ({ nodes: selectedNodes }: { nodes: any[] }) => {
@@ -121,13 +121,13 @@ const TopologyCanvas: React.FC = () => {
       case 'cylinder':
         items.push(
           {
-            label: 'Inject: Jammed',
+            label: t('contextMenu.injectJammed'),
             onClick: () => injectFault(node.id, 'jammed'),
             badge: 'native',
             danger: true,
           },
           {
-            label: 'Inject: Motion Timeout',
+            label: t('contextMenu.injectMotionTimeout'),
             onClick: () => injectFault(node.id, 'motion_timeout'),
             badge: 'native',
             danger: true,
@@ -137,19 +137,19 @@ const TopologyCanvas: React.FC = () => {
       case 'sensor':
         items.push(
           {
-            label: 'Inject: Stuck On',
+            label: t('contextMenu.injectStuckOn'),
             onClick: () => injectFault(node.id, 'stuck_on'),
             badge: 'native',
             danger: true,
           },
           {
-            label: 'Inject: Stuck Off',
+            label: t('contextMenu.injectStuckOff'),
             onClick: () => injectFault(node.id, 'stuck_off'),
             badge: 'native',
             danger: true,
           },
           {
-            label: 'Inject: Chatter',
+            label: t('contextMenu.injectChatter'),
             onClick: () => injectFault(node.id, 'chatter'),
             badge: 'native',
             danger: true,
@@ -159,13 +159,13 @@ const TopologyCanvas: React.FC = () => {
       case 'switch':
         items.push(
           {
-            label: 'Inject: Stuck On',
+            label: t('contextMenu.injectStuckOn'),
             onClick: () => injectFault(node.id, 'stuck_on'),
             badge: 'native',
             danger: true,
           },
           {
-            label: 'Inject: Stuck Off',
+            label: t('contextMenu.injectStuckOff'),
             onClick: () => injectFault(node.id, 'stuck_off'),
             badge: 'native',
             danger: true,
@@ -176,19 +176,19 @@ const TopologyCanvas: React.FC = () => {
       case 'stepper_pd':
         items.push(
           {
-            label: 'Inject: Lost Step',
+            label: t('contextMenu.injectLostStep'),
             onClick: () => injectFault(node.id, 'lost_step'),
             badge: 'native',
             danger: true,
           },
           {
-            label: 'Inject: Stall',
+            label: t('contextMenu.injectStall'),
             onClick: () => injectFault(node.id, 'stall'),
             badge: 'native',
             danger: true,
           },
           {
-            label: 'Inject: Direction Reversed',
+            label: t('contextMenu.injectDirectionReversed'),
             onClick: () => injectFault(node.id, 'direction_reversed'),
             badge: 'native',
             danger: true,
@@ -207,7 +207,7 @@ const TopologyCanvas: React.FC = () => {
 
     items.push(
       {
-        label: 'Clear Faults',
+        label: t('contextMenu.clearFaults'),
         onClick: () => clearFaults(node.id),
       },
       {
@@ -216,13 +216,11 @@ const TopologyCanvas: React.FC = () => {
         disabled: true,
       },
       {
-        label: 'Delete Node',
+        label: t('contextMenu.deleteNode'),
         onClick: () => {
           const isCritical = ['cylinder', 'stepper_pd'].includes(nodeType);
           if (isCritical) {
-            const confirmed = window.confirm(
-              'Delete safety-critical node? This action cannot be undone.'
-            );
+            const confirmed = window.confirm(t('contextMenu.deleteConfirm'));
             if (confirmed) {
               deleteNode(node.id);
               setContextMenu(null);
