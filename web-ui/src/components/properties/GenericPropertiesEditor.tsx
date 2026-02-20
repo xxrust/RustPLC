@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface GenericPropertiesEditorProps {
   nodeId: string;
@@ -11,6 +12,7 @@ const GenericPropertiesEditor: React.FC<GenericPropertiesEditorProps> = ({
   data,
   onUpdate,
 }) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState<any>(data);
   const [jsonError, setJsonError] = useState<string>('');
   const [isDirty, setIsDirty] = useState(false);
@@ -58,12 +60,12 @@ const GenericPropertiesEditor: React.FC<GenericPropertiesEditorProps> = ({
   return (
     <div style={{ padding: 16, color: '#e0e0e0' }}>
       <h3 style={{ margin: '0 0 16px 0', fontSize: 14, fontWeight: 600, color: '#00bcd4' }}>
-        Generic Node Properties
+        {t('properties.genericTitle')}
       </h3>
 
       <div style={{ marginBottom: 12, padding: 8, background: '#1e1e1e', borderRadius: 4, border: '1px solid #3a3a3a' }}>
         <div style={{ fontSize: 10, color: '#a0a0a0', marginBottom: 8 }}>
-          Key-Value Editor
+          {t('properties.keyValueEditor')}
         </div>
         {Object.entries(formData).map(([key, value]) => (
           <div key={key} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
@@ -134,7 +136,7 @@ const GenericPropertiesEditor: React.FC<GenericPropertiesEditorProps> = ({
             marginTop: 4,
           }}
         >
-          + Add Field
+          {t('properties.addField')}
         </button>
       </div>
 
@@ -160,7 +162,7 @@ const GenericPropertiesEditor: React.FC<GenericPropertiesEditorProps> = ({
               cursor: 'pointer',
             }}
           >
-            Save
+            {t('properties.save')}
           </button>
           <button
             onClick={handleRevert}
@@ -175,7 +177,7 @@ const GenericPropertiesEditor: React.FC<GenericPropertiesEditorProps> = ({
               cursor: 'pointer',
             }}
           >
-            Revert
+            {t('properties.revert')}
           </button>
         </div>
       )}

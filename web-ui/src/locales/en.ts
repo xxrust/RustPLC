@@ -46,6 +46,10 @@ export const en = {
       switch: 'Switch',
       stepper: 'Stepper Motor',
       generic: 'Generic',
+      actuators: 'Actuators',
+      sensors: 'Sensors',
+      other: 'Other',
+      searchPlaceholder: 'Search components...',
     },
 
     // Properties Panel

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { switchSchema, type SwitchData } from '../../schemas/nodeSchemas';
 
 interface SwitchPropertiesEditorProps {
@@ -12,6 +13,7 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
   data,
   onUpdate,
 }) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState<SwitchData>({
     label: data.label || '',
     status: data.status || 'open',
@@ -59,12 +61,12 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
   return (
     <div style={{ padding: 16, color: '#e0e0e0' }}>
       <h3 style={{ margin: '0 0 16px 0', fontSize: 14, fontWeight: 600, color: '#00bcd4' }}>
-        Switch Properties
+        {t('properties.switchTitle')}
       </h3>
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Label
+          {t('properties.label')}
         </label>
         <input
           type="text"
@@ -87,7 +89,7 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Status
+          {t('properties.status')}
         </label>
         <select
           value={formData.status}
@@ -102,9 +104,9 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
             fontSize: 12,
           }}
         >
-          <option value="open">Open</option>
-          <option value="closed">Closed</option>
-          <option value="fault">Fault</option>
+          <option value="open">{t('properties.statusOpen')}</option>
+          <option value="closed">{t('properties.statusClosed')}</option>
+          <option value="fault">{t('properties.statusFault')}</option>
         </select>
       </div>
 
@@ -116,7 +118,7 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
             onChange={(e) => handleChange('value', e.target.checked)}
             style={{ width: 14, height: 14 }}
           />
-          Value (Boolean)
+          {t('properties.value')} (Boolean)
         </label>
       </div>
 
@@ -136,7 +138,7 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
               cursor: 'pointer',
             }}
           >
-            Save
+            {t('properties.save')}
           </button>
           <button
             onClick={handleRevert}
@@ -151,7 +153,7 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
               cursor: 'pointer',
             }}
           >
-            Revert
+            {t('properties.revert')}
           </button>
         </div>
       )}

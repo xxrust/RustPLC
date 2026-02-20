@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { stepperSchema, type StepperData } from '../../schemas/nodeSchemas';
 
 interface StepperPropertiesEditorProps {
@@ -12,6 +13,7 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
   data,
   onUpdate,
 }) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState<StepperData>({
     label: data.label || '',
     direction: data.direction || 'stopped',
@@ -63,12 +65,12 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
   return (
     <div style={{ padding: 16, color: '#e0e0e0' }}>
       <h3 style={{ margin: '0 0 16px 0', fontSize: 14, fontWeight: 600, color: '#00bcd4' }}>
-        Stepper Motor Properties
+        {t('properties.stepperTitle')}
       </h3>
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Label
+          {t('properties.label')}
         </label>
         <input
           type="text"
@@ -91,7 +93,7 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Direction
+          {t('properties.direction')}
         </label>
         <select
           value={formData.direction}
@@ -106,9 +108,9 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
             fontSize: 12,
           }}
         >
-          <option value="forward">Forward</option>
-          <option value="reverse">Reverse</option>
-          <option value="stopped">Stopped</option>
+          <option value="forward">{t('properties.directionForward')}</option>
+          <option value="reverse">{t('properties.directionReverse')}</option>
+          <option value="stopped">{t('properties.directionStopped')}</option>
         </select>
       </div>
 
@@ -120,13 +122,13 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
             onChange={(e) => handleChange('enable', e.target.checked)}
             style={{ width: 14, height: 14 }}
           />
-          Enable
+          {t('properties.enable')}
         </label>
       </div>
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Position (steps)
+          {t('properties.position')}
         </label>
         <input
           type="number"
@@ -149,7 +151,7 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Steps per Revolution
+          {t('properties.stepsPerRev')}
         </label>
         <input
           type="number"
@@ -186,7 +188,7 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
               cursor: 'pointer',
             }}
           >
-            Save
+            {t('properties.save')}
           </button>
           <button
             onClick={handleRevert}
@@ -201,7 +203,7 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
               cursor: 'pointer',
             }}
           >
-            Revert
+            {t('properties.revert')}
           </button>
         </div>
       )}

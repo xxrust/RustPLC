@@ -46,6 +46,10 @@ export const zh = {
       switch: '开关',
       stepper: '步进电机',
       generic: '通用',
+      actuators: '执行器',
+      sensors: '传感器',
+      other: '其他',
+      searchPlaceholder: '搜索组件...',
     },
 
     // Properties Panel

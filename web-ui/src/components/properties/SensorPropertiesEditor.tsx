@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { sensorSchema, type SensorData } from '../../schemas/nodeSchemas';
 
 interface SensorPropertiesEditorProps {
@@ -12,6 +13,7 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
   data,
   onUpdate,
 }) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState<SensorData>({
     label: data.label || '',
     status: data.status || 'off',
@@ -61,12 +63,12 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
   return (
     <div style={{ padding: 16, color: '#e0e0e0' }}>
       <h3 style={{ margin: '0 0 16px 0', fontSize: 14, fontWeight: 600, color: '#00bcd4' }}>
-        Sensor Properties
+        {t('properties.sensorTitle')}
       </h3>
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Label
+          {t('properties.label')}
         </label>
         <input
           type="text"
@@ -89,7 +91,7 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Status
+          {t('properties.status')}
         </label>
         <select
           value={formData.status}
@@ -104,9 +106,9 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
             fontSize: 12,
           }}
         >
-          <option value="on">On</option>
-          <option value="off">Off</option>
-          <option value="fault">Fault</option>
+          <option value="on">{t('properties.statusOn')}</option>
+          <option value="off">{t('properties.statusOff')}</option>
+          <option value="fault">{t('properties.statusFault')}</option>
         </select>
       </div>
 
@@ -118,19 +120,19 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
             onChange={(e) => handleChange('value', e.target.checked)}
             style={{ width: 14, height: 14 }}
           />
-          Value (Boolean)
+          {t('properties.value')} (Boolean)
         </label>
       </div>
 
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'block', fontSize: 11, marginBottom: 4, color: '#a0a0a0' }}>
-          Detects (Target Node ID)
+          {t('properties.detects')}
         </label>
         <input
           type="text"
           value={formData.detects || ''}
           onChange={(e) => handleChange('detects', e.target.value)}
-          placeholder="e.g., cylinder_1"
+          placeholder={t('properties.detectsPlaceholder')}
           style={{
             width: '100%',
             padding: '6px 8px',
@@ -159,7 +161,7 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
               cursor: 'pointer',
             }}
           >
-            Save
+            {t('properties.save')}
           </button>
           <button
             onClick={handleRevert}
@@ -174,7 +176,7 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
               cursor: 'pointer',
             }}
           >
-            Revert
+            {t('properties.revert')}
           </button>
         </div>
       )}

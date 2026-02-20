@@ -1,22 +1,28 @@
 import React, { useState } from 'react';
-
-const COMPONENT_TYPES = [
-  { type: 'cylinder', label: 'Cylinder', icon: '⊢', category: 'Actuators' },
-  { type: 'sensor', label: 'Sensor', icon: '◉', category: 'Sensors' },
-  { type: 'switch', label: 'Switch', icon: '⊣', category: 'Sensors' },
-  { type: 'stepper_pd', label: 'Stepper Motor', icon: '⊙', category: 'Actuators' },
-  { type: 'generic', label: 'Generic', icon: '□', category: 'Other' },
-];
-
-const CATEGORIES = ['Actuators', 'Sensors', 'Other'];
+import { useTranslation } from 'react-i18next';
 
 interface ComponentLibraryProps {
   onDragStart: (type: string, label: string) => void;
 }
 
 const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onDragStart }) => {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const COMPONENT_TYPES = [
+    { type: 'cylinder', label: t('componentLibrary.cylinder'), icon: '⊢', category: t('componentLibrary.actuators') },
+    { type: 'sensor', label: t('componentLibrary.sensor'), icon: '◉', category: t('componentLibrary.sensors') },
+    { type: 'switch', label: t('componentLibrary.switch'), icon: '⊣', category: t('componentLibrary.sensors') },
+    { type: 'stepper_pd', label: t('componentLibrary.stepper'), icon: '⊙', category: t('componentLibrary.actuators') },
+    { type: 'generic', label: t('componentLibrary.generic'), icon: '□', category: t('componentLibrary.other') },
+  ];
+
+  const CATEGORIES = [
+    t('componentLibrary.actuators'),
+    t('componentLibrary.sensors'),
+    t('componentLibrary.other')
+  ];
 
   const filtered = COMPONENT_TYPES.filter(
     (c) =>
@@ -33,7 +39,7 @@ const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onDragStart }) => {
       <div style={{ padding: '8px 12px', borderBottom: '1px solid #3a3a3a' }}>
         <input
           type="text"
-          placeholder="Search components..."
+          placeholder={t('componentLibrary.searchPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{
