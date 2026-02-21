@@ -153,6 +153,25 @@ export const en = {
         'Preview: matched {{matched}} node(s), node changes {{nodeChanges}}, edge changes {{edgeChanges}}.',
       batchPreviewNodeChanges: 'Node updates',
       batchPreviewEdgeChanges: 'Edge updates',
+
+      // Tag view controls
+      tagViewTitle: 'Tag View Controls',
+      tagViewFilterDimension: 'Filter by tag dimension',
+      tagViewFilterPlaceholder: 'Filter by exact tag or use *',
+      tagViewFilterSummary: 'Visible after filter: {{nodes}} node(s), {{edges}} edge(s).',
+      tagViewClearFilter: 'Clear Filter',
+      tagViewGroupingDimension: 'Highlight groups by',
+      tagViewGroupingToggle: 'Enable grouped highlighting',
+      tagViewGroupingMore: '+{{count}} more groups',
+      tagViewClearGrouping: 'Clear Highlight',
+      tagViewLocationLocate: 'Locate fault region (location_group)',
+      tagViewLocationPlaceholder: 'e.g. line_a/cell_2/station_7',
+      tagViewLocationPreview:
+        'Region matches {{region}} node(s), with neighbors {{neighbors}} node(s).',
+      tagViewLocateButton: 'Locate Region + Neighbors',
+      tagViewClearLocate: 'Clear Locate',
+      tagViewLocationActive:
+        'Focused region: {{region}} node(s), with neighbors {{neighbors}} node(s).',
     },
 
     // Context Menu

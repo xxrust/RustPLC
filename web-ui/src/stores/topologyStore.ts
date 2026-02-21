@@ -18,6 +18,24 @@ export interface NodeData {
   [key: string]: any;
 }
 
+export interface TagFilterState {
+  enabled: boolean;
+  dimension: TagDimension;
+  query: string;
+}
+
+export interface TagGroupingState {
+  enabled: boolean;
+  dimension: TagDimension;
+}
+
+export interface LocationFocusState {
+  active: boolean;
+  locationPath: string;
+  includeNeighbors: boolean;
+  requestId: number;
+}
+
 interface TopologyState {
   // Nodes and edges
   nodes: Node<NodeData>[];
@@ -28,6 +46,11 @@ interface TopologyState {
 
   // Dirty tracking
   hasUnsavedChanges: boolean;
+
+  // Canvas tag visualization
+  tagFilter: TagFilterState;
+  tagGrouping: TagGroupingState;
+  locationFocus: LocationFocusState;
 
   // Actions
   setNodes: (nodes: Node<NodeData>[]) => void;
@@ -41,6 +64,12 @@ interface TopologyState {
   deleteNode: (nodeId: string) => void;
   deleteEdge: (edgeId: string) => void;
   setHasUnsavedChanges: (value: boolean) => void;
+  setTagFilter: (dimension: TagDimension, query: string) => void;
+  clearTagFilter: () => void;
+  setTagGrouping: (enabled: boolean, dimension?: TagDimension) => void;
+  clearTagGrouping: () => void;
+  focusLocationRegion: (locationPath: string, includeNeighbors?: boolean) => void;
+  clearLocationFocus: () => void;
   findNodeIdsByTag: (dimension: TagDimension, tag: string) => string[];
   findNodeIdsByLocationPath: (locationPath: string) => string[];
 }
@@ -52,6 +81,21 @@ export const useTopologyStore = create<TopologyState>()(
       edges: [],
       selectedNodeId: null,
       hasUnsavedChanges: false,
+      tagFilter: {
+        enabled: false,
+        dimension: 'functional_group',
+        query: '',
+      },
+      tagGrouping: {
+        enabled: false,
+        dimension: 'functional_group',
+      },
+      locationFocus: {
+        active: false,
+        locationPath: '',
+        includeNeighbors: true,
+        requestId: 0,
+      },
 
       setNodes: (nodes) => set({ nodes: nodes.map(normalizeTopologyNode) }),
 
@@ -126,6 +170,64 @@ export const useTopologyStore = create<TopologyState>()(
       },
 
       setHasUnsavedChanges: (value) => set({ hasUnsavedChanges: value }),
+
+      setTagFilter: (dimension, query) => {
+        const normalizedQuery = query.trim();
+        set({
+          tagFilter: {
+            enabled: normalizedQuery.length > 0,
+            dimension,
+            query: normalizedQuery,
+          },
+        });
+      },
+
+      clearTagFilter: () =>
+        set({
+          tagFilter: {
+            enabled: false,
+            dimension: get().tagFilter.dimension,
+            query: '',
+          },
+        }),
+
+      setTagGrouping: (enabled, dimension) =>
+        set({
+          tagGrouping: {
+            enabled,
+            dimension: dimension ?? get().tagGrouping.dimension,
+          },
+        }),
+
+      clearTagGrouping: () =>
+        set({
+          tagGrouping: {
+            enabled: false,
+            dimension: get().tagGrouping.dimension,
+          },
+        }),
+
+      focusLocationRegion: (locationPath, includeNeighbors = true) => {
+        const normalizedPath = locationPath.trim();
+        set({
+          locationFocus: {
+            active: normalizedPath.length > 0,
+            locationPath: normalizedPath,
+            includeNeighbors,
+            requestId: get().locationFocus.requestId + 1,
+          },
+        });
+      },
+
+      clearLocationFocus: () =>
+        set({
+          locationFocus: {
+            active: false,
+            locationPath: '',
+            includeNeighbors: true,
+            requestId: get().locationFocus.requestId + 1,
+          },
+        }),
 
       findNodeIdsByTag: (dimension, tag) =>
         get()

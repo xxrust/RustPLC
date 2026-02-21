@@ -9,6 +9,7 @@
 - 新增 DSL 结构化字段时，优先保持 AST/API/store 的固定 shape（一致字段名 + 空值默认结构），前端解析入口做 normalize，避免 UI 侧散落空值判断。
 - `topology` 相关 API（`get/save/parse-plc`）若承载新元数据，建议统一走“服务端归一化后再返回/落盘”的模式，避免前端与文件工件出现字段漂移。
 - 前端涉及拓扑导出/保存/写回时，统一复用 `web-ui/src/utils/topologySerialization.ts` 的 `toComponentTopology`，避免 edges 的 `signal/relation/from_port/to_port` 序列化口径不一致。
+- 画布级可视化状态（过滤/分组高亮/区域定位）应放在 store，`TopologyCanvas` 仅基于 state 派生 `renderNodes/renderEdges`（`hidden + style`），避免污染持久化拓扑数据。
 
 Started: Sat Feb 21 17:59:17 CST 2026
 
@@ -196,4 +197,30 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - 新增拓扑根字段（如 `tag_rules`）时需在 `ComponentTopology` 结构体上加 `serde(default, skip_serializing_if)`，否则会影响 normalized 输出兼容性。
   - Useful context (e.g., "the evaluation panel is in component X")
     - Web API `/topology/validate` 与 CLI `component-topology-validate` 共用 `parse_component_topology_value`，标签规则一处实现即可同时覆盖前后端校验入口。
+---
+## 2026-02-22 00:37:15 CST - US-010
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added tag-driven visualization controls to the canvas properties panel: tag filtering (nodes/edges), tag grouping highlight, and location-based fault-region focus.
+  - Extended topology store with `tagFilter` / `tagGrouping` / `locationFocus` state + actions, and wired `TopologyCanvas` to derive render-time hidden/style state from these controls.
+  - Added reusable tag-visualization helpers (`resolveTagFilterNodeIds`, `buildTagGroupColorMap`, `resolveLocationFocusNodeIds`) and localized UI copy (`en`/`zh`).
+  - Completed browser validation with `dev-browser` skill on `http://127.0.0.1:4173`, including filter-zero-results, group highlight legend, tag-change realtime refresh, and location-group one-click locate flow; captured screenshot `output/playwright/us-010-tag-visualization.png`.
+- Files changed
+  - `web-ui/src/components/canvas/TopologyCanvas.tsx`
+  - `web-ui/src/components/properties/CanvasPropertiesEditor.tsx`
+  - `web-ui/src/components/properties/TagVisualizationPanel.tsx`
+  - `web-ui/src/stores/topologyStore.ts`
+  - `web-ui/src/utils/tagVisualization.ts`
+  - `web-ui/src/locales/en.ts`
+  - `web-ui/src/locales/zh.ts`
+  - `output/playwright/us-010-tag-visualization.png`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For visual-only topology interactions, derive node/edge visibility/style at render time instead of mutating persisted topology objects.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `dev-browser` defaults to Chrome here (missing binary); use Firefox with `LD_LIBRARY_PATH=/tmp/libasound/extracted/usr/lib/x86_64-linux-gnu` to avoid `libasound.so.2` launch failure.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `TagVisualizationPanel` is mounted in `CanvasPropertiesEditor`, so it appears in the right panel only when no node is selected.
 ---

@@ -153,6 +153,23 @@ export const zh = {
         '预览：命中节点 {{matched}} 个，节点变更 {{nodeChanges}} 处，连线变更 {{edgeChanges}} 处。',
       batchPreviewNodeChanges: '节点变更',
       batchPreviewEdgeChanges: '连线变更',
+
+      // Tag view controls
+      tagViewTitle: '标签视图控制',
+      tagViewFilterDimension: '按标签维度过滤',
+      tagViewFilterPlaceholder: '输入精确标签，或使用 *',
+      tagViewFilterSummary: '过滤后可见：节点 {{nodes}} 个，连线 {{edges}} 条。',
+      tagViewClearFilter: '清空过滤',
+      tagViewGroupingDimension: '按维度分组高亮',
+      tagViewGroupingToggle: '启用分组高亮',
+      tagViewGroupingMore: '还有 {{count}} 个分组',
+      tagViewClearGrouping: '清除高亮',
+      tagViewLocationLocate: '故障区域定位（location_group）',
+      tagViewLocationPlaceholder: '例如 line_a/cell_2/station_7',
+      tagViewLocationPreview: '区域命中 {{region}} 个节点，含邻近共 {{neighbors}} 个节点。',
+      tagViewLocateButton: '定位区域 + 邻近器件',
+      tagViewClearLocate: '清除定位',
+      tagViewLocationActive: '当前聚焦：区域 {{region}} 个节点，邻近共 {{neighbors}} 个节点。',
     },
 
     // Context Menu
