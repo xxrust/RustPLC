@@ -1168,8 +1168,38 @@ fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, Json<Value>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_topology_tags_in_place, TAGS_SCHEMA_VERSION};
-    use serde_json::json;
+    use super::{
+        find_workspace_root, normalize_topology_tags_in_place, parse_plc_topology,
+        ParsePlcTopologyRequest, TAGS_SCHEMA_VERSION,
+    };
+    use axum::response::Json;
+    use serde_json::{json, Value};
+
+    fn find_component<'a>(payload: &'a Value, id: &str) -> &'a Value {
+        payload["components"]
+            .as_array()
+            .and_then(|components| {
+                components
+                    .iter()
+                    .find(|component| component.get("id").and_then(Value::as_str) == Some(id))
+            })
+            .expect("component should exist")
+    }
+
+    fn has_detects_connection(payload: &Value, from: &str, to: &str, signal: &str) -> bool {
+        payload["connections"]
+            .as_array()
+            .map(|connections| {
+                connections.iter().any(|connection| {
+                    connection.get("relation").and_then(Value::as_str) == Some("detects")
+                        && connection.get("from").and_then(Value::as_str) == Some(from)
+                        && connection.get("to").and_then(Value::as_str) == Some(to)
+                        && connection.get("signal").and_then(Value::as_str) == Some(signal)
+                        && connection.get("from_port").and_then(Value::as_str) == Some(signal)
+                })
+            })
+            .unwrap_or(false)
+    }
 
     #[test]
     fn topology_tag_normalization_adds_schema_and_default_dimensions() {
@@ -1225,6 +1255,106 @@ mod tests {
                 "danger_level": ["high"],
                 "location_group": ["line_a/cell_2/station_7"]
             })
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_plc_topology_returns_relation_port_and_tag_metadata() {
+        let plc = r#"
+[topology]
+device Y0: digital_output {
+    ports: [out:digital:producer]
+}
+device X0: digital_input {
+    ports: [in:digital:consumer]
+}
+device valve_A: solenoid_valve {
+    driven_by: Y0,
+    ports: [coil:digital:consumer, feedback:logical:producer],
+    tags: {
+        functional_group: [actuation],
+        danger_level: [high],
+        location_group: ["line_a/cell_2/station_7"]
+    }
+}
+device sensor_A: sensor {
+    reports_to: X0,
+    detects: valve_A.feedback,
+    ports: [sense:digital:consumer, out:digital:producer]
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let response = parse_plc_topology(Json(ParsePlcTopologyRequest {
+            content: plc.to_string(),
+        }))
+        .await
+        .expect("parse-plc API should succeed")
+        .0;
+
+        let valve = find_component(&response, "valve_A");
+        assert_eq!(
+            valve["params"]["ports"],
+            json!([
+                {"id": "coil", "type": "digital", "role": "consumer"},
+                {"id": "feedback", "type": "logical", "role": "producer"}
+            ])
+        );
+        assert_eq!(
+            valve["params"]["tags"],
+            json!({
+                "functional_group": ["actuation"],
+                "danger_level": ["high"],
+                "location_group": ["line_a/cell_2/station_7"]
+            })
+        );
+        let detects = response["connections"]
+            .as_array()
+            .and_then(|connections| {
+                connections.iter().find(|connection| {
+                    connection.get("relation").and_then(Value::as_str) == Some("detects")
+                        && connection.get("from").and_then(Value::as_str) == Some("valve_A")
+                        && connection.get("to").and_then(Value::as_str) == Some("sensor_A")
+                })
+            })
+            .expect("detects connection should exist");
+        assert_eq!(detects["signal"], json!("feedback"));
+        assert_eq!(detects["from_port"], json!("feedback"));
+        assert_eq!(detects["to_port"], json!("sense"));
+    }
+
+    #[tokio::test]
+    async fn parse_plc_topology_two_cylinder_keeps_extended_and_retracted_edges_distinct() {
+        let root = find_workspace_root();
+        let plc = std::fs::read_to_string(root.join("examples/two_cylinder.plc"))
+            .expect("two_cylinder example should exist");
+
+        let response = parse_plc_topology(Json(ParsePlcTopologyRequest { content: plc }))
+            .await
+            .expect("parse-plc API should parse two_cylinder")
+            .0;
+
+        assert!(
+            has_detects_connection(&response, "cyl_A", "sensor_A_ext", "extended"),
+            "should keep cyl_A.extended detects edge"
+        );
+        assert!(
+            has_detects_connection(&response, "cyl_A", "sensor_A_ret", "retracted"),
+            "should keep cyl_A.retracted detects edge"
+        );
+        assert!(
+            has_detects_connection(&response, "cyl_B", "sensor_B_ext", "extended"),
+            "should keep cyl_B.extended detects edge"
+        );
+        assert!(
+            has_detects_connection(&response, "cyl_B", "sensor_B_ret", "retracted"),
+            "should keep cyl_B.retracted detects edge"
         );
     }
 }

@@ -10,6 +10,7 @@
 - `topology` 相关 API（`get/save/parse-plc`）若承载新元数据，建议统一走“服务端归一化后再返回/落盘”的模式，避免前端与文件工件出现字段漂移。
 - 前端涉及拓扑导出/保存/写回时，统一复用 `web-ui/src/utils/topologySerialization.ts` 的 `toComponentTopology`，避免 edges 的 `signal/relation/from_port/to_port` 序列化口径不一致。
 - 画布级可视化状态（过滤/分组高亮/区域定位）应放在 store，`TopologyCanvas` 仅基于 state 派生 `renderNodes/renderEdges`（`hidden + style`），避免污染持久化拓扑数据。
+- `parse-plc` API 契约回归建议直接在 `crates/web-server/src/main.rs` 调用 `parse_plc_topology(Json(ParsePlcTopologyRequest))` 断言 JSON 字段，避免起服务端到端测试成本。
 
 Started: Sat Feb 21 17:59:17 CST 2026
 
@@ -223,4 +224,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `dev-browser` defaults to Chrome here (missing binary); use Firefox with `LD_LIBRARY_PATH=/tmp/libasound/extracted/usr/lib/x86_64-linux-gnu` to avoid `libasound.so.2` launch failure.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `TagVisualizationPanel` is mounted in `CanvasPropertiesEditor`, so it appears in the right panel only when no node is selected.
+---
+## 2026-02-22 00:50:16 CST - US-011
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added parse-plc API contract regression tests in `web-server` for `relation/from_port/to_port/signal` fields and component `ports/tags` metadata.
+  - Added `two_cylinder` regression coverage to ensure `detects` edges keep `extended/retracted` signal distinctions in API payload.
+- Files changed
+  - `crates/web-server/src/main.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For backend API contract stories, unit-test handler functions directly (`parse_plc_topology(Json(...))`) to validate payload schema without booting Axum router.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `cargo clippy` is not installed in this environment; keep quality gate with `cargo check` + `cargo test` + `rustfmt --check` and record lint-tooling gap.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `examples/two_cylinder.plc` is a stable fixture for verifying `cyl_*.extended/retracted` detect-link metadata in parse-plc API output.
 ---
