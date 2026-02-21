@@ -5,7 +5,7 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program,
 };
-use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
+use rust_plc::verification::{verify_all, VerificationSummary, WarningEntry, WarningLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
@@ -19,25 +19,27 @@ use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, 
 use petgraph::Direction;
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::alarm_runtime::{
-    AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity, build_alarm_event,
+    build_alarm_event, AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity,
 };
-use rust_plc::component_diagnostics::{ComponentDiagnosisReport, diagnose_component_sim};
+use rust_plc::component_diagnostics::{diagnose_component_sim, ComponentDiagnosisReport};
 use rust_plc::component_scenario::{parse_component_scenario_json, write_component_scenario_json};
-use rust_plc::component_sim::{ComponentSimReport, run_component_simulation};
-use rust_plc::component_topology::{parse_component_topology_json, write_component_topology_json};
+use rust_plc::component_sim::{run_component_simulation, ComponentSimReport};
+use rust_plc::component_topology::{
+    diff_component_topology_semantics, parse_component_topology_json, write_component_topology_json,
+};
 use rust_plc::diagnostics::{
-    DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport, EvidenceInputKind,
-    EvidenceSource, IoSnapshotArtifact, IoTickSnapshot, diagnose,
+    diagnose, DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport,
+    EvidenceInputKind, EvidenceSource, IoSnapshotArtifact, IoTickSnapshot,
 };
 use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
 use rust_plc::sequence_lint::{
-    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
+    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
 };
-use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
-use rust_plc::tick_timing::{TickTimingSample, parse_tick_timing_jsonl, to_tick_timing_jsonl};
-use rust_plc::timing_report::{TimingReport, build_timing_report};
+use rust_plc::sim_regress::{run_sim_regress_with_options, SimRegressOptions, SimRegressSummary};
+use rust_plc::tick_timing::{parse_tick_timing_jsonl, to_tick_timing_jsonl, TickTimingSample};
+use rust_plc::timing_report::{build_timing_report, TimingReport};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -1498,6 +1500,13 @@ fn main() {
         }
         return;
     }
+    if first == "component-topology-diff" {
+        if let Err(msg) = run_component_topology_diff_subcommand(&program, args) {
+            eprintln!("[CTOPDIFF-000] {msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "component-scenario-validate" {
         if let Err(msg) = run_component_scenario_validate_subcommand(&program, args) {
             eprintln!("[CSCN-000] {msg}");
@@ -1858,6 +1867,9 @@ fn print_usage(program: &str) {
     eprintln!("  {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>");
     eprintln!(
         "  {program} component-topology-validate <topology.json> [--output <human|json>] [--normalized-out <normalized_topology.json>]"
+    );
+    eprintln!(
+        "  {program} component-topology-diff <before_topology.json> <after_topology.json> --out <semantic_diff.json> [--output <human|json>]"
     );
     eprintln!(
         "  {program} component-scenario-validate <scenario.json> [--output <human|json>] [--normalized-out <normalized_scenario.json>]"
@@ -7223,6 +7235,136 @@ fn format_component_topology_validate_error(
     msg
 }
 
+fn run_component_topology_diff_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = format!(
+        "Usage: {program} component-topology-diff <before_topology.json> <after_topology.json> --out <semantic_diff.json> [--output <human|json>]"
+    );
+    let Some(before_path) = args.next() else {
+        return Err(usage);
+    };
+    let Some(after_path) = args.next() else {
+        return Err(usage);
+    };
+    let before_path = PathBuf::from(before_path);
+    let after_path = PathBuf::from(after_path);
+    let mut out: Option<PathBuf> = None;
+    let mut output_mode = CliOutputMode::Human;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--out" => {
+                out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --out <semantic_diff.json>".to_string()
+                })?));
+            }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
+            "-h" | "--help" => return Err(usage.clone()),
+            other => {
+                return Err(format!(
+                    "Unknown argument for component-topology-diff: {other}"
+                ));
+            }
+        }
+    }
+
+    let out = out.ok_or_else(|| usage.clone())?;
+
+    let before_text = fs::read_to_string(&before_path)
+        .map_err(|err| format!("Failed to read {}: {err}", before_path.display()))?;
+    let before_topology = parse_component_topology_json(&before_text)
+        .map_err(|err| format_component_topology_validate_error(&before_path, &err))?;
+
+    let after_text = fs::read_to_string(&after_path)
+        .map_err(|err| format!("Failed to read {}: {err}", after_path.display()))?;
+    let after_topology = parse_component_topology_json(&after_text)
+        .map_err(|err| format_component_topology_validate_error(&after_path, &err))?;
+
+    let report = diff_component_topology_semantics(&before_topology, &after_topology);
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Failed to create semantic diff output dir {}: {err}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
+    let mut report_json = serde_json::to_string_pretty(&report)
+        .map_err(|err| format!("Failed to serialize semantic diff report: {err}"))?;
+    report_json.push('\n');
+    fs::write(&out, report_json).map_err(|err| {
+        format!(
+            "Failed to write semantic diff report {}: {err}",
+            out.display()
+        )
+    })?;
+
+    if output_mode == CliOutputMode::Json {
+        #[derive(Serialize)]
+        struct ComponentTopologyDiffJson {
+            schema_version: u32,
+            command: &'static str,
+            output: &'static str,
+            status: &'static str,
+            before_topology: String,
+            after_topology: String,
+            semantic_diff: String,
+            changes_detected: bool,
+            node_changes: usize,
+            port_changes: usize,
+            relation_changes: usize,
+            tag_changes: usize,
+            impact_nodes: usize,
+            impact_relations: usize,
+        }
+
+        let mut body = serde_json::to_string_pretty(&ComponentTopologyDiffJson {
+            schema_version: 1,
+            command: "component-topology-diff",
+            output: output_mode.as_str(),
+            status: "pass",
+            before_topology: display_path_relative_to_cwd(&before_path),
+            after_topology: display_path_relative_to_cwd(&after_path),
+            semantic_diff: display_path_relative_to_cwd(&out),
+            changes_detected: !report.is_match,
+            node_changes: report.summary.node_changes,
+            port_changes: report.summary.port_changes,
+            relation_changes: report.summary.relation_changes,
+            tag_changes: report.summary.tag_changes,
+            impact_nodes: report.impact.blast_radius_nodes.len(),
+            impact_relations: report.impact.blast_radius_relations.len(),
+        })
+        .map_err(|err| format!("Failed to serialize component-topology-diff JSON output: {err}"))?;
+        body.push('\n');
+        print!("{body}");
+    } else {
+        eprintln!(
+            "component-topology-diff: PASS (changes_detected={}, node_changes={}, port_changes={}, relation_changes={}, tag_changes={})",
+            !report.is_match,
+            report.summary.node_changes,
+            report.summary.port_changes,
+            report.summary.relation_changes,
+            report.summary.tag_changes
+        );
+        eprintln!("  before_topology: {}", before_path.display());
+        eprintln!("  after_topology: {}", after_path.display());
+        eprintln!("  semantic_diff: {}", out.display());
+    }
+
+    Ok(())
+}
+
 fn run_component_scenario_validate_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
@@ -7726,7 +7868,7 @@ fn format_component_sim_error(err: &rust_plc::component_sim::ComponentSimError) 
 }
 
 fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
-    use rust_plc::iec_address::{LogicalChannelKind, parse_iec_address};
+    use rust_plc::iec_address::{parse_iec_address, LogicalChannelKind};
     use toml::value::Table;
 
     let root = v

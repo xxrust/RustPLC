@@ -14,6 +14,7 @@
 - 前端端口契约应在 `topologyStore.normalizeTopologyNode` 中统一通过 `resolveNodePorts` 归一化，并在导出时去除 `portContractFallback` 推导字段，避免把降级推断反写进持久化拓扑。
 - CLI 场景链路回归优先采用 `scenario-init` 生成夹具后立刻执行 `scenario-validate`（同一临时目录），避免依赖手写 YAML 随 DSL 进化失效。
 - 文档契约测试若绑定 `docs/*.md` 路径，优先支持“主路径 + 归档路径”候选读取（如 `docs/已实现/`），并移除已废弃文档对应测试，避免文档迁移导致 CI 假阳性失败。
+- 新增拓扑语义 diff 能力时，先复用 `parse_component_topology_json` 做两侧归一化，再比较 `nodes/ports/relations/tags`，可保证 diff 与 validate 语义一致并直接落盘为审计工件。
 
 Started: Sat Feb 21 17:59:17 CST 2026
 
@@ -322,4 +323,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `cargo fmt --all --check` 当前会受历史未格式化文件影响（如 `src/component_topology.rs`），故事级质量门禁更稳妥的是对改动文件做 `rustfmt --check` 并配合 `cargo test --tests`。
   - Useful context (e.g., "the evaluation panel is in component X")
     - 当前仓库无 `AGENTS.md`（含测试目录与根目录）；可复用经验需沉淀到 `progress.txt` 的 `Codebase Patterns`。
+---
+## 2026-02-22 02:13:58 CST - US-015
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added semantic topology diff model in `component_topology`: compare normalized `nodes/ports/relations/tags`, emit deterministic JSON report, and include impact analysis (`relation_change_nodes`/`tag_change_nodes`/`blast_radius`/`high_risk_nodes`/`review_reasons`).
+  - Added new CLI command `component-topology-diff <before> <after> --out <semantic_diff.json> [--output human|json]` to generate audit-ready semantic diff artifacts and machine-readable summary output.
+  - Added regression coverage for semantic diff internals and CLI contract (`tests/component_topology_diff.rs`), including change and no-change scenarios.
+- Files changed
+  - `src/component_topology.rs`
+  - `src/main.rs`
+  - `tests/component_topology_diff.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `component-topology` story能力扩展优先落在同一模块（parse/validate/diff）并复用归一化输入，可避免 CLI 子命令间语义漂移。
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `cargo clippy` 在当前工具链未安装（`cargo-clippy` missing），质量门禁需记录并采用 `cargo check + rustfmt --check + targeted cargo test` 组合。
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - 新命令输出的 `semantic_diff.json` 已包含变更维度和影响半径字段，可直接作为后续审计或评审附件，无需二次聚合。
 ---
