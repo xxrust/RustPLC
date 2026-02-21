@@ -1,9 +1,9 @@
 use axum::{
+    Router,
     extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
     routing::{get, post},
-    Router,
 };
 use rust_plc::ast::DeviceType;
 use rust_plc::component_scenario::parse_component_scenario_value;
@@ -11,7 +11,7 @@ use rust_plc::component_topology::parse_component_topology_value;
 use rust_plc::parser::parse_plc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -278,7 +278,10 @@ async fn parse_plc_topology(
                 "params": {
                     "name": device.name,
                     "device_type": plc_device_type_name(&device.device_type),
-                    "connected_to": device.attributes.connected_to,
+                    "driven_by": device.attributes.driven_by.clone(),
+                    "reports_to": device.attributes.reports_to.clone(),
+                    "ports": device.attributes.ports.clone(),
+                    "tags": device.attributes.tags.clone(),
                     "detects": device.attributes.detects.as_ref().map(|d| format!("{}.{}", d.device, d.state)),
                     "detects_device": device.attributes.detects.as_ref().map(|d| d.device.clone()),
                     "detects_state": device.attributes.detects.as_ref().map(|d| d.state.clone()),
@@ -291,47 +294,24 @@ async fn parse_plc_topology(
         })
         .collect::<Vec<_>>();
 
-    let mut seen_edges = HashSet::<(String, String)>::new();
-    let mut connections = Vec::new();
-    for device in devices {
-        if let Some(upstream) = &device.attributes.connected_to {
-            if name_to_index.contains_key(upstream) {
-                let pair = (upstream.clone(), device.name.clone());
-                if seen_edges.insert(pair.clone()) {
-                    connections.push(serde_json::json!({
-                        "from": pair.0,
-                        "to": pair.1,
-                    }));
-                }
-            }
-        }
-
-        if let Some(detects) = &device.attributes.detects {
-            if name_to_index.contains_key(&detects.device) {
-                let pair = (detects.device.clone(), device.name.clone());
-                if seen_edges.insert(pair.clone()) {
-                    let from_port = match (
-                        name_to_index
-                            .get(&detects.device)
-                            .map(|idx| &devices[*idx].device_type),
-                        detects.state.as_str(),
-                    ) {
-                        (Some(DeviceType::Cylinder), "extended") => Some("extended"),
-                        (Some(DeviceType::Cylinder), "retracted") => Some("retracted"),
-                        _ => None,
-                    };
-                    connections.push(serde_json::json!({
-                        "from": pair.0,
-                        "to": pair.1,
-                        "relation": "detects",
-                        "signal": detects.state,
-                        "from_port": from_port,
-                        "to_port": "in",
-                    }));
-                }
-            }
-        }
-    }
+    let connections = program
+        .topology
+        .connections
+        .iter()
+        .filter(|conn| {
+            name_to_index.contains_key(&conn.from) && name_to_index.contains_key(&conn.to)
+        })
+        .map(|conn| {
+            serde_json::json!({
+                "from": conn.from,
+                "to": conn.to,
+                "relation": conn.relation,
+                "signal": conn.signal,
+                "from_port": conn.from_port,
+                "to_port": conn.to_port,
+            })
+        })
+        .collect::<Vec<_>>();
 
     Ok(Json(serde_json::json!({
         "schema_version": 1,

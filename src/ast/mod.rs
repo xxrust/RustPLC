@@ -10,6 +10,8 @@ pub struct PlcProgram {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TopologySection {
     pub devices: Vec<DeviceDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connections: Vec<TopologyConnection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,14 +63,35 @@ pub struct DevicePort {
     pub role: PortRole,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TopologyRelation {
+    DrivenBy,
+    ReportsTo,
+    Detects,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TopologyConnection {
+    pub from: String,
+    pub to: String,
+    pub relation: TopologyRelation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_port: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_port: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DeviceAttributes {
     pub driven_by: Option<String>,
     pub reports_to: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ports: Vec<DevicePort>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub connected_to: Option<String>,
+    #[serde(default, skip_serializing_if = "DeviceTags::is_empty")]
+    pub tags: DeviceTags,
     pub response_time: Option<DurationValue>,
     pub stroke_time: Option<DurationValue>,
     pub retract_time: Option<DurationValue>,
@@ -96,6 +119,24 @@ pub struct DeviceAttributes {
     pub out: Option<String>,
     pub period_ms: Option<u64>,
     pub limit: Option<AnalogRange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct DeviceTags {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub functional_group: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub danger_level: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub location_group: Vec<String>,
+}
+
+impl DeviceTags {
+    pub fn is_empty(&self) -> bool {
+        self.functional_group.is_empty()
+            && self.danger_level.is_empty()
+            && self.location_group.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

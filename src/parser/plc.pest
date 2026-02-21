@@ -45,6 +45,7 @@ attribute_name = {
     | "ramp_time"
     | "states"
     | "ports"
+    | "tags"
     | "range"
     | "unit"
     // PID minimal loop
@@ -63,6 +64,11 @@ port_type = { "digital" | "analog" | "pneumatic" | "logical" | "generic" }
 port_role = { "producer" | "consumer" | "bidirectional" }
 port_definition = { identifier ~ ":" ~ port_type ~ ":" ~ port_role }
 port_list = { "[" ~ port_definition ~ ("," ~ port_definition)* ~ ","? ~ "]" }
+tag_dimension_name = { "functional_group" | "danger_level" | "location_group" }
+tag_value = { identifier | string_literal }
+tag_value_list = { "[" ~ tag_value ~ ("," ~ tag_value)* ~ ","? ~ "]" }
+tag_dimension = { tag_dimension_name ~ ":" ~ tag_value_list }
+tags_value = { "{" ~ tag_dimension ~ ((","? ~ tag_dimension))* ~ ","? ~ "}" }
 
 attribute_value = {
     state_reference
@@ -74,6 +80,7 @@ attribute_value = {
     | string_literal
     | boolean_value
     | port_list
+    | tags_value
     | identifier_list
     | identifier
 }

@@ -67,6 +67,12 @@ export interface RunStatus {
   failure_summary?: string;
 }
 
+export interface DeviceTags {
+  functional_group: string[];
+  danger_level: string[];
+  location_group: string[];
+}
+
 export interface ComponentTopology {
   schema_version: number;
   component_library: {

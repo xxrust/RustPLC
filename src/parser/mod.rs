@@ -1,11 +1,12 @@
 use crate::ast::{
     ActionStatement, BinaryValue, Branch, CausalityConstraint, ComparisonOperator,
     ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DevicePort,
-    DeviceType, DurationValue, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective,
-    ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch, SafetyConstraint,
-    SafetyOperand, SafetyRelation, StateReference, StepDeclaration, StepStatement, TaskDeclaration,
-    TasksSection, TimeUnit, TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget,
-    TopologySection, WaitCondition, WaitStatement,
+    DeviceTags, DeviceType, DurationValue, GotoDirective, LiteralValue, MeasuredValue,
+    OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch,
+    SafetyConstraint, SafetyOperand, SafetyRelation, StateReference, StepDeclaration,
+    StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective, TimingConstraint,
+    TimingRelation, TimingTarget, TopologyConnection, TopologyRelation, TopologySection,
+    WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use pest::Parser;
@@ -87,7 +88,82 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
         }
     }
 
-    Ok(TopologySection { devices })
+    let connections = derive_topology_connections(&devices);
+    Ok(TopologySection {
+        devices,
+        connections,
+    })
+}
+
+fn derive_topology_connections(devices: &[DeviceDeclaration]) -> Vec<TopologyConnection> {
+    let mut out = Vec::new();
+
+    for device in devices {
+        if let Some(upstream) = device.attributes.driven_by.as_ref() {
+            let from_port = find_device(devices, upstream)
+                .and_then(|d| single_port_for_role(&d.attributes.ports, PortRole::Producer));
+            let to_port = single_port_for_role(&device.attributes.ports, PortRole::Consumer);
+            out.push(TopologyConnection {
+                from: upstream.clone(),
+                to: device.name.clone(),
+                relation: TopologyRelation::DrivenBy,
+                from_port,
+                to_port,
+                signal: None,
+            });
+        }
+
+        if let Some(target) = device.attributes.reports_to.as_ref() {
+            let from_port = single_port_for_role(&device.attributes.ports, PortRole::Producer);
+            let to_port = find_device(devices, target)
+                .and_then(|d| single_port_for_role(&d.attributes.ports, PortRole::Consumer));
+            out.push(TopologyConnection {
+                from: device.name.clone(),
+                to: target.clone(),
+                relation: TopologyRelation::ReportsTo,
+                from_port,
+                to_port,
+                signal: None,
+            });
+        }
+
+        if let Some(detects) = device.attributes.detects.as_ref() {
+            let from_port = find_device(devices, &detects.device).and_then(|source| {
+                source
+                    .attributes
+                    .ports
+                    .iter()
+                    .find(|port| port.id == detects.state)
+                    .map(|port| port.id.clone())
+                    .or_else(|| single_port_for_role(&source.attributes.ports, PortRole::Producer))
+            });
+            let to_port = single_port_for_role(&device.attributes.ports, PortRole::Consumer);
+            out.push(TopologyConnection {
+                from: detects.device.clone(),
+                to: device.name.clone(),
+                relation: TopologyRelation::Detects,
+                from_port: from_port.or_else(|| Some(detects.state.clone())),
+                to_port,
+                signal: Some(detects.state.clone()),
+            });
+        }
+    }
+
+    out
+}
+
+fn find_device<'a>(devices: &'a [DeviceDeclaration], name: &str) -> Option<&'a DeviceDeclaration> {
+    devices.iter().find(|device| device.name == name)
+}
+
+fn single_port_for_role(ports: &[DevicePort], role: PortRole) -> Option<String> {
+    let mut matches = ports.iter().filter(|port| port.role == role);
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        None
+    } else {
+        Some(first.id.clone())
+    }
 }
 
 fn parse_device_declaration(pair: Pair<Rule>) -> Result<DeviceDeclaration, PlcError> {
@@ -157,9 +233,7 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
 
     match attr_name.as_str() {
         "driven_by" => {
-            let target = expect_identifier(value, "driven_by")?;
-            attributes.connected_to = Some(target.clone());
-            attributes.driven_by = Some(target);
+            attributes.driven_by = Some(expect_identifier(value, "driven_by")?);
         }
         "reports_to" => {
             attributes.reports_to = Some(expect_identifier(value, "reports_to")?);
@@ -202,6 +276,9 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         }
         "ports" => {
             attributes.ports = expect_port_list(value, "ports")?;
+        }
+        "tags" => {
+            attributes.tags = expect_tags(value, "tags")?;
         }
         "range" => {
             attributes.range = Some(parse_range_value(value)?);
@@ -1254,6 +1331,91 @@ fn expect_port_list(pair: Pair<Rule>, field_name: &str) -> Result<Vec<DevicePort
     Ok(ports)
 }
 
+fn expect_tags(pair: Pair<Rule>, field_name: &str) -> Result<DeviceTags, PlcError> {
+    let line = line_of(&pair);
+    if pair.as_rule() != Rule::tags_value {
+        return Err(PlcError::parse(
+            line,
+            format!(
+                "属性 {field_name} 需要标签对象（如 {{ functional_group: [clamp], danger_level: [high] }}）"
+            ),
+        ));
+    }
+
+    let mut tags = DeviceTags::default();
+    for dimension in pair
+        .into_inner()
+        .filter(|part| part.as_rule() == Rule::tag_dimension)
+    {
+        let dimension_line = line_of(&dimension);
+        let mut key = None::<String>;
+        let mut values = None::<Vec<String>>;
+
+        for part in dimension.into_inner() {
+            match part.as_rule() {
+                Rule::tag_dimension_name => key = Some(part.as_str().to_string()),
+                Rule::tag_value_list => values = Some(parse_tag_values(part)?),
+                _ => {}
+            }
+        }
+
+        let key = key.ok_or_else(|| PlcError::parse(dimension_line, "tags 维度缺少名称"))?;
+        let values =
+            values.ok_or_else(|| PlcError::parse(dimension_line, "tags 维度缺少值列表"))?;
+        if values.is_empty() {
+            return Err(PlcError::parse(
+                dimension_line,
+                format!("tags.{key} 至少需要一个标签值"),
+            ));
+        }
+
+        match key.as_str() {
+            "functional_group" => tags.functional_group = values,
+            "danger_level" => tags.danger_level = values,
+            "location_group" => tags.location_group = values,
+            _ => {
+                return Err(PlcError::parse(
+                    dimension_line,
+                    format!("不支持的 tags 维度: {key}"),
+                ));
+            }
+        }
+    }
+
+    if tags.is_empty() {
+        return Err(PlcError::parse(
+            line,
+            format!("属性 {field_name} 至少需要一个标签维度"),
+        ));
+    }
+
+    Ok(tags)
+}
+
+fn parse_tag_values(pair: Pair<Rule>) -> Result<Vec<String>, PlcError> {
+    let line = line_of(&pair);
+    if pair.as_rule() != Rule::tag_value_list {
+        return Err(PlcError::parse(line, "tags 维度值必须是列表"));
+    }
+
+    let mut values = Vec::new();
+    for item in pair
+        .into_inner()
+        .filter(|part| part.as_rule() == Rule::tag_value)
+    {
+        let value = first_inner(item, line, "tags 标签值")?;
+        match value.as_rule() {
+            Rule::identifier => values.push(value.as_str().to_string()),
+            Rule::string_literal => values.push(parse_string_literal(value)?),
+            _ => {
+                return Err(PlcError::parse(line, "tags 标签值仅支持标识符或字符串"));
+            }
+        }
+    }
+
+    Ok(values)
+}
+
 fn parse_port_definition(pair: Pair<Rule>) -> Result<DevicePort, PlcError> {
     let line = line_of(&pair);
     let mut port_id = None;
@@ -1346,31 +1508,31 @@ device X4: digital_input                # start button
 
 # ===== operator panel =====
 device start_button: digital_input {
-    connected_to: X4,
+    driven_by: X4,
     debounce: 20ms
 }
 
 device alarm_light: digital_output {
-    connected_to: Y2
+    driven_by: Y2
 }
 
 # ===== solenoid valves =====
 device valve_A: solenoid_valve {
     type: "5/2",
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 15ms
 }
 
 device valve_B: solenoid_valve {
     type: "5/2",
-    connected_to: Y1,
+    driven_by: Y1,
     response_time: 15ms
 }
 
 # ===== cylinders =====
 device cyl_A: cylinder {
     type: double_acting,
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke: 100mm,
     stroke_time: 200ms,
     retract_time: 180ms
@@ -1378,7 +1540,7 @@ device cyl_A: cylinder {
 
 device cyl_B: cylinder {
     type: double_acting,
-    connected_to: valve_B,
+    driven_by: valve_B,
     stroke: 150mm,
     stroke_time: 300ms,
     retract_time: 250ms
@@ -1387,25 +1549,25 @@ device cyl_B: cylinder {
 # ===== sensors =====
 device sensor_A_ext: sensor {
     type: magnetic,
-    connected_to: X0,
+    driven_by: X0,
     detects: cyl_A.extended
 }
 
 device sensor_A_ret: sensor {
     type: magnetic,
-    connected_to: X1,
+    driven_by: X1,
     detects: cyl_A.retracted
 }
 
 device sensor_B_ext: sensor {
     type: magnetic,
-    connected_to: X2,
+    driven_by: X2,
     detects: cyl_B.extended
 }
 
 device sensor_B_ret: sensor {
     type: magnetic,
-    connected_to: X3,
+    driven_by: X3,
     detects: cyl_B.retracted
 }
 "#;
@@ -1456,8 +1618,8 @@ task main:
         let input = r#"
 [topology]
 
-device Y0: digital_output
-device X0: digital_input
+device Y0: digital_output { ports: [out:digital:producer] }
+device X0: digital_input { ports: [in:digital:consumer] }
 device valve_A: solenoid_valve {
     driven_by: Y0,
     ports: [coil:digital:consumer, feedback:logical:producer]
@@ -1465,7 +1627,7 @@ device valve_A: solenoid_valve {
 device sensor_A: sensor {
     reports_to: X0,
     detects: valve_A.on,
-    ports: [sense:digital:producer]
+    ports: [sense:digital:consumer, out:digital:producer]
 }
 
 [constraints]
@@ -1504,6 +1666,47 @@ task main:
         assert_eq!(valve.attributes.ports[0].id, "coil");
         assert_eq!(valve.attributes.ports[0].port_type, PortType::Digital);
         assert_eq!(valve.attributes.ports[0].role, PortRole::Consumer);
+        assert_eq!(program.topology.connections.len(), 3);
+        assert_eq!(
+            program.topology.connections[0].relation,
+            crate::ast::TopologyRelation::DrivenBy
+        );
+        assert_eq!(
+            program.topology.connections[0].from_port.as_deref(),
+            Some("out")
+        );
+        assert_eq!(
+            program.topology.connections[0].to_port.as_deref(),
+            Some("coil")
+        );
+        assert_eq!(
+            program.topology.connections[1].relation,
+            crate::ast::TopologyRelation::ReportsTo
+        );
+        assert_eq!(
+            program.topology.connections[1].from_port.as_deref(),
+            Some("out")
+        );
+        assert_eq!(
+            program.topology.connections[1].to_port.as_deref(),
+            Some("in")
+        );
+        assert_eq!(
+            program.topology.connections[2].relation,
+            crate::ast::TopologyRelation::Detects
+        );
+        assert_eq!(
+            program.topology.connections[2].signal.as_deref(),
+            Some("on")
+        );
+        assert_eq!(
+            program.topology.connections[2].from_port.as_deref(),
+            Some("feedback")
+        );
+        assert_eq!(
+            program.topology.connections[2].to_port.as_deref(),
+            Some("sense")
+        );
     }
 
     #[test]
@@ -1526,6 +1729,47 @@ task main:
         assert!(
             err.to_string().contains("driven_by 或 reports_to"),
             "迁移提示应建议使用 driven_by/reports_to，实际: {err}"
+        );
+    }
+
+    #[test]
+    fn parses_multidimensional_tags_into_ast() {
+        let input = r#"
+[topology]
+
+device valve_A: solenoid_valve {
+    driven_by: Y0,
+    tags: {
+        functional_group: [clamp, press],
+        danger_level: [high],
+        location_group: ["line_a/cell_2/station_7"]
+    }
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("应支持多维 tags 语法");
+        let valve = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "valve_A")
+            .expect("应包含 valve_A");
+
+        assert_eq!(
+            valve.attributes.tags.functional_group,
+            vec!["clamp".to_string(), "press".to_string()]
+        );
+        assert_eq!(valve.attributes.tags.danger_level, vec!["high".to_string()]);
+        assert_eq!(
+            valve.attributes.tags.location_group,
+            vec!["line_a/cell_2/station_7".to_string()]
         );
     }
 
@@ -1635,19 +1879,19 @@ device Y3: digital_output
 device X5: digital_input
 
 device estop: digital_input {
-    connected_to: X5,
+    driven_by: X5,
     debounce: 10ms,
     inverted: true
 }
 
 device spindle_valve: solenoid_valve {
-    connected_to: Y3,
+    driven_by: Y3,
     response_time: 25ms,
     type: "3/2"
 }
 
 device spindle_cyl: cylinder {
-    connected_to: spindle_valve,
+    driven_by: spindle_valve,
     stroke_time: 120ms,
     retract_time: 110ms,
     stroke: 80mm,
@@ -1655,13 +1899,13 @@ device spindle_cyl: cylinder {
 }
 
 device spindle_sensor: sensor {
-    connected_to: X5,
+    driven_by: X5,
     detects: spindle_cyl.extended,
     type: optical
 }
 
 device spindle_motor: motor {
-    connected_to: Y3,
+    driven_by: Y3,
     rated_speed: 60rpm,
     ramp_time: 300ms
 }
@@ -1777,9 +2021,9 @@ task ready:
 [topology]
 device Y0: digital_output
 device X0: digital_input
-device valve_A: solenoid_valve { connected_to: Y0 }
-device cyl_A: cylinder { connected_to: valve_A, stroke_time: 200ms, retract_time: 180ms }
-device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
+device valve_A: solenoid_valve { driven_by: Y0 }
+device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
+device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
 
 [constraints]
 causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
@@ -1811,9 +2055,9 @@ task init:
 [topology]
 device Y0: digital_output
 device X0: digital_input
-device valve_glue: solenoid_valve { connected_to: Y0 }
-device cyl_glue: cylinder { connected_to: valve_glue, stroke_time: 200ms, retract_time: 180ms }
-device sensor_glue_ext: sensor { connected_to: X0, detects: cyl_glue.extended }
+device valve_glue: solenoid_valve { driven_by: Y0 }
+device cyl_glue: cylinder { driven_by: valve_glue, stroke_time: 200ms, retract_time: 180ms }
+device sensor_glue_ext: sensor { driven_by: X0, detects: cyl_glue.extended }
 
 [constraints]
 causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ext
@@ -1847,8 +2091,8 @@ task glue:
         let input = r#"
 [topology]
 device Y0: digital_output
-device valve_glue: solenoid_valve { connected_to: Y0 }
-device cyl_glue: cylinder { connected_to: valve_glue, stroke_time: 200ms, retract_time: 180ms }
+device valve_glue: solenoid_valve { driven_by: Y0 }
+device cyl_glue: cylinder { driven_by: valve_glue, stroke_time: 200ms, retract_time: 180ms }
 
 [constraints]
 
@@ -1943,32 +2187,32 @@ device X3: digital_input
 device X4: digital_input
 
 device start_button: digital_input {
-    connected_to: X4
+    driven_by: X4
     debounce: 20ms
 }
 
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
     response_time: 20ms
 }
 device valve_B: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
     response_time: 20ms
 }
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 300ms
     retract_time: 300ms
 }
 device cyl_B: cylinder {
-    connected_to: valve_B
+    driven_by: valve_B
     stroke_time: 300ms
     retract_time: 300ms
 }
-device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
-device sensor_A_ret: sensor { connected_to: X1, detects: cyl_A.retracted }
-device sensor_B_ext: sensor { connected_to: X2, detects: cyl_B.extended }
-device sensor_B_ret: sensor { connected_to: X3, detects: cyl_B.retracted }
+device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
+device sensor_A_ret: sensor { driven_by: X1, detects: cyl_A.retracted }
+device sensor_B_ext: sensor { driven_by: X2, detects: cyl_B.extended }
+device sensor_B_ret: sensor { driven_by: X3, detects: cyl_B.retracted }
 
 [constraints]
 
@@ -2051,25 +2295,25 @@ device X1: digital_input                 # 传感器B
 device X2: digital_input                 # 启动按钮
 
 device start_button: digital_input {     # 启动按钮
-    connected_to: X2
+    driven_by: X2
     debounce: 20ms
 }
 
 device motor_ctrl: motor {
-    connected_to: Y0
+    driven_by: Y0
     rated_speed: 60rpm
     ramp_time: 50ms                      # 启动到额定转速时间
 }
 
 device sensor_A: sensor {
     type: proximity
-    connected_to: X0
+    driven_by: X0
     detects: motor_ctrl.position_A       # 检测A位置
 }
 
 device sensor_B: sensor {
     type: proximity
-    connected_to: X1
+    driven_by: X1
     detects: motor_ctrl.position_B       # 检测B位置
 }
 

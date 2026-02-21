@@ -15,6 +15,7 @@ import { useReplayStore } from '../stores/replayStore';
 import { useAppStore } from '../stores/appStore';
 import { topologyApi, traceApi, runApi } from '../services/api';
 import type { NodeData } from '../stores/topologyStore';
+import type { DeviceTags } from '../types';
 
 interface Tab {
   id: string;
@@ -429,6 +430,7 @@ function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ 
       type: mapComponentType(comp.component_id || comp.type || 'generic', comp.params?.device_type),
       status: 'idle',
       ...comp.params,
+      tags: normalizeDeviceTags(comp.params?.tags),
     },
   }));
   const edges = (data.connections || []).map((conn: any, i: number) => {
@@ -449,6 +451,34 @@ function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ 
     return edge;
   });
   return { nodes, edges };
+}
+
+function normalizeDeviceTags(raw: unknown): DeviceTags {
+  if (!raw || typeof raw !== 'object') {
+    return emptyDeviceTags();
+  }
+
+  const source = raw as Record<string, unknown>;
+  return {
+    functional_group: normalizeTagDimension(source.functional_group),
+    danger_level: normalizeTagDimension(source.danger_level),
+    location_group: normalizeTagDimension(source.location_group),
+  };
+}
+
+function normalizeTagDimension(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.filter((value): value is string => typeof value === 'string');
+}
+
+function emptyDeviceTags(): DeviceTags {
+  return {
+    functional_group: [],
+    danger_level: [],
+    location_group: [],
+  };
 }
 
 function normalizeEndpointId(raw: string): string {

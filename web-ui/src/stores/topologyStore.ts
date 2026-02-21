@@ -1,10 +1,12 @@
 import { create } from 'zustand';
 import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import type { Node, Edge, OnNodesChange, OnEdgesChange } from '@xyflow/react';
+import type { DeviceTags } from '../types';
 
 export interface NodeData {
   label: string;
   type: string;
+  tags?: DeviceTags;
   status?: string;
   value?: number | boolean;
   [key: string]: any;
