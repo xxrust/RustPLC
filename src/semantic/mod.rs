@@ -3,17 +3,16 @@ use crate::ast::{
     ConstraintsSection, DeviceType, DurationValue, GotoDirective, LiteralValue,
     OnCompleteDirective, ParallelBlock, PlcProgram, RaceBlock, SafetyOperand,
     SafetyRelation as AstSafetyRelation, StepStatement, TaskDeclaration, TasksSection, TimeUnit,
-    TimeoutDirective, TimingRelation as AstTimingRelation, TimingTarget, TopologySection,
-    WaitCondition, WaitStatement,
+    TimeoutDirective, TimingRelation as AstTimingRelation, TimingTarget, TopologyConnection,
+    TopologyRelation, TopologySection, WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use crate::ir::{
     ActionKind, ActionRef, ActionTiming, BinaryValue as IrBinaryValue, CausalityChain,
     ConnectionType, ConstraintSet, Device, DeviceKind, PidLoop as IrPidLoop, SafetyExpr,
     SafetyRelation as IrSafetyRelation, SafetyRule, State, StateExpr, StateMachine, TimeInterval,
-    TimerOperation, TimerOperationKind, TimingModel,
-    TimingRelation as IrTimingRelation, TimingRule, TimingScope, TopologyGraph, Transition,
-    TransitionAction, TransitionGuard,
+    TimerOperation, TimerOperationKind, TimingModel, TimingRelation as IrTimingRelation,
+    TimingRule, TimingScope, TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
 use petgraph::graph::NodeIndex;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -396,45 +395,51 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
         }
     }
 
-    for device in &topology.devices {
-        let Some(target_name) = device.attributes.connected_to.as_deref() else {
-            continue;
-        };
+    for connection in semantic_topology_connections(topology) {
+        let line = topology_connection_line(topology, &connection);
+        let context = topology_connection_context(&connection);
 
-        let Some(target_node) = device_nodes.get(target_name) else {
+        let Some(from_node) = device_nodes.get(&connection.from) else {
             errors.push(PlcError::undefined_reference_with_reason(
-                device.line,
+                line,
                 "设备",
-                target_name,
-                format!(
-                    "设备 {} 的 connected_to 引用了该名称，请先定义后再连接",
-                    device.name
-                ),
+                &connection.from,
+                format!("{context} 引用了该名称，请先定义后再连接"),
             ));
             continue;
         };
 
-        let Some(current_node) = device_nodes.get(&device.name) else {
+        let Some(to_node) = device_nodes.get(&connection.to) else {
+            errors.push(PlcError::undefined_reference_with_reason(
+                line,
+                "设备",
+                &connection.to,
+                format!("{context} 指向了未定义设备，请先定义后再连接"),
+            ));
             continue;
         };
 
-        let Some(connection_type) = connection_type_for(&target_node.kind, &current_node.kind)
+        let Some(connection_type) =
+            connection_type_for_relation(&connection.relation, &from_node.kind, &to_node.kind)
         else {
             errors.push(PlcError::type_mismatch_with_reason(
-                device.line,
-                format!("可作为 {} 上游的设备", device_kind_name(&current_node.kind)),
-                device_kind_name(&target_node.kind),
-                format!("设备 {} 的 connected_to", device.name),
+                line,
+                format!("{} 可连接的 consumer 设备", device_kind_name(&from_node.kind)),
+                device_kind_name(&to_node.kind),
+                context,
                 format!(
-                    "请检查 {} 与 {} 的连接方向，或调整为兼容设备类型",
-                    target_name, device.name
+                    "`{}` 关系要求 producer -> consumer，当前为 {}({}) -> {}({})，请调整设备类型或连接方向",
+                    topology_relation_name(&connection.relation),
+                    connection.from,
+                    device_kind_name(&from_node.kind),
+                    connection.to,
+                    device_kind_name(&to_node.kind)
                 ),
             ));
             continue;
         };
 
-        // `A connected_to B` means B provides upstream linkage into A.
-        topology_graph.add_connection(target_node.index, current_node.index, connection_type);
+        topology_graph.add_connection(from_node.index, to_node.index, connection_type);
     }
 
     topology_graph.pid_loops = pid_loops;
@@ -443,6 +448,103 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
         Ok(topology_graph)
     } else {
         Err(errors)
+    }
+}
+
+fn semantic_topology_connections(topology: &TopologySection) -> Vec<TopologyConnection> {
+    if !topology.connections.is_empty() {
+        return topology.connections.clone();
+    }
+
+    let mut connections = Vec::new();
+    for device in &topology.devices {
+        if let Some(upstream) = device.attributes.driven_by.as_ref() {
+            connections.push(TopologyConnection {
+                from: upstream.clone(),
+                to: device.name.clone(),
+                relation: TopologyRelation::DrivenBy,
+                from_port: None,
+                to_port: None,
+                signal: None,
+            });
+        }
+
+        if let Some(target) = device.attributes.reports_to.as_ref() {
+            connections.push(TopologyConnection {
+                from: device.name.clone(),
+                to: target.clone(),
+                relation: TopologyRelation::ReportsTo,
+                from_port: None,
+                to_port: None,
+                signal: None,
+            });
+        }
+
+        if let Some(detects) = device.attributes.detects.as_ref() {
+            connections.push(TopologyConnection {
+                from: detects.device.clone(),
+                to: device.name.clone(),
+                relation: TopologyRelation::Detects,
+                from_port: Some(detects.state.clone()),
+                to_port: None,
+                signal: Some(detects.state.clone()),
+            });
+        }
+    }
+
+    connections
+}
+
+fn topology_connection_line(topology: &TopologySection, connection: &TopologyConnection) -> usize {
+    for device in &topology.devices {
+        let matches_line = match connection.relation {
+            TopologyRelation::DrivenBy => {
+                device.name == connection.to
+                    && device
+                        .attributes
+                        .driven_by
+                        .as_deref()
+                        .is_some_and(|from| from == connection.from)
+            }
+            TopologyRelation::ReportsTo => {
+                device.name == connection.from
+                    && device
+                        .attributes
+                        .reports_to
+                        .as_deref()
+                        .is_some_and(|to| to == connection.to)
+            }
+            TopologyRelation::Detects => {
+                device.name == connection.to
+                    && device
+                        .attributes
+                        .detects
+                        .as_ref()
+                        .is_some_and(|detects| detects.device == connection.from)
+            }
+        };
+
+        if matches_line {
+            return device.line.max(1);
+        }
+    }
+
+    1
+}
+
+fn topology_connection_context(connection: &TopologyConnection) -> String {
+    match connection.relation {
+        TopologyRelation::DrivenBy => format!("设备 {} 的 driven_by", connection.to),
+        TopologyRelation::ReportsTo => format!("设备 {} 的 reports_to", connection.from),
+        TopologyRelation::Detects => format!("设备 {} 的 detects", connection.to),
+    }
+}
+
+fn topology_relation_name(relation: &TopologyRelation) -> &'static str {
+    match relation {
+        TopologyRelation::DrivenBy => "driven_by",
+        TopologyRelation::ReportsTo => "reports_to",
+        TopologyRelation::Detects => "detects",
     }
 }
 
@@ -469,11 +571,17 @@ fn extract_pid_loops(topology: &TopologySection, errors: &mut Vec<PlcError>) -> 
         }
         let line = device.line.max(1);
         let Some(pv) = device.attributes.pv.as_ref() else {
-            errors.push(PlcError::semantic(line, format!("PID {} 缺少 pv 属性", device.name)));
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 缺少 pv 属性", device.name),
+            ));
             continue;
         };
         let Some(sp) = device.attributes.sp.as_ref() else {
-            errors.push(PlcError::semantic(line, format!("PID {} 缺少 sp 属性", device.name)));
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 缺少 sp 属性", device.name),
+            ));
             continue;
         };
         let Some(sp_numeric) = format_numeric_literal_from_literal(sp) else {
@@ -484,19 +592,31 @@ fn extract_pid_loops(topology: &TopologySection, errors: &mut Vec<PlcError>) -> 
             continue;
         };
         let Some(kp) = device.attributes.kp else {
-            errors.push(PlcError::semantic(line, format!("PID {} 缺少 kp 属性", device.name)));
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 缺少 kp 属性", device.name),
+            ));
             continue;
         };
         let Some(ki) = device.attributes.ki else {
-            errors.push(PlcError::semantic(line, format!("PID {} 缺少 ki 属性", device.name)));
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 缺少 ki 属性", device.name),
+            ));
             continue;
         };
         let Some(kd) = device.attributes.kd else {
-            errors.push(PlcError::semantic(line, format!("PID {} 缺少 kd 属性", device.name)));
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 缺少 kd 属性", device.name),
+            ));
             continue;
         };
         let Some(out) = device.attributes.out.as_ref() else {
-            errors.push(PlcError::semantic(line, format!("PID {} 缺少 out 属性", device.name)));
+            errors.push(PlcError::semantic(
+                line,
+                format!("PID {} 缺少 out 属性", device.name),
+            ));
             continue;
         };
         let Some(period_ms) = device.attributes.period_ms else {
@@ -1025,9 +1145,7 @@ fn format_numeric_literal_from_literal(literal: &LiteralValue) -> Option<String>
     match literal {
         LiteralValue::Number(v) => Some(format_numeric_literal(*v)),
         LiteralValue::Measured(measured) => Some(format_numeric_literal(measured.value)),
-        LiteralValue::Boolean(_)
-        | LiteralValue::String(_)
-        | LiteralValue::State(_) => None,
+        LiteralValue::Boolean(_) | LiteralValue::String(_) | LiteralValue::State(_) => None,
     }
 }
 
@@ -1274,7 +1392,11 @@ fn collect_device_ranges(topology: &TopologySection) -> HashMap<String, (f64, f6
         .iter()
         .filter_map(|device| {
             device.attributes.range.as_ref().map(|r| {
-                let (min, max) = if r.min <= r.max { (r.min, r.max) } else { (r.max, r.min) };
+                let (min, max) = if r.min <= r.max {
+                    (r.min, r.max)
+                } else {
+                    (r.max, r.min)
+                };
                 (device.name.clone(), (min, max))
             })
         })
@@ -1407,7 +1529,8 @@ fn validate_wait_device_references_in_statements(
                             );
                         }
                     }
-                    if let Some((value, unit)) = threshold_literal_value_and_unit(&condition.right) {
+                    if let Some((value, unit)) = threshold_literal_value_and_unit(&condition.right)
+                    {
                         if let Some(device) = wait_operand_device_name(&condition.left) {
                             validate_analog_threshold_comparison(
                                 device,
@@ -2593,7 +2716,19 @@ fn ast_type_to_ir_kind(device_type: &DeviceType) -> DeviceKind {
     }
 }
 
-fn connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<ConnectionType> {
+fn connection_type_for_relation(
+    relation: &TopologyRelation,
+    from: &DeviceKind,
+    to: &DeviceKind,
+) -> Option<ConnectionType> {
+    match relation {
+        TopologyRelation::DrivenBy => driven_by_connection_type_for(from, to),
+        TopologyRelation::ReportsTo => reports_to_connection_type_for(to),
+        TopologyRelation::Detects => detects_connection_type_for(to),
+    }
+}
+
+fn driven_by_connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<ConnectionType> {
     match (from, to) {
         (DeviceKind::DigitalOutput, DeviceKind::SolenoidValve)
         | (DeviceKind::DigitalOutput, DeviceKind::Motor)
@@ -2607,6 +2742,22 @@ fn connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<ConnectionT
         | (DeviceKind::AnalogOutput, DeviceKind::SolenoidValve)
         | (DeviceKind::AnalogOutput, DeviceKind::Motor) => Some(ConnectionType::Analog),
         (DeviceKind::Pid, DeviceKind::Pid) => Some(ConnectionType::Logical),
+        _ => None,
+    }
+}
+
+fn reports_to_connection_type_for(to: &DeviceKind) -> Option<ConnectionType> {
+    match to {
+        DeviceKind::DigitalInput => Some(ConnectionType::Logical),
+        DeviceKind::AnalogInput => Some(ConnectionType::Analog),
+        _ => None,
+    }
+}
+
+fn detects_connection_type_for(to: &DeviceKind) -> Option<ConnectionType> {
+    match to {
+        DeviceKind::Sensor | DeviceKind::DigitalInput => Some(ConnectionType::Logical),
+        DeviceKind::AnalogInput => Some(ConnectionType::Analog),
         _ => None,
     }
 }
@@ -2654,31 +2805,31 @@ device X4: digital_input
 
 # ===== operator panel =====
 device start_button: digital_input {
-    connected_to: X4,
+    driven_by: X4,
     debounce: 20ms
 }
 
 device alarm_light: digital_output {
-    connected_to: Y2
+    driven_by: Y2
 }
 
 # ===== solenoid valves =====
 device valve_A: solenoid_valve {
     type: "5/2",
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 15ms
 }
 
 device valve_B: solenoid_valve {
     type: "5/2",
-    connected_to: Y1,
+    driven_by: Y1,
     response_time: 15ms
 }
 
 # ===== cylinders =====
 device cyl_A: cylinder {
     type: double_acting,
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke: 100mm,
     stroke_time: 200ms,
     retract_time: 180ms
@@ -2686,7 +2837,7 @@ device cyl_A: cylinder {
 
 device cyl_B: cylinder {
     type: double_acting,
-    connected_to: valve_B,
+    driven_by: valve_B,
     stroke: 150mm,
     stroke_time: 300ms,
     retract_time: 250ms
@@ -2695,25 +2846,25 @@ device cyl_B: cylinder {
 # ===== sensors =====
 device sensor_A_ext: sensor {
     type: magnetic,
-    connected_to: X0,
+    driven_by: X0,
     detects: cyl_A.extended
 }
 
 device sensor_A_ret: sensor {
     type: magnetic,
-    connected_to: X1,
+    driven_by: X1,
     detects: cyl_A.retracted
 }
 
 device sensor_B_ext: sensor {
     type: magnetic,
-    connected_to: X2,
+    driven_by: X2,
     detects: cyl_B.extended
 }
 
 device sensor_B_ret: sensor {
     type: magnetic,
-    connected_to: X3,
+    driven_by: X3,
     detects: cyl_B.retracted
 }
 
@@ -2726,7 +2877,7 @@ device sensor_B_ret: sensor {
         let topology = build_topology_graph(&program).expect("PRD 5.3 示例应能成功构建拓扑图");
 
         assert_eq!(topology.graph.node_count(), 18);
-        assert_eq!(topology.graph.edge_count(), 10);
+        assert_eq!(topology.graph.edge_count(), 14);
 
         let has_pneumatic_edge = topology.graph.edge_references().any(|edge| {
             let source = &topology.graph[edge.source()].name;
@@ -2741,6 +2892,15 @@ device sensor_B_ret: sensor {
             source == "Y0" && target == "valve_A" && edge.weight() == &ConnectionType::Electrical
         });
         assert!(has_electrical_edge, "应包含 Y0 -> valve_A 电气连接");
+
+        let has_detects_edge = topology.graph.edge_references().any(|edge| {
+            let source = &topology.graph[edge.source()].name;
+            let target = &topology.graph[edge.target()].name;
+            source == "cyl_A"
+                && target == "sensor_A_ext"
+                && edge.weight() == &ConnectionType::Logical
+        });
+        assert!(has_detects_edge, "应包含 cyl_A -> sensor_A_ext 检测连接");
     }
 
     #[test]
@@ -2785,7 +2945,7 @@ task main:
 device Y0: digital_output
 
 device valve_A: solenoid_valve {
-    connected_to: Y9,
+    driven_by: Y9,
     response_time: 15ms
 }
 
@@ -2810,18 +2970,18 @@ device valve_A: solenoid_valve {
         let input = r#"
 [topology]
 device cyl_A: cylinder {
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke_time: 200ms,
     retract_time: 180ms
 }
 
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 15ms
 }
 
 device sensor_bad: sensor {
-    connected_to: cyl_A,
+    driven_by: cyl_A,
     detects: cyl_A.extended
 }
 
@@ -2844,6 +3004,77 @@ device Y0: digital_output
     }
 
     #[test]
+    fn supports_mimo_edges_in_producer_to_consumer_direction() {
+        let input = r#"
+[topology]
+device Y0: digital_output
+device X0: digital_input
+device valve_A: solenoid_valve { driven_by: Y0 }
+device valve_B: solenoid_valve { driven_by: Y0 }
+device sensor_A: sensor {
+    driven_by: X0,
+    detects: valve_A.on
+}
+device sensor_B: sensor {
+    driven_by: X0,
+    detects: valve_A.on
+}
+
+[constraints]
+
+[tasks]
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let topology = build_topology_graph(&program).expect("build topology");
+
+        let edge_exists = |from: &str, to: &str| {
+            topology.graph.edge_references().any(|edge| {
+                topology.graph[edge.source()].name == from
+                    && topology.graph[edge.target()].name == to
+            })
+        };
+
+        assert!(edge_exists("Y0", "valve_A"), "应支持一对多：Y0 -> valve_A");
+        assert!(edge_exists("Y0", "valve_B"), "应支持一对多：Y0 -> valve_B");
+        assert!(edge_exists("X0", "sensor_A"), "应支持多设备共享消费者输入");
+        assert!(edge_exists("X0", "sensor_B"), "应支持多设备共享消费者输入");
+        assert!(
+            edge_exists("valve_A", "sensor_A"),
+            "应支持多入：valve_A -> sensor_A"
+        );
+        assert!(
+            edge_exists("valve_A", "sensor_B"),
+            "应支持多入：valve_A -> sensor_B"
+        );
+    }
+
+    #[test]
+    fn reports_direction_error_for_invalid_reports_to_target() {
+        let input = r#"
+[topology]
+device Y0: digital_output
+device valve_A: solenoid_valve { driven_by: Y0 }
+device sensor_bad: sensor { reports_to: valve_A }
+
+[constraints]
+
+[tasks]
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let errors = build_topology_graph(&program).expect_err("reports_to 指向非 consumer 应报错");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].line(), 5);
+        assert!(
+            errors[0].to_string().contains("reports_to")
+                && errors[0].to_string().contains("producer -> consumer"),
+            "错误提示应说明 reports_to 的方向约束，实际: {}",
+            errors[0]
+        );
+    }
+
+    #[test]
     fn builds_constraint_set_and_timing_model_from_prd_5_4_example() {
         let input = r#"
 [topology]
@@ -2851,39 +3082,39 @@ device Y0: digital_output
 device Y0: digital_output
 device Y1: digital_output
 device motor_ctrl: motor {
-    connected_to: Y0,
+    driven_by: Y0,
     ramp_time: 50ms
 }
 
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 15ms
 }
 
 device valve_B: solenoid_valve {
-    connected_to: Y1,
+    driven_by: Y1,
     response_time: 15ms
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke_time: 200ms,
     retract_time: 180ms
 }
 
 device cyl_B: cylinder {
-    connected_to: valve_B,
+    driven_by: valve_B,
     stroke_time: 300ms,
     retract_time: 250ms
 }
 
 device sensor_A_ext: sensor {
-    connected_to: Y0,
+    driven_by: Y0,
     detects: cyl_A.extended
 }
 
 device sensor_B_ext: sensor {
-    connected_to: Y1,
+    driven_by: Y1,
     detects: cyl_B.extended
 }
 
@@ -3299,18 +3530,14 @@ task ready:
         let program = parse_plc(input).expect("PRD 5.5.1 示例应能成功解析为 AST");
         let state_machine = build_state_machine(&program).expect("应能从 5.5.1 示例构建状态机");
 
-        assert!(
-            state_machine
-                .states
-                .iter()
-                .any(|state| state.task_name == "init" && state.step_name == "extend_A")
-        );
-        assert!(
-            state_machine
-                .states
-                .iter()
-                .any(|state| state.task_name == "init" && state.step_name == "retract_B")
-        );
+        assert!(state_machine
+            .states
+            .iter()
+            .any(|state| state.task_name == "init" && state.step_name == "extend_A"));
+        assert!(state_machine
+            .states
+            .iter()
+            .any(|state| state.task_name == "init" && state.step_name == "retract_B"));
 
         let has_wait_transition = state_machine.transitions.iter().any(|transition| {
             transition.from.task_name == "init"

@@ -2,6 +2,7 @@
 ## Codebase Patterns
 - 当 DSL 关键字弃用时，先在 `parse_plc` 入口做逐行预检查并返回带行列号的迁移错误，再交给 pest 做常规语法解析。
 - DSL 新增结构化属性时，按 `plc.pest` 规则 + `parser/mod.rs` 的 `expect_*` 解析辅助函数成对落地，避免语义层直接解析字符串。
+- 语义拓扑构图应以 `TopologySection.connections` 为主输入，并通过 relation 回溯到设备声明行号，保证 `driven_by/reports_to/detects` 的错误都可定位。
 
 Started: Sat Feb 21 17:59:17 CST 2026
 
@@ -25,4 +26,23 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Running workspace-wide `cargo fmt` can touch many unrelated files in this repo; keep formatting scoped to changed files unless full-format is intentional.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Existing semantic pipeline still reads legacy `connected_to`; this round kept compatibility by mapping `driven_by` into the legacy field until later stories remove it.
+---
+
+## 2026-02-21 21:29:12 CST - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Refactored semantic topology build to consume relation connections uniformly (`driven_by`/`reports_to`/`detects`) and always add edges in producer -> consumer direction.
+  - Added relation-aware type/direction validation with line-locatable diagnostics, while preserving `type_mismatch` error class compatibility.
+  - Added semantic regression tests covering MIMO-style fan-in/fan-out and invalid direction hints for `reports_to`.
+- Files changed
+  - `src/semantic/mod.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `build_topology_from_ast` should not read relation fields ad hoc; use `topology.connections` as single source of truth to keep parser/semantic/API contracts aligned.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Some integration tests assert error category text (`ERROR [type_mismatch]`), so improving direction diagnostics must keep the original error class stable.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Existing verification/runtime code already traverses graph edges as upstream `Incoming`, so producer -> consumer graph orientation can be expanded relation-by-relation without changing traversal API.
 ---
