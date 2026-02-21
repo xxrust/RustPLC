@@ -32,6 +32,7 @@ interface TopologyState {
   // Actions
   setNodes: (nodes: Node<NodeData>[]) => void;
   setEdges: (edges: Edge[]) => void;
+  replaceTopology: (nodes: Node<NodeData>[], edges: Edge[], markDirty?: boolean) => void;
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   setSelectedNodeId: (id: string | null) => void;
@@ -55,6 +56,21 @@ export const useTopologyStore = create<TopologyState>()(
       setNodes: (nodes) => set({ nodes: nodes.map(normalizeTopologyNode) }),
 
       setEdges: (edges) => set({ edges }),
+
+      replaceTopology: (nodes, edges, markDirty = true) => {
+        const normalizedNodes = nodes.map(normalizeTopologyNode);
+        const selectedNodeId = get().selectedNodeId;
+        const hasSelectedNode = selectedNodeId
+          ? normalizedNodes.some((node) => node.id === selectedNodeId)
+          : false;
+
+        set({
+          nodes: normalizedNodes,
+          edges,
+          selectedNodeId: hasSelectedNode ? selectedNodeId : null,
+          hasUnsavedChanges: markDirty,
+        });
+      },
 
       onNodesChange: (changes) => {
         set({
