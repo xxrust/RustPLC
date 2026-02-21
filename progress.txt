@@ -13,6 +13,7 @@
 - `parse-plc` API 契约回归建议直接在 `crates/web-server/src/main.rs` 调用 `parse_plc_topology(Json(ParsePlcTopologyRequest))` 断言 JSON 字段，避免起服务端到端测试成本。
 - 前端端口契约应在 `topologyStore.normalizeTopologyNode` 中统一通过 `resolveNodePorts` 归一化，并在导出时去除 `portContractFallback` 推导字段，避免把降级推断反写进持久化拓扑。
 - CLI 场景链路回归优先采用 `scenario-init` 生成夹具后立刻执行 `scenario-validate`（同一临时目录），避免依赖手写 YAML 随 DSL 进化失效。
+- 文档契约测试若绑定 `docs/*.md` 路径，优先支持“主路径 + 归档路径”候选读取（如 `docs/已实现/`），并移除已废弃文档对应测试，避免文档迁移导致 CI 假阳性失败。
 
 Started: Sat Feb 21 17:59:17 CST 2026
 
@@ -298,4 +299,27 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Workspace currently contains pre-existing doc relocations; `cargo test` fails at `tests/hil_regression_doc.rs` because `docs/hil_regression.md` is absent, so story-level validation should include targeted suites in addition to recording this known blocker.
   - Useful context (e.g., "the evaluation panel is in component X")
     - No `AGENTS.md` file exists under the touched directories (`tests/`, `docs/`, repo root), so reusable findings were captured in `progress.txt` `Codebase Patterns` instead.
+---
+## 2026-02-22 01:58:33 CST - US-014
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 清理了已失效的文档契约测试（移除 `hil_regression` 与 `stage3_ci_gate_runbook` 对应测试），避免无业务价值的文档路径漂移阻塞测试。
+  - 为 `component-topology-validate` 增补端口契约/标签规则契约回归：新增 `CTOP-CONN-007`（source 端口角色错误）与 `CTOP-TAGRULE-005`（tag rule mode 非法）稳定错误码+路径断言。
+  - 强化既有契约回归断言粒度：连接方向与危险等级规则失败场景均同时校验 `code + path`，确保 CLI 诊断输出稳定可依赖。
+  - 调整文档测试读取策略，`no_board_playbook` 与 `stepper_ab_encoder` 兼容 `docs/` 与 `docs/已实现/` 双路径，适配文档归档迁移。
+- Files changed
+  - `tests/component_topology_validate.rs`
+  - `tests/no_board_playbook_doc.rs`
+  - `tests/stepper_ab_encoder_doc.rs`
+  - `tests/hil_regression_doc.rs`
+  - `tests/stage3_ci_gate_runbook_doc.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `component-topology-validate` 的失败契约建议统一断言 `issue code + JSON path`，仅断言 code 无法防止定位路径漂移。
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `cargo fmt --all --check` 当前会受历史未格式化文件影响（如 `src/component_topology.rs`），故事级质量门禁更稳妥的是对改动文件做 `rustfmt --check` 并配合 `cargo test --tests`。
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - 当前仓库无 `AGENTS.md`（含测试目录与根目录）；可复用经验需沉淀到 `progress.txt` 的 `Codebase Patterns`。
 ---

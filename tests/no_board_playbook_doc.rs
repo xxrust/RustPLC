@@ -1,12 +1,33 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn read_doc() -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("docs")
-        .join("no_board_playbook.md");
-    fs::read_to_string(&path).unwrap_or_else(|e| panic!("read doc failed: {e}"))
+    let base = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let candidates = [
+        base.join("docs").join("no_board_playbook.md"),
+        base.join("docs")
+            .join("已实现")
+            .join("no_board_playbook.md"),
+    ];
+    read_first_existing_doc(&candidates)
+}
+
+fn read_first_existing_doc(candidates: &[PathBuf]) -> String {
+    for path in candidates {
+        if path.exists() {
+            return fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("read doc failed {}: {e}", path.display()));
+        }
+    }
+    panic!(
+        "read doc failed: none of the expected files exist: {}",
+        candidates
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 }
 
 #[test]

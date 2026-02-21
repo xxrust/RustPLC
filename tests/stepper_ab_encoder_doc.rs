@@ -1,11 +1,34 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rust_plc::parser::parse_plc;
 
-fn read_doc(rel: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
-    fs::read_to_string(&path).unwrap_or_else(|e| panic!("read doc failed {rel}: {e}"))
+fn read_stepper_doc() -> String {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let candidates = [
+        base.join("docs").join("stepper_ab_encoder.md"),
+        base.join("docs")
+            .join("已实现")
+            .join("stepper_ab_encoder.md"),
+    ];
+    read_first_existing_doc(&candidates)
+}
+
+fn read_first_existing_doc(candidates: &[PathBuf]) -> String {
+    for path in candidates {
+        if path.exists() {
+            return fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("read doc failed {}: {e}", path.display()));
+        }
+    }
+    panic!(
+        "read doc failed: none of the expected files exist: {}",
+        candidates
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 }
 
 fn extract_fenced_blocks(markdown: &str, fence_lang: &str) -> Vec<String> {
@@ -43,7 +66,7 @@ fn extract_fenced_blocks(markdown: &str, fence_lang: &str) -> Vec<String> {
 
 #[test]
 fn stepper_ab_encoder_markdown_plc_snippets_parse() {
-    let doc = read_doc("docs/stepper_ab_encoder.md");
+    let doc = read_stepper_doc();
     let blocks = extract_fenced_blocks(&doc, "plc");
     assert!(
         !blocks.is_empty(),
@@ -61,7 +84,7 @@ fn stepper_ab_encoder_markdown_plc_snippets_parse() {
 
 #[test]
 fn stepper_ab_encoder_doc_covers_rule_templates_and_playbook_link() {
-    let doc = read_doc("docs/stepper_ab_encoder.md");
+    let doc = read_stepper_doc();
     for needle in [
         "规则模板",
         "6.1 单阈值互斥",
@@ -77,7 +100,7 @@ fn stepper_ab_encoder_doc_covers_rule_templates_and_playbook_link() {
 
 #[test]
 fn stepper_ab_encoder_doc_covers_scope_boundaries_and_non_goals() {
-    let doc = read_doc("docs/stepper_ab_encoder.md");
+    let doc = read_stepper_doc();
     for needle in [
         "本期边界与非目标",
         "实时脉冲轨迹规划",

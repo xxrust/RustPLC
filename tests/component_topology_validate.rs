@@ -17,6 +17,17 @@ fn temp_dir(prefix: &str) -> PathBuf {
     dir
 }
 
+fn assert_stderr_has_issue(stderr: &str, code: &str, path: &str) {
+    assert!(
+        stderr.contains(code),
+        "stderr should contain issue code `{code}`, got: {stderr}"
+    );
+    assert!(
+        stderr.contains(path),
+        "stderr should contain issue path `{path}`, got: {stderr}"
+    );
+}
+
 #[test]
 fn component_topology_validate_passes_and_emits_json_contract() {
     let base = temp_dir("rust_plc_component_topology_pass");
@@ -124,10 +135,52 @@ fn component_topology_validate_fails_on_invalid_connection_direction() {
         stderr.contains("[CTOP-000]"),
         "stderr should contain CTOP prefix, got: {stderr}"
     );
+    assert_stderr_has_issue(&stderr, "CTOP-CONN-008", "$.connections[0].to");
+}
+
+#[test]
+fn component_topology_validate_fails_on_invalid_output_port_contract() {
+    let base = temp_dir("rust_plc_component_topology_port_contract_fail");
+    let topology = base.join("topology_port_contract_invalid.json");
+    fs::write(
+        &topology,
+        r#"{
+  "schema_version": 1,
+  "component_library": {
+    "schema_version": 1,
+    "components": [
+      { "id": "switch", "name": "Start", "type": "switch", "params": {} },
+      { "id": "cylinder", "name": "Lift", "type": "cylinder", "params": {} }
+    ]
+  },
+  "components": [
+    { "id": "s0", "component_id": "switch", "params": {} },
+    { "id": "c0", "component_id": "cylinder", "params": {} },
+    { "id": "c1", "component_id": "cylinder", "params": {} }
+  ],
+  "connections": [
+    { "from": "s0.state", "to": "c0.cmd_extend" },
+    { "from": "s0.state", "to": "c0.cmd_retract" },
+    { "from": "s0.state", "to": "c1.cmd_extend" },
+    { "from": "s0.state", "to": "c1.cmd_retract" },
+    { "from": "c0.cmd_extend", "to": "c1.cmd_extend" }
+  ]
+}"#,
+    )
+    .expect("write topology invalid port contract json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("component-topology-validate")
+        .arg(&topology)
+        .output()
+        .expect("run component-topology-validate port-contract fail");
+
     assert!(
-        stderr.contains("CTOP-CONN-008"),
-        "stderr should contain stable issue code, got: {stderr}"
+        !output.status.success(),
+        "component-topology-validate should fail on invalid output port contract"
     );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_stderr_has_issue(&stderr, "CTOP-CONN-007", "$.connections[4].from");
 }
 
 #[test]
@@ -175,8 +228,59 @@ fn component_topology_validate_fails_on_tag_rule_violation() {
         "component-topology-validate should fail on tag rule violation"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_stderr_has_issue(
+        &stderr,
+        "CTOP-TAGRULE-101",
+        "$.components[2].params.tags.danger_level",
+    );
+}
+
+#[test]
+fn component_topology_validate_fails_on_invalid_tag_rule_config_contract() {
+    let base = temp_dir("rust_plc_component_topology_tag_rule_contract_fail");
+    let topology = base.join("topology_tag_rule_contract_invalid.json");
+    fs::write(
+        &topology,
+        r#"{
+  "schema_version": 1,
+  "tag_rules": {
+    "functional_group": {
+      "mode": "zone_only"
+    }
+  },
+  "component_library": {
+    "schema_version": 1,
+    "components": [
+      { "id": "switch", "name": "Start", "type": "switch", "params": {} },
+      { "id": "cylinder", "name": "Lift", "type": "cylinder", "params": {} }
+    ]
+  },
+  "components": [
+    { "id": "s0", "component_id": "switch", "params": {} },
+    { "id": "c0", "component_id": "cylinder", "params": {} }
+  ],
+  "connections": [
+    { "from": "s0.state", "to": "c0.cmd_extend" },
+    { "from": "s0.state", "to": "c0.cmd_retract" }
+  ]
+}"#,
+    )
+    .expect("write topology invalid tag-rule contract json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("component-topology-validate")
+        .arg(&topology)
+        .output()
+        .expect("run component-topology-validate tag-rule contract fail");
+
     assert!(
-        stderr.contains("CTOP-TAGRULE-101"),
-        "stderr should contain tag-rule issue code, got: {stderr}"
+        !output.status.success(),
+        "component-topology-validate should fail on invalid tag-rule config"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_stderr_has_issue(
+        &stderr,
+        "CTOP-TAGRULE-005",
+        "$.tag_rules.functional_group.mode",
     );
 }
