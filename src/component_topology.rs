@@ -1,6 +1,6 @@
 use crate::component_library::{
-    ComponentLibrary, ComponentLibraryIssue, ComponentLibraryValidationError, ComponentType,
-    parse_component_library_value,
+    parse_component_library_value, ComponentLibrary, ComponentLibraryIssue,
+    ComponentLibraryValidationError, ComponentType,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -23,9 +23,57 @@ pub struct ComponentConnection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ComponentTopology {
     pub schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_rules: Option<ComponentTagRules>,
     pub component_library: ComponentLibrary,
     pub components: Vec<ComponentInstance>,
     pub connections: Vec<ComponentConnection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ComponentTagRules {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub danger_level: Option<DangerLevelRuleConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub functional_group: Option<GroupConnectionRuleConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location_group: Option<LocationGroupRuleConfig>,
+}
+
+impl ComponentTagRules {
+    fn is_empty(&self) -> bool {
+        self.danger_level.is_none()
+            && self.functional_group.is_none()
+            && self.location_group.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DangerLevelRuleConfig {
+    pub dual_channel_levels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct GroupConnectionRuleConfig {
+    #[serde(default)]
+    pub mode: GroupConnectionMode,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GroupConnectionMode {
+    #[default]
+    AllowAny,
+    WithinOnly,
+    CrossOnly,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct LocationGroupRuleConfig {
+    #[serde(default)]
+    pub mode: GroupConnectionMode,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_cross_zone_pairs: Vec<[String; 2]>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -113,6 +161,7 @@ pub fn parse_component_topology_value(
         },
     };
 
+    let tag_rules = parse_tag_rules(root.get("tag_rules"), &mut issues);
     let instances = parse_instances(root.get("components"), &mut issues);
     let connections = parse_connections(root.get("connections"), &mut issues);
 
@@ -120,7 +169,13 @@ pub fn parse_component_topology_value(
         return Err(ComponentTopologyValidationError { issues });
     };
 
-    validate_topology_relations(&component_library, &instances, &connections, &mut issues);
+    validate_topology_relations(
+        &component_library,
+        &instances,
+        &connections,
+        &tag_rules,
+        &mut issues,
+    );
 
     if !issues.is_empty() {
         return Err(ComponentTopologyValidationError { issues });
@@ -128,6 +183,7 @@ pub fn parse_component_topology_value(
 
     Ok(ComponentTopology {
         schema_version,
+        tag_rules: (!tag_rules.is_empty()).then_some(tag_rules),
         component_library,
         components: instances,
         connections,
@@ -147,6 +203,231 @@ pub fn write_component_topology_json(
             path.display()
         )
     })
+}
+
+fn parse_tag_rules(
+    raw: Option<&Value>,
+    issues: &mut Vec<ComponentTopologyIssue>,
+) -> ComponentTagRules {
+    let Some(raw) = raw else {
+        return ComponentTagRules::default();
+    };
+    let Some(obj) = raw.as_object() else {
+        issues.push(topo_issue(
+            "CTOP-TAGRULE-001",
+            "$.tag_rules",
+            "tag_rules must be an object",
+        ));
+        return ComponentTagRules::default();
+    };
+
+    let mut rules = ComponentTagRules::default();
+
+    if let Some(raw_danger) = obj.get("danger_level") {
+        rules.danger_level = parse_danger_level_rule(raw_danger, issues);
+    }
+    if let Some(raw_group) = obj.get("functional_group") {
+        rules.functional_group = parse_group_rule(
+            raw_group,
+            "$.tag_rules.functional_group",
+            "CTOP-TAGRULE-004",
+            "CTOP-TAGRULE-005",
+            issues,
+        );
+    }
+    if let Some(raw_location) = obj.get("location_group") {
+        rules.location_group = parse_location_group_rule(raw_location, issues);
+    }
+
+    rules
+}
+
+fn parse_danger_level_rule(
+    raw: &Value,
+    issues: &mut Vec<ComponentTopologyIssue>,
+) -> Option<DangerLevelRuleConfig> {
+    let path = "$.tag_rules.danger_level";
+    let Some(obj) = raw.as_object() else {
+        issues.push(topo_issue(
+            "CTOP-TAGRULE-002",
+            path,
+            "danger_level rule must be an object",
+        ));
+        return None;
+    };
+
+    let Some(raw_levels) = obj.get("dual_channel_levels") else {
+        issues.push(topo_issue(
+            "CTOP-TAGRULE-003",
+            format!("{path}.dual_channel_levels"),
+            "danger_level rule requires `dual_channel_levels`",
+        ));
+        return None;
+    };
+
+    let Some(levels) = raw_levels.as_array() else {
+        issues.push(topo_issue(
+            "CTOP-TAGRULE-003",
+            format!("{path}.dual_channel_levels"),
+            "`dual_channel_levels` must be an array of non-empty strings",
+        ));
+        return None;
+    };
+
+    let mut normalized = Vec::new();
+    for (idx, entry) in levels.iter().enumerate() {
+        let Some(value) = entry.as_str() else {
+            issues.push(topo_issue(
+                "CTOP-TAGRULE-003",
+                format!("{path}.dual_channel_levels[{idx}]"),
+                "each danger level must be a non-empty string",
+            ));
+            continue;
+        };
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            issues.push(topo_issue(
+                "CTOP-TAGRULE-003",
+                format!("{path}.dual_channel_levels[{idx}]"),
+                "each danger level must be a non-empty string",
+            ));
+            continue;
+        }
+        normalized.push(trimmed.to_string());
+    }
+
+    normalized.sort();
+    normalized.dedup();
+    if normalized.is_empty() {
+        issues.push(topo_issue(
+            "CTOP-TAGRULE-003",
+            format!("{path}.dual_channel_levels"),
+            "`dual_channel_levels` must include at least one level",
+        ));
+        return None;
+    }
+
+    Some(DangerLevelRuleConfig {
+        dual_channel_levels: normalized,
+    })
+}
+
+fn parse_group_rule(
+    raw: &Value,
+    path: &str,
+    object_error_code: &str,
+    mode_error_code: &str,
+    issues: &mut Vec<ComponentTopologyIssue>,
+) -> Option<GroupConnectionRuleConfig> {
+    let Some(obj) = raw.as_object() else {
+        issues.push(topo_issue(
+            object_error_code,
+            path,
+            "group rule must be an object",
+        ));
+        return None;
+    };
+
+    let Some(raw_mode) = obj.get("mode") else {
+        return Some(GroupConnectionRuleConfig::default());
+    };
+    let Some(mode_str) = raw_mode.as_str() else {
+        issues.push(topo_issue(
+            mode_error_code,
+            format!("{path}.mode"),
+            "mode must be one of: allow_any, within_only, cross_only",
+        ));
+        return None;
+    };
+
+    let mode = match mode_str {
+        "allow_any" => GroupConnectionMode::AllowAny,
+        "within_only" => GroupConnectionMode::WithinOnly,
+        "cross_only" => GroupConnectionMode::CrossOnly,
+        _ => {
+            issues.push(topo_issue(
+                mode_error_code,
+                format!("{path}.mode"),
+                "mode must be one of: allow_any, within_only, cross_only",
+            ));
+            return None;
+        }
+    };
+    Some(GroupConnectionRuleConfig { mode })
+}
+
+fn parse_location_group_rule(
+    raw: &Value,
+    issues: &mut Vec<ComponentTopologyIssue>,
+) -> Option<LocationGroupRuleConfig> {
+    let Some(mut rule) = parse_group_rule(
+        raw,
+        "$.tag_rules.location_group",
+        "CTOP-TAGRULE-006",
+        "CTOP-TAGRULE-007",
+        issues,
+    )
+    .map(|base| LocationGroupRuleConfig {
+        mode: base.mode,
+        allowed_cross_zone_pairs: Vec::new(),
+    }) else {
+        return None;
+    };
+
+    let Some(obj) = raw.as_object() else {
+        return Some(rule);
+    };
+
+    let Some(raw_pairs) = obj.get("allowed_cross_zone_pairs") else {
+        return Some(rule);
+    };
+    let Some(entries) = raw_pairs.as_array() else {
+        issues.push(topo_issue(
+            "CTOP-TAGRULE-008",
+            "$.tag_rules.location_group.allowed_cross_zone_pairs",
+            "allowed_cross_zone_pairs must be an array of [source_zone, target_zone]",
+        ));
+        return Some(rule);
+    };
+
+    for (idx, entry) in entries.iter().enumerate() {
+        let Some(pair) = entry.as_array() else {
+            issues.push(topo_issue(
+                "CTOP-TAGRULE-008",
+                format!("$.tag_rules.location_group.allowed_cross_zone_pairs[{idx}]"),
+                "each pair must be [source_zone, target_zone]",
+            ));
+            continue;
+        };
+        if pair.len() != 2 {
+            issues.push(topo_issue(
+                "CTOP-TAGRULE-008",
+                format!("$.tag_rules.location_group.allowed_cross_zone_pairs[{idx}]"),
+                "each pair must include exactly 2 strings",
+            ));
+            continue;
+        }
+        let Some(source) = pair[0].as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+            issues.push(topo_issue(
+                "CTOP-TAGRULE-008",
+                format!("$.tag_rules.location_group.allowed_cross_zone_pairs[{idx}][0]"),
+                "source zone must be a non-empty string",
+            ));
+            continue;
+        };
+        let Some(target) = pair[1].as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+            issues.push(topo_issue(
+                "CTOP-TAGRULE-008",
+                format!("$.tag_rules.location_group.allowed_cross_zone_pairs[{idx}][1]"),
+                "target zone must be a non-empty string",
+            ));
+            continue;
+        };
+        rule.allowed_cross_zone_pairs
+            .push([source.to_string(), target.to_string()]);
+    }
+
+    Some(rule)
 }
 
 fn parse_instances(
@@ -270,6 +551,7 @@ fn validate_topology_relations(
     component_library: &ComponentLibrary,
     instances: &[ComponentInstance],
     connections: &[ComponentConnection],
+    tag_rules: &ComponentTagRules,
     issues: &mut Vec<ComponentTopologyIssue>,
 ) {
     let mut by_component = BTreeMap::<String, ComponentType>::new();
@@ -303,6 +585,7 @@ fn validate_topology_relations(
     }
 
     let mut connected_inputs = BTreeSet::<(String, &'static str)>::new();
+    let mut resolved_connections = Vec::<ResolvedConnection>::new();
     for (idx, connection) in connections.iter().enumerate() {
         let Some((from_instance, from_port)) = parse_endpoint(
             &connection.from,
@@ -353,7 +636,19 @@ fn validate_topology_relations(
             continue;
         }
         connected_inputs.insert((to_instance.to_string(), to_port));
+        resolved_connections.push(ResolvedConnection {
+            index: idx,
+            from_instance: from_instance.to_string(),
+            to_instance: to_instance.to_string(),
+            from_type,
+        });
     }
+
+    let instance_indexes = instances
+        .iter()
+        .enumerate()
+        .map(|(idx, instance)| (instance.id.clone(), idx))
+        .collect::<BTreeMap<_, _>>();
 
     for (idx, instance) in instances.iter().enumerate() {
         let Some(component_type) = instance_component_type.get(&instance.id).copied() else {
@@ -373,6 +668,304 @@ fn validate_topology_relations(
             }
         }
     }
+
+    validate_tag_rules(
+        tag_rules,
+        instances,
+        &instance_indexes,
+        &resolved_connections,
+        issues,
+    );
+}
+
+#[derive(Debug, Clone, Default)]
+struct InstanceTags {
+    functional_group: BTreeSet<String>,
+    danger_level: BTreeSet<String>,
+    location_group: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedConnection {
+    index: usize,
+    from_instance: String,
+    to_instance: String,
+    from_type: ComponentType,
+}
+
+fn validate_tag_rules(
+    tag_rules: &ComponentTagRules,
+    instances: &[ComponentInstance],
+    instance_indexes: &BTreeMap<String, usize>,
+    resolved_connections: &[ResolvedConnection],
+    issues: &mut Vec<ComponentTopologyIssue>,
+) {
+    if tag_rules.is_empty() {
+        return;
+    }
+
+    let tags_by_instance = instances
+        .iter()
+        .map(|instance| (instance.id.clone(), extract_instance_tags(instance)))
+        .collect::<BTreeMap<_, _>>();
+
+    if let Some(danger_rule) = &tag_rules.danger_level {
+        validate_danger_level_rule(
+            danger_rule,
+            instance_indexes,
+            &tags_by_instance,
+            resolved_connections,
+            issues,
+        );
+    }
+    if let Some(group_rule) = &tag_rules.functional_group {
+        validate_functional_group_rule(group_rule, &tags_by_instance, resolved_connections, issues);
+    }
+    if let Some(location_rule) = &tag_rules.location_group {
+        validate_location_group_rule(
+            location_rule,
+            &tags_by_instance,
+            resolved_connections,
+            issues,
+        );
+    }
+}
+
+fn extract_instance_tags(instance: &ComponentInstance) -> InstanceTags {
+    let Some(raw_tags) = instance.params.get("tags") else {
+        return InstanceTags::default();
+    };
+    let Some(obj) = raw_tags.as_object() else {
+        return InstanceTags::default();
+    };
+
+    InstanceTags {
+        functional_group: read_tag_dimension(obj.get("functional_group")),
+        danger_level: read_tag_dimension(obj.get("danger_level")),
+        location_group: read_tag_dimension(obj.get("location_group")),
+    }
+}
+
+fn read_tag_dimension(raw: Option<&Value>) -> BTreeSet<String> {
+    let Some(raw) = raw else {
+        return BTreeSet::new();
+    };
+    let Some(entries) = raw.as_array() else {
+        return BTreeSet::new();
+    };
+
+    let mut out = BTreeSet::new();
+    for entry in entries {
+        let Some(value) = entry.as_str() else {
+            continue;
+        };
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            out.insert(trimmed.to_string());
+        }
+    }
+    out
+}
+
+fn validate_danger_level_rule(
+    danger_rule: &DangerLevelRuleConfig,
+    instance_indexes: &BTreeMap<String, usize>,
+    tags_by_instance: &BTreeMap<String, InstanceTags>,
+    resolved_connections: &[ResolvedConnection],
+    issues: &mut Vec<ComponentTopologyIssue>,
+) {
+    let required_levels = danger_rule
+        .dual_channel_levels
+        .iter()
+        .map(|level| level.as_str())
+        .collect::<BTreeSet<_>>();
+
+    for (instance_id, tags) in tags_by_instance {
+        if tags
+            .danger_level
+            .iter()
+            .all(|level| !required_levels.contains(level.as_str()))
+        {
+            continue;
+        }
+
+        let incoming_detection_channels = resolved_connections
+            .iter()
+            .filter(|conn| {
+                conn.to_instance == *instance_id
+                    && matches!(
+                        conn.from_type,
+                        ComponentType::Sensor | ComponentType::Switch
+                    )
+            })
+            .map(|conn| conn.from_instance.as_str())
+            .collect::<BTreeSet<_>>();
+
+        if incoming_detection_channels.len() >= 2 {
+            continue;
+        }
+
+        let Some(component_idx) = instance_indexes.get(instance_id) else {
+            continue;
+        };
+        issues.push(topo_issue(
+            "CTOP-TAGRULE-101",
+            format!("$.components[{component_idx}].params.tags.danger_level"),
+            format!(
+                "component `{instance_id}` matches high-risk danger_level but has only {} independent detection channel(s); at least 2 sensor/switch channels are required",
+                incoming_detection_channels.len()
+            ),
+        ));
+    }
+}
+
+fn validate_functional_group_rule(
+    group_rule: &GroupConnectionRuleConfig,
+    tags_by_instance: &BTreeMap<String, InstanceTags>,
+    resolved_connections: &[ResolvedConnection],
+    issues: &mut Vec<ComponentTopologyIssue>,
+) {
+    if group_rule.mode == GroupConnectionMode::AllowAny {
+        return;
+    }
+
+    for connection in resolved_connections {
+        let Some(from_tags) = tags_by_instance.get(&connection.from_instance) else {
+            continue;
+        };
+        let Some(to_tags) = tags_by_instance.get(&connection.to_instance) else {
+            continue;
+        };
+        if from_tags.functional_group.is_empty() || to_tags.functional_group.is_empty() {
+            continue;
+        }
+
+        let has_shared_group = from_tags
+            .functional_group
+            .iter()
+            .any(|tag| to_tags.functional_group.contains(tag));
+
+        match group_rule.mode {
+            GroupConnectionMode::WithinOnly if !has_shared_group => {
+                issues.push(topo_issue(
+                    "CTOP-TAGRULE-102",
+                    format!("$.connections[{}]", connection.index),
+                    format!(
+                        "connection `{}` -> `{}` crosses functional_group boundaries but rule mode is `within_only`",
+                        connection.from_instance, connection.to_instance
+                    ),
+                ));
+            }
+            GroupConnectionMode::CrossOnly if has_shared_group => {
+                issues.push(topo_issue(
+                    "CTOP-TAGRULE-103",
+                    format!("$.connections[{}]", connection.index),
+                    format!(
+                        "connection `{}` -> `{}` stays within the same functional_group but rule mode is `cross_only`",
+                        connection.from_instance, connection.to_instance
+                    ),
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn validate_location_group_rule(
+    location_rule: &LocationGroupRuleConfig,
+    tags_by_instance: &BTreeMap<String, InstanceTags>,
+    resolved_connections: &[ResolvedConnection],
+    issues: &mut Vec<ComponentTopologyIssue>,
+) {
+    if location_rule.mode == GroupConnectionMode::AllowAny {
+        return;
+    }
+
+    for connection in resolved_connections {
+        let Some(from_tags) = tags_by_instance.get(&connection.from_instance) else {
+            continue;
+        };
+        let Some(to_tags) = tags_by_instance.get(&connection.to_instance) else {
+            continue;
+        };
+        if from_tags.location_group.is_empty() || to_tags.location_group.is_empty() {
+            continue;
+        }
+
+        let same_zone =
+            has_related_location_tag(&from_tags.location_group, &to_tags.location_group);
+
+        match location_rule.mode {
+            GroupConnectionMode::WithinOnly if !same_zone => {
+                if is_allowed_cross_zone_connection(
+                    &from_tags.location_group,
+                    &to_tags.location_group,
+                    &location_rule.allowed_cross_zone_pairs,
+                ) {
+                    continue;
+                }
+                issues.push(topo_issue(
+                    "CTOP-TAGRULE-104",
+                    format!("$.connections[{}]", connection.index),
+                    format!(
+                        "connection `{}` -> `{}` crosses location_group isolation boundaries",
+                        connection.from_instance, connection.to_instance
+                    ),
+                ));
+            }
+            GroupConnectionMode::CrossOnly if same_zone => {
+                issues.push(topo_issue(
+                    "CTOP-TAGRULE-105",
+                    format!("$.connections[{}]", connection.index),
+                    format!(
+                        "connection `{}` -> `{}` remains in the same location_group but rule mode is `cross_only`",
+                        connection.from_instance, connection.to_instance
+                    ),
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn has_related_location_tag(left: &BTreeSet<String>, right: &BTreeSet<String>) -> bool {
+    left.iter()
+        .any(|a| right.iter().any(|b| is_related_location_path(a, b)))
+}
+
+fn is_related_location_path(left: &str, right: &str) -> bool {
+    is_same_or_path_prefix(left, right) || is_same_or_path_prefix(right, left)
+}
+
+fn is_same_or_path_prefix(prefix: &str, value: &str) -> bool {
+    if prefix == value {
+        return true;
+    }
+    value.len() > prefix.len()
+        && value.starts_with(prefix)
+        && value.as_bytes().get(prefix.len()) == Some(&b'/')
+}
+
+fn is_allowed_cross_zone_connection(
+    source_locations: &BTreeSet<String>,
+    target_locations: &BTreeSet<String>,
+    allowed_pairs: &[[String; 2]],
+) -> bool {
+    allowed_pairs.iter().any(|pair| {
+        let forward_match = source_locations
+            .iter()
+            .any(|source| is_related_location_path(source, &pair[0]))
+            && target_locations
+                .iter()
+                .any(|target| is_related_location_path(target, &pair[1]));
+        let reverse_match = source_locations
+            .iter()
+            .any(|source| is_related_location_path(source, &pair[1]))
+            && target_locations
+                .iter()
+                .any(|target| is_related_location_path(target, &pair[0]));
+        forward_match || reverse_match
+    })
 }
 
 #[derive(Debug)]
@@ -594,11 +1187,10 @@ mod tests {
 }"#,
         )
         .expect_err("invalid direction should fail");
-        assert!(
-            err.issues
-                .iter()
-                .any(|issue| issue.code == "CTOP-CONN-008" && issue.path == "$.connections[0].to")
-        );
+        assert!(err
+            .issues
+            .iter()
+            .any(|issue| issue.code == "CTOP-CONN-008" && issue.path == "$.connections[0].to"));
     }
 
     #[test]
@@ -623,10 +1215,172 @@ mod tests {
 }"#,
         )
         .expect_err("missing required input should fail");
+        assert!(err
+            .issues
+            .iter()
+            .any(|issue| issue.code == "CTOP-CONN-009" && issue.path == "$.components[1].id"));
+    }
+
+    #[test]
+    fn reports_danger_level_rule_violation_with_structured_issue() {
+        let err = parse_component_topology_json(
+            r#"{
+  "schema_version": 1,
+  "tag_rules": {
+    "danger_level": {
+      "dual_channel_levels": ["high"]
+    }
+  },
+  "component_library": {
+    "schema_version": 1,
+    "components": [
+      { "id": "switch", "name": "Switch", "type": "switch", "params": {} },
+      { "id": "sensor", "name": "Sensor", "type": "sensor", "params": {} },
+      { "id": "cylinder", "name": "Cylinder", "type": "cylinder", "params": {} }
+    ]
+  },
+  "components": [
+    { "id": "s0", "component_id": "switch", "params": {} },
+    { "id": "x0", "component_id": "sensor", "params": {} },
+    { "id": "c0", "component_id": "cylinder", "params": { "tags": { "danger_level": ["high"] } } }
+  ],
+  "connections": [
+    { "from": "s0.state", "to": "c0.cmd_extend" },
+    { "from": "s0.state", "to": "c0.cmd_retract" }
+  ]
+}"#,
+        )
+        .expect_err("danger_level dual-channel rule should fail");
+
+        let issue = err
+            .issues
+            .iter()
+            .find(|issue| issue.code == "CTOP-TAGRULE-101")
+            .expect("expected CTOP-TAGRULE-101 issue");
+        assert_eq!(issue.path, "$.components[2].params.tags.danger_level");
+        assert!(
+            issue.message.contains("at least 2"),
+            "message should explain dual-channel requirement, got: {}",
+            issue.message
+        );
+    }
+
+    #[test]
+    fn reports_functional_group_mode_violation_with_stable_code() {
+        let err = parse_component_topology_json(
+            r#"{
+  "schema_version": 1,
+  "tag_rules": {
+    "functional_group": {
+      "mode": "within_only"
+    }
+  },
+  "component_library": {
+    "schema_version": 1,
+    "components": [
+      { "id": "switch", "name": "Switch", "type": "switch", "params": {} },
+      { "id": "sensor", "name": "Sensor", "type": "sensor", "params": {} },
+      { "id": "cylinder", "name": "Cylinder", "type": "cylinder", "params": {} }
+    ]
+  },
+  "components": [
+    { "id": "s0", "component_id": "switch", "params": { "tags": { "functional_group": ["control"] } } },
+    { "id": "x0", "component_id": "sensor", "params": { "tags": { "functional_group": ["sensing"] } } },
+    { "id": "c0", "component_id": "cylinder", "params": { "tags": { "functional_group": ["actuation"] } } }
+  ],
+  "connections": [
+    { "from": "s0.state", "to": "c0.cmd_extend" },
+    { "from": "x0.state", "to": "c0.cmd_retract" }
+  ]
+}"#,
+        )
+        .expect_err("within_only functional_group rule should fail");
+
         assert!(
             err.issues
                 .iter()
-                .any(|issue| issue.code == "CTOP-CONN-009" && issue.path == "$.components[1].id")
+                .any(|issue| issue.code == "CTOP-TAGRULE-102" && issue.path == "$.connections[0]"),
+            "expected CTOP-TAGRULE-102 on first connection"
+        );
+    }
+
+    #[test]
+    fn reports_location_group_isolation_violation_with_hierarchical_match() {
+        let err = parse_component_topology_json(
+            r#"{
+  "schema_version": 1,
+  "tag_rules": {
+    "location_group": {
+      "mode": "within_only"
+    }
+  },
+  "component_library": {
+    "schema_version": 1,
+    "components": [
+      { "id": "switch", "name": "Switch", "type": "switch", "params": {} },
+      { "id": "sensor", "name": "Sensor", "type": "sensor", "params": {} },
+      { "id": "cylinder", "name": "Cylinder", "type": "cylinder", "params": {} }
+    ]
+  },
+  "components": [
+    { "id": "s0", "component_id": "switch", "params": { "tags": { "location_group": ["line_a"] } } },
+    { "id": "x0", "component_id": "sensor", "params": { "tags": { "location_group": ["line_b/cell_1"] } } },
+    { "id": "c0", "component_id": "cylinder", "params": { "tags": { "location_group": ["line_a/cell_1/station_7"] } } }
+  ],
+  "connections": [
+    { "from": "s0.state", "to": "c0.cmd_extend" },
+    { "from": "x0.state", "to": "c0.cmd_retract" }
+  ]
+}"#,
+        )
+        .expect_err("location isolation rule should fail for cross-zone connection");
+
+        assert!(
+            err.issues
+                .iter()
+                .any(|issue| issue.code == "CTOP-TAGRULE-104" && issue.path == "$.connections[1]"),
+            "expected CTOP-TAGRULE-104 for the cross-zone connection"
+        );
+    }
+
+    #[test]
+    fn reports_invalid_tag_rule_config_with_path_and_code() {
+        let err = parse_component_topology_json(
+            r#"{
+  "schema_version": 1,
+  "tag_rules": {
+    "functional_group": {
+      "mode": "invalid_mode"
+    }
+  },
+  "component_library": {
+    "schema_version": 1,
+    "components": [
+      { "id": "switch", "name": "Switch", "type": "switch", "params": {} },
+      { "id": "sensor", "name": "Sensor", "type": "sensor", "params": {} },
+      { "id": "cylinder", "name": "Cylinder", "type": "cylinder", "params": {} }
+    ]
+  },
+  "components": [
+    { "id": "s0", "component_id": "switch", "params": {} },
+    { "id": "x0", "component_id": "sensor", "params": {} },
+    { "id": "c0", "component_id": "cylinder", "params": {} }
+  ],
+  "connections": [
+    { "from": "s0.state", "to": "c0.cmd_extend" },
+    { "from": "x0.state", "to": "c0.cmd_retract" }
+  ]
+}"#,
+        )
+        .expect_err("invalid tag rule config should fail");
+
+        assert!(
+            err.issues.iter().any(|issue| {
+                issue.code == "CTOP-TAGRULE-005"
+                    && issue.path == "$.tag_rules.functional_group.mode"
+                    && !issue.message.is_empty()
+            }),
+            "expected structured config issue with code/path/message"
         );
     }
 }

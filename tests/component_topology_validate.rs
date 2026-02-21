@@ -129,3 +129,54 @@ fn component_topology_validate_fails_on_invalid_connection_direction() {
         "stderr should contain stable issue code, got: {stderr}"
     );
 }
+
+#[test]
+fn component_topology_validate_fails_on_tag_rule_violation() {
+    let base = temp_dir("rust_plc_component_topology_tag_rule_fail");
+    let topology = base.join("topology_tag_rule_invalid.json");
+    fs::write(
+        &topology,
+        r#"{
+  "schema_version": 1,
+  "tag_rules": {
+    "danger_level": {
+      "dual_channel_levels": ["high"]
+    }
+  },
+  "component_library": {
+    "schema_version": 1,
+    "components": [
+      { "id": "switch", "name": "Start", "type": "switch", "params": {} },
+      { "id": "sensor", "name": "Front", "type": "sensor", "params": {} },
+      { "id": "cylinder", "name": "Lift", "type": "cylinder", "params": {} }
+    ]
+  },
+  "components": [
+    { "id": "s0", "component_id": "switch", "params": {} },
+    { "id": "x0", "component_id": "sensor", "params": {} },
+    { "id": "c0", "component_id": "cylinder", "params": { "tags": { "danger_level": ["high"] } } }
+  ],
+  "connections": [
+    { "from": "s0.state", "to": "c0.cmd_extend" },
+    { "from": "s0.state", "to": "c0.cmd_retract" }
+  ]
+}"#,
+    )
+    .expect("write topology tag rule invalid json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("component-topology-validate")
+        .arg(&topology)
+        .output()
+        .expect("run component-topology-validate tag-rule fail");
+
+    assert!(
+        !output.status.success(),
+        "component-topology-validate should fail on tag rule violation"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("CTOP-TAGRULE-101"),
+        "stderr should contain tag-rule issue code, got: {stderr}"
+    );
+}
