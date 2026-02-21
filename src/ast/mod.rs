@@ -35,8 +35,39 @@ pub enum DeviceType {
     Pid,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PortType {
+    Digital,
+    Analog,
+    Pneumatic,
+    Logical,
+    Generic,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PortRole {
+    Producer,
+    Consumer,
+    Bidirectional,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DevicePort {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub port_type: PortType,
+    pub role: PortRole,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DeviceAttributes {
+    pub driven_by: Option<String>,
+    pub reports_to: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<DevicePort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connected_to: Option<String>,
     pub response_time: Option<DurationValue>,
     pub stroke_time: Option<DurationValue>,

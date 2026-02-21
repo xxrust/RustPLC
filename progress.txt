@@ -1,5 +1,28 @@
 # Ralph Progress Log
 ## Codebase Patterns
-- (to be populated in this stage)
+- 当 DSL 关键字弃用时，先在 `parse_plc` 入口做逐行预检查并返回带行列号的迁移错误，再交给 pest 做常规语法解析。
+- DSL 新增结构化属性时，按 `plc.pest` 规则 + `parser/mod.rs` 的 `expect_*` 解析辅助函数成对落地，避免语义层直接解析字符串。
 
-Started: Fri Feb 20 00:54:24 CST 2026
+Started: Sat Feb 21 17:59:17 CST 2026
+
+## 2026-02-21 20:07:09 CST - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added new DSL relation fields `driven_by`/`reports_to`, added first-class `ports` model (`id/type/role`), and banned `connected_to` with migration error.
+  - Extended AST with port enums/structs and relation fields in `DeviceAttributes`.
+  - Updated parse-plc topology preview API payload/edges to surface new relation and port metadata.
+- Files changed
+  - `src/ast/mod.rs`
+  - `src/parser/plc.pest`
+  - `src/parser/mod.rs`
+  - `crates/web-server/src/main.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `parse_plc_topology` in `crates/web-server/src/main.rs` is the backend contract used by topology editor, so DSL field changes should update both `components[].params` and derived `connections`.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Running workspace-wide `cargo fmt` can touch many unrelated files in this repo; keep formatting scoped to changed files unless full-format is intentional.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Existing semantic pipeline still reads legacy `connected_to`; this round kept compatibility by mapping `driven_by` into the legacy field until later stories remove it.
+---

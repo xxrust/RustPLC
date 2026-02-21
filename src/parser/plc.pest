@@ -30,7 +30,8 @@ device_type = {
 }
 
 attribute_name = {
-    "connected_to"
+    "driven_by"
+    | "reports_to"
     | "response_time"
     | "stroke_time"
     | "retract_time"
@@ -43,6 +44,7 @@ attribute_name = {
     | "rated_speed"
     | "ramp_time"
     | "states"
+    | "ports"
     | "range"
     | "unit"
     // PID minimal loop
@@ -57,6 +59,10 @@ attribute_name = {
 }
 
 range_value = @{ number ~ ".." ~ number }
+port_type = { "digital" | "analog" | "pneumatic" | "logical" | "generic" }
+port_role = { "producer" | "consumer" | "bidirectional" }
+port_definition = { identifier ~ ":" ~ port_type ~ ":" ~ port_role }
+port_list = { "[" ~ port_definition ~ ("," ~ port_definition)* ~ ","? ~ "]" }
 
 attribute_value = {
     state_reference
@@ -67,6 +73,7 @@ attribute_value = {
     | integer
     | string_literal
     | boolean_value
+    | port_list
     | identifier_list
     | identifier
 }

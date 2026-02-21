@@ -1,11 +1,11 @@
 use crate::ast::{
     ActionStatement, BinaryValue, Branch, CausalityConstraint, ComparisonOperator,
-    ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType,
-    DurationValue, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective, ParallelBlock,
-    PlcProgram, RaceBlock, RaceBranch, SafetyConstraint, SafetyOperand, SafetyRelation,
-    StateReference, StepDeclaration, StepStatement, TaskDeclaration, TasksSection, TimeUnit,
-    TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget, TopologySection,
-    WaitCondition, WaitStatement,
+    ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DevicePort,
+    DeviceType, DurationValue, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective,
+    ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch, SafetyConstraint,
+    SafetyOperand, SafetyRelation, StateReference, StepDeclaration, StepStatement, TaskDeclaration,
+    TasksSection, TimeUnit, TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget,
+    TopologySection, WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use pest::Parser;
@@ -29,12 +29,32 @@ pub fn parse_tasks(input: &str) -> Result<(), pest::error::Error<Rule>> {
 }
 
 pub fn parse_plc(input: &str) -> Result<PlcProgram, PlcError> {
+    reject_deprecated_connected_to(input)?;
     let mut pairs = PlcParser::parse(Rule::plc_file, input).map_err(map_parse_error)?;
     let plc_pair = pairs
         .next()
         .ok_or_else(|| PlcError::parse(1, "未找到可解析的 PLC 程序"))?;
 
     parse_plc_pair(plc_pair)
+}
+
+fn reject_deprecated_connected_to(input: &str) -> Result<(), PlcError> {
+    for (line_idx, line) in input.lines().enumerate() {
+        let code = line.split('#').next().unwrap_or(line);
+        if let Some(col_idx) = code.find("connected_to") {
+            let tail = &code[col_idx + "connected_to".len()..];
+            if tail.trim_start().starts_with(':') {
+                return Err(PlcError::parse_at(
+                    "<input>",
+                    line_idx + 1,
+                    col_idx + 1,
+                    "属性 connected_to 已废弃，请改用 driven_by 或 reports_to",
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_plc_pair(pair: Pair<Rule>) -> Result<PlcProgram, PlcError> {
@@ -136,8 +156,13 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
     let value = first_inner(value_wrapper, line, "属性值")?;
 
     match attr_name.as_str() {
-        "connected_to" => {
-            attributes.connected_to = Some(expect_identifier(value, "connected_to")?);
+        "driven_by" => {
+            let target = expect_identifier(value, "driven_by")?;
+            attributes.connected_to = Some(target.clone());
+            attributes.driven_by = Some(target);
+        }
+        "reports_to" => {
+            attributes.reports_to = Some(expect_identifier(value, "reports_to")?);
         }
         "response_time" => {
             attributes.response_time = Some(expect_duration(value, "response_time")?);
@@ -174,6 +199,9 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         }
         "states" => {
             attributes.custom_states = Some(expect_identifier_list(value, "states")?);
+        }
+        "ports" => {
+            attributes.ports = expect_port_list(value, "ports")?;
         }
         "range" => {
             attributes.range = Some(parse_range_value(value)?);
@@ -283,9 +311,10 @@ fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
                     Rule::identifier => device = Some(part.as_str().to_string()),
                     Rule::comparison_operator => operator = Some(parse_comparison_operator(part)?),
                     Rule::number => {
-                        value = Some(part.as_str().parse::<f64>().map_err(|_| {
-                            PlcError::parse(line, "analog_condition 数值解析失败")
-                        })?);
+                        value =
+                            Some(part.as_str().parse::<f64>().map_err(|_| {
+                                PlcError::parse(line, "analog_condition 数值解析失败")
+                            })?);
                     }
                     Rule::measured_value => {
                         let measured = parse_measured_value(part)?;
@@ -1035,7 +1064,10 @@ fn expect_number(pair: Pair<Rule>, field_name: &str) -> Result<f64, PlcError> {
     let line = line_of(&pair);
     if matches!(pair.as_rule(), Rule::number | Rule::integer) {
         pair.as_str().parse::<f64>().map_err(|_| {
-            PlcError::parse(line, format!("属性 {field_name} 数值解析失败: {}", pair.as_str()))
+            PlcError::parse(
+                line,
+                format!("属性 {field_name} 数值解析失败: {}", pair.as_str()),
+            )
         })
     } else {
         Err(PlcError::parse(
@@ -1055,11 +1087,13 @@ fn expect_u64(pair: Pair<Rule>, field_name: &str) -> Result<u64, PlcError> {
                 format!("属性 {field_name} 需要整数值，实际为: {raw}"),
             ));
         }
-        raw.parse::<u64>().map_err(|_| {
-            PlcError::parse(line, format!("属性 {field_name} 整数解析失败: {raw}"))
-        })
+        raw.parse::<u64>()
+            .map_err(|_| PlcError::parse(line, format!("属性 {field_name} 整数解析失败: {raw}")))
     } else {
-        Err(PlcError::parse(line, format!("属性 {field_name} 需要整数值")))
+        Err(PlcError::parse(
+            line,
+            format!("属性 {field_name} 需要整数值"),
+        ))
     }
 }
 
@@ -1193,6 +1227,77 @@ fn expect_identifier_list(pair: Pair<Rule>, field_name: &str) -> Result<Vec<Stri
     Ok(values)
 }
 
+fn expect_port_list(pair: Pair<Rule>, field_name: &str) -> Result<Vec<DevicePort>, PlcError> {
+    let line = line_of(&pair);
+    if pair.as_rule() != Rule::port_list {
+        return Err(PlcError::parse(
+            line,
+            format!(
+                "属性 {field_name} 需要端口列表（如 [in:digital:consumer, out:digital:producer]）"
+            ),
+        ));
+    }
+
+    let ports = pair
+        .into_inner()
+        .filter(|part| part.as_rule() == Rule::port_definition)
+        .map(parse_port_definition)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if ports.is_empty() {
+        return Err(PlcError::parse(
+            line,
+            format!("属性 {field_name} 至少需要一个端口定义"),
+        ));
+    }
+
+    Ok(ports)
+}
+
+fn parse_port_definition(pair: Pair<Rule>) -> Result<DevicePort, PlcError> {
+    let line = line_of(&pair);
+    let mut port_id = None;
+    let mut port_type = None;
+    let mut role = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => port_id = Some(part.as_str().to_string()),
+            Rule::port_type => port_type = Some(parse_port_type(part)?),
+            Rule::port_role => role = Some(parse_port_role(part)?),
+            _ => {}
+        }
+    }
+
+    Ok(DevicePort {
+        id: port_id.ok_or_else(|| PlcError::parse(line, "端口定义缺少 id"))?,
+        port_type: port_type.ok_or_else(|| PlcError::parse(line, "端口定义缺少 type"))?,
+        role: role.ok_or_else(|| PlcError::parse(line, "端口定义缺少 role"))?,
+    })
+}
+
+fn parse_port_type(pair: Pair<Rule>) -> Result<PortType, PlcError> {
+    let line = line_of(&pair);
+    match pair.as_str() {
+        "digital" => Ok(PortType::Digital),
+        "analog" => Ok(PortType::Analog),
+        "pneumatic" => Ok(PortType::Pneumatic),
+        "logical" => Ok(PortType::Logical),
+        "generic" => Ok(PortType::Generic),
+        other => Err(PlcError::parse(line, format!("不支持的端口类型: {other}"))),
+    }
+}
+
+fn parse_port_role(pair: Pair<Rule>) -> Result<PortRole, PlcError> {
+    let line = line_of(&pair);
+    match pair.as_str() {
+        "producer" => Ok(PortRole::Producer),
+        "consumer" => Ok(PortRole::Consumer),
+        "bidirectional" => Ok(PortRole::Bidirectional),
+        other => Err(PlcError::parse(line, format!("不支持的端口角色: {other}"))),
+    }
+}
+
 fn first_inner<'a>(
     pair: Pair<'a, Rule>,
     line: usize,
@@ -1219,7 +1324,10 @@ fn map_parse_error(err: pest::error::Error<Rule>) -> PlcError {
 #[cfg(test)]
 mod tests {
     use super::{parse_constraints, parse_plc, parse_tasks, parse_topology};
-    use crate::ast::{ActionStatement, LiteralValue, OnCompleteDirective, StepStatement, WaitCondition};
+    use crate::ast::{
+        ActionStatement, LiteralValue, OnCompleteDirective, PortRole, PortType, StepStatement,
+        WaitCondition,
+    };
 
     #[test]
     fn parses_prd_5_3_topology_example() {
@@ -1340,6 +1448,84 @@ task main:
             valve.attributes.custom_states.as_ref(),
             Some(&expected),
             "应解析出自定义 states 列表"
+        );
+    }
+
+    #[test]
+    fn parses_new_relation_fields_and_ports_into_ast() {
+        let input = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device valve_A: solenoid_valve {
+    driven_by: Y0,
+    ports: [coil:digital:consumer, feedback:logical:producer]
+}
+device sensor_A: sensor {
+    reports_to: X0,
+    detects: valve_A.on,
+    ports: [sense:digital:producer]
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("应支持 driven_by/reports_to/ports 新语法");
+        let valve = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "valve_A")
+            .expect("应包含 valve_A");
+        let sensor = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "sensor_A")
+            .expect("应包含 sensor_A");
+
+        assert_eq!(valve.attributes.driven_by.as_deref(), Some("Y0"));
+        assert_eq!(sensor.attributes.reports_to.as_deref(), Some("X0"));
+        assert_eq!(
+            sensor
+                .attributes
+                .detects
+                .as_ref()
+                .map(|d| d.device.as_str()),
+            Some("valve_A")
+        );
+        assert_eq!(valve.attributes.ports.len(), 2);
+        assert_eq!(valve.attributes.ports[0].id, "coil");
+        assert_eq!(valve.attributes.ports[0].port_type, PortType::Digital);
+        assert_eq!(valve.attributes.ports[0].role, PortRole::Consumer);
+    }
+
+    #[test]
+    fn rejects_connected_to_with_migration_hint() {
+        let input = r#"
+[topology]
+device Y0: digital_output
+device valve_A: solenoid_valve { connected_to: Y0 }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let err = parse_plc(input).expect_err("connected_to 应被明确禁止");
+        assert_eq!(err.line(), 4);
+        assert!(
+            err.to_string().contains("driven_by 或 reports_to"),
+            "迁移提示应建议使用 driven_by/reports_to，实际: {err}"
         );
     }
 
