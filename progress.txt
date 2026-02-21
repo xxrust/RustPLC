@@ -4,6 +4,7 @@
 - DSL 新增结构化属性时，按 `plc.pest` 规则 + `parser/mod.rs` 的 `expect_*` 解析辅助函数成对落地，避免语义层直接解析字符串。
 - 语义拓扑构图应以 `TopologySection.connections` 为主输入，并通过 relation 回溯到设备声明行号，保证 `driven_by/reports_to/detects` 的错误都可定位。
 - 废弃 DSL 字段后，需同步更新 verifier/runtime/scenario 相关测试夹具与诊断文案，否则 `parse_plc` 的迁移拦截会导致回归测试批量失败。
+- 为废弃字段加 CI 防回流时，优先用 `git diff` 扫描新增行而非全仓 grep，这样不会被历史文档/负例夹具阻塞。
 
 Started: Sat Feb 21 17:59:17 CST 2026
 
@@ -28,7 +29,6 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - Existing semantic pipeline still reads legacy `connected_to`; this round kept compatibility by mapping `driven_by` into the legacy field until later stories remove it.
 ---
-
 ## 2026-02-21 21:29:12 CST - US-003
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
@@ -69,4 +69,31 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Workspace-wide `cargo fmt --all --check` can fail due unrelated dirty files; for iterative PRD work, run `rustfmt --check` on story-touched files to keep scope isolated.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `cargo test two_cylinder` and `cargo test assembly_station` already cover key compilation regressions through `examples_integration` and `large_demo_coverage` without running the full suite.
+---
+
+## 2026-02-21 22:03:36 CST - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `scripts/migrate_connected_to.py` to bulk migrate legacy `connected_to` attributes to `driven_by` in `.plc` files (dry-run/write modes).
+  - Added manual-review output for unresolved list-style legacy values so ambiguous migrations are surfaced explicitly.
+  - Added CI regression guard `scripts/ci_no_connected_to_regression.sh` and wired it into `.github/workflows/rp2040_regression.yml`.
+  - Migrated Stage-3 gate fixture DSL in `scripts/stage3_runtime_dev_gate.sh` from `connected_to` to `driven_by` to keep CI/runtime gates aligned with parser restrictions.
+  - Updated runbook/docs test coverage so the new CI guard + migration command are documented and locked.
+- Files changed
+  - `.github/workflows/rp2040_regression.yml`
+  - `scripts/ci_script_contract_preflight.sh`
+  - `scripts/ci_no_connected_to_regression.sh`
+  - `scripts/migrate_connected_to.py`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `docs/stage3_ci_gate_runbook.md`
+  - `tests/stage3_ci_gate_runbook_doc.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Stage-3 CI runbook assertions are enforced by `tests/stage3_ci_gate_runbook_doc.rs`, so any gate command change should update both doc and assertion list.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `scripts/ci_script_contract_preflight.sh` validates git mode (`100755`) from index metadata, so newly added shell scripts need `git update-index --chmod=+x` in addition to local `chmod` when filemode tracking is disabled.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `scripts/ci_no_connected_to_regression.sh` supports explicit base ref input for local checks and auto-detects `GITHUB_BASE_REF` for PR CI.
 ---

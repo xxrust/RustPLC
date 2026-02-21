@@ -10,8 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Script mode/EOL preflight
         run: scripts/ci_script_contract_preflight.sh
+      - name: Block legacy connected_to regressions
+        run: scripts/ci_no_connected_to_regression.sh
 
   stage3-runtime-dev-gates:
     runs-on: ubuntu-latest

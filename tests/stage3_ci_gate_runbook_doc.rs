@@ -13,6 +13,8 @@ fn stage3_ci_gate_runbook_mentions_script_contract_preflight() {
     for needle in [
         "script mode/EOL preflight",
         "scripts/ci_script_contract_preflight.sh",
+        "scripts/ci_no_connected_to_regression.sh",
+        "scripts/migrate_connected_to.py",
         "executable mode (`100755`)",
         "CRLF",
         "LF",

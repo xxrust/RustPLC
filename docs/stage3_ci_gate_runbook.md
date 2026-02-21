@@ -15,6 +15,7 @@ scripts/stage3_runtime_dev_gate.sh
 This command covers:
 
 - script mode/EOL preflight (`ci_script_contract_preflight.sh`)
+- `connected_to` regression guard (`ci_no_connected_to_regression.sh`)
 - `online_force_control_plane` contract
 - `online_variable_control_plane` contract
 - `retain_persistent` contract
@@ -31,6 +32,7 @@ This command covers:
 
 ```bash
 scripts/ci_script_contract_preflight.sh
+scripts/ci_no_connected_to_regression.sh
 cargo test --test online_force_control_plane --test online_variable_control_plane --test retain_persistent --test scenario_gen --test sim_regress --test new_scaffold
 cargo test --test abnormal_exit_matrix --test abnormal_exit_matrix_doc
 cargo test --test commissioning_playbook_doc
@@ -42,7 +44,8 @@ If preflight fails:
 
 - ensure required scripts are tracked with executable mode (`100755`)
 - convert CRLF to LF for all tracked `*.sh` files
-- re-run `scripts/ci_script_contract_preflight.sh` before pushing
+- run `scripts/migrate_connected_to.py <file-or-dir> --write` when legacy DSL appears
+- re-run `scripts/ci_script_contract_preflight.sh` and `scripts/ci_no_connected_to_regression.sh` before pushing
 
 ### B. scenario-gen schema check
 
