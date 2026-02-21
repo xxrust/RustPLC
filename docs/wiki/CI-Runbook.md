@@ -12,6 +12,7 @@ Workflow: `.github/workflows/rp2040_regression.yml`
 
 Jobs:
 - `workspace-test`: `cargo test --workspace`
+- `topology-perf-gate`: `python3 scripts/topology_perf_gate.py --output human`
 - `rp2040-cross-build`: `cargo build -p board-rp2040 --target thumbv6m-none-eabi --release`
 - `trace-gate`: trace-diff + PIL gates against golden artifacts
 - `pil-renode-runner`: PIL baseline suite with Renode runner (auto-download)
@@ -26,6 +27,8 @@ Run the same commands CI uses:
 set -euo pipefail
 
 cargo test --workspace
+
+python3 scripts/topology_perf_gate.py --output human
 
 cargo build -p board-rp2040 --target thumbv6m-none-eabi --release
 
@@ -52,6 +55,8 @@ scripts/pil_trace_baseline_suite.sh \
   --runner renode \
   --out-root out/ci_pil_baselines_renode
 ```
+
+Topology perf gate thresholds live in `scripts/perf/topology_perf_thresholds.json`.
 
 ---
 

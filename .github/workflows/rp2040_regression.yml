@@ -33,6 +33,14 @@ jobs:
       - name: Cargo test (workspace)
         run: cargo test --workspace
 
+  topology-perf-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Topology performance baseline gate
+        run: python3 scripts/topology_perf_gate.py --output human
+
   rp2040-cross-build:
     runs-on: ubuntu-latest
     steps:

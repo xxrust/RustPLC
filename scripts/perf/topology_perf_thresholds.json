@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "fixture": {
+    "components": 500,
+    "connections": 2000
+  },
+  "thresholds_ms_p95": {
+    "parse_validate": 250.0,
+    "compile_simulate": 400.0,
+    "render_transform": 80.0
+  }
+}

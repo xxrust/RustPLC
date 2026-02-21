@@ -15,6 +15,7 @@
 - CLI 场景链路回归优先采用 `scenario-init` 生成夹具后立刻执行 `scenario-validate`（同一临时目录），避免依赖手写 YAML 随 DSL 进化失效。
 - 文档契约测试若绑定 `docs/*.md` 路径，优先支持“主路径 + 归档路径”候选读取（如 `docs/已实现/`），并移除已废弃文档对应测试，避免文档迁移导致 CI 假阳性失败。
 - 新增拓扑语义 diff 能力时，先复用 `parse_component_topology_json` 做两侧归一化，再比较 `nodes/ports/relations/tags`，可保证 diff 与 validate 语义一致并直接落盘为审计工件。
+- Web UI 若需把固定拓扑 JSON 作为可选项目加载，需同时提供 `examples/<id>.plc`（供 `/api/projects` 枚举）与 `examples/<id>.topology.json`（供 `/api/topology/:id` 优先返回）。
 
 Started: Sat Feb 21 17:59:17 CST 2026
 
@@ -343,4 +344,33 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `cargo clippy` 在当前工具链未安装（`cargo-clippy` missing），质量门禁需记录并采用 `cargo check + rustfmt --check + targeted cargo test` 组合。
   - Useful context (e.g., "the evaluation panel is in component X")
     - 新命令输出的 `semantic_diff.json` 已包含变更维度和影响半径字段，可直接作为后续审计或评审附件，无需二次聚合。
+---
+## 2026-02-22 02:47:38 CST - US-016
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 建立 500 节点 / 2000 边规模基线工件：`examples/topology_perf_500.topology.json`、`examples/topology_perf_500.scenario.json`，并补充 `examples/topology_perf_500.plc` 作为 Web UI 项目选择入口。
+  - 新增性能门禁脚本 `scripts/topology_perf_gate.py`，覆盖三条关键路径：`component-topology-validate`（解析）、`component-sim`（编译/执行链路）与前端拓扑渲染预处理（toCanvasTopology 等价转换）。
+  - 新增阈值配置 `scripts/perf/topology_perf_thresholds.json` 并接入 CI（`rp2040_regression.yml` 新增 `topology-perf-gate` 作业）。
+  - 补充基线契约测试 `tests/topology_perf_baseline.rs` 与文档 `docs/topology_perf_baseline.md`、`docs/wiki/CI-Runbook.md` 更新。
+  - 使用 `dev-browser` skill 完成浏览器验证：在 `http://127.0.0.1:4173` 切换到 `topology_perf_500` 项目后确认画布加载 500 节点 / 2000 边，标签过滤 `control` 后显示 250 节点 / 0 边；截图 `output/playwright/us-016-topology-perf-baseline.png`。
+- Files changed
+  - `.github/workflows/rp2040_regression.yml`
+  - `docs/topology_perf_baseline.md`
+  - `docs/wiki/CI-Runbook.md`
+  - `examples/topology_perf_500.plc`
+  - `examples/topology_perf_500.scenario.json`
+  - `examples/topology_perf_500.topology.json`
+  - `scripts/perf/topology_perf_thresholds.json`
+  - `scripts/topology_perf_gate.py`
+  - `tests/topology_perf_baseline.rs`
+  - `output/playwright/us-016-topology-perf-baseline.png`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - 规模基线门禁建议把“固定 fixture + 阈值 JSON + 脚本输出 machine-readable JSON”配套落地，方便 CI 与后续阈值校准。
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `dev-browser` 默认尝试 Chrome；当前环境需用 Firefox 并注入 `LD_LIBRARY_PATH=/tmp/libasound/extracted/usr/lib/x86_64-linux-gnu` 以规避 `libasound.so.2` 缺失。
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Web UI 右侧 Properties 面板中的 Statistics 与 Tag View Controls 已可直接作为大规模拓扑加载验收入口（节点/边数量与过滤结果无需额外调试开关）。
 ---
