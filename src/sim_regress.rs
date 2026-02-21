@@ -18,10 +18,7 @@ fn render_minimized_scenario_yaml(
     let mut msg = String::new();
     msg.push_str("# Minimized by `rust_plc sim-regress --minimize-failure`.\n");
     msg.push_str(&format!("# Source PLC: {}\n", plc_path.display()));
-    msg.push_str(&format!(
-        "# Source scenario: {}\n",
-        scenario_path.display()
-    ));
+    msg.push_str(&format!("# Source scenario: {}\n", scenario_path.display()));
     msg.push_str(&format!(
         "# Failure signature: kind={} task={:?} step={:?} at_ms={:?}\n",
         failure.kind, failure.task, failure.step, failure.at_ms
@@ -624,9 +621,10 @@ fn scenario_with_ticks(base: &sim::Scenario, ticks: u64) -> sim::Scenario {
         if b.count == 0 || b.period_ms == 0 {
             return false;
         }
-        let last_start = b
-            .at_ms
-            .saturating_add(b.period_ms.saturating_mul((b.count.saturating_sub(1)) as u64));
+        let last_start = b.at_ms.saturating_add(
+            b.period_ms
+                .saturating_mul((b.count.saturating_sub(1)) as u64),
+        );
         let last_end = last_start.saturating_add(b.active_ms);
         last_end < dur
     });

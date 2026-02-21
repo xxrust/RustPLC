@@ -1,8 +1,8 @@
 use crate::ir::{DeviceKind, TopologyGraph};
 use crate::parser::parse_plc;
 use crate::semantic::{build_topology_graph, preprocess_program};
-use petgraph::graph::NodeIndex;
 use petgraph::Direction;
+use petgraph::graph::NodeIndex;
 use serde_yaml::{Mapping, Number, Value};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
@@ -164,11 +164,7 @@ impl ScenarioNameResolver {
 fn unique_physical_id(mut ids: Vec<u16>) -> Result<u16, Vec<u16>> {
     ids.sort_unstable();
     ids.dedup();
-    if ids.len() == 1 {
-        Ok(ids[0])
-    } else {
-        Err(ids)
-    }
+    if ids.len() == 1 { Ok(ids[0]) } else { Err(ids) }
 }
 
 fn parse_decimal_u16(s: &str) -> Option<u16> {

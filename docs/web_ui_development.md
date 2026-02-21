@@ -173,6 +173,23 @@ POST /api/alarms/:id/ack        # 确认告警
 - `AlarmEvent` - 告警事件
 - `TimingReport` - 时序报告
 
+### 标签字段契约（`tags_schema_version = 1`）
+
+`/api/topology/:id` 与 `/api/topology/parse-plc` 的返回值统一遵循以下 tags 契约：
+
+- 顶层返回 `tags_schema_version`（当前固定为 `1`）。
+- 每个 `components[].params.tags` 都是固定 shape（缺失字段会补空数组）：
+
+```json
+{
+  "functional_group": [],
+  "danger_level": [],
+  "location_group": []
+}
+```
+
+- `location_group` 支持层级路径（例如 `line_a/cell_2/station_7`），前端 store 允许按层级前缀检索（如 `line_a/cell_2` 命中该工位）。
+
 ## 状态管理
 
 ### Zustand Store (`appStore.ts`)

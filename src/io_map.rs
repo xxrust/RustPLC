@@ -190,10 +190,24 @@ impl IoMap {
         let ai_table = v.get("analog_inputs").and_then(|v| v.as_table());
         let ao_table = v.get("analog_outputs").and_then(|v| v.as_table());
 
-        let digital_inputs =
-            parse_map_section(di_table, "digital_inputs", "di", "di0", 0, 29, "0..=29 or \"virtual\"")?;
-        let digital_outputs =
-            parse_map_section(do_table, "digital_outputs", "do", "do0", 0, 29, "0..=29 or \"virtual\"")?;
+        let digital_inputs = parse_map_section(
+            di_table,
+            "digital_inputs",
+            "di",
+            "di0",
+            0,
+            29,
+            "0..=29 or \"virtual\"",
+        )?;
+        let digital_outputs = parse_map_section(
+            do_table,
+            "digital_outputs",
+            "do",
+            "do0",
+            0,
+            29,
+            "0..=29 or \"virtual\"",
+        )?;
         let analog_inputs = match ai_table {
             Some(t) => parse_map_section(
                 t,
@@ -207,7 +221,15 @@ impl IoMap {
             None => BTreeMap::new(),
         };
         let analog_outputs = match ao_table {
-            Some(t) => parse_map_section(t, "analog_outputs", "ao", "ao0", 0, 29, "0..=29 or \"virtual\"")?,
+            Some(t) => parse_map_section(
+                t,
+                "analog_outputs",
+                "ao",
+                "ao0",
+                0,
+                29,
+                "0..=29 or \"virtual\"",
+            )?,
             None => BTreeMap::new(),
         };
 
@@ -278,7 +300,10 @@ impl IoMap {
 
         if let Some(motion) = &self.motion {
             for (&axis, cfg) in &motion.stepper {
-                insert_seen(cfg.step_gpio, format!("motion.stepper.axis{axis}.step_gpio"))?;
+                insert_seen(
+                    cfg.step_gpio,
+                    format!("motion.stepper.axis{axis}.step_gpio"),
+                )?;
                 insert_seen(cfg.dir_gpio, format!("motion.stepper.axis{axis}.dir_gpio"))?;
                 insert_seen(cfg.en_gpio, format!("motion.stepper.axis{axis}.en_gpio"))?;
             }
@@ -328,16 +353,21 @@ fn parse_motion_config(v: &toml::Value) -> Result<Option<MotionConfig>, IoMapErr
                     message: "must be a table".to_string(),
                 });
             };
-            let step_gpio = parse_required_gpio(t, "step_gpio", &format!("motion.stepper.{axis_key}"))?;
-            let dir_gpio = parse_required_gpio(t, "dir_gpio", &format!("motion.stepper.{axis_key}"))?;
+            let step_gpio =
+                parse_required_gpio(t, "step_gpio", &format!("motion.stepper.{axis_key}"))?;
+            let dir_gpio =
+                parse_required_gpio(t, "dir_gpio", &format!("motion.stepper.{axis_key}"))?;
             let en_gpio = parse_required_gpio(t, "en_gpio", &format!("motion.stepper.{axis_key}"))?;
             let dir_inverted = t
                 .get("dir_inverted")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let v_max_sps = parse_optional_u32(t, "v_max_sps", &format!("motion.stepper.{axis_key}"))?;
-            let acc_sps2 = parse_optional_u32(t, "acc_sps2", &format!("motion.stepper.{axis_key}"))?;
-            let dec_sps2 = parse_optional_u32(t, "dec_sps2", &format!("motion.stepper.{axis_key}"))?;
+            let v_max_sps =
+                parse_optional_u32(t, "v_max_sps", &format!("motion.stepper.{axis_key}"))?;
+            let acc_sps2 =
+                parse_optional_u32(t, "acc_sps2", &format!("motion.stepper.{axis_key}"))?;
+            let dec_sps2 =
+                parse_optional_u32(t, "dec_sps2", &format!("motion.stepper.{axis_key}"))?;
 
             // Semantic checks (keep errors path-addressable and actionable).
             if step_gpio == dir_gpio || step_gpio == en_gpio || dir_gpio == en_gpio {
@@ -406,8 +436,9 @@ fn parse_motion_config(v: &toml::Value) -> Result<Option<MotionConfig>, IoMapErr
             if a_gpio == b_gpio {
                 return Err(IoMapError::InvalidMotion {
                     path: format!("motion.encoder.{axis_key}"),
-                    message: "a_gpio and b_gpio must be distinct (hint: wire A and B to different GPIOs)"
-                        .to_string(),
+                    message:
+                        "a_gpio and b_gpio must be distinct (hint: wire A and B to different GPIOs)"
+                            .to_string(),
                 });
             }
             let ppr = parse_required_u32(t, "ppr", &format!("motion.encoder.{axis_key}"))?;
@@ -440,10 +471,7 @@ fn parse_motion_config(v: &toml::Value) -> Result<Option<MotionConfig>, IoMapErr
                     });
                 }
             };
-            let scale = t
-                .get("scale")
-                .and_then(|v| v.as_float())
-                .unwrap_or(1.0);
+            let scale = t.get("scale").and_then(|v| v.as_float()).unwrap_or(1.0);
             if !scale.is_finite() || scale <= 0.0 {
                 return Err(IoMapError::InvalidMotion {
                     path: format!("motion.encoder.{axis_key}.scale"),
@@ -590,7 +618,9 @@ fn parse_safe_state(v: &toml::Value) -> Result<SafeStateConfig, IoMapError> {
         .unwrap_or(0);
     if on_exit_timeout_ms < 0 {
         return Err(IoMapError::InvalidSafeState {
-            details: format!("safe_state.on_exit_timeout_ms must be >= 0, got {on_exit_timeout_ms}"),
+            details: format!(
+                "safe_state.on_exit_timeout_ms must be >= 0, got {on_exit_timeout_ms}"
+            ),
         });
     }
 
@@ -885,8 +915,7 @@ di0 = "virtual"
 do0 = "virtual"
 "#;
         let m = IoMap::from_toml_str(input).expect("parse");
-        m.validate_for_usage(usage_one_di_do())
-            .expect("validate");
+        m.validate_for_usage(usage_one_di_do()).expect("validate");
     }
 
     #[test]
@@ -1024,9 +1053,15 @@ group = 30
 "#;
         let map = IoMap::from_toml_str(toml).unwrap();
         assert_eq!(map.safe_state.mode, SafeStateMode::Profile);
-        assert_eq!(map.safe_state.digital_outputs.get(&2).unwrap().safe_value, false);
+        assert_eq!(
+            map.safe_state.digital_outputs.get(&2).unwrap().safe_value,
+            false
+        );
         assert_eq!(map.safe_state.digital_outputs.get(&2).unwrap().group, 10);
-        assert_eq!(map.safe_state.digital_outputs.get(&0).unwrap().safe_value, true);
+        assert_eq!(
+            map.safe_state.digital_outputs.get(&0).unwrap().safe_value,
+            true
+        );
         assert_eq!(map.safe_state.analog_outputs.get(&0).unwrap().group, 30);
     }
 
@@ -1111,7 +1146,9 @@ dir_gpio = 3
 en_gpio = 4
 v_max_sps = 20000
 "#;
-        let err = IoMap::from_toml_str(partial_profile).unwrap_err().to_string();
+        let err = IoMap::from_toml_str(partial_profile)
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("motion.stepper.axis0") && err.contains("all three must be set"),
             "expected partial-profile error, got: {err}"

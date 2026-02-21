@@ -7,33 +7,33 @@ device X2: digital_input
 device X3: digital_input
 
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke_time: 300ms,
     retract_time: 300ms
 }
 
 device sensor_A_ext: sensor {
-    connected_to: X0,
+    driven_by: X0,
     detects: cyl_A.extended
 }
 
 device sensor_A_ext2: sensor {
-    connected_to: X1,
+    driven_by: X1,
     detects: cyl_A.extended
 }
 
 device sensor_A_ret: sensor {
-    connected_to: X2,
+    driven_by: X2,
     detects: cyl_A.retracted
 }
 
 device sensor_A_ret2: sensor {
-    connected_to: X3,
+    driven_by: X3,
     detects: cyl_A.retracted
 }
 

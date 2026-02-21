@@ -11,60 +11,60 @@ device X4: digital_input
 device X5: digital_input
 
 device start_button: digital_input {
-    connected_to: X5
+    driven_by: X5
     debounce: 20ms
 }
 
 device motor_conveyor: motor {
-    connected_to: Y0
+    driven_by: Y0
     rated_speed: 30rpm
     ramp_time: 50ms
 }
 
 device sensor_arrive: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: motor_conveyor.position_A
 }
 
 device valve_lift: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_lift: cylinder {
-    connected_to: valve_lift
+    driven_by: valve_lift
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_lift_ext: sensor {
-    connected_to: X1
+    driven_by: X1
     detects: cyl_lift.extended
 }
 
 device sensor_lift_ret: sensor {
-    connected_to: X2
+    driven_by: X2
     detects: cyl_lift.retracted
 }
 
 device valve_label: solenoid_valve {
-    connected_to: Y2
+    driven_by: Y2
     response_time: 20ms
 }
 
 device cyl_label: cylinder {
-    connected_to: valve_label
+    driven_by: valve_label
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_label_ext: sensor {
-    connected_to: X3
+    driven_by: X3
     detects: cyl_label.extended
 }
 
 device sensor_label_ret: sensor {
-    connected_to: X4
+    driven_by: X4
     detects: cyl_label.retracted
 }
 

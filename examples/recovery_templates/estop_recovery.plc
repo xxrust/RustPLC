@@ -7,21 +7,21 @@ device Y0: digital_output
 device Y1: digital_output
 
 device start_button: digital_input {
-    connected_to: X0
+    driven_by: X0
     debounce: 20ms
 }
 device estop_button: digital_input {
-    connected_to: X1
+    driven_by: X1
     debounce: 20ms
 }
 device part_sensor: digital_input {
-    connected_to: X2
+    driven_by: X2
 }
 device conveyor: digital_output {
-    connected_to: Y0
+    driven_by: Y0
 }
 device alarm_light: digital_output {
-    connected_to: Y1
+    driven_by: Y1
 }
 
 [constraints]

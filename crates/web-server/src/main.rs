@@ -1,16 +1,16 @@
 use axum::{
-    Router,
     extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
     routing::{get, post},
+    Router,
 };
 use rust_plc::ast::DeviceType;
 use rust_plc::component_scenario::parse_component_scenario_value;
 use rust_plc::component_topology::parse_component_topology_value;
 use rust_plc::parser::parse_plc;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
@@ -88,6 +88,8 @@ struct AckAlarmRequest {
 struct ParsePlcTopologyRequest {
     content: String,
 }
+
+const TAGS_SCHEMA_VERSION: u64 = 1;
 
 #[tokio::main]
 async fn main() {
@@ -191,7 +193,9 @@ async fn get_topology(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let json_path = topology_path_for_id(&state.workspace_root, &id);
     if json_path.exists() {
-        return read_json_file(&json_path);
+        let mut value = read_json_value(&json_path)?;
+        normalize_topology_tags_in_place(&mut value);
+        return Ok(Json(value));
     }
 
     let plc_path = state.workspace_root.join(format!("examples/{id}.plc"));
@@ -205,19 +209,22 @@ async fn get_topology(
         })));
     }
 
-    Ok(Json(serde_json::json!({
+    let mut fallback = serde_json::json!({
         "schema_version": 1,
         "component_library": { "schema_version": 1, "components": [] },
         "components": [],
         "connections": []
-    })))
+    });
+    normalize_topology_tags_in_place(&mut fallback);
+    Ok(Json(fallback))
 }
 
 async fn save_topology(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<Value>,
+    Json(mut payload): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    normalize_topology_tags_in_place(&mut payload);
     let path = topology_path_for_id(&state.workspace_root, &id);
     write_json_pretty(&path, &payload).map_err(internal_error)?;
     Ok(Json(serde_json::json!({
@@ -313,7 +320,7 @@ async fn parse_plc_topology(
         })
         .collect::<Vec<_>>();
 
-    Ok(Json(serde_json::json!({
+    let mut response = serde_json::json!({
         "schema_version": 1,
         "component_library": {
             "schema_version": 1,
@@ -321,7 +328,9 @@ async fn parse_plc_topology(
         },
         "components": components,
         "connections": connections
-    })))
+    });
+    normalize_topology_tags_in_place(&mut response);
+    Ok(Json(response))
 }
 
 fn build_topology_preview_plc(input: &str) -> Option<String> {
@@ -977,10 +986,75 @@ fn write_json_pretty(path: &StdPath, payload: &Value) -> Result<(), String> {
 }
 
 fn read_json_file(path: &StdPath) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let text = std::fs::read_to_string(path).map_err(internal_error)?;
-    let value = serde_json::from_str::<Value>(&text)
-        .map_err(|err| bad_request(format!("invalid JSON {}: {err}", path.display())))?;
+    let value = read_json_value(path)?;
     Ok(Json(value))
+}
+
+fn read_json_value(path: &StdPath) -> Result<Value, (StatusCode, Json<Value>)> {
+    let text = std::fs::read_to_string(path).map_err(internal_error)?;
+    serde_json::from_str::<Value>(&text)
+        .map_err(|err| bad_request(format!("invalid JSON {}: {err}", path.display())))
+}
+
+fn normalize_topology_tags_in_place(value: &mut Value) {
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    root.insert(
+        "tags_schema_version".to_string(),
+        Value::from(TAGS_SCHEMA_VERSION),
+    );
+    let Some(components) = root.get_mut("components").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for component in components {
+        let Some(component_obj) = component.as_object_mut() else {
+            continue;
+        };
+        let params = component_obj
+            .entry("params")
+            .or_insert_with(|| Value::Object(Map::new()));
+        if !params.is_object() {
+            *params = Value::Object(Map::new());
+        }
+        let Some(params_obj) = params.as_object_mut() else {
+            continue;
+        };
+        let normalized_tags = normalize_tags_value(params_obj.get("tags"));
+        params_obj.insert("tags".to_string(), normalized_tags);
+    }
+}
+
+fn normalize_tags_value(raw: Option<&Value>) -> Value {
+    let source = raw.and_then(Value::as_object);
+    let mut out = Map::new();
+    out.insert(
+        "functional_group".to_string(),
+        Value::Array(normalize_tag_dimension(source, "functional_group")),
+    );
+    out.insert(
+        "danger_level".to_string(),
+        Value::Array(normalize_tag_dimension(source, "danger_level")),
+    );
+    out.insert(
+        "location_group".to_string(),
+        Value::Array(normalize_tag_dimension(source, "location_group")),
+    );
+    Value::Object(out)
+}
+
+fn normalize_tag_dimension(source: Option<&Map<String, Value>>, key: &str) -> Vec<Value> {
+    source
+        .and_then(|obj| obj.get(key))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|value| Value::String(value.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 fn artifact_href(workspace_root: &StdPath, path: &StdPath) -> String {
@@ -1090,4 +1164,67 @@ fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, Json<Value>) {
             "error": err.to_string()
         })),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_topology_tags_in_place, TAGS_SCHEMA_VERSION};
+    use serde_json::json;
+
+    #[test]
+    fn topology_tag_normalization_adds_schema_and_default_dimensions() {
+        let mut payload = json!({
+            "schema_version": 1,
+            "component_library": { "schema_version": 1, "components": [] },
+            "components": [
+                {
+                    "id": "x0",
+                    "component_id": "sensor",
+                    "params": { "name": "x0" }
+                }
+            ],
+            "connections": []
+        });
+        normalize_topology_tags_in_place(&mut payload);
+        assert_eq!(
+            payload.get("tags_schema_version").and_then(|v| v.as_u64()),
+            Some(TAGS_SCHEMA_VERSION)
+        );
+        assert_eq!(
+            payload["components"][0]["params"]["tags"],
+            json!({
+                "functional_group": [],
+                "danger_level": [],
+                "location_group": []
+            })
+        );
+    }
+
+    #[test]
+    fn topology_tag_normalization_filters_non_string_values() {
+        let mut payload = json!({
+            "components": [
+                {
+                    "id": "x0",
+                    "component_id": "sensor",
+                    "params": {
+                        "tags": {
+                            "functional_group": ["press", 1, true],
+                            "danger_level": ["high"],
+                            "location_group": ["line_a/cell_2/station_7", null]
+                        }
+                    }
+                }
+            ]
+        });
+        normalize_topology_tags_in_place(&mut payload);
+        assert_eq!(
+            payload["components"][0]["params"]["tags"],
+            json!({
+                "functional_group": ["press"],
+                "danger_level": ["high"],
+                "location_group": ["line_a/cell_2/station_7"]
+            })
+        );
+    }
 }

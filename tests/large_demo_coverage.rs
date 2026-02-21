@@ -243,13 +243,13 @@ fn stress_many_devices_compiles_and_verifies() {
         topo.push_str(&format!("device Y{idx}: digital_output\n"));
         topo.push_str(&format!("device X{idx}: digital_input\n"));
         topo.push_str(&format!(
-            "device valve_{idx}: solenoid_valve {{ connected_to: Y{idx}, response_time: 10ms }}\n"
+            "device valve_{idx}: solenoid_valve {{ driven_by: Y{idx}, response_time: 10ms }}\n"
         ));
         topo.push_str(&format!(
-            "device cyl_{idx}: cylinder {{ connected_to: valve_{idx}, stroke_time: 120ms, retract_time: 110ms }}\n"
+            "device cyl_{idx}: cylinder {{ driven_by: valve_{idx}, stroke_time: 120ms, retract_time: 110ms }}\n"
         ));
         topo.push_str(&format!(
-            "device sensor_{idx}_ext: sensor {{ connected_to: X{idx}, detects: cyl_{idx}.extended }}\n"
+            "device sensor_{idx}_ext: sensor {{ driven_by: X{idx}, detects: cyl_{idx}.extended }}\n"
         ));
     }
 
@@ -384,7 +384,7 @@ fn parse_error_unsupported_attribute_name() {
 [topology]
 device Y0: digital_output
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     foo: 1
 }
 
@@ -499,7 +499,7 @@ fn semantic_error_connected_to_references_undefined_device() {
 device Y0: digital_output
 
 device valve_A: solenoid_valve {
-    connected_to: Y9,
+    driven_by: Y9,
     response_time: 15ms
 }
 
@@ -535,18 +535,18 @@ fn semantic_error_incompatible_connection_types() {
     let source = r#"
 [topology]
 device cyl_A: cylinder {
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke_time: 200ms,
     retract_time: 180ms
 }
 
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 15ms
 }
 
 device sensor_bad: sensor {
-    connected_to: cyl_A,
+    driven_by: cyl_A,
     detects: cyl_A.extended
 }
 
@@ -605,10 +605,10 @@ fn safety_fails_on_parallel_conflicts_with() {
 [topology]
 device Y0: digital_output
 device Y1: digital_output
-device valve_A: solenoid_valve { connected_to: Y0, response_time: 15ms }
-device valve_B: solenoid_valve { connected_to: Y1, response_time: 15ms }
-device cyl_A: cylinder { connected_to: valve_A, stroke_time: 200ms, retract_time: 180ms }
-device cyl_B: cylinder { connected_to: valve_B, stroke_time: 250ms, retract_time: 220ms }
+device valve_A: solenoid_valve { driven_by: Y0, response_time: 15ms }
+device valve_B: solenoid_valve { driven_by: Y1, response_time: 15ms }
+device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
+device cyl_B: cylinder { driven_by: valve_B, stroke_time: 250ms, retract_time: 220ms }
 
 [constraints]
 safety: cyl_A.extended conflicts_with cyl_B.extended
@@ -664,9 +664,9 @@ fn timing_fails_on_must_complete_within_too_small() {
 [topology]
 device Y0: digital_output
 device X0: digital_input
-device valve_A: solenoid_valve { connected_to: Y0, response_time: 20ms }
-device cyl_A: cylinder { connected_to: valve_A, stroke_time: 200ms, retract_time: 180ms }
-device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
+device valve_A: solenoid_valve { driven_by: Y0, response_time: 20ms }
+device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
+device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
 
 [constraints]
 timing: task.main.step_extend must_complete_within 100ms
@@ -689,9 +689,9 @@ fn timing_fails_on_must_start_after_when_shortest_is_insufficient() {
 [topology]
 device Y0: digital_output
 device X0: digital_input
-device valve_A: solenoid_valve { connected_to: Y0, response_time: 10ms }
-device cyl_A: cylinder { connected_to: valve_A, stroke_time: 50ms, retract_time: 50ms }
-device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
+device valve_A: solenoid_valve { driven_by: Y0, response_time: 10ms }
+device cyl_A: cylinder { driven_by: valve_A, stroke_time: 50ms, retract_time: 50ms }
+device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
 
 [constraints]
 timing: task.cooldown must_start_after 500ms
@@ -718,9 +718,9 @@ fn causality_fails_when_declared_chain_is_not_connected() {
 [topology]
 device Y0: digital_output
 device X0: digital_input
-device valve_A: solenoid_valve { connected_to: Y0, response_time: 20ms }
-device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms } # missing connected_to: valve_A
-device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
+device valve_A: solenoid_valve { driven_by: Y0, response_time: 20ms }
+device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms } # missing driven_by: valve_A
+device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
 
 [constraints]
 causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
@@ -741,10 +741,10 @@ fn combined_failures_report_multiple_checkers() {
 [topology]
 device Y0: digital_output
 device Y1: digital_output
-device valve_A: solenoid_valve { connected_to: Y0, response_time: 20ms }
-device valve_B: solenoid_valve { connected_to: Y1, response_time: 20ms }
-device cyl_A: cylinder { connected_to: valve_A, stroke_time: 200ms, retract_time: 180ms }
-device cyl_B: cylinder { connected_to: valve_B, stroke_time: 200ms, retract_time: 180ms }
+device valve_A: solenoid_valve { driven_by: Y0, response_time: 20ms }
+device valve_B: solenoid_valve { driven_by: Y1, response_time: 20ms }
+device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
+device cyl_B: cylinder { driven_by: valve_B, stroke_time: 200ms, retract_time: 180ms }
 
 [constraints]
 safety: cyl_A.extended conflicts_with cyl_B.extended

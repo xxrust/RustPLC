@@ -82,7 +82,7 @@
 
 **场景**：
 - 气缸 stroke_time=200ms，上游 valve response_time=20ms，但 `must_complete_within 100ms` → Timing 违反
-- 因果链声明 `Y0 → valve_A → cyl_A → sensor_A_ext`，但 cyl_A 缺少 `connected_to: valve_A` → Causality 断裂
+- 因果链声明 `Y0 → valve_A → cyl_A → sensor_A_ext`，但 cyl_A 缺少 `driven_by: valve_A` → Causality 断裂
 - `must_start_after 200ms` 但前驱 timeout 只有 50ms → Timing must_start_after 违反
 
 **预期**：
@@ -101,7 +101,7 @@
 1. **Safety**：`parallel` 块同时伸出 clamp_A 和 clamp_B，违反 `clamp_A.extended conflicts_with clamp_B.extended`
 2. **Liveness**：`error_recovery` task 的 `wait: sensor_A_released == true` 无 timeout 且无 allow_indefinite_wait
 3. **Timing**：`task.main.clamp_both must_complete_within 50ms`，但 stroke_time=300ms + response_time=25ms = 325ms
-4. **Causality**：声明 `Y2 → valve_C → clamp_B → sensor_B_clamped`，但 clamp_B 缺少 `connected_to: valve_C`
+4. **Causality**：声明 `Y2 → valve_C → clamp_B → sensor_B_clamped`，但 clamp_B 缺少 `driven_by: valve_C`
 
 **拓扑**：
 - 工位 A：Y0 → valve_A → clamp_A → sensor_A_clamped / sensor_A_released

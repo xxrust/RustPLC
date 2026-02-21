@@ -180,9 +180,9 @@ AI will generate a complete `.plc` file through multi-turn dialogue and auto-ver
 ```plc
 [topology]
 device Y0: digital_output
-device valve_A: solenoid_valve { connected_to: Y0, response_time: 20ms }
-device cyl_A: cylinder { connected_to: valve_A, stroke_time: 300ms }
-device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
+device valve_A: solenoid_valve { driven_by: Y0, response_time: 20ms }
+device cyl_A: cylinder { driven_by: valve_A, stroke_time: 300ms }
+device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
 
 [constraints]
 safety:

@@ -62,28 +62,28 @@ device X1: digital_input
 device X2: digital_input
 
 device start_button: digital_input {
-    connected_to: X2
+    driven_by: X2
     debounce: 20ms
 }
 
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 200ms
     retract_time: 180ms
 }
 
 device sensor_A_ext: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: cyl_A.extended
 }
 
 device sensor_A_ret: sensor {
-    connected_to: X1
+    driven_by: X1
     detects: cyl_A.retracted
 }
 
@@ -155,11 +155,11 @@ fn test2a_sequential_cylinders_safety_pass() {
 device Y0: digital_output
 device Y1: digital_output
 
-device valve_A: solenoid_valve { connected_to: Y0, response_time: 15ms }
-device valve_B: solenoid_valve { connected_to: Y1, response_time: 15ms }
+device valve_A: solenoid_valve { driven_by: Y0, response_time: 15ms }
+device valve_B: solenoid_valve { driven_by: Y1, response_time: 15ms }
 
-device cyl_A: cylinder { connected_to: valve_A, stroke_time: 200ms, retract_time: 180ms }
-device cyl_B: cylinder { connected_to: valve_B, stroke_time: 250ms, retract_time: 220ms }
+device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
+device cyl_B: cylinder { driven_by: valve_B, stroke_time: 250ms, retract_time: 220ms }
 
 [constraints]
 
@@ -195,11 +195,11 @@ fn test2b_parallel_cylinders_safety_fail() {
 device Y0: digital_output
 device Y1: digital_output
 
-device valve_A: solenoid_valve { connected_to: Y0, response_time: 15ms }
-device valve_B: solenoid_valve { connected_to: Y1, response_time: 15ms }
+device valve_A: solenoid_valve { driven_by: Y0, response_time: 15ms }
+device valve_B: solenoid_valve { driven_by: Y1, response_time: 15ms }
 
-device cyl_A: cylinder { connected_to: valve_A, stroke_time: 200ms, retract_time: 180ms }
-device cyl_B: cylinder { connected_to: valve_B, stroke_time: 250ms, retract_time: 220ms }
+device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
+device cyl_B: cylinder { driven_by: valve_B, stroke_time: 250ms, retract_time: 220ms }
 
 [constraints]
 
@@ -314,7 +314,7 @@ task spin_b:
 //   - 气缸 stroke_time=200ms + 上游 valve response_time=20ms = 220ms，
 //     但 must_complete_within 100ms → Timing 违反
 //   - 因果链声明 Y0 → valve_A → cyl_A → sensor_A_ext，
-//     但 cyl_A 缺少 connected_to: valve_A → Causality 断裂
+//     但 cyl_A 缺少 driven_by: valve_A → Causality 断裂
 //   - must_start_after 200ms 但前驱 timeout 只有 50ms → Timing must_start_after 违反
 // 验证能力：Timing 和 Causality 引擎能同时工作，各自独立报告问题，
 //           且 Timing 能正确计算上游 response_time 链路时间。
@@ -328,7 +328,7 @@ device Y0: digital_output
 device X0: digital_input
 
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
     response_time: 20ms
 }
 
@@ -338,7 +338,7 @@ device cyl_A: cylinder {
 }
 
 device sensor_A_ext: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: cyl_A.extended
 }
 
@@ -376,7 +376,7 @@ task cooldown:
         "timing 错误应指出超限"
     );
 
-    // Causality 断裂（cyl_A 缺少 connected_to: valve_A）
+    // Causality 断裂（cyl_A 缺少 driven_by: valve_A）
     assert!(
         joined.contains("ERROR [causality]"),
         "应报告 causality 错误"
@@ -422,7 +422,7 @@ task cooldown:
 //   3. Timing：task.main.clamp_both 的 must_complete_within 50ms，
 //      但夹具 stroke_time=300ms + 上游 response_time=25ms = 325ms
 //   4. Causality：声明 Y2 → valve_C → clamp_B → sensor_B_clamped，
-//      但 clamp_B 缺少 connected_to: valve_C
+//      但 clamp_B 缺少 driven_by: valve_C
 //
 // 验证能力：在一个接近真实复杂度的程序上，四项验证引擎全部独立工作，
 //           同时报告所有问题，错误信息包含行号、原因和修复建议。
@@ -442,45 +442,45 @@ device X3: digital_input
 
 # ===== 工位 A 夹具 =====
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
     response_time: 25ms
 }
 
 device clamp_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 300ms
     retract_time: 280ms
 }
 
 device sensor_A_clamped: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: clamp_A.extended
 }
 
 device sensor_A_released: sensor {
-    connected_to: X1
+    driven_by: X1
     detects: clamp_A.retracted
 }
 
 # ===== 工位 B 夹具 =====
 device valve_C: solenoid_valve {
-    connected_to: Y2
+    driven_by: Y2
     response_time: 25ms
 }
 
-# 故意缺少 connected_to: valve_C → 触发 Causality 断裂
+# 故意缺少 driven_by: valve_C → 触发 Causality 断裂
 device clamp_B: cylinder {
     stroke_time: 300ms
     retract_time: 280ms
 }
 
 device sensor_B_clamped: sensor {
-    connected_to: X2
+    driven_by: X2
     detects: clamp_B.extended
 }
 
 device sensor_B_released: sensor {
-    connected_to: X3
+    driven_by: X3
     detects: clamp_B.retracted
 }
 
@@ -552,7 +552,7 @@ task error_recovery:
     // 4. Causality 违反
     assert!(
         joined.contains("ERROR [causality]"),
-        "应报告 causality 错误（clamp_B 缺少 connected_to: valve_C）"
+        "应报告 causality 错误（clamp_B 缺少 driven_by: valve_C）"
     );
 
     assert_all_errors_have_location_and_suggestion(&errors);

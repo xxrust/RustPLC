@@ -1,6 +1,6 @@
 use crate::component_library::{
-    parse_component_library_value, ComponentLibrary, ComponentLibraryIssue,
-    ComponentLibraryValidationError, ComponentType,
+    ComponentLibrary, ComponentLibraryIssue, ComponentLibraryValidationError, ComponentType,
+    parse_component_library_value,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -594,10 +594,11 @@ mod tests {
 }"#,
         )
         .expect_err("invalid direction should fail");
-        assert!(err
-            .issues
-            .iter()
-            .any(|issue| issue.code == "CTOP-CONN-008" && issue.path == "$.connections[0].to"));
+        assert!(
+            err.issues
+                .iter()
+                .any(|issue| issue.code == "CTOP-CONN-008" && issue.path == "$.connections[0].to")
+        );
     }
 
     #[test]
@@ -622,9 +623,10 @@ mod tests {
 }"#,
         )
         .expect_err("missing required input should fail");
-        assert!(err
-            .issues
-            .iter()
-            .any(|issue| issue.code == "CTOP-CONN-009" && issue.path == "$.components[1].id"));
+        assert!(
+            err.issues
+                .iter()
+                .any(|issue| issue.code == "CTOP-CONN-009" && issue.path == "$.components[1].id")
+        );
     }
 }

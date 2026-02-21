@@ -8,23 +8,23 @@ device Y1: digital_output
 device Y2: digital_output
 
 device start_button: digital_input {
-    connected_to: X0
+    driven_by: X0
     debounce: 20ms
 }
 device sensor_extend: digital_input {
-    connected_to: X1
+    driven_by: X1
 }
 device maintenance_reset: digital_input {
-    connected_to: X2
+    driven_by: X2
 }
 device cyl_extend_cmd: digital_output {
-    connected_to: Y0
+    driven_by: Y0
 }
 device cyl_retract_cmd: digital_output {
-    connected_to: Y1
+    driven_by: Y1
 }
 device alarm_light: digital_output {
-    connected_to: Y2
+    driven_by: Y2
 }
 
 [constraints]

@@ -59,13 +59,13 @@ device AI24: analog_input { range: 0..4000000, unit: "count", external: true }
 device AI25: analog_input { range: 0..200000, unit: "count_s", external: true }
 device DI24: digital_input { external: true }
 
-device axis0_enable: digital_output { connected_to: DO24 }
-device axis0_dir: digital_output { connected_to: DO25 }
-device axis0_vel_cmd: analog_output { connected_to: AO24 }
+device axis0_enable: digital_output { driven_by: DO24 }
+device axis0_dir: digital_output { driven_by: DO25 }
+device axis0_vel_cmd: analog_output { driven_by: AO24 }
 
-device axis0_count: analog_input { connected_to: AI24, external: true }
-device axis0_speed: analog_input { connected_to: AI25, external: true }
-device axis0_enc_dir_positive: digital_input { connected_to: DI24, external: true }
+device axis0_count: analog_input { driven_by: AI24, external: true }
+device axis0_speed: analog_input { driven_by: AI25, external: true }
+device axis0_enc_dir_positive: digital_input { driven_by: DI24, external: true }
 
 [constraints]
 

@@ -35,7 +35,9 @@ fn scenario_init_generates_parseable_yaml() {
 
         let out = base.join(format!(
             "{}_{preset}.yaml",
-            plc.file_stem().and_then(|s| s.to_str()).unwrap_or("scenario")
+            plc.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("scenario")
         ));
 
         let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
@@ -64,4 +66,3 @@ fn scenario_init_generates_parseable_yaml() {
         assert!(scenario.duration_ms > 0, "duration_ms should be > 0");
     }
 }
-

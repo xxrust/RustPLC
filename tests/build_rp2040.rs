@@ -11,19 +11,19 @@ device AI0: analog_input { range: 0..100, unit: "bar" }
 device AO0: analog_output { range: 0..10, ramp_time: 500ms, unit: "V" }
 
 device start_button: digital_input {
-    connected_to: X0
+    driven_by: X0
 }
 
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
 }
 
 device sensor_ext: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: cyl_A.extended
 }
 
@@ -115,10 +115,7 @@ fn cli_build_rp2040_emits_expected_artifacts() {
         v.get("runtime_semver").and_then(|v| v.as_str()).is_some(),
         true
     );
-    assert_eq!(
-        v.get("git_commit").and_then(|v| v.as_str()).is_some(),
-        true
-    );
+    assert_eq!(v.get("git_commit").and_then(|v| v.as_str()).is_some(), true);
     assert_eq!(v.get("git_dirty").and_then(|v| v.as_bool()).is_some(), true);
     let sha = v
         .get("plc_sha256")

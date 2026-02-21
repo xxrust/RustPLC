@@ -21,4 +21,3 @@ fn openplc_learnings_wiki_mentions_delivered_capabilities() {
         assert!(doc.contains(needle), "doc should mention `{needle}`");
     }
 }
-

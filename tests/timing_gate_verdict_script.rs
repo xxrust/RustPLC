@@ -74,10 +74,9 @@ fn timing_gate_verdict_passes_when_thresholds_are_satisfied() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let verdict_json: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(&verdict).expect("read timing gate verdict"),
-    )
-    .expect("parse timing gate verdict json");
+    let verdict_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&verdict).expect("read timing gate verdict"))
+            .expect("parse timing gate verdict json");
 
     assert_eq!(
         verdict_json.get("status").and_then(|v| v.as_str()),
@@ -126,10 +125,9 @@ fn timing_gate_verdict_fails_when_thresholds_are_exceeded() {
         "timing gate verdict should fail when thresholds are exceeded"
     );
 
-    let verdict_json: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(&verdict).expect("read timing gate verdict"),
-    )
-    .expect("parse timing gate verdict json");
+    let verdict_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&verdict).expect("read timing gate verdict"))
+            .expect("parse timing gate verdict json");
 
     assert_eq!(
         verdict_json.get("status").and_then(|v| v.as_str()),
@@ -145,9 +143,9 @@ fn timing_gate_verdict_fails_when_thresholds_are_exceeded() {
         .and_then(|v| v.as_array())
         .expect("violations should be array");
     assert!(
-        violations.iter().any(|row| {
-            row.get("metric").and_then(|v| v.as_str()) == Some("exec_us_p99")
-        }),
+        violations
+            .iter()
+            .any(|row| { row.get("metric").and_then(|v| v.as_str()) == Some("exec_us_p99") }),
         "violations should include exec_us_p99 breach"
     );
 }

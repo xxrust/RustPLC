@@ -100,4 +100,3 @@ fn rp2040_motion_minimal_scenarios_cover_nominal_and_fault_paths() {
         "expected two fault scenarios to hit timeout path"
     );
 }
-

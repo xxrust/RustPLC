@@ -310,12 +310,9 @@ fn parses_stepper_multi_sensor_consistency_example_into_verified_ir_json() {
         "verification report should include a status entry for the safety rule"
     );
     assert!(
-        safety_statuses.iter().any(|status| {
-            status["rule"]
-                .as_str()
-                .unwrap_or("")
-                .contains("axis_x.on")
-        }),
+        safety_statuses
+            .iter()
+            .any(|status| { status["rule"].as_str().unwrap_or("").contains("axis_x.on") }),
         "verification report should include the axis_x alarm interlock rule"
     );
     assert_eq!(
@@ -542,12 +539,12 @@ device X0: digital_input
 device X1: digital_input
 
 device valve_glue: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 15ms
 }
 
 device cyl_glue: cylinder {
-    connected_to: valve_glue,
+    driven_by: valve_glue,
     type: double_acting,
     stroke: 50mm,
     stroke_time: 120ms,
@@ -555,12 +552,12 @@ device cyl_glue: cylinder {
 }
 
 device sensor_glue_ext: sensor {
-    connected_to: X0,
+    driven_by: X0,
     detects: cyl_glue.extended
 }
 
 device sensor_glue_ret: sensor {
-    connected_to: X1,
+    driven_by: X1,
     detects: cyl_glue.retracted
 }
 
@@ -600,12 +597,12 @@ device X0: digital_input
 device X1: digital_input
 
 device valve_glue: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 15ms
 }
 
 device cyl_glue: cylinder {
-    connected_to: valve_glue,
+    driven_by: valve_glue,
     type: double_acting,
     stroke: 50mm,
     stroke_time: 120ms,
@@ -613,12 +610,12 @@ device cyl_glue: cylinder {
 }
 
 device sensor_glue_ext: sensor {
-    connected_to: X0,
+    driven_by: X0,
     detects: cyl_glue.extended
 }
 
 device sensor_glue_ret: sensor {
-    connected_to: X1,
+    driven_by: X1,
     detects: cyl_glue.retracted
 }
 

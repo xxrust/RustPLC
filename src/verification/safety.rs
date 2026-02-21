@@ -1385,8 +1385,8 @@ fn z3_sanity_probe() {
 #[cfg(test)]
 mod tests {
     use super::{
-        analog_state_for_value, verify_safety, verify_safety_with_config, SafetyConfig,
-        SafetyModel, SafetyProofLevel, SafetyRuleStatusKind,
+        SafetyConfig, SafetyModel, SafetyProofLevel, SafetyRuleStatusKind, analog_state_for_value,
+        verify_safety, verify_safety_with_config,
     };
     use crate::ir::{SafetyExpr, SafetyRelation, SafetyRule, StateExpr};
     use crate::parser::parse_plc;
@@ -1856,10 +1856,12 @@ task main:
         assert_eq!(report.coverage.degraded_rules, 0);
         assert_eq!(report.coverage.skipped_rules, 0);
         assert_eq!(report.rule_statuses.len(), 2);
-        assert!(report
-            .rule_statuses
-            .iter()
-            .all(|status| matches!(status.status, SafetyRuleStatusKind::Bound)));
+        assert!(
+            report
+                .rule_statuses
+                .iter()
+                .all(|status| matches!(status.status, SafetyRuleStatusKind::Bound))
+        );
         assert!(report.rule_statuses.iter().all(|s| s.reason.is_none()));
     }
 
@@ -1905,10 +1907,12 @@ task main:
         assert_eq!(report.coverage.total_rules, 2);
         assert_eq!(report.coverage.bound_rules, 1);
         assert_eq!(report.coverage.skipped_rules, 1);
-        assert!(report
-            .rule_statuses
-            .iter()
-            .any(|status| matches!(status.status, SafetyRuleStatusKind::Skipped)));
+        assert!(
+            report
+                .rule_statuses
+                .iter()
+                .any(|status| matches!(status.status, SafetyRuleStatusKind::Skipped))
+        );
         assert!(
             report
                 .warnings
@@ -1970,10 +1974,12 @@ task main:
         assert_eq!(report.coverage.bound_rules, 0);
         assert_eq!(report.coverage.degraded_rules, 0);
         assert_eq!(report.coverage.skipped_rules, 2);
-        assert!(report
-            .rule_statuses
-            .iter()
-            .all(|status| matches!(status.status, SafetyRuleStatusKind::Skipped)));
+        assert!(
+            report
+                .rule_statuses
+                .iter()
+                .all(|status| matches!(status.status, SafetyRuleStatusKind::Skipped))
+        );
     }
 
     #[test]

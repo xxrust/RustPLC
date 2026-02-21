@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
+import { persist } from 'zustand/middleware';
 import type { Node, Edge, OnNodesChange, OnEdgesChange } from '@xyflow/react';
-import type { DeviceTags } from '../types';
+import type { DeviceTags, TagDimension } from '../types';
+import {
+  hasLocationPrefix,
+  hasTag,
+  normalizeDeviceTags,
+} from '../utils/deviceTags';
 
 export interface NodeData {
   label: string;
@@ -34,64 +40,106 @@ interface TopologyState {
   deleteNode: (nodeId: string) => void;
   deleteEdge: (edgeId: string) => void;
   setHasUnsavedChanges: (value: boolean) => void;
+  findNodeIdsByTag: (dimension: TagDimension, tag: string) => string[];
+  findNodeIdsByLocationPath: (locationPath: string) => string[];
 }
 
-export const useTopologyStore = create<TopologyState>((set, get) => ({
-  nodes: [],
-  edges: [],
-  selectedNodeId: null,
-  hasUnsavedChanges: false,
+export const useTopologyStore = create<TopologyState>()(
+  persist(
+    (set, get) => ({
+      nodes: [],
+      edges: [],
+      selectedNodeId: null,
+      hasUnsavedChanges: false,
 
-  setNodes: (nodes) => set({ nodes }),
+      setNodes: (nodes) => set({ nodes: nodes.map(normalizeTopologyNode) }),
 
-  setEdges: (edges) => set({ edges }),
+      setEdges: (edges) => set({ edges }),
 
-  onNodesChange: (changes) => {
-    set({
-      nodes: applyNodeChanges(changes, get().nodes) as Node<NodeData>[],
-      hasUnsavedChanges: true,
-    });
-  },
+      onNodesChange: (changes) => {
+        set({
+          nodes: applyNodeChanges(changes, get().nodes) as Node<NodeData>[],
+          hasUnsavedChanges: true,
+        });
+      },
 
-  onEdgesChange: (changes) => {
-    set({
-      edges: applyEdgeChanges(changes, get().edges),
-      hasUnsavedChanges: true,
-    });
-  },
+      onEdgesChange: (changes) => {
+        set({
+          edges: applyEdgeChanges(changes, get().edges),
+          hasUnsavedChanges: true,
+        });
+      },
 
-  setSelectedNodeId: (id) => set({ selectedNodeId: id }),
+      setSelectedNodeId: (id) => set({ selectedNodeId: id }),
 
-  updateNodeData: (nodeId, data) => {
-    set({
-      nodes: get().nodes.map((node) =>
-        node.id === nodeId
-          ? { ...node, data: { ...node.data, ...data } }
-          : node
-      ),
-      hasUnsavedChanges: true,
-    });
-  },
+      updateNodeData: (nodeId, data) => {
+        set({
+          nodes: get().nodes.map((node) =>
+            node.id === nodeId
+              ? normalizeTopologyNode({
+                  ...node,
+                  data: { ...node.data, ...data },
+                })
+              : node
+          ),
+          hasUnsavedChanges: true,
+        });
+      },
 
-  addNode: (node) => {
-    set({ nodes: [...get().nodes, node], hasUnsavedChanges: true });
-  },
+      addNode: (node) => {
+        set({
+          nodes: [...get().nodes, normalizeTopologyNode(node)],
+          hasUnsavedChanges: true,
+        });
+      },
 
-  deleteNode: (nodeId) => {
-    set({
-      nodes: get().nodes.filter((n) => n.id !== nodeId),
-      edges: get().edges.filter((e) => e.source !== nodeId && e.target !== nodeId),
-      selectedNodeId: get().selectedNodeId === nodeId ? null : get().selectedNodeId,
-      hasUnsavedChanges: true,
-    });
-  },
+      deleteNode: (nodeId) => {
+        set({
+          nodes: get().nodes.filter((n) => n.id !== nodeId),
+          edges: get().edges.filter((e) => e.source !== nodeId && e.target !== nodeId),
+          selectedNodeId: get().selectedNodeId === nodeId ? null : get().selectedNodeId,
+          hasUnsavedChanges: true,
+        });
+      },
 
-  deleteEdge: (edgeId) => {
-    set({
-      edges: get().edges.filter((e) => e.id !== edgeId),
-      hasUnsavedChanges: true,
-    });
-  },
+      deleteEdge: (edgeId) => {
+        set({
+          edges: get().edges.filter((e) => e.id !== edgeId),
+          hasUnsavedChanges: true,
+        });
+      },
 
-  setHasUnsavedChanges: (value) => set({ hasUnsavedChanges: value }),
-}));
+      setHasUnsavedChanges: (value) => set({ hasUnsavedChanges: value }),
+
+      findNodeIdsByTag: (dimension, tag) =>
+        get()
+          .nodes
+          .filter((node) => hasTag(node.data.tags, dimension, tag))
+          .map((node) => node.id),
+
+      findNodeIdsByLocationPath: (locationPath) =>
+        get()
+          .nodes
+          .filter((node) => hasLocationPrefix(node.data.tags, locationPath))
+          .map((node) => node.id),
+    }),
+    {
+      name: 'rustplc-topology-storage-v1',
+      partialize: (state) => ({
+        nodes: state.nodes,
+        edges: state.edges,
+        selectedNodeId: state.selectedNodeId,
+      }),
+    }
+  )
+);
+
+function normalizeTopologyNode(node: Node<NodeData>): Node<NodeData> {
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      tags: normalizeDeviceTags(node.data.tags),
+    },
+  };
+}

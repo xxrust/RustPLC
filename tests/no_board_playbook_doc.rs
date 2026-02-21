@@ -21,10 +21,7 @@ fn no_board_playbook_mentions_required_commands_and_they_exist_in_cli_usage() {
         "no-board-gate",
         "release-bundle",
     ] {
-        assert!(
-            doc.contains(needle),
-            "doc should mention `{needle}`"
-        );
+        assert!(doc.contains(needle), "doc should mention `{needle}`");
     }
 
     // CLI usage is printed to stderr.

@@ -261,9 +261,11 @@ task main:
         .as_array()
         .expect("timing warnings should be array");
     assert!(
-        timing_warnings
-            .iter()
-            .any(|w| w["level"] == "warn" && w["message"].as_str().unwrap_or("").contains("runtime budget")),
+        timing_warnings.iter().any(|w| w["level"] == "warn"
+            && w["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("runtime budget")),
         "budget threshold exceed should add warn-level timing warning"
     );
 }

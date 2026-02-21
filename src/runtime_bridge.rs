@@ -209,11 +209,13 @@ fn build_pid_configs(
         };
 
         let parse = |field: &str, value: &str| -> Result<f32, BridgeError> {
-            value.parse::<f32>().map_err(|_| BridgeError::InvalidPidLiteral {
-                pid: pid_name.clone(),
-                field: field.to_string(),
-                value: value.to_string(),
-            })
+            value
+                .parse::<f32>()
+                .map_err(|_| BridgeError::InvalidPidLiteral {
+                    pid: pid_name.clone(),
+                    field: field.to_string(),
+                    value: value.to_string(),
+                })
         };
 
         let pv = resolver.resolve_analog_input_id(&ctx, &loop_spec.pv)?;

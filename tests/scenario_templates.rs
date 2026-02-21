@@ -62,4 +62,3 @@ fn scenario_init_presets_generate_validateable_scenarios() {
         );
     }
 }
-

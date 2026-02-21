@@ -20,36 +20,36 @@ device AI1: analog_input { range: 0..2000, unit: "mm", external: true }         
 device AI2: analog_input { range: 0..5, unit: "code", external: true }          # 0=ok, 1=laser dropout, 2=pos mismatch, ...
 
 # Logical aliases for scenarios/tests.
-device axis_count: analog_input { connected_to: AI0, range: 0..4000000, unit: "count" }
-device laser_pos_mm: analog_input { connected_to: AI1, range: 0..2000, unit: "mm" }
-device sensor_fault_code: analog_input { connected_to: AI2, range: 0..5, unit: "code" }
+device axis_count: analog_input { driven_by: AI0, range: 0..4000000, unit: "count" }
+device laser_pos_mm: analog_input { driven_by: AI1, range: 0..2000, unit: "mm" }
+device sensor_fault_code: analog_input { driven_by: AI2, range: 0..5, unit: "code" }
 
 # Logical devices
 device axis_x: motor {
-    connected_to: Y1
+    driven_by: Y1
     ramp_time: 10ms
 }
 
 device dir_positive: digital_output {
-    connected_to: Y0
+    driven_by: Y0
 }
 
 device move_cmd: digital_output {
-    connected_to: Y2
+    driven_by: Y2
 }
 
 device inpos_x: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: axis_x.position_ok
 }
 
 device alarm_x: sensor {
-    connected_to: X1
+    driven_by: X1
     detects: axis_x.alarm
 }
 
 device pos_consistent: digital_input {
-    connected_to: X2
+    driven_by: X2
 }
 
 [constraints]

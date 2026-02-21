@@ -387,8 +387,8 @@ impl DigitalBurstEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use io_traits::Io;
     use io_traits::DigitalOutputId;
+    use io_traits::Io;
     use runtime_core::{Action, Instr, Program, Runtime, Step, StepId, Task};
 
     #[test]
@@ -442,7 +442,10 @@ inputs:
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+        };
 
         fn run(scenario: &Scenario) -> (Vec<String>, Vec<crate::DigitalEdge>) {
             let mut io = SimIo::new(1, 1, 0, 0);
@@ -532,7 +535,10 @@ faults:
         let observed_a = run_once(yaml);
         let observed_b = run_once(yaml);
 
-        assert_eq!(observed_a, observed_b, "burst schedule should be deterministic");
+        assert_eq!(
+            observed_a, observed_b,
+            "burst schedule should be deterministic"
+        );
         assert_eq!(
             observed_a,
             vec![true, false, true, false, true, false, false, false]

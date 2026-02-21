@@ -53,4 +53,3 @@ fn scenario_expand_writes_parseable_expanded_yaml() {
     );
     let _scenario = sim::Scenario::from_yaml_str(&yaml).expect("expanded scenario should parse");
 }
-

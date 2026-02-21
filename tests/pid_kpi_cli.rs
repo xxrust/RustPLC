@@ -86,9 +86,7 @@ model:
     let steady_err = kpi1["kpi"]["steady_state_error"]
         .as_f64()
         .expect("steady_state_error as f64");
-    let settling = kpi1["kpi"]["settling_time_ms"]
-        .as_u64()
-        .unwrap_or(10_000);
+    let settling = kpi1["kpi"]["settling_time_ms"].as_u64().unwrap_or(10_000);
 
     assert!(
         overshoot <= 20.0,

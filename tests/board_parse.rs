@@ -51,8 +51,5 @@ fn cli_board_parse_converts_trace_and_timing_lines_to_jsonl_artifacts() {
     let timing_first = timing_jsonl.lines().next().expect("timing row");
     let timing: serde_json::Value = serde_json::from_str(timing_first).expect("valid json");
     assert_eq!(timing.get("tick").and_then(|v| v.as_u64()), Some(0));
-    assert_eq!(
-        timing.get("exec_us").and_then(|v| v.as_u64()),
-        Some(10)
-    );
+    assert_eq!(timing.get("exec_us").and_then(|v| v.as_u64()), Some(10));
 }

@@ -140,4 +140,3 @@ fn sim_pid_kpi_doc_command_succeeds() {
             .expect("KPI JSON");
     assert!(kpi.get("kpi").is_some());
 }
-

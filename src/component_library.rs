@@ -331,10 +331,11 @@ mod tests {
 }"#,
         )
         .expect_err("missing schema_version should fail");
-        assert!(err
-            .issues
-            .iter()
-            .any(|issue| issue.code == "CLIB-SCHEMA-001" && issue.path == "$.schema_version"));
+        assert!(
+            err.issues
+                .iter()
+                .any(|issue| issue.code == "CLIB-SCHEMA-001" && issue.path == "$.schema_version")
+        );
     }
 
     #[test]
@@ -346,10 +347,11 @@ mod tests {
 }"#,
         )
         .expect_err("components type mismatch should fail");
-        assert!(err
-            .issues
-            .iter()
-            .any(|issue| issue.code == "CLIB-COMP-002" && issue.path == "$.components"));
+        assert!(
+            err.issues
+                .iter()
+                .any(|issue| issue.code == "CLIB-COMP-002" && issue.path == "$.components")
+        );
     }
 
     #[test]
@@ -364,10 +366,11 @@ mod tests {
 }"#,
         )
         .expect_err("duplicate IDs should fail");
-        assert!(err
-            .issues
-            .iter()
-            .any(|issue| issue.code == "CLIB-COMP-006" && issue.path == "$.components[1].id"));
+        assert!(
+            err.issues
+                .iter()
+                .any(|issue| issue.code == "CLIB-COMP-006" && issue.path == "$.components[1].id")
+        );
     }
 
     #[test]
@@ -381,9 +384,10 @@ mod tests {
 }"#,
         )
         .expect_err("unsupported type should fail");
-        assert!(err
-            .issues
-            .iter()
-            .any(|issue| issue.code == "CLIB-COMP-010" && issue.path == "$.components[0].type"));
+        assert!(
+            err.issues
+                .iter()
+                .any(|issue| issue.code == "CLIB-COMP-010" && issue.path == "$.components[0].type")
+        );
     }
 }

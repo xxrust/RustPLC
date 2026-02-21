@@ -210,10 +210,7 @@ pub fn compute_pid_kpi(setpoint: f32, tick_ms: u64, pv_samples: &[f32]) -> PidKp
     let overshoot_percent = if setpoint.abs() < 1e-6 {
         0.0
     } else if setpoint >= 0.0 {
-        let peak = pv_samples
-            .iter()
-            .copied()
-            .fold(f32::NEG_INFINITY, f32::max);
+        let peak = pv_samples.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         ((peak - setpoint).max(0.0) / setpoint.abs()) * 100.0
     } else {
         let trough = pv_samples.iter().copied().fold(f32::INFINITY, f32::min);
@@ -296,7 +293,11 @@ trait ProcessModel {
     fn step(&mut self, u: f32) -> f32;
 }
 
-fn model_from_config(config: &ProcessModelConfig, tick_ms: u64, initial: f32) -> Box<dyn ProcessModel> {
+fn model_from_config(
+    config: &ProcessModelConfig,
+    tick_ms: u64,
+    initial: f32,
+) -> Box<dyn ProcessModel> {
     match config {
         ProcessModelConfig::FirstOrder { gain, tau_ms } => Box::new(FirstOrderModel {
             gain: *gain,

@@ -3530,14 +3530,18 @@ task ready:
         let program = parse_plc(input).expect("PRD 5.5.1 示例应能成功解析为 AST");
         let state_machine = build_state_machine(&program).expect("应能从 5.5.1 示例构建状态机");
 
-        assert!(state_machine
-            .states
-            .iter()
-            .any(|state| state.task_name == "init" && state.step_name == "extend_A"));
-        assert!(state_machine
-            .states
-            .iter()
-            .any(|state| state.task_name == "init" && state.step_name == "retract_B"));
+        assert!(
+            state_machine
+                .states
+                .iter()
+                .any(|state| state.task_name == "init" && state.step_name == "extend_A")
+        );
+        assert!(
+            state_machine
+                .states
+                .iter()
+                .any(|state| state.task_name == "init" && state.step_name == "retract_B")
+        );
 
         let has_wait_transition = state_machine.transitions.iter().any(|transition| {
             transition.from.task_name == "init"

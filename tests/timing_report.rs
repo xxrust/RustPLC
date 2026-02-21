@@ -66,4 +66,3 @@ fn timing_report_generates_expected_stats_from_tick_timing_jsonl() {
     assert_eq!(v.get("exec_us_p99").and_then(|x| x.as_u64()), Some(100));
     assert_eq!(v.get("exec_us_mean").and_then(|x| x.as_f64()), Some(55.0));
 }
-

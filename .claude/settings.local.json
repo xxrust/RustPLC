@@ -47,7 +47,17 @@
       "Bash(node -e:*)",
       "Bash(npx tsc:*)",
       "Bash(taskkill:*)",
-      "Bash(npx vite build)"
+      "Bash(npx vite build)",
+      "Bash(npm run dev)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(tasklist:*)",
+      "Bash(npm run type-check:*)",
+      "Bash(npm run:*)",
+      "Bash(/tmp/fix_summary.md:*)",
+      "Bash(/tmp/visual_test.html:*)",
+      "Bash(git checkout:*)",
+      "Bash(git revert:*)"
     ]
   }
 }

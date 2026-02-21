@@ -5,7 +5,11 @@ import { useTopologyStore } from '../stores/topologyStore';
 import { topologyApi } from '../services/api';
 import ValidationErrorPanel from './ValidationErrorPanel';
 import { ProjectSelector } from './ProjectSelector';
-import type { ComponentTopology } from '../types';
+import {
+  TOPOLOGY_TAGS_SCHEMA_VERSION,
+  type ComponentTopology,
+} from '../types';
+import { normalizeDeviceTags } from '../utils/deviceTags';
 
 interface Tab {
   id: string;
@@ -56,11 +60,15 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
       // Convert React Flow state to ComponentTopology format
       const topology: ComponentTopology = {
         schema_version: 1,
+        tags_schema_version: TOPOLOGY_TAGS_SCHEMA_VERSION,
         component_library: { schema_version: 1, components: [] },
         components: nodes.map((n) => ({
           id: n.id,
           component_id: n.type || 'generic',
-          params: n.data,
+          params: {
+            ...n.data,
+            tags: normalizeDeviceTags(n.data.tags),
+          },
           position: n.position,
         })),
         connections: edges.map((e) => ({

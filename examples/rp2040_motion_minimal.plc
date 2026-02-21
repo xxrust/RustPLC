@@ -23,17 +23,17 @@ device AI26: analog_input { range: 0..4000000, unit: "count", external: true } #
 device X26: digital_input { external: true }                                    # axis1 enc_dir_positive
 
 # Logical aliases
-device axis0_enable: digital_output { connected_to: Y24 }
-device axis0_dir: digital_output { connected_to: Y25 }
-device axis0_vel_cmd: analog_output { connected_to: AO24, range: 0..20000, unit: "step_s" }
-device axis0_count: analog_input { connected_to: AI24, range: 0..4000000, unit: "count", external: true }
-device axis0_enc_dir_positive: digital_input { connected_to: X24, external: true }
+device axis0_enable: digital_output { driven_by: Y24 }
+device axis0_dir: digital_output { driven_by: Y25 }
+device axis0_vel_cmd: analog_output { driven_by: AO24, range: 0..20000, unit: "step_s" }
+device axis0_count: analog_input { driven_by: AI24, range: 0..4000000, unit: "count", external: true }
+device axis0_enc_dir_positive: digital_input { driven_by: X24, external: true }
 
-device axis1_enable: digital_output { connected_to: Y26 }
-device axis1_dir: digital_output { connected_to: Y27 }
-device axis1_vel_cmd: analog_output { connected_to: AO26, range: 0..20000, unit: "step_s" }
-device axis1_count: analog_input { connected_to: AI26, range: 0..4000000, unit: "count", external: true }
-device axis1_enc_dir_positive: digital_input { connected_to: X26, external: true }
+device axis1_enable: digital_output { driven_by: Y26 }
+device axis1_dir: digital_output { driven_by: Y27 }
+device axis1_vel_cmd: analog_output { driven_by: AO26, range: 0..20000, unit: "step_s" }
+device axis1_count: analog_input { driven_by: AI26, range: 0..4000000, unit: "count", external: true }
+device axis1_enc_dir_positive: digital_input { driven_by: X26, external: true }
 
 [constraints]
 

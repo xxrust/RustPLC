@@ -147,7 +147,9 @@ pub fn generate_program_module(
     out.push_str("  ];\n\n");
 
     if program.pid_loops.is_empty() {
-        out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };\n");
+        out.push_str(
+            "  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };\n",
+        );
     } else {
         out.push_str(&format!(
             "  static PID_LOOPS: [PidConfig; {}] = [\n",
@@ -340,7 +342,10 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+        };
 
         let src = generate_program_module(&PROGRAM, "gen").expect("codegen ok");
         // Parse the generated source. We treat it as a standalone item file.

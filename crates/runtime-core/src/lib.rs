@@ -551,7 +551,10 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+        };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
@@ -611,7 +614,10 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+        };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
@@ -658,7 +664,10 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+        };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
@@ -704,7 +713,10 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+        };
 
         let mut io = MemIo::new();
         io.ai[0] = 90.0;
@@ -748,7 +760,10 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+        };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();

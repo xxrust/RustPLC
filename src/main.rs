@@ -5,7 +5,7 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program,
 };
-use rust_plc::verification::{verify_all, VerificationSummary, WarningEntry, WarningLevel};
+use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
@@ -19,25 +19,25 @@ use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, 
 use petgraph::Direction;
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::alarm_runtime::{
-    build_alarm_event, AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity,
+    AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity, build_alarm_event,
 };
-use rust_plc::component_diagnostics::{diagnose_component_sim, ComponentDiagnosisReport};
+use rust_plc::component_diagnostics::{ComponentDiagnosisReport, diagnose_component_sim};
 use rust_plc::component_scenario::{parse_component_scenario_json, write_component_scenario_json};
-use rust_plc::component_sim::{run_component_simulation, ComponentSimReport};
+use rust_plc::component_sim::{ComponentSimReport, run_component_simulation};
 use rust_plc::component_topology::{parse_component_topology_json, write_component_topology_json};
 use rust_plc::diagnostics::{
-    diagnose, DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport,
-    EvidenceInputKind, EvidenceSource, IoSnapshotArtifact, IoTickSnapshot,
+    DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport, EvidenceInputKind,
+    EvidenceSource, IoSnapshotArtifact, IoTickSnapshot, diagnose,
 };
 use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
 use rust_plc::sequence_lint::{
-    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
+    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
 };
-use rust_plc::sim_regress::{run_sim_regress_with_options, SimRegressOptions, SimRegressSummary};
-use rust_plc::tick_timing::{parse_tick_timing_jsonl, to_tick_timing_jsonl, TickTimingSample};
-use rust_plc::timing_report::{build_timing_report, TimingReport};
+use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
+use rust_plc::tick_timing::{TickTimingSample, parse_tick_timing_jsonl, to_tick_timing_jsonl};
+use rust_plc::timing_report::{TimingReport, build_timing_report};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -7726,7 +7726,7 @@ fn format_component_sim_error(err: &rust_plc::component_sim::ComponentSimError) 
 }
 
 fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
-    use rust_plc::iec_address::{parse_iec_address, LogicalChannelKind};
+    use rust_plc::iec_address::{LogicalChannelKind, parse_iec_address};
     use toml::value::Table;
 
     let root = v

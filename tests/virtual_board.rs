@@ -79,7 +79,10 @@ inputs:
     assert!(meta.exists(), "virtual_board_meta.json should exist");
 
     let log_text = fs::read_to_string(&board_log).expect("read board.log");
-    assert!(log_text.contains("TRACE "), "board log should contain TRACE lines");
+    assert!(
+        log_text.contains("TRACE "),
+        "board log should contain TRACE lines"
+    );
 
     let trace_text = fs::read_to_string(&board_trace).expect("read board trace");
     assert!(
@@ -89,7 +92,10 @@ inputs:
     let tick_timing_text = fs::read_to_string(&tick_timing).expect("read tick timing");
     let rows = rust_plc::tick_timing::parse_tick_timing_jsonl(&tick_timing_text)
         .expect("tick timing jsonl should parse");
-    assert!(!rows.is_empty(), "tick timing should contain at least one row");
+    assert!(
+        !rows.is_empty(),
+        "tick timing should contain at least one row"
+    );
     assert!(
         rows.windows(2).all(|w| w[0].tick < w[1].tick),
         "tick timing rows should be in ascending tick order"
@@ -130,12 +136,12 @@ inputs:
 
     // board-parse artifacts should exactly match virtual-board artifacts (same serializers).
     let virtual_trace = fs::read_to_string(&board_trace).expect("read virtual board trace");
-    let parsed_trace = fs::read_to_string(parsed_dir.join("board_trace.jsonl"))
-        .expect("read parsed board trace");
+    let parsed_trace =
+        fs::read_to_string(parsed_dir.join("board_trace.jsonl")).expect("read parsed board trace");
     assert_eq!(virtual_trace, parsed_trace);
 
     let virtual_timing = fs::read_to_string(&tick_timing).expect("read virtual tick timing");
-    let parsed_timing = fs::read_to_string(parsed_dir.join("tick_timing.jsonl"))
-        .expect("read parsed tick timing");
+    let parsed_timing =
+        fs::read_to_string(parsed_dir.join("tick_timing.jsonl")).expect("read parsed tick timing");
     assert_eq!(virtual_timing, parsed_timing);
 }

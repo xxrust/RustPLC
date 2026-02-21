@@ -3,7 +3,7 @@
 device X0: digital_input
 
 device start_button: digital_input {
-    connected_to: X0
+    driven_by: X0
 }
 
 [constraints]

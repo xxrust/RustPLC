@@ -53,4 +53,3 @@ TIMING exec_us=120 tick=1 slack_us=880 ts_start_us=1000 ts_end_us=1120 overrun=t
         assert_eq!(parsed.timing_rows[1].overrun, true);
     }
 }
-

@@ -269,6 +269,9 @@ task main:
                 ],
             },
         );
-        assert!(findings.is_empty(), "exempt step should not produce finding");
+        assert!(
+            findings.is_empty(),
+            "exempt step should not produce finding"
+        );
     }
 }

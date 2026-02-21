@@ -19,112 +19,112 @@ device X10: digital_input
 device X11: digital_input
 
 device start_button: digital_input {
-    connected_to: X11
+    driven_by: X11
     debounce: 20ms
 }
 
 device motor_conv: motor {
-    connected_to: Y0
+    driven_by: Y0
     rated_speed: 30rpm
     ramp_time: 50ms
 }
 
 device sensor_pos1: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: motor_conv.position_A
 }
 
 device sensor_pos2: sensor {
-    connected_to: X1
+    driven_by: X1
     detects: motor_conv.position_B
 }
 
 device sensor_exit: sensor {
-    connected_to: X2
+    driven_by: X2
     detects: motor_conv.position_C
 }
 
 device valve_clamp1: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_clamp1: cylinder {
-    connected_to: valve_clamp1
+    driven_by: valve_clamp1
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_clamp1_ext: sensor {
-    connected_to: X3
+    driven_by: X3
     detects: cyl_clamp1.extended
 }
 
 device sensor_clamp1_ret: sensor {
-    connected_to: X4
+    driven_by: X4
     detects: cyl_clamp1.retracted
 }
 
 device valve_stamp: solenoid_valve {
-    connected_to: Y2
+    driven_by: Y2
     response_time: 20ms
 }
 
 device cyl_stamp: cylinder {
-    connected_to: valve_stamp
+    driven_by: valve_stamp
     stroke_time: 200ms
     retract_time: 200ms
 }
 
 device sensor_stamp_ext: sensor {
-    connected_to: X5
+    driven_by: X5
     detects: cyl_stamp.extended
 }
 
 device sensor_stamp_ret: sensor {
-    connected_to: X6
+    driven_by: X6
     detects: cyl_stamp.retracted
 }
 
 device valve_clamp2: solenoid_valve {
-    connected_to: Y3
+    driven_by: Y3
     response_time: 20ms
 }
 
 device cyl_clamp2: cylinder {
-    connected_to: valve_clamp2
+    driven_by: valve_clamp2
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_clamp2_ext: sensor {
-    connected_to: X7
+    driven_by: X7
     detects: cyl_clamp2.extended
 }
 
 device sensor_clamp2_ret: sensor {
-    connected_to: X8
+    driven_by: X8
     detects: cyl_clamp2.retracted
 }
 
 device valve_bend: solenoid_valve {
-    connected_to: Y4
+    driven_by: Y4
     response_time: 20ms
 }
 
 device cyl_bend: cylinder {
-    connected_to: valve_bend
+    driven_by: valve_bend
     stroke_time: 500ms
     retract_time: 500ms
 }
 
 device sensor_bend_ext: sensor {
-    connected_to: X9
+    driven_by: X9
     detects: cyl_bend.extended
 }
 
 device sensor_bend_ret: sensor {
-    connected_to: X10
+    driven_by: X10
     detects: cyl_bend.retracted
 }
 

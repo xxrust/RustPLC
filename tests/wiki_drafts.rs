@@ -44,7 +44,11 @@ fn extract_fenced_blocks(markdown: &str, fence_lang: &str) -> Vec<String> {
 #[test]
 fn wiki_draft_stepper_ab_encoder_contains_parseable_plc_and_key_terms() {
     let doc = read_doc("docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md");
-    for needle in ["docs/stepper_ab_encoder.md", "zone_code", "Bi-directional Interlock"] {
+    for needle in [
+        "docs/stepper_ab_encoder.md",
+        "zone_code",
+        "Bi-directional Interlock",
+    ] {
         assert!(doc.contains(needle), "wiki draft should mention `{needle}`");
     }
 
@@ -65,7 +69,11 @@ fn wiki_draft_stepper_ab_encoder_contains_parseable_plc_and_key_terms() {
 #[test]
 fn wiki_draft_topology_abstraction_contains_parseable_plc_and_key_terms() {
     let doc = read_doc("docs/wiki/Topology-Abstraction-PLS-Angle-Distance.md");
-    for needle in ["docs/stepper_ab_encoder.md", "Primary + Derived", "pos_consistent"] {
+    for needle in [
+        "docs/stepper_ab_encoder.md",
+        "Primary + Derived",
+        "pos_consistent",
+    ] {
         assert!(doc.contains(needle), "wiki draft should mention `{needle}`");
     }
 
@@ -82,4 +90,3 @@ fn wiki_draft_topology_abstraction_contains_parseable_plc_and_key_terms() {
         }
     }
 }
-
