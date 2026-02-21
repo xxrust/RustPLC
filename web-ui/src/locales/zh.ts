@@ -416,6 +416,13 @@ export const zh = {
       fitView: '适应视图',
       lockView: '锁定视图',
       unlockView: '解锁视图',
+      portFallbackNodesNotice:
+        '{{count}} 个节点缺少显式端口元数据，连线绑定将使用降级模式。',
+      portFallbackEdgeWarning: '缺少显式端口元数据，已按降级模式创建连线。',
+      portTypeMismatch: '端口类型不匹配：{{source}} -> {{target}}。',
+      portRoleMismatch: '连线方向与端口角色不匹配。',
+      portBindingUnavailable: '当前节点对无法唯一绑定 source/target 端口。',
+      dismissWarning: '关闭告警',
     },
 
     // Notifications

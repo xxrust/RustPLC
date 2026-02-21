@@ -77,8 +77,24 @@ export const TOPOLOGY_TAGS_SCHEMA_VERSION = 1;
 
 export type TagDimension = keyof DeviceTags;
 
+export type PortSignalType =
+  | 'digital'
+  | 'analog'
+  | 'pneumatic'
+  | 'logical'
+  | 'generic';
+
+export type DevicePortRole = 'producer' | 'consumer' | 'bidirectional';
+
+export interface DevicePortMetadata {
+  id: string;
+  type: PortSignalType;
+  role: DevicePortRole;
+}
+
 export interface TopologyComponentParams extends Record<string, unknown> {
   tags?: DeviceTags;
+  ports?: DevicePortMetadata[];
 }
 
 export interface ComponentTopology {

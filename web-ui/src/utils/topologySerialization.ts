@@ -5,6 +5,7 @@ import {
 } from '../types';
 import type { NodeData } from '../stores/topologyStore';
 import { normalizeDeviceTags } from './deviceTags';
+import { normalizeDevicePorts } from './portContract';
 
 export function toComponentTopology(
   nodes: Array<Node<NodeData>>,
@@ -17,10 +18,7 @@ export function toComponentTopology(
     components: nodes.map((node) => ({
       id: node.id,
       component_id: node.type || 'generic',
-      params: {
-        ...node.data,
-        tags: normalizeDeviceTags(node.data.tags),
-      },
+      params: sanitizeNodeParams(node.data),
       position: node.position,
     })),
     connections: edges.map((edge) => {
@@ -49,6 +47,27 @@ export function toComponentTopology(
       return connection;
     }),
   };
+}
+
+function sanitizeNodeParams(nodeData: NodeData): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = { ...nodeData };
+  delete sanitized.portContractFallback;
+
+  const normalizedTags = normalizeDeviceTags(nodeData.tags);
+  sanitized.tags = normalizedTags;
+
+  if (nodeData.portContractFallback) {
+    delete sanitized.ports;
+  } else {
+    const ports = normalizeDevicePorts(nodeData.ports);
+    if (ports.length > 0) {
+      sanitized.ports = ports;
+    } else {
+      delete sanitized.ports;
+    }
+  }
+
+  return sanitized;
 }
 
 export function downloadTopologyAsJson(

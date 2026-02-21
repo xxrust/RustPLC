@@ -16,6 +16,7 @@ import { useAppStore } from '../stores/appStore';
 import { topologyApi, traceApi, runApi } from '../services/api';
 import type { NodeData } from '../stores/topologyStore';
 import { normalizeDeviceTags } from '../utils/deviceTags';
+import { getEdgeSignalLabel } from '../utils/portContract';
 
 interface Tab {
   id: string;
@@ -438,6 +439,10 @@ function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ 
       id: `e-${i}`,
       source: normalizeEndpointId(conn.from),
       target: normalizeEndpointId(conn.to),
+      data:
+        typeof conn.relation === 'string' && conn.relation
+          ? { relation: conn.relation }
+          : undefined,
     };
     if (typeof conn.from_port === 'string' && conn.from_port) {
       edge.sourceHandle = conn.from_port;
@@ -445,9 +450,7 @@ function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ 
     if (typeof conn.to_port === 'string' && conn.to_port) {
       edge.targetHandle = conn.to_port;
     }
-    if (typeof conn.signal === 'string' && conn.signal) {
-      edge.label = conn.signal;
-    }
+    edge.label = getEdgeSignalLabel(conn.from_port, conn.to_port, conn.signal);
     return edge;
   });
   return { nodes, edges };

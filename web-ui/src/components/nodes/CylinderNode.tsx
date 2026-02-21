@@ -1,7 +1,7 @@
 import React from 'react';
-import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import type { NodeData } from '../../stores/topologyStore';
+import NodePortHandles, { PortMetadataFallbackBadge } from './NodePortHandles';
 
 const statusColor: Record<string, string> = {
   extended: '#00bcd4',
@@ -26,8 +26,10 @@ const CylinderNode: React.FC<NodeProps> = ({ data, selected }) => {
         borderRadius: 6,
         minWidth: 120,
         fontFamily: 'Inter, sans-serif',
+        position: 'relative',
       }}
     >
+      <PortMetadataFallbackBadge visible={Boolean(d.portContractFallback)} />
       {/* Header */}
       <div
         style={{
@@ -87,9 +89,7 @@ const CylinderNode: React.FC<NodeProps> = ({ data, selected }) => {
         </div>
       </div>
 
-      <Handle type="target" id="cmd" position={Position.Left} style={{ background: '#00bcd4', width: 8, height: 8, top: '50%' }} />
-      <Handle type="source" id="extended" position={Position.Right} style={{ background: '#00bcd4', width: 8, height: 8, top: '30%' }} />
-      <Handle type="source" id="retracted" position={Position.Right} style={{ background: '#a0a0a0', width: 8, height: 8, top: '70%' }} />
+      <NodePortHandles ports={d.ports} />
     </div>
   );
 };

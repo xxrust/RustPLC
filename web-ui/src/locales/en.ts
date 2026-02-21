@@ -418,6 +418,15 @@ export const en = {
       fitView: 'Fit View',
       lockView: 'Lock View',
       unlockView: 'Unlock View',
+      portFallbackNodesNotice:
+        '{{count}} node(s) are using fallback port contracts; edge binding is degraded.',
+      portFallbackEdgeWarning:
+        'Missing explicit port metadata; edge added in degraded mode.',
+      portTypeMismatch: 'Port type mismatch: {{source}} -> {{target}}.',
+      portRoleMismatch: 'Connection direction does not match port role.',
+      portBindingUnavailable:
+        'Cannot bind edge to unique source/target handles for this node pair.',
+      dismissWarning: 'Dismiss warning',
     },
 
     // Notifications

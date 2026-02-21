@@ -11,6 +11,7 @@
 - 前端涉及拓扑导出/保存/写回时，统一复用 `web-ui/src/utils/topologySerialization.ts` 的 `toComponentTopology`，避免 edges 的 `signal/relation/from_port/to_port` 序列化口径不一致。
 - 画布级可视化状态（过滤/分组高亮/区域定位）应放在 store，`TopologyCanvas` 仅基于 state 派生 `renderNodes/renderEdges`（`hidden + style`），避免污染持久化拓扑数据。
 - `parse-plc` API 契约回归建议直接在 `crates/web-server/src/main.rs` 调用 `parse_plc_topology(Json(ParsePlcTopologyRequest))` 断言 JSON 字段，避免起服务端到端测试成本。
+- 前端端口契约应在 `topologyStore.normalizeTopologyNode` 中统一通过 `resolveNodePorts` 归一化，并在导出时去除 `portContractFallback` 推导字段，避免把降级推断反写进持久化拓扑。
 
 Started: Sat Feb 21 17:59:17 CST 2026
 
@@ -241,4 +242,40 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `cargo clippy` is not installed in this environment; keep quality gate with `cargo check` + `cargo test` + `rustfmt --check` and record lint-tooling gap.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `examples/two_cylinder.plc` is a stable fixture for verifying `cyl_*.extended/retracted` detect-link metadata in parse-plc API output.
+---
+## 2026-02-22 01:27:52 CST - US-012
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a frontend port-contract layer (`portContract.ts`) and dynamic handle renderer (`NodePortHandles`) so cylinder/sensor/switch/stepper/generic nodes all bind handles from port metadata (with fallback defaults).
+  - Refactored topology store normalization to always resolve node ports and mark `portContractFallback`; canvas now surfaces fallback badges/node outlines and a global degraded-contract notice.
+  - Reworked canvas connection flow to enforce port role + signal type compatibility, bind `sourceHandle`/`targetHandle`, and auto-fill edge labels from `signal/sourceHandle/targetHandle` priority.
+  - Updated topology hydration/serialization to preserve relation metadata and only persist explicit ports (drop fallback-derived contracts on export/write-back).
+  - Added i18n copy for port mismatch/fallback warnings and captured browser validation screenshot `output/playwright/us-012-port-contract.png`.
+- Files changed
+  - `web-ui/src/utils/portContract.ts`
+  - `web-ui/src/components/nodes/NodePortHandles.tsx`
+  - `web-ui/src/components/nodes/CylinderNode.tsx`
+  - `web-ui/src/components/nodes/SensorNode.tsx`
+  - `web-ui/src/components/nodes/SwitchNode.tsx`
+  - `web-ui/src/components/nodes/StepperNode.tsx`
+  - `web-ui/src/components/nodes/GenericNode.tsx`
+  - `web-ui/src/components/nodes/InputTerminalNode.tsx`
+  - `web-ui/src/components/nodes/OutputTerminalNode.tsx`
+  - `web-ui/src/components/canvas/TopologyCanvas.tsx`
+  - `web-ui/src/stores/topologyStore.ts`
+  - `web-ui/src/layouts/IDDELayout.tsx`
+  - `web-ui/src/utils/topologySerialization.ts`
+  - `web-ui/src/types/index.ts`
+  - `web-ui/src/locales/en.ts`
+  - `web-ui/src/locales/zh.ts`
+  - `output/playwright/us-012-port-contract.png`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Port-level UX validations are best centralized in `TopologyCanvas.onConnect` so both drag-created edges and warning UX stay aligned with store serialization contracts.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Full `cargo test` currently fails in this worktree because pre-existing doc relocations removed `docs/hil_regression.md`; use scoped checks (`cargo test --lib`) when story scope is frontend-only and doc fixtures are externally modified.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Browser validation can reliably exercise port-contract behavior on the default demo canvas (no backend project needed), including handle coverage, fallback warning, and type-mismatch rejection.
 ---

@@ -2,17 +2,24 @@ import { create } from 'zustand';
 import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import { persist } from 'zustand/middleware';
 import type { Node, Edge, OnNodesChange, OnEdgesChange } from '@xyflow/react';
-import type { DeviceTags, TagDimension } from '../types';
+import type {
+  DevicePortMetadata,
+  DeviceTags,
+  TagDimension,
+} from '../types';
 import {
   hasLocationPrefix,
   hasTag,
   normalizeDeviceTags,
 } from '../utils/deviceTags';
+import { resolveNodePorts } from '../utils/portContract';
 
 export interface NodeData {
   label: string;
   type: string;
   tags?: DeviceTags;
+  ports?: DevicePortMetadata[];
+  portContractFallback?: boolean;
   status?: string;
   value?: number | boolean;
   [key: string]: any;
@@ -253,11 +260,14 @@ export const useTopologyStore = create<TopologyState>()(
 );
 
 function normalizeTopologyNode(node: Node<NodeData>): Node<NodeData> {
+  const resolvedPorts = resolveNodePorts(node.type, node.data.ports);
   return {
     ...node,
     data: {
       ...node.data,
       tags: normalizeDeviceTags(node.data.tags),
+      ports: resolvedPorts.ports,
+      portContractFallback: resolvedPorts.usedFallbackContract,
     },
   };
 }

@@ -27,12 +27,21 @@ import GenericNode from '../nodes/GenericNode';
 import InputTerminalNode from '../nodes/InputTerminalNode';
 import OutputTerminalNode from '../nodes/OutputTerminalNode';
 import ContextMenu, { type MenuItem } from '../ContextMenu';
+import type { NodeData } from '../../stores/topologyStore';
 import {
   buildTagGroupColorMap,
   getPrimaryTagValue,
   resolveLocationFocusNodeIds,
   resolveTagFilterNodeIds,
 } from '../../utils/tagVisualization';
+import {
+  canPortConsume,
+  canPortProduce,
+  findPortById,
+  getEdgeSignalLabel,
+  isPortTypeCompatible,
+} from '../../utils/portContract';
+import type { DevicePortMetadata } from '../../types';
 
 const nodeTypes = {
   cylinder: CylinderNode,
@@ -44,6 +53,13 @@ const nodeTypes = {
   input_terminal: InputTerminalNode,
   output_terminal: OutputTerminalNode,
 };
+
+interface PortResolution {
+  handleId?: string;
+  port?: DevicePortMetadata;
+  usedFallbackContract: boolean;
+  inferredHandle: boolean;
+}
 
 const TopologyCanvas: React.FC = () => {
   const { t } = useTranslation();
@@ -71,6 +87,20 @@ const TopologyCanvas: React.FC = () => {
     y: number;
     node: Node;
   } | null>(null);
+  const [connectionWarning, setConnectionWarning] = useState<string | null>(null);
+
+  const nodesById = useMemo(
+    () => new Map(nodes.map((node) => [node.id, node])),
+    [nodes]
+  );
+
+  const fallbackPortNodeCount = useMemo(
+    () =>
+      nodes.filter((node) =>
+        Boolean((node.data as NodeData | undefined)?.portContractFallback)
+      ).length,
+    [nodes]
+  );
 
   const filteredNodeIds = useMemo(() => {
     if (!tagFilter.enabled) {
@@ -121,9 +151,16 @@ const TopologyCanvas: React.FC = () => {
           tagGrouping.enabled && nodeGroup
             ? tagGroupColorMap.get(nodeGroup)
             : undefined;
+        const usesFallbackPorts = Boolean(
+          (node.data as NodeData | undefined)?.portContractFallback
+        );
 
         if (groupColor) {
           style.boxShadow = `0 0 0 2px ${groupColor}66`;
+        }
+        if (usesFallbackPorts) {
+          style.outline = '1px dashed #faad14';
+          style.outlineOffset = 2;
         }
 
         if (focusSets) {
@@ -158,8 +195,34 @@ const TopologyCanvas: React.FC = () => {
         }
 
         const style: React.CSSProperties = { ...(edge.style || {}) };
+        const sourceNode = nodesById.get(edge.source);
+        const targetNode = nodesById.get(edge.target);
+        const sourceData = sourceNode?.data as NodeData | undefined;
+        const targetData = targetNode?.data as NodeData | undefined;
+        const sourceHandle = normalizeHandleId(edge.sourceHandle);
+        const targetHandle = normalizeHandleId(edge.targetHandle);
+        const sourcePort = findPortById(sourceData?.ports, sourceHandle);
+        const targetPort = findPortById(targetData?.ports, targetHandle);
+        const fallbackBinding =
+          Boolean(sourceData?.portContractFallback) ||
+          Boolean(targetData?.portContractFallback) ||
+          !sourcePort ||
+          !targetPort;
+        const typeMismatch =
+          Boolean(sourcePort && targetPort) &&
+          !isPortTypeCompatible(sourcePort, targetPort);
+
+        if (fallbackBinding) {
+          style.strokeDasharray = '6 4';
+          style.stroke = '#faad14';
+        }
+        if (typeMismatch) {
+          style.strokeDasharray = '6 4';
+          style.stroke = '#ff4d4f';
+          style.strokeWidth = 2.4;
+        }
+
         if (tagGrouping.enabled) {
-          const sourceNode = nodes.find((node) => node.id === edge.source);
           const sourceGroup = sourceNode
             ? getPrimaryTagValue(sourceNode.data?.tags, tagGrouping.dimension)
             : null;
@@ -185,10 +248,19 @@ const TopologyCanvas: React.FC = () => {
 
         return {
           ...nextEdge,
+          label: getEdgeSignalLabel(sourceHandle, targetHandle, edge.label),
           style,
         };
       }),
-    [edges, filteredNodeIds, focusSets, nodes, tagGroupColorMap, tagGrouping.dimension, tagGrouping.enabled]
+    [
+      edges,
+      filteredNodeIds,
+      focusSets,
+      nodesById,
+      tagGroupColorMap,
+      tagGrouping.dimension,
+      tagGrouping.enabled,
+    ]
   );
 
   // Delete key handler
@@ -250,9 +322,87 @@ const TopologyCanvas: React.FC = () => {
 
   const onConnect = useCallback(
     (connection: Connection) => {
-      setEdges(addEdge({ ...connection, id: `e-${Date.now()}` }, edges));
+      if (!connection.source || !connection.target) {
+        return;
+      }
+
+      const sourceNode = nodesById.get(connection.source);
+      const targetNode = nodesById.get(connection.target);
+      if (!sourceNode || !targetNode) {
+        return;
+      }
+
+      const sourcePortResolution = resolvePortForConnection(
+        sourceNode,
+        normalizeHandleId(connection.sourceHandle),
+        'source'
+      );
+      const targetPortResolution = resolvePortForConnection(
+        targetNode,
+        normalizeHandleId(connection.targetHandle),
+        'target'
+      );
+
+      if (!sourcePortResolution.port || !canPortProduce(sourcePortResolution.port)) {
+        setConnectionWarning(t('canvas.portRoleMismatch'));
+        return;
+      }
+      if (!targetPortResolution.port || !canPortConsume(targetPortResolution.port)) {
+        setConnectionWarning(t('canvas.portRoleMismatch'));
+        return;
+      }
+
+      if (
+        !isPortTypeCompatible(sourcePortResolution.port, targetPortResolution.port)
+      ) {
+        setConnectionWarning(
+          t('canvas.portTypeMismatch', {
+            source: sourcePortResolution.port.type,
+            target: targetPortResolution.port.type,
+          })
+        );
+        return;
+      }
+
+      const sourceHandle = sourcePortResolution.handleId;
+      const targetHandle = targetPortResolution.handleId;
+      if (!sourceHandle || !targetHandle) {
+        setConnectionWarning(t('canvas.portBindingUnavailable'));
+        return;
+      }
+
+      const useDegradedBinding =
+        sourcePortResolution.usedFallbackContract ||
+        targetPortResolution.usedFallbackContract ||
+        sourcePortResolution.inferredHandle ||
+        targetPortResolution.inferredHandle;
+
+      if (useDegradedBinding) {
+        setConnectionWarning(t('canvas.portFallbackEdgeWarning'));
+      } else {
+        setConnectionWarning(null);
+      }
+
+      const nextEdge: Edge = {
+        id: `e-${Date.now()}`,
+        source: connection.source,
+        target: connection.target,
+        sourceHandle,
+        targetHandle,
+        label: getEdgeSignalLabel(sourceHandle, targetHandle, connection.sourceHandle),
+      };
+
+      if (useDegradedBinding) {
+        nextEdge.style = {
+          ...(nextEdge.style || {}),
+          strokeDasharray: '6 4',
+          stroke: '#faad14',
+        };
+      }
+
+      setEdges(addEdge(nextEdge, edges));
     },
-    [edges, setEdges]
+    [edges, nodesById, setEdges, t]
   );
 
   const onNodeContextMenu = useCallback(
@@ -420,7 +570,64 @@ const TopologyCanvas: React.FC = () => {
   };
 
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {fallbackPortNodeCount > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 12,
+            left: 12,
+            zIndex: 8,
+            background: '#3a2a00',
+            border: '1px solid #faad14',
+            color: '#ffd666',
+            borderRadius: 4,
+            padding: '4px 8px',
+            fontSize: 11,
+            maxWidth: 360,
+          }}
+        >
+          {t('canvas.portFallbackNodesNotice', { count: fallbackPortNodeCount })}
+        </div>
+      )}
+      {connectionWarning && (
+        <div
+          style={{
+            position: 'absolute',
+            top: fallbackPortNodeCount > 0 ? 44 : 12,
+            left: 12,
+            zIndex: 8,
+            background: '#3a0010',
+            border: '1px solid #ff4d4f',
+            color: '#ffccc7',
+            borderRadius: 4,
+            padding: '4px 8px',
+            fontSize: 11,
+            maxWidth: 360,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <span style={{ flex: 1 }}>{connectionWarning}</span>
+          <button
+            type="button"
+            onClick={() => setConnectionWarning(null)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#ffccc7',
+              cursor: 'pointer',
+              fontSize: 12,
+              lineHeight: 1,
+              padding: 0,
+            }}
+            aria-label={t('canvas.dismissWarning')}
+          >
+            ×
+          </button>
+        </div>
+      )}
       <ReactFlow
         nodes={renderNodes}
         edges={renderEdges}
@@ -490,6 +697,51 @@ const TopologyCanvas: React.FC = () => {
 };
 
 export default TopologyCanvas;
+
+function normalizeHandleId(handle: unknown): string | undefined {
+  if (typeof handle !== 'string') {
+    return undefined;
+  }
+  const trimmed = handle.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolvePortForConnection(
+  node: Node,
+  requestedHandle: string | undefined,
+  direction: 'source' | 'target'
+): PortResolution {
+  const data = (node.data || {}) as NodeData;
+  const ports = data.ports || [];
+  const usedFallbackContract = Boolean(data.portContractFallback);
+
+  if (requestedHandle) {
+    return {
+      handleId: requestedHandle,
+      port: findPortById(ports, requestedHandle),
+      usedFallbackContract,
+      inferredHandle: false,
+    };
+  }
+
+  const candidates = ports.filter((port) =>
+    direction === 'source' ? canPortProduce(port) : canPortConsume(port)
+  );
+
+  if (candidates.length === 1) {
+    return {
+      handleId: candidates[0].id,
+      port: candidates[0],
+      usedFallbackContract,
+      inferredHandle: true,
+    };
+  }
+
+  return {
+    usedFallbackContract,
+    inferredHandle: true,
+  };
+}
 
 const CanvasControls: React.FC<{ isInteractive: boolean; onToggleInteractive: () => void }> = ({
   isInteractive,

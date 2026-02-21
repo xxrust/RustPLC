@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
 import type { NodeData } from '../../stores/topologyStore';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useAppStore } from '../../stores/appStore';
 import { simulationApi } from '../../services/api';
+import NodePortHandles, { PortMetadataFallbackBadge } from './NodePortHandles';
 
 const SwitchNode: React.FC<NodeProps> = ({ data, selected, id }) => {
   const { t } = useTranslation();
@@ -42,8 +42,10 @@ const SwitchNode: React.FC<NodeProps> = ({ data, selected, id }) => {
         border: `2px solid ${selected ? '#00bcd4' : '#3a3a3a'}`,
         borderRadius: 6,
         minWidth: 100,
+        position: 'relative',
       }}
     >
+      <PortMetadataFallbackBadge visible={Boolean(d.portContractFallback)} />
       <div style={{ background: '#1e1e1e', borderBottom: '1px solid #3a3a3a', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 6, borderRadius: '4px 4px 0 0' }}>
         <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
         <span style={{ color: '#e0e0e0', fontSize: 11, fontWeight: 600 }}>{d.label}</span>
@@ -88,8 +90,7 @@ const SwitchNode: React.FC<NodeProps> = ({ data, selected, id }) => {
           </button>
         )}
       </div>
-      <Handle type="target" position={Position.Left} style={{ background: '#00bcd4', width: 8, height: 8 }} />
-      <Handle type="source" position={Position.Right} style={{ background: '#00bcd4', width: 8, height: 8 }} />
+      <NodePortHandles ports={d.ports} />
     </div>
   );
 };
