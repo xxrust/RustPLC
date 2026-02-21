@@ -12,6 +12,7 @@
 - 画布级可视化状态（过滤/分组高亮/区域定位）应放在 store，`TopologyCanvas` 仅基于 state 派生 `renderNodes/renderEdges`（`hidden + style`），避免污染持久化拓扑数据。
 - `parse-plc` API 契约回归建议直接在 `crates/web-server/src/main.rs` 调用 `parse_plc_topology(Json(ParsePlcTopologyRequest))` 断言 JSON 字段，避免起服务端到端测试成本。
 - 前端端口契约应在 `topologyStore.normalizeTopologyNode` 中统一通过 `resolveNodePorts` 归一化，并在导出时去除 `portContractFallback` 推导字段，避免把降级推断反写进持久化拓扑。
+- CLI 场景链路回归优先采用 `scenario-init` 生成夹具后立刻执行 `scenario-validate`（同一临时目录），避免依赖手写 YAML 随 DSL 进化失效。
 
 Started: Sat Feb 21 17:59:17 CST 2026
 
@@ -278,4 +279,23 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Full `cargo test` currently fails in this worktree because pre-existing doc relocations removed `docs/hil_regression.md`; use scoped checks (`cargo test --lib`) when story scope is frontend-only and doc fixtures are externally modified.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Browser validation can reliably exercise port-contract behavior on the default demo canvas (no backend project needed), including handle coverage, fallback warning, and type-mismatch rejection.
+---
+## 2026-02-22 01:40:15 CST - US-013
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a dedicated Parser/Semantic/Runtime/API/UI test inventory matrix document and mapped each layer to representative suites plus fixture coverage.
+  - Refactored `tests/scenario_validate.rs` into table-driven coverage: success-path cases now iterate over `assembly_station` and `two_cylinder` presets, and unknown IO failure checks were merged into one reusable case matrix.
+  - Kept key regression set visibility for `two_cylinder` / `assembly_station` / MIMO through explicit matrix entries and targeted regression test runs.
+- Files changed
+  - `docs/testing_inventory_matrix.md`
+  - `tests/scenario_validate.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - CLI scenario contract tests are more stable when they generate fresh YAML with `scenario-init` before validation instead of relying on static scenario fixtures.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Workspace currently contains pre-existing doc relocations; `cargo test` fails at `tests/hil_regression_doc.rs` because `docs/hil_regression.md` is absent, so story-level validation should include targeted suites in addition to recording this known blocker.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - No `AGENTS.md` file exists under the touched directories (`tests/`, `docs/`, repo root), so reusable findings were captured in `progress.txt` `Codebase Patterns` instead.
 ---
