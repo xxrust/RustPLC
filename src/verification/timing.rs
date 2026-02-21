@@ -45,7 +45,7 @@ struct StepTimingEstimate {
 #[derive(Debug, Clone, Default)]
 struct TimingContext {
     profiles: HashMap<String, DeviceTimingProfile>,
-    // `A connected_to B` lowers to `B -> A`; store reverse adjacency for upstream response tracing.
+    // Topology edges are producer -> consumer; store reverse adjacency for upstream response tracing.
     upstream_by_target: HashMap<String, Vec<String>>,
 }
 
@@ -616,12 +616,12 @@ mod tests {
 device Y0: digital_output
 
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke_time: 200ms,
     retract_time: 180ms
 }
@@ -654,12 +654,12 @@ task init:
 device Y0: digital_output
 
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke_time: 200ms,
     retract_time: 180ms
 }
@@ -750,23 +750,23 @@ device Y0: digital_output
 device Y1: digital_output
 
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 50ms
 }
 
 device valve_B: solenoid_valve {
-    connected_to: Y1,
+    driven_by: Y1,
     response_time: 50ms
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke_time: 300ms,
     retract_time: 200ms
 }
 
 device cyl_B: cylinder {
-    connected_to: valve_B,
+    driven_by: valve_B,
     stroke_time: 300ms,
     retract_time: 200ms
 }
@@ -819,12 +819,12 @@ task fault:
 device Y0: digital_output
 
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke_time: 200ms,
     retract_time: 180ms
 }

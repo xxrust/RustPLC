@@ -3,6 +3,7 @@
 - 当 DSL 关键字弃用时，先在 `parse_plc` 入口做逐行预检查并返回带行列号的迁移错误，再交给 pest 做常规语法解析。
 - DSL 新增结构化属性时，按 `plc.pest` 规则 + `parser/mod.rs` 的 `expect_*` 解析辅助函数成对落地，避免语义层直接解析字符串。
 - 语义拓扑构图应以 `TopologySection.connections` 为主输入，并通过 relation 回溯到设备声明行号，保证 `driven_by/reports_to/detects` 的错误都可定位。
+- 废弃 DSL 字段后，需同步更新 verifier/runtime/scenario 相关测试夹具与诊断文案，否则 `parse_plc` 的迁移拦截会导致回归测试批量失败。
 
 Started: Sat Feb 21 17:59:17 CST 2026
 
@@ -45,4 +46,27 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Some integration tests assert error category text (`ERROR [type_mismatch]`), so improving direction diagnostics must keep the original error class stable.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Existing verification/runtime code already traverses graph edges as upstream `Incoming`, so producer -> consumer graph orientation can be expanded relation-by-relation without changing traversal API.
+---
+
+## 2026-02-21 21:44:49 CST - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Updated scenario/runtime/verification fixtures to use `driven_by` topology relations so parser migration checks no longer break these pipelines.
+  - Refreshed causality fallback diagnostics to reference `driven_by/reports_to/detects` instead of deprecated `connected_to`.
+  - Verified US-004 regression scope for `two_cylinder` and `assembly_station` via targeted test runs.
+- Files changed
+  - `src/scenario_resolve.rs`
+  - `src/verification/causality.rs`
+  - `src/verification/safety.rs`
+  - `src/verification/timing.rs`
+  - `tests/runtime_bridge_us006.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Constraint verifier tests embed large inline PLC fixtures, so DSL keyword migrations require cross-module fixture updates (not just parser/semantic tests).
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Workspace-wide `cargo fmt --all --check` can fail due unrelated dirty files; for iterative PRD work, run `rustfmt --check` on story-touched files to keep scope isolated.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `cargo test two_cylinder` and `cargo test assembly_station` already cover key compilation regressions through `examples_integration` and `large_demo_coverage` without running the full suite.
 ---

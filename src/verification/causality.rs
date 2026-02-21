@@ -703,7 +703,7 @@ fn build_fallback_details(
             format!("{output} -> {} -> {}", pair.action_target, pair.wait_sensor),
             format!("{output} -> ???"),
             format!(
-                "请检查 {} 的 connected_to 链路，确保它可由输出端口驱动",
+                "请检查 {} 的 driven_by/reports_to 链路，确保它可由输出端口驱动",
                 pair.action_target
             ),
         );
@@ -717,7 +717,7 @@ fn build_fallback_details(
             format!("{} -> {}", source_path.join(" -> "), pair.wait_sensor),
             format!("{} -> ???", source_path.join(" -> ")),
             format!(
-                "请补充 {} 的 detects/connected_to 声明，确保动作后能反馈到 {}",
+                "请补充 {} 的 detects/driven_by/reports_to 声明，确保动作后能反馈到 {}",
                 pair.wait_sensor, pair.wait_sensor
             ),
         );
@@ -736,7 +736,7 @@ fn build_fallback_details(
 
 fn suggestion_for_link(from: &str, to: &str) -> String {
     format!(
-        "请在 [topology] 中检查 {to} 的 connected_to / detects 配置，确保链路 {from} -> {to} 可达"
+        "请在 [topology] 中检查 {to} 的 driven_by/reports_to/detects 配置，确保链路 {from} -> {to} 可达"
     )
 }
 
@@ -757,34 +757,34 @@ device X0: digital_input
 device X1: digital_input
 
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 20ms
 }
 
 device valve_B: solenoid_valve {
-    connected_to: Y1,
+    driven_by: Y1,
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A,
+    driven_by: valve_A,
     stroke_time: 300ms,
     retract_time: 300ms
 }
 
 device cyl_B: cylinder {
-    connected_to: valve_B,
+    driven_by: valve_B,
     stroke_time: 300ms,
     retract_time: 300ms
 }
 
 device sensor_A_ext: sensor {
-    connected_to: X0,
+    driven_by: X0,
     detects: cyl_A.extended
 }
 
 device sensor_B_ext: sensor {
-    connected_to: X1,
+    driven_by: X1,
     detects: cyl_B.extended
 }
 
@@ -821,7 +821,7 @@ device Y0: digital_output
 device X0: digital_input
 
 device valve_A: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 20ms
 }
 
@@ -831,7 +831,7 @@ device cyl_A: cylinder {
 }
 
 device sensor_A_ext: sensor {
-    connected_to: X0,
+    driven_by: X0,
     detects: cyl_A.extended
 }
 
@@ -889,20 +889,20 @@ device X0: digital_input
 device X1: digital_input
 
 device motor_left: motor {
-    connected_to: Y0
+    driven_by: Y0
 }
 
 device motor_right: motor {
-    connected_to: Y1
+    driven_by: Y1
 }
 
 device sensor_left: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: motor_left.on
 }
 
 device sensor_right: sensor {
-    connected_to: X1
+    driven_by: X1
     detects: motor_right.on
 }
 
@@ -942,19 +942,19 @@ device Y2: digital_output
 device X0: digital_input
 
 device motor_left: motor {
-    connected_to: Y0
+    driven_by: Y0
 }
 
 device motor_right: motor {
-    connected_to: Y1
+    driven_by: Y1
 }
 
 device motor_aux: motor {
-    connected_to: Y2
+    driven_by: Y2
 }
 
 device sensor_left: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: motor_aux.on
 }
 
@@ -1000,32 +1000,32 @@ device X0: digital_input
 device X1: digital_input
 
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
 }
 
 device valve_B: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 200ms
     retract_time: 200ms
 }
 
 device cyl_B: cylinder {
-    connected_to: valve_B
+    driven_by: valve_B
     stroke_time: 200ms
     retract_time: 200ms
 }
 
 device sensor_A_ext: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: cyl_A.extended
 }
 
 device sensor_A_ext2: sensor {
-    connected_to: X1
+    driven_by: X1
     detects: cyl_B.extended
 }
 
@@ -1069,7 +1069,7 @@ task main:
 device Y0: digital_output
 
 device motor_A: motor {
-    connected_to: Y0
+    driven_by: Y0
 }
 
 device pressure_in: analog_input {
@@ -1109,7 +1109,7 @@ task main:
 device Y0: digital_output
 
 device motor_A: motor {
-    connected_to: Y0
+    driven_by: Y0
 }
 
 device pressure_in: analog_input {
