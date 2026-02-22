@@ -249,7 +249,7 @@ fn stress_many_devices_compiles_and_verifies() {
             "device cyl_{idx}: cylinder {{ driven_by: valve_{idx}, stroke_time: 120ms, retract_time: 110ms }}\n"
         ));
         topo.push_str(&format!(
-            "device sensor_{idx}_ext: sensor {{ driven_by: X{idx}, detects: cyl_{idx}.extended }}\n"
+            "device sensor_{idx}_ext: sensor {{ reports_to: X{idx}, detects: cyl_{idx}.extended }}\n"
         ));
     }
 
@@ -666,7 +666,7 @@ device Y0: digital_output
 device X0: digital_input
 device valve_A: solenoid_valve { driven_by: Y0, response_time: 20ms }
 device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
-device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
+device sensor_A_ext: sensor { reports_to: X0, detects: cyl_A.extended }
 
 [constraints]
 timing: task.main.step_extend must_complete_within 100ms
@@ -691,7 +691,7 @@ device Y0: digital_output
 device X0: digital_input
 device valve_A: solenoid_valve { driven_by: Y0, response_time: 10ms }
 device cyl_A: cylinder { driven_by: valve_A, stroke_time: 50ms, retract_time: 50ms }
-device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
+device sensor_A_ext: sensor { reports_to: X0, detects: cyl_A.extended }
 
 [constraints]
 timing: task.cooldown must_start_after 500ms
@@ -720,7 +720,7 @@ device Y0: digital_output
 device X0: digital_input
 device valve_A: solenoid_valve { driven_by: Y0, response_time: 20ms }
 device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms } # missing driven_by: valve_A
-device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
+device sensor_A_ext: sensor { reports_to: X0, detects: cyl_A.extended }
 
 [constraints]
 causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext

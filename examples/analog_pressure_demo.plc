@@ -20,12 +20,12 @@ device prop_valve: solenoid_valve {
 }
 
 device pressure_sensor: sensor {
-    driven_by: AI0,
+    reports_to: AI0,
     detects: prop_valve.on
 }
 
-device start_button: digital_input {
-    driven_by: X0,
+device start_button: sensor {
+    reports_to: X0,
     debounce: 20ms
 }
 

@@ -151,8 +151,21 @@ impl ScenarioNameResolver {
                 .graph
                 .neighbors_directed(n, Direction::Incoming)
             {
-                if visited.insert(pred) {
+                let pred_kind = &self.topology.graph[pred].kind;
+                if (*pred_kind == DeviceKind::Sensor || *pred_kind == kind) && visited.insert(pred)
+                {
                     queue.push_back(pred);
+                }
+            }
+            for succ in self
+                .topology
+                .graph
+                .neighbors_directed(n, Direction::Outgoing)
+            {
+                let succ_kind = &self.topology.graph[succ].kind;
+                if (*succ_kind == DeviceKind::Sensor || *succ_kind == kind) && visited.insert(succ)
+                {
+                    queue.push_back(succ);
                 }
             }
         }
@@ -858,8 +871,8 @@ mod tests {
 device X0: digital_input
 device AI0: analog_input { range: 0..100 }
 
-device start_button: digital_input { driven_by: X0 }
-device pressure_sensor: sensor { driven_by: AI0 }
+device start_button: sensor { reports_to: X0 }
+device pressure_sensor: sensor { reports_to: AI0 }
 
 [constraints]
 [tasks]

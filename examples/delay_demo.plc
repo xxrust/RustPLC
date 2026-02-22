@@ -10,7 +10,7 @@ device conveyor: motor {
 }
 
 device sensor_arrived: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: conveyor.position_A
 }
 

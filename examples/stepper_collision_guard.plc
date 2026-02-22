@@ -18,22 +18,10 @@ device X4: digital_input   # encoder dir sign (+)
 device AI0: analog_input { range: 0..4000000, unit: "count", external: true } # axis count snapshot
 device AI1: analog_input { range: 0..3, unit: "zone", external: true }        # 0=safe, 1..N=danger
 
-# External feedback provided by the drive / board layer (logical aliases for scenarios/tests).
-device axis_count: analog_input { driven_by: AI0, range: 0..4000000, unit: "count" }
-device zone_code: analog_input { driven_by: AI1, range: 0..3, unit: "zone" } # 0=safe, 1..N=danger
-
 # Logical devices
 device axis_x: motor {
     driven_by: Y1
     ramp_time: 10ms
-}
-
-device dir_positive: digital_output {
-    driven_by: Y0
-}
-
-device move_cmd: digital_output {
-    driven_by: Y3
 }
 
 device clamp_valve: solenoid_valve {
@@ -48,26 +36,22 @@ device cyl_clamp: cylinder {
 }
 
 device inpos_x: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: axis_x.position_ok
 }
 
 device alarm_x: sensor {
-    driven_by: X1
+    reports_to: X1
     detects: axis_x.alarm
 }
 
-device enc_dir_positive: digital_input {
-    driven_by: X4
-}
-
 device clamp_ext: sensor {
-    driven_by: X2
+    reports_to: X2
     detects: cyl_clamp.extended
 }
 
 device clamp_ret: sensor {
-    driven_by: X3
+    reports_to: X3
     detects: cyl_clamp.retracted
 }
 
@@ -78,11 +62,11 @@ safety: axis_x.on requires alarm_x.off
     reason: "Drive alarm must be cleared before enabling axis"
 
 # Collision guard: when we're in any danger window, the clamp must NOT be extended.
-safety: zone_code > 0 conflicts_with cyl_clamp.extended
+safety: AI1 > 0 conflicts_with cyl_clamp.extended
     reason: "zone_code indicates a collision window; clamp must stay retracted"
 
 # Bi-directional command interlock: while issuing motion commands, the clamp must be in a safe pose.
-safety: move_cmd.on conflicts_with cyl_clamp.extended
+safety: Y3.on conflicts_with cyl_clamp.extended
     reason: "Motion command requires clamp retracted to avoid collision"
 
 [tasks]
@@ -97,25 +81,25 @@ task cycle:
         action: set axis_x on
 
     step set_dir_positive:
-        action: set dir_positive on
+        action: set Y0 on
 
     # Wait for safe window before allowing motion progress.
     step wait_safe_zone:
-        wait: zone_code == 0
+        wait: AI1 == 0
         timeout: 1000ms -> goto fault
 
     step start_move:
-        action: set move_cmd on
+        action: set Y3 on
 
     # Fault scenario hook: if encoder direction feedback disagrees with the commanded direction,
     # we should fail fast instead of waiting forever for a target count that will never arrive.
     step wait_dir_feedback:
-        wait: enc_dir_positive == true
+        wait: X4 == true
         timeout: 500ms -> goto fault
 
     # In a real system, motion happens in the drive; PLC just waits on feedback.
     step wait_target_count:
-        wait: axis_count >= 120000
+        wait: AI0 >= 120000
         timeout: 3000ms -> goto fault
 
     step wait_inpos:
@@ -123,7 +107,7 @@ task cycle:
         timeout: 1000ms -> goto fault
 
     step stop_move:
-        action: set move_cmd off
+        action: set Y3 off
 
     on_complete: goto idle
 

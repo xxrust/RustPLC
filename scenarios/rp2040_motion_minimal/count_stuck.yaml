@@ -7,11 +7,10 @@ inputs:
   - at_ms: 0
     set:
       digital_inputs:
-        axis0_enc_dir_positive: true
-        axis1_enc_dir_positive: true
+        X24: true
+        X26: true
       analog_inputs:
-        axis0_count: 0
-        axis1_count: 0
+        AI24: 0
+        AI26: 0
 
   # Counts stay stuck at 0 -> should timeout in wait_axis0_count.
-

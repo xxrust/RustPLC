@@ -244,18 +244,18 @@ fn parses_stepper_collision_guard_example_into_verified_ir_json() {
             status["rule"]
                 .as_str()
                 .unwrap_or("")
-                .contains("zone_code > 0")
+                .contains("AI1 > 0")
         }),
-        "verification report should include the zone_code window interlock rule"
+        "verification report should include the AI1 window interlock rule"
     );
     assert!(
         safety_statuses.iter().any(|status| {
             status["rule"]
                 .as_str()
                 .unwrap_or("")
-                .contains("move_cmd.on")
+                .contains("Y3.on")
         }),
-        "verification report should include the move_cmd command interlock rule"
+        "verification report should include the Y3 command interlock rule"
     );
     assert_eq!(
         ir_json["verification"]["safety"]["skipped_rules"]
@@ -552,12 +552,12 @@ device cyl_glue: cylinder {
 }
 
 device sensor_glue_ext: sensor {
-    driven_by: X0,
+    reports_to: X0,
     detects: cyl_glue.extended
 }
 
 device sensor_glue_ret: sensor {
-    driven_by: X1,
+    reports_to: X1,
     detects: cyl_glue.retracted
 }
 
@@ -610,12 +610,12 @@ device cyl_glue: cylinder {
 }
 
 device sensor_glue_ext: sensor {
-    driven_by: X0,
+    reports_to: X0,
     detects: cyl_glue.extended
 }
 
 device sensor_glue_ret: sensor {
-    driven_by: X1,
+    reports_to: X1,
     detects: cyl_glue.retracted
 }
 

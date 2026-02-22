@@ -779,12 +779,12 @@ device cyl_B: cylinder {
 }
 
 device sensor_A_ext: sensor {
-    driven_by: X0,
+    reports_to: X0,
     detects: cyl_A.extended
 }
 
 device sensor_B_ext: sensor {
-    driven_by: X1,
+    reports_to: X1,
     detects: cyl_B.extended
 }
 
@@ -831,7 +831,7 @@ device cyl_A: cylinder {
 }
 
 device sensor_A_ext: sensor {
-    driven_by: X0,
+    reports_to: X0,
     detects: cyl_A.extended
 }
 
@@ -897,12 +897,12 @@ device motor_right: motor {
 }
 
 device sensor_left: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: motor_left.on
 }
 
 device sensor_right: sensor {
-    driven_by: X1
+    reports_to: X1
     detects: motor_right.on
 }
 
@@ -954,7 +954,7 @@ device motor_aux: motor {
 }
 
 device sensor_left: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: motor_aux.on
 }
 
@@ -1020,12 +1020,12 @@ device cyl_B: cylinder {
 }
 
 device sensor_A_ext: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: cyl_A.extended
 }
 
 device sensor_A_ext2: sensor {
-    driven_by: X1
+    reports_to: X1
     detects: cyl_B.extended
 }
 

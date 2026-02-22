@@ -29,13 +29,13 @@ device cyl_B: cylinder {
 
 device sensor_A_ext: sensor {
     type: magnetic
-    driven_by: X0
+    reports_to: X0
     detects: cyl_A.extended
 }
 
 device sensor_B_ext: sensor {
     type: magnetic
-    driven_by: X1
+    reports_to: X1
     detects: cyl_B.extended
 }
 

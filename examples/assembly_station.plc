@@ -18,8 +18,8 @@ device X8: digital_input
 device X9: digital_input
 device X10: digital_input
 
-device start_button: digital_input {
-    driven_by: X10
+device start_button: sensor {
+    reports_to: X10
     debounce: 20ms
 }
 
@@ -36,12 +36,12 @@ device motor_right: motor {
 }
 
 device sensor_left_arrive: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: motor_left.position_A
 }
 
 device sensor_right_arrive: sensor {
-    driven_by: X1
+    reports_to: X1
     detects: motor_right.position_A
 }
 
@@ -57,12 +57,12 @@ device cyl_push_L: cylinder {
 }
 
 device sensor_push_L_ext: sensor {
-    driven_by: X2
+    reports_to: X2
     detects: cyl_push_L.extended
 }
 
 device sensor_push_L_ret: sensor {
-    driven_by: X3
+    reports_to: X3
     detects: cyl_push_L.retracted
 }
 
@@ -78,12 +78,12 @@ device cyl_push_R: cylinder {
 }
 
 device sensor_push_R_ext: sensor {
-    driven_by: X4
+    reports_to: X4
     detects: cyl_push_R.extended
 }
 
 device sensor_push_R_ret: sensor {
-    driven_by: X5
+    reports_to: X5
     detects: cyl_push_R.retracted
 }
 
@@ -99,12 +99,12 @@ device cyl_press: cylinder {
 }
 
 device sensor_press_ext: sensor {
-    driven_by: X6
+    reports_to: X6
     detects: cyl_press.extended
 }
 
 device sensor_press_ret: sensor {
-    driven_by: X7
+    reports_to: X7
     detects: cyl_press.retracted
 }
 
@@ -120,12 +120,12 @@ device cyl_eject: cylinder {
 }
 
 device sensor_eject_ext: sensor {
-    driven_by: X8
+    reports_to: X8
     detects: cyl_eject.extended
 }
 
 device sensor_eject_ret: sensor {
-    driven_by: X9
+    reports_to: X9
     detects: cyl_eject.retracted
 }
 

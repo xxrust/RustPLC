@@ -5,10 +5,14 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use rust_plc::ast::DeviceType;
+use rust_plc::ast::{
+    DeviceDeclaration, DevicePort, DeviceType, PortRole, PortType, TopologyConnection,
+    TopologyRelation,
+};
 use rust_plc::component_scenario::parse_component_scenario_value;
 use rust_plc::component_topology::parse_component_topology_value;
 use rust_plc::parser::parse_plc;
+use rust_plc::topology_semantic_gate::validate_topology_semantics;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -266,6 +270,18 @@ async fn parse_plc_topology(
         build_topology_preview_plc(normalized).unwrap_or_else(|| normalized.to_string());
     let program = parse_plc(&preview_plc)
         .map_err(|err| bad_request(format!("failed to parse PLC: {err}")))?;
+    let semantic_gate = match validate_topology_semantics(&program.topology) {
+        Ok(()) => serde_json::json!({
+            "valid": true,
+            "code": serde_json::Value::Null,
+            "issues": []
+        }),
+        Err(err) => serde_json::json!({
+            "valid": false,
+            "code": err.code,
+            "issues": err.issues
+        }),
+    };
 
     let devices = &program.topology.devices;
     let mut name_to_index = HashMap::<String, usize>::new();
@@ -273,12 +289,21 @@ async fn parse_plc_topology(
         name_to_index.insert(device.name.clone(), idx);
     }
 
+    let resolved_ports_by_name = devices
+        .iter()
+        .map(|device| (device.name.clone(), resolved_device_ports(device)))
+        .collect::<HashMap<_, _>>();
+
     let components = devices
         .iter()
         .enumerate()
         .map(|(idx, device)| {
             let col = idx % 4;
             let row = idx / 4;
+            let ports = resolved_ports_by_name
+                .get(&device.name)
+                .cloned()
+                .unwrap_or_default();
             serde_json::json!({
                 "id": device.name,
                 "component_id": map_plc_device_to_component_id(&device.device_type),
@@ -287,7 +312,7 @@ async fn parse_plc_topology(
                     "device_type": plc_device_type_name(&device.device_type),
                     "driven_by": device.attributes.driven_by.clone(),
                     "reports_to": device.attributes.reports_to.clone(),
-                    "ports": device.attributes.ports.clone(),
+                    "ports": ports,
                     "tags": device.attributes.tags.clone(),
                     "detects": device.attributes.detects.as_ref().map(|d| format!("{}.{}", d.device, d.state)),
                     "detects_device": device.attributes.detects.as_ref().map(|d| d.device.clone()),
@@ -301,13 +326,12 @@ async fn parse_plc_topology(
         })
         .collect::<Vec<_>>();
 
-    let connections = program
-        .topology
-        .connections
-        .iter()
+    let connections = resolve_topology_connections(devices, &program.topology.connections)
+        .into_iter()
         .filter(|conn| {
             name_to_index.contains_key(&conn.from) && name_to_index.contains_key(&conn.to)
         })
+        .map(|conn| infer_connection_ports(conn, &resolved_ports_by_name))
         .map(|conn| {
             serde_json::json!({
                 "from": conn.from,
@@ -327,10 +351,187 @@ async fn parse_plc_topology(
             "components": []
         },
         "components": components,
-        "connections": connections
+        "connections": connections,
+        "semantic_gate": semantic_gate
     });
     normalize_topology_tags_in_place(&mut response);
     Ok(Json(response))
+}
+
+fn resolve_topology_connections(
+    devices: &[DeviceDeclaration],
+    explicit_connections: &[TopologyConnection],
+) -> Vec<TopologyConnection> {
+    if !explicit_connections.is_empty() {
+        return explicit_connections.to_vec();
+    }
+
+    let mut connections = Vec::new();
+    for device in devices {
+        if let Some(upstream) = device.attributes.driven_by.as_ref() {
+            connections.push(TopologyConnection {
+                from: upstream.clone(),
+                to: device.name.clone(),
+                relation: TopologyRelation::DrivenBy,
+                from_port: None,
+                to_port: None,
+                signal: None,
+            });
+        }
+        if let Some(target) = device.attributes.reports_to.as_ref() {
+            connections.push(TopologyConnection {
+                from: device.name.clone(),
+                to: target.clone(),
+                relation: TopologyRelation::ReportsTo,
+                from_port: None,
+                to_port: None,
+                signal: None,
+            });
+        }
+        if let Some(detects) = device.attributes.detects.as_ref() {
+            connections.push(TopologyConnection {
+                from: detects.device.clone(),
+                to: device.name.clone(),
+                relation: TopologyRelation::Detects,
+                from_port: Some(detects.state.clone()),
+                to_port: None,
+                signal: Some(detects.state.clone()),
+            });
+        }
+    }
+    connections
+}
+
+fn resolved_device_ports(device: &DeviceDeclaration) -> Vec<DevicePort> {
+    if !device.attributes.ports.is_empty() {
+        return device.attributes.ports.clone();
+    }
+    implicit_ports_for_device_type(&device.device_type)
+}
+
+fn implicit_ports_for_device_type(device_type: &DeviceType) -> Vec<DevicePort> {
+    match device_type {
+        DeviceType::DigitalOutput => vec![device_port("out", PortType::Digital, PortRole::Producer)],
+        DeviceType::DigitalInput => vec![device_port("in", PortType::Digital, PortRole::Consumer)],
+        DeviceType::SolenoidValve => vec![
+            device_port("coil", PortType::Digital, PortRole::Consumer),
+            device_port("out", PortType::Pneumatic, PortRole::Producer),
+        ],
+        DeviceType::Cylinder => vec![
+            device_port("cmd", PortType::Pneumatic, PortRole::Consumer),
+            device_port("extended", PortType::Logical, PortRole::Producer),
+            device_port("retracted", PortType::Logical, PortRole::Producer),
+        ],
+        DeviceType::Sensor => vec![
+            device_port("sense", PortType::Logical, PortRole::Consumer),
+            device_port("out", PortType::Digital, PortRole::Producer),
+        ],
+        DeviceType::Motor => vec![
+            device_port("cmd", PortType::Digital, PortRole::Consumer),
+            device_port("on", PortType::Logical, PortRole::Producer),
+        ],
+        DeviceType::AnalogInput => vec![device_port("in", PortType::Analog, PortRole::Consumer)],
+        DeviceType::AnalogOutput => vec![device_port("out", PortType::Analog, PortRole::Producer)],
+        DeviceType::Pid => vec![
+            device_port("in", PortType::Analog, PortRole::Consumer),
+            device_port("out", PortType::Analog, PortRole::Producer),
+        ],
+    }
+}
+
+fn device_port(id: &str, port_type: PortType, role: PortRole) -> DevicePort {
+    DevicePort {
+        id: id.to_string(),
+        port_type,
+        role,
+    }
+}
+
+fn infer_connection_ports(
+    mut connection: TopologyConnection,
+    ports_by_name: &HashMap<String, Vec<DevicePort>>,
+) -> TopologyConnection {
+    if connection.from_port.is_none() {
+        connection.from_port = infer_port_for_side(&connection, ports_by_name, true);
+    }
+    if connection.to_port.is_none() {
+        connection.to_port = infer_port_for_side(&connection, ports_by_name, false);
+    }
+    if connection.signal.is_none() {
+        connection.signal = connection
+            .from_port
+            .clone()
+            .or_else(|| connection.to_port.clone());
+    }
+    connection
+}
+
+fn infer_port_for_side(
+    connection: &TopologyConnection,
+    ports_by_name: &HashMap<String, Vec<DevicePort>>,
+    source_side: bool,
+) -> Option<String> {
+    let node_name = if source_side {
+        &connection.from
+    } else {
+        &connection.to
+    };
+    let ports = ports_by_name.get(node_name)?;
+    let candidates = ports
+        .iter()
+        .filter(|port| match (source_side, &port.role) {
+            (true, PortRole::Producer | PortRole::Bidirectional) => true,
+            (false, PortRole::Consumer | PortRole::Bidirectional) => true,
+            _ => false,
+        })
+        .map(|port| port.id.as_str())
+        .collect::<Vec<_>>();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let preferred = if source_side {
+        preferred_source_port_id(connection)
+    } else {
+        preferred_target_port_id(connection)
+    };
+    if let Some(preferred_id) = preferred {
+        if candidates.iter().any(|candidate| *candidate == preferred_id) {
+            return Some(preferred_id.to_string());
+        }
+    }
+
+    if candidates.len() == 1 {
+        return Some(candidates[0].to_string());
+    }
+
+    // Stable fallback for multi-port nodes: choose the first candidate in declaration order.
+    Some(candidates[0].to_string())
+}
+
+fn preferred_source_port_id(connection: &TopologyConnection) -> Option<&str> {
+    if matches!(connection.relation, TopologyRelation::Detects) {
+        if let Some(signal) = connection.signal.as_deref() {
+            return Some(signal);
+        }
+        if let Some(from_port) = connection.from_port.as_deref() {
+            return Some(from_port);
+        }
+    }
+
+    match connection.relation {
+        TopologyRelation::DrivenBy | TopologyRelation::ReportsTo => Some("out"),
+        TopologyRelation::Detects => Some("state"),
+    }
+}
+
+fn preferred_target_port_id(connection: &TopologyConnection) -> Option<&str> {
+    match connection.relation {
+        TopologyRelation::DrivenBy => Some("cmd"),
+        TopologyRelation::ReportsTo => Some("in"),
+        TopologyRelation::Detects => Some("sense"),
+    }
 }
 
 fn build_topology_preview_plc(input: &str) -> Option<String> {
@@ -1297,6 +1498,7 @@ task main:
         .await
         .expect("parse-plc API should succeed")
         .0;
+        assert_eq!(response["semantic_gate"]["valid"], json!(true));
 
         let valve = find_component(&response, "valve_A");
         assert_eq!(
@@ -1339,6 +1541,11 @@ task main:
             .await
             .expect("parse-plc API should parse two_cylinder")
             .0;
+        assert_eq!(
+            response["semantic_gate"]["valid"],
+            json!(true),
+            "two_cylinder should pass topology semantic gate"
+        );
 
         assert!(
             has_detects_connection(&response, "cyl_A", "sensor_A_ext", "extended"),

@@ -2723,41 +2723,34 @@ fn connection_type_for_relation(
 ) -> Option<ConnectionType> {
     match relation {
         TopologyRelation::DrivenBy => driven_by_connection_type_for(from, to),
-        TopologyRelation::ReportsTo => reports_to_connection_type_for(to),
-        TopologyRelation::Detects => detects_connection_type_for(to),
+        TopologyRelation::ReportsTo => reports_to_connection_type_for(from, to),
+        TopologyRelation::Detects => detects_connection_type_for(from, to),
     }
 }
 
 fn driven_by_connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<ConnectionType> {
     match (from, to) {
         (DeviceKind::DigitalOutput, DeviceKind::SolenoidValve)
-        | (DeviceKind::DigitalOutput, DeviceKind::Motor)
-        | (DeviceKind::DigitalInput, DeviceKind::Sensor) => Some(ConnectionType::Electrical),
+        | (DeviceKind::DigitalOutput, DeviceKind::Motor) => Some(ConnectionType::Electrical),
         (DeviceKind::SolenoidValve, DeviceKind::Cylinder) => Some(ConnectionType::Pneumatic),
-        (DeviceKind::DigitalInput, DeviceKind::DigitalInput)
-        | (DeviceKind::DigitalOutput, DeviceKind::DigitalOutput) => Some(ConnectionType::Logical),
-        (DeviceKind::AnalogInput, DeviceKind::AnalogInput)
-        | (DeviceKind::AnalogOutput, DeviceKind::AnalogOutput) => Some(ConnectionType::Logical),
-        (DeviceKind::AnalogInput, DeviceKind::Sensor)
-        | (DeviceKind::AnalogOutput, DeviceKind::SolenoidValve)
-        | (DeviceKind::AnalogOutput, DeviceKind::Motor) => Some(ConnectionType::Analog),
-        (DeviceKind::Pid, DeviceKind::Pid) => Some(ConnectionType::Logical),
+        (DeviceKind::AnalogOutput, DeviceKind::Motor) => Some(ConnectionType::Analog),
         _ => None,
     }
 }
 
-fn reports_to_connection_type_for(to: &DeviceKind) -> Option<ConnectionType> {
-    match to {
-        DeviceKind::DigitalInput => Some(ConnectionType::Logical),
-        DeviceKind::AnalogInput => Some(ConnectionType::Analog),
+fn reports_to_connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<ConnectionType> {
+    match (from, to) {
+        (DeviceKind::Sensor, DeviceKind::DigitalInput) => Some(ConnectionType::Logical),
+        (DeviceKind::Sensor, DeviceKind::AnalogInput) => Some(ConnectionType::Analog),
         _ => None,
     }
 }
 
-fn detects_connection_type_for(to: &DeviceKind) -> Option<ConnectionType> {
-    match to {
-        DeviceKind::Sensor | DeviceKind::DigitalInput => Some(ConnectionType::Logical),
-        DeviceKind::AnalogInput => Some(ConnectionType::Analog),
+fn detects_connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<ConnectionType> {
+    match (from, to) {
+        (DeviceKind::Cylinder, DeviceKind::Sensor)
+        | (DeviceKind::Motor, DeviceKind::Sensor)
+        | (DeviceKind::SolenoidValve, DeviceKind::Sensor) => Some(ConnectionType::Logical),
         _ => None,
     }
 }
@@ -2804,12 +2797,12 @@ device X3: digital_input
 device X4: digital_input
 
 # ===== operator panel =====
-device start_button: digital_input {
-    driven_by: X4,
+device start_button: sensor {
+    reports_to: X4,
     debounce: 20ms
 }
 
-device alarm_light: digital_output {
+device alarm_light: motor {
     driven_by: Y2
 }
 
@@ -2846,25 +2839,25 @@ device cyl_B: cylinder {
 # ===== sensors =====
 device sensor_A_ext: sensor {
     type: magnetic,
-    driven_by: X0,
+    reports_to: X0,
     detects: cyl_A.extended
 }
 
 device sensor_A_ret: sensor {
     type: magnetic,
-    driven_by: X1,
+    reports_to: X1,
     detects: cyl_A.retracted
 }
 
 device sensor_B_ext: sensor {
     type: magnetic,
-    driven_by: X2,
+    reports_to: X2,
     detects: cyl_B.extended
 }
 
 device sensor_B_ret: sensor {
     type: magnetic,
-    driven_by: X3,
+    reports_to: X3,
     detects: cyl_B.retracted
 }
 
@@ -3012,11 +3005,11 @@ device X0: digital_input
 device valve_A: solenoid_valve { driven_by: Y0 }
 device valve_B: solenoid_valve { driven_by: Y0 }
 device sensor_A: sensor {
-    driven_by: X0,
+    reports_to: X0,
     detects: valve_A.on
 }
 device sensor_B: sensor {
-    driven_by: X0,
+    reports_to: X0,
     detects: valve_A.on
 }
 
@@ -3037,8 +3030,14 @@ device sensor_B: sensor {
 
         assert!(edge_exists("Y0", "valve_A"), "应支持一对多：Y0 -> valve_A");
         assert!(edge_exists("Y0", "valve_B"), "应支持一对多：Y0 -> valve_B");
-        assert!(edge_exists("X0", "sensor_A"), "应支持多设备共享消费者输入");
-        assert!(edge_exists("X0", "sensor_B"), "应支持多设备共享消费者输入");
+        assert!(
+            edge_exists("sensor_A", "X0"),
+            "应支持多生产者汇聚到同一输入"
+        );
+        assert!(
+            edge_exists("sensor_B", "X0"),
+            "应支持多生产者汇聚到同一输入"
+        );
         assert!(
             edge_exists("valve_A", "sensor_A"),
             "应支持多入：valve_A -> sensor_A"

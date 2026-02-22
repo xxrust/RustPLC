@@ -10,10 +10,6 @@ device X0: digital_input
 device AI0: analog_input { range: 0..100, unit: "bar" }
 device AO0: analog_output { range: 0..10, ramp_time: 500ms, unit: "V" }
 
-device start_button: digital_input {
-    driven_by: X0
-}
-
 device valve_A: solenoid_valve {
     driven_by: Y0
 }
@@ -23,7 +19,7 @@ device cyl_A: cylinder {
 }
 
 device sensor_ext: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: cyl_A.extended
 }
 
@@ -36,7 +32,7 @@ task main:
         action: extend cyl_A
 
     step wait_button:
-        wait: start_button == true
+        wait: X0 == true
         timeout: 50ms -> goto fault
 
     step dwell:

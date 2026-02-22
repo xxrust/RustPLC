@@ -19,8 +19,8 @@ const PLC_FIXTURE: &str = r#"
 device Y0: digital_output
 device X0: digital_input
 
-device start_button: digital_input {
-    driven_by: X0
+device start_button: sensor {
+    reports_to: X0
 }
 
 device valve_A: solenoid_valve {
@@ -32,7 +32,7 @@ device cyl_A: cylinder {
 }
 
 device sensor_ext: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: cyl_A.extended
 }
 
@@ -186,8 +186,8 @@ const PLC_ANALOG_WAIT_FIXTURE: &str = r#"
 device AI0: analog_input { range: 0..100, unit: "bar", external: true }
 device X0: digital_input
 
-device start_button: digital_input {
-    driven_by: X0
+device start_button: sensor {
+    reports_to: X0
 }
 
 [constraints]

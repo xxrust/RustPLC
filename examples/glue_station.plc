@@ -10,8 +10,8 @@ device X3: digital_input
 device X4: digital_input
 device X5: digital_input
 
-device start_button: digital_input {
-    driven_by: X5
+device start_button: sensor {
+    reports_to: X5
     debounce: 20ms
 }
 
@@ -22,7 +22,7 @@ device motor_conv: motor {
 }
 
 device sensor_arrive: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: motor_conv.position_A
 }
 
@@ -38,12 +38,12 @@ device cyl_clamp: cylinder {
 }
 
 device sensor_clamp_ext: sensor {
-    driven_by: X1
+    reports_to: X1
     detects: cyl_clamp.extended
 }
 
 device sensor_clamp_ret: sensor {
-    driven_by: X2
+    reports_to: X2
     detects: cyl_clamp.retracted
 }
 
@@ -59,12 +59,12 @@ device cyl_glue: cylinder {
 }
 
 device sensor_glue_ext: sensor {
-    driven_by: X3
+    reports_to: X3
     detects: cyl_glue.extended
 }
 
 device sensor_glue_ret: sensor {
-    driven_by: X4
+    reports_to: X4
     detects: cyl_glue.retracted
 }
 

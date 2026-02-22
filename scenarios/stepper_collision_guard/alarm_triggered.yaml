@@ -9,5 +9,5 @@ inputs:
       digital_inputs:
         alarm_x: true
       analog_inputs:
-        zone_code: 0
-        axis_count: 0
+        AI1: 0
+        AI0: 0

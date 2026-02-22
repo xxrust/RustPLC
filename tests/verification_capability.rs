@@ -61,8 +61,8 @@ device X0: digital_input
 device X1: digital_input
 device X2: digital_input
 
-device start_button: digital_input {
-    driven_by: X2
+device start_button: sensor {
+    reports_to: X2
     debounce: 20ms
 }
 
@@ -78,12 +78,12 @@ device cyl_A: cylinder {
 }
 
 device sensor_A_ext: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: cyl_A.extended
 }
 
 device sensor_A_ret: sensor {
-    driven_by: X1
+    reports_to: X1
     detects: cyl_A.retracted
 }
 
@@ -338,7 +338,7 @@ device cyl_A: cylinder {
 }
 
 device sensor_A_ext: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: cyl_A.extended
 }
 
@@ -453,12 +453,12 @@ device clamp_A: cylinder {
 }
 
 device sensor_A_clamped: sensor {
-    driven_by: X0
+    reports_to: X0
     detects: clamp_A.extended
 }
 
 device sensor_A_released: sensor {
-    driven_by: X1
+    reports_to: X1
     detects: clamp_A.retracted
 }
 
@@ -475,12 +475,12 @@ device clamp_B: cylinder {
 }
 
 device sensor_B_clamped: sensor {
-    driven_by: X2
+    reports_to: X2
     detects: clamp_B.extended
 }
 
 device sensor_B_released: sensor {
-    driven_by: X3
+    reports_to: X3
     detects: clamp_B.retracted
 }
 

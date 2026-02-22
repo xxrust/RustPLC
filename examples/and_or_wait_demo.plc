@@ -18,22 +18,22 @@ device cyl_A: cylinder {
 }
 
 device sensor_A_ext: sensor {
-    driven_by: X0,
+    reports_to: X0,
     detects: cyl_A.extended
 }
 
 device sensor_A_ext2: sensor {
-    driven_by: X1,
+    reports_to: X1,
     detects: cyl_A.extended
 }
 
 device sensor_A_ret: sensor {
-    driven_by: X2,
+    reports_to: X2,
     detects: cyl_A.retracted
 }
 
 device sensor_A_ret2: sensor {
-    driven_by: X3,
+    reports_to: X3,
     detects: cyl_A.retracted
 }
 
@@ -63,4 +63,3 @@ task fault:
     step stop:
         action: log "wait AND/OR demo fault"
     on_complete: goto main
-

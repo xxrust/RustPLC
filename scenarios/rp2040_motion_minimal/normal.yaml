@@ -7,21 +7,20 @@ inputs:
   - at_ms: 0
     set:
       digital_inputs:
-        axis0_enc_dir_positive: false
-        axis1_enc_dir_positive: false
+        X24: false
+        X26: false
       analog_inputs:
-        axis0_count: 0
-        axis1_count: 0
+        AI24: 0
+        AI26: 0
 
   - at_ms: 100
     set:
       digital_inputs:
-        axis0_enc_dir_positive: true
-        axis1_enc_dir_positive: true
+        X24: true
+        X26: true
 
   - at_ms: 800
     set:
       analog_inputs:
-        axis0_count: 25000
-        axis1_count: 18000
-
+        AI24: 25000
+        AI26: 18000

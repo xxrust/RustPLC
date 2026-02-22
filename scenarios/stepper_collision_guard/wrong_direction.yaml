@@ -8,12 +8,12 @@ inputs:
     set:
       digital_inputs:
         alarm_x: false
-        enc_dir_positive: false
+        X4: false
       analog_inputs:
-        zone_code: 0
-        axis_count: 0
+        AI1: 0
+        AI0: 0
 
   - at_ms: 800
     set:
       analog_inputs:
-        axis_count: 200000
+        AI0: 200000

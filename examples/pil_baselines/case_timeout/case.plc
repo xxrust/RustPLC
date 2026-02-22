@@ -2,8 +2,8 @@
 
 device X0: digital_input
 
-device start_button: digital_input {
-    driven_by: X0
+device start_button: sensor {
+    reports_to: X0
 }
 
 [constraints]
