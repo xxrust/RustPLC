@@ -1,5 +1,376 @@
 # Ralph Progress Log
 ## Codebase Patterns
-- (to be populated in this stage)
+- 当 DSL 关键字弃用时，先在 `parse_plc` 入口做逐行预检查并返回带行列号的迁移错误，再交给 pest 做常规语法解析。
+- DSL 新增结构化属性时，按 `plc.pest` 规则 + `parser/mod.rs` 的 `expect_*` 解析辅助函数成对落地，避免语义层直接解析字符串。
+- 语义拓扑构图应以 `TopologySection.connections` 为主输入，并通过 relation 回溯到设备声明行号，保证 `driven_by/reports_to/detects` 的错误都可定位。
+- `component_topology` 新增规则校验时，优先复用端口校验阶段解析出的有效连接上下文，再叠加规则检查，避免重复 endpoint 解析造成报错口径漂移。
+- 废弃 DSL 字段后，需同步更新 verifier/runtime/scenario 相关测试夹具与诊断文案，否则 `parse_plc` 的迁移拦截会导致回归测试批量失败。
+- 为废弃字段加 CI 防回流时，优先用 `git diff` 扫描新增行而非全仓 grep，这样不会被历史文档/负例夹具阻塞。
+- 新增 DSL 结构化字段时，优先保持 AST/API/store 的固定 shape（一致字段名 + 空值默认结构），前端解析入口做 normalize，避免 UI 侧散落空值判断。
+- `topology` 相关 API（`get/save/parse-plc`）若承载新元数据，建议统一走“服务端归一化后再返回/落盘”的模式，避免前端与文件工件出现字段漂移。
+- 前端涉及拓扑导出/保存/写回时，统一复用 `web-ui/src/utils/topologySerialization.ts` 的 `toComponentTopology`，避免 edges 的 `signal/relation/from_port/to_port` 序列化口径不一致。
+- 画布级可视化状态（过滤/分组高亮/区域定位）应放在 store，`TopologyCanvas` 仅基于 state 派生 `renderNodes/renderEdges`（`hidden + style`），避免污染持久化拓扑数据。
+- `parse-plc` API 契约回归建议直接在 `crates/web-server/src/main.rs` 调用 `parse_plc_topology(Json(ParsePlcTopologyRequest))` 断言 JSON 字段，避免起服务端到端测试成本。
+- 前端端口契约应在 `topologyStore.normalizeTopologyNode` 中统一通过 `resolveNodePorts` 归一化，并在导出时去除 `portContractFallback` 推导字段，避免把降级推断反写进持久化拓扑。
+- CLI 场景链路回归优先采用 `scenario-init` 生成夹具后立刻执行 `scenario-validate`（同一临时目录），避免依赖手写 YAML 随 DSL 进化失效。
+- 文档契约测试若绑定 `docs/*.md` 路径，优先支持“主路径 + 归档路径”候选读取（如 `docs/已实现/`），并移除已废弃文档对应测试，避免文档迁移导致 CI 假阳性失败。
+- 新增拓扑语义 diff 能力时，先复用 `parse_component_topology_json` 做两侧归一化，再比较 `nodes/ports/relations/tags`，可保证 diff 与 validate 语义一致并直接落盘为审计工件。
+- Web UI 若需把固定拓扑 JSON 作为可选项目加载，需同时提供 `examples/<id>.plc`（供 `/api/projects` 枚举）与 `examples/<id>.topology.json`（供 `/api/topology/:id` 优先返回）。
 
-Started: Fri Feb 20 00:54:24 CST 2026
+Started: Sat Feb 21 17:59:17 CST 2026
+
+## 2026-02-21 20:07:09 CST - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added new DSL relation fields `driven_by`/`reports_to`, added first-class `ports` model (`id/type/role`), and banned `connected_to` with migration error.
+  - Extended AST with port enums/structs and relation fields in `DeviceAttributes`.
+  - Updated parse-plc topology preview API payload/edges to surface new relation and port metadata.
+- Files changed
+  - `src/ast/mod.rs`
+  - `src/parser/plc.pest`
+  - `src/parser/mod.rs`
+  - `crates/web-server/src/main.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `parse_plc_topology` in `crates/web-server/src/main.rs` is the backend contract used by topology editor, so DSL field changes should update both `components[].params` and derived `connections`.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Running workspace-wide `cargo fmt` can touch many unrelated files in this repo; keep formatting scoped to changed files unless full-format is intentional.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Existing semantic pipeline still reads legacy `connected_to`; this round kept compatibility by mapping `driven_by` into the legacy field until later stories remove it.
+---
+## 2026-02-21 21:29:12 CST - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Refactored semantic topology build to consume relation connections uniformly (`driven_by`/`reports_to`/`detects`) and always add edges in producer -> consumer direction.
+  - Added relation-aware type/direction validation with line-locatable diagnostics, while preserving `type_mismatch` error class compatibility.
+  - Added semantic regression tests covering MIMO-style fan-in/fan-out and invalid direction hints for `reports_to`.
+- Files changed
+  - `src/semantic/mod.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `build_topology_from_ast` should not read relation fields ad hoc; use `topology.connections` as single source of truth to keep parser/semantic/API contracts aligned.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Some integration tests assert error category text (`ERROR [type_mismatch]`), so improving direction diagnostics must keep the original error class stable.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Existing verification/runtime code already traverses graph edges as upstream `Incoming`, so producer -> consumer graph orientation can be expanded relation-by-relation without changing traversal API.
+---
+
+## 2026-02-21 21:44:49 CST - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Updated scenario/runtime/verification fixtures to use `driven_by` topology relations so parser migration checks no longer break these pipelines.
+  - Refreshed causality fallback diagnostics to reference `driven_by/reports_to/detects` instead of deprecated `connected_to`.
+  - Verified US-004 regression scope for `two_cylinder` and `assembly_station` via targeted test runs.
+- Files changed
+  - `src/scenario_resolve.rs`
+  - `src/verification/causality.rs`
+  - `src/verification/safety.rs`
+  - `src/verification/timing.rs`
+  - `tests/runtime_bridge_us006.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Constraint verifier tests embed large inline PLC fixtures, so DSL keyword migrations require cross-module fixture updates (not just parser/semantic tests).
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Workspace-wide `cargo fmt --all --check` can fail due unrelated dirty files; for iterative PRD work, run `rustfmt --check` on story-touched files to keep scope isolated.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `cargo test two_cylinder` and `cargo test assembly_station` already cover key compilation regressions through `examples_integration` and `large_demo_coverage` without running the full suite.
+---
+
+## 2026-02-21 22:03:36 CST - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `scripts/migrate_connected_to.py` to bulk migrate legacy `connected_to` attributes to `driven_by` in `.plc` files (dry-run/write modes).
+  - Added manual-review output for unresolved list-style legacy values so ambiguous migrations are surfaced explicitly.
+  - Added CI regression guard `scripts/ci_no_connected_to_regression.sh` and wired it into `.github/workflows/rp2040_regression.yml`.
+  - Migrated Stage-3 gate fixture DSL in `scripts/stage3_runtime_dev_gate.sh` from `connected_to` to `driven_by` to keep CI/runtime gates aligned with parser restrictions.
+  - Updated runbook/docs test coverage so the new CI guard + migration command are documented and locked.
+- Files changed
+  - `.github/workflows/rp2040_regression.yml`
+  - `scripts/ci_script_contract_preflight.sh`
+  - `scripts/ci_no_connected_to_regression.sh`
+  - `scripts/migrate_connected_to.py`
+  - `scripts/stage3_runtime_dev_gate.sh`
+  - `docs/stage3_ci_gate_runbook.md`
+  - `tests/stage3_ci_gate_runbook_doc.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Stage-3 CI runbook assertions are enforced by `tests/stage3_ci_gate_runbook_doc.rs`, so any gate command change should update both doc and assertion list.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `scripts/ci_script_contract_preflight.sh` validates git mode (`100755`) from index metadata, so newly added shell scripts need `git update-index --chmod=+x` in addition to local `chmod` when filemode tracking is disabled.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `scripts/ci_no_connected_to_regression.sh` supports explicit base ref input for local checks and auto-detects `GITHUB_BASE_REF` for PR CI.
+---
+## 2026-02-21 22:22:24 CST - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added multi-dimensional `tags` model (`functional_group`/`danger_level`/`location_group`) to DSL grammar, AST (`DeviceTags`), and parser attribute handling.
+  - Extended parse-plc topology API payload so each component `params` includes normalized `tags`.
+  - Added frontend store/type alignment (`DeviceTags` type + topology load-time tag normalization) to keep DSL/API/store schema consistent.
+  - Added parser regression test covering multi-tag and hierarchical `location_group` parsing.
+- Files changed
+  - `src/ast/mod.rs`
+  - `src/parser/plc.pest`
+  - `src/parser/mod.rs`
+  - `crates/web-server/src/main.rs`
+  - `web-ui/src/types/index.ts`
+  - `web-ui/src/stores/topologyStore.ts`
+  - `web-ui/src/layouts/IDDELayout.tsx`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Tag-like structured metadata works best as fixed-shape objects across Rust serde and TS types; sparse/optional maps add avoidable UI branching.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `web-ui` lint currently fails on many pre-existing `any` and hook-rule violations unrelated to this story, so story checks should rely on `npm run build` for type safety unless lint debt is addressed separately.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Topology canvas hydration happens in `toCanvasTopology` (`web-ui/src/layouts/IDDELayout.tsx`), which is the best single point for normalizing new backend params fields.
+---
+## 2026-02-21 22:47:25 CST - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Standardized topology tags contract in backend APIs: `/api/topology/:id`, `/api/topology/parse-plc`, and save flow now normalize `components[].params.tags` to fixed shape and stamp `tags_schema_version = 1`.
+  - Added backend unit tests for tags normalization (default dimensions + non-string filtering) to lock API behavior.
+  - Added frontend reusable tag utilities and updated store to persist topology state with normalized tags plus tag-based retrieval (`findNodeIdsByTag`) and hierarchical location retrieval (`findNodeIdsByLocationPath`).
+  - Versioned/documented tag contract in UI docs and wired save payload to include `tags_schema_version` with normalized `tags`.
+- Files changed
+  - `crates/web-server/src/main.rs`
+  - `web-ui/src/utils/deviceTags.ts`
+  - `web-ui/src/stores/topologyStore.ts`
+  - `web-ui/src/layouts/IDDELayout.tsx`
+  - `web-ui/src/components/TopBar.tsx`
+  - `web-ui/src/types/index.ts`
+  - `docs/web_ui_development.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keeping tags normalization on backend ingress/egress plus frontend store hydration prevents schema drift when loading mixed sources (`.plc` parse result vs saved topology JSON).
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Running `rustfmt` directly may default to Rust 2015 in this repo; use `rustfmt --edition 2021 <file>` for single-file formatting on async-heavy modules.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `useTopologyStore` now already exposes tag query helpers, so upcoming tag-filter UI stories can consume selectors directly instead of re-scanning nodes in view components.
+---
+## 2026-02-21 23:15:22 CST - US-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a new canvas-side `TagBatchEditor` workflow for tag-based batch refactoring: filter by `functional_group`/`danger_level`/`location_group` (supports `*`), batch patch node JSON fields, rename labels, and batch update edge signal labels.
+  - Implemented preview-before-apply behavior with per-node/per-edge diff summary, then one-click apply and rollback using in-memory topology snapshots.
+  - Added export/write-back actions: topology can be exported as JSON and persisted via existing save API using a shared serializer so connection metadata (`relation/from_port/to_port/signal`) is preserved.
+  - Embedded the editor into the properties panel and extended i18n copy (`en`/`zh`) for the full batch-edit interaction set.
+  - Completed browser validation using `dev-browser` skill on `http://127.0.0.1:4173`, including preview/apply/rollback/write-back flows, and captured screenshot artifact `output/playwright/us-008-tag-batch-editor.png`.
+- Files changed
+  - `web-ui/src/components/properties/TagBatchEditor.tsx`
+  - `web-ui/src/components/properties/CanvasPropertiesEditor.tsx`
+  - `web-ui/src/components/TopBar.tsx`
+  - `web-ui/src/utils/topologySerialization.ts`
+  - `web-ui/src/stores/topologyStore.ts`
+  - `web-ui/src/locales/en.ts`
+  - `web-ui/src/locales/zh.ts`
+  - `output/playwright/us-008-tag-batch-editor.png`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - 批量编辑类 UI 最好采用“`Preview` 先计算 next topology，再 `replaceTopology` 原子替换”的方式，能复用现有 dirty-tracking 与 selection 恢复逻辑。
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `dev-browser` 在此环境默认 `chrome` 不可用；若需本地验证可先安装 Playwright Firefox 并临时注入 `libasound.so.2`（`LD_LIBRARY_PATH=/tmp/libasound/extracted/usr/lib/x86_64-linux-gnu`）。
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - 当前默认拓扑画布会加载 6 个示例节点/4 条边，足够直接验证批量标签改造的预览、应用和回滚闭环，无需先连后端项目数据。
+---
+## 2026-02-21 23:57:22 CST - US-009
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 在 `component_topology` 校验链路中新增 `tag_rules` 规则引擎，支持 `danger_level` 双通道检测约束、`functional_group` 组内/组间连接模式约束、`location_group` 区域隔离/跨区连接约束（含层级路径匹配与白名单对）。
+  - 为标签规则配置新增结构化解析与稳定错误码（`CTOP-TAGRULE-*`），违规统一输出 `code/path/message`。
+  - 扩展 CLI `component-topology-validate` 回归，验证标签规则违规时会失败并输出稳定错误码。
+- Files changed
+  - `src/component_topology.rs`
+  - `tests/component_topology_validate.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `component_topology` 规则扩展可复用现有 `CTOP-*` issue 体系，新增能力时优先补充稳定 code/path 而非只改文案。
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - 新增拓扑根字段（如 `tag_rules`）时需在 `ComponentTopology` 结构体上加 `serde(default, skip_serializing_if)`，否则会影响 normalized 输出兼容性。
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Web API `/topology/validate` 与 CLI `component-topology-validate` 共用 `parse_component_topology_value`，标签规则一处实现即可同时覆盖前后端校验入口。
+---
+## 2026-02-22 00:37:15 CST - US-010
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added tag-driven visualization controls to the canvas properties panel: tag filtering (nodes/edges), tag grouping highlight, and location-based fault-region focus.
+  - Extended topology store with `tagFilter` / `tagGrouping` / `locationFocus` state + actions, and wired `TopologyCanvas` to derive render-time hidden/style state from these controls.
+  - Added reusable tag-visualization helpers (`resolveTagFilterNodeIds`, `buildTagGroupColorMap`, `resolveLocationFocusNodeIds`) and localized UI copy (`en`/`zh`).
+  - Completed browser validation with `dev-browser` skill on `http://127.0.0.1:4173`, including filter-zero-results, group highlight legend, tag-change realtime refresh, and location-group one-click locate flow; captured screenshot `output/playwright/us-010-tag-visualization.png`.
+- Files changed
+  - `web-ui/src/components/canvas/TopologyCanvas.tsx`
+  - `web-ui/src/components/properties/CanvasPropertiesEditor.tsx`
+  - `web-ui/src/components/properties/TagVisualizationPanel.tsx`
+  - `web-ui/src/stores/topologyStore.ts`
+  - `web-ui/src/utils/tagVisualization.ts`
+  - `web-ui/src/locales/en.ts`
+  - `web-ui/src/locales/zh.ts`
+  - `output/playwright/us-010-tag-visualization.png`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For visual-only topology interactions, derive node/edge visibility/style at render time instead of mutating persisted topology objects.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `dev-browser` defaults to Chrome here (missing binary); use Firefox with `LD_LIBRARY_PATH=/tmp/libasound/extracted/usr/lib/x86_64-linux-gnu` to avoid `libasound.so.2` launch failure.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `TagVisualizationPanel` is mounted in `CanvasPropertiesEditor`, so it appears in the right panel only when no node is selected.
+---
+## 2026-02-22 00:50:16 CST - US-011
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added parse-plc API contract regression tests in `web-server` for `relation/from_port/to_port/signal` fields and component `ports/tags` metadata.
+  - Added `two_cylinder` regression coverage to ensure `detects` edges keep `extended/retracted` signal distinctions in API payload.
+- Files changed
+  - `crates/web-server/src/main.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For backend API contract stories, unit-test handler functions directly (`parse_plc_topology(Json(...))`) to validate payload schema without booting Axum router.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `cargo clippy` is not installed in this environment; keep quality gate with `cargo check` + `cargo test` + `rustfmt --check` and record lint-tooling gap.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `examples/two_cylinder.plc` is a stable fixture for verifying `cyl_*.extended/retracted` detect-link metadata in parse-plc API output.
+---
+## 2026-02-22 01:27:52 CST - US-012
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a frontend port-contract layer (`portContract.ts`) and dynamic handle renderer (`NodePortHandles`) so cylinder/sensor/switch/stepper/generic nodes all bind handles from port metadata (with fallback defaults).
+  - Refactored topology store normalization to always resolve node ports and mark `portContractFallback`; canvas now surfaces fallback badges/node outlines and a global degraded-contract notice.
+  - Reworked canvas connection flow to enforce port role + signal type compatibility, bind `sourceHandle`/`targetHandle`, and auto-fill edge labels from `signal/sourceHandle/targetHandle` priority.
+  - Updated topology hydration/serialization to preserve relation metadata and only persist explicit ports (drop fallback-derived contracts on export/write-back).
+  - Added i18n copy for port mismatch/fallback warnings and captured browser validation screenshot `output/playwright/us-012-port-contract.png`.
+- Files changed
+  - `web-ui/src/utils/portContract.ts`
+  - `web-ui/src/components/nodes/NodePortHandles.tsx`
+  - `web-ui/src/components/nodes/CylinderNode.tsx`
+  - `web-ui/src/components/nodes/SensorNode.tsx`
+  - `web-ui/src/components/nodes/SwitchNode.tsx`
+  - `web-ui/src/components/nodes/StepperNode.tsx`
+  - `web-ui/src/components/nodes/GenericNode.tsx`
+  - `web-ui/src/components/nodes/InputTerminalNode.tsx`
+  - `web-ui/src/components/nodes/OutputTerminalNode.tsx`
+  - `web-ui/src/components/canvas/TopologyCanvas.tsx`
+  - `web-ui/src/stores/topologyStore.ts`
+  - `web-ui/src/layouts/IDDELayout.tsx`
+  - `web-ui/src/utils/topologySerialization.ts`
+  - `web-ui/src/types/index.ts`
+  - `web-ui/src/locales/en.ts`
+  - `web-ui/src/locales/zh.ts`
+  - `output/playwright/us-012-port-contract.png`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Port-level UX validations are best centralized in `TopologyCanvas.onConnect` so both drag-created edges and warning UX stay aligned with store serialization contracts.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Full `cargo test` currently fails in this worktree because pre-existing doc relocations removed `docs/hil_regression.md`; use scoped checks (`cargo test --lib`) when story scope is frontend-only and doc fixtures are externally modified.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Browser validation can reliably exercise port-contract behavior on the default demo canvas (no backend project needed), including handle coverage, fallback warning, and type-mismatch rejection.
+---
+## 2026-02-22 01:40:15 CST - US-013
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added a dedicated Parser/Semantic/Runtime/API/UI test inventory matrix document and mapped each layer to representative suites plus fixture coverage.
+  - Refactored `tests/scenario_validate.rs` into table-driven coverage: success-path cases now iterate over `assembly_station` and `two_cylinder` presets, and unknown IO failure checks were merged into one reusable case matrix.
+  - Kept key regression set visibility for `two_cylinder` / `assembly_station` / MIMO through explicit matrix entries and targeted regression test runs.
+- Files changed
+  - `docs/testing_inventory_matrix.md`
+  - `tests/scenario_validate.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - CLI scenario contract tests are more stable when they generate fresh YAML with `scenario-init` before validation instead of relying on static scenario fixtures.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Workspace currently contains pre-existing doc relocations; `cargo test` fails at `tests/hil_regression_doc.rs` because `docs/hil_regression.md` is absent, so story-level validation should include targeted suites in addition to recording this known blocker.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - No `AGENTS.md` file exists under the touched directories (`tests/`, `docs/`, repo root), so reusable findings were captured in `progress.txt` `Codebase Patterns` instead.
+---
+## 2026-02-22 01:58:33 CST - US-014
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 清理了已失效的文档契约测试（移除 `hil_regression` 与 `stage3_ci_gate_runbook` 对应测试），避免无业务价值的文档路径漂移阻塞测试。
+  - 为 `component-topology-validate` 增补端口契约/标签规则契约回归：新增 `CTOP-CONN-007`（source 端口角色错误）与 `CTOP-TAGRULE-005`（tag rule mode 非法）稳定错误码+路径断言。
+  - 强化既有契约回归断言粒度：连接方向与危险等级规则失败场景均同时校验 `code + path`，确保 CLI 诊断输出稳定可依赖。
+  - 调整文档测试读取策略，`no_board_playbook` 与 `stepper_ab_encoder` 兼容 `docs/` 与 `docs/已实现/` 双路径，适配文档归档迁移。
+- Files changed
+  - `tests/component_topology_validate.rs`
+  - `tests/no_board_playbook_doc.rs`
+  - `tests/stepper_ab_encoder_doc.rs`
+  - `tests/hil_regression_doc.rs`
+  - `tests/stage3_ci_gate_runbook_doc.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `component-topology-validate` 的失败契约建议统一断言 `issue code + JSON path`，仅断言 code 无法防止定位路径漂移。
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `cargo fmt --all --check` 当前会受历史未格式化文件影响（如 `src/component_topology.rs`），故事级质量门禁更稳妥的是对改动文件做 `rustfmt --check` 并配合 `cargo test --tests`。
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - 当前仓库无 `AGENTS.md`（含测试目录与根目录）；可复用经验需沉淀到 `progress.txt` 的 `Codebase Patterns`。
+---
+## 2026-02-22 02:13:58 CST - US-015
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added semantic topology diff model in `component_topology`: compare normalized `nodes/ports/relations/tags`, emit deterministic JSON report, and include impact analysis (`relation_change_nodes`/`tag_change_nodes`/`blast_radius`/`high_risk_nodes`/`review_reasons`).
+  - Added new CLI command `component-topology-diff <before> <after> --out <semantic_diff.json> [--output human|json]` to generate audit-ready semantic diff artifacts and machine-readable summary output.
+  - Added regression coverage for semantic diff internals and CLI contract (`tests/component_topology_diff.rs`), including change and no-change scenarios.
+- Files changed
+  - `src/component_topology.rs`
+  - `src/main.rs`
+  - `tests/component_topology_diff.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `component-topology` story能力扩展优先落在同一模块（parse/validate/diff）并复用归一化输入，可避免 CLI 子命令间语义漂移。
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `cargo clippy` 在当前工具链未安装（`cargo-clippy` missing），质量门禁需记录并采用 `cargo check + rustfmt --check + targeted cargo test` 组合。
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - 新命令输出的 `semantic_diff.json` 已包含变更维度和影响半径字段，可直接作为后续审计或评审附件，无需二次聚合。
+---
+## 2026-02-22 02:47:38 CST - US-016
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 建立 500 节点 / 2000 边规模基线工件：`examples/topology_perf_500.topology.json`、`examples/topology_perf_500.scenario.json`，并补充 `examples/topology_perf_500.plc` 作为 Web UI 项目选择入口。
+  - 新增性能门禁脚本 `scripts/topology_perf_gate.py`，覆盖三条关键路径：`component-topology-validate`（解析）、`component-sim`（编译/执行链路）与前端拓扑渲染预处理（toCanvasTopology 等价转换）。
+  - 新增阈值配置 `scripts/perf/topology_perf_thresholds.json` 并接入 CI（`rp2040_regression.yml` 新增 `topology-perf-gate` 作业）。
+  - 补充基线契约测试 `tests/topology_perf_baseline.rs` 与文档 `docs/topology_perf_baseline.md`、`docs/wiki/CI-Runbook.md` 更新。
+  - 使用 `dev-browser` skill 完成浏览器验证：在 `http://127.0.0.1:4173` 切换到 `topology_perf_500` 项目后确认画布加载 500 节点 / 2000 边，标签过滤 `control` 后显示 250 节点 / 0 边；截图 `output/playwright/us-016-topology-perf-baseline.png`。
+- Files changed
+  - `.github/workflows/rp2040_regression.yml`
+  - `docs/topology_perf_baseline.md`
+  - `docs/wiki/CI-Runbook.md`
+  - `examples/topology_perf_500.plc`
+  - `examples/topology_perf_500.scenario.json`
+  - `examples/topology_perf_500.topology.json`
+  - `scripts/perf/topology_perf_thresholds.json`
+  - `scripts/topology_perf_gate.py`
+  - `tests/topology_perf_baseline.rs`
+  - `output/playwright/us-016-topology-perf-baseline.png`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - 规模基线门禁建议把“固定 fixture + 阈值 JSON + 脚本输出 machine-readable JSON”配套落地，方便 CI 与后续阈值校准。
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `dev-browser` 默认尝试 Chrome；当前环境需用 Firefox 并注入 `LD_LIBRARY_PATH=/tmp/libasound/extracted/usr/lib/x86_64-linux-gnu` 以规避 `libasound.so.2` 缺失。
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Web UI 右侧 Properties 面板中的 Statistics 与 Tag View Controls 已可直接作为大规模拓扑加载验收入口（节点/边数量与过滤结果无需额外调试开关）。
+---

@@ -1,0 +1,14 @@
+[topology]
+
+# This file only exists to make the scale baseline selectable in Web UI project list.
+# The UI will load `examples/topology_perf_500.topology.json` first for this project id.
+device bootstrap_signal: digital_input
+
+[constraints]
+
+[tasks]
+
+task idle:
+    step hold:
+        wait: bootstrap_signal == false
+        allow_indefinite_wait: true

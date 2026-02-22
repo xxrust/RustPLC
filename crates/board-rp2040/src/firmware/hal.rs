@@ -1,7 +1,7 @@
 #![cfg(target_os = "none")]
 
-use super::PicoIo;
 use super::motion::Motion;
+use super::PicoIo;
 use io_traits::Io;
 use rp_pico::hal::timer::Timer;
 
@@ -48,7 +48,11 @@ impl Hal {
         self.io.sample_analog_inputs();
 
         let tick = self.io.tick().0;
-        defmt::info!("TICK tick={} ts_ms={}", tick, tick.saturating_mul(self.tick_ms));
+        defmt::info!(
+            "TICK tick={} ts_ms={}",
+            tick,
+            tick.saturating_mul(self.tick_ms)
+        );
         (tick, tick_start_us, deadline_us)
     }
 

@@ -22,62 +22,49 @@ device X24: digital_input { external: true }                                    
 device AI26: analog_input { range: 0..4000000, unit: "count", external: true } # axis1 count
 device X26: digital_input { external: true }                                    # axis1 enc_dir_positive
 
-# Logical aliases
-device axis0_enable: digital_output { connected_to: Y24 }
-device axis0_dir: digital_output { connected_to: Y25 }
-device axis0_vel_cmd: analog_output { connected_to: AO24, range: 0..20000, unit: "step_s" }
-device axis0_count: analog_input { connected_to: AI24, range: 0..4000000, unit: "count", external: true }
-device axis0_enc_dir_positive: digital_input { connected_to: X24, external: true }
-
-device axis1_enable: digital_output { connected_to: Y26 }
-device axis1_dir: digital_output { connected_to: Y27 }
-device axis1_vel_cmd: analog_output { connected_to: AO26, range: 0..20000, unit: "step_s" }
-device axis1_count: analog_input { connected_to: AI26, range: 0..4000000, unit: "count", external: true }
-device axis1_enc_dir_positive: digital_input { connected_to: X26, external: true }
-
 [constraints]
 
 [tasks]
 
 task cycle:
   step enable_axes:
-    action: set axis0_enable on
-    action: set axis1_enable on
+    action: set Y24 on
+    action: set Y26 on
 
   step set_dir_forward:
-    action: set axis0_dir on
-    action: set axis1_dir on
+    action: set Y25 on
+    action: set Y27 on
 
   step start_move:
-    action: set_analog axis0_vel_cmd 8000
-    action: set_analog axis1_vel_cmd 6000
+    action: set_analog AO24 8000
+    action: set_analog AO26 6000
 
   step wait_dir_feedback:
-    wait: axis0_enc_dir_positive == true
+    wait: X24 == true
     timeout: 200ms -> goto fault
 
   step wait_axis0_count:
-    wait: axis0_count >= 20000
+    wait: AI24 >= 20000
     timeout: 1500ms -> goto fault
 
   step wait_axis1_count:
-    wait: axis1_count >= 15000
+    wait: AI26 >= 15000
     timeout: 1500ms -> goto fault
 
   step stop:
-    action: set_analog axis0_vel_cmd 0
-    action: set_analog axis1_vel_cmd 0
-    action: set axis0_enable off
-    action: set axis1_enable off
+    action: set_analog AO24 0
+    action: set_analog AO26 0
+    action: set Y24 off
+    action: set Y26 off
 
   on_complete: goto done
 
 task fault:
   step safe_stop:
-    action: set_analog axis0_vel_cmd 0
-    action: set_analog axis1_vel_cmd 0
-    action: set axis0_enable off
-    action: set axis1_enable off
+    action: set_analog AO24 0
+    action: set_analog AO26 0
+    action: set Y24 off
+    action: set Y26 off
 
   step log:
     action: log "fault: timeout waiting for motion feedback"

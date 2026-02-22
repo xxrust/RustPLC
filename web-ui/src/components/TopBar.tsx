@@ -5,7 +5,7 @@ import { useTopologyStore } from '../stores/topologyStore';
 import { topologyApi } from '../services/api';
 import ValidationErrorPanel from './ValidationErrorPanel';
 import { ProjectSelector } from './ProjectSelector';
-import type { ComponentTopology } from '../types';
+import { toComponentTopology } from '../utils/topologySerialization';
 
 interface Tab {
   id: string;
@@ -53,21 +53,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
     try {
       setSaving(true);
 
-      // Convert React Flow state to ComponentTopology format
-      const topology: ComponentTopology = {
-        schema_version: 1,
-        component_library: { schema_version: 1, components: [] },
-        components: nodes.map((n) => ({
-          id: n.id,
-          component_id: n.type || 'generic',
-          params: n.data,
-          position: n.position,
-        })),
-        connections: edges.map((e) => ({
-          from: e.source,
-          to: e.target,
-        })),
-      };
+      const topology = toComponentTopology(nodes, edges);
 
       // Validate via API
       const validation = await topologyApi.validateTopology(topology);

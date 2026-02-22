@@ -370,7 +370,10 @@ fn parse_stepper_axis_table(v: &toml::Value, base: &str) -> Result<StepperAxisCo
             "{base}: step_gpio/dir_gpio/en_gpio must be distinct"
         ));
     }
-    let dir_inverted = t.get("dir_inverted").and_then(|v| v.as_bool()).unwrap_or(false);
+    let dir_inverted = t
+        .get("dir_inverted")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     // Trapezoid defaults are optional; if any is set, all three must be set.
     let v_max_sps = t.get("v_max_sps").and_then(|v| v.as_integer());
@@ -491,9 +494,17 @@ fn parse_safe_do_section(v: Option<&toml::Value>) -> Result<BTreeMap<u16, SafeDo
             Some(toml::Value::Integer(n)) => match *n {
                 0 => false,
                 1 => true,
-                other => return Err(format!("safe_state.do.{k}.safe_value must be 0|1|bool, got {other}")),
+                other => {
+                    return Err(format!(
+                        "safe_state.do.{k}.safe_value must be 0|1|bool, got {other}"
+                    ))
+                }
             },
-            Some(other) => return Err(format!("safe_state.do.{k}.safe_value must be 0|1|bool, got {other:?}")),
+            Some(other) => {
+                return Err(format!(
+                    "safe_state.do.{k}.safe_value must be 0|1|bool, got {other:?}"
+                ))
+            }
             None => return Err(format!("safe_state.do.{k}.safe_value is required")),
         };
         let group = entry.get("group").and_then(|v| v.as_integer()).unwrap_or(0);

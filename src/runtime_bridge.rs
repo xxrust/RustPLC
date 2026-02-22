@@ -209,11 +209,13 @@ fn build_pid_configs(
         };
 
         let parse = |field: &str, value: &str| -> Result<f32, BridgeError> {
-            value.parse::<f32>().map_err(|_| BridgeError::InvalidPidLiteral {
-                pid: pid_name.clone(),
-                field: field.to_string(),
-                value: value.to_string(),
-            })
+            value
+                .parse::<f32>()
+                .map_err(|_| BridgeError::InvalidPidLiteral {
+                    pid: pid_name.clone(),
+                    field: field.to_string(),
+                    value: value.to_string(),
+                })
         };
 
         let pv = resolver.resolve_analog_input_id(&ctx, &loop_spec.pv)?;
@@ -741,7 +743,7 @@ impl<'a> TopologyResolver<'a> {
                     device: device.to_string(),
                 })?;
 
-        let ids = self.collect_physical_ids(start, DeviceKind::DigitalInput, parse_x_id);
+        let ids = self.collect_input_physical_ids(start, DeviceKind::DigitalInput, parse_x_id);
         unique_physical_id(ids).map(DigitalInputId).map_err(|_| {
             BridgeError::UnresolvableDigitalInput {
                 state: state_name.to_string(),
@@ -810,7 +812,7 @@ impl<'a> TopologyResolver<'a> {
                     device: device.to_string(),
                 })?;
 
-        let ids = self.collect_physical_ids(start, DeviceKind::AnalogInput, parse_ai_id);
+        let ids = self.collect_input_physical_ids(start, DeviceKind::AnalogInput, parse_ai_id);
         unique_physical_id(ids).map(AnalogInputId).map_err(|_| {
             BridgeError::UnresolvableAnalogInput {
                 state: state_name.to_string(),
@@ -847,6 +849,54 @@ impl<'a> TopologyResolver<'a> {
             {
                 if visited.insert(pred) {
                     queue.push_back(pred);
+                }
+            }
+        }
+
+        out
+    }
+
+    fn collect_input_physical_ids(
+        &self,
+        start: NodeIndex,
+        kind: DeviceKind,
+        parse: fn(&str) -> Option<u16>,
+    ) -> Vec<u16> {
+        let mut queue = VecDeque::new();
+        let mut visited = HashSet::new();
+        let mut out = Vec::new();
+
+        queue.push_back(start);
+        visited.insert(start);
+
+        while let Some(n) = queue.pop_front() {
+            let device = &self.topology.graph[n];
+            if device.kind == kind {
+                if let Some(id) = parse(&device.name) {
+                    out.push(id);
+                }
+            }
+
+            for pred in self
+                .topology
+                .graph
+                .neighbors_directed(n, Direction::Incoming)
+            {
+                let pred_kind = &self.topology.graph[pred].kind;
+                if (*pred_kind == DeviceKind::Sensor || *pred_kind == kind) && visited.insert(pred)
+                {
+                    queue.push_back(pred);
+                }
+            }
+            for succ in self
+                .topology
+                .graph
+                .neighbors_directed(n, Direction::Outgoing)
+            {
+                let succ_kind = &self.topology.graph[succ].kind;
+                if (*succ_kind == DeviceKind::Sensor || *succ_kind == kind) && visited.insert(succ)
+                {
+                    queue.push_back(succ);
                 }
             }
         }

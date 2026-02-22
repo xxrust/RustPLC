@@ -267,14 +267,18 @@ mod tests {
         );
         let first = &diagnosis.candidates[0];
         assert_eq!(first.issue_code, "DIAG-COMP-007");
-        assert!(first
-            .evidence
-            .iter()
-            .any(|entry| { entry.source == ComponentEvidenceSource::FaultInjection }));
-        assert!(first
-            .evidence
-            .iter()
-            .any(|entry| { entry.source == ComponentEvidenceSource::ProgramBehavior }));
+        assert!(
+            first
+                .evidence
+                .iter()
+                .any(|entry| { entry.source == ComponentEvidenceSource::FaultInjection })
+        );
+        assert!(
+            first
+                .evidence
+                .iter()
+                .any(|entry| { entry.source == ComponentEvidenceSource::ProgramBehavior })
+        );
         assert!(
             first.fault_context.is_some(),
             "fault context should be present"

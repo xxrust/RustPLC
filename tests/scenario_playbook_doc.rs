@@ -44,4 +44,3 @@ fn scenario_playbook_mentions_required_commands_and_they_exist_in_cli_usage() {
         );
     }
 }
-

@@ -78,17 +78,21 @@ pub fn parse_iec_address(input: &str) -> Result<LogicalChannel, IecAddressParseE
 
     match (iq, xw) {
         ('I', 'X') | ('Q', 'X') => {
-            let (n_str, m_str) = tail.split_once('.').ok_or_else(|| {
-                IecAddressParseError::InvalidFormat {
+            let (n_str, m_str) =
+                tail.split_once('.')
+                    .ok_or_else(|| IecAddressParseError::InvalidFormat {
+                        input: raw.to_string(),
+                    })?;
+            let n: u32 = n_str
+                .parse()
+                .map_err(|_| IecAddressParseError::InvalidNumber {
                     input: raw.to_string(),
-                }
-            })?;
-            let n: u32 = n_str.parse().map_err(|_| IecAddressParseError::InvalidNumber {
-                input: raw.to_string(),
-            })?;
-            let m_u32: u32 = m_str.parse().map_err(|_| IecAddressParseError::InvalidNumber {
-                input: raw.to_string(),
-            })?;
+                })?;
+            let m_u32: u32 = m_str
+                .parse()
+                .map_err(|_| IecAddressParseError::InvalidNumber {
+                    input: raw.to_string(),
+                })?;
             let m: u8 = m_u32
                 .try_into()
                 .map_err(|_| IecAddressParseError::InvalidNumber {
@@ -119,9 +123,11 @@ pub fn parse_iec_address(input: &str) -> Result<LogicalChannel, IecAddressParseE
                     input: raw.to_string(),
                 });
             }
-            let n: u16 = tail.parse().map_err(|_| IecAddressParseError::InvalidNumber {
-                input: raw.to_string(),
-            })?;
+            let n: u16 = tail
+                .parse()
+                .map_err(|_| IecAddressParseError::InvalidNumber {
+                    input: raw.to_string(),
+                })?;
             let kind = if iq == 'I' {
                 LogicalChannelKind::AnalogInput
             } else {
@@ -201,4 +207,3 @@ mod tests {
         ));
     }
 }
-

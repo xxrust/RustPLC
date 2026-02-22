@@ -6,6 +6,7 @@ cd "$REPO_ROOT"
 
 required_exec_scripts=(
   "scripts/stage3_runtime_dev_gate.sh"
+  "scripts/ci_no_connected_to_regression.sh"
   "scripts/rp2040_trace_gate.sh"
   "scripts/rp2040_hil_gate.sh"
   "scripts/rp2040_hil_daily_gate.sh"

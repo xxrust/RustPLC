@@ -1,8 +1,8 @@
 use crate::ir::{DeviceKind, TopologyGraph};
 use crate::parser::parse_plc;
 use crate::semantic::{build_topology_graph, preprocess_program};
-use petgraph::graph::NodeIndex;
 use petgraph::Direction;
+use petgraph::graph::NodeIndex;
 use serde_yaml::{Mapping, Number, Value};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
@@ -90,9 +90,11 @@ impl ScenarioNameResolver {
             }
         }
 
-        let start = self.by_name.get(raw).copied().ok_or_else(|| {
-            format!("unknown {} name `{raw}`", kind.label())
-        })?;
+        let start = self
+            .by_name
+            .get(raw)
+            .copied()
+            .ok_or_else(|| format!("unknown {} name `{raw}`", kind.label()))?;
 
         let want_kind = match kind {
             InputKind::Digital => DeviceKind::DigitalInput,
@@ -149,8 +151,21 @@ impl ScenarioNameResolver {
                 .graph
                 .neighbors_directed(n, Direction::Incoming)
             {
-                if visited.insert(pred) {
+                let pred_kind = &self.topology.graph[pred].kind;
+                if (*pred_kind == DeviceKind::Sensor || *pred_kind == kind) && visited.insert(pred)
+                {
                     queue.push_back(pred);
+                }
+            }
+            for succ in self
+                .topology
+                .graph
+                .neighbors_directed(n, Direction::Outgoing)
+            {
+                let succ_kind = &self.topology.graph[succ].kind;
+                if (*succ_kind == DeviceKind::Sensor || *succ_kind == kind) && visited.insert(succ)
+                {
+                    queue.push_back(succ);
                 }
             }
         }
@@ -162,11 +177,7 @@ impl ScenarioNameResolver {
 fn unique_physical_id(mut ids: Vec<u16>) -> Result<u16, Vec<u16>> {
     ids.sort_unstable();
     ids.dedup();
-    if ids.len() == 1 {
-        Ok(ids[0])
-    } else {
-        Err(ids)
-    }
+    if ids.len() == 1 { Ok(ids[0]) } else { Err(ids) }
 }
 
 fn parse_decimal_u16(s: &str) -> Option<u16> {
@@ -245,9 +256,7 @@ fn resolve_map_keys_to_u16(
             })?
         } else {
             val_to_u16_number(k).ok_or_else(|| {
-                format!(
-                    "invalid numeric key at {path_prefix} (expected 0..=65535 integer): {k:?}"
-                )
+                format!("invalid numeric key at {path_prefix} (expected 0..=65535 integer): {k:?}")
             })?
         };
 
@@ -274,7 +283,10 @@ fn resolve_map_keys_to_u16(
     Ok(out)
 }
 
-fn resolve_inputs_in_document(resolver: &ScenarioNameResolver, doc: &mut Value) -> Result<(), String> {
+fn resolve_inputs_in_document(
+    resolver: &ScenarioNameResolver,
+    doc: &mut Value,
+) -> Result<(), String> {
     let Value::Mapping(root) = doc else {
         // Let the downstream deserializer produce a better error later.
         return Ok(());
@@ -292,7 +304,8 @@ fn resolve_inputs_in_document(resolver: &ScenarioNameResolver, doc: &mut Value) 
             continue;
         };
 
-        if let Some(Value::Mapping(di_map)) = set_map.get(Value::String("digital_inputs".to_string()))
+        if let Some(Value::Mapping(di_map)) =
+            set_map.get(Value::String("digital_inputs".to_string()))
         {
             let resolved = resolve_map_keys_to_u16(
                 resolver,
@@ -306,7 +319,8 @@ fn resolve_inputs_in_document(resolver: &ScenarioNameResolver, doc: &mut Value) 
             );
         }
 
-        if let Some(Value::Mapping(ai_map)) = set_map.get(Value::String("analog_inputs".to_string()))
+        if let Some(Value::Mapping(ai_map)) =
+            set_map.get(Value::String("analog_inputs".to_string()))
         {
             let resolved = resolve_map_keys_to_u16(
                 resolver,
@@ -378,7 +392,10 @@ fn resolve_digital_bursts_in_document(
     Ok(())
 }
 
-fn resolve_faults_in_document(resolver: &ScenarioNameResolver, doc: &mut Value) -> Result<(), String> {
+fn resolve_faults_in_document(
+    resolver: &ScenarioNameResolver,
+    doc: &mut Value,
+) -> Result<(), String> {
     let Value::Mapping(root) = doc else {
         return Ok(());
     };
@@ -547,7 +564,9 @@ fn collect_existing_inputs(doc: &Value) -> Result<BTreeMap<u64, ExpandedAtMs>, S
 
         if let Some(Value::Mapping(di_map)) = set_map.get(&yaml_key("digital_inputs")) {
             for (k, v) in di_map {
-                let Some(id) = val_to_u16_number(k) else { continue };
+                let Some(id) = val_to_u16_number(k) else {
+                    continue;
+                };
                 let Some(b) = v.as_bool() else { continue };
                 insert_di(
                     &mut out,
@@ -560,7 +579,9 @@ fn collect_existing_inputs(doc: &Value) -> Result<BTreeMap<u64, ExpandedAtMs>, S
         }
         if let Some(Value::Mapping(ai_map)) = set_map.get(&yaml_key("analog_inputs")) {
             for (k, v) in ai_map {
-                let Some(id) = val_to_u16_number(k) else { continue };
+                let Some(id) = val_to_u16_number(k) else {
+                    continue;
+                };
                 insert_ai(
                     &mut out,
                     at_ms,
@@ -607,7 +628,10 @@ fn expand_pulse_sugar(
         ensure_aligned("width_ms", width_ms, tick_ms, &format!("{path}.width_ms"))?;
         ensure_lt_duration(at_ms, duration_ms, &format!("{path}.at_ms"))?;
 
-        let Some(target_v) = pm.get(&yaml_key("digital")).or_else(|| pm.get(&yaml_key("target"))) else {
+        let Some(target_v) = pm
+            .get(&yaml_key("digital"))
+            .or_else(|| pm.get(&yaml_key("target")))
+        else {
             return Err(format!("missing required field `digital` at {path}"));
         };
         let id = resolve_id_value(
@@ -618,8 +642,9 @@ fn expand_pulse_sugar(
         )?;
 
         let value = get_bool_field_opt(pm, "value", &format!("{path}.value"))?.unwrap_or(true);
-        let inactive_value = get_bool_field_opt(pm, "inactive_value", &format!("{path}.inactive_value"))?
-            .unwrap_or(false);
+        let inactive_value =
+            get_bool_field_opt(pm, "inactive_value", &format!("{path}.inactive_value"))?
+                .unwrap_or(false);
 
         let release_at = at_ms.saturating_add(width_ms);
         ensure_aligned(
@@ -691,28 +716,30 @@ fn expand_hold_sugar(
 
         let id = resolve_id_value(resolver, kind, target_v, &format!("{path}.target"))?;
 
-        let Some(value_v) = get_number_field_opt(hm, "value").or_else(|| hm.get(&yaml_key("value"))) else {
+        let Some(value_v) =
+            get_number_field_opt(hm, "value").or_else(|| hm.get(&yaml_key("value")))
+        else {
             return Err(format!("missing required field `value` at {path}.value"));
         };
 
         match kind {
             InputKind::Digital => {
                 let Some(b) = value_v.as_bool() else {
-                    return Err(format!("invalid value at {path}.value (expected bool): {value_v:?}"));
+                    return Err(format!(
+                        "invalid value at {path}.value (expected bool): {value_v:?}"
+                    ));
                 };
-                let release = get_bool_field_opt(hm, "release_value", &format!("{path}.release_value"))?
-                    .unwrap_or(false);
+                let release =
+                    get_bool_field_opt(hm, "release_value", &format!("{path}.release_value"))?
+                        .unwrap_or(false);
                 insert_di(by_at_ms, from_ms, id, b, format!("{path} (hold start)"))?;
-                insert_di(
-                    by_at_ms,
-                    to_ms,
-                    id,
-                    release,
-                    format!("{path} (hold end)"),
-                )?;
+                insert_di(by_at_ms, to_ms, id, release, format!("{path} (hold end)"))?;
             }
             InputKind::Analog => {
-                if value_v.as_f64().is_none() && value_v.as_i64().is_none() && value_v.as_u64().is_none() {
+                if value_v.as_f64().is_none()
+                    && value_v.as_i64().is_none()
+                    && value_v.as_u64().is_none()
+                {
                     return Err(format!(
                         "invalid value at {path}.value (expected number): {value_v:?}"
                     ));
@@ -728,13 +755,7 @@ fn expand_hold_sugar(
                     value_v.clone(),
                     format!("{path} (hold start)"),
                 )?;
-                insert_ai(
-                    by_at_ms,
-                    to_ms,
-                    id,
-                    release_v,
-                    format!("{path} (hold end)"),
-                )?;
+                insert_ai(by_at_ms, to_ms, id, release_v, format!("{path} (hold end)"))?;
             }
         }
     }
@@ -850,8 +871,8 @@ mod tests {
 device X0: digital_input
 device AI0: analog_input { range: 0..100 }
 
-device start_button: digital_input { connected_to: X0 }
-device pressure_sensor: sensor { connected_to: AI0 }
+device start_button: sensor { reports_to: X0 }
+device pressure_sensor: sensor { reports_to: AI0 }
 
 [constraints]
 [tasks]

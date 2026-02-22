@@ -308,10 +308,11 @@ mod tests {
 ]"#,
         )
         .expect_err("invalid lost_step ratio should fail");
-        assert!(err
-            .issues
-            .iter()
-            .any(|issue| issue.code == "CFLT-012" && issue.path == "$[0].params.ratio"));
+        assert!(
+            err.issues
+                .iter()
+                .any(|issue| issue.code == "CFLT-012" && issue.path == "$[0].params.ratio")
+        );
     }
 
     #[test]
@@ -322,9 +323,10 @@ mod tests {
 ]"#,
         )
         .expect_err("invalid chatter params should fail");
-        assert!(err
-            .issues
-            .iter()
-            .any(|issue| issue.code == "CFLT-011" && issue.path == "$[0].params"));
+        assert!(
+            err.issues
+                .iter()
+                .any(|issue| issue.code == "CFLT-011" && issue.path == "$[0].params")
+        );
     }
 }

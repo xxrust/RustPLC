@@ -1,6 +1,6 @@
 use crate::component_faults::{
-    parse_component_fault_events_value, ComponentFaultEvent, ComponentFaultIssue,
-    ComponentFaultValidationError,
+    ComponentFaultEvent, ComponentFaultIssue, ComponentFaultValidationError,
+    parse_component_fault_events_value,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

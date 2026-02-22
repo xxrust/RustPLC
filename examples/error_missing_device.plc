@@ -3,7 +3,7 @@
 device Y0: digital_output
 
 device valve_A: solenoid_valve {
-    connected_to: Y9
+    driven_by: Y9
     response_time: 20ms
 }
 

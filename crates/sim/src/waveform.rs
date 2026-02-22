@@ -195,7 +195,10 @@ mod tests {
             steps: &STEPS,
             entry: StepId(0),
         }];
-        static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+        };
 
         let mut io = SimIo::new(1, 1, 0, 0);
         io.schedule_digital_input(Tick(1), DigitalInputId(0), true);

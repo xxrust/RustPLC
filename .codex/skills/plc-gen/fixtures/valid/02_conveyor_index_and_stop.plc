@@ -6,35 +6,35 @@ device X0: digital_input
 device X1: digital_input
 device X2: digital_input
 
-device start_button: digital_input {
-    connected_to: X2
+device start_button: sensor {
+    reports_to: X2
     debounce: 20ms
 }
 
 device motor_conveyor: motor {
-    connected_to: Y0
+    driven_by: Y0
     rated_speed: 30rpm
     ramp_time: 50ms
 }
 
 device sensor_index: sensor {
-    connected_to: X0
+    reports_to: X0
     detects: motor_conveyor.position_index
 }
 
 device valve_stopper: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_stopper: cylinder {
-    connected_to: valve_stopper
+    driven_by: valve_stopper
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_stop_ext: sensor {
-    connected_to: X1
+    reports_to: X1
     detects: cyl_stopper.extended
 }
 

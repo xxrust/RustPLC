@@ -1147,11 +1147,13 @@ mod tests {
             final_position <= 0,
             "direction_reversed should affect position direction"
         );
-        assert!(report
-            .fault_audit
-            .iter()
-            .any(|entry| entry.action == "activated"
-                && entry.fault_kind == ComponentFaultKind::Stall));
+        assert!(
+            report
+                .fault_audit
+                .iter()
+                .any(|entry| entry.action == "activated"
+                    && entry.fault_kind == ComponentFaultKind::Stall)
+        );
         assert!(report.fault_audit.iter().any(
             |entry| entry.action == "expired" && entry.fault_kind == ComponentFaultKind::Stall
         ));

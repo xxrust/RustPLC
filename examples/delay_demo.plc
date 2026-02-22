@@ -4,13 +4,13 @@ device Y0: digital_output
 device X0: digital_input
 
 device conveyor: motor {
-    connected_to: Y0
+    driven_by: Y0
     rated_speed: 60rpm
     ramp_time: 200ms
 }
 
 device sensor_arrived: sensor {
-    connected_to: X0
+    reports_to: X0
     detects: conveyor.position_A
 }
 

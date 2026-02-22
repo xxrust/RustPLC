@@ -9,7 +9,7 @@ device Y0: digital_output
 device AI0: analog_input { range: 0..100, unit: "bar" }
 
 device valve_main: solenoid_valve {
-    connected_to: Y0,
+    driven_by: Y0,
     response_time: 30ms
 }
 

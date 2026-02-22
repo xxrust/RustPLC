@@ -1,6 +1,8 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTopologyStore } from '../../stores/topologyStore';
+import TagBatchEditor from './TagBatchEditor';
+import TagVisualizationPanel from './TagVisualizationPanel';
 
 const CanvasPropertiesEditor: React.FC = () => {
   const { t } = useTranslation();
@@ -50,6 +52,10 @@ const CanvasPropertiesEditor: React.FC = () => {
           )}
         </div>
       </div>
+
+      <TagVisualizationPanel />
+
+      <TagBatchEditor />
 
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 11, color: '#a0a0a0', marginBottom: 8 }}>{t('properties.instructions')}</div>

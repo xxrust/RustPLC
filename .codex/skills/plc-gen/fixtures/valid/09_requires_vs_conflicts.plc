@@ -8,50 +8,50 @@ device X2: digital_input
 device X3: digital_input
 device X4: digital_input
 
-device start_button: digital_input {
-    connected_to: X4
+device start_button: sensor {
+    reports_to: X4
     debounce: 20ms
 }
 
 device valve_hold: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
     response_time: 20ms
 }
 
 device valve_work: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_hold: cylinder {
-    connected_to: valve_hold
+    driven_by: valve_hold
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device cyl_work: cylinder {
-    connected_to: valve_work
+    driven_by: valve_work
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_hold_ext: sensor {
-    connected_to: X0
+    reports_to: X0
     detects: cyl_hold.extended
 }
 
 device sensor_hold_ret: sensor {
-    connected_to: X1
+    reports_to: X1
     detects: cyl_hold.retracted
 }
 
 device sensor_work_ext: sensor {
-    connected_to: X2
+    reports_to: X2
     detects: cyl_work.extended
 }
 
 device sensor_work_ret: sensor {
-    connected_to: X3
+    reports_to: X3
     detects: cyl_work.retracted
 }
 

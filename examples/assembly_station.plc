@@ -18,114 +18,114 @@ device X8: digital_input
 device X9: digital_input
 device X10: digital_input
 
-device start_button: digital_input {
-    connected_to: X10
+device start_button: sensor {
+    reports_to: X10
     debounce: 20ms
 }
 
 device motor_left: motor {
-    connected_to: Y0
+    driven_by: Y0
     rated_speed: 30rpm
     ramp_time: 50ms
 }
 
 device motor_right: motor {
-    connected_to: Y1
+    driven_by: Y1
     rated_speed: 30rpm
     ramp_time: 50ms
 }
 
 device sensor_left_arrive: sensor {
-    connected_to: X0
+    reports_to: X0
     detects: motor_left.position_A
 }
 
 device sensor_right_arrive: sensor {
-    connected_to: X1
+    reports_to: X1
     detects: motor_right.position_A
 }
 
 device valve_push_L: solenoid_valve {
-    connected_to: Y2
+    driven_by: Y2
     response_time: 20ms
 }
 
 device cyl_push_L: cylinder {
-    connected_to: valve_push_L
+    driven_by: valve_push_L
     stroke_time: 500ms
     retract_time: 500ms
 }
 
 device sensor_push_L_ext: sensor {
-    connected_to: X2
+    reports_to: X2
     detects: cyl_push_L.extended
 }
 
 device sensor_push_L_ret: sensor {
-    connected_to: X3
+    reports_to: X3
     detects: cyl_push_L.retracted
 }
 
 device valve_push_R: solenoid_valve {
-    connected_to: Y3
+    driven_by: Y3
     response_time: 20ms
 }
 
 device cyl_push_R: cylinder {
-    connected_to: valve_push_R
+    driven_by: valve_push_R
     stroke_time: 500ms
     retract_time: 500ms
 }
 
 device sensor_push_R_ext: sensor {
-    connected_to: X4
+    reports_to: X4
     detects: cyl_push_R.extended
 }
 
 device sensor_push_R_ret: sensor {
-    connected_to: X5
+    reports_to: X5
     detects: cyl_push_R.retracted
 }
 
 device valve_press: solenoid_valve {
-    connected_to: Y4
+    driven_by: Y4
     response_time: 20ms
 }
 
 device cyl_press: cylinder {
-    connected_to: valve_press
+    driven_by: valve_press
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_press_ext: sensor {
-    connected_to: X6
+    reports_to: X6
     detects: cyl_press.extended
 }
 
 device sensor_press_ret: sensor {
-    connected_to: X7
+    reports_to: X7
     detects: cyl_press.retracted
 }
 
 device valve_eject: solenoid_valve {
-    connected_to: Y5
+    driven_by: Y5
     response_time: 20ms
 }
 
 device cyl_eject: cylinder {
-    connected_to: valve_eject
+    driven_by: valve_eject
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_eject_ext: sensor {
-    connected_to: X8
+    reports_to: X8
     detects: cyl_eject.extended
 }
 
 device sensor_eject_ret: sensor {
-    connected_to: X9
+    reports_to: X9
     detects: cyl_eject.retracted
 }
 

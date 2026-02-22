@@ -55,19 +55,19 @@ device Y0: digital_output
 device X0: digital_input
 
 device start_button: digital_input {
-    connected_to: X0
+    driven_by: X0
 }
 
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
 }
 
 device sensor_ext: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: cyl_A.extended
 }
 

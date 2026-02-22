@@ -8,45 +8,45 @@ device X2: digital_input
 device X3: digital_input
 device X4: digital_input
 
-device start_button: digital_input {
-    connected_to: X2
+device start_button: sensor {
+    reports_to: X2
     debounce: 20ms
 }
 
-device switch_A: digital_input {
-    connected_to: X3
+device switch_A: sensor {
+    reports_to: X3
     debounce: 20ms
 }
 
-device switch_B: digital_input {
-    connected_to: X4
+device switch_B: sensor {
+    reports_to: X4
     debounce: 20ms
 }
 
 device motor_grind: motor {
-    connected_to: Y0
+    driven_by: Y0
     rated_speed: 3000rpm
     ramp_time: 50ms
 }
 
 device valve_clamp: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_clamp: cylinder {
-    connected_to: valve_clamp
+    driven_by: valve_clamp
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_clamp_ext: sensor {
-    connected_to: X0
+    reports_to: X0
     detects: cyl_clamp.extended
 }
 
 device sensor_clamp_ret: sensor {
-    connected_to: X1
+    reports_to: X1
     detects: cyl_clamp.retracted
 }
 

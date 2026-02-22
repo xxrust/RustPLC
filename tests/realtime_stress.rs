@@ -66,7 +66,8 @@ fn high_load_scenarios_are_deterministic_and_gateable() {
     let overload_out = base.join("overload_out");
     let overload_out_again = base.join("overload_out_again");
 
-    let safe_report = run_virtual_board_and_timing_report(&plc_path, &safe_scenario_path, &safe_out);
+    let safe_report =
+        run_virtual_board_and_timing_report(&plc_path, &safe_scenario_path, &safe_out);
     let overload_report =
         run_virtual_board_and_timing_report(&plc_path, &overload_scenario_path, &overload_out);
     let overload_report_again = run_virtual_board_and_timing_report(
@@ -76,7 +77,9 @@ fn high_load_scenarios_are_deterministic_and_gateable() {
     );
 
     let safe_p99 = safe_report["exec_us_p99"].as_u64().expect("safe p99");
-    let overload_p99 = overload_report["exec_us_p99"].as_u64().expect("overload p99");
+    let overload_p99 = overload_report["exec_us_p99"]
+        .as_u64()
+        .expect("overload p99");
     let overload_p99_again = overload_report_again["exec_us_p99"]
         .as_u64()
         .expect("overload p99 repeat");

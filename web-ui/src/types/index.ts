@@ -67,25 +67,60 @@ export interface RunStatus {
   failure_summary?: string;
 }
 
+export interface DeviceTags {
+  functional_group: string[];
+  danger_level: string[];
+  location_group: string[];
+}
+
+export const TOPOLOGY_TAGS_SCHEMA_VERSION = 1;
+
+export type TagDimension = keyof DeviceTags;
+
+export type PortSignalType =
+  | 'digital'
+  | 'analog'
+  | 'pneumatic'
+  | 'logical'
+  | 'generic';
+
+export type DevicePortRole = 'producer' | 'consumer' | 'bidirectional';
+
+export interface DevicePortMetadata {
+  id: string;
+  type: PortSignalType;
+  role: DevicePortRole;
+}
+
+export interface TopologyComponentParams extends Record<string, unknown> {
+  tags?: DeviceTags;
+  ports?: DevicePortMetadata[];
+}
+
 export interface ComponentTopology {
   schema_version: number;
+  tags_schema_version?: number;
   component_library: {
     schema_version: number;
     components: Array<{
       id: string;
       name: string;
       type: string;
-      params: Record<string, any>;
+      params: TopologyComponentParams;
     }>;
   };
   components: Array<{
     id: string;
     component_id: string;
-    params: Record<string, any>;
+    params: TopologyComponentParams;
   }>;
   connections: Array<{
     from: string;
     to: string;
+    relation?: string;
+    signal?: string;
+    from_port?: string;
+    to_port?: string;
   }>;
 }
 

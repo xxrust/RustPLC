@@ -38,4 +38,3 @@ fn sim_plc_force_override_demo_runs() {
     );
     assert!(out.exists(), "trace output should exist");
 }
-

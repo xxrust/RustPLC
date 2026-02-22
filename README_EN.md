@@ -160,6 +160,10 @@ Verification passed:
 | **⏱️ Real-Time Gating** | Tick timing sampling, p50/p95/p99 stats, real-time threshold gates |
 | **🚫 No-Board Delivery** | Virtual board runner, SIL vs virtual-board comparison, release-bundle |
 | **🛡️ Recovery Templates** | E-stop/power-loss/sensor-stuck recovery templates, critical wait recoverability lint |
+| **🏷️ Tag-Driven Topology** | Multi-dimensional tags (functional/danger/location), batch refactor, rule engine, visual grouping |
+| **🔀 Port-Level Wiring** | Explicit `driven_by`/`reports_to`/`detects` semantics, MIMO topology, port contract validation |
+| **📊 Semantic Diff** | Topology change impact analysis, node/port/relation/tag-level diff, audit records |
+| **⚡ Performance Gate** | 500-node/2000-edge baseline, compile/parse/render p95 threshold CI gate |
 
 ---
 
@@ -180,9 +184,18 @@ AI will generate a complete `.plc` file through multi-turn dialogue and auto-ver
 ```plc
 [topology]
 device Y0: digital_output
-device valve_A: solenoid_valve { connected_to: Y0, response_time: 20ms }
-device cyl_A: cylinder { connected_to: valve_A, stroke_time: 300ms }
-device sensor_A_ext: sensor { connected_to: X0, detects: cyl_A.extended }
+device valve_A: solenoid_valve {
+    driven_by: Y0,
+    response_time: 20ms
+}
+device cyl_A: cylinder {
+    driven_by: valve_A,
+    stroke_time: 300ms
+}
+device sensor_A_ext: sensor {
+    reports_to: X0,
+    detects: cyl_A
+}
 
 [constraints]
 safety:
@@ -195,6 +208,8 @@ task cycle:
         wait: sensor_A_ext == true
         timeout: 500ms -> goto fault_handler
 ```
+
+> **Note**: `connected_to` is deprecated. Use `driven_by` (drive relationship), `reports_to` (signal reporting), `detects` (detection target). Migration tool: `python3 scripts/migrate_connected_to.py`
 
 ### 2. Compile & Verify
 
@@ -287,6 +302,7 @@ Full documentation available on **[GitHub Wiki](https://github.com/xxrust/RustPL
 - No-board delivery: [`docs/no_board_playbook.md`](docs/no_board_playbook.md)
 - Motion control: [`docs/stepper_ab_encoder.md`](docs/stepper_ab_encoder.md)
 - Recovery templates: [`docs/recovery_templates_sequence_lint.md`](docs/recovery_templates_sequence_lint.md)
+- Topology refactor: [`docs/topology_perf_baseline.md`](docs/topology_perf_baseline.md), [`docs/testing_inventory_matrix.md`](docs/testing_inventory_matrix.md)
 
 ---
 
@@ -333,11 +349,25 @@ Full documentation available on **[GitHub Wiki](https://github.com/xxrust/RustPL
 - ✅ Threshold semantic hardening (type / range / unit consistency checks)
 - ✅ No-RTOS Real-Time Playbook documentation
 
+**Topology Semantics & Tag Refactor (this release):**
+- ✅ Unified topology direction: producer → consumer (`driven_by` / `reports_to` / `detects`)
+- ✅ Removed `connected_to` ambiguity; batch migration tool + CI regression guard
+- ✅ Ports as first-class citizens (`id/type/role`), MIMO topology support
+- ✅ Multi-dimensional tag system (`functional_group` / `danger_level` / `location_group`)
+- ✅ Tag-driven batch refactor (preview diff, rollback, export)
+- ✅ Tag rule engine (danger-level dual-channel, within-group / cross-group connection constraints)
+- ✅ Frontend tag visualization grouping & filtering, `location_group` one-click navigation
+- ✅ parse-plc API returns relation & port metadata (`relation/from_port/to_port/signal`)
+- ✅ Frontend port contract & wiring binding refactor (cylinder/sensor/switch/stepper/generic)
+- ✅ Test inventory matrix & parameterization refactor, removed invalid tests
+- ✅ Semantic diff & impact analysis (node/port/relation/tag changes + affected rules/tests/modules)
+- ✅ Performance gate: 500-node/2000-edge baseline, p95 threshold CI alerts
+
 ### Planned
 
 - ⏳ Hardware abstraction layer (EtherCAT / Modbus / more GPIO boards)
 - ⏳ Multi-controller coordination
-- ⏳ Graphical DSL editor
+- ⏳ LSP editor integration (syntax highlighting, completion, go-to-definition)
 
 ---
 

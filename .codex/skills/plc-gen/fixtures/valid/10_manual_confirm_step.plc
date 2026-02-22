@@ -6,34 +6,34 @@ device X1: digital_input
 device X2: digital_input
 device X3: digital_input
 
-device start_button: digital_input {
-    connected_to: X3
+device start_button: sensor {
+    reports_to: X3
     debounce: 20ms
 }
 
-device confirm_button: digital_input {
-    connected_to: X2
+device confirm_button: sensor {
+    reports_to: X2
     debounce: 20ms
 }
 
 device valve_lift: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
     response_time: 20ms
 }
 
 device cyl_lift: cylinder {
-    connected_to: valve_lift
+    driven_by: valve_lift
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_lift_ext: sensor {
-    connected_to: X0
+    reports_to: X0
     detects: cyl_lift.extended
 }
 
 device sensor_lift_ret: sensor {
-    connected_to: X1
+    reports_to: X1
     detects: cyl_lift.retracted
 }
 

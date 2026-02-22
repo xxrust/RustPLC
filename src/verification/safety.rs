@@ -331,9 +331,10 @@ pub fn verify_safety_with_config(
         total_rules,
     };
 
-    let level =
-        if degraded_rules == 0 && skipped_rules_count == 0 && (checked_rules == 0 || all_complete)
-        {
+    let level = if degraded_rules == 0
+        && skipped_rules_count == 0
+        && (checked_rules == 0 || all_complete)
+    {
         SafetyProofLevel::Complete
     } else {
         if !all_complete {
@@ -1018,7 +1019,9 @@ fn safety_expr_states_with_reason(
             let state_id = model.device_state_index[device_id]
                 .get(&state_expr.state)
                 .copied()
-                .ok_or_else(|| format!("设备 {} 不存在状态 {}", state_expr.device, state_expr.state))?;
+                .ok_or_else(|| {
+                    format!("设备 {} 不存在状态 {}", state_expr.device, state_expr.state)
+                })?;
             Ok((device_id, vec![state_id]))
         }
         SafetyExpr::Threshold {
@@ -1047,8 +1050,10 @@ fn safety_expr_states_with_reason(
             if value.parse::<f64>().is_err() {
                 return Err(format!("阈值值无法解析为数字：{value}"));
             }
-            let states = threshold_states_for_expr(model, device_id, operator, value)
-                .ok_or_else(|| format!("无法将阈值表达式映射到离散区间：{device} {operator} {value}"))?;
+            let states =
+                threshold_states_for_expr(model, device_id, operator, value).ok_or_else(|| {
+                    format!("无法将阈值表达式映射到离散区间：{device} {operator} {value}")
+                })?;
             Ok((device_id, states))
         }
     }
@@ -1396,23 +1401,23 @@ device Y0: digital_output
 device Y1: digital_output
 
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
     response_time: 20ms
 }
 
 device valve_B: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device cyl_B: cylinder {
-    connected_to: valve_B
+    driven_by: valve_B
     stroke_time: 300ms
     retract_time: 300ms
 }
@@ -1460,21 +1465,21 @@ device Y0: digital_output
 device Y1: digital_output
 
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
 }
 
 device valve_B: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 200ms
     retract_time: 200ms
 }
 
 device cyl_B: cylinder {
-    connected_to: valve_B
+    driven_by: valve_B
     stroke_time: 200ms
     retract_time: 200ms
 }
@@ -1517,20 +1522,20 @@ task parallel_demo:
 
 device Y0: digital_output
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
 }
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 100ms
     retract_time: 100ms
 }
 
 device Y1: digital_output
 device valve_B: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
 }
 device cyl_B: cylinder {
-    connected_to: valve_B
+    driven_by: valve_B
     stroke_time: 100ms
     retract_time: 100ms
 }
@@ -1572,20 +1577,20 @@ task loop:
 
 device Y0: digital_output
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
 }
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 100ms
     retract_time: 100ms
 }
 
 device Y1: digital_output
 device valve_B: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
 }
 device cyl_B: cylinder {
-    connected_to: valve_B
+    driven_by: valve_B
     stroke_time: 100ms
     retract_time: 100ms
 }
@@ -1634,20 +1639,20 @@ task init:
 
 device Y0: digital_output
 device valve_A: solenoid_valve {
-    connected_to: Y0
+    driven_by: Y0
 }
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 100ms
     retract_time: 100ms
 }
 
 device Y1: digital_output
 device valve_B: solenoid_valve {
-    connected_to: Y1
+    driven_by: Y1
 }
 device cyl_B: cylinder {
-    connected_to: valve_B
+    driven_by: valve_B
     stroke_time: 100ms
     retract_time: 100ms
 }
@@ -1708,17 +1713,17 @@ task loop:
 device Y0: digital_output
 device Y1: digital_output
 
-device valve_clamp: solenoid_valve { connected_to: Y0 }
-device valve_press: solenoid_valve { connected_to: Y1 }
+device valve_clamp: solenoid_valve { driven_by: Y0 }
+device valve_press: solenoid_valve { driven_by: Y1 }
 
 device cyl_clamp: cylinder {
-    connected_to: valve_clamp
+    driven_by: valve_clamp
     stroke_time: 120ms
     retract_time: 120ms
 }
 
 device cyl_press: cylinder {
-    connected_to: valve_press
+    driven_by: valve_press
     stroke_time: 140ms
     retract_time: 140ms
 }
@@ -1771,17 +1776,17 @@ task press:
 device Y0: digital_output
 device Y1: digital_output
 
-device valve_clamp: solenoid_valve { connected_to: Y0 }
-device valve_press: solenoid_valve { connected_to: Y1 }
+device valve_clamp: solenoid_valve { driven_by: Y0 }
+device valve_press: solenoid_valve { driven_by: Y1 }
 
 device cyl_clamp: cylinder {
-    connected_to: valve_clamp
+    driven_by: valve_clamp
     stroke_time: 120ms
     retract_time: 120ms
 }
 
 device cyl_press: cylinder {
-    connected_to: valve_press
+    driven_by: valve_press
     stroke_time: 140ms
     retract_time: 140ms
 }
@@ -1851,10 +1856,12 @@ task main:
         assert_eq!(report.coverage.degraded_rules, 0);
         assert_eq!(report.coverage.skipped_rules, 0);
         assert_eq!(report.rule_statuses.len(), 2);
-        assert!(report
-            .rule_statuses
-            .iter()
-            .all(|status| matches!(status.status, SafetyRuleStatusKind::Bound)));
+        assert!(
+            report
+                .rule_statuses
+                .iter()
+                .all(|status| matches!(status.status, SafetyRuleStatusKind::Bound))
+        );
         assert!(report.rule_statuses.iter().all(|s| s.reason.is_none()));
     }
 
@@ -1900,10 +1907,12 @@ task main:
         assert_eq!(report.coverage.total_rules, 2);
         assert_eq!(report.coverage.bound_rules, 1);
         assert_eq!(report.coverage.skipped_rules, 1);
-        assert!(report
-            .rule_statuses
-            .iter()
-            .any(|status| matches!(status.status, SafetyRuleStatusKind::Skipped)));
+        assert!(
+            report
+                .rule_statuses
+                .iter()
+                .any(|status| matches!(status.status, SafetyRuleStatusKind::Skipped))
+        );
         assert!(
             report
                 .warnings
@@ -1965,10 +1974,12 @@ task main:
         assert_eq!(report.coverage.bound_rules, 0);
         assert_eq!(report.coverage.degraded_rules, 0);
         assert_eq!(report.coverage.skipped_rules, 2);
-        assert!(report
-            .rule_statuses
-            .iter()
-            .all(|status| matches!(status.status, SafetyRuleStatusKind::Skipped)));
+        assert!(
+            report
+                .rule_statuses
+                .iter()
+                .all(|status| matches!(status.status, SafetyRuleStatusKind::Skipped))
+        );
     }
 
     #[test]
@@ -1981,28 +1992,28 @@ device Y1: digital_output
 device X0: digital_input
 device X1: digital_input
 
-device valve_A: solenoid_valve { connected_to: Y0 }
-device valve_B: solenoid_valve { connected_to: Y1 }
+device valve_A: solenoid_valve { driven_by: Y0 }
+device valve_B: solenoid_valve { driven_by: Y1 }
 
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 120ms
     retract_time: 120ms
 }
 
 device cyl_B: cylinder {
-    connected_to: valve_B
+    driven_by: valve_B
     stroke_time: 120ms
     retract_time: 120ms
 }
 
 device sensor_A_ext: sensor {
-    connected_to: X0
+    driven_by: X0
     detects: cyl_A.extended
 }
 
 device sensor_B_ext: sensor {
-    connected_to: X1
+    driven_by: X1
     detects: cyl_B.extended
 }
 
@@ -2045,9 +2056,9 @@ task main:
 device pressure_sensor: analog_input { range: 0..100, unit: "bar" }
 
 device Y0: digital_output
-device valve_A: solenoid_valve { connected_to: Y0 }
+device valve_A: solenoid_valve { driven_by: Y0 }
 device cyl_A: cylinder {
-    connected_to: valve_A
+    driven_by: valve_A
     stroke_time: 120ms
     retract_time: 120ms
 }
@@ -2117,11 +2128,7 @@ task main:
         let status = &report.rule_statuses[0];
         assert!(matches!(status.status, SafetyRuleStatusKind::Degraded));
         assert!(
-            status
-                .reason
-                .as_deref()
-                .unwrap_or("")
-                .contains("区间离散"),
+            status.reason.as_deref().unwrap_or("").contains("区间离散"),
             "阈值抽象应标注为降级原因"
         );
         assert_eq!(status.analog_thresholds.len(), 2);
@@ -2174,7 +2181,7 @@ task main:
 
 device AO0: analog_output { range: 0..10 }
 device Y0: digital_output
-device valve: solenoid_valve { connected_to: Y0 }
+device valve: solenoid_valve { driven_by: Y0 }
 
 [constraints]
 

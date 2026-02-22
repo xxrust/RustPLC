@@ -85,7 +85,10 @@ inputs: []
     );
 
     let body = fs::read_to_string(&alarms).expect("read alarm events");
-    let first = body.lines().next().expect("expected at least one alarm event");
+    let first = body
+        .lines()
+        .next()
+        .expect("expected at least one alarm event");
     let event: Value = serde_json::from_str(first).expect("valid alarm event JSON");
 
     assert!(event.get("alarm_id").and_then(Value::as_str).is_some());

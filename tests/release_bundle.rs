@@ -176,7 +176,9 @@ fn release_bundle_emits_manifest_with_consistent_hashes() {
         "realtime_profile tick_ms should come from scenario"
     );
     assert!(
-        build_meta["realtime_profile"]["overrun_count"].as_u64().is_some(),
+        build_meta["realtime_profile"]["overrun_count"]
+            .as_u64()
+            .is_some(),
         "realtime_profile should include overrun_count"
     );
 }

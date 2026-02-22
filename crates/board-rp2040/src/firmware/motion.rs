@@ -10,7 +10,7 @@ use rp_pico::hal::{
         PullDown,
     },
     pac,
-    pio::{PIOBuilder, PIOExt, PinDir, Rx, Running, SM0, SM1, SM2, SM3, StateMachine, Tx},
+    pio::{PIOBuilder, PIOExt, PinDir, Running, Rx, StateMachine, Tx, SM0, SM1, SM2, SM3},
 };
 
 // PIO instruction helpers.
@@ -84,7 +84,9 @@ impl Motion {
             "set pins, 0",
             "jmp loop"
         );
-        let installed_step = pio.install(&step_program.program).expect("install step pio");
+        let installed_step = pio
+            .install(&step_program.program)
+            .expect("install step pio");
         let installed_step_1 = unsafe { installed_step.share() };
 
         // Quadrature counter program (shared across both encoder axes).
@@ -115,7 +117,9 @@ impl Motion {
             "mov x, !y",
             "jmp start"
         );
-        let installed_quad = pio.install(&quad_program.program).expect("install quad pio");
+        let installed_quad = pio
+            .install(&quad_program.program)
+            .expect("install quad pio");
         let installed_quad_1 = unsafe { installed_quad.share() };
 
         let axis0 = Axis::new(
@@ -190,8 +194,10 @@ struct AxisChannels {
     di_dir_positive: usize,
 }
 
-struct Axis<SmStep: rp_pico::hal::pio::StateMachineIndex, SmEnc: rp_pico::hal::pio::StateMachineIndex>
-{
+struct Axis<
+    SmStep: rp_pico::hal::pio::StateMachineIndex,
+    SmEnc: rp_pico::hal::pio::StateMachineIndex,
+> {
     channels: AxisChannels,
     stepper: Option<StepperAxis<SmStep>>,
     encoder: Option<AbEncoderAxis<SmEnc>>,
@@ -354,10 +360,8 @@ impl<SM: rp_pico::hal::pio::StateMachineIndex> StepperAxis<SM> {
         let dir = take_pin(pins, dir_gpio)?;
         let en = take_pin(pins, en_gpio)?;
 
-        let step: Pin<DynPinId, FunctionPio0, PullDown> = step
-            .try_into_function::<FunctionPio0>()
-            .ok()
-            .unwrap();
+        let step: Pin<DynPinId, FunctionPio0, PullDown> =
+            step.try_into_function::<FunctionPio0>().ok().unwrap();
         let step_pin_id = step.id().num;
 
         let mut dir: Pin<DynPinId, FunctionSioOutput, PullDown> =
@@ -569,14 +573,10 @@ impl<SM: rp_pico::hal::pio::StateMachineIndex> AbEncoderAxis<SM> {
         let a = take_pin(pins, a_gpio)?;
         let b = take_pin(pins, b_gpio)?;
 
-        let a: Pin<DynPinId, FunctionPio0, PullDown> = a
-            .try_into_function::<FunctionPio0>()
-            .ok()
-            .unwrap();
-        let b: Pin<DynPinId, FunctionPio0, PullDown> = b
-            .try_into_function::<FunctionPio0>()
-            .ok()
-            .unwrap();
+        let a: Pin<DynPinId, FunctionPio0, PullDown> =
+            a.try_into_function::<FunctionPio0>().ok().unwrap();
+        let b: Pin<DynPinId, FunctionPio0, PullDown> =
+            b.try_into_function::<FunctionPio0>().ok().unwrap();
         let a_pin_id = a.id().num;
         let b_pin_id = b.id().num;
 
@@ -585,16 +585,21 @@ impl<SM: rp_pico::hal::pio::StateMachineIndex> AbEncoderAxis<SM> {
             .jmp_pin(b_pin_id)
             .clock_divisor_fixed_point(1, 0)
             .build(sm);
-        sm.set_pindirs([
-            (a_pin_id, PinDir::Input),
-            (b_pin_id, PinDir::Input),
-        ]);
+        sm.set_pindirs([(a_pin_id, PinDir::Input), (b_pin_id, PinDir::Input)]);
         let sm = sm.start();
 
         Some(Self {
             count_sign_inverted,
-            scale: if scale.is_finite() && scale > 0.0 { scale } else { 1.0 },
-            quad: if quad == 1 || quad == 2 || quad == 4 { quad } else { 4 },
+            scale: if scale.is_finite() && scale > 0.0 {
+                scale
+            } else {
+                1.0
+            },
+            quad: if quad == 1 || quad == 2 || quad == 4 {
+                quad
+            } else {
+                4
+            },
             _a_pin: a,
             _b_pin: b,
             sm,

@@ -5,26 +5,26 @@ device X0: digital_input
 device X1: digital_input
 device X2: digital_input
 
-device start_button: digital_input {
-    connected_to: X2
+device start_button: sensor {
+    reports_to: X2
     debounce: 20ms
 }
 
 device motor_ctrl: motor {
-    connected_to: Y0
+    driven_by: Y0
     rated_speed: 60rpm
     ramp_time: 50ms
 }
 
 device sensor_A: sensor {
     type: proximity
-    connected_to: X0
+    reports_to: X0
     detects: motor_ctrl.position_A
 }
 
 device sensor_B: sensor {
     type: proximity
-    connected_to: X1
+    reports_to: X1
     detects: motor_ctrl.position_B
 }
 

@@ -115,6 +115,63 @@ export const en = {
       instructionSelect: '• Select a node to edit its properties',
       instructionDelete: '• Press Delete to remove selected nodes/edges',
       instructionRightClick: '• Right-click nodes for fault injection',
+
+      // Tag batch editor
+      batchTitle: 'Tag Batch Refactor',
+      batchDimension: 'Tag Dimension',
+      batchFilter: 'Tag Filter',
+      batchFilterPlaceholder: 'e.g. conveyor, high, line_a/cell_2 or *',
+      batchFilterHintEmpty: 'Enter a tag filter to preview impacted nodes.',
+      batchFilterHint: '{{count}} node(s) currently match this filter.',
+      batchNodePatch: 'Node Patch (JSON object)',
+      batchRename: 'Naming Rule',
+      batchRenamePrefix: 'Prefix',
+      batchRenameSuffix: 'Suffix',
+      batchRenameSearch: 'Replace from',
+      batchRenameReplace: 'Replace to',
+      batchEdgeUpdate: 'Edge Update',
+      batchEdgeScopeTouched: 'Touched edges',
+      batchEdgeScopeInternal: 'Internal edges',
+      batchEdgeSignalKeep: 'Keep signal labels',
+      batchEdgeSignalSet: 'Set signal label',
+      batchEdgeSignalClear: 'Clear signal label',
+      batchEdgeSignalPlaceholder: 'Signal label value',
+      batchPreview: 'Preview Diff',
+      batchApply: 'Apply Batch',
+      batchRollback: 'Rollback Last Batch',
+      batchExport: 'Export Topology JSON',
+      batchWriteBack: 'Write Back',
+      batchWriteBackSaving: 'Writing...',
+      batchPreviewError: 'Unable to build batch preview.',
+      batchApplySuccess: 'Batch changes applied. Review and save when ready.',
+      batchRollbackSuccess: 'Last batch change has been rolled back.',
+      batchExportSuccess: 'Topology JSON exported.',
+      batchWriteBackNeedProject: 'Select a project before writing back.',
+      batchWriteBackSuccess: 'Topology written back to project.',
+      batchWriteBackFailed: 'Write-back failed. Check server/API status.',
+      batchPreviewSummary:
+        'Preview: matched {{matched}} node(s), node changes {{nodeChanges}}, edge changes {{edgeChanges}}.',
+      batchPreviewNodeChanges: 'Node updates',
+      batchPreviewEdgeChanges: 'Edge updates',
+
+      // Tag view controls
+      tagViewTitle: 'Tag View Controls',
+      tagViewFilterDimension: 'Filter by tag dimension',
+      tagViewFilterPlaceholder: 'Filter by exact tag or use *',
+      tagViewFilterSummary: 'Visible after filter: {{nodes}} node(s), {{edges}} edge(s).',
+      tagViewClearFilter: 'Clear Filter',
+      tagViewGroupingDimension: 'Highlight groups by',
+      tagViewGroupingToggle: 'Enable grouped highlighting',
+      tagViewGroupingMore: '+{{count}} more groups',
+      tagViewClearGrouping: 'Clear Highlight',
+      tagViewLocationLocate: 'Locate fault region (location_group)',
+      tagViewLocationPlaceholder: 'e.g. line_a/cell_2/station_7',
+      tagViewLocationPreview:
+        'Region matches {{region}} node(s), with neighbors {{neighbors}} node(s).',
+      tagViewLocateButton: 'Locate Region + Neighbors',
+      tagViewClearLocate: 'Clear Locate',
+      tagViewLocationActive:
+        'Focused region: {{region}} node(s), with neighbors {{neighbors}} node(s).',
     },
 
     // Context Menu
@@ -361,6 +418,15 @@ export const en = {
       fitView: 'Fit View',
       lockView: 'Lock View',
       unlockView: 'Unlock View',
+      portFallbackNodesNotice:
+        '{{count}} node(s) are using fallback port contracts; edge binding is degraded.',
+      portFallbackEdgeWarning:
+        'Missing explicit port metadata; edge added in degraded mode.',
+      portTypeMismatch: 'Port type mismatch: {{source}} -> {{target}}.',
+      portRoleMismatch: 'Connection direction does not match port role.',
+      portBindingUnavailable:
+        'Cannot bind edge to unique source/target handles for this node pair.',
+      dismissWarning: 'Dismiss warning',
     },
 
     // Notifications

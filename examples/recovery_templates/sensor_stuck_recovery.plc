@@ -7,24 +7,24 @@ device Y0: digital_output
 device Y1: digital_output
 device Y2: digital_output
 
-device start_button: digital_input {
-    connected_to: X0
+device start_button: sensor {
+    reports_to: X0
     debounce: 20ms
 }
-device sensor_extend: digital_input {
-    connected_to: X1
+device sensor_extend: sensor {
+    reports_to: X1
 }
-device maintenance_reset: digital_input {
-    connected_to: X2
+device maintenance_reset: sensor {
+    reports_to: X2
 }
-device cyl_extend_cmd: digital_output {
-    connected_to: Y0
+device cyl_extend_cmd: solenoid_valve {
+    driven_by: Y0
 }
-device cyl_retract_cmd: digital_output {
-    connected_to: Y1
+device cyl_retract_cmd: solenoid_valve {
+    driven_by: Y1
 }
-device alarm_light: digital_output {
-    connected_to: Y2
+device alarm_light: solenoid_valve {
+    driven_by: Y2
 }
 
 [constraints]

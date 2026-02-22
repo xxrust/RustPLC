@@ -50,4 +50,3 @@ fn readme_sim_plc_quickstart_command_succeeds() {
     let trace = fs::read_to_string(&out_trace).expect("read trace");
     assert!(!trace.trim().is_empty(), "trace should be non-empty");
 }
-
