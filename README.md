@@ -160,6 +160,10 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 | **⏱️ 实时门禁** | tick 时序采样，p50/p95/p99 统计，实时阈值门禁 |
 | **🚫 无板交付** | 虚拟板级 Runner，SIL vs virtual-board 对比，release-bundle |
 | **🛡️ 恢复模板** | 急停/掉电/传感器卡死恢复模板，关键 wait 可恢复性 lint |
+| **🏷️ 标签驱动拓扑** | 多维标签（功能/危险等级/位置），批量改造，规则引擎，可视化分组 |
+| **🔀 端口级连线** | `driven_by`/`reports_to`/`detects` 明确语义，MIMO 拓扑，端口契约验证 |
+| **📊 语义 Diff** | 拓扑变更影响分析，节点/端口/关系/标签级 diff，审计记录 |
+| **⚡ 性能门禁** | 500 节点/2000 边基线，编译/解析/渲染 p95 阈值 CI 门禁 |
 
 ---
 
@@ -180,9 +184,18 @@ AI 会通过多轮对话生成完整的 `.plc` 文件并自动验证。
 ```plc
 [topology]
 device Y0: digital_output
-device valve_A: solenoid_valve { driven_by: Y0, response_time: 20ms }
-device cyl_A: cylinder { driven_by: valve_A, stroke_time: 300ms }
-device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
+device valve_A: solenoid_valve {
+    driven_by: Y0,
+    response_time: 20ms
+}
+device cyl_A: cylinder {
+    driven_by: valve_A,
+    stroke_time: 300ms
+}
+device sensor_A_ext: sensor {
+    reports_to: X0,
+    detects: cyl_A
+}
 
 [constraints]
 safety:
@@ -195,6 +208,8 @@ task cycle:
         wait: sensor_A_ext == true
         timeout: 500ms -> goto fault_handler
 ```
+
+> **注意**：`connected_to` 已废弃，请使用 `driven_by`（驱动关系）、`reports_to`（信号上报）、`detects`（检测目标）。迁移工具：`python3 scripts/migrate_connected_to.py`
 
 ### 2. 编译验证
 
@@ -287,6 +302,7 @@ cargo run --release -- release-bundle examples/assembly_station.plc \
 - 无板交付：[`docs/no_board_playbook.md`](docs/no_board_playbook.md)
 - 运动控制：[`docs/stepper_ab_encoder.md`](docs/stepper_ab_encoder.md)
 - 恢复模板：[`docs/recovery_templates_sequence_lint.md`](docs/recovery_templates_sequence_lint.md)
+- 拓扑重构：[`docs/topology_perf_baseline.md`](docs/topology_perf_baseline.md)、[`docs/testing_inventory_matrix.md`](docs/testing_inventory_matrix.md)
 
 ---
 
@@ -333,11 +349,25 @@ cargo run --release -- release-bundle examples/assembly_station.plc \
 - ✅ 阈值语义强化（类型/range/unit 一致性校验）
 - ✅ No-RTOS Real-Time Playbook 文档
 
+**拓扑语义与标签重构（本次）：**
+- ✅ DSL 拓扑方向统一为生产者 → 消费者（`driven_by` / `reports_to` / `detects`）
+- ✅ 移除 `connected_to` 歧义，提供批量迁移工具与 CI 禁回流检查
+- ✅ 端口为一等公民（`id/type/role`），支持 MIMO 拓扑
+- ✅ 多维标签系统（`functional_group` / `danger_level` / `location_group`）
+- ✅ 标签驱动批量改造（预览 diff、回滚、导出）
+- ✅ 标签规则引擎（危险等级双通道、组内/跨组连接约束）
+- ✅ 前端标签可视化分组与过滤，`location_group` 一键定位
+- ✅ parse-plc API 输出关系与端口元数据（`relation/from_port/to_port/signal`）
+- ✅ 前端端口契约与连线绑定重构（cylinder/sensor/switch/stepper/generic）
+- ✅ 测试盘点矩阵与参数化重构，删除无效测试
+- ✅ 语义 Diff 与影响分析（节点/端口/关系/标签变化 + 受影响规则/测试/模块）
+- ✅ 性能门禁：500 节点/2000 边基线，p95 阈值 CI 告警
+
 ### 计划中
 
 - ⏳ 硬件抽象层扩展（EtherCAT / Modbus / 更多 GPIO 板卡）
 - ⏳ 多控制器协同
-- ⏳ 图形化 DSL 编辑器
+- ⏳ LSP 编辑器集成（语法高亮、补全、跳转定义）
 
 ---
 
