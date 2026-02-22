@@ -140,6 +140,23 @@ export function isPortTypeCompatible(
   return sourcePort.type === targetPort.type;
 }
 
+export function isPortTypeCompatibleForRelation(
+  sourcePort: DevicePortMetadata | undefined,
+  targetPort: DevicePortMetadata | undefined,
+  relation: string | null | undefined
+): boolean {
+  if (isPortTypeCompatible(sourcePort, targetPort)) {
+    return true;
+  }
+
+  // `detects` carries state-observation semantics; logical and digital can interoperate.
+  if (normalizeRelation(relation) === 'detects' && sourcePort && targetPort) {
+    return isLogicalOrDigital(sourcePort.type) && isLogicalOrDigital(targetPort.type);
+  }
+
+  return false;
+}
+
 export function getEdgeSignalLabel(
   sourceHandle: string | null | undefined,
   targetHandle: string | null | undefined,
@@ -184,4 +201,12 @@ function normalizePortRole(raw: unknown): DevicePortRole | null {
   }
   const normalized = raw.trim().toLowerCase();
   return PORT_ROLES.find((role) => role === normalized) || null;
+}
+
+function normalizeRelation(raw: string | null | undefined): string {
+  return typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+}
+
+function isLogicalOrDigital(type: PortSignalType): boolean {
+  return type === 'logical' || type === 'digital';
 }

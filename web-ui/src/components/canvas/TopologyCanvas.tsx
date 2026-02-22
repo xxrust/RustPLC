@@ -40,6 +40,7 @@ import {
   findPortById,
   getEdgeSignalLabel,
   isPortTypeCompatible,
+  isPortTypeCompatibleForRelation,
 } from '../../utils/portContract';
 import type { DevicePortMetadata } from '../../types';
 
@@ -210,7 +211,11 @@ const TopologyCanvas: React.FC = () => {
           !targetPort;
         const typeMismatch =
           Boolean(sourcePort && targetPort) &&
-          !isPortTypeCompatible(sourcePort, targetPort);
+          !isPortTypeCompatibleForRelation(
+            sourcePort,
+            targetPort,
+            readEdgeRelation(edge.data)
+          );
 
         if (fallbackBinding) {
           style.strokeDasharray = '6 4';
@@ -703,6 +708,18 @@ function normalizeHandleId(handle: unknown): string | undefined {
     return undefined;
   }
   const trimmed = handle.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readEdgeRelation(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object') {
+    return undefined;
+  }
+  const relation = (data as Record<string, unknown>).relation;
+  if (typeof relation !== 'string') {
+    return undefined;
+  }
+  const trimmed = relation.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
