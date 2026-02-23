@@ -4,6 +4,7 @@
 - For DSL attribute migrations, keep legacy keys in AST/parser and map them to the new canonical field during parsing, then emit a migration warning when both are present.
 - Topology semantic gate checks should split into per-device preflight validation (attributes/subtypes) and connection validation, so attribute errors surface even without relation edges.
 - Canonical sample modeling now maps common discrete inputs by intent: start/reset buttons use `push_button`, cylinder end-stroke feedback uses `limit_switch`, presence/arrival sensing uses `proximity_sensor`, and emergency stops must use `e_stop_button` with `inverted: true`.
+- PIL semantic baseline fixtures must keep the directory contract `examples/pil_baselines/<case>/case.plc` + `scenarios/base.yaml`; scripts auto-discover case folders and skip incomplete fixtures.
 
 Started: Mon Feb 23 00:00:00 CST 2026
 
@@ -94,4 +95,26 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `e_stop_button` samples must include `inverted: true`; otherwise topology semantic gate fails with `SEM-106`.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `tests/examples_integration.rs` and `tests/recovery_templates.rs` are the quickest regression checks for example fixture syntax/semantics.
+---
+
+## [2026-02-23 11:14:06 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Removed redundant semantic baseline fixtures `case_delay` and `case_log` from `examples/pil_baselines`.
+  - Kept `case_timeout` as the single minimal runnable baseline case, preserving expected folder structure (`case.plc` + `scenarios/base.yaml`) for script compatibility.
+  - Verified semantic baseline script still passes with the slimmed case set.
+- Files changed
+  - examples/pil_baselines/case_delay/case.plc
+  - examples/pil_baselines/case_delay/scenarios/base.yaml
+  - examples/pil_baselines/case_log/case.plc
+  - examples/pil_baselines/case_log/scenarios/base.yaml
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `scripts/pil_semantic_baseline.sh` is directory-driven and does not hardcode case names, so baseline pruning can be done by removing whole case folders while keeping the internal case layout intact.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - A semantic baseline case is considered valid only when both `case.plc` and `scenarios/base.yaml` exist; missing either file silently downgrades coverage via skip logic.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Running `scripts/pil_semantic_baseline.sh --cases-dir examples/pil_baselines` is the direct acceptance gate for this fixture set and quickly validates script compatibility after case changes.
 ---
