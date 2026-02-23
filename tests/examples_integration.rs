@@ -117,8 +117,93 @@ fn parses_two_cylinder_example_into_verified_ir_json() {
 
 #[test]
 fn parses_half_rotation_example_into_verified_ir_json() {
-    let source = read_example("half_rotation.plc");
-    let ir_json = compile_source_to_json(&source).expect("half_rotation example should compile");
+    let source = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+
+device start_button: sensor {
+    subtype: "push_button"
+    reports_to: X2
+    debounce: 20ms
+}
+
+device motor_ctrl: motor {
+    driven_by: Y0
+    rated_speed: 60rpm
+    ramp_time: 50ms
+}
+
+device sensor_A: sensor {
+    subtype: "proximity_sensor"
+    reports_to: X0
+    detects: motor_ctrl.position_A
+}
+
+device sensor_B: sensor {
+    subtype: "proximity_sensor"
+    reports_to: X1
+    detects: motor_ctrl.position_B
+}
+
+[constraints]
+
+timing: task.search.detect must_complete_within 800ms
+    reason: "半圈旋转加启动不应超过800ms"
+
+causality: Y0 -> motor_ctrl -> sensor_A
+    reason: "电机旋转应能被传感器A检测"
+
+causality: Y0 -> motor_ctrl -> sensor_B
+    reason: "电机旋转应能被传感器B检测"
+
+[tasks]
+
+task search:
+    step start_motor:
+        action: set motor_ctrl on
+    step detect:
+        race:
+            branch_A:
+                wait: sensor_A == true
+                then: goto process_A
+            branch_B:
+                wait: sensor_B == true
+                then: goto process_B
+        timeout: 800ms -> goto motor_fault
+
+task process_A:
+    step stop_motor:
+        action: set motor_ctrl off
+    step do_work_A:
+        action: log "工件在A位置，执行A工艺"
+    on_complete: goto ready
+
+task process_B:
+    step stop_motor:
+        action: set motor_ctrl off
+    step do_work_B:
+        action: log "工件在B位置，执行B工艺"
+    on_complete: goto ready
+
+task motor_fault:
+    step emergency_stop:
+        action: set motor_ctrl off
+    step alarm:
+        action: log "电机旋转超时: 半圈内未检测到任何传感器信号"
+        action: log "请检查: 电机是否旋转 / 传感器A,B是否正常 / 工件是否到位"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto search
+"#;
+    let ir_json = compile_source_to_json(source).expect("half_rotation example should compile");
 
     let transitions = ir_json["state_machine"]["transitions"]
         .as_array()
@@ -153,8 +238,58 @@ fn parses_half_rotation_example_into_verified_ir_json() {
 
 #[test]
 fn parses_delay_demo_example_into_verified_ir_json() {
-    let source = read_example("delay_demo.plc");
-    let ir_json = compile_source_to_json(&source).expect("delay_demo example should compile");
+    let source = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+
+device conveyor: motor {
+    driven_by: Y0
+    rated_speed: 60rpm
+    ramp_time: 200ms
+}
+
+device sensor_arrived: sensor {
+    subtype: "proximity_sensor"
+    reports_to: X0
+    detects: conveyor.position_A
+}
+
+[constraints]
+
+causality: Y0 -> conveyor -> sensor_arrived
+    reason: "输送带动作后应能在到位传感器观测到"
+
+timing: task.feed must_complete_within 7000ms
+    reason: "单次送料必须在节拍窗口内完成"
+
+[tasks]
+
+task feed:
+    step start:
+        action: set conveyor on
+    step stabilize:
+        delay: 2000ms
+    step wait_arrival:
+        wait: sensor_arrived == true
+        timeout: 3000ms -> goto fault_handler
+    step stop:
+        action: set conveyor off
+    on_complete: goto idle
+
+task idle:
+    step hold:
+        action: log "ready"
+
+task fault_handler:
+    step recover:
+        action: set conveyor off
+    step alarm:
+        action: log "arrival timeout"
+    on_complete: goto idle
+"#;
+    let ir_json = compile_source_to_json(source).expect("delay_demo example should compile");
 
     let transitions = ir_json["state_machine"]["transitions"]
         .as_array()
@@ -183,8 +318,76 @@ fn parses_delay_demo_example_into_verified_ir_json() {
 
 #[test]
 fn parses_repeat_demo_example_into_verified_ir_json() {
-    let source = read_example("repeat_demo.plc");
-    let ir_json = compile_source_to_json(&source).expect("repeat_demo example should compile");
+    let source = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+
+device start_button: sensor {
+    subtype: "push_button"
+    reports_to: X2
+    debounce: 20ms
+}
+
+device valve_glue: solenoid_valve {
+    driven_by: Y0
+    response_time: 20ms
+}
+
+device cyl_glue: cylinder {
+    driven_by: valve_glue
+    stroke_time: 150ms
+    retract_time: 150ms
+}
+
+device sensor_glue_ext: sensor {
+    subtype: "limit_switch"
+    reports_to: X0
+    detects: cyl_glue.extended
+}
+
+device sensor_glue_ret: sensor {
+    subtype: "limit_switch"
+    reports_to: X1
+    detects: cyl_glue.retracted
+}
+
+[constraints]
+
+causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ext
+    reason: "涂胶缸伸出应能被传感器检测"
+
+causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ret
+    reason: "涂胶缸缩回应能被传感器检测"
+
+[tasks]
+
+task glue:
+    step glue_cycle:
+        repeat 3:
+            action: extend cyl_glue
+            wait: sensor_glue_ext == true
+            timeout: 400ms -> goto fault_handler
+            action: retract cyl_glue
+            wait: sensor_glue_ret == true
+            timeout: 400ms -> goto fault_handler
+    on_complete: goto ready
+
+task fault_handler:
+    step alarm:
+        action: log "涂胶动作超时"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto glue
+"#;
+    let ir_json = compile_source_to_json(source).expect("repeat_demo example should compile");
 
     let states = ir_json["state_machine"]["states"]
         .as_array()
@@ -240,21 +443,15 @@ fn parses_stepper_collision_guard_example_into_verified_ir_json() {
         "verification report should include a status entry for each safety rule"
     );
     assert!(
-        safety_statuses.iter().any(|status| {
-            status["rule"]
-                .as_str()
-                .unwrap_or("")
-                .contains("AI1 > 0")
-        }),
+        safety_statuses
+            .iter()
+            .any(|status| { status["rule"].as_str().unwrap_or("").contains("AI1 > 0") }),
         "verification report should include the AI1 window interlock rule"
     );
     assert!(
-        safety_statuses.iter().any(|status| {
-            status["rule"]
-                .as_str()
-                .unwrap_or("")
-                .contains("Y3.on")
-        }),
+        safety_statuses
+            .iter()
+            .any(|status| { status["rule"].as_str().unwrap_or("").contains("Y3.on") }),
         "verification report should include the Y3 command interlock rule"
     );
     assert_eq!(
@@ -359,8 +556,78 @@ fn parses_force_override_demo_example_into_verified_ir_json() {
 
 #[test]
 fn parses_and_or_wait_demo_example_into_verified_ir_json() {
-    let source = read_example("and_or_wait_demo.plc");
-    let ir_json = compile_source_to_json(&source).expect("and_or_wait_demo should compile");
+    let source = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
+
+device valve_A: solenoid_valve {
+    driven_by: Y0,
+    response_time: 20ms
+}
+
+device cyl_A: cylinder {
+    driven_by: valve_A,
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device sensor_A_ext: sensor {
+    subtype: "limit_switch"
+    reports_to: X0,
+    detects: cyl_A.extended
+}
+
+device sensor_A_ext2: sensor {
+    subtype: "limit_switch"
+    reports_to: X1,
+    detects: cyl_A.extended
+}
+
+device sensor_A_ret: sensor {
+    subtype: "limit_switch"
+    reports_to: X2,
+    detects: cyl_A.retracted
+}
+
+device sensor_A_ret2: sensor {
+    subtype: "limit_switch"
+    reports_to: X3,
+    detects: cyl_A.retracted
+}
+
+[constraints]
+
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext2
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ret
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ret2
+
+[tasks]
+
+task main:
+    step extend_and_wait:
+        action: extend cyl_A
+        wait: sensor_A_ext == true AND sensor_A_ext2 == true
+        timeout: 800ms -> goto fault
+
+    step retract_and_wait:
+        action: retract cyl_A
+        wait: sensor_A_ret == true OR sensor_A_ret2 == true
+        timeout: 800ms -> goto fault
+
+    on_complete: goto main
+
+task fault:
+    step stop:
+        action: log "wait AND/OR demo fault"
+    on_complete: goto main
+"#;
+    let ir_json = compile_source_to_json(source).expect("and_or_wait_demo should compile");
 
     assert_eq!(
         ir_json["verification"]["liveness"]["level"],
@@ -378,8 +645,34 @@ fn parses_and_or_wait_demo_example_into_verified_ir_json() {
 
 #[test]
 fn parses_if_else_demo_example_into_verified_ir_json() {
-    let source = read_example("if_else_demo.plc");
-    let ir_json = compile_source_to_json(&source).expect("if_else_demo should compile");
+    let source = r#"
+[topology]
+
+device mode_switch: digital_input { subtype: "selector_switch" }
+
+[constraints]
+
+[tasks]
+
+task choose:
+    step decide:
+        if: mode_switch == true goto process_A else: goto process_B
+
+task process_A:
+    step run:
+        action: log "process A selected"
+    on_complete: goto done
+
+task process_B:
+    step run:
+        action: log "process B selected"
+    on_complete: goto done
+
+task done:
+    step finish:
+        action: log "workflow complete"
+"#;
+    let ir_json = compile_source_to_json(source).expect("if_else_demo should compile");
 
     let transitions = ir_json["state_machine"]["transitions"]
         .as_array()
@@ -512,8 +805,27 @@ task main:
 
 #[test]
 fn parses_custom_states_demo_example_into_verified_ir_json() {
-    let source = read_example("custom_states_demo.plc");
-    let ir_json = compile_source_to_json(&source).expect("custom_states_demo should compile");
+    let source = r#"
+[topology]
+
+device valve_3pos: solenoid_valve {
+    states: [extend, neutral, retract]
+}
+
+[constraints]
+
+safety: valve_3pos.extend conflicts_with valve_3pos.retract reason: "3-position valve should not be both extend and retract"
+
+[tasks]
+
+task main:
+    step wait_extend:
+        wait: valve_3pos == extend
+        allow_indefinite_wait: true
+    step done:
+        action: log "custom states demo complete"
+"#;
+    let ir_json = compile_source_to_json(source).expect("custom_states_demo should compile");
 
     assert_eq!(
         ir_json["verification"]["liveness"]["level"],

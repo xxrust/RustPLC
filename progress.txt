@@ -7,6 +7,7 @@
 - PIL semantic baseline fixtures must keep the directory contract `examples/pil_baselines/<case>/case.plc` + `scenarios/base.yaml`; scripts auto-discover case folders and skip incomplete fixtures.
 
 - Large topology regression should keep a single canonical station fixture (`assembly_station`) in file form; additional station-scale coverage should be generated inline in `tests/large_demo_coverage.rs` to avoid fixture drift.
+- Single-purpose demo PLCs that only back one assertion should live as inline DSL fixtures inside `tests/examples_integration.rs`; file-based examples are reserved for canonical user-facing walkthroughs.
 Started: Mon Feb 23 00:00:00 CST 2026
 
 ## [2026-02-23 09:40:50 CST] - US-001
@@ -144,4 +145,31 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Deleting example fixtures requires checking coverage tests for file reads first; missing files otherwise fail late at runtime.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `tests/large_demo_coverage.rs` is the contract test that defines which large example files must continue to exist.
+---
+
+
+## [2026-02-23 11:27:45 CST] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Inlined six single-purpose demo fixtures into `tests/examples_integration.rs`: half_rotation, delay, repeat, and_or_wait, if_else, custom_states.
+  - Upgraded the inlined fixture attributes to subtype-first modeling where applicable (`push_button`, `proximity_sensor`, `limit_switch`, `selector_switch`) while preserving original test assertions.
+  - Removed the six standalone example files to reduce fixture sprawl in `examples/`.
+  - Ran `cargo check --workspace` and `cargo test --workspace` successfully.
+- Files changed
+  - tests/examples_integration.rs
+  - examples/half_rotation.plc
+  - examples/delay_demo.plc
+  - examples/repeat_demo.plc
+  - examples/and_or_wait_demo.plc
+  - examples/if_else_demo.plc
+  - examples/custom_states_demo.plc
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `tests/examples_integration.rs` is the right home for behavior-only DSL fixtures that are not intended as end-user examples.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - After deleting sample files, run a global filename search to catch any hidden references in tests/scripts.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Example integration tests can safely carry moderately sized inline DSL blocks without impacting verification semantics.
 ---
