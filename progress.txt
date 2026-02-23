@@ -3,6 +3,7 @@
 - Keep subtype vocabulary and compatibility rules centralized in `src/device_subtype.rs`; normalize first, then query the matrix rather than scattering subtype literals.
 - For DSL attribute migrations, keep legacy keys in AST/parser and map them to the new canonical field during parsing, then emit a migration warning when both are present.
 - Topology semantic gate checks should split into per-device preflight validation (attributes/subtypes) and connection validation, so attribute errors surface even without relation edges.
+- Canonical sample modeling now maps common discrete inputs by intent: start/reset buttons use `push_button`, cylinder end-stroke feedback uses `limit_switch`, presence/arrival sensing uses `proximity_sensor`, and emergency stops must use `e_stop_button` with `inverted: true`.
 
 Started: Mon Feb 23 00:00:00 CST 2026
 
@@ -69,4 +70,28 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Adding a new topology semantic code requires updating both enum serde rename and `as_str()` mapping, otherwise diagnostics/tests will miss the new code string.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Unknown subtype behavior is intentionally warning-only at semantic gate level to preserve forward compatibility while still surfacing operator feedback.
+---
+
+## [2026-02-23 11:03:15 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Upgraded `examples/two_cylinder.plc` to subtype-first modeling: `start_button` now uses `push_button`, and all cylinder end-stroke sensors use `limit_switch`.
+  - Upgraded `examples/assembly_station.plc` with subtype annotations for start button (`push_button`), arrival sensors (`proximity_sensor`), and cylinder stroke sensors (`limit_switch`).
+  - Updated `examples/recovery_templates/estop_recovery.plc` to model `estop_button` as `e_stop_button` with mandatory `inverted: true`; also standardized other inputs with `push_button`/`proximity_sensor`.
+  - Updated `examples/force_override_demo.plc` input point `X0` to include `subtype: "push_button"`.
+  - Ran `cargo check --workspace` and `cargo test --workspace` successfully.
+- Files changed
+  - examples/two_cylinder.plc
+  - examples/assembly_station.plc
+  - examples/recovery_templates/estop_recovery.plc
+  - examples/force_override_demo.plc
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Existing integration tests compile all canonical examples, so sample DSL upgrades should stay aligned with subtype matrix names in `src/device_subtype.rs`.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `e_stop_button` samples must include `inverted: true`; otherwise topology semantic gate fails with `SEM-106`.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `tests/examples_integration.rs` and `tests/recovery_templates.rs` are the quickest regression checks for example fixture syntax/semantics.
 ---

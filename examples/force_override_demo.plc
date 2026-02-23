@@ -5,7 +5,7 @@
 # - Force DO0/AO0 to fixed values (overriding program writes)
 # - Clear forces later to show normal program writes resume
 
-device X0: digital_input
+device X0: digital_input { subtype: "push_button" }
 device Y0: digital_output
 device AO0: analog_output { range: 0..10, unit: "V" }
 
@@ -37,4 +37,3 @@ task run:
         delay: 20ms
 
     on_complete: goto run
-

@@ -8,14 +8,18 @@ device Y1: digital_output
 
 device start_button: sensor {
     reports_to: X0
+    subtype: "push_button"
     debounce: 20ms
 }
 device estop_button: sensor {
     reports_to: X1
+    subtype: "e_stop_button"
+    inverted: true
     debounce: 20ms
 }
 device part_sensor: sensor {
     reports_to: X2
+    subtype: "proximity_sensor"
 }
 device conveyor: motor {
     driven_by: Y0
