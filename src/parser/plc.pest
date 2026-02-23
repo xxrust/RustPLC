@@ -36,6 +36,7 @@ attribute_name = {
     | "stroke_time"
     | "retract_time"
     | "stroke"
+    | "subtype"
     | "type"
     | "detects"
     | "debounce"

@@ -1,17 +1,19 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/topology-signal-direction-refactor",
-  "description": "拓扑语义与标签驱动重构：移除 connected_to 多义性，统一生产者->消费者方向，并以端口与标签模型支持复杂多输入多输出系统，同时支持按位置分组快速故障定位。",
+  "branchName": "ralph/subtype-standardization-examples-slim",
+  "description": "将 subtype 作为 RustPLC 拓扑 DSL 的标准规范，并精简 examples 资产，降低维护成本同时保持验证回归完整。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "新 DSL 关系字段与端口模型规范",
-      "description": "作为 DSL 设计者，我希望用 driven_by、reports_to、detects 与端口模型消除 connected_to 多义性。",
+      "title": "DSL 支持 subtype 并兼容 legacy type",
+      "description": "As a DSL maintainer, I want `subtype` as a first-class attribute so that device semantics can be expressed explicitly while remaining backward compatible.",
       "acceptanceCriteria": [
-        "定义并采用 driven_by、reports_to、detects 字段",
-        "端口定义包含 id/type/role 并成为一等公民",
-        "新语法明确禁止 connected_to",
-        "Typecheck passes"
+        "AST `DeviceAttributes` 增加 `subtype` 字段",
+        "Parser grammar 支持 `subtype` 属性",
+        "当仅声明 `type` 时自动映射到 `subtype`",
+        "当同时声明 `type` 与 `subtype` 时以 `subtype` 为准并给出迁移提示",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 1,
       "passes": true,
@@ -19,229 +21,111 @@
     },
     {
       "id": "US-002",
-      "title": "Parser/AST 支持新字段与端口级连线",
-      "description": "作为编译器开发者，我希望 AST 和解析器原生支持 from_port/to_port 并拒绝 connected_to。",
+      "title": "建立 subtype 注册表与兼容矩阵",
+      "description": "As a semantic owner, I want a centralized subtype registry so that subtype names, normalization, and base-type compatibility stay consistent.",
       "acceptanceCriteria": [
-        "AST 移除 connected_to 存储路径并支持新字段",
-        "连线结构支持 from_port/to_port",
-        "解析到 connected_to 时返回明确迁移错误（含行号）",
+        "新增统一的 subtype registry 模块",
+        "支持 subtype 规范化（大小写、空格、连字符）",
+        "定义并暴露已支持 subtype 列表",
+        "定义 subtype 到基础设备类型的兼容矩阵",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "语义构图统一生产者到消费者",
-      "description": "作为语义分析维护者，我希望拓扑边方向唯一为 producer -> consumer，并支持多入多出连接。",
+      "title": "拓扑语义门禁增加 subtype 校验（SEM-106）",
+      "description": "As a safety engineer, I want subtype mismatches to fail semantic gate so that invalid topology semantics are blocked before formal verification.",
       "acceptanceCriteria": [
-        "拓扑构图方向统一 producer -> consumer",
-        "支持一对多、多对一、多对多连接",
-        "方向错误提示清晰可定位",
+        "新增语义错误码 `SEM-106`",
+        "subtype 与基础设备类型不兼容时门禁失败",
+        "`e_stop_button` 要求 `inverted: true`（NC 建模）",
+        "未知 subtype 默认告警并按基础类型处理",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "场景解析与验证运行链路适配",
-      "description": "作为运行链路维护者，我希望 scenario 解析、验证器和运行桥接在新方向下行为一致。",
+      "title": "核心样例升级为 subtype 标准写法",
+      "description": "As a user, I want canonical examples to use subtype so that I can follow the new standard directly.",
       "acceptanceCriteria": [
-        "scenario_resolve 与别名解析适配新方向",
-        "timing/causality/safety/runtime_bridge 去除旧方向假设",
-        "two_cylinder 与 assembly_station 回归通过",
+        "更新 `examples/two_cylinder.plc` 的按钮与行程传感器 subtype",
+        "更新 `examples/assembly_station.plc` 的按钮与关键传感器 subtype",
+        "更新 `examples/recovery_templates/estop_recovery.plc` 的 `e_stop_button` + `inverted: true`",
+        "更新 `examples/force_override_demo.plc` 输入点 subtype",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "旧 DSL 迁移工具与 CI 禁回流",
-      "description": "作为维护者，我希望通过迁移工具批量替换 connected_to 并用 CI 阻止回流。",
+      "title": "精简 PIL baseline 样例集合",
+      "description": "As a maintainer, I want fewer redundant PIL baseline fixtures so that baseline maintenance remains lightweight.",
       "acceptanceCriteria": [
-        "提供旧 DSL 到新 DSL 迁移脚本/命令",
-        "无法自动迁移项输出人工确认提示",
-        "CI 增加禁止新增 connected_to 检查",
+        "删除重复 baseline case（delay/log）",
+        "保留单个最小可运行 case（timeout）",
+        "保留 case 的 scenario 结构与脚本兼容性",
+        "`scripts/pil_semantic_baseline.sh --cases-dir examples/pil_baselines` 可通过",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "标签模型设计（多维标签）",
-      "description": "作为系统建模者，我希望器件支持功能分组、危险等级和位置分组等多维标签。",
+      "title": "删除重复大型工位示例并收敛覆盖",
+      "description": "As a test maintainer, I want to remove duplicated station examples so that test coverage stays meaningful with fewer fixtures.",
       "acceptanceCriteria": [
-        "标签支持多维结构（例如 functional_group、danger_level、location_group）",
-        "同一器件支持多个标签",
-        "标签 schema 在 DSL/API/store 保持一致",
-        "Typecheck passes"
+        "删除 `stamp_bend_line/drill_station/glue_station/grind_station/label_station` 示例",
+        "`tests/large_demo_coverage.rs` 不再依赖已删除示例",
+        "保留 `assembly_station` 作为大型拓扑代表样例",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-007",
-      "title": "DSL/API/Store 标签一致化",
-      "description": "作为全栈开发者，我希望标签字段在 DSL、后端 API、前端 Store 中语义一致。",
+      "title": "将单用途演示样例内联到集成测试",
+      "description": "As a QA engineer, I want single-purpose demo PLC fixtures inlined into tests so that deleting files does not reduce behavior coverage.",
       "acceptanceCriteria": [
-        "parse-plc 与拓扑 API 返回标准化 tags 字段",
-        "前端 store 持久化标签信息并可检索",
-        "标签字段文档化并版本化",
-        "location_group 支持层级表达（如 line_a/cell_2/station_7）",
+        "将 `half_rotation/delay/repeat/and_or_wait/if_else/custom_states` 迁移为 `tests/examples_integration.rs` 内联 DSL",
+        "删除上述 6 个示例文件",
+        "保持对应 6 组集成测试语义断言不变",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 7,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-008",
-      "title": "标签驱动批量改造能力",
-      "description": "作为工程师，我希望按标签批量修改器件参数、连线和命名并快速改代码。",
+      "title": "文档与资产清单同步到 subtype 标准",
+      "description": "As a documentation consumer, I want docs to match the new subtype standard so that examples and spec are consistent.",
       "acceptanceCriteria": [
-        "支持按标签筛选并批量修改属性",
-        "批量修改支持预览 diff 与回滚",
-        "变更后可导出或写回拓扑代码",
+        "更新 subtype 相关规范文档中的 DSL 示例为当前可执行语法",
+        "更新 examples 清单与推荐入口，标注保留与内联策略",
+        "新增迁移说明：legacy `type` 与 `subtype` 的兼容与优先级",
         "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Tests pass"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-009",
-      "title": "标签规则引擎（功能、危险等级与位置）",
-      "description": "作为安全负责人，我希望标签可驱动编译期规则校验。",
-      "acceptanceCriteria": [
-        "支持 danger_level 约束规则（如高危双通道检测）",
-        "支持 functional_group 组内外连接规则",
-        "支持 location_group 区域隔离和跨区连接约束",
-        "违规输出结构化错误 code/path/message",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-010",
-      "title": "标签可视化分组与过滤",
-      "description": "作为前端用户，我希望按标签高亮、过滤和分组查看拓扑，并在故障时快速定位区域。",
-      "acceptanceCriteria": [
-        "支持按标签过滤节点与边",
-        "支持按标签分组高亮显示",
-        "标签变更后视图实时更新",
-        "支持按 location_group 一键定位故障区域及邻近器件",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-011",
-      "title": "parse-plc API 输出关系与端口元数据",
-      "description": "作为前端调用方，我希望 parse-plc 接口返回关系、端口和标签元数据。",
-      "acceptanceCriteria": [
-        "接口返回 relation/from_port/to_port/signal",
-        "接口返回节点端口定义与 tags",
-        "two_cylinder 可区分 extended/retracted 连线",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 11,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-012",
-      "title": "前端端口契约与连线绑定重构",
-      "description": "作为前端开发者，我希望画布连线严格依赖端口元数据并支持动态端口。",
-      "acceptanceCriteria": [
-        "端口契约覆盖 cylinder/sensor/switch/stepper/generic",
-        "连线绑定 sourceHandle/targetHandle/label 并校验端口类型",
-        "缺失端口元数据时显示降级样式和告警",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-013",
-      "title": "测试盘点与参数化重构",
-      "description": "作为测试维护者，我希望先盘点覆盖，再把重复测试参数化以减少冗余。",
-      "acceptanceCriteria": [
-        "输出 Parser/Semantic/Runtime/API/UI 测试盘点矩阵",
-        "重复逻辑测试改为参数化/table-driven",
-        "保留关键回归集（two_cylinder/assembly_station/MIMO）",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-014",
-      "title": "无效测试清理与契约回归增强",
-      "description": "作为测试维护者，我希望删除无效测试并补齐端口与标签契约测试。",
-      "acceptanceCriteria": [
-        "删除无断言或无业务价值的无效测试",
-        "新增端口契约与标签规则契约测试",
-        "关键 E2E 回归通过",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 14,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-015",
-      "title": "语义 Diff 与影响分析能力",
-      "description": "作为评审者，我希望看到语义级变更和影响范围，降低批量改造风险。",
-      "acceptanceCriteria": [
-        "提供语义级 diff（节点/端口/关系/标签）",
-        "标签或连线变更后输出影响分析",
-        "结果可用于审计记录",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 15,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-016",
-      "title": "性能门禁与规模基线",
-      "description": "作为平台维护者，我希望建立大规模拓扑性能基线并在 CI 中防回退。",
-      "acceptanceCriteria": [
-        "建立 500 节点/2000 边基线样例",
-        "编译、解析、渲染关键路径性能可度量",
-        "CI 增加性能回归告警阈值",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 16,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]
