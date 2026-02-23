@@ -12,72 +12,67 @@ device X5: digital_input
 device X6: digital_input
 
 device start_button: sensor {
-    reports_to: X6
     debounce: 20ms
 }
 
 device valve_push: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 
 device valve_clamp: solenoid_valve {
-    driven_by: Y1
     response_time: 20ms
 }
 
 device valve_press: solenoid_valve {
-    driven_by: Y2
     response_time: 20ms
 }
 
 device cyl_push: cylinder {
-    driven_by: valve_push
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device cyl_clamp: cylinder {
-    driven_by: valve_clamp
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device cyl_press: cylinder {
-    driven_by: valve_press
     stroke_time: 300ms
     retract_time: 300ms
 }
 
-device sensor_push_ext: sensor {
-    reports_to: X0
-    detects: cyl_push.extended
-}
+device sensor_push_ext: sensor
 
-device sensor_push_ret: sensor {
-    reports_to: X1
-    detects: cyl_push.retracted
-}
+device sensor_push_ret: sensor
 
-device sensor_clamp_ext: sensor {
-    reports_to: X2
-    detects: cyl_clamp.extended
-}
+device sensor_clamp_ext: sensor
 
-device sensor_clamp_ret: sensor {
-    reports_to: X3
-    detects: cyl_clamp.retracted
-}
+device sensor_clamp_ret: sensor
 
-device sensor_press_ext: sensor {
-    reports_to: X4
-    detects: cyl_press.extended
-}
+device sensor_press_ext: sensor
 
-device sensor_press_ret: sensor {
-    reports_to: X5
-    detects: cyl_press.retracted
-}
+device sensor_press_ret: sensor
+
+relation { from: start_button.out, to: X6.in, via: reports_to }
+relation { from: Y0.out, to: valve_push.coil, via: driven_by }
+relation { from: Y1.out, to: valve_clamp.coil, via: driven_by }
+relation { from: Y2.out, to: valve_press.coil, via: driven_by }
+relation { from: valve_push.out, to: cyl_push.cmd, via: driven_by }
+relation { from: valve_clamp.out, to: cyl_clamp.cmd, via: driven_by }
+relation { from: valve_press.out, to: cyl_press.cmd, via: driven_by }
+relation { from: sensor_push_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_push.extended, to: sensor_push_ext.sense, via: detects }
+relation { from: sensor_push_ret.out, to: X1.in, via: reports_to }
+relation { from: cyl_push.retracted, to: sensor_push_ret.sense, via: detects }
+relation { from: sensor_clamp_ext.out, to: X2.in, via: reports_to }
+relation { from: cyl_clamp.extended, to: sensor_clamp_ext.sense, via: detects }
+relation { from: sensor_clamp_ret.out, to: X3.in, via: reports_to }
+relation { from: cyl_clamp.retracted, to: sensor_clamp_ret.sense, via: detects }
+relation { from: sensor_press_ext.out, to: X4.in, via: reports_to }
+relation { from: cyl_press.extended, to: sensor_press_ext.sense, via: detects }
+relation { from: sensor_press_ret.out, to: X5.in, via: reports_to }
+relation { from: cyl_press.retracted, to: sensor_press_ret.sense, via: detects }
 
 [constraints]
 

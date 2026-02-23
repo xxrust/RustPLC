@@ -62,30 +62,29 @@ device X1: digital_input
 device X2: digital_input
 
 device start_button: sensor {
-    reports_to: X2
     debounce: 20ms
 }
 
 device valve_A: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 200ms
     retract_time: 180ms
 }
 
-device sensor_A_ext: sensor {
-    reports_to: X0
-    detects: cyl_A.extended
-}
+device sensor_A_ext: sensor
 
-device sensor_A_ret: sensor {
-    reports_to: X1
-    detects: cyl_A.retracted
-}
+device sensor_A_ret: sensor
+
+relation { from: start_button.out, to: X2.in, via: reports_to }
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_A_ret.sense, via: detects }
+relation { from: sensor_A_ret.out, to: X1.in, via: reports_to }
 
 [constraints]
 
@@ -155,11 +154,16 @@ fn test2a_sequential_cylinders_safety_pass() {
 device Y0: digital_output
 device Y1: digital_output
 
-device valve_A: solenoid_valve { driven_by: Y0, response_time: 15ms }
-device valve_B: solenoid_valve { driven_by: Y1, response_time: 15ms }
+device valve_A: solenoid_valve { response_time: 15ms }
+device valve_B: solenoid_valve { response_time: 15ms }
 
-device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
-device cyl_B: cylinder { driven_by: valve_B, stroke_time: 250ms, retract_time: 220ms }
+device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms }
+device cyl_B: cylinder { stroke_time: 250ms, retract_time: 220ms }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
 
 [constraints]
 
@@ -195,11 +199,16 @@ fn test2b_parallel_cylinders_safety_fail() {
 device Y0: digital_output
 device Y1: digital_output
 
-device valve_A: solenoid_valve { driven_by: Y0, response_time: 15ms }
-device valve_B: solenoid_valve { driven_by: Y1, response_time: 15ms }
+device valve_A: solenoid_valve { response_time: 15ms }
+device valve_B: solenoid_valve { response_time: 15ms }
 
-device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
-device cyl_B: cylinder { driven_by: valve_B, stroke_time: 250ms, retract_time: 220ms }
+device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms }
+device cyl_B: cylinder { stroke_time: 250ms, retract_time: 220ms }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
 
 [constraints]
 
@@ -314,7 +323,7 @@ task spin_b:
 //   - 气缸 stroke_time=200ms + 上游 valve response_time=20ms = 220ms，
 //     但 must_complete_within 100ms → Timing 违反
 //   - 因果链声明 Y0 → valve_A → cyl_A → sensor_A_ext，
-//     但 cyl_A 缺少 driven_by: valve_A → Causality 断裂
+//     但缺少 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by } → Causality 断裂
 //   - must_start_after 200ms 但前驱 timeout 只有 50ms → Timing must_start_after 违反
 // 验证能力：Timing 和 Causality 引擎能同时工作，各自独立报告问题，
 //           且 Timing 能正确计算上游 response_time 链路时间。
@@ -328,7 +337,6 @@ device Y0: digital_output
 device X0: digital_input
 
 device valve_A: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 
@@ -337,10 +345,11 @@ device cyl_A: cylinder {
     retract_time: 180ms
 }
 
-device sensor_A_ext: sensor {
-    reports_to: X0
-    detects: cyl_A.extended
-}
+device sensor_A_ext: sensor
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0.in, via: reports_to }
 
 [constraints]
 
@@ -376,7 +385,7 @@ task cooldown:
         "timing 错误应指出超限"
     );
 
-    // Causality 断裂（cyl_A 缺少 driven_by: valve_A）
+    // Causality 断裂（缺少 valve_A.out -> cyl_A.cmd）
     assert!(
         joined.contains("ERROR [causality]"),
         "应报告 causality 错误"
@@ -422,7 +431,7 @@ task cooldown:
 //   3. Timing：task.main.clamp_both 的 must_complete_within 50ms，
 //      但夹具 stroke_time=300ms + 上游 response_time=25ms = 325ms
 //   4. Causality：声明 Y2 → valve_C → clamp_B → sensor_B_clamped，
-//      但 clamp_B 缺少 driven_by: valve_C
+//      但缺少 relation { from: valve_C.out, to: clamp_B.cmd, via: driven_by }
 //
 // 验证能力：在一个接近真实复杂度的程序上，四项验证引擎全部独立工作，
 //           同时报告所有问题，错误信息包含行号、原因和修复建议。
@@ -442,47 +451,44 @@ device X3: digital_input
 
 # ===== 工位 A 夹具 =====
 device valve_A: solenoid_valve {
-    driven_by: Y0
     response_time: 25ms
 }
 
 device clamp_A: cylinder {
-    driven_by: valve_A
     stroke_time: 300ms
     retract_time: 280ms
 }
 
-device sensor_A_clamped: sensor {
-    reports_to: X0
-    detects: clamp_A.extended
-}
+device sensor_A_clamped: sensor
 
-device sensor_A_released: sensor {
-    reports_to: X1
-    detects: clamp_A.retracted
-}
+device sensor_A_released: sensor
 
 # ===== 工位 B 夹具 =====
 device valve_C: solenoid_valve {
-    driven_by: Y2
     response_time: 25ms
 }
 
-# 故意缺少 driven_by: valve_C → 触发 Causality 断裂
+# 故意缺少 valve_C.out -> clamp_B.cmd → 触发 Causality 断裂
 device clamp_B: cylinder {
     stroke_time: 300ms
     retract_time: 280ms
 }
 
-device sensor_B_clamped: sensor {
-    reports_to: X2
-    detects: clamp_B.extended
-}
+device sensor_B_clamped: sensor
 
-device sensor_B_released: sensor {
-    reports_to: X3
-    detects: clamp_B.retracted
-}
+device sensor_B_released: sensor
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: clamp_A.cmd, via: driven_by }
+relation { from: clamp_A.extended, to: sensor_A_clamped.sense, via: detects }
+relation { from: sensor_A_clamped.out, to: X0.in, via: reports_to }
+relation { from: clamp_A.retracted, to: sensor_A_released.sense, via: detects }
+relation { from: sensor_A_released.out, to: X1.in, via: reports_to }
+relation { from: Y2.out, to: valve_C.coil, via: driven_by }
+relation { from: clamp_B.extended, to: sensor_B_clamped.sense, via: detects }
+relation { from: sensor_B_clamped.out, to: X2.in, via: reports_to }
+relation { from: clamp_B.retracted, to: sensor_B_released.sense, via: detects }
+relation { from: sensor_B_released.out, to: X3.in, via: reports_to }
 
 [constraints]
 
@@ -494,7 +500,7 @@ safety: clamp_A.extended conflicts_with clamp_B.extended
 timing: task.main.clamp_both must_complete_within 50ms
     reason: "夹紧动作不应超过50ms"
 
-# Causality：声明完整链路，但 clamp_B 缺少 connected_to
+# Causality：声明完整链路，但 clamp_B 缺少关键驱动 relation
 causality: Y0 -> valve_A -> clamp_A -> sensor_A_clamped
     reason: "Y0 驱动 valve_A 推动 clamp_A 由 sensor_A_clamped 检测"
 causality: Y2 -> valve_C -> clamp_B -> sensor_B_clamped
@@ -552,7 +558,7 @@ task error_recovery:
     // 4. Causality 违反
     assert!(
         joined.contains("ERROR [causality]"),
-        "应报告 causality 错误（clamp_B 缺少 driven_by: valve_C）"
+        "应报告 causality 错误（clamp_B 缺少 valve_C.out -> clamp_B.cmd）"
     );
 
     assert_all_errors_have_location_and_suggestion(&errors);

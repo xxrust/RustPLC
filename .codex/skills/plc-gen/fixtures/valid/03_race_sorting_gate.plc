@@ -7,36 +7,35 @@ device X1: digital_input
 device X2: digital_input
 
 device start_button: sensor {
-    reports_to: X2
     debounce: 20ms
 }
 
 device motor_conv: motor {
-    driven_by: Y0
     rated_speed: 20rpm
     ramp_time: 50ms
 }
 
-device sensor_A: sensor {
-    reports_to: X0
-    detects: motor_conv.position_A
-}
+device sensor_A: sensor
 
-device sensor_B: sensor {
-    reports_to: X1
-    detects: motor_conv.position_B
-}
+device sensor_B: sensor
 
 device valve_gate: solenoid_valve {
-    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_gate: cylinder {
-    driven_by: valve_gate
     stroke_time: 300ms
     retract_time: 300ms
 }
+
+relation { from: start_button.out, to: X2.in, via: reports_to }
+relation { from: Y0.out, to: motor_conv.cmd, via: driven_by }
+relation { from: sensor_A.out, to: X0.in, via: reports_to }
+relation { from: motor_conv.position_A, to: sensor_A.sense, via: detects }
+relation { from: sensor_B.out, to: X1.in, via: reports_to }
+relation { from: motor_conv.position_B, to: sensor_B.sense, via: detects }
+relation { from: Y1.out, to: valve_gate.coil, via: driven_by }
+relation { from: valve_gate.out, to: cyl_gate.cmd, via: driven_by }
 
 [constraints]
 

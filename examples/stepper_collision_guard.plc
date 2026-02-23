@@ -20,40 +20,34 @@ device AI1: analog_input { range: 0..3, unit: "zone", external: true }        # 
 
 # Logical devices
 device axis_x: motor {
-    driven_by: Y1
     ramp_time: 10ms
 }
 
 device clamp_valve: solenoid_valve {
-    driven_by: Y2
     response_time: 20ms
 }
 
 device cyl_clamp: cylinder {
-    driven_by: clamp_valve
     stroke_time: 200ms
     retract_time: 200ms
 }
 
-device inpos_x: sensor {
-    reports_to: X0
-    detects: axis_x.position_ok
-}
+device inpos_x: sensor
+device alarm_x: sensor
+device clamp_ext: sensor
+device clamp_ret: sensor
 
-device alarm_x: sensor {
-    reports_to: X1
-    detects: axis_x.alarm
-}
-
-device clamp_ext: sensor {
-    reports_to: X2
-    detects: cyl_clamp.extended
-}
-
-device clamp_ret: sensor {
-    reports_to: X3
-    detects: cyl_clamp.retracted
-}
+relation { from: Y1.out, to: axis_x.cmd, via: driven_by }
+relation { from: Y2.out, to: clamp_valve.coil, via: driven_by }
+relation { from: clamp_valve.out, to: cyl_clamp.cmd, via: driven_by }
+relation { from: axis_x.position_ok, to: inpos_x.sense, via: detects }
+relation { from: inpos_x.out, to: X0.in, via: reports_to }
+relation { from: axis_x.alarm, to: alarm_x.sense, via: detects }
+relation { from: alarm_x.out, to: X1.in, via: reports_to }
+relation { from: cyl_clamp.extended, to: clamp_ext.sense, via: detects }
+relation { from: clamp_ext.out, to: X2.in, via: reports_to }
+relation { from: cyl_clamp.retracted, to: clamp_ret.sense, via: detects }
+relation { from: clamp_ret.out, to: X3.in, via: reports_to }
 
 [constraints]
 

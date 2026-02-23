@@ -7,26 +7,25 @@ device Y0: digital_output
 device Y1: digital_output
 
 device start_button: sensor {
-    reports_to: X0
     subtype: "push_button"
     debounce: 20ms
 }
 device estop_button: sensor {
-    reports_to: X1
     subtype: "e_stop_button"
     inverted: true
     debounce: 20ms
 }
 device part_sensor: sensor {
-    reports_to: X2
     subtype: "proximity_sensor"
 }
-device conveyor: motor {
-    driven_by: Y0
-}
-device alarm_light: solenoid_valve {
-    driven_by: Y1
-}
+device conveyor: motor
+device alarm_light: solenoid_valve
+
+relation { from: start_button.out, to: X0.in, via: reports_to }
+relation { from: estop_button.out, to: X1.in, via: reports_to }
+relation { from: part_sensor.out, to: X2.in, via: reports_to }
+relation { from: Y0.out, to: conveyor.cmd, via: driven_by }
+relation { from: Y1.out, to: alarm_light.coil, via: driven_by }
 
 [constraints]
 

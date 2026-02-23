@@ -2742,8 +2742,7 @@ device start_button: sensor {
     debounce: 20ms
 }
 
-device alarm_light: motor {
-}
+device alarm_light: motor
 
 # ===== solenoid valves =====
 device valve_A: solenoid_valve {
@@ -2927,7 +2926,7 @@ relation { from: cyl_A.extended, to: sensor_bad.sense, via: driven_by }
         let errors = build_topology_graph(&program).expect_err("不兼容连接类型应报错");
 
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].line(), 14);
+        assert_eq!(errors[0].line(), 9);
         assert!(
             errors[0].to_string().contains("sensor") && errors[0].to_string().contains("cylinder"),
             "错误消息应包含不兼容的设备类型"
@@ -3004,7 +3003,7 @@ relation { from: sensor_bad.out, to: valve_A.coil, via: reports_to }
         let program = parse_plc(input).expect("parse");
         let errors = build_topology_graph(&program).expect_err("reports_to 指向非 consumer 应报错");
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].line(), 5);
+        assert_eq!(errors[0].line(), 4);
         assert!(
             errors[0].to_string().contains("reports_to")
                 && errors[0].to_string().contains("producer -> consumer"),

@@ -127,27 +127,28 @@ device X2: digital_input
 
 device start_button: sensor {
     subtype: "push_button"
-    reports_to: X2
     debounce: 20ms
 }
 
 device motor_ctrl: motor {
-    driven_by: Y0
     rated_speed: 60rpm
     ramp_time: 50ms
 }
 
 device sensor_A: sensor {
     subtype: "proximity_sensor"
-    reports_to: X0
-    detects: motor_ctrl.position_A
 }
 
 device sensor_B: sensor {
     subtype: "proximity_sensor"
-    reports_to: X1
-    detects: motor_ctrl.position_B
 }
+
+relation { from: start_button.out, to: X2.in, via: reports_to }
+relation { from: Y0.out, to: motor_ctrl.cmd, via: driven_by }
+relation { from: motor_ctrl.position_A, to: sensor_A.sense, via: detects }
+relation { from: sensor_A.out, to: X0.in, via: reports_to }
+relation { from: motor_ctrl.position_B, to: sensor_B.sense, via: detects }
+relation { from: sensor_B.out, to: X1.in, via: reports_to }
 
 [constraints]
 
@@ -245,16 +246,17 @@ device Y0: digital_output
 device X0: digital_input
 
 device conveyor: motor {
-    driven_by: Y0
     rated_speed: 60rpm
     ramp_time: 200ms
 }
 
 device sensor_arrived: sensor {
     subtype: "proximity_sensor"
-    reports_to: X0
-    detects: conveyor.position_A
 }
+
+relation { from: Y0.out, to: conveyor.cmd, via: driven_by }
+relation { from: conveyor.position_A, to: sensor_arrived.sense, via: detects }
+relation { from: sensor_arrived.out, to: X0.in, via: reports_to }
 
 [constraints]
 
@@ -328,32 +330,33 @@ device X2: digital_input
 
 device start_button: sensor {
     subtype: "push_button"
-    reports_to: X2
     debounce: 20ms
 }
 
 device valve_glue: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 
 device cyl_glue: cylinder {
-    driven_by: valve_glue
     stroke_time: 150ms
     retract_time: 150ms
 }
 
 device sensor_glue_ext: sensor {
     subtype: "limit_switch"
-    reports_to: X0
-    detects: cyl_glue.extended
 }
 
 device sensor_glue_ret: sensor {
     subtype: "limit_switch"
-    reports_to: X1
-    detects: cyl_glue.retracted
 }
+
+relation { from: start_button.out, to: X2.in, via: reports_to }
+relation { from: Y0.out, to: valve_glue.coil, via: driven_by }
+relation { from: valve_glue.out, to: cyl_glue.cmd, via: driven_by }
+relation { from: cyl_glue.extended, to: sensor_glue_ext.sense, via: detects }
+relation { from: sensor_glue_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_glue.retracted, to: sensor_glue_ret.sense, via: detects }
+relation { from: sensor_glue_ret.out, to: X1.in, via: reports_to }
 
 [constraints]
 
@@ -566,39 +569,40 @@ device X2: digital_input
 device X3: digital_input
 
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    driven_by: valve_A,
     stroke_time: 300ms,
     retract_time: 300ms
 }
 
 device sensor_A_ext: sensor {
     subtype: "limit_switch"
-    reports_to: X0,
-    detects: cyl_A.extended
 }
 
 device sensor_A_ext2: sensor {
     subtype: "limit_switch"
-    reports_to: X1,
-    detects: cyl_A.extended
 }
 
 device sensor_A_ret: sensor {
     subtype: "limit_switch"
-    reports_to: X2,
-    detects: cyl_A.retracted
 }
 
 device sensor_A_ret2: sensor {
     subtype: "limit_switch"
-    reports_to: X3,
-    detects: cyl_A.retracted
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_A.extended, to: sensor_A_ext2.sense, via: detects }
+relation { from: sensor_A_ext2.out, to: X1.in, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_A_ret.sense, via: detects }
+relation { from: sensor_A_ret.out, to: X2.in, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_A_ret2.sense, via: detects }
+relation { from: sensor_A_ret2.out, to: X3.in, via: reports_to }
 
 [constraints]
 
@@ -851,27 +855,25 @@ device X0: digital_input
 device X1: digital_input
 
 device valve_glue: solenoid_valve {
-    driven_by: Y0,
     response_time: 15ms
 }
 
 device cyl_glue: cylinder {
-    driven_by: valve_glue,
     type: double_acting,
     stroke: 50mm,
     stroke_time: 120ms,
     retract_time: 110ms
 }
 
-device sensor_glue_ext: sensor {
-    reports_to: X0,
-    detects: cyl_glue.extended
-}
+device sensor_glue_ext: sensor
+device sensor_glue_ret: sensor
 
-device sensor_glue_ret: sensor {
-    reports_to: X1,
-    detects: cyl_glue.retracted
-}
+relation { from: Y0.out, to: valve_glue.coil, via: driven_by }
+relation { from: valve_glue.out, to: cyl_glue.cmd, via: driven_by }
+relation { from: cyl_glue.extended, to: sensor_glue_ext.sense, via: detects }
+relation { from: sensor_glue_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_glue.retracted, to: sensor_glue_ret.sense, via: detects }
+relation { from: sensor_glue_ret.out, to: X1.in, via: reports_to }
 
 [constraints]
 
@@ -909,27 +911,25 @@ device X0: digital_input
 device X1: digital_input
 
 device valve_glue: solenoid_valve {
-    driven_by: Y0,
     response_time: 15ms
 }
 
 device cyl_glue: cylinder {
-    driven_by: valve_glue,
     type: double_acting,
     stroke: 50mm,
     stroke_time: 120ms,
     retract_time: 110ms
 }
 
-device sensor_glue_ext: sensor {
-    reports_to: X0,
-    detects: cyl_glue.extended
-}
+device sensor_glue_ext: sensor
+device sensor_glue_ret: sensor
 
-device sensor_glue_ret: sensor {
-    reports_to: X1,
-    detects: cyl_glue.retracted
-}
+relation { from: Y0.out, to: valve_glue.coil, via: driven_by }
+relation { from: valve_glue.out, to: cyl_glue.cmd, via: driven_by }
+relation { from: cyl_glue.extended, to: sensor_glue_ext.sense, via: detects }
+relation { from: sensor_glue_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_glue.retracted, to: sensor_glue_ret.sense, via: detects }
+relation { from: sensor_glue_ret.out, to: X1.in, via: reports_to }
 
 [constraints]
 

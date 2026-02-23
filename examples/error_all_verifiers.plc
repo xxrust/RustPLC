@@ -6,38 +6,39 @@ device X0: digital_input
 device X1: digital_input
 
 device valve_A: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 
 device valve_B: solenoid_valve {
-    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 200ms
     retract_time: 200ms
 }
 
 device cyl_B: cylinder {
-    driven_by: valve_B
     stroke_time: 200ms
     retract_time: 200ms
 }
 
 device sensor_A_ext: sensor {
     type: magnetic
-    reports_to: X0
-    detects: cyl_A.extended
 }
 
 device sensor_B_ext: sensor {
     type: magnetic
-    reports_to: X1
-    detects: cyl_B.extended
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_B.extended, to: sensor_B_ext.sense, via: detects }
+relation { from: sensor_B_ext.out, to: X1.in, via: reports_to }
 
 [constraints]
 

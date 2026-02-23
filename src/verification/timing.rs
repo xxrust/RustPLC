@@ -616,15 +616,16 @@ mod tests {
 device Y0: digital_output
 
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    driven_by: valve_A,
     stroke_time: 200ms,
     retract_time: 180ms
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 
 [constraints]
 
@@ -654,15 +655,16 @@ task init:
 device Y0: digital_output
 
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    driven_by: valve_A,
     stroke_time: 200ms,
     retract_time: 180ms
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 
 [constraints]
 
@@ -750,26 +752,27 @@ device Y0: digital_output
 device Y1: digital_output
 
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     response_time: 50ms
 }
 
 device valve_B: solenoid_valve {
-    driven_by: Y1,
     response_time: 50ms
 }
 
 device cyl_A: cylinder {
-    driven_by: valve_A,
     stroke_time: 300ms,
     retract_time: 200ms
 }
 
 device cyl_B: cylinder {
-    driven_by: valve_B,
     stroke_time: 300ms,
     retract_time: 200ms
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
 
 [constraints]
 
@@ -819,15 +822,16 @@ task fault:
 device Y0: digital_output
 
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    driven_by: valve_A,
     stroke_time: 200ms,
     retract_time: 180ms
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 
 [constraints]
 

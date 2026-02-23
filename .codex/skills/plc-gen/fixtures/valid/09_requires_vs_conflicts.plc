@@ -9,51 +9,48 @@ device X3: digital_input
 device X4: digital_input
 
 device start_button: sensor {
-    reports_to: X4
     debounce: 20ms
 }
 
 device valve_hold: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 
 device valve_work: solenoid_valve {
-    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_hold: cylinder {
-    driven_by: valve_hold
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device cyl_work: cylinder {
-    driven_by: valve_work
     stroke_time: 300ms
     retract_time: 300ms
 }
 
-device sensor_hold_ext: sensor {
-    reports_to: X0
-    detects: cyl_hold.extended
-}
+device sensor_hold_ext: sensor
 
-device sensor_hold_ret: sensor {
-    reports_to: X1
-    detects: cyl_hold.retracted
-}
+device sensor_hold_ret: sensor
 
-device sensor_work_ext: sensor {
-    reports_to: X2
-    detects: cyl_work.extended
-}
+device sensor_work_ext: sensor
 
-device sensor_work_ret: sensor {
-    reports_to: X3
-    detects: cyl_work.retracted
-}
+device sensor_work_ret: sensor
+
+relation { from: start_button.out, to: X4.in, via: reports_to }
+relation { from: Y0.out, to: valve_hold.coil, via: driven_by }
+relation { from: Y1.out, to: valve_work.coil, via: driven_by }
+relation { from: valve_hold.out, to: cyl_hold.cmd, via: driven_by }
+relation { from: valve_work.out, to: cyl_work.cmd, via: driven_by }
+relation { from: sensor_hold_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_hold.extended, to: sensor_hold_ext.sense, via: detects }
+relation { from: sensor_hold_ret.out, to: X1.in, via: reports_to }
+relation { from: cyl_hold.retracted, to: sensor_hold_ret.sense, via: detects }
+relation { from: sensor_work_ext.out, to: X2.in, via: reports_to }
+relation { from: cyl_work.extended, to: sensor_work_ext.sense, via: detects }
+relation { from: sensor_work_ret.out, to: X3.in, via: reports_to }
+relation { from: cyl_work.retracted, to: sensor_work_ret.sense, via: detects }
 
 [constraints]
 

@@ -82,19 +82,18 @@ device AI1: analog_input { range: 0..200000, unit: "count_s", external: true }
 
 # 逻辑设备（把步进轴当 motor 进行顺控）
 device axis_x: motor {
-    driven_by: Y1
+    ports: [cmd:digital:consumer, position_ok:logical:producer, alarm:logical:producer]
     ramp_time: 10ms
 }
 
-device inpos_x: sensor {
-    driven_by: X0
-    detects: axis_x.position_ok
-}
+device inpos_x: sensor
+device alarm_x: sensor
 
-device alarm_x: sensor {
-    driven_by: X1
-    detects: axis_x.alarm
-}
+relation { from: Y1.out, to: axis_x.cmd, via: driven_by }
+relation { from: axis_x.position_ok, to: inpos_x.sense, via: detects }
+relation { from: inpos_x.out, to: X0.in, via: reports_to }
+relation { from: axis_x.alarm, to: alarm_x.sense, via: detects }
+relation { from: alarm_x.out, to: X1.in, via: reports_to }
 
 [constraints]
 safety: axis_x.on requires alarm_x.off

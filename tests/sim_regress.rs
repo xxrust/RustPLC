@@ -8,22 +8,19 @@ const PLC_FIXTURE: &str = r#"
 device Y0: digital_output
 device X0: digital_input
 
-device start_button: sensor {
-    reports_to: X0
-}
+device start_button: sensor
 
-device valve_A: solenoid_valve {
-    driven_by: Y0
-}
+device valve_A: solenoid_valve
 
-device cyl_A: cylinder {
-    driven_by: valve_A
-}
+device cyl_A: cylinder
 
-device sensor_ext: sensor {
-    reports_to: X0
-    detects: cyl_A.extended
-}
+device sensor_ext: sensor
+
+relation { from: start_button.out, to: X0.in, via: reports_to }
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: X0.in, via: reports_to }
 
 [constraints]
 
@@ -60,13 +57,10 @@ const PLC_FIXTURE_MULTI_TIMEOUT: &str = r#"
 device X0: digital_input
 device X1: digital_input
 
-device start_a: sensor {
-    reports_to: X0
-}
-
-device start_b: sensor {
-    reports_to: X1
-}
+device start_a: sensor
+device start_b: sensor
+relation { from: start_a.out, to: X0.in, via: reports_to }
+relation { from: start_b.out, to: X1.in, via: reports_to }
 
 [constraints]
 
@@ -310,12 +304,10 @@ fn sim_regress_minimization_keeps_failure_signature_for_sugar_scenarios() {
 device X0: digital_input
 device X1: digital_input
 
-device start_button: sensor {
-    reports_to: X0
-}
-device noise_button: sensor {
-    reports_to: X1
-}
+device start_button: sensor
+device noise_button: sensor
+relation { from: start_button.out, to: X0.in, via: reports_to }
+relation { from: noise_button.out, to: X1.in, via: reports_to }
 
 [constraints]
 

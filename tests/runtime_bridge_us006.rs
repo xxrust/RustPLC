@@ -19,22 +19,19 @@ const PLC_FIXTURE: &str = r#"
 device Y0: digital_output
 device X0: digital_input
 
-device start_button: sensor {
-    reports_to: X0
-}
+device start_button: sensor
 
-device valve_A: solenoid_valve {
-    driven_by: Y0
-}
+device valve_A: solenoid_valve
 
-device cyl_A: cylinder {
-    driven_by: valve_A
-}
+device cyl_A: cylinder
 
-device sensor_ext: sensor {
-    reports_to: X0
-    detects: cyl_A.extended
-}
+device sensor_ext: sensor
+
+relation { from: start_button.out, to: X0.in, via: reports_to }
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: X0.in, via: reports_to }
 
 [constraints]
 
@@ -186,9 +183,8 @@ const PLC_ANALOG_WAIT_FIXTURE: &str = r#"
 device AI0: analog_input { range: 0..100, unit: "bar", external: true }
 device X0: digital_input
 
-device start_button: sensor {
-    reports_to: X0
-}
+device start_button: sensor
+relation { from: start_button.out, to: X0.in, via: reports_to }
 
 [constraints]
 

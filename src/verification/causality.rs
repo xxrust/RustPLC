@@ -757,36 +757,34 @@ device X0: digital_input
 device X1: digital_input
 
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     response_time: 20ms
 }
 
 device valve_B: solenoid_valve {
-    driven_by: Y1,
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    driven_by: valve_A,
     stroke_time: 300ms,
     retract_time: 300ms
 }
 
 device cyl_B: cylinder {
-    driven_by: valve_B,
     stroke_time: 300ms,
     retract_time: 300ms
 }
 
-device sensor_A_ext: sensor {
-    reports_to: X0,
-    detects: cyl_A.extended
-}
+device sensor_A_ext: sensor
+device sensor_B_ext: sensor
 
-device sensor_B_ext: sensor {
-    reports_to: X1,
-    detects: cyl_B.extended
-}
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_B.extended, to: sensor_B_ext.sense, via: detects }
+relation { from: sensor_B_ext.out, to: X1.in, via: reports_to }
 
 [constraints]
 
@@ -821,7 +819,6 @@ device Y0: digital_output
 device X0: digital_input
 
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     response_time: 20ms
 }
 
@@ -830,10 +827,11 @@ device cyl_A: cylinder {
     retract_time: 300ms
 }
 
-device sensor_A_ext: sensor {
-    reports_to: X0,
-    detects: cyl_A.extended
-}
+device sensor_A_ext: sensor
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0.in, via: reports_to }
 
 [constraints]
 
@@ -888,23 +886,17 @@ device Y1: digital_output
 device X0: digital_input
 device X1: digital_input
 
-device motor_left: motor {
-    driven_by: Y0
-}
+device motor_left: motor
+device motor_right: motor
+device sensor_left: sensor
+device sensor_right: sensor
 
-device motor_right: motor {
-    driven_by: Y1
-}
-
-device sensor_left: sensor {
-    reports_to: X0
-    detects: motor_left.on
-}
-
-device sensor_right: sensor {
-    reports_to: X1
-    detects: motor_right.on
-}
+relation { from: Y0.out, to: motor_left.cmd, via: driven_by }
+relation { from: Y1.out, to: motor_right.cmd, via: driven_by }
+relation { from: motor_left.on, to: sensor_left.sense, via: detects }
+relation { from: sensor_left.out, to: X0.in, via: reports_to }
+relation { from: motor_right.on, to: sensor_right.sense, via: detects }
+relation { from: sensor_right.out, to: X1.in, via: reports_to }
 
 [constraints]
 
@@ -941,22 +933,16 @@ device Y1: digital_output
 device Y2: digital_output
 device X0: digital_input
 
-device motor_left: motor {
-    driven_by: Y0
-}
+device motor_left: motor
+device motor_right: motor
+device motor_aux: motor
+device sensor_left: sensor
 
-device motor_right: motor {
-    driven_by: Y1
-}
-
-device motor_aux: motor {
-    driven_by: Y2
-}
-
-device sensor_left: sensor {
-    reports_to: X0
-    detects: motor_aux.on
-}
+relation { from: Y0.out, to: motor_left.cmd, via: driven_by }
+relation { from: Y1.out, to: motor_right.cmd, via: driven_by }
+relation { from: Y2.out, to: motor_aux.cmd, via: driven_by }
+relation { from: motor_aux.on, to: sensor_left.sense, via: detects }
+relation { from: sensor_left.out, to: X0.in, via: reports_to }
 
 [constraints]
 
@@ -999,35 +985,30 @@ device Y1: digital_output
 device X0: digital_input
 device X1: digital_input
 
-device valve_A: solenoid_valve {
-    driven_by: Y0
-}
-
-device valve_B: solenoid_valve {
-    driven_by: Y1
-}
+device valve_A: solenoid_valve
+device valve_B: solenoid_valve
 
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 200ms
     retract_time: 200ms
 }
 
 device cyl_B: cylinder {
-    driven_by: valve_B
     stroke_time: 200ms
     retract_time: 200ms
 }
 
-device sensor_A_ext: sensor {
-    reports_to: X0
-    detects: cyl_A.extended
-}
+device sensor_A_ext: sensor
+device sensor_A_ext2: sensor
 
-device sensor_A_ext2: sensor {
-    reports_to: X1
-    detects: cyl_B.extended
-}
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_B.extended, to: sensor_A_ext2.sense, via: detects }
+relation { from: sensor_A_ext2.out, to: X1.in, via: reports_to }
 
 [constraints]
 
@@ -1068,9 +1049,8 @@ task main:
 
 device Y0: digital_output
 
-device motor_A: motor {
-    driven_by: Y0
-}
+device motor_A: motor
+relation { from: Y0.out, to: motor_A.cmd, via: driven_by }
 
 device pressure_in: analog_input {
     range: 0..10
@@ -1108,9 +1088,8 @@ task main:
 
 device Y0: digital_output
 
-device motor_A: motor {
-    driven_by: Y0
-}
+device motor_A: motor
+relation { from: Y0.out, to: motor_A.cmd, via: driven_by }
 
 device pressure_in: analog_input {
     range: 0..10,

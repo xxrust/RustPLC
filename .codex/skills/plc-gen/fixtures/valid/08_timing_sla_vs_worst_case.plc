@@ -5,25 +5,25 @@ device X0: digital_input
 device X1: digital_input
 
 device start_button: sensor {
-    reports_to: X1
     debounce: 20ms
 }
 
 device valve_act: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 
 device cyl_act: cylinder {
-    driven_by: valve_act
     stroke_time: 300ms
     retract_time: 300ms
 }
 
-device sensor_ext: sensor {
-    reports_to: X0
-    detects: cyl_act.extended
-}
+device sensor_ext: sensor
+
+relation { from: start_button.out, to: X1.in, via: reports_to }
+relation { from: Y0.out, to: valve_act.coil, via: driven_by }
+relation { from: valve_act.out, to: cyl_act.cmd, via: driven_by }
+relation { from: sensor_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_act.extended, to: sensor_ext.sense, via: detects }
 
 [constraints]
 

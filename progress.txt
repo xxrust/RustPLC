@@ -48,3 +48,34 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - `cargo fmt --check` currently reports pre-existing style drift in `crates/web-server/src/main.rs`; avoid mixing unrelated formatting work into topology stories.
 ---
+## [2026-02-23 16:52:00 CST] - US-003/US-004/US-006/US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 批量迁移 examples、recovery templates、技能夹具与核心验证测试到 `relation { from/to/via }` 新 DSL，移除旧属性写法。
+  - 补齐文档与 API 解析测试中的遗留片段（`docs/已实现/stepper_ab_encoder.md`、`crates/web-server/src/main.rs`）并改为端口级 relation。
+  - 修复 `tests/verification_capability.rs` 的全套场景，确保 timing/safety/causality/liveness 在新 DSL 下继续覆盖正反例。
+  - 全量回归通过：`cargo test --workspace`。
+- Files changed
+  - examples/*.plc（含 `two_cylinder.plc`、`assembly_station.plc`、`recovery_templates/*` 等）
+  - .codex/skills/plc-gen/fixtures/valid/*.plc
+  - tests/build_rp2040.rs
+  - tests/examples_integration.rs
+  - tests/large_demo_coverage.rs
+  - tests/runtime_bridge_us006.rs
+  - tests/sim_regress.rs
+  - tests/verification_capability.rs
+  - docs/已实现/stepper_ab_encoder.md
+  - crates/web-server/src/main.rs
+  - src/verification/{timing.rs,safety.rs,causality.rs}
+  - src/semantic/mod.rs
+  - src/scenario_resolve.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `parse_plc` 相关文档测试会扫描 markdown fenced `plc` 代码块，文档片段必须和当前 DSL 同步。
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - 只跑单个 crate 测试容易漏掉 `web-server` 内嵌 PLC 片段；最终仍需 `cargo test --workspace` 兜底。
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `tests/verification_capability.rs` 是四类验证能力的“综合回归哨兵”，DSL 破坏性升级后应优先修复并保持通过。
+---

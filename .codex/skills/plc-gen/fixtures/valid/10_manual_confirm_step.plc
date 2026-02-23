@@ -7,35 +7,34 @@ device X2: digital_input
 device X3: digital_input
 
 device start_button: sensor {
-    reports_to: X3
     debounce: 20ms
 }
 
 device confirm_button: sensor {
-    reports_to: X2
     debounce: 20ms
 }
 
 device valve_lift: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 
 device cyl_lift: cylinder {
-    driven_by: valve_lift
     stroke_time: 300ms
     retract_time: 300ms
 }
 
-device sensor_lift_ext: sensor {
-    reports_to: X0
-    detects: cyl_lift.extended
-}
+device sensor_lift_ext: sensor
 
-device sensor_lift_ret: sensor {
-    reports_to: X1
-    detects: cyl_lift.retracted
-}
+device sensor_lift_ret: sensor
+
+relation { from: start_button.out, to: X3.in, via: reports_to }
+relation { from: confirm_button.out, to: X2.in, via: reports_to }
+relation { from: Y0.out, to: valve_lift.coil, via: driven_by }
+relation { from: valve_lift.out, to: cyl_lift.cmd, via: driven_by }
+relation { from: sensor_lift_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_lift.extended, to: sensor_lift_ext.sense, via: detects }
+relation { from: sensor_lift_ret.out, to: X1.in, via: reports_to }
+relation { from: cyl_lift.retracted, to: sensor_lift_ret.sense, via: detects }
 
 [constraints]
 

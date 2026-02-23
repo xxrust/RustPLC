@@ -1401,26 +1401,27 @@ device Y0: digital_output
 device Y1: digital_output
 
 device valve_A: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 
 device valve_B: solenoid_valve {
-    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device cyl_B: cylinder {
-    driven_by: valve_B
     stroke_time: 300ms
     retract_time: 300ms
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
 
 [constraints]
 
@@ -1464,25 +1465,23 @@ task init:
 device Y0: digital_output
 device Y1: digital_output
 
-device valve_A: solenoid_valve {
-    driven_by: Y0
-}
-
-device valve_B: solenoid_valve {
-    driven_by: Y1
-}
+device valve_A: solenoid_valve
+device valve_B: solenoid_valve
 
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 200ms
     retract_time: 200ms
 }
 
 device cyl_B: cylinder {
-    driven_by: valve_B
     stroke_time: 200ms
     retract_time: 200ms
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
 
 [constraints]
 
@@ -1521,24 +1520,23 @@ task parallel_demo:
 [topology]
 
 device Y0: digital_output
-device valve_A: solenoid_valve {
-    driven_by: Y0
-}
+device valve_A: solenoid_valve
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 100ms
     retract_time: 100ms
 }
 
 device Y1: digital_output
-device valve_B: solenoid_valve {
-    driven_by: Y1
-}
+device valve_B: solenoid_valve
 device cyl_B: cylinder {
-    driven_by: valve_B
     stroke_time: 100ms
     retract_time: 100ms
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
 
 [constraints]
 
@@ -1576,24 +1574,23 @@ task loop:
 [topology]
 
 device Y0: digital_output
-device valve_A: solenoid_valve {
-    driven_by: Y0
-}
+device valve_A: solenoid_valve
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 100ms
     retract_time: 100ms
 }
 
 device Y1: digital_output
-device valve_B: solenoid_valve {
-    driven_by: Y1
-}
+device valve_B: solenoid_valve
 device cyl_B: cylinder {
-    driven_by: valve_B
     stroke_time: 100ms
     retract_time: 100ms
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
 
 [constraints]
 
@@ -1638,24 +1635,23 @@ task init:
 [topology]
 
 device Y0: digital_output
-device valve_A: solenoid_valve {
-    driven_by: Y0
-}
+device valve_A: solenoid_valve
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 100ms
     retract_time: 100ms
 }
 
 device Y1: digital_output
-device valve_B: solenoid_valve {
-    driven_by: Y1
-}
+device valve_B: solenoid_valve
 device cyl_B: cylinder {
-    driven_by: valve_B
     stroke_time: 100ms
     retract_time: 100ms
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
 
 [constraints]
 
@@ -1713,20 +1709,23 @@ task loop:
 device Y0: digital_output
 device Y1: digital_output
 
-device valve_clamp: solenoid_valve { driven_by: Y0 }
-device valve_press: solenoid_valve { driven_by: Y1 }
+device valve_clamp: solenoid_valve
+device valve_press: solenoid_valve
 
 device cyl_clamp: cylinder {
-    driven_by: valve_clamp
     stroke_time: 120ms
     retract_time: 120ms
 }
 
 device cyl_press: cylinder {
-    driven_by: valve_press
     stroke_time: 140ms
     retract_time: 140ms
 }
+
+relation { from: Y0.out, to: valve_clamp.coil, via: driven_by }
+relation { from: valve_clamp.out, to: cyl_clamp.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_press.coil, via: driven_by }
+relation { from: valve_press.out, to: cyl_press.cmd, via: driven_by }
 
 [constraints]
 
@@ -1776,20 +1775,23 @@ task press:
 device Y0: digital_output
 device Y1: digital_output
 
-device valve_clamp: solenoid_valve { driven_by: Y0 }
-device valve_press: solenoid_valve { driven_by: Y1 }
+device valve_clamp: solenoid_valve
+device valve_press: solenoid_valve
 
 device cyl_clamp: cylinder {
-    driven_by: valve_clamp
     stroke_time: 120ms
     retract_time: 120ms
 }
 
 device cyl_press: cylinder {
-    driven_by: valve_press
     stroke_time: 140ms
     retract_time: 140ms
 }
+
+relation { from: Y0.out, to: valve_clamp.coil, via: driven_by }
+relation { from: valve_clamp.out, to: cyl_clamp.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_press.coil, via: driven_by }
+relation { from: valve_press.out, to: cyl_press.cmd, via: driven_by }
 
 [constraints]
 
@@ -1992,30 +1994,30 @@ device Y1: digital_output
 device X0: digital_input
 device X1: digital_input
 
-device valve_A: solenoid_valve { driven_by: Y0 }
-device valve_B: solenoid_valve { driven_by: Y1 }
+device valve_A: solenoid_valve
+device valve_B: solenoid_valve
 
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 120ms
     retract_time: 120ms
 }
 
 device cyl_B: cylinder {
-    driven_by: valve_B
     stroke_time: 120ms
     retract_time: 120ms
 }
 
-device sensor_A_ext: sensor {
-    driven_by: X0
-    detects: cyl_A.extended
-}
+device sensor_A_ext: sensor
+device sensor_B_ext: sensor
 
-device sensor_B_ext: sensor {
-    driven_by: X1
-    detects: cyl_B.extended
-}
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_B.extended, to: sensor_B_ext.sense, via: detects }
+relation { from: sensor_B_ext.out, to: X1.in, via: reports_to }
 
 [constraints]
 
@@ -2056,12 +2058,14 @@ task main:
 device pressure_sensor: analog_input { range: 0..100, unit: "bar" }
 
 device Y0: digital_output
-device valve_A: solenoid_valve { driven_by: Y0 }
+device valve_A: solenoid_valve
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 120ms
     retract_time: 120ms
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 
 [constraints]
 
@@ -2181,7 +2185,8 @@ task main:
 
 device AO0: analog_output { range: 0..10 }
 device Y0: digital_output
-device valve: solenoid_valve { driven_by: Y0 }
+device valve: solenoid_valve
+relation { from: Y0.out, to: valve.coil, via: driven_by }
 
 [constraints]
 

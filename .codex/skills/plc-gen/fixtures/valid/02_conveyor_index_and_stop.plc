@@ -7,36 +7,35 @@ device X1: digital_input
 device X2: digital_input
 
 device start_button: sensor {
-    reports_to: X2
     debounce: 20ms
 }
 
 device motor_conveyor: motor {
-    driven_by: Y0
     rated_speed: 30rpm
     ramp_time: 50ms
 }
 
-device sensor_index: sensor {
-    reports_to: X0
-    detects: motor_conveyor.position_index
-}
+device sensor_index: sensor
 
 device valve_stopper: solenoid_valve {
-    driven_by: Y1
     response_time: 20ms
 }
 
 device cyl_stopper: cylinder {
-    driven_by: valve_stopper
     stroke_time: 300ms
     retract_time: 300ms
 }
 
-device sensor_stop_ext: sensor {
-    reports_to: X1
-    detects: cyl_stopper.extended
-}
+device sensor_stop_ext: sensor
+
+relation { from: start_button.out, to: X2.in, via: reports_to }
+relation { from: Y0.out, to: motor_conveyor.cmd, via: driven_by }
+relation { from: sensor_index.out, to: X0.in, via: reports_to }
+relation { from: motor_conveyor.position_index, to: sensor_index.sense, via: detects }
+relation { from: Y1.out, to: valve_stopper.coil, via: driven_by }
+relation { from: valve_stopper.out, to: cyl_stopper.cmd, via: driven_by }
+relation { from: sensor_stop_ext.out, to: X1.in, via: reports_to }
+relation { from: cyl_stopper.extended, to: sensor_stop_ext.sense, via: detects }
 
 [constraints]
 

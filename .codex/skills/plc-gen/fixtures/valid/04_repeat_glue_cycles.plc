@@ -6,30 +6,29 @@ device X1: digital_input
 device X2: digital_input
 
 device start_button: sensor {
-    reports_to: X2
     debounce: 20ms
 }
 
 device valve_glue: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 
 device cyl_glue: cylinder {
-    driven_by: valve_glue
     stroke_time: 300ms
     retract_time: 300ms
 }
 
-device sensor_glue_ext: sensor {
-    reports_to: X0
-    detects: cyl_glue.extended
-}
+device sensor_glue_ext: sensor
 
-device sensor_glue_ret: sensor {
-    reports_to: X1
-    detects: cyl_glue.retracted
-}
+device sensor_glue_ret: sensor
+
+relation { from: start_button.out, to: X2.in, via: reports_to }
+relation { from: Y0.out, to: valve_glue.coil, via: driven_by }
+relation { from: valve_glue.out, to: cyl_glue.cmd, via: driven_by }
+relation { from: sensor_glue_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_glue.extended, to: sensor_glue_ext.sense, via: detects }
+relation { from: sensor_glue_ret.out, to: X1.in, via: reports_to }
+relation { from: cyl_glue.retracted, to: sensor_glue_ret.sense, via: detects }
 
 [constraints]
 

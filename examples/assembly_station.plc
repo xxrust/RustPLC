@@ -19,126 +19,127 @@ device X9: digital_input
 device X10: digital_input
 
 device start_button: sensor {
-    reports_to: X10
     subtype: "push_button"
     debounce: 20ms
 }
 
 device motor_left: motor {
-    driven_by: Y0
     rated_speed: 30rpm
     ramp_time: 50ms
 }
 
 device motor_right: motor {
-    driven_by: Y1
     rated_speed: 30rpm
     ramp_time: 50ms
 }
 
 device sensor_left_arrive: sensor {
-    reports_to: X0
     subtype: "proximity_sensor"
-    detects: motor_left.position_A
 }
 
 device sensor_right_arrive: sensor {
-    reports_to: X1
     subtype: "proximity_sensor"
-    detects: motor_right.position_A
 }
 
 device valve_push_L: solenoid_valve {
-    driven_by: Y2
     response_time: 20ms
 }
 
 device cyl_push_L: cylinder {
-    driven_by: valve_push_L
     stroke_time: 500ms
     retract_time: 500ms
 }
 
 device sensor_push_L_ext: sensor {
-    reports_to: X2
     subtype: "limit_switch"
-    detects: cyl_push_L.extended
 }
 
 device sensor_push_L_ret: sensor {
-    reports_to: X3
     subtype: "limit_switch"
-    detects: cyl_push_L.retracted
 }
 
 device valve_push_R: solenoid_valve {
-    driven_by: Y3
     response_time: 20ms
 }
 
 device cyl_push_R: cylinder {
-    driven_by: valve_push_R
     stroke_time: 500ms
     retract_time: 500ms
 }
 
 device sensor_push_R_ext: sensor {
-    reports_to: X4
     subtype: "limit_switch"
-    detects: cyl_push_R.extended
 }
 
 device sensor_push_R_ret: sensor {
-    reports_to: X5
     subtype: "limit_switch"
-    detects: cyl_push_R.retracted
 }
 
 device valve_press: solenoid_valve {
-    driven_by: Y4
     response_time: 20ms
 }
 
 device cyl_press: cylinder {
-    driven_by: valve_press
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_press_ext: sensor {
-    reports_to: X6
     subtype: "limit_switch"
-    detects: cyl_press.extended
 }
 
 device sensor_press_ret: sensor {
-    reports_to: X7
     subtype: "limit_switch"
-    detects: cyl_press.retracted
 }
 
 device valve_eject: solenoid_valve {
-    driven_by: Y5
     response_time: 20ms
 }
 
 device cyl_eject: cylinder {
-    driven_by: valve_eject
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_eject_ext: sensor {
-    reports_to: X8
     subtype: "limit_switch"
-    detects: cyl_eject.extended
 }
 
 device sensor_eject_ret: sensor {
-    reports_to: X9
     subtype: "limit_switch"
-    detects: cyl_eject.retracted
 }
+
+relation { from: start_button.out, to: X10.in, via: reports_to }
+relation { from: Y0.out, to: motor_left.cmd, via: driven_by }
+relation { from: motor_left.position_A, to: sensor_left_arrive.sense, via: detects }
+relation { from: sensor_left_arrive.out, to: X0.in, via: reports_to }
+relation { from: Y1.out, to: motor_right.cmd, via: driven_by }
+relation { from: motor_right.position_A, to: sensor_right_arrive.sense, via: detects }
+relation { from: sensor_right_arrive.out, to: X1.in, via: reports_to }
+relation { from: Y2.out, to: valve_push_L.coil, via: driven_by }
+relation { from: valve_push_L.out, to: cyl_push_L.cmd, via: driven_by }
+relation { from: cyl_push_L.extended, to: sensor_push_L_ext.sense, via: detects }
+relation { from: sensor_push_L_ext.out, to: X2.in, via: reports_to }
+relation { from: cyl_push_L.retracted, to: sensor_push_L_ret.sense, via: detects }
+relation { from: sensor_push_L_ret.out, to: X3.in, via: reports_to }
+relation { from: Y3.out, to: valve_push_R.coil, via: driven_by }
+relation { from: valve_push_R.out, to: cyl_push_R.cmd, via: driven_by }
+relation { from: cyl_push_R.extended, to: sensor_push_R_ext.sense, via: detects }
+relation { from: sensor_push_R_ext.out, to: X4.in, via: reports_to }
+relation { from: cyl_push_R.retracted, to: sensor_push_R_ret.sense, via: detects }
+relation { from: sensor_push_R_ret.out, to: X5.in, via: reports_to }
+relation { from: Y4.out, to: valve_press.coil, via: driven_by }
+relation { from: valve_press.out, to: cyl_press.cmd, via: driven_by }
+relation { from: cyl_press.extended, to: sensor_press_ext.sense, via: detects }
+relation { from: sensor_press_ext.out, to: X6.in, via: reports_to }
+relation { from: cyl_press.retracted, to: sensor_press_ret.sense, via: detects }
+relation { from: sensor_press_ret.out, to: X7.in, via: reports_to }
+relation { from: Y5.out, to: valve_eject.coil, via: driven_by }
+relation { from: valve_eject.out, to: cyl_eject.cmd, via: driven_by }
+relation { from: cyl_eject.extended, to: sensor_eject_ext.sense, via: detects }
+relation { from: sensor_eject_ext.out, to: X8.in, via: reports_to }
+relation { from: cyl_eject.retracted, to: sensor_eject_ret.sense, via: detects }
+relation { from: sensor_eject_ret.out, to: X9.in, via: reports_to }
 
 [constraints]
 

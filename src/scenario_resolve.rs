@@ -871,8 +871,10 @@ mod tests {
 device X0: digital_input
 device AI0: analog_input { range: 0..100 }
 
-device start_button: sensor { reports_to: X0 }
-device pressure_sensor: sensor { reports_to: AI0 }
+device start_button: sensor
+device pressure_sensor: sensor
+relation { from: start_button.out, to: X0.in, via: reports_to }
+relation { from: pressure_sensor.out, to: AI0.in, via: reports_to }
 
 [constraints]
 [tasks]

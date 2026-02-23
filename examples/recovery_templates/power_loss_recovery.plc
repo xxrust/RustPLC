@@ -7,21 +7,18 @@ device Y0: digital_output
 device Y1: digital_output
 
 device start_button: sensor {
-    reports_to: X0
     debounce: 20ms
 }
-device power_ok: sensor {
-    reports_to: X1
-}
-device station_sensor: sensor {
-    reports_to: X2
-}
-device conveyor: motor {
-    driven_by: Y0
-}
-device alarm_light: solenoid_valve {
-    driven_by: Y1
-}
+device power_ok: sensor
+device station_sensor: sensor
+device conveyor: motor
+device alarm_light: solenoid_valve
+
+relation { from: start_button.out, to: X0.in, via: reports_to }
+relation { from: power_ok.out, to: X1.in, via: reports_to }
+relation { from: station_sensor.out, to: X2.in, via: reports_to }
+relation { from: Y0.out, to: conveyor.cmd, via: driven_by }
+relation { from: Y1.out, to: alarm_light.coil, via: driven_by }
 
 [constraints]
 

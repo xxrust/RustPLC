@@ -1470,7 +1470,6 @@ device X0: digital_input {
     ports: [in:digital:consumer]
 }
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     ports: [coil:digital:consumer, feedback:logical:producer],
     tags: {
         functional_group: [actuation],
@@ -1479,10 +1478,12 @@ device valve_A: solenoid_valve {
     }
 }
 device sensor_A: sensor {
-    reports_to: X0,
-    detects: valve_A.feedback,
-    ports: [sense:digital:consumer, out:digital:producer]
+    ports: [sense:logical:consumer, out:digital:producer]
 }
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.feedback, to: sensor_A.sense, via: detects }
+relation { from: sensor_A.out, to: X0.in, via: reports_to }
 
 [constraints]
 

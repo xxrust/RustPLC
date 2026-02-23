@@ -9,9 +9,10 @@ device Y0: digital_output
 device AI0: analog_input { range: 0..100, unit: "bar" }
 
 device valve_main: solenoid_valve {
-    driven_by: Y0,
     response_time: 30ms
 }
+
+relation { from: Y0.out, to: valve_main.coil, via: driven_by }
 
 [constraints]
 

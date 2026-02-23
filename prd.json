@@ -48,8 +48,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已切换为 relation + Device.Port 校验路径；旧属性迁移错误已锁定。"
     },
     {
       "id": "US-004",
@@ -63,8 +63,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "拓扑图/因果链验证与回归用例已统一基于显式 relation。"
     },
     {
       "id": "US-005",
@@ -94,8 +94,8 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "核心 examples 与恢复模板已迁移 relation DSL。"
     },
     {
       "id": "US-007",
@@ -109,8 +109,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "parser/semantic/verification 夹具与大部分回归测试已迁移并通过。"
     },
     {
       "id": "US-008",

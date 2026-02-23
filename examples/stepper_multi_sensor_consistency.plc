@@ -26,7 +26,6 @@ device sensor_fault_code: analog_input { range: 0..5, unit: "code" }
 
 # Logical devices
 device axis_x: motor {
-    driven_by: Y1
     ramp_time: 10ms
 }
 
@@ -34,17 +33,16 @@ device dir_positive: digital_output
 
 device move_cmd: digital_output
 
-device inpos_x: sensor {
-    reports_to: X0
-    detects: axis_x.position_ok
-}
-
-device alarm_x: sensor {
-    reports_to: X1
-    detects: axis_x.alarm
-}
+device inpos_x: sensor
+device alarm_x: sensor
 
 device pos_consistent: digital_input
+
+relation { from: Y1.out, to: axis_x.cmd, via: driven_by }
+relation { from: axis_x.position_ok, to: inpos_x.sense, via: detects }
+relation { from: inpos_x.out, to: X0.in, via: reports_to }
+relation { from: axis_x.alarm, to: alarm_x.sense, via: detects }
+relation { from: alarm_x.out, to: X1.in, via: reports_to }
 
 [constraints]
 

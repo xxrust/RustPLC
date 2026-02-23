@@ -8,24 +8,20 @@ device Y1: digital_output
 device Y2: digital_output
 
 device start_button: sensor {
-    reports_to: X0
     debounce: 20ms
 }
-device sensor_extend: sensor {
-    reports_to: X1
-}
-device maintenance_reset: sensor {
-    reports_to: X2
-}
-device cyl_extend_cmd: solenoid_valve {
-    driven_by: Y0
-}
-device cyl_retract_cmd: solenoid_valve {
-    driven_by: Y1
-}
-device alarm_light: solenoid_valve {
-    driven_by: Y2
-}
+device sensor_extend: sensor
+device maintenance_reset: sensor
+device cyl_extend_cmd: solenoid_valve
+device cyl_retract_cmd: solenoid_valve
+device alarm_light: solenoid_valve
+
+relation { from: start_button.out, to: X0.in, via: reports_to }
+relation { from: sensor_extend.out, to: X1.in, via: reports_to }
+relation { from: maintenance_reset.out, to: X2.in, via: reports_to }
+relation { from: Y0.out, to: cyl_extend_cmd.coil, via: driven_by }
+relation { from: Y1.out, to: cyl_retract_cmd.coil, via: driven_by }
+relation { from: Y2.out, to: alarm_light.coil, via: driven_by }
 
 [constraints]
 
