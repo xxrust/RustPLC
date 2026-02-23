@@ -1,0 +1,43 @@
+[topology]
+device plc_main: plc {
+    ports: [Y0:digital:producer, X0:digital:consumer, AI0:analog:consumer]
+}
+
+device valve_A: solenoid_valve {
+    ports: [coil:digital:consumer, out:pneumatic:producer]
+}
+device cyl_A: cylinder {
+    ports: [cmd:pneumatic:consumer, extended:logical:producer]
+}
+device sensor_A_ext: sensor {
+    ports: [sense:logical:consumer, out:digital:producer]
+}
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: plc_main.X0, via: reports_to }
+
+[constraints]
+safety: valve_A.on requires sensor_A_ext.on
+
+[tasks]
+task main:
+    step wait_start:
+        wait: X0 == true
+        timeout: 1000ms -> goto fault
+
+    step run:
+        action: set Y0 on
+        delay: 100ms
+        action: set Y0 off
+
+    on_complete: goto done
+
+task fault:
+    step safe_stop:
+        action: set Y0 off
+    on_complete: goto done
+
+task done:
+    step halt:

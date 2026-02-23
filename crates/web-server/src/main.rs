@@ -12,7 +12,9 @@ use rust_plc::ast::{
 use rust_plc::component_scenario::parse_component_scenario_value;
 use rust_plc::component_topology::parse_component_topology_value;
 use rust_plc::parser::parse_plc;
-use rust_plc::topology_semantic_gate::validate_topology_semantics;
+use rust_plc::topology_semantic_gate::{
+    collect_topology_deprecation_warnings, validate_topology_semantics,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -282,6 +284,7 @@ async fn parse_plc_topology(
             "issues": err.issues
         }),
     };
+    let compat_warnings = collect_topology_deprecation_warnings(&program.topology);
 
     let devices = &program.topology.devices;
     let mut name_to_index = HashMap::<String, usize>::new();
@@ -310,6 +313,7 @@ async fn parse_plc_topology(
                 "params": {
                     "name": device.name,
                     "device_type": plc_device_type_name(&device.device_type),
+                    "endpoint_kind": endpoint_kind_for_device_type(&device.device_type),
                     "driven_by": device.attributes.driven_by.clone(),
                     "reports_to": device.attributes.reports_to.clone(),
                     "ports": ports,
@@ -352,7 +356,8 @@ async fn parse_plc_topology(
         },
         "components": components,
         "connections": connections,
-        "semantic_gate": semantic_gate
+        "semantic_gate": semantic_gate,
+        "compat_warnings": compat_warnings
     });
     normalize_topology_tags_in_place(&mut response);
     Ok(Json(response))
@@ -411,8 +416,11 @@ fn resolved_device_ports(device: &DeviceDeclaration) -> Vec<DevicePort> {
 
 fn implicit_ports_for_device_type(device_type: &DeviceType) -> Vec<DevicePort> {
     match device_type {
-        DeviceType::DigitalOutput => vec![device_port("out", PortType::Digital, PortRole::Producer)],
+        DeviceType::DigitalOutput => {
+            vec![device_port("out", PortType::Digital, PortRole::Producer)]
+        }
         DeviceType::DigitalInput => vec![device_port("in", PortType::Digital, PortRole::Consumer)],
+        DeviceType::Plc => Vec::new(),
         DeviceType::SolenoidValve => vec![
             device_port("coil", PortType::Digital, PortRole::Consumer),
             device_port("out", PortType::Pneumatic, PortRole::Producer),
@@ -497,7 +505,10 @@ fn infer_port_for_side(
         preferred_target_port_id(connection)
     };
     if let Some(preferred_id) = preferred {
-        if candidates.iter().any(|candidate| *candidate == preferred_id) {
+        if candidates
+            .iter()
+            .any(|candidate| *candidate == preferred_id)
+        {
             return Some(preferred_id.to_string());
         }
     }
@@ -1323,6 +1334,7 @@ fn map_plc_device_to_component_id(kind: &DeviceType) -> &'static str {
         DeviceType::AnalogInput => "sensor",
         DeviceType::AnalogOutput => "stepper_pd",
         DeviceType::Pid => "generic",
+        DeviceType::Plc => "generic",
     }
 }
 
@@ -1337,6 +1349,22 @@ fn plc_device_type_name(kind: &DeviceType) -> &'static str {
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
+        DeviceType::Plc => "plc",
+    }
+}
+
+fn endpoint_kind_for_device_type(kind: &DeviceType) -> &'static str {
+    match kind {
+        DeviceType::DigitalInput
+        | DeviceType::DigitalOutput
+        | DeviceType::AnalogInput
+        | DeviceType::AnalogOutput => "controller_port",
+        DeviceType::Plc => "controller_device",
+        DeviceType::SolenoidValve
+        | DeviceType::Cylinder
+        | DeviceType::Sensor
+        | DeviceType::Motor
+        | DeviceType::Pid => "process_device",
     }
 }
 

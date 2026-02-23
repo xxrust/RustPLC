@@ -221,6 +221,8 @@ task cycle:
 ```
 
 > **注意**：设备属性写法 `driven_by/reports_to/detects` 已移除；请统一使用 `relation { from, to, via }`。其中 PLC 点位可直接写 `Y0`/`X1`（无需 `Y0.out`/`X1.in`）。
+>
+> **推荐建模（2026-02-23 起）**：优先使用 `device plc_main: plc { ports: [...] }` 声明控制器端口；`device X*/Y*/AI*/AO*` 旧写法处于兼容窗口（2026-02-23 ~ 2026-06-30），当前仅给出 WARN 级提示。
 
 ### 2. 编译验证
 

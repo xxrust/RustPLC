@@ -212,6 +212,8 @@ task cycle:
 ```
 
 > **Note**: Legacy device attributes `driven_by/reports_to/detects` are removed. Use `relation { from, to, via }` only. PLC points can be written as `Y0` / `X1` directly (no `Y0.out` / `X1.in`).
+>
+> **Recommended modeling (since February 23, 2026)**: Prefer `device plc_main: plc { ports: [...] }` for controller ports. The old `device X*/Y*/AI*/AO*` style remains in a compatibility window (**February 23, 2026 ~ June 30, 2026**) with WARN-level notices.
 
 ### 2. Compile & Verify
 

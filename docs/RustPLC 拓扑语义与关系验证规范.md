@@ -14,6 +14,7 @@
 2. 拓扑连线唯一来源是 `relation { from, to, via }`。
 3. 设备属性写法 `driven_by/reports_to/detects` 已移除，不再兼容。
 4. 非 IO 设备必须显式写 `Device.Port`；PLC IO 点位允许写简写 `Y0`/`X0`/`AI0`/`AO0`。
+5. 推荐使用 `device <name>: plc { ports: [...] }` 建模控制器；`device X0/Y0/...` 旧写法当前仅兼容保留。
 
 ---
 
@@ -153,3 +154,17 @@ task main:
 1. 先补全每个设备真实端口（必要时用 `ports: [...]` 显式声明）。
 2. 再把所有拓扑语义改写为 `relation`。
 3. 最后运行 `cargo test --workspace` 进行全量回归。
+
+迁移辅助（可选）：
+
+```bash
+python3 scripts/migrate_plc_controller_ports.py examples/your.plc --output examples/your.migrated.plc
+```
+
+---
+
+## 7. 兼容窗口与告警等级
+
+- 自 **2026-02-23** 起：旧写法 `device X*/Y*/AI*/AO*` 继续可用，但编译/解析返回 `WARN` 级兼容告警（不阻断）。
+- 兼容窗口：**2026-02-23 ~ 2026-06-30**。
+- 推荐在窗口期内迁移到 `plc` 设备端口建模，避免后续策略收紧带来的批量改造风险。

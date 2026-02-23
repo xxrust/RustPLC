@@ -424,11 +424,19 @@ export default IDDELayout;
 function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ id: string; source: string; target: string }> } {
   const nodes: Node<NodeData>[] = (data.components || []).map((comp: any, i: number) => ({
     id: comp.id,
-    type: mapComponentType(comp.component_id || comp.type || 'generic', comp.params?.device_type),
+    type: mapComponentType(
+      comp.component_id || comp.type || 'generic',
+      comp.params?.device_type,
+      comp.params?.endpoint_kind
+    ),
     position: comp.position || { x: 150 + (i % 3) * 200, y: 100 + Math.floor(i / 3) * 160 },
     data: {
       label: comp.id,
-      type: mapComponentType(comp.component_id || comp.type || 'generic', comp.params?.device_type),
+      type: mapComponentType(
+        comp.component_id || comp.type || 'generic',
+        comp.params?.device_type,
+        comp.params?.endpoint_kind
+      ),
       status: 'idle',
       ...comp.params,
       tags: normalizeDeviceTags(comp.params?.tags),
@@ -464,7 +472,12 @@ function normalizeEndpointId(raw: string): string {
   return idx >= 0 ? raw.slice(0, idx) : raw;
 }
 
-function mapComponentType(raw: string, deviceType?: string): string {
+function mapComponentType(raw: string, deviceType?: string, endpointKind?: string): string {
+  if (endpointKind === 'controller_port') {
+    if (deviceType?.toLowerCase().includes('input')) return 'input_terminal';
+    if (deviceType?.toLowerCase().includes('output')) return 'output_terminal';
+  }
+
   // 优先根据 device_type 判断
   if (deviceType) {
     const dt = deviceType.toLowerCase();
