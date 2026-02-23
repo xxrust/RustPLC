@@ -5,6 +5,7 @@ use crate::ast::{
 use crate::device_subtype::{
     normalize_subtype, subtype_compatible_base_types, subtype_matches_device_type,
 };
+use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -268,6 +269,45 @@ pub fn validate_topology_semantics(
     }
 }
 
+pub fn collect_topology_deprecation_warnings(topology: &TopologySection) -> Vec<String> {
+    if topology
+        .devices
+        .iter()
+        .any(|d| matches!(d.device_type, DeviceType::Plc))
+    {
+        return Vec::new();
+    }
+
+    let mut legacy = Vec::<String>::new();
+    for device in &topology.devices {
+        let Some(port) = parse_physical_plc_port_ref(&device.name) else {
+            continue;
+        };
+        let matches_legacy = matches!(
+            (port.kind, &device.device_type),
+            (PlcPortKind::DigitalInput, DeviceType::DigitalInput)
+                | (PlcPortKind::DigitalOutput, DeviceType::DigitalOutput)
+                | (PlcPortKind::AnalogInput, DeviceType::AnalogInput)
+                | (PlcPortKind::AnalogOutput, DeviceType::AnalogOutput)
+        );
+        if matches_legacy {
+            legacy.push(device.name.clone());
+        }
+    }
+
+    if legacy.is_empty() {
+        return Vec::new();
+    }
+
+    legacy.sort();
+    legacy.dedup();
+
+    vec![format!(
+        "检测到旧版 PLC IO 设备建模（{}）。建议迁移到 `device <name>: plc {{ ports: [...] }}`。兼容窗口：2026-02-23 ~ 2026-06-30（当前为 WARN，不阻断）",
+        legacy.join(", ")
+    )]
+}
+
 fn validate_device_subtypes(topology: &TopologySection) -> Vec<TopologySemanticIssue> {
     let mut issues = Vec::new();
 
@@ -381,6 +421,7 @@ fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
             PortRole::Consumer,
             Some("detector"),
         )],
+        DeviceType::Plc => Vec::new(),
         DeviceType::SolenoidValve => vec![
             gate_port(
                 "coil",
@@ -722,6 +763,7 @@ fn device_type_name(device_type: &DeviceType) -> &'static str {
     match device_type {
         DeviceType::DigitalOutput => "digital_output",
         DeviceType::DigitalInput => "digital_input",
+        DeviceType::Plc => "plc",
         DeviceType::SolenoidValve => "solenoid_valve",
         DeviceType::Cylinder => "cylinder",
         DeviceType::Sensor => "sensor",
@@ -804,6 +846,28 @@ relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 task main:
     step idle:
 "#;
+        let program = parse_plc(input).expect("parse");
+        validate_topology_semantics(&program.topology).expect("gate should pass");
+    }
+
+    #[test]
+    fn gate_accepts_plc_device_with_explicit_ports() {
+        let input = r#"
+[topology]
+device plc_main: plc { ports: [Y0:digital:producer, X0:digital:consumer] }
+device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
+device sensor_A: sensor { ports: [out:digital:producer] }
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: sensor_A.out, to: plc_main.X0, via: reports_to }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
         let program = parse_plc(input).expect("parse");
         validate_topology_semantics(&program.topology).expect("gate should pass");
     }
@@ -913,7 +977,10 @@ task main:
             .iter()
             .map(|issue| issue.code.as_str())
             .collect::<Vec<_>>();
-        assert!(codes.contains(&"SEM-101"), "should require explicit non-io ports");
+        assert!(
+            codes.contains(&"SEM-101"),
+            "should require explicit non-io ports"
+        );
     }
 
     #[test]

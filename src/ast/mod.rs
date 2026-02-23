@@ -23,11 +23,12 @@ pub struct DeviceDeclaration {
     pub attributes: DeviceAttributes,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceType {
     DigitalOutput,
     DigitalInput,
+    Plc,
     SolenoidValve,
     Cylinder,
     Sensor,

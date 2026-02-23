@@ -20,6 +20,7 @@ section_tasks = { "[" ~ "tasks" ~ "]" }
 device_type = {
     "digital_output"
     | "digital_input"
+    | "plc"
     | "solenoid_valve"
     | "cylinder"
     | "sensor"

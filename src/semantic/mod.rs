@@ -1,10 +1,11 @@
 use crate::ast::{
     ActionStatement, BinaryValue as AstBinaryValue, ComparisonOperator, ConditionExpression,
-    ConstraintsSection, DeviceType, DurationValue, GotoDirective, LiteralValue,
-    OnCompleteDirective, ParallelBlock, PlcProgram, RaceBlock, SafetyOperand,
-    SafetyRelation as AstSafetyRelation, StepStatement, TaskDeclaration, TasksSection, TimeUnit,
-    TimeoutDirective, TimingRelation as AstTimingRelation, TimingTarget, TopologyConnection,
-    TopologyRelation, TopologySection, WaitCondition, WaitStatement,
+    ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType, DurationValue,
+    GotoDirective, LiteralValue, OnCompleteDirective, ParallelBlock, PlcProgram, PortRole,
+    PortType, RaceBlock, SafetyOperand, SafetyRelation as AstSafetyRelation, StepStatement,
+    TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective, TimingRelation as AstTimingRelation,
+    TimingTarget, TopologyConnection, TopologyRelation, TopologySection, WaitCondition,
+    WaitStatement,
 };
 use crate::error::PlcError;
 use crate::ir::{
@@ -14,8 +15,9 @@ use crate::ir::{
     TimerOperation, TimerOperationKind, TimingModel, TimingRelation as IrTimingRelation,
     TimingRule, TimingScope, TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
+use crate::plc_port::{PlcPortKind, canonical_physical_device_name, parse_plc_port_ref};
 use petgraph::graph::NodeIndex;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 struct DeviceNode {
@@ -29,9 +31,308 @@ struct DeviceNode {
 /// steps named with `_1.._N` suffixes.
 pub fn preprocess_program(program: &PlcProgram) -> Result<PlcProgram, Vec<PlcError>> {
     let expanded_tasks = expand_repeat_blocks(&program.tasks)?;
+    let expanded_topology = expand_plc_controller_devices(&program.topology)?;
     let mut rewritten = program.clone();
     rewritten.tasks = expanded_tasks;
+    rewritten.topology = expanded_topology;
     Ok(rewritten)
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedPlcEndpoint {
+    name: String,
+}
+
+fn expand_plc_controller_devices(
+    topology: &TopologySection,
+) -> Result<TopologySection, Vec<PlcError>> {
+    let mut errors = Vec::<PlcError>::new();
+    let mut rewritten_devices = topology
+        .devices
+        .iter()
+        .filter(|device| !matches!(device.device_type, DeviceType::Plc))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut existing_names = rewritten_devices
+        .iter()
+        .map(|device| (device.name.clone(), device.device_type.clone()))
+        .collect::<HashMap<_, _>>();
+
+    let plc_devices = topology
+        .devices
+        .iter()
+        .filter(|device| matches!(device.device_type, DeviceType::Plc))
+        .collect::<Vec<_>>();
+    if plc_devices.is_empty() {
+        return Ok(topology.clone());
+    }
+
+    let mut port_lookup = HashMap::<(String, String), ResolvedPlcEndpoint>::new();
+    let mut synthetic_declarations = HashMap::<String, DeviceDeclaration>::new();
+
+    for plc in plc_devices {
+        if plc.attributes.ports.is_empty() {
+            errors.push(PlcError::semantic_with_reason(
+                plc.line.max(1),
+                format!("PLC 设备 {} 必须声明 ports", plc.name),
+                "请在 plc 设备上声明端口，例如 ports: [Y0:digital:producer, X0:digital:consumer]",
+            ));
+            continue;
+        }
+
+        let mut seen_ports = BTreeSet::<String>::new();
+        for port in &plc.attributes.ports {
+            if !seen_ports.insert(port.id.clone()) {
+                errors.push(PlcError::duplicate_definition_with_reason(
+                    plc.line.max(1),
+                    "端口",
+                    &format!("{}.{}", plc.name, port.id),
+                    "PLC 设备的端口 id 不能重复",
+                ));
+                continue;
+            }
+
+            let Some(port_ref) = parse_plc_port_ref(&port.id) else {
+                errors.push(PlcError::semantic_with_reason(
+                    plc.line.max(1),
+                    format!(
+                        "PLC 设备 {} 的端口 {} 不是有效 PLC 通道（支持 X*/Y*/AI*/AO*/DI*/DO*）",
+                        plc.name, port.id
+                    ),
+                    "请将 plc 端口命名为 X0/Y0/AI0/AO0 或 DI0/DO0 形式",
+                ));
+                continue;
+            };
+
+            let expected_type = expected_plc_port_type(port_ref.kind);
+            if port.port_type != expected_type {
+                errors.push(PlcError::type_mismatch_with_reason(
+                    plc.line.max(1),
+                    port_type_name(&expected_type),
+                    port_type_name(&port.port_type),
+                    format!("PLC 端口 {}.{}", plc.name, port.id),
+                    "请修正 plc 端口类型，使其与端口编号前缀一致（X/DI=Digital, Y/DO=Digital, AI=Analog, AO=Analog）",
+                ));
+                continue;
+            }
+
+            let expected_role = expected_plc_port_role(port_ref.kind);
+            if port.role != expected_role && port.role != PortRole::Bidirectional {
+                errors.push(PlcError::type_mismatch_with_reason(
+                    plc.line.max(1),
+                    port_role_name(&expected_role),
+                    port_role_name(&port.role),
+                    format!("PLC 端口 {}.{}", plc.name, port.id),
+                    "请修正 plc 端口方向：输入端口应为 consumer，输出端口应为 producer",
+                ));
+                continue;
+            }
+
+            let synthetic_name = canonical_physical_device_name(port_ref.kind, port_ref.id);
+            let synthetic_type = plc_port_device_type(port_ref.kind);
+            if let Some(existing_type) = existing_names.get(&synthetic_name) {
+                if *existing_type != synthetic_type {
+                    errors.push(PlcError::type_mismatch_with_reason(
+                        plc.line.max(1),
+                        device_type_name(&synthetic_type),
+                        device_type_name(existing_type),
+                        format!("PLC 端口 {}.{}", plc.name, port.id),
+                        format!(
+                            "端口 {} 映射到内部节点 {}，但该节点已被声明为不同类型",
+                            port.id, synthetic_name
+                        ),
+                    ));
+                    continue;
+                }
+            } else if let Some(existing_decl) = synthetic_declarations.get(&synthetic_name) {
+                if existing_decl.device_type != synthetic_type {
+                    errors.push(PlcError::type_mismatch_with_reason(
+                        plc.line.max(1),
+                        device_type_name(&synthetic_type),
+                        device_type_name(&existing_decl.device_type),
+                        format!("PLC 端口 {}.{}", plc.name, port.id),
+                        "多个 plc 端口映射到同一内部节点但类型冲突",
+                    ));
+                    continue;
+                }
+            } else {
+                synthetic_declarations.insert(
+                    synthetic_name.clone(),
+                    DeviceDeclaration {
+                        line: plc.line,
+                        name: synthetic_name.clone(),
+                        device_type: synthetic_type.clone(),
+                        attributes: DeviceAttributes::default(),
+                    },
+                );
+                existing_names.insert(synthetic_name.clone(), synthetic_type.clone());
+            }
+
+            port_lookup.insert(
+                (plc.name.clone(), port.id.clone()),
+                ResolvedPlcEndpoint {
+                    name: synthetic_name,
+                },
+            );
+        }
+    }
+
+    let mut rewritten_connections = Vec::<TopologyConnection>::new();
+    for connection in &topology.connections {
+        let Some(rewritten) =
+            rewrite_plc_connection(connection, &port_lookup, topology, &mut errors)
+        else {
+            continue;
+        };
+        rewritten_connections.push(rewritten);
+    }
+
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    let mut synthetic = synthetic_declarations.into_values().collect::<Vec<_>>();
+    synthetic.sort_by(|a, b| a.name.cmp(&b.name));
+    rewritten_devices.extend(synthetic);
+
+    Ok(TopologySection {
+        devices: rewritten_devices,
+        connections: rewritten_connections,
+    })
+}
+
+fn rewrite_plc_connection(
+    connection: &TopologyConnection,
+    port_lookup: &HashMap<(String, String), ResolvedPlcEndpoint>,
+    topology: &TopologySection,
+    errors: &mut Vec<PlcError>,
+) -> Option<TopologyConnection> {
+    let mut rewritten = connection.clone();
+    let line = topology_connection_line(topology, connection);
+
+    if let Some(endpoint) = resolve_plc_side(connection, true, port_lookup, line, errors)? {
+        rewritten.from = endpoint.name;
+        rewritten.from_port = None;
+    }
+    if let Some(endpoint) = resolve_plc_side(connection, false, port_lookup, line, errors)? {
+        rewritten.to = endpoint.name;
+        rewritten.to_port = None;
+    }
+
+    Some(rewritten)
+}
+
+fn resolve_plc_side(
+    connection: &TopologyConnection,
+    source_side: bool,
+    port_lookup: &HashMap<(String, String), ResolvedPlcEndpoint>,
+    line: usize,
+    errors: &mut Vec<PlcError>,
+) -> Option<Option<ResolvedPlcEndpoint>> {
+    let device_name = if source_side {
+        &connection.from
+    } else {
+        &connection.to
+    };
+
+    let Some(requested_port) = (if source_side {
+        connection.from_port.as_ref()
+    } else {
+        connection.to_port.as_ref()
+    }) else {
+        if port_lookup
+            .keys()
+            .any(|(plc_name, _)| plc_name == device_name)
+        {
+            errors.push(PlcError::semantic_with_reason(
+                line.max(1),
+                format!(
+                    "连接 {} -> {} 使用了 PLC 设备 {} 但未指定端口",
+                    connection.from, connection.to, device_name
+                ),
+                "请使用 Device.Port 形式，例如 plc_main.Y0 或 plc_main.X0",
+            ));
+            return None;
+        }
+        return Some(None);
+    };
+
+    if let Some(endpoint) = port_lookup.get(&(device_name.clone(), requested_port.clone())) {
+        return Some(Some(endpoint.clone()));
+    }
+
+    if port_lookup
+        .keys()
+        .any(|(plc_name, _)| plc_name == device_name)
+    {
+        errors.push(PlcError::semantic_with_reason(
+            line.max(1),
+            format!(
+                "PLC 设备 {} 上未找到端口 {}（连接 {} -> {}）",
+                device_name, requested_port, connection.from, connection.to
+            ),
+            "请检查 relation 引用的端口名，确保与 plc 设备 ports 声明一致",
+        ));
+        return None;
+    }
+
+    Some(None)
+}
+
+fn expected_plc_port_type(kind: PlcPortKind) -> PortType {
+    match kind {
+        PlcPortKind::DigitalInput | PlcPortKind::DigitalOutput => PortType::Digital,
+        PlcPortKind::AnalogInput | PlcPortKind::AnalogOutput => PortType::Analog,
+    }
+}
+
+fn expected_plc_port_role(kind: PlcPortKind) -> PortRole {
+    match kind {
+        PlcPortKind::DigitalInput | PlcPortKind::AnalogInput => PortRole::Consumer,
+        PlcPortKind::DigitalOutput | PlcPortKind::AnalogOutput => PortRole::Producer,
+    }
+}
+
+fn plc_port_device_type(kind: PlcPortKind) -> DeviceType {
+    match kind {
+        PlcPortKind::DigitalInput => DeviceType::DigitalInput,
+        PlcPortKind::DigitalOutput => DeviceType::DigitalOutput,
+        PlcPortKind::AnalogInput => DeviceType::AnalogInput,
+        PlcPortKind::AnalogOutput => DeviceType::AnalogOutput,
+    }
+}
+
+fn device_type_name(device_type: &DeviceType) -> &'static str {
+    match device_type {
+        DeviceType::DigitalOutput => "digital_output",
+        DeviceType::DigitalInput => "digital_input",
+        DeviceType::Plc => "plc",
+        DeviceType::SolenoidValve => "solenoid_valve",
+        DeviceType::Cylinder => "cylinder",
+        DeviceType::Sensor => "sensor",
+        DeviceType::Motor => "motor",
+        DeviceType::AnalogInput => "analog_input",
+        DeviceType::AnalogOutput => "analog_output",
+        DeviceType::Pid => "pid",
+    }
+}
+
+fn port_type_name(port_type: &PortType) -> &'static str {
+    match port_type {
+        PortType::Digital => "digital",
+        PortType::Analog => "analog",
+        PortType::Pneumatic => "pneumatic",
+        PortType::Logical => "logical",
+        PortType::Generic => "generic",
+    }
+}
+
+fn port_role_name(role: &PortRole) -> &'static str {
+    match role {
+        PortRole::Producer => "producer",
+        PortRole::Consumer => "consumer",
+        PortRole::Bidirectional => "bidirectional",
+    }
 }
 
 fn expand_repeat_blocks(tasks: &TasksSection) -> Result<TasksSection, Vec<PlcError>> {
@@ -1872,7 +2173,9 @@ fn default_states_for_kind(kind: &DeviceKind) -> &'static [&'static str] {
         | DeviceKind::SolenoidValve
         | DeviceKind::Sensor
         | DeviceKind::Motor => &["on", "off"],
-        DeviceKind::AnalogInput | DeviceKind::AnalogOutput | DeviceKind::Pid => &[],
+        DeviceKind::AnalogInput | DeviceKind::AnalogOutput | DeviceKind::Pid | DeviceKind::Plc => {
+            &[]
+        }
     }
 }
 
@@ -2647,6 +2950,7 @@ fn ast_type_to_ir_kind(device_type: &DeviceType) -> DeviceKind {
     match device_type {
         DeviceType::DigitalOutput => DeviceKind::DigitalOutput,
         DeviceType::DigitalInput => DeviceKind::DigitalInput,
+        DeviceType::Plc => DeviceKind::Plc,
         DeviceType::SolenoidValve => DeviceKind::SolenoidValve,
         DeviceType::Cylinder => DeviceKind::Cylinder,
         DeviceType::Sensor => DeviceKind::Sensor,
@@ -2700,6 +3004,7 @@ fn device_kind_name(kind: &DeviceKind) -> &'static str {
     match kind {
         DeviceKind::DigitalOutput => "digital_output",
         DeviceKind::DigitalInput => "digital_input",
+        DeviceKind::Plc => "plc",
         DeviceKind::SolenoidValve => "solenoid_valve",
         DeviceKind::Cylinder => "cylinder",
         DeviceKind::Sensor => "sensor",
@@ -2714,6 +3019,7 @@ fn device_kind_name(kind: &DeviceKind) -> &'static str {
 mod tests {
     use super::{
         build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
+        preprocess_program,
     };
     use crate::ir::{
         ConnectionType, SafetyRelation, TimerOperationKind, TimingRelation, TimingScope,
@@ -2721,6 +3027,74 @@ mod tests {
     };
     use crate::parser::parse_plc;
     use petgraph::visit::EdgeRef;
+
+    #[test]
+    fn preprocess_expands_plc_device_ports_into_internal_io_nodes() {
+        let input = r#"
+[topology]
+device plc_main: plc { ports: [Y0:digital:producer, X0:digital:consumer] }
+device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
+device start_button: sensor { ports: [out:digital:producer] }
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let expanded = preprocess_program(&program).expect("preprocess");
+        assert!(
+            !expanded
+                .topology
+                .devices
+                .iter()
+                .any(|d| matches!(d.device_type, crate::ast::DeviceType::Plc)),
+            "plc 设备应在 preprocess 后降维"
+        );
+        assert!(
+            expanded.topology.devices.iter().any(|d| d.name == "Y0"),
+            "应生成 Y0 内部 IO 节点"
+        );
+        assert!(
+            expanded.topology.devices.iter().any(|d| d.name == "X0"),
+            "应生成 X0 内部 IO 节点"
+        );
+
+        let y0_edge_exists = expanded.topology.connections.iter().any(|c| {
+            c.from == "Y0"
+                && c.to == "valve_A"
+                && c.from_port.is_none()
+                && c.to_port.as_deref() == Some("coil")
+        });
+        assert!(y0_edge_exists, "plc_main.Y0 应改写为 Y0 -> valve_A.coil");
+    }
+
+    #[test]
+    fn preprocess_rejects_plc_endpoint_without_explicit_port() {
+        let input = r#"
+[topology]
+device plc_main: plc { ports: [Y0:digital:producer] }
+device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
+relation { from: plc_main, to: valve_A.coil, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let errors = preprocess_program(&program).expect_err("应报错");
+        assert!(
+            errors.iter().any(|e| e.to_string().contains("未指定端口")),
+            "应提示 PLC 端点必须显式指定端口"
+        );
+    }
 
     #[test]
     fn builds_topology_graph_from_prd_5_3_topology() {

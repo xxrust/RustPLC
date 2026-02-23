@@ -214,6 +214,7 @@ fn parse_device_type(pair: Pair<Rule>) -> Result<DeviceType, PlcError> {
     match pair.as_str() {
         "digital_output" => Ok(DeviceType::DigitalOutput),
         "digital_input" => Ok(DeviceType::DigitalInput),
+        "plc" => Ok(DeviceType::Plc),
         "solenoid_valve" => Ok(DeviceType::SolenoidValve),
         "cylinder" => Ok(DeviceType::Cylinder),
         "sensor" => Ok(DeviceType::Sensor),
@@ -1565,8 +1566,8 @@ fn map_parse_error(err: pest::error::Error<Rule>) -> PlcError {
 mod tests {
     use super::{parse_constraints, parse_plc, parse_tasks, parse_topology};
     use crate::ast::{
-        ActionStatement, LiteralValue, OnCompleteDirective, PortRole, PortType, StepStatement,
-        WaitCondition,
+        ActionStatement, DeviceType, LiteralValue, OnCompleteDirective, PortRole, PortType,
+        StepStatement, WaitCondition,
     };
 
     #[test]
@@ -1763,9 +1764,42 @@ task main:
         assert_eq!(program.topology.connections.len(), 3);
         assert_eq!(program.topology.connections[0].from, "Y0");
         assert_eq!(program.topology.connections[0].from_port, None);
-        assert_eq!(program.topology.connections[0].to_port.as_deref(), Some("coil"));
+        assert_eq!(
+            program.topology.connections[0].to_port.as_deref(),
+            Some("coil")
+        );
         assert_eq!(program.topology.connections[2].to, "X0");
         assert_eq!(program.topology.connections[2].to_port, None);
+    }
+
+    #[test]
+    fn parses_plc_controller_device_type_and_ports() {
+        let input = r#"
+[topology]
+device plc_main: plc { ports: [Y0:digital:producer, X0:digital:consumer] }
+device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("plc 设备应能解析");
+        let plc = program
+            .topology
+            .devices
+            .iter()
+            .find(|d| d.name == "plc_main")
+            .expect("应包含 plc_main");
+        assert!(matches!(plc.device_type, DeviceType::Plc));
+        assert_eq!(plc.attributes.ports.len(), 2);
+        assert_eq!(
+            program.topology.connections[0].from_port.as_deref(),
+            Some("Y0")
+        );
     }
 
     #[test]

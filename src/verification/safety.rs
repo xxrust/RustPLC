@@ -660,6 +660,7 @@ fn collect_device_domains(
             }
             DeviceType::DigitalOutput
             | DeviceType::DigitalInput
+            | DeviceType::Plc
             | DeviceType::SolenoidValve
             | DeviceType::Sensor
             | DeviceType::Motor

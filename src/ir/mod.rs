@@ -13,6 +13,7 @@ pub struct Device {
 pub enum DeviceKind {
     DigitalOutput,
     DigitalInput,
+    Plc,
     SolenoidValve,
     Cylinder,
     Sensor,

@@ -63,6 +63,7 @@ fn device_type_label(device_type: &DeviceType) -> &'static str {
     match device_type {
         DeviceType::DigitalOutput => "digital_output",
         DeviceType::DigitalInput => "digital_input",
+        DeviceType::Plc => "plc",
         DeviceType::SolenoidValve => "solenoid_valve",
         DeviceType::Cylinder => "cylinder",
         DeviceType::Sensor => "sensor",

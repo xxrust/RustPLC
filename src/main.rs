@@ -1,11 +1,14 @@
 use rust_plc::error::PlcError;
 use rust_plc::ir::{ConstraintSet, DeviceKind, StateMachine, TimingModel, TopologyGraph};
 use rust_plc::parser::parse_plc;
+use rust_plc::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program,
 };
-use rust_plc::topology_semantic_gate::validate_topology_semantics;
+use rust_plc::topology_semantic_gate::{
+    collect_topology_deprecation_warnings, validate_topology_semantics,
+};
 use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -415,22 +418,6 @@ fn default_scenario_init_out_path(plc_path: &Path) -> PathBuf {
     parent.join(format!("{stem}.scenario.yaml"))
 }
 
-fn parse_prefixed_u16(name: &str, prefix: char) -> Option<u16> {
-    let rest = name.strip_prefix(prefix)?;
-    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    rest.parse::<u16>().ok()
-}
-
-fn parse_prefixed_token_u16(name: &str, prefix: &str) -> Option<u16> {
-    let rest = name.strip_prefix(prefix)?;
-    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    rest.parse::<u16>().ok()
-}
-
 fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHints, String> {
     let program = parse_plc(plc_source).map_err(|e| e.to_string())?;
     let expanded = preprocess_program(&program).map_err(|errors| {
@@ -482,17 +469,23 @@ fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHint
         let device = &topology.graph[node];
         match device.kind {
             DeviceKind::DigitalInput => {
-                if let Some(id) = parse_prefixed_u16(&device.name, 'X') {
+                if let Some(port) = parse_physical_plc_port_ref(&device.name) {
+                    if !matches!(port.kind, PlcPortKind::DigitalInput) {
+                        continue;
+                    }
                     let aliases =
                         collect_downstream_aliases(&topology, node, is_physical_digital_input_name);
-                    digital_aliases.insert(id, aliases);
+                    digital_aliases.insert(port.id, aliases);
                 }
             }
             DeviceKind::AnalogInput => {
-                if let Some(id) = parse_prefixed_token_u16(&device.name, "AI") {
+                if let Some(port) = parse_physical_plc_port_ref(&device.name) {
+                    if !matches!(port.kind, PlcPortKind::AnalogInput) {
+                        continue;
+                    }
                     let aliases =
                         collect_downstream_aliases(&topology, node, is_physical_analog_input_name);
-                    analog_aliases.insert(id, aliases);
+                    analog_aliases.insert(port.id, aliases);
                 }
             }
             _ => {}
@@ -542,11 +535,17 @@ fn collect_downstream_aliases(
 }
 
 fn is_physical_digital_input_name(name: &str) -> bool {
-    parse_prefixed_u16(name, 'X').is_some()
+    matches!(
+        parse_physical_plc_port_ref(name),
+        Some(port) if matches!(port.kind, PlcPortKind::DigitalInput)
+    )
 }
 
 fn is_physical_analog_input_name(name: &str) -> bool {
-    parse_prefixed_token_u16(name, "AI").is_some()
+    matches!(
+        parse_physical_plc_port_ref(name),
+        Some(port) if matches!(port.kind, PlcPortKind::AnalogInput)
+    )
 }
 
 fn render_input_alias_comment(aliases: &BTreeMap<u16, Vec<String>>, id: u16) -> String {
@@ -9506,6 +9505,9 @@ fn reason_str(r: runtime_core::TransitionReason) -> &'static str {
 
 fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
     let program = parse_plc(source).map_err(|err| vec![err.to_string()])?;
+    for warning in collect_topology_deprecation_warnings(&program.topology) {
+        eprintln!("WARNING [deprecation] {warning}");
+    }
     let expanded_program = preprocess_program(&program).map_err(|errors| {
         errors
             .into_iter()
