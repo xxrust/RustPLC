@@ -134,28 +134,6 @@ macro_rules! err_contains {
 // -----------------------------------------------------------------------------
 
 #[test]
-fn large_example_stamp_bend_line_compiles_and_has_nontrivial_ir() {
-    let source = read_example("stamp_bend_line.plc");
-    let ir = compile_source_to_json(&source).expect("stamp_bend_line should compile");
-
-    assert!(ir["topology"]["graph"]["nodes"].as_array().unwrap().len() >= 30);
-    assert!(ir["state_machine"]["states"].as_array().unwrap().len() >= 15);
-    assert!(ir["state_machine"]["transitions"].as_array().unwrap().len() >= 20);
-    assert_eq!(
-        ir["verification"]["liveness"]["level"],
-        Value::String("通过".to_string())
-    );
-    assert_eq!(
-        ir["verification"]["timing"]["level"],
-        Value::String("通过".to_string())
-    );
-    assert_eq!(
-        ir["verification"]["causality"]["level"],
-        Value::String("通过".to_string())
-    );
-}
-
-#[test]
 fn large_example_assembly_station_compiles_and_has_nontrivial_ir() {
     let source = read_example("assembly_station.plc");
     let ir = compile_source_to_json(&source).expect("assembly_station should compile");
@@ -163,46 +141,6 @@ fn large_example_assembly_station_compiles_and_has_nontrivial_ir() {
     assert!(ir["topology"]["graph"]["nodes"].as_array().unwrap().len() >= 30);
     assert!(ir["state_machine"]["states"].as_array().unwrap().len() >= 12);
     assert!(ir["state_machine"]["transitions"].as_array().unwrap().len() >= 20);
-}
-
-#[test]
-fn large_example_drill_station_compiles_and_has_nontrivial_ir() {
-    let source = read_example("drill_station.plc");
-    let ir = compile_source_to_json(&source).expect("drill_station should compile");
-
-    assert!(ir["topology"]["graph"]["nodes"].as_array().unwrap().len() >= 15);
-    assert!(ir["state_machine"]["states"].as_array().unwrap().len() >= 10);
-    assert!(ir["state_machine"]["transitions"].as_array().unwrap().len() >= 15);
-}
-
-#[test]
-fn large_example_glue_station_compiles_and_has_nontrivial_ir() {
-    let source = read_example("glue_station.plc");
-    let ir = compile_source_to_json(&source).expect("glue_station should compile");
-
-    assert!(ir["topology"]["graph"]["nodes"].as_array().unwrap().len() >= 15);
-    assert!(ir["state_machine"]["states"].as_array().unwrap().len() >= 12);
-    assert!(ir["state_machine"]["transitions"].as_array().unwrap().len() >= 20);
-}
-
-#[test]
-fn large_example_grind_station_compiles_and_has_nontrivial_ir() {
-    let source = read_example("grind_station.plc");
-    let ir = compile_source_to_json(&source).expect("grind_station should compile");
-
-    assert!(ir["topology"]["graph"]["nodes"].as_array().unwrap().len() >= 10);
-    assert!(ir["state_machine"]["states"].as_array().unwrap().len() >= 10);
-    assert!(ir["state_machine"]["transitions"].as_array().unwrap().len() >= 15);
-}
-
-#[test]
-fn large_example_label_station_compiles_and_has_nontrivial_ir() {
-    let source = read_example("label_station.plc");
-    let ir = compile_source_to_json(&source).expect("label_station should compile");
-
-    assert!(ir["topology"]["graph"]["nodes"].as_array().unwrap().len() >= 15);
-    assert!(ir["state_machine"]["states"].as_array().unwrap().len() >= 10);
-    assert!(ir["state_machine"]["transitions"].as_array().unwrap().len() >= 15);
 }
 
 // -----------------------------------------------------------------------------

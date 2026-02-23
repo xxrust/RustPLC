@@ -6,6 +6,7 @@
 - Canonical sample modeling now maps common discrete inputs by intent: start/reset buttons use `push_button`, cylinder end-stroke feedback uses `limit_switch`, presence/arrival sensing uses `proximity_sensor`, and emergency stops must use `e_stop_button` with `inverted: true`.
 - PIL semantic baseline fixtures must keep the directory contract `examples/pil_baselines/<case>/case.plc` + `scenarios/base.yaml`; scripts auto-discover case folders and skip incomplete fixtures.
 
+- Large topology regression should keep a single canonical station fixture (`assembly_station`) in file form; additional station-scale coverage should be generated inline in `tests/large_demo_coverage.rs` to avoid fixture drift.
 Started: Mon Feb 23 00:00:00 CST 2026
 
 ## [2026-02-23 09:40:50 CST] - US-001
@@ -117,4 +118,30 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - A semantic baseline case is considered valid only when both `case.plc` and `scenarios/base.yaml` exist; missing either file silently downgrades coverage via skip logic.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Running `scripts/pil_semantic_baseline.sh --cases-dir examples/pil_baselines` is the direct acceptance gate for this fixture set and quickly validates script compatibility after case changes.
+---
+
+
+## [2026-02-23 11:24:44 CST] - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Deleted duplicated large station fixtures: `stamp_bend_line.plc`, `drill_station.plc`, `glue_station.plc`, `grind_station.plc`, `label_station.plc`.
+  - Trimmed `tests/large_demo_coverage.rs` to keep `assembly_station` as the single large topology representative sample.
+  - Preserved stress-style large coverage through existing inline generation tests (`many steps/devices/repeat/parallel`).
+  - Ran `cargo check --workspace` and `cargo test --workspace` successfully.
+- Files changed
+  - examples/stamp_bend_line.plc
+  - examples/drill_station.plc
+  - examples/glue_station.plc
+  - examples/grind_station.plc
+  - examples/label_station.plc
+  - tests/large_demo_coverage.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For large fixture maintenance, one canonical file-based representative plus synthetic stress tests gives broad coverage with lower asset churn.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Deleting example fixtures requires checking coverage tests for file reads first; missing files otherwise fail late at runtime.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `tests/large_demo_coverage.rs` is the contract test that defines which large example files must continue to exist.
 ---
