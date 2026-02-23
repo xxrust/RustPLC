@@ -214,6 +214,14 @@ fn parse_attribute_block(pair: Pair<Rule>) -> Result<DeviceAttributes, PlcError>
         }
     }
 
+    if attributes.subtype.is_none() {
+        attributes.subtype = attributes.r#type.clone();
+    } else if attributes.r#type.is_some() {
+        eprintln!(
+            "WARNING [parser] 检测到同时声明 `type` 与 `subtype`，将以 `subtype` 为准；请迁移到 `subtype`"
+        );
+    }
+
     Ok(attributes)
 }
 
@@ -249,6 +257,9 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         }
         "stroke" => {
             attributes.stroke = Some(expect_measured(value, "stroke")?);
+        }
+        "subtype" => {
+            attributes.subtype = Some(expect_identifier_or_string(value, "subtype")?);
         }
         "type" => {
             attributes.r#type = Some(expect_identifier_or_string(value, "type")?);
@@ -1706,6 +1717,72 @@ task main:
         assert_eq!(
             program.topology.connections[2].to_port.as_deref(),
             Some("sense")
+        );
+    }
+
+    #[test]
+    fn parses_subtype_attribute_into_ast() {
+        let input = r#"
+[topology]
+device start_button: digital_input { subtype: "push_button" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("subtype should parse");
+        let start_button = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "start_button")
+            .expect("should include start_button");
+        assert_eq!(
+            start_button.attributes.subtype.as_deref(),
+            Some("push_button")
+        );
+    }
+
+    #[test]
+    fn keeps_type_compatibility_and_subtype_precedence() {
+        let input = r#"
+[topology]
+device legacy_limit: digital_input { type: "limit_switch" }
+device e_stop: digital_input { type: "push_button", subtype: "e_stop_button" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("type/subtype compatibility should parse");
+        let legacy_limit = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "legacy_limit")
+            .expect("should include legacy_limit");
+        let e_stop = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "e_stop")
+            .expect("should include e_stop");
+
+        assert_eq!(
+            legacy_limit.attributes.subtype.as_deref(),
+            Some("limit_switch"),
+            "legacy `type` should map to subtype"
+        );
+        assert_eq!(
+            e_stop.attributes.subtype.as_deref(),
+            Some("e_stop_button"),
+            "`subtype` should override `type` when both are provided"
         );
     }
 

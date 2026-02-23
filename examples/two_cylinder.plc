@@ -10,6 +10,7 @@ device X4: digital_input
 
 device start_button: sensor {
     reports_to: X4
+    subtype: "push_button"
     debounce: 20ms
 }
 
@@ -37,21 +38,25 @@ device cyl_B: cylinder {
 
 device sensor_A_ext: sensor {
     reports_to: X0
+    subtype: "limit_switch"
     detects: cyl_A.extended
 }
 
 device sensor_A_ret: sensor {
     reports_to: X1
+    subtype: "limit_switch"
     detects: cyl_A.retracted
 }
 
 device sensor_B_ext: sensor {
     reports_to: X2
+    subtype: "limit_switch"
     detects: cyl_B.extended
 }
 
 device sensor_B_ret: sensor {
     reports_to: X3
+    subtype: "limit_switch"
     detects: cyl_B.retracted
 }
 

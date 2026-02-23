@@ -96,6 +96,8 @@ pub struct DeviceAttributes {
     pub stroke_time: Option<DurationValue>,
     pub retract_time: Option<DurationValue>,
     pub stroke: Option<MeasuredValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtype: Option<String>,
     #[serde(rename = "type")]
     pub r#type: Option<String>,
     pub detects: Option<StateReference>,

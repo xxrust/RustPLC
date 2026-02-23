@@ -22,3 +22,9 @@
 
 - Consolidated duplicated `scenario-validate` failure tests into one table-driven case matrix in `tests/scenario_validate.rs`.
 - Converted success-path validation into a table-driven loop over `assembly_station` and `two_cylinder` presets to reduce duplicated command wiring and keep fixture coverage explicit.
+
+## Examples Asset Strategy (Subtype Standard)
+
+- Keep file-based canonical examples for user-facing workflows (`two_cylinder`, `assembly_station`, `force_override_demo`, recovery templates, motion examples).
+- Move single-purpose demo fixtures (`half_rotation`, `delay_demo`, `repeat_demo`, `and_or_wait_demo`, `if_else_demo`, `custom_states_demo`) into `tests/examples_integration.rs` inline DSL blocks.
+- Keep large topology representative coverage centered on `examples/assembly_station.plc`; remove duplicated station fixtures and preserve stress coverage via generated inline tests in `tests/large_demo_coverage.rs`.
