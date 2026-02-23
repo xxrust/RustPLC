@@ -1,5 +1,6 @@
 # Ralph Progress Log
 ## Codebase Patterns
+- Keep subtype vocabulary and compatibility rules centralized in `src/device_subtype.rs`; normalize first, then query the matrix rather than scattering subtype literals.
 - For DSL attribute migrations, keep legacy keys in AST/parser and map them to the new canonical field during parsing, then emit a migration warning when both are present.
 
 Started: Mon Feb 23 00:00:00 CST 2026
@@ -24,4 +25,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Updating accepted attributes requires both `src/parser/plc.pest` and `apply_attribute` match arms in `src/parser/mod.rs`.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Parser tests in `src/parser/mod.rs` are the fastest guardrail for grammar and AST-field migration behavior.
+---
+
+## [2026-02-23 10:04:43 CST] - US-002
+Thread: https://ampcode.com/threads/019c85e4-b1b7-7613-9eb5-68bc2030b65d
+- What was implemented
+  - Added centralized subtype registry module `src/device_subtype.rs` with normalized subtype lookup.
+  - Exposed supported subtype list and subtype-to-base-type compatibility matrix helpers.
+  - Added registry helpers for known-subtype checks and compatibility matching against `DeviceType`.
+  - Added unit tests for normalization, exported subtype list, compatibility matrix resolution, and device-type matching.
+- Files changed
+  - src/device_subtype.rs
+  - src/lib.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - New DSL taxonomy helpers should live in focused modules and be exported through `src/lib.rs` for reuse across parser/semantic gates.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - When expanding subtype support, update both `known_subtypes()` and `subtype_compatible_base_types()` so list exposure and matrix behavior stay in sync.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Compatibility checks can use `subtype_matches_device_type()` directly instead of duplicating per-callsite match logic.
 ---
