@@ -38,18 +38,18 @@ device sensor_work_ext: sensor
 
 device sensor_work_ret: sensor
 
-relation { from: start_button.out, to: X4.in, via: reports_to }
-relation { from: Y0.out, to: valve_hold.coil, via: driven_by }
-relation { from: Y1.out, to: valve_work.coil, via: driven_by }
+relation { from: start_button.out, to: X4, via: reports_to }
+relation { from: Y0, to: valve_hold.coil, via: driven_by }
+relation { from: Y1, to: valve_work.coil, via: driven_by }
 relation { from: valve_hold.out, to: cyl_hold.cmd, via: driven_by }
 relation { from: valve_work.out, to: cyl_work.cmd, via: driven_by }
-relation { from: sensor_hold_ext.out, to: X0.in, via: reports_to }
+relation { from: sensor_hold_ext.out, to: X0, via: reports_to }
 relation { from: cyl_hold.extended, to: sensor_hold_ext.sense, via: detects }
-relation { from: sensor_hold_ret.out, to: X1.in, via: reports_to }
+relation { from: sensor_hold_ret.out, to: X1, via: reports_to }
 relation { from: cyl_hold.retracted, to: sensor_hold_ret.sense, via: detects }
-relation { from: sensor_work_ext.out, to: X2.in, via: reports_to }
+relation { from: sensor_work_ext.out, to: X2, via: reports_to }
 relation { from: cyl_work.extended, to: sensor_work_ext.sense, via: detects }
-relation { from: sensor_work_ret.out, to: X3.in, via: reports_to }
+relation { from: sensor_work_ret.out, to: X3, via: reports_to }
 relation { from: cyl_work.retracted, to: sensor_work_ret.sense, via: detects }
 
 [constraints]

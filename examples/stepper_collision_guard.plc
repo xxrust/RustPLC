@@ -37,17 +37,17 @@ device alarm_x: sensor
 device clamp_ext: sensor
 device clamp_ret: sensor
 
-relation { from: Y1.out, to: axis_x.cmd, via: driven_by }
-relation { from: Y2.out, to: clamp_valve.coil, via: driven_by }
+relation { from: Y1, to: axis_x.cmd, via: driven_by }
+relation { from: Y2, to: clamp_valve.coil, via: driven_by }
 relation { from: clamp_valve.out, to: cyl_clamp.cmd, via: driven_by }
 relation { from: axis_x.position_ok, to: inpos_x.sense, via: detects }
-relation { from: inpos_x.out, to: X0.in, via: reports_to }
+relation { from: inpos_x.out, to: X0, via: reports_to }
 relation { from: axis_x.alarm, to: alarm_x.sense, via: detects }
-relation { from: alarm_x.out, to: X1.in, via: reports_to }
+relation { from: alarm_x.out, to: X1, via: reports_to }
 relation { from: cyl_clamp.extended, to: clamp_ext.sense, via: detects }
-relation { from: clamp_ext.out, to: X2.in, via: reports_to }
+relation { from: clamp_ext.out, to: X2, via: reports_to }
 relation { from: cyl_clamp.retracted, to: clamp_ret.sense, via: detects }
-relation { from: clamp_ret.out, to: X3.in, via: reports_to }
+relation { from: clamp_ret.out, to: X3, via: reports_to }
 
 [constraints]
 

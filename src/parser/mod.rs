@@ -102,8 +102,8 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
 fn parse_relation_declaration(pair: Pair<Rule>) -> Result<TopologyConnection, PlcError> {
     let line = line_of(&pair);
     let col = col_of(&pair);
-    let mut from = None::<(String, String)>;
-    let mut to = None::<(String, String)>;
+    let mut from = None::<(String, Option<String>)>;
+    let mut to = None::<(String, Option<String>)>;
     let mut relation = None::<TopologyRelation>;
 
     for field in pair.into_inner() {
@@ -128,13 +128,13 @@ fn parse_relation_declaration(pair: Pair<Rule>) -> Result<TopologyConnection, Pl
                 if from.is_some() {
                     return Err(PlcError::parse(field_line, "relation.from 重复声明"));
                 }
-                from = Some(expect_port_reference(value, "relation.from")?);
+                from = Some(expect_relation_endpoint(value, "relation.from")?);
             }
             "to" => {
                 if to.is_some() {
                     return Err(PlcError::parse(field_line, "relation.to 重复声明"));
                 }
-                to = Some(expect_port_reference(value, "relation.to")?);
+                to = Some(expect_relation_endpoint(value, "relation.to")?);
             }
             "via" => {
                 if relation.is_some() {
@@ -156,7 +156,7 @@ fn parse_relation_declaration(pair: Pair<Rule>) -> Result<TopologyConnection, Pl
             "<input>",
             line,
             col,
-            "relation 缺少 from 字段（需要 Device.Port）",
+            "relation 缺少 from 字段（需要 Device 或 Device.Port）",
         )
     })?;
     let (to_device, to_port) = to.ok_or_else(|| {
@@ -164,7 +164,7 @@ fn parse_relation_declaration(pair: Pair<Rule>) -> Result<TopologyConnection, Pl
             "<input>",
             line,
             col,
-            "relation 缺少 to 字段（需要 Device.Port）",
+            "relation 缺少 to 字段（需要 Device 或 Device.Port）",
         )
     })?;
     let relation = relation.ok_or_else(|| {
@@ -180,8 +180,8 @@ fn parse_relation_declaration(pair: Pair<Rule>) -> Result<TopologyConnection, Pl
         from: from_device,
         to: to_device,
         relation,
-        from_port: Some(from_port),
-        to_port: Some(to_port),
+        from_port,
+        to_port,
         signal: None,
     })
 }
@@ -1310,21 +1310,24 @@ fn expect_boolean(pair: Pair<Rule>, field_name: &str) -> Result<bool, PlcError> 
     }
 }
 
-fn expect_port_reference(pair: Pair<Rule>, field_name: &str) -> Result<(String, String), PlcError> {
+fn expect_relation_endpoint(
+    pair: Pair<Rule>,
+    field_name: &str,
+) -> Result<(String, Option<String>), PlcError> {
     let line = line_of(&pair);
-    if pair.as_rule() != Rule::port_reference {
-        return Err(PlcError::parse(
+    match pair.as_rule() {
+        Rule::port_reference => {
+            let (device, port) = pair.as_str().split_once('.').ok_or_else(|| {
+                PlcError::parse(line, format!("属性 {field_name} 端口引用格式错误"))
+            })?;
+            Ok((device.to_string(), Some(port.to_string())))
+        }
+        Rule::identifier => Ok((pair.as_str().to_string(), None)),
+        _ => Err(PlcError::parse(
             line,
-            format!("属性 {field_name} 需要端口引用（如 device.port）"),
-        ));
+            format!("属性 {field_name} 需要端点引用（如 device 或 device.port）"),
+        )),
     }
-
-    let (device, port) = pair
-        .as_str()
-        .split_once('.')
-        .ok_or_else(|| PlcError::parse(line, format!("属性 {field_name} 端口引用格式错误")))?;
-
-    Ok((device.to_string(), port.to_string()))
 }
 
 fn expect_topology_relation(
@@ -1734,6 +1737,35 @@ task main:
         assert_eq!(relation.from_port.as_deref(), Some("out"));
         assert_eq!(relation.to_port.as_deref(), Some("coil"));
         assert_eq!(relation.relation, crate::ast::TopologyRelation::DrivenBy);
+    }
+
+    #[test]
+    fn parses_relation_with_plc_io_shorthand_endpoints() {
+        let input = r#"
+[topology]
+device Y0: digital_output
+device X0: digital_input
+device valve_A: solenoid_valve { ports: [coil:digital:consumer, out:pneumatic:producer] }
+device sensor_A: sensor
+
+relation { from: Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: sensor_A.sense, via: detects }
+relation { from: sensor_A.out, to: X0, via: reports_to }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("relation 应支持 PLC IO 简写端点");
+        assert_eq!(program.topology.connections.len(), 3);
+        assert_eq!(program.topology.connections[0].from, "Y0");
+        assert_eq!(program.topology.connections[0].from_port, None);
+        assert_eq!(program.topology.connections[0].to_port.as_deref(), Some("coil"));
+        assert_eq!(program.topology.connections[2].to, "X0");
+        assert_eq!(program.topology.connections[2].to_port, None);
     }
 
     #[test]

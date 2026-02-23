@@ -19,10 +19,10 @@ device cyl_act: cylinder {
 
 device sensor_ext: sensor
 
-relation { from: start_button.out, to: X1.in, via: reports_to }
-relation { from: Y0.out, to: valve_act.coil, via: driven_by }
+relation { from: start_button.out, to: X1, via: reports_to }
+relation { from: Y0, to: valve_act.coil, via: driven_by }
 relation { from: valve_act.out, to: cyl_act.cmd, via: driven_by }
-relation { from: sensor_ext.out, to: X0.in, via: reports_to }
+relation { from: sensor_ext.out, to: X0, via: reports_to }
 relation { from: cyl_act.extended, to: sensor_ext.sense, via: detects }
 
 [constraints]

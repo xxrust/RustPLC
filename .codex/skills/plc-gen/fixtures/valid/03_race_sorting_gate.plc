@@ -28,13 +28,13 @@ device cyl_gate: cylinder {
     retract_time: 300ms
 }
 
-relation { from: start_button.out, to: X2.in, via: reports_to }
-relation { from: Y0.out, to: motor_conv.cmd, via: driven_by }
-relation { from: sensor_A.out, to: X0.in, via: reports_to }
+relation { from: start_button.out, to: X2, via: reports_to }
+relation { from: Y0, to: motor_conv.cmd, via: driven_by }
+relation { from: sensor_A.out, to: X0, via: reports_to }
 relation { from: motor_conv.position_A, to: sensor_A.sense, via: detects }
-relation { from: sensor_B.out, to: X1.in, via: reports_to }
+relation { from: sensor_B.out, to: X1, via: reports_to }
 relation { from: motor_conv.position_B, to: sensor_B.sense, via: detects }
-relation { from: Y1.out, to: valve_gate.coil, via: driven_by }
+relation { from: Y1, to: valve_gate.coil, via: driven_by }
 relation { from: valve_gate.out, to: cyl_gate.cmd, via: driven_by }
 
 [constraints]

@@ -28,13 +28,13 @@ device cyl_stopper: cylinder {
 
 device sensor_stop_ext: sensor
 
-relation { from: start_button.out, to: X2.in, via: reports_to }
-relation { from: Y0.out, to: motor_conveyor.cmd, via: driven_by }
-relation { from: sensor_index.out, to: X0.in, via: reports_to }
+relation { from: start_button.out, to: X2, via: reports_to }
+relation { from: Y0, to: motor_conveyor.cmd, via: driven_by }
+relation { from: sensor_index.out, to: X0, via: reports_to }
 relation { from: motor_conveyor.position_index, to: sensor_index.sense, via: detects }
-relation { from: Y1.out, to: valve_stopper.coil, via: driven_by }
+relation { from: Y1, to: valve_stopper.coil, via: driven_by }
 relation { from: valve_stopper.out, to: cyl_stopper.cmd, via: driven_by }
-relation { from: sensor_stop_ext.out, to: X1.in, via: reports_to }
+relation { from: sensor_stop_ext.out, to: X1, via: reports_to }
 relation { from: cyl_stopper.extended, to: sensor_stop_ext.sense, via: detects }
 
 [constraints]

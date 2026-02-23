@@ -4,7 +4,7 @@ device X0: digital_input
 
 device start_button: sensor
 
-relation { from: start_button.out, to: X0.in, via: reports_to }
+relation { from: start_button.out, to: X0, via: reports_to }
 
 [constraints]
 

@@ -193,22 +193,24 @@ AI 会通过多轮对话生成完整的 `.plc` 文件并自动验证。
 ```plc
 [topology]
 device Y0: digital_output
+device X0: digital_input
 device valve_A: solenoid_valve {
-    driven_by: Y0,
-    response_time: 20ms
+    response_time: 20ms,
+    ports: [coil:digital:consumer, out:pneumatic:producer]
 }
 device cyl_A: cylinder {
-    driven_by: valve_A,
-    stroke_time: 300ms
+    stroke_time: 300ms,
+    ports: [cmd:pneumatic:consumer, extended:logical:producer]
 }
-device sensor_A_ext: sensor {
-    reports_to: X0,
-    detects: cyl_A
-}
+device sensor_A_ext: sensor
+
+relation { from: Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0, via: reports_to }
 
 [constraints]
-safety:
-    cyl_A.extended conflicts_with cyl_B.extended
+safety: cyl_A.extended requires sensor_A_ext.on
 
 [tasks]
 task cycle:
@@ -218,7 +220,7 @@ task cycle:
         timeout: 500ms -> goto fault_handler
 ```
 
-> **注意**：`connected_to` 已废弃，请使用 `driven_by`（驱动关系）、`reports_to`（信号上报）、`detects`（检测目标）。迁移工具：`python3 scripts/migrate_connected_to.py`
+> **注意**：设备属性写法 `driven_by/reports_to/detects` 已移除；请统一使用 `relation { from, to, via }`。其中 PLC 点位可直接写 `Y0`/`X1`（无需 `Y0.out`/`X1.in`）。
 
 ### 2. 编译验证
 

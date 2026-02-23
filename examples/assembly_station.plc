@@ -109,37 +109,37 @@ device sensor_eject_ret: sensor {
     subtype: "limit_switch"
 }
 
-relation { from: start_button.out, to: X10.in, via: reports_to }
-relation { from: Y0.out, to: motor_left.cmd, via: driven_by }
+relation { from: start_button.out, to: X10, via: reports_to }
+relation { from: Y0, to: motor_left.cmd, via: driven_by }
 relation { from: motor_left.position_A, to: sensor_left_arrive.sense, via: detects }
-relation { from: sensor_left_arrive.out, to: X0.in, via: reports_to }
-relation { from: Y1.out, to: motor_right.cmd, via: driven_by }
+relation { from: sensor_left_arrive.out, to: X0, via: reports_to }
+relation { from: Y1, to: motor_right.cmd, via: driven_by }
 relation { from: motor_right.position_A, to: sensor_right_arrive.sense, via: detects }
-relation { from: sensor_right_arrive.out, to: X1.in, via: reports_to }
-relation { from: Y2.out, to: valve_push_L.coil, via: driven_by }
+relation { from: sensor_right_arrive.out, to: X1, via: reports_to }
+relation { from: Y2, to: valve_push_L.coil, via: driven_by }
 relation { from: valve_push_L.out, to: cyl_push_L.cmd, via: driven_by }
 relation { from: cyl_push_L.extended, to: sensor_push_L_ext.sense, via: detects }
-relation { from: sensor_push_L_ext.out, to: X2.in, via: reports_to }
+relation { from: sensor_push_L_ext.out, to: X2, via: reports_to }
 relation { from: cyl_push_L.retracted, to: sensor_push_L_ret.sense, via: detects }
-relation { from: sensor_push_L_ret.out, to: X3.in, via: reports_to }
-relation { from: Y3.out, to: valve_push_R.coil, via: driven_by }
+relation { from: sensor_push_L_ret.out, to: X3, via: reports_to }
+relation { from: Y3, to: valve_push_R.coil, via: driven_by }
 relation { from: valve_push_R.out, to: cyl_push_R.cmd, via: driven_by }
 relation { from: cyl_push_R.extended, to: sensor_push_R_ext.sense, via: detects }
-relation { from: sensor_push_R_ext.out, to: X4.in, via: reports_to }
+relation { from: sensor_push_R_ext.out, to: X4, via: reports_to }
 relation { from: cyl_push_R.retracted, to: sensor_push_R_ret.sense, via: detects }
-relation { from: sensor_push_R_ret.out, to: X5.in, via: reports_to }
-relation { from: Y4.out, to: valve_press.coil, via: driven_by }
+relation { from: sensor_push_R_ret.out, to: X5, via: reports_to }
+relation { from: Y4, to: valve_press.coil, via: driven_by }
 relation { from: valve_press.out, to: cyl_press.cmd, via: driven_by }
 relation { from: cyl_press.extended, to: sensor_press_ext.sense, via: detects }
-relation { from: sensor_press_ext.out, to: X6.in, via: reports_to }
+relation { from: sensor_press_ext.out, to: X6, via: reports_to }
 relation { from: cyl_press.retracted, to: sensor_press_ret.sense, via: detects }
-relation { from: sensor_press_ret.out, to: X7.in, via: reports_to }
-relation { from: Y5.out, to: valve_eject.coil, via: driven_by }
+relation { from: sensor_press_ret.out, to: X7, via: reports_to }
+relation { from: Y5, to: valve_eject.coil, via: driven_by }
 relation { from: valve_eject.out, to: cyl_eject.cmd, via: driven_by }
 relation { from: cyl_eject.extended, to: sensor_eject_ext.sense, via: detects }
-relation { from: sensor_eject_ext.out, to: X8.in, via: reports_to }
+relation { from: sensor_eject_ext.out, to: X8, via: reports_to }
 relation { from: cyl_eject.retracted, to: sensor_eject_ret.sense, via: detects }
-relation { from: sensor_eject_ret.out, to: X9.in, via: reports_to }
+relation { from: sensor_eject_ret.out, to: X9, via: reports_to }
 
 [constraints]
 

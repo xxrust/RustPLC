@@ -89,11 +89,11 @@ device axis_x: motor {
 device inpos_x: sensor
 device alarm_x: sensor
 
-relation { from: Y1.out, to: axis_x.cmd, via: driven_by }
+relation { from: Y1, to: axis_x.cmd, via: driven_by }
 relation { from: axis_x.position_ok, to: inpos_x.sense, via: detects }
-relation { from: inpos_x.out, to: X0.in, via: reports_to }
+relation { from: inpos_x.out, to: X0, via: reports_to }
 relation { from: axis_x.alarm, to: alarm_x.sense, via: detects }
-relation { from: alarm_x.out, to: X1.in, via: reports_to }
+relation { from: alarm_x.out, to: X1, via: reports_to }
 
 [constraints]
 safety: axis_x.on requires alarm_x.off

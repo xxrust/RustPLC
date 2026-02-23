@@ -78,8 +78,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已新增双输入阀正反例与多IO motor 回归，语义门禁可拦截端口缺失/误接。"
     },
     {
       "id": "US-006",
@@ -124,8 +124,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "规范文档改为可执行 DSL，补充旧写法迁移对照；README 已声明旧属性不兼容。"
     }
   ]
 }

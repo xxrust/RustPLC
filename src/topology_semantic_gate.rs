@@ -87,6 +87,7 @@ struct GatePort {
 
 #[derive(Debug, Clone)]
 struct GateDevice {
+    kind: DeviceType,
     ports: Vec<GatePort>,
 }
 
@@ -107,6 +108,7 @@ pub fn validate_topology_semantics(
         devices.insert(
             device.name.clone(),
             GateDevice {
+                kind: device.device_type.clone(),
                 ports: resolved_device_ports(device),
             },
         );
@@ -137,6 +139,7 @@ pub fn validate_topology_semantics(
 
         let from_port = match resolve_port(
             &connection,
+            &from_device.kind,
             &from_device.ports,
             true,
             line,
@@ -149,6 +152,7 @@ pub fn validate_topology_semantics(
 
         let to_port = match resolve_port(
             &connection,
+            &to_device.kind,
             &to_device.ports,
             false,
             line,
@@ -493,6 +497,7 @@ fn infer_semantic_role(port: &DevicePort) -> Option<&'static str> {
 
 fn resolve_port(
     connection: &TopologyConnection,
+    device_type: &DeviceType,
     ports: &[GatePort],
     source_side: bool,
     line: usize,
@@ -542,6 +547,27 @@ fn resolve_port(
                     &connection.from
                 } else {
                     &connection.to
+                }
+            ),
+        ));
+        return None;
+    }
+
+    if !allows_shorthand_endpoint(device_type) {
+        issues.push(issue_sem101(
+            line,
+            connection,
+            format!(
+                "设备 `{}` 必须显式指定端口（请使用 {}）",
+                if source_side {
+                    &connection.from
+                } else {
+                    &connection.to
+                },
+                if source_side {
+                    "from: device.port"
+                } else {
+                    "to: device.port"
                 }
             ),
         ));
@@ -623,6 +649,16 @@ fn resolve_port(
         },
     ));
     None
+}
+
+fn allows_shorthand_endpoint(device_type: &DeviceType) -> bool {
+    matches!(
+        device_type,
+        DeviceType::DigitalOutput
+            | DeviceType::DigitalInput
+            | DeviceType::AnalogOutput
+            | DeviceType::AnalogInput
+    )
 }
 
 fn issue_sem101(
@@ -734,7 +770,7 @@ mod tests {
 device Y0: digital_output
 device X4: digital_input
 device start_button: digital_input
-relation { from: X4.in, to: start_button.in, via: driven_by }
+relation { from: X4, to: start_button, via: driven_by }
 
 [constraints]
 
@@ -759,7 +795,7 @@ task main:
 device Y0: digital_output
 device valve_A: solenoid_valve { response_time: 15ms }
 device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms }
-relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 
 [constraints]
@@ -770,6 +806,114 @@ task main:
 "#;
         let program = parse_plc(input).expect("parse");
         validate_topology_semantics(&program.topology).expect("gate should pass");
+    }
+
+    #[test]
+    fn gate_accepts_dual_input_valve_with_explicit_ports() {
+        let input = r#"
+[topology]
+device Y5: digital_output
+device Y6: digital_output
+device valve_eject: solenoid_valve {
+    ports: [coil_extend:digital:consumer, coil_retract:digital:consumer, out:pneumatic:producer]
+}
+device cyl_eject: cylinder
+relation { from: Y5, to: valve_eject.coil_extend, via: driven_by }
+relation { from: Y6, to: valve_eject.coil_retract, via: driven_by }
+relation { from: valve_eject.out, to: cyl_eject.cmd, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        validate_topology_semantics(&program.topology)
+            .expect("dual-input valve topology should pass");
+    }
+
+    #[test]
+    fn gate_rejects_dual_input_valve_with_unknown_port() {
+        let input = r#"
+[topology]
+device Y5: digital_output
+device valve_eject: solenoid_valve {
+    ports: [coil_extend:digital:consumer, coil_retract:digital:consumer, out:pneumatic:producer]
+}
+relation { from: Y5, to: valve_eject.coil, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err = validate_topology_semantics(&program.topology).expect_err("gate should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(codes.contains(&"SEM-101"), "should report missing port");
+    }
+
+    #[test]
+    fn gate_accepts_multi_io_motor_with_explicit_ports() {
+        let input = r#"
+[topology]
+device Y0: digital_output
+device Y1: digital_output
+device X0: digital_input
+device X1: digital_input
+device axis_feed: motor {
+    ports: [cmd_fwd:digital:consumer, cmd_rev:digital:consumer, speed_ok:logical:producer, alarm:logical:producer]
+}
+device speed_ok_sensor: sensor
+device alarm_sensor: sensor
+relation { from: Y0, to: axis_feed.cmd_fwd, via: driven_by }
+relation { from: Y1, to: axis_feed.cmd_rev, via: driven_by }
+relation { from: axis_feed.speed_ok, to: speed_ok_sensor.sense, via: detects }
+relation { from: speed_ok_sensor.out, to: X0, via: reports_to }
+relation { from: axis_feed.alarm, to: alarm_sensor.sense, via: detects }
+relation { from: alarm_sensor.out, to: X1, via: reports_to }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        validate_topology_semantics(&program.topology)
+            .expect("multi-io device topology should pass");
+    }
+
+    #[test]
+    fn gate_rejects_non_io_shorthand_endpoint() {
+        let input = r#"
+[topology]
+device Y0: digital_output
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+relation { from: Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A, to: cyl_A, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err = validate_topology_semantics(&program.topology).expect_err("gate should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(codes.contains(&"SEM-101"), "should require explicit non-io ports");
     }
 
     #[test]

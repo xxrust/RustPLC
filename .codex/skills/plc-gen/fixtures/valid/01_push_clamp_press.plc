@@ -54,24 +54,24 @@ device sensor_press_ext: sensor
 
 device sensor_press_ret: sensor
 
-relation { from: start_button.out, to: X6.in, via: reports_to }
-relation { from: Y0.out, to: valve_push.coil, via: driven_by }
-relation { from: Y1.out, to: valve_clamp.coil, via: driven_by }
-relation { from: Y2.out, to: valve_press.coil, via: driven_by }
+relation { from: start_button.out, to: X6, via: reports_to }
+relation { from: Y0, to: valve_push.coil, via: driven_by }
+relation { from: Y1, to: valve_clamp.coil, via: driven_by }
+relation { from: Y2, to: valve_press.coil, via: driven_by }
 relation { from: valve_push.out, to: cyl_push.cmd, via: driven_by }
 relation { from: valve_clamp.out, to: cyl_clamp.cmd, via: driven_by }
 relation { from: valve_press.out, to: cyl_press.cmd, via: driven_by }
-relation { from: sensor_push_ext.out, to: X0.in, via: reports_to }
+relation { from: sensor_push_ext.out, to: X0, via: reports_to }
 relation { from: cyl_push.extended, to: sensor_push_ext.sense, via: detects }
-relation { from: sensor_push_ret.out, to: X1.in, via: reports_to }
+relation { from: sensor_push_ret.out, to: X1, via: reports_to }
 relation { from: cyl_push.retracted, to: sensor_push_ret.sense, via: detects }
-relation { from: sensor_clamp_ext.out, to: X2.in, via: reports_to }
+relation { from: sensor_clamp_ext.out, to: X2, via: reports_to }
 relation { from: cyl_clamp.extended, to: sensor_clamp_ext.sense, via: detects }
-relation { from: sensor_clamp_ret.out, to: X3.in, via: reports_to }
+relation { from: sensor_clamp_ret.out, to: X3, via: reports_to }
 relation { from: cyl_clamp.retracted, to: sensor_clamp_ret.sense, via: detects }
-relation { from: sensor_press_ext.out, to: X4.in, via: reports_to }
+relation { from: sensor_press_ext.out, to: X4, via: reports_to }
 relation { from: cyl_press.extended, to: sensor_press_ext.sense, via: detects }
-relation { from: sensor_press_ret.out, to: X5.in, via: reports_to }
+relation { from: sensor_press_ret.out, to: X5, via: reports_to }
 relation { from: cyl_press.retracted, to: sensor_press_ret.sense, via: detects }
 
 [constraints]

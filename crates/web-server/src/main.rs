@@ -1481,9 +1481,9 @@ device sensor_A: sensor {
     ports: [sense:logical:consumer, out:digital:producer]
 }
 
-relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.feedback, to: sensor_A.sense, via: detects }
-relation { from: sensor_A.out, to: X0.in, via: reports_to }
+relation { from: sensor_A.out, to: X0, via: reports_to }
 
 [constraints]
 

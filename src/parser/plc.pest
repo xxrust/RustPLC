@@ -92,9 +92,10 @@ attribute_block = { "{" ~ attribute ~ ((","? ~ attribute))* ~ ","? ~ "}" }
 device_declaration = { "device" ~ identifier ~ ":" ~ device_type ~ attribute_block? }
 
 port_reference = @{ identifier ~ "." ~ identifier }
+endpoint_reference = _{ port_reference | identifier }
 topology_relation = { "driven_by" | "reports_to" | "detects" }
 relation_field_name = { "from" | "to" | "via" }
-relation_field_value = { port_reference | topology_relation }
+relation_field_value = { topology_relation | endpoint_reference }
 relation_field = { relation_field_name ~ ":" ~ relation_field_value }
 relation_declaration = { "relation" ~ "{" ~ relation_field ~ ((","? ~ relation_field))* ~ ","? ~ "}" }
 topology_entry = _{ device_declaration | relation_declaration }

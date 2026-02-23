@@ -79,3 +79,33 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - `tests/verification_capability.rs` 是四类验证能力的“综合回归哨兵”，DSL 破坏性升级后应优先修复并保持通过。
 ---
+## [2026-02-23 22:56:10 CST] - US-005/US-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 修复 PLC 点位表达：`relation` 端点支持 `Y0/X0/AI0/AO0` 简写，不再强制写 `Y0.out` / `X0.in`。
+  - 语义门禁增加约束：端点简写仅允许 PLC IO 设备；非 IO 设备（如 valve/cylinder/motor/sensor）必须显式 `Device.Port`。
+  - 新增 US-005 回归：双输入阀正例、端口错误反例、多输入多输出 motor 正例与非 IO 端点简写反例。
+  - 全量示例与技能夹具 `.plc` 迁移为 PLC IO 简写端点风格。
+  - 更新 US-008 文档：`docs/RustPLC 拓扑语义与关系验证规范.md` 重写为可执行 DSL + 迁移对照；README/README_EN 明确旧属性写法不兼容。
+  - 全量回归通过：`cargo test --workspace`。
+- Files changed
+  - src/parser/plc.pest
+  - src/parser/mod.rs
+  - src/topology_semantic_gate.rs
+  - examples/*.plc（含 recovery templates 与 pil baseline）
+  - .codex/skills/plc-gen/fixtures/valid/*.plc
+  - docs/RustPLC 拓扑语义与关系验证规范.md
+  - docs/已实现/stepper_ab_encoder.md
+  - README.md
+  - README_EN.md
+  - crates/web-server/src/main.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - PLC IO 点位在业务语义上更接近“端口名”而非“设备.端口”，因此 DSL 允许点位简写能显著降低建模歧义。
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - 端点简写开放后必须配合门禁限制设备类型，否则会把非 IO 设备的多端口语义重新变模糊。
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `src/topology_semantic_gate.rs` 的 `resolve_port` 是简写解析与语义约束的核心收口点。
+---

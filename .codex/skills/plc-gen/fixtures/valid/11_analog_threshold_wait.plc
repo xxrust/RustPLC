@@ -12,7 +12,7 @@ device valve_main: solenoid_valve {
     response_time: 30ms
 }
 
-relation { from: Y0.out, to: valve_main.coil, via: driven_by }
+relation { from: Y0, to: valve_main.coil, via: driven_by }
 
 [constraints]
 

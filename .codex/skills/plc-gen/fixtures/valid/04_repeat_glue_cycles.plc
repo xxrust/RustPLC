@@ -22,12 +22,12 @@ device sensor_glue_ext: sensor
 
 device sensor_glue_ret: sensor
 
-relation { from: start_button.out, to: X2.in, via: reports_to }
-relation { from: Y0.out, to: valve_glue.coil, via: driven_by }
+relation { from: start_button.out, to: X2, via: reports_to }
+relation { from: Y0, to: valve_glue.coil, via: driven_by }
 relation { from: valve_glue.out, to: cyl_glue.cmd, via: driven_by }
-relation { from: sensor_glue_ext.out, to: X0.in, via: reports_to }
+relation { from: sensor_glue_ext.out, to: X0, via: reports_to }
 relation { from: cyl_glue.extended, to: sensor_glue_ext.sense, via: detects }
-relation { from: sensor_glue_ret.out, to: X1.in, via: reports_to }
+relation { from: sensor_glue_ret.out, to: X1, via: reports_to }
 relation { from: cyl_glue.retracted, to: sensor_glue_ret.sense, via: detects }
 
 [constraints]

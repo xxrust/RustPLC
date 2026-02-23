@@ -5,7 +5,7 @@ device Y0: digital_output
 device valve_A: solenoid_valve {
     response_time: 20ms
 }
-relation { from: Y9.out, to: valve_A.coil, via: driven_by }
+relation { from: Y9, to: valve_A.coil, via: driven_by }
 
 [constraints]
 

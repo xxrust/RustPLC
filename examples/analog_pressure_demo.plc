@@ -24,10 +24,10 @@ device start_button: sensor {
     debounce: 20ms
 }
 
-relation { from: Y0.out, to: prop_valve.coil, via: driven_by }
+relation { from: Y0, to: prop_valve.coil, via: driven_by }
 relation { from: prop_valve.on, to: pressure_sensor.sense, via: detects }
-relation { from: pressure_sensor.out, to: AI0.in, via: reports_to }
-relation { from: start_button.out, to: X0.in, via: reports_to }
+relation { from: pressure_sensor.out, to: AI0, via: reports_to }
+relation { from: start_button.out, to: X0, via: reports_to }
 
 [constraints]
 
