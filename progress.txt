@@ -5,6 +5,7 @@ Started: Mon Feb 23 13:05:43 CST 2026
 ## Codebase Patterns
 - Topology parser now supports mixed entries in `[topology]`; when any explicit `relation { ... }` is present, `TopologySection.connections` should come from relation blocks instead of auto-derived edges.
 - Use dedicated parser helpers (`expect_port_reference`, `expect_topology_relation`) for relation fields so errors stay localized to `relation.from` / `relation.to` / `relation.via`.
+- Topology relation handling should stay single-source: parser/semantic/topology-gate all consume `TopologySection.connections` only (no attribute-based fallback).
 
 ## [2026-02-23 13:29:00 CST] - US-001
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -25,4 +26,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - When changing parser files in this repo, preserve CRLF line endings in `src/parser/mod.rs` to avoid noisy diffs.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Existing `parses_new_relation_fields_and_ports_into_ast` test still validates legacy attribute-derived edges; keep it green until US-002 removes legacy path.
+---
+## [2026-02-23 14:41:41 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Removed parser fallback that auto-derived topology edges from `driven_by`/`reports_to`/`detects`; `[topology]` connections now come only from explicit `relation { ... }` blocks.
+  - Deprecated legacy topology attributes in device blocks: parser now returns migration errors for `driven_by` / `reports_to` / `detects` and points users to `relation + Device.Port`.
+  - Removed semantic and topology gate fallbacks that rebuilt connections from legacy attributes; both now consume only `TopologySection.connections`.
+  - Updated parser/topology-gate unit tests to cover strict relation-only flow and migration diagnostics.
+- Files changed
+  - src/parser/mod.rs
+  - src/semantic/mod.rs
+  - src/topology_semantic_gate.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Topology relation source is now single-path: parser, semantic graph build, and semantic gate should all read only `TopologySection.connections`.
+  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
+    - Running broad formatting commands can rewrite line endings and create noisy diffs; keep CRLF in core parser/semantic files.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `cargo fmt --check` currently reports pre-existing style drift in `crates/web-server/src/main.rs`; avoid mixing unrelated formatting work into topology stories.
 ---

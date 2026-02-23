@@ -452,92 +452,33 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
 }
 
 fn semantic_topology_connections(topology: &TopologySection) -> Vec<TopologyConnection> {
-    if !topology.connections.is_empty() {
-        return topology.connections.clone();
-    }
-
-    let mut connections = Vec::new();
-    for device in &topology.devices {
-        if let Some(upstream) = device.attributes.driven_by.as_ref() {
-            connections.push(TopologyConnection {
-                from: upstream.clone(),
-                to: device.name.clone(),
-                relation: TopologyRelation::DrivenBy,
-                from_port: None,
-                to_port: None,
-                signal: None,
-            });
-        }
-
-        if let Some(target) = device.attributes.reports_to.as_ref() {
-            connections.push(TopologyConnection {
-                from: device.name.clone(),
-                to: target.clone(),
-                relation: TopologyRelation::ReportsTo,
-                from_port: None,
-                to_port: None,
-                signal: None,
-            });
-        }
-
-        if let Some(detects) = device.attributes.detects.as_ref() {
-            connections.push(TopologyConnection {
-                from: detects.device.clone(),
-                to: device.name.clone(),
-                relation: TopologyRelation::Detects,
-                from_port: Some(detects.state.clone()),
-                to_port: None,
-                signal: Some(detects.state.clone()),
-            });
-        }
-    }
-
-    connections
+    topology.connections.clone()
 }
 
 fn topology_connection_line(topology: &TopologySection, connection: &TopologyConnection) -> usize {
-    for device in &topology.devices {
-        let matches_line = match connection.relation {
-            TopologyRelation::DrivenBy => {
-                device.name == connection.to
-                    && device
-                        .attributes
-                        .driven_by
-                        .as_deref()
-                        .is_some_and(|from| from == connection.from)
-            }
-            TopologyRelation::ReportsTo => {
-                device.name == connection.from
-                    && device
-                        .attributes
-                        .reports_to
-                        .as_deref()
-                        .is_some_and(|to| to == connection.to)
-            }
-            TopologyRelation::Detects => {
-                device.name == connection.to
-                    && device
-                        .attributes
-                        .detects
-                        .as_ref()
-                        .is_some_and(|detects| detects.device == connection.from)
-            }
-        };
-
-        if matches_line {
-            return device.line.max(1);
-        }
-    }
-
-    1
+    topology
+        .devices
+        .iter()
+        .find(|device| device.name == connection.to)
+        .map(|device| device.line.max(1))
+        .or_else(|| {
+            topology
+                .devices
+                .iter()
+                .find(|device| device.name == connection.from)
+                .map(|device| device.line.max(1))
+        })
+        .unwrap_or(1)
 }
 
 fn topology_connection_context(connection: &TopologyConnection) -> String {
-    match connection.relation {
-        TopologyRelation::DrivenBy => format!("设备 {} 的 driven_by", connection.to),
-        TopologyRelation::ReportsTo => format!("设备 {} 的 reports_to", connection.from),
-        TopologyRelation::Detects => format!("设备 {} 的 detects", connection.to),
-    }
+    let relation = topology_relation_name(&connection.relation);
+    let from_port = connection.from_port.as_deref().unwrap_or("<missing>");
+    let to_port = connection.to_port.as_deref().unwrap_or("<missing>");
+    format!(
+        "relation {{ from: {}.{}, to: {}.{}, via: {} }}",
+        connection.from, from_port, connection.to, to_port, relation
+    )
 }
 
 fn topology_relation_name(relation: &TopologyRelation) -> &'static str {
@@ -2798,31 +2739,26 @@ device X4: digital_input
 
 # ===== operator panel =====
 device start_button: sensor {
-    reports_to: X4,
     debounce: 20ms
 }
 
 device alarm_light: motor {
-    driven_by: Y2
 }
 
 # ===== solenoid valves =====
 device valve_A: solenoid_valve {
     type: "5/2",
-    driven_by: Y0,
     response_time: 15ms
 }
 
 device valve_B: solenoid_valve {
     type: "5/2",
-    driven_by: Y1,
     response_time: 15ms
 }
 
 # ===== cylinders =====
 device cyl_A: cylinder {
     type: double_acting,
-    driven_by: valve_A,
     stroke: 100mm,
     stroke_time: 200ms,
     retract_time: 180ms
@@ -2830,7 +2766,6 @@ device cyl_A: cylinder {
 
 device cyl_B: cylinder {
     type: double_acting,
-    driven_by: valve_B,
     stroke: 150mm,
     stroke_time: 300ms,
     retract_time: 250ms
@@ -2838,28 +2773,35 @@ device cyl_B: cylinder {
 
 # ===== sensors =====
 device sensor_A_ext: sensor {
-    type: magnetic,
-    reports_to: X0,
-    detects: cyl_A.extended
+    type: magnetic
 }
 
 device sensor_A_ret: sensor {
-    type: magnetic,
-    reports_to: X1,
-    detects: cyl_A.retracted
+    type: magnetic
 }
 
 device sensor_B_ext: sensor {
-    type: magnetic,
-    reports_to: X2,
-    detects: cyl_B.extended
+    type: magnetic
 }
 
 device sensor_B_ret: sensor {
-    type: magnetic,
-    reports_to: X3,
-    detects: cyl_B.retracted
+    type: magnetic
 }
+
+relation { from: start_button.out, to: X4.in, via: reports_to }
+relation { from: Y2.out, to: alarm_light.cmd, via: driven_by }
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_A_ret.sense, via: detects }
+relation { from: sensor_A_ret.out, to: X1.in, via: reports_to }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
+relation { from: cyl_B.extended, to: sensor_B_ext.sense, via: detects }
+relation { from: sensor_B_ext.out, to: X2.in, via: reports_to }
+relation { from: cyl_B.retracted, to: sensor_B_ret.sense, via: detects }
+relation { from: sensor_B_ret.out, to: X3.in, via: reports_to }
 
 [constraints]
 
@@ -2938,9 +2880,9 @@ task main:
 device Y0: digital_output
 
 device valve_A: solenoid_valve {
-    driven_by: Y9,
     response_time: 15ms
 }
+relation { from: Y9.out, to: valve_A.coil, via: driven_by }
 
 [constraints]
 
@@ -2962,23 +2904,19 @@ device valve_A: solenoid_valve {
     fn reports_error_when_connection_types_are_incompatible() {
         let input = r#"
 [topology]
-device cyl_A: cylinder {
-    driven_by: valve_A,
-    stroke_time: 200ms,
-    retract_time: 180ms
-}
+device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms }
 
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     response_time: 15ms
 }
 
-device sensor_bad: sensor {
-    driven_by: cyl_A,
-    detects: cyl_A.extended
-}
+device sensor_bad: sensor
 
 device Y0: digital_output
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_bad.sense, via: driven_by }
 
 [constraints]
 
@@ -3002,16 +2940,16 @@ device Y0: digital_output
 [topology]
 device Y0: digital_output
 device X0: digital_input
-device valve_A: solenoid_valve { driven_by: Y0 }
-device valve_B: solenoid_valve { driven_by: Y0 }
-device sensor_A: sensor {
-    reports_to: X0,
-    detects: valve_A.on
-}
-device sensor_B: sensor {
-    reports_to: X0,
-    detects: valve_A.on
-}
+device valve_A: solenoid_valve
+device valve_B: solenoid_valve
+device sensor_A: sensor
+device sensor_B: sensor
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: Y0.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_A.out, to: sensor_A.sense, via: detects }
+relation { from: valve_A.out, to: sensor_B.sense, via: detects }
+relation { from: sensor_A.out, to: X0.in, via: reports_to }
+relation { from: sensor_B.out, to: X0.in, via: reports_to }
 
 [constraints]
 
@@ -3053,8 +2991,10 @@ device sensor_B: sensor {
         let input = r#"
 [topology]
 device Y0: digital_output
-device valve_A: solenoid_valve { driven_by: Y0 }
-device sensor_bad: sensor { reports_to: valve_A }
+device valve_A: solenoid_valve
+device sensor_bad: sensor
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: sensor_bad.out, to: valve_A.coil, via: reports_to }
 
 [constraints]
 
@@ -3081,41 +3021,37 @@ device sensor_bad: sensor { reports_to: valve_A }
 device Y0: digital_output
 device Y1: digital_output
 device motor_ctrl: motor {
-    driven_by: Y0,
     ramp_time: 50ms
 }
 
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     response_time: 15ms
 }
 
 device valve_B: solenoid_valve {
-    driven_by: Y1,
     response_time: 15ms
 }
 
 device cyl_A: cylinder {
-    driven_by: valve_A,
     stroke_time: 200ms,
     retract_time: 180ms
 }
 
 device cyl_B: cylinder {
-    driven_by: valve_B,
     stroke_time: 300ms,
     retract_time: 250ms
 }
 
-device sensor_A_ext: sensor {
-    driven_by: Y0,
-    detects: cyl_A.extended
-}
+device sensor_A_ext: sensor
+device sensor_B_ext: sensor
 
-device sensor_B_ext: sensor {
-    driven_by: Y1,
-    detects: cyl_B.extended
-}
+relation { from: Y0.out, to: motor_ctrl.cmd, via: driven_by }
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: cyl_B.extended, to: sensor_B_ext.sense, via: detects }
 
 [constraints]
 

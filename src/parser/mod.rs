@@ -49,7 +49,7 @@ fn reject_deprecated_connected_to(input: &str) -> Result<(), PlcError> {
                     "<input>",
                     line_idx + 1,
                     col_idx + 1,
-                    "属性 connected_to 已废弃，请改用 driven_by 或 reports_to",
+                    "属性 connected_to 已废弃，请改用 relation { from: Device.Port, to: Device.Port, via: ... }",
                 ));
             }
         }
@@ -93,14 +93,9 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
         }
     }
 
-    let connections = if explicit_connections.is_empty() {
-        derive_topology_connections(&devices)
-    } else {
-        explicit_connections
-    };
     Ok(TopologySection {
         devices,
-        connections,
+        connections: explicit_connections,
     })
 }
 
@@ -191,77 +186,6 @@ fn parse_relation_declaration(pair: Pair<Rule>) -> Result<TopologyConnection, Pl
     })
 }
 
-fn derive_topology_connections(devices: &[DeviceDeclaration]) -> Vec<TopologyConnection> {
-    let mut out = Vec::new();
-
-    for device in devices {
-        if let Some(upstream) = device.attributes.driven_by.as_ref() {
-            let from_port = find_device(devices, upstream)
-                .and_then(|d| single_port_for_role(&d.attributes.ports, PortRole::Producer));
-            let to_port = single_port_for_role(&device.attributes.ports, PortRole::Consumer);
-            out.push(TopologyConnection {
-                from: upstream.clone(),
-                to: device.name.clone(),
-                relation: TopologyRelation::DrivenBy,
-                from_port,
-                to_port,
-                signal: None,
-            });
-        }
-
-        if let Some(target) = device.attributes.reports_to.as_ref() {
-            let from_port = single_port_for_role(&device.attributes.ports, PortRole::Producer);
-            let to_port = find_device(devices, target)
-                .and_then(|d| single_port_for_role(&d.attributes.ports, PortRole::Consumer));
-            out.push(TopologyConnection {
-                from: device.name.clone(),
-                to: target.clone(),
-                relation: TopologyRelation::ReportsTo,
-                from_port,
-                to_port,
-                signal: None,
-            });
-        }
-
-        if let Some(detects) = device.attributes.detects.as_ref() {
-            let from_port = find_device(devices, &detects.device).and_then(|source| {
-                source
-                    .attributes
-                    .ports
-                    .iter()
-                    .find(|port| port.id == detects.state)
-                    .map(|port| port.id.clone())
-                    .or_else(|| single_port_for_role(&source.attributes.ports, PortRole::Producer))
-            });
-            let to_port = single_port_for_role(&device.attributes.ports, PortRole::Consumer);
-            out.push(TopologyConnection {
-                from: detects.device.clone(),
-                to: device.name.clone(),
-                relation: TopologyRelation::Detects,
-                from_port: from_port.or_else(|| Some(detects.state.clone())),
-                to_port,
-                signal: Some(detects.state.clone()),
-            });
-        }
-    }
-
-    out
-}
-
-fn find_device<'a>(devices: &'a [DeviceDeclaration], name: &str) -> Option<&'a DeviceDeclaration> {
-    devices.iter().find(|device| device.name == name)
-}
-
-fn single_port_for_role(ports: &[DevicePort], role: PortRole) -> Option<String> {
-    let mut matches = ports.iter().filter(|port| port.role == role);
-    let first = matches.next()?;
-    if matches.next().is_some() {
-        None
-    } else {
-        Some(first.id.clone())
-    }
-}
-
 fn parse_device_declaration(pair: Pair<Rule>) -> Result<DeviceDeclaration, PlcError> {
     let line = line_of(&pair);
     let mut name = None;
@@ -323,6 +247,7 @@ fn parse_attribute_block(pair: Pair<Rule>) -> Result<DeviceAttributes, PlcError>
 
 fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Result<(), PlcError> {
     let line = line_of(&pair);
+    let col = col_of(&pair);
     let mut inner = pair.into_inner();
 
     let attr_name = inner
@@ -337,10 +262,10 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
 
     match attr_name.as_str() {
         "driven_by" => {
-            attributes.driven_by = Some(expect_identifier(value, "driven_by")?);
+            return Err(legacy_topology_attribute_error(line, col, "driven_by"));
         }
         "reports_to" => {
-            attributes.reports_to = Some(expect_identifier(value, "reports_to")?);
+            return Err(legacy_topology_attribute_error(line, col, "reports_to"));
         }
         "response_time" => {
             attributes.response_time = Some(expect_duration(value, "response_time")?);
@@ -361,7 +286,7 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
             attributes.r#type = Some(expect_identifier_or_string(value, "type")?);
         }
         "detects" => {
-            attributes.detects = Some(expect_state_reference(value, "detects")?);
+            return Err(legacy_topology_attribute_error(line, col, "detects"));
         }
         "debounce" => {
             attributes.debounce = Some(expect_duration(value, "debounce")?);
@@ -426,6 +351,17 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
     }
 
     Ok(())
+}
+
+fn legacy_topology_attribute_error(line: usize, col: usize, attr_name: &str) -> PlcError {
+    PlcError::parse_at(
+        "<input>",
+        line,
+        col,
+        format!(
+            "属性 {attr_name} 已废弃，请改用 relation {{ from: Device.Port, to: Device.Port, via: {attr_name} }}"
+        ),
+    )
 }
 
 fn parse_constraints_section(pair: Pair<Rule>) -> Result<ConstraintsSection, PlcError> {
@@ -1374,18 +1310,6 @@ fn expect_boolean(pair: Pair<Rule>, field_name: &str) -> Result<bool, PlcError> 
     }
 }
 
-fn expect_state_reference(pair: Pair<Rule>, field_name: &str) -> Result<StateReference, PlcError> {
-    let line = line_of(&pair);
-    if pair.as_rule() == Rule::state_reference {
-        parse_state_reference(pair)
-    } else {
-        Err(PlcError::parse(
-            line,
-            format!("属性 {field_name} 需要状态引用（如 cyl_A.extended）"),
-        ))
-    }
-}
-
 fn expect_port_reference(pair: Pair<Rule>, field_name: &str) -> Result<(String, String), PlcError> {
     let line = line_of(&pair);
     if pair.as_rule() != Rule::port_reference {
@@ -1646,81 +1570,16 @@ mod tests {
     fn parses_prd_5_3_topology_example() {
         let input = r#"
 [topology]
+device Y0: digital_output
+device X0: digital_input
+device valve_A: solenoid_valve { ports: [coil:digital:consumer, out:pneumatic:producer] }
+device cyl_A: cylinder { ports: [cmd:pneumatic:consumer, extended:logical:producer] }
+device sensor_A: sensor { ports: [sense:logical:consumer, out:digital:producer] }
 
-# ===== controller ports =====
-device Y0: digital_output               # digital output port
-device Y1: digital_output
-device Y2: digital_output               # alarm light output
-device X0: digital_input                # digital input port
-device X1: digital_input
-device X2: digital_input
-device X3: digital_input
-device X4: digital_input                # start button
-
-# ===== operator panel =====
-device start_button: digital_input {
-    driven_by: X4,
-    debounce: 20ms
-}
-
-device alarm_light: digital_output {
-    driven_by: Y2
-}
-
-# ===== solenoid valves =====
-device valve_A: solenoid_valve {
-    type: "5/2",
-    driven_by: Y0,
-    response_time: 15ms
-}
-
-device valve_B: solenoid_valve {
-    type: "5/2",
-    driven_by: Y1,
-    response_time: 15ms
-}
-
-# ===== cylinders =====
-device cyl_A: cylinder {
-    type: double_acting,
-    driven_by: valve_A,
-    stroke: 100mm,
-    stroke_time: 200ms,
-    retract_time: 180ms
-}
-
-device cyl_B: cylinder {
-    type: double_acting,
-    driven_by: valve_B,
-    stroke: 150mm,
-    stroke_time: 300ms,
-    retract_time: 250ms
-}
-
-# ===== sensors =====
-device sensor_A_ext: sensor {
-    type: magnetic,
-    driven_by: X0,
-    detects: cyl_A.extended
-}
-
-device sensor_A_ret: sensor {
-    type: magnetic,
-    driven_by: X1,
-    detects: cyl_A.retracted
-}
-
-device sensor_B_ext: sensor {
-    type: magnetic,
-    driven_by: X2,
-    detects: cyl_B.extended
-}
-
-device sensor_B_ret: sensor {
-    type: magnetic,
-    driven_by: X3,
-    detects: cyl_B.retracted
-}
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A.sense, via: detects }
+relation { from: sensor_A.out, to: X0.in, via: reports_to }
 "#;
 
         assert!(parse_topology(input).is_ok());
@@ -1771,15 +1630,11 @@ task main:
 
 device Y0: digital_output { ports: [out:digital:producer] }
 device X0: digital_input { ports: [in:digital:consumer] }
-device valve_A: solenoid_valve {
-    driven_by: Y0,
-    ports: [coil:digital:consumer, feedback:logical:producer]
-}
-device sensor_A: sensor {
-    reports_to: X0,
-    detects: valve_A.on,
-    ports: [sense:digital:consumer, out:digital:producer]
-}
+device valve_A: solenoid_valve { ports: [coil:digital:consumer, feedback:logical:producer] }
+device sensor_A: sensor { ports: [sense:logical:consumer, out:digital:producer] }
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.feedback, to: sensor_A.sense, via: detects }
+relation { from: sensor_A.out, to: X0.in, via: reports_to }
 
 [constraints]
 
@@ -1789,7 +1644,7 @@ task main:
         action: log "ok"
 "#;
 
-        let program = parse_plc(input).expect("应支持 driven_by/reports_to/ports 新语法");
+        let program = parse_plc(input).expect("应支持 relation + ports 新语法");
         let valve = program
             .topology
             .devices
@@ -1803,16 +1658,9 @@ task main:
             .find(|device| device.name == "sensor_A")
             .expect("应包含 sensor_A");
 
-        assert_eq!(valve.attributes.driven_by.as_deref(), Some("Y0"));
-        assert_eq!(sensor.attributes.reports_to.as_deref(), Some("X0"));
-        assert_eq!(
-            sensor
-                .attributes
-                .detects
-                .as_ref()
-                .map(|d| d.device.as_str()),
-            Some("valve_A")
-        );
+        assert!(valve.attributes.driven_by.is_none());
+        assert!(sensor.attributes.reports_to.is_none());
+        assert!(sensor.attributes.detects.is_none());
         assert_eq!(valve.attributes.ports.len(), 2);
         assert_eq!(valve.attributes.ports[0].id, "coil");
         assert_eq!(valve.attributes.ports[0].port_type, PortType::Digital);
@@ -1832,31 +1680,28 @@ task main:
         );
         assert_eq!(
             program.topology.connections[1].relation,
-            crate::ast::TopologyRelation::ReportsTo
-        );
-        assert_eq!(
-            program.topology.connections[1].from_port.as_deref(),
-            Some("out")
-        );
-        assert_eq!(
-            program.topology.connections[1].to_port.as_deref(),
-            Some("in")
-        );
-        assert_eq!(
-            program.topology.connections[2].relation,
             crate::ast::TopologyRelation::Detects
         );
         assert_eq!(
-            program.topology.connections[2].signal.as_deref(),
-            Some("on")
-        );
-        assert_eq!(
-            program.topology.connections[2].from_port.as_deref(),
+            program.topology.connections[1].from_port.as_deref(),
             Some("feedback")
         );
         assert_eq!(
-            program.topology.connections[2].to_port.as_deref(),
+            program.topology.connections[1].to_port.as_deref(),
             Some("sense")
+        );
+        assert_eq!(
+            program.topology.connections[2].relation,
+            crate::ast::TopologyRelation::ReportsTo
+        );
+        assert_eq!(program.topology.connections[2].signal.as_deref(), None);
+        assert_eq!(
+            program.topology.connections[2].from_port.as_deref(),
+            Some("out")
+        );
+        assert_eq!(
+            program.topology.connections[2].to_port.as_deref(),
+            Some("in")
         );
     }
 
@@ -1932,6 +1777,42 @@ task main:
             assert!(
                 err.to_string().contains(expected_error),
                 "{case_name} 应返回 `{expected_error}`，实际: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_legacy_topology_attributes_with_migration_hint() {
+        let cases = [
+            ("driven_by", "driven_by: Y0", "via: driven_by"),
+            ("reports_to", "reports_to: X0", "via: reports_to"),
+            ("detects", "detects: valve_A.on", "via: detects"),
+        ];
+
+        for (name, legacy_attr, hint) in cases {
+            let input = format!(
+                r#"
+[topology]
+device Y0: digital_output
+device X0: digital_input
+device valve_A: solenoid_valve {{ {legacy_attr} }}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#
+            );
+
+            let err = parse_plc(&input).expect_err(name);
+            assert!(
+                err.to_string().contains("已废弃"),
+                "{name} 应提示旧写法已废弃，实际: {err}"
+            );
+            assert!(
+                err.to_string().contains(hint),
+                "{name} 应提示迁移到 relation.via，实际: {err}"
             );
         }
     }
@@ -2020,8 +1901,8 @@ task main:
         let err = parse_plc(input).expect_err("connected_to 应被明确禁止");
         assert_eq!(err.line(), 4);
         assert!(
-            err.to_string().contains("driven_by 或 reports_to"),
-            "迁移提示应建议使用 driven_by/reports_to，实际: {err}"
+            err.to_string().contains("relation { from: Device.Port"),
+            "迁移提示应建议使用 relation + Device.Port，实际: {err}"
         );
     }
 
@@ -2031,7 +1912,6 @@ task main:
 [topology]
 
 device valve_A: solenoid_valve {
-    driven_by: Y0,
     tags: {
         functional_group: [clamp, press],
         danger_level: [high],
@@ -2172,19 +2052,16 @@ device Y3: digital_output
 device X5: digital_input
 
 device estop: digital_input {
-    driven_by: X5,
     debounce: 10ms,
     inverted: true
 }
 
 device spindle_valve: solenoid_valve {
-    driven_by: Y3,
     response_time: 25ms,
     type: "3/2"
 }
 
 device spindle_cyl: cylinder {
-    driven_by: spindle_valve,
     stroke_time: 120ms,
     retract_time: 110ms,
     stroke: 80mm,
@@ -2192,13 +2069,10 @@ device spindle_cyl: cylinder {
 }
 
 device spindle_sensor: sensor {
-    driven_by: X5,
-    detects: spindle_cyl.extended,
     type: optical
 }
 
 device spindle_motor: motor {
-    driven_by: Y3,
     rated_speed: 60rpm,
     ramp_time: 300ms
 }
@@ -2314,9 +2188,9 @@ task ready:
 [topology]
 device Y0: digital_output
 device X0: digital_input
-device valve_A: solenoid_valve { driven_by: Y0 }
-device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
-device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
+device valve_A: solenoid_valve
+device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms }
+device sensor_A_ext: sensor
 
 [constraints]
 causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
@@ -2348,9 +2222,9 @@ task init:
 [topology]
 device Y0: digital_output
 device X0: digital_input
-device valve_glue: solenoid_valve { driven_by: Y0 }
-device cyl_glue: cylinder { driven_by: valve_glue, stroke_time: 200ms, retract_time: 180ms }
-device sensor_glue_ext: sensor { driven_by: X0, detects: cyl_glue.extended }
+device valve_glue: solenoid_valve
+device cyl_glue: cylinder { stroke_time: 200ms, retract_time: 180ms }
+device sensor_glue_ext: sensor
 
 [constraints]
 causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ext
@@ -2384,8 +2258,8 @@ task glue:
         let input = r#"
 [topology]
 device Y0: digital_output
-device valve_glue: solenoid_valve { driven_by: Y0 }
-device cyl_glue: cylinder { driven_by: valve_glue, stroke_time: 200ms, retract_time: 180ms }
+device valve_glue: solenoid_valve
+device cyl_glue: cylinder { stroke_time: 200ms, retract_time: 180ms }
 
 [constraints]
 
@@ -2480,32 +2354,27 @@ device X3: digital_input
 device X4: digital_input
 
 device start_button: digital_input {
-    driven_by: X4
     debounce: 20ms
 }
 
 device valve_A: solenoid_valve {
-    driven_by: Y0
     response_time: 20ms
 }
 device valve_B: solenoid_valve {
-    driven_by: Y1
     response_time: 20ms
 }
 device cyl_A: cylinder {
-    driven_by: valve_A
     stroke_time: 300ms
     retract_time: 300ms
 }
 device cyl_B: cylinder {
-    driven_by: valve_B
     stroke_time: 300ms
     retract_time: 300ms
 }
-device sensor_A_ext: sensor { driven_by: X0, detects: cyl_A.extended }
-device sensor_A_ret: sensor { driven_by: X1, detects: cyl_A.retracted }
-device sensor_B_ext: sensor { driven_by: X2, detects: cyl_B.extended }
-device sensor_B_ret: sensor { driven_by: X3, detects: cyl_B.retracted }
+device sensor_A_ext: sensor
+device sensor_A_ret: sensor
+device sensor_B_ext: sensor
+device sensor_B_ret: sensor
 
 [constraints]
 
@@ -2588,26 +2457,20 @@ device X1: digital_input                 # 传感器B
 device X2: digital_input                 # 启动按钮
 
 device start_button: digital_input {     # 启动按钮
-    driven_by: X2
     debounce: 20ms
 }
 
 device motor_ctrl: motor {
-    driven_by: Y0
     rated_speed: 60rpm
     ramp_time: 50ms                      # 启动到额定转速时间
 }
 
 device sensor_A: sensor {
     type: proximity
-    driven_by: X0
-    detects: motor_ctrl.position_A       # 检测A位置
 }
 
 device sensor_B: sensor {
     type: proximity
-    driven_by: X1
-    detects: motor_ctrl.position_B       # 检测B位置
 }
 
 [constraints]

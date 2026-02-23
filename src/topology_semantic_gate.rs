@@ -341,44 +341,7 @@ fn compatible_base_types(subtype: &str) -> Vec<&'static str> {
 }
 
 fn semantic_connections(topology: &TopologySection) -> Vec<TopologyConnection> {
-    if !topology.connections.is_empty() {
-        return topology.connections.clone();
-    }
-
-    let mut connections = Vec::new();
-    for device in &topology.devices {
-        if let Some(upstream) = device.attributes.driven_by.as_ref() {
-            connections.push(TopologyConnection {
-                from: upstream.clone(),
-                to: device.name.clone(),
-                relation: TopologyRelation::DrivenBy,
-                from_port: None,
-                to_port: None,
-                signal: None,
-            });
-        }
-        if let Some(target) = device.attributes.reports_to.as_ref() {
-            connections.push(TopologyConnection {
-                from: device.name.clone(),
-                to: target.clone(),
-                relation: TopologyRelation::ReportsTo,
-                from_port: None,
-                to_port: None,
-                signal: None,
-            });
-        }
-        if let Some(detects) = device.attributes.detects.as_ref() {
-            connections.push(TopologyConnection {
-                from: detects.device.clone(),
-                to: device.name.clone(),
-                relation: TopologyRelation::Detects,
-                from_port: Some(detects.state.clone()),
-                to_port: None,
-                signal: Some(detects.state.clone()),
-            });
-        }
-    }
-    connections
+    topology.connections.clone()
 }
 
 fn resolved_device_ports(device: &DeviceDeclaration) -> Vec<GatePort> {
@@ -744,38 +707,19 @@ fn port_type_name(port_type: &PortType) -> &'static str {
 }
 
 fn topology_connection_line(topology: &TopologySection, connection: &TopologyConnection) -> usize {
-    for device in &topology.devices {
-        let matches_line = match connection.relation {
-            TopologyRelation::DrivenBy => {
-                device.name == connection.to
-                    && device
-                        .attributes
-                        .driven_by
-                        .as_deref()
-                        .is_some_and(|from| from == connection.from)
-            }
-            TopologyRelation::ReportsTo => {
-                device.name == connection.from
-                    && device
-                        .attributes
-                        .reports_to
-                        .as_deref()
-                        .is_some_and(|to| to == connection.to)
-            }
-            TopologyRelation::Detects => {
-                device.name == connection.to
-                    && device
-                        .attributes
-                        .detects
-                        .as_ref()
-                        .is_some_and(|detects| detects.device == connection.from)
-            }
-        };
-        if matches_line {
-            return device.line.max(1);
-        }
-    }
-    1
+    topology
+        .devices
+        .iter()
+        .find(|device| device.name == connection.to)
+        .map(|device| device.line.max(1))
+        .or_else(|| {
+            topology
+                .devices
+                .iter()
+                .find(|device| device.name == connection.from)
+                .map(|device| device.line.max(1))
+        })
+        .unwrap_or(1)
 }
 
 #[cfg(test)]
@@ -789,7 +733,8 @@ mod tests {
 [topology]
 device Y0: digital_output
 device X4: digital_input
-device start_button: digital_input { driven_by: X4 }
+device start_button: digital_input
+relation { from: X4.in, to: start_button.in, via: driven_by }
 
 [constraints]
 
@@ -812,8 +757,10 @@ task main:
         let input = r#"
 [topology]
 device Y0: digital_output
-device valve_A: solenoid_valve { driven_by: Y0 }
-device cyl_A: cylinder { driven_by: valve_A, stroke_time: 200ms, retract_time: 180ms }
+device valve_A: solenoid_valve { response_time: 15ms }
+device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms }
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 
 [constraints]
 
