@@ -13,7 +13,7 @@ cargo test --test online_force_control_plane --test online_variable_control_plan
 cargo test --test abnormal_exit_matrix --test abnormal_exit_matrix_doc
 cargo test --test commissioning_playbook_doc
 cargo test --test developer_bootstrap_pack_doc
-cargo test --test stage3_ci_gate_runbook_doc
+cargo test --test no_board_playbook_doc
 
 echo "[stage3-gate] Checking scenario-gen summary contract"
 cargo run -- scenario-gen \
