@@ -15,6 +15,7 @@ pub mod iec_address;
 pub mod io_map;
 pub mod ir;
 pub mod parser;
+pub mod plc_port;
 pub mod runtime_bridge;
 pub mod scenario_resolve;
 pub mod semantic;

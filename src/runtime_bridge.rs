@@ -2,6 +2,7 @@ use crate::ir::{
     BinaryValue as IrBinaryValue, DeviceKind, State, StateMachine, TopologyGraph, Transition,
     TransitionAction, TransitionGuard,
 };
+use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
 use petgraph::Direction;
 use petgraph::graph::NodeIndex;
@@ -915,37 +916,29 @@ fn unique_physical_id(mut ids: Vec<u16>) -> Result<u16, ()> {
 }
 
 fn parse_x_id(name: &str) -> Option<u16> {
-    parse_prefixed_u16(name, 'X')
+    match parse_physical_plc_port_ref(name) {
+        Some(port) if matches!(port.kind, PlcPortKind::DigitalInput) => Some(port.id),
+        _ => None,
+    }
 }
 
 fn parse_y_id(name: &str) -> Option<u16> {
-    parse_prefixed_u16(name, 'Y')
+    match parse_physical_plc_port_ref(name) {
+        Some(port) if matches!(port.kind, PlcPortKind::DigitalOutput) => Some(port.id),
+        _ => None,
+    }
 }
 
 fn parse_ao_id(name: &str) -> Option<u16> {
-    parse_prefixed_token_u16(name, "AO")
+    match parse_physical_plc_port_ref(name) {
+        Some(port) if matches!(port.kind, PlcPortKind::AnalogOutput) => Some(port.id),
+        _ => None,
+    }
 }
 
 fn parse_ai_id(name: &str) -> Option<u16> {
-    parse_prefixed_token_u16(name, "AI")
-}
-
-fn parse_prefixed_u16(name: &str, prefix: char) -> Option<u16> {
-    let mut chars = name.chars();
-    if chars.next()? != prefix {
-        return None;
+    match parse_physical_plc_port_ref(name) {
+        Some(port) if matches!(port.kind, PlcPortKind::AnalogInput) => Some(port.id),
+        _ => None,
     }
-    let rest: String = chars.collect();
-    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    rest.parse::<u16>().ok()
-}
-
-fn parse_prefixed_token_u16(name: &str, prefix: &str) -> Option<u16> {
-    let rest = name.strip_prefix(prefix)?;
-    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    rest.parse::<u16>().ok()
 }

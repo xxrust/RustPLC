@@ -1,5 +1,9 @@
 use crate::ir::{DeviceKind, TopologyGraph};
 use crate::parser::parse_plc;
+use crate::plc_port::{
+    PlcPortKind, parse_analog_input_endpoint_id, parse_digital_input_endpoint_id,
+    parse_physical_plc_port_ref,
+};
 use crate::semantic::{build_topology_graph, preprocess_program};
 use petgraph::Direction;
 use petgraph::graph::NodeIndex;
@@ -77,14 +81,12 @@ impl ScenarioNameResolver {
         // Allow explicit physical names (X<N>, AI<N>) and explicit logical id names (DI<N>, AI<N>).
         match kind {
             InputKind::Digital => {
-                if let Some(id) =
-                    parse_prefixed_u16(raw, 'X').or_else(|| parse_prefixed_token_u16(raw, "DI"))
-                {
+                if let Some(id) = parse_digital_input_endpoint_id(raw) {
                     return Ok(id);
                 }
             }
             InputKind::Analog => {
-                if let Some(id) = parse_prefixed_token_u16(raw, "AI") {
+                if let Some(id) = parse_analog_input_endpoint_id(raw) {
                     return Ok(id);
                 }
             }
@@ -101,8 +103,14 @@ impl ScenarioNameResolver {
             InputKind::Analog => DeviceKind::AnalogInput,
         };
         let parse_physical = match kind {
-            InputKind::Digital => |name: &str| parse_prefixed_u16(name, 'X'),
-            InputKind::Analog => |name: &str| parse_prefixed_token_u16(name, "AI"),
+            InputKind::Digital => |name: &str| match parse_physical_plc_port_ref(name) {
+                Some(port) if matches!(port.kind, PlcPortKind::DigitalInput) => Some(port.id),
+                _ => None,
+            },
+            InputKind::Analog => |name: &str| match parse_physical_plc_port_ref(name) {
+                Some(port) if matches!(port.kind, PlcPortKind::AnalogInput) => Some(port.id),
+                _ => None,
+            },
         };
 
         let ids = self.collect_physical_ids(start, want_kind, parse_physical);
@@ -187,31 +195,18 @@ fn parse_decimal_u16(s: &str) -> Option<u16> {
     s.parse::<u16>().ok()
 }
 
-fn parse_prefixed_u16(name: &str, prefix: char) -> Option<u16> {
-    let mut chars = name.chars();
-    let first = chars.next()?;
-    if first.to_ascii_uppercase() != prefix {
-        return None;
-    }
-    let rest: String = chars.collect();
-    parse_decimal_u16(&rest)
-}
-
-fn parse_prefixed_token_u16(name: &str, prefix: &str) -> Option<u16> {
-    let (head, rest) = name.split_at(prefix.len().min(name.len()));
-    if head.eq_ignore_ascii_case(prefix) {
-        parse_decimal_u16(rest)
-    } else {
-        None
-    }
-}
-
 fn is_physical_digital_name(name: &str) -> bool {
-    parse_prefixed_u16(name, 'X').is_some()
+    matches!(
+        parse_physical_plc_port_ref(name),
+        Some(port) if matches!(port.kind, PlcPortKind::DigitalInput)
+    )
 }
 
 fn is_physical_analog_name(name: &str) -> bool {
-    parse_prefixed_token_u16(name, "AI").is_some()
+    matches!(
+        parse_physical_plc_port_ref(name),
+        Some(port) if matches!(port.kind, PlcPortKind::AnalogInput)
+    )
 }
 
 fn val_to_u16_number(v: &Value) -> Option<u16> {

@@ -1,3 +1,4 @@
+use crate::plc_port::{PlcPortKind, io_map_key_for_port};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -286,16 +287,16 @@ impl IoMap {
             Ok(())
         };
         for (&id, &gpio) in &self.digital_inputs {
-            insert_seen(gpio, format!("di{id}"))?;
+            insert_seen(gpio, io_map_key_for_port(PlcPortKind::DigitalInput, id))?;
         }
         for (&id, &gpio) in &self.digital_outputs {
-            insert_seen(gpio, format!("do{id}"))?;
+            insert_seen(gpio, io_map_key_for_port(PlcPortKind::DigitalOutput, id))?;
         }
         for (&id, &gpio) in &self.analog_outputs {
-            insert_seen(gpio, format!("ao{id}"))?;
+            insert_seen(gpio, io_map_key_for_port(PlcPortKind::AnalogOutput, id))?;
         }
         for (&id, &gpio) in &self.analog_inputs {
-            insert_seen(gpio, format!("ai{id}"))?;
+            insert_seen(gpio, io_map_key_for_port(PlcPortKind::AnalogInput, id))?;
         }
 
         if let Some(motion) = &self.motion {
