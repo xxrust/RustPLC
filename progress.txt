@@ -2,6 +2,7 @@
 ## Codebase Patterns
 - Keep subtype vocabulary and compatibility rules centralized in `src/device_subtype.rs`; normalize first, then query the matrix rather than scattering subtype literals.
 - For DSL attribute migrations, keep legacy keys in AST/parser and map them to the new canonical field during parsing, then emit a migration warning when both are present.
+- Topology semantic gate checks should split into per-device preflight validation (attributes/subtypes) and connection validation, so attribute errors surface even without relation edges.
 
 Started: Mon Feb 23 00:00:00 CST 2026
 
@@ -46,4 +47,26 @@ Thread: https://ampcode.com/threads/019c85e4-b1b7-7613-9eb5-68bc2030b65d
     - When expanding subtype support, update both `known_subtypes()` and `subtype_compatible_base_types()` so list exposure and matrix behavior stay in sync.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Compatibility checks can use `subtype_matches_device_type()` directly instead of duplicating per-callsite match logic.
+---
+
+## [2026-02-23 10:32:13 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended topology semantic gate with new error code `SEM-106` for subtype semantic violations.
+  - Added subtype/base-type compatibility validation using the centralized registry matrix; incompatible combinations now fail semantic gate.
+  - Added `e_stop_button` guardrail requiring `inverted: true` (NC modeling), reported as `SEM-106` on violation.
+  - Added unknown-subtype fallback behavior: emit semantic warning and continue using base-type behavior without gate failure.
+  - Added topology gate tests covering incompatible subtype, e-stop inversion requirement, valid e-stop configuration, and unknown-subtype warning-only fallback.
+  - Ran `cargo check --workspace` and `cargo test --workspace` successfully.
+- Files changed
+  - src/topology_semantic_gate.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Gate-level device attribute validation can run before relation resolution, making semantic errors independent from whether topology connections are present.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Adding a new topology semantic code requires updating both enum serde rename and `as_str()` mapping, otherwise diagnostics/tests will miss the new code string.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Unknown subtype behavior is intentionally warning-only at semantic gate level to preserve forward compatibility while still surfacing operator feedback.
 ---

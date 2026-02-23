@@ -2,6 +2,9 @@ use crate::ast::{
     DeviceDeclaration, DevicePort, DeviceType, PortRole, PortType, TopologyConnection,
     TopologyRelation, TopologySection,
 };
+use crate::device_subtype::{
+    normalize_subtype, subtype_compatible_base_types, subtype_matches_device_type,
+};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -19,6 +22,8 @@ pub enum TopologySemanticCode {
     Sem104SemanticRoleIncompatible,
     #[serde(rename = "SEM-105")]
     Sem105DanglingPort,
+    #[serde(rename = "SEM-106")]
+    Sem106SubtypeIncompatible,
 }
 
 impl TopologySemanticCode {
@@ -29,6 +34,7 @@ impl TopologySemanticCode {
             Self::Sem103TypeIncompatible => "SEM-103",
             Self::Sem104SemanticRoleIncompatible => "SEM-104",
             Self::Sem105DanglingPort => "SEM-105",
+            Self::Sem106SubtypeIncompatible => "SEM-106",
         }
     }
 }
@@ -95,6 +101,7 @@ struct ResolvedPort {
 pub fn validate_topology_semantics(
     topology: &TopologySection,
 ) -> Result<(), TopologySemanticGateError> {
+    let mut issues = validate_device_subtypes(topology);
     let mut devices = HashMap::<String, GateDevice>::new();
     for device in &topology.devices {
         devices.insert(
@@ -105,7 +112,6 @@ pub fn validate_topology_semantics(
         );
     }
 
-    let mut issues = Vec::<TopologySemanticIssue>::new();
     let mut used_explicit_ports = HashSet::<(String, String)>::new();
 
     for connection in semantic_connections(topology) {
@@ -256,6 +262,82 @@ pub fn validate_topology_semantics(
             issues,
         })
     }
+}
+
+fn validate_device_subtypes(topology: &TopologySection) -> Vec<TopologySemanticIssue> {
+    let mut issues = Vec::new();
+
+    for device in &topology.devices {
+        let Some(raw_subtype) = device.attributes.subtype.as_deref() else {
+            continue;
+        };
+
+        let normalized_subtype = normalize_subtype(raw_subtype);
+        let line = device.line.max(1);
+
+        if !subtype_known(raw_subtype) {
+            eprintln!(
+                "WARNING [semantic] 设备 `{}` 声明了未知 subtype `{}`，将按基础类型 `{}` 继续处理",
+                device.name,
+                raw_subtype,
+                device_type_name(&device.device_type),
+            );
+            continue;
+        }
+
+        if !subtype_matches_device_type(raw_subtype, &device.device_type) {
+            let compatible = compatible_base_types(raw_subtype);
+            issues.push(TopologySemanticIssue {
+                code: TopologySemanticCode::Sem106SubtypeIncompatible,
+                line,
+                relation: None,
+                from: Some(device.name.clone()),
+                to: None,
+                from_port: None,
+                to_port: None,
+                message: format!(
+                    "设备 `{}` 的 subtype `{}` 与基础类型 `{}` 不兼容",
+                    device.name,
+                    normalized_subtype,
+                    device_type_name(&device.device_type)
+                ),
+                suggestion: format!(
+                    "请改为兼容类型（{}）或调整设备基础类型",
+                    compatible.join(", ")
+                ),
+            });
+            continue;
+        }
+
+        if normalized_subtype == "e_stop_button" && device.attributes.inverted != Some(true) {
+            issues.push(TopologySemanticIssue {
+                code: TopologySemanticCode::Sem106SubtypeIncompatible,
+                line,
+                relation: None,
+                from: Some(device.name.clone()),
+                to: None,
+                from_port: None,
+                to_port: None,
+                message: format!(
+                    "设备 `{}` 使用 subtype `e_stop_button` 时必须设置 `inverted: true`（NC 建模）",
+                    device.name
+                ),
+                suggestion: "请为该设备补充 inverted: true".to_string(),
+            });
+        }
+    }
+
+    issues
+}
+
+fn subtype_known(subtype: &str) -> bool {
+    subtype_compatible_base_types(subtype).is_some()
+}
+
+fn compatible_base_types(subtype: &str) -> Vec<&'static str> {
+    subtype_compatible_base_types(subtype)
+        .map(|items| items.to_vec())
+        .unwrap_or_else(|| vec!["unknown"])
 }
 
 fn semantic_connections(topology: &TopologySection) -> Vec<TopologyConnection> {
@@ -637,6 +719,20 @@ fn role_name(role: &PortRole) -> &'static str {
     }
 }
 
+fn device_type_name(device_type: &DeviceType) -> &'static str {
+    match device_type {
+        DeviceType::DigitalOutput => "digital_output",
+        DeviceType::DigitalInput => "digital_input",
+        DeviceType::SolenoidValve => "solenoid_valve",
+        DeviceType::Cylinder => "cylinder",
+        DeviceType::Sensor => "sensor",
+        DeviceType::Motor => "motor",
+        DeviceType::AnalogInput => "analog_input",
+        DeviceType::AnalogOutput => "analog_output",
+        DeviceType::Pid => "pid",
+    }
+}
+
 fn port_type_name(port_type: &PortType) -> &'static str {
     match port_type {
         PortType::Digital => "digital",
@@ -727,5 +823,85 @@ task main:
 "#;
         let program = parse_plc(input).expect("parse");
         validate_topology_semantics(&program.topology).expect("gate should pass");
+    }
+
+    #[test]
+    fn gate_rejects_incompatible_subtype_matrix() {
+        let input = r#"
+[topology]
+device indicator_wrong: digital_output { subtype: "push_button" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err = validate_topology_semantics(&program.topology).expect_err("gate should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(codes.contains(&"SEM-106"), "should report subtype mismatch");
+    }
+
+    #[test]
+    fn gate_requires_estop_button_inverted_true() {
+        let input = r#"
+[topology]
+device e_stop: digital_input { subtype: "e_stop_button" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err = validate_topology_semantics(&program.topology).expect_err("gate should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&"SEM-106"),
+            "should report missing inverted true for e_stop_button"
+        );
+    }
+
+    #[test]
+    fn gate_accepts_estop_button_with_inverted_true() {
+        let input = r#"
+[topology]
+device e_stop: digital_input { subtype: "e_stop_button", inverted: true }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        validate_topology_semantics(&program.topology).expect("gate should pass");
+    }
+
+    #[test]
+    fn gate_keeps_unknown_subtype_as_warning_only() {
+        let input = r#"
+[topology]
+device mystery: digital_input { subtype: "future_custom_sensor" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        validate_topology_semantics(&program.topology)
+            .expect("unknown subtype should fallback to base type behavior");
     }
 }
