@@ -8,6 +8,7 @@
 
 - Large topology regression should keep a single canonical station fixture (`assembly_station`) in file form; additional station-scale coverage should be generated inline in `tests/large_demo_coverage.rs` to avoid fixture drift.
 - Single-purpose demo PLCs that only back one assertion should live as inline DSL fixtures inside `tests/examples_integration.rs`; file-based examples are reserved for canonical user-facing walkthroughs.
+- For DSL taxonomy migrations, keep one dedicated docs entry that binds three concerns together: executable subtype snippets, legacy compatibility rules, and examples asset retention policy.
 Started: Mon Feb 23 00:00:00 CST 2026
 
 ## [2026-02-23 09:40:50 CST] - US-001
@@ -172,4 +173,29 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - After deleting sample files, run a global filename search to catch any hidden references in tests/scripts.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Example integration tests can safely carry moderately sized inline DSL blocks without impacting verification semantics.
+---
+
+
+## [2026-02-23 11:32:45 CST] - US-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added subtype standard documentation with executable DSL snippets, supported subtype matrix, and SEM-106 e-stop modeling requirements.
+  - Added explicit migration notes for legacy `type` compatibility and `subtype` precedence.
+  - Published examples asset inventory and retention strategy (kept canonical examples vs inlined fixtures vs removed duplicates).
+  - Added a README entry section pointing to the subtype standard document and recommended example entry points.
+  - Synced testing inventory document with the new examples retention/inline strategy.
+  - Ran `cargo check --workspace` and `cargo test --workspace` successfully.
+- Files changed
+  - docs/subtype_standard_and_examples_inventory.md
+  - README.md
+  - docs/testing_inventory_matrix.md
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Documentation updates are most maintainable when spec, migration behavior, and fixture inventory are published in a single source-of-truth page.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - README-facing example recommendations can drift from test reality unless the examples inventory explicitly marks retained vs inline-only fixtures.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `docs/testing_inventory_matrix.md` is the right companion document for communicating why a fixture is file-based or inline.
 ---

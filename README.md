@@ -46,6 +46,15 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
   - Causality: 通过 — 所有信号链路连通
 ```
 
+## Subtype 标准与示例入口
+
+- Subtype 规范、迁移规则（legacy `type` → `subtype`）与可执行 DSL 示例：`docs/subtype_standard_and_examples_inventory.md`
+- 建议从以下文件开始：
+  - `examples/two_cylinder.plc`（最小可运行）
+  - `examples/assembly_station.plc`（大型拓扑）
+  - `examples/recovery_templates/estop_recovery.plc`（`e_stop_button` + `inverted: true`）
+  - `examples/force_override_demo.plc`（在线强制与调试）
+
 ---
 
 ## 系统架构
