@@ -1,17 +1,16 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/subtype-standardization-examples-slim",
-  "description": "将 subtype 作为 RustPLC 拓扑 DSL 的标准规范，并精简 examples 资产，降低维护成本同时保持验证回归完整。",
+  "branchName": "ralph/explicit-port-topology-breaking",
+  "description": "将拓扑 DSL 升级为严格端口级关系模型：输入/输出都必须显式映射到 Device.Port，移除 driven_by/reports_to/detects 的旧写法兼容，并以双输入阀为首个标准场景。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "DSL 支持 subtype 并兼容 legacy type",
-      "description": "As a DSL maintainer, I want `subtype` as a first-class attribute so that device semantics can be expressed explicitly while remaining backward compatible.",
+      "title": "新增端口级 relation DSL 语法",
+      "description": "As a DSL author, I want relation blocks with explicit from/to ports so that every physical connection is unambiguous.",
       "acceptanceCriteria": [
-        "AST `DeviceAttributes` 增加 `subtype` 字段",
-        "Parser grammar 支持 `subtype` 属性",
-        "当仅声明 `type` 时自动映射到 `subtype`",
-        "当同时声明 `type` 与 `subtype` 时以 `subtype` 为准并给出迁移提示",
+        "`[topology]` 支持声明 relation，包含 `from: Device.Port`、`to: Device.Port`、`via: driven_by|reports_to|detects`",
+        "Parser 将 relation 映射到 `TopologySection.connections`，并写入 `from_port`/`to_port`",
+        "relation 缺少 from/to/via 任一字段时给出可定位的语法或语义错误",
         "Typecheck passes",
         "Tests pass"
       ],
@@ -21,111 +20,111 @@
     },
     {
       "id": "US-002",
-      "title": "建立 subtype 注册表与兼容矩阵",
-      "description": "As a semantic owner, I want a centralized subtype registry so that subtype names, normalization, and base-type compatibility stay consistent.",
+      "title": "移除旧拓扑属性写法（破坏性变更）",
+      "description": "As a platform maintainer, I want to remove legacy topology attributes so that the codebase has one strict standard.",
       "acceptanceCriteria": [
-        "新增统一的 subtype registry 模块",
-        "支持 subtype 规范化（大小写、空格、连字符）",
-        "定义并暴露已支持 subtype 列表",
-        "定义 subtype 到基础设备类型的兼容矩阵",
+        "DSL 不再接受设备属性 `driven_by`、`reports_to`、`detects`",
+        "Parser/semantic 中删除由设备属性自动推导连接的逻辑",
+        "使用旧写法时返回明确迁移错误，提示改用 relation + Device.Port",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "拓扑语义门禁增加 subtype 校验（SEM-106）",
-      "description": "As a safety engineer, I want subtype mismatches to fail semantic gate so that invalid topology semantics are blocked before formal verification.",
+      "title": "语义门禁改为严格端口校验",
+      "description": "As a safety engineer, I want semantic gate validation to run on explicit ports only so that ambiguous topology is rejected early.",
       "acceptanceCriteria": [
-        "新增语义错误码 `SEM-106`",
-        "subtype 与基础设备类型不兼容时门禁失败",
-        "`e_stop_button` 要求 `inverted: true`（NC 建模）",
-        "未知 subtype 默认告警并按基础类型处理",
+        "对每条 relation 执行端口存在性校验（SEM-101）",
+        "对每条 relation 执行方向校验 output -> input（SEM-102）",
+        "对每条 relation 执行类型兼容性校验（SEM-103）",
+        "可选语义角色校验保持可用（SEM-104）",
+        "悬空端口校验仅基于显式 relation 参与情况（SEM-105）",
+        "不再进行任何隐式端口推断（即使设备只有一个端口）",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "核心样例升级为 subtype 标准写法",
-      "description": "As a user, I want canonical examples to use subtype so that I can follow the new standard directly.",
+      "title": "拓扑图与因果验证切换到端口关系源",
+      "description": "As a verification engineer, I want graph building and causality checks to use explicit port relations so that diagnostics match physical wiring.",
       "acceptanceCriteria": [
-        "更新 `examples/two_cylinder.plc` 的按钮与行程传感器 subtype",
-        "更新 `examples/assembly_station.plc` 的按钮与关键传感器 subtype",
-        "更新 `examples/recovery_templates/estop_recovery.plc` 的 `e_stop_button` + `inverted: true`",
-        "更新 `examples/force_override_demo.plc` 输入点 subtype",
+        "Topology graph 仅消费 `TopologySection.connections`",
+        "因果链验证仍支持设备级 chain 表达，但其可达性必须来自端口级 relation 图",
+        "错误信息包含关键端口上下文（例如 `valve_eject.coil_retract`）",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "精简 PIL baseline 样例集合",
-      "description": "As a maintainer, I want fewer redundant PIL baseline fixtures so that baseline maintenance remains lightweight.",
+      "title": "实现双输入阀标准建模（可扩展到多 IO 设备）",
+      "description": "As a controls engineer, I want a dual-coil valve model with explicit port mapping so that each PLC output maps to a concrete physical coil.",
       "acceptanceCriteria": [
-        "删除重复 baseline case（delay/log）",
-        "保留单个最小可运行 case（timeout）",
-        "保留 case 的 scenario 结构与脚本兼容性",
-        "`scripts/pil_semantic_baseline.sh --cases-dir examples/pil_baselines` 可通过",
+        "新增双输入阀正例：两个 DO 分别连接 `coil_extend` 与 `coil_retract`",
+        "新增反例：端口缺失或接错端口会被语义门禁拦截",
+        "新增多输入/多输出设备最小回归样例（如 motor）以证明框架可扩展",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "删除重复大型工位示例并收敛覆盖",
-      "description": "As a test maintainer, I want to remove duplicated station examples so that test coverage stays meaningful with fewer fixtures.",
+      "title": "核心示例迁移到端口级 relation DSL",
+      "description": "As a RustPLC user, I want canonical examples to use explicit port relations so that I can copy the new standard directly.",
       "acceptanceCriteria": [
-        "删除 `stamp_bend_line/drill_station/glue_station/grind_station/label_station` 示例",
-        "`tests/large_demo_coverage.rs` 不再依赖已删除示例",
-        "保留 `assembly_station` 作为大型拓扑代表样例",
+        "更新 `examples/two_cylinder.plc` 为 relation + Device.Port 写法",
+        "更新 `examples/assembly_station.plc` 为 relation + Device.Port 写法",
+        "更新 `examples/recovery_templates/estop_recovery.plc` 为 relation + Device.Port 写法",
+        "示例中不再出现 `driven_by`/`reports_to`/`detects` 设备属性",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-007",
-      "title": "将单用途演示样例内联到集成测试",
-      "description": "As a QA engineer, I want single-purpose demo PLC fixtures inlined into tests so that deleting files does not reduce behavior coverage.",
+      "title": "测试夹具与门禁回归用例全面迁移",
+      "description": "As a maintainer, I want parser/semantic/verification tests migrated to relation DSL so that CI reflects the new contract.",
       "acceptanceCriteria": [
-        "将 `half_rotation/delay/repeat/and_or_wait/if_else/custom_states` 迁移为 `tests/examples_integration.rs` 内联 DSL",
-        "删除上述 6 个示例文件",
-        "保持对应 6 组集成测试语义断言不变",
+        "更新 parser/semantic/verification 现有 fixture 到 relation + Device.Port",
+        "新增旧写法失败测试，确保破坏性变更被锁定",
+        "新增端口歧义不允许的测试（缺 from_port/to_port 或错误端口）",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 7,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-008",
-      "title": "文档与资产清单同步到 subtype 标准",
-      "description": "As a documentation consumer, I want docs to match the new subtype standard so that examples and spec are consistent.",
+      "title": "文档标准化与迁移说明",
+      "description": "As a documentation consumer, I want docs to describe the port-first topology standard clearly so that migration and future modeling are consistent.",
       "acceptanceCriteria": [
-        "更新 subtype 相关规范文档中的 DSL 示例为当前可执行语法",
-        "更新 examples 清单与推荐入口，标注保留与内联策略",
-        "新增迁移说明：legacy `type` 与 `subtype` 的兼容与优先级",
+        "更新 `docs/RustPLC 拓扑语义与关系验证规范.md` 的 DSL 示例为可执行语法",
+        "新增迁移指南：旧属性写法到 relation + Device.Port 的对照表",
+        "在 README 或相关文档中明确声明：旧写法不再兼容",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 8,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]

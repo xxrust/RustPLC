@@ -81,17 +81,113 @@ fn parse_plc_pair(pair: Pair<Rule>) -> Result<PlcProgram, PlcError> {
 
 fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError> {
     let mut devices = Vec::new();
+    let mut explicit_connections = Vec::new();
 
     for entry in pair.into_inner() {
-        if entry.as_rule() == Rule::device_declaration {
-            devices.push(parse_device_declaration(entry)?);
+        match entry.as_rule() {
+            Rule::device_declaration => devices.push(parse_device_declaration(entry)?),
+            Rule::relation_declaration => {
+                explicit_connections.push(parse_relation_declaration(entry)?);
+            }
+            _ => {}
         }
     }
 
-    let connections = derive_topology_connections(&devices);
+    let connections = if explicit_connections.is_empty() {
+        derive_topology_connections(&devices)
+    } else {
+        explicit_connections
+    };
     Ok(TopologySection {
         devices,
         connections,
+    })
+}
+
+fn parse_relation_declaration(pair: Pair<Rule>) -> Result<TopologyConnection, PlcError> {
+    let line = line_of(&pair);
+    let col = col_of(&pair);
+    let mut from = None::<(String, String)>;
+    let mut to = None::<(String, String)>;
+    let mut relation = None::<TopologyRelation>;
+
+    for field in pair.into_inner() {
+        if field.as_rule() != Rule::relation_field {
+            continue;
+        }
+
+        let field_line = line_of(&field);
+        let mut inner = field.into_inner();
+        let field_name = inner
+            .next()
+            .ok_or_else(|| PlcError::parse(field_line, "relation 字段缺少名称"))?
+            .as_str()
+            .to_string();
+        let value_wrapper = inner
+            .next()
+            .ok_or_else(|| PlcError::parse(field_line, format!("relation.{field_name} 缺少值")))?;
+        let value = first_inner(value_wrapper, field_line, "relation 字段值")?;
+
+        match field_name.as_str() {
+            "from" => {
+                if from.is_some() {
+                    return Err(PlcError::parse(field_line, "relation.from 重复声明"));
+                }
+                from = Some(expect_port_reference(value, "relation.from")?);
+            }
+            "to" => {
+                if to.is_some() {
+                    return Err(PlcError::parse(field_line, "relation.to 重复声明"));
+                }
+                to = Some(expect_port_reference(value, "relation.to")?);
+            }
+            "via" => {
+                if relation.is_some() {
+                    return Err(PlcError::parse(field_line, "relation.via 重复声明"));
+                }
+                relation = Some(expect_topology_relation(value, "relation.via")?);
+            }
+            _ => {
+                return Err(PlcError::parse(
+                    field_line,
+                    format!("不支持的 relation 字段: {field_name}"),
+                ));
+            }
+        }
+    }
+
+    let (from_device, from_port) = from.ok_or_else(|| {
+        PlcError::parse_at(
+            "<input>",
+            line,
+            col,
+            "relation 缺少 from 字段（需要 Device.Port）",
+        )
+    })?;
+    let (to_device, to_port) = to.ok_or_else(|| {
+        PlcError::parse_at(
+            "<input>",
+            line,
+            col,
+            "relation 缺少 to 字段（需要 Device.Port）",
+        )
+    })?;
+    let relation = relation.ok_or_else(|| {
+        PlcError::parse_at(
+            "<input>",
+            line,
+            col,
+            "relation 缺少 via 字段（driven_by/reports_to/detects）",
+        )
+    })?;
+
+    Ok(TopologyConnection {
+        from: from_device,
+        to: to_device,
+        relation,
+        from_port: Some(from_port),
+        to_port: Some(to_port),
+        signal: None,
     })
 }
 
@@ -1290,6 +1386,46 @@ fn expect_state_reference(pair: Pair<Rule>, field_name: &str) -> Result<StateRef
     }
 }
 
+fn expect_port_reference(pair: Pair<Rule>, field_name: &str) -> Result<(String, String), PlcError> {
+    let line = line_of(&pair);
+    if pair.as_rule() != Rule::port_reference {
+        return Err(PlcError::parse(
+            line,
+            format!("属性 {field_name} 需要端口引用（如 device.port）"),
+        ));
+    }
+
+    let (device, port) = pair
+        .as_str()
+        .split_once('.')
+        .ok_or_else(|| PlcError::parse(line, format!("属性 {field_name} 端口引用格式错误")))?;
+
+    Ok((device.to_string(), port.to_string()))
+}
+
+fn expect_topology_relation(
+    pair: Pair<Rule>,
+    field_name: &str,
+) -> Result<TopologyRelation, PlcError> {
+    let line = line_of(&pair);
+    if pair.as_rule() != Rule::topology_relation {
+        return Err(PlcError::parse(
+            line,
+            format!("属性 {field_name} 需要拓扑关系（driven_by/reports_to/detects）"),
+        ));
+    }
+
+    match pair.as_str() {
+        "driven_by" => Ok(TopologyRelation::DrivenBy),
+        "reports_to" => Ok(TopologyRelation::ReportsTo),
+        "detects" => Ok(TopologyRelation::Detects),
+        other => Err(PlcError::parse(
+            line,
+            format!("不支持的 relation 类型: {other}"),
+        )),
+    }
+}
+
 fn expect_identifier_list(pair: Pair<Rule>, field_name: &str) -> Result<Vec<String>, PlcError> {
     let line = line_of(&pair);
     if pair.as_rule() != Rule::identifier_list {
@@ -1483,6 +1619,10 @@ fn first_inner<'a>(
 
 fn line_of(pair: &Pair<Rule>) -> usize {
     pair.as_span().start_pos().line_col().0
+}
+
+fn col_of(pair: &Pair<Rule>) -> usize {
+    pair.as_span().start_pos().line_col().1
 }
 
 fn map_parse_error(err: pest::error::Error<Rule>) -> PlcError {
@@ -1718,6 +1858,82 @@ task main:
             program.topology.connections[2].to_port.as_deref(),
             Some("sense")
         );
+    }
+
+    #[test]
+    fn parses_explicit_relation_blocks_into_topology_connections() {
+        let input = r#"
+[topology]
+device Y0: digital_output { ports: [out:digital:producer] }
+device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
+
+relation {
+    from: Y0.out,
+    to: valve_A.coil,
+    via: driven_by
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("relation DSL 应写入 topology.connections");
+        assert_eq!(program.topology.connections.len(), 1);
+
+        let relation = &program.topology.connections[0];
+        assert_eq!(relation.from, "Y0");
+        assert_eq!(relation.to, "valve_A");
+        assert_eq!(relation.from_port.as_deref(), Some("out"));
+        assert_eq!(relation.to_port.as_deref(), Some("coil"));
+        assert_eq!(relation.relation, crate::ast::TopologyRelation::DrivenBy);
+    }
+
+    #[test]
+    fn rejects_relation_when_required_fields_are_missing() {
+        let cases = [
+            (
+                "missing_from",
+                "relation { to: valve_A.coil, via: driven_by }",
+                "relation 缺少 from 字段",
+            ),
+            (
+                "missing_to",
+                "relation { from: Y0.out, via: driven_by }",
+                "relation 缺少 to 字段",
+            ),
+            (
+                "missing_via",
+                "relation { from: Y0.out, to: valve_A.coil }",
+                "relation 缺少 via 字段",
+            ),
+        ];
+
+        for (case_name, relation_block, expected_error) in cases {
+            let input = format!(
+                r#"
+[topology]
+device Y0: digital_output {{ ports: [out:digital:producer] }}
+device valve_A: solenoid_valve {{ ports: [coil:digital:consumer] }}
+
+{relation_block}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#
+            );
+
+            let err = parse_plc(&input).expect_err(case_name);
+            assert!(
+                err.to_string().contains(expected_error),
+                "{case_name} 应返回 `{expected_error}`，实际: {err}"
+            );
+        }
     }
 
     #[test]

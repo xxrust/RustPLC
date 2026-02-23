@@ -91,7 +91,15 @@ attribute_block = { "{" ~ attribute ~ ((","? ~ attribute))* ~ ","? ~ "}" }
 
 device_declaration = { "device" ~ identifier ~ ":" ~ device_type ~ attribute_block? }
 
-topology_section = { section_topology ~ device_declaration* }
+port_reference = @{ identifier ~ "." ~ identifier }
+topology_relation = { "driven_by" | "reports_to" | "detects" }
+relation_field_name = { "from" | "to" | "via" }
+relation_field_value = { port_reference | topology_relation }
+relation_field = { relation_field_name ~ ":" ~ relation_field_value }
+relation_declaration = { "relation" ~ "{" ~ relation_field ~ ((","? ~ relation_field))* ~ ","? ~ "}" }
+topology_entry = _{ device_declaration | relation_declaration }
+
+topology_section = { section_topology ~ topology_entry* }
 topology_file = { SOI ~ topology_section ~ EOI }
 
 safety_relation = { "conflicts_with" | "requires" }
