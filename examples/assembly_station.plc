@@ -1,22 +1,5 @@
 [topology]
 
-device Y0: digital_output
-device Y1: digital_output
-device Y2: digital_output
-device Y3: digital_output
-device Y4: digital_output
-device Y5: digital_output
-device X0: digital_input
-device X1: digital_input
-device X2: digital_input
-device X3: digital_input
-device X4: digital_input
-device X5: digital_input
-device X6: digital_input
-device X7: digital_input
-device X8: digital_input
-device X9: digital_input
-device X10: digital_input
 
 device start_button: sensor {
     subtype: "push_button"
@@ -109,38 +92,39 @@ device sensor_eject_ret: sensor {
     subtype: "limit_switch"
 }
 
-relation { from: start_button.out, to: X10, via: reports_to }
-relation { from: Y0, to: motor_left.cmd, via: driven_by }
+relation { from: start_button.out, to: plc_main.X10, via: reports_to }
+relation { from: plc_main.Y0, to: motor_left.cmd, via: driven_by }
 relation { from: motor_left.position_A, to: sensor_left_arrive.sense, via: detects }
-relation { from: sensor_left_arrive.out, to: X0, via: reports_to }
-relation { from: Y1, to: motor_right.cmd, via: driven_by }
+relation { from: sensor_left_arrive.out, to: plc_main.X0, via: reports_to }
+relation { from: plc_main.Y1, to: motor_right.cmd, via: driven_by }
 relation { from: motor_right.position_A, to: sensor_right_arrive.sense, via: detects }
-relation { from: sensor_right_arrive.out, to: X1, via: reports_to }
-relation { from: Y2, to: valve_push_L.coil, via: driven_by }
+relation { from: sensor_right_arrive.out, to: plc_main.X1, via: reports_to }
+relation { from: plc_main.Y2, to: valve_push_L.coil, via: driven_by }
 relation { from: valve_push_L.out, to: cyl_push_L.cmd, via: driven_by }
 relation { from: cyl_push_L.extended, to: sensor_push_L_ext.sense, via: detects }
-relation { from: sensor_push_L_ext.out, to: X2, via: reports_to }
+relation { from: sensor_push_L_ext.out, to: plc_main.X2, via: reports_to }
 relation { from: cyl_push_L.retracted, to: sensor_push_L_ret.sense, via: detects }
-relation { from: sensor_push_L_ret.out, to: X3, via: reports_to }
-relation { from: Y3, to: valve_push_R.coil, via: driven_by }
+relation { from: sensor_push_L_ret.out, to: plc_main.X3, via: reports_to }
+relation { from: plc_main.Y3, to: valve_push_R.coil, via: driven_by }
 relation { from: valve_push_R.out, to: cyl_push_R.cmd, via: driven_by }
 relation { from: cyl_push_R.extended, to: sensor_push_R_ext.sense, via: detects }
-relation { from: sensor_push_R_ext.out, to: X4, via: reports_to }
+relation { from: sensor_push_R_ext.out, to: plc_main.X4, via: reports_to }
 relation { from: cyl_push_R.retracted, to: sensor_push_R_ret.sense, via: detects }
-relation { from: sensor_push_R_ret.out, to: X5, via: reports_to }
-relation { from: Y4, to: valve_press.coil, via: driven_by }
+relation { from: sensor_push_R_ret.out, to: plc_main.X5, via: reports_to }
+relation { from: plc_main.Y4, to: valve_press.coil, via: driven_by }
 relation { from: valve_press.out, to: cyl_press.cmd, via: driven_by }
 relation { from: cyl_press.extended, to: sensor_press_ext.sense, via: detects }
-relation { from: sensor_press_ext.out, to: X6, via: reports_to }
+relation { from: sensor_press_ext.out, to: plc_main.X6, via: reports_to }
 relation { from: cyl_press.retracted, to: sensor_press_ret.sense, via: detects }
-relation { from: sensor_press_ret.out, to: X7, via: reports_to }
-relation { from: Y5, to: valve_eject.coil, via: driven_by }
+relation { from: sensor_press_ret.out, to: plc_main.X7, via: reports_to }
+relation { from: plc_main.Y5, to: valve_eject.coil, via: driven_by }
 relation { from: valve_eject.out, to: cyl_eject.cmd, via: driven_by }
 relation { from: cyl_eject.extended, to: sensor_eject_ext.sense, via: detects }
-relation { from: sensor_eject_ext.out, to: X8, via: reports_to }
+relation { from: sensor_eject_ext.out, to: plc_main.X8, via: reports_to }
 relation { from: cyl_eject.retracted, to: sensor_eject_ret.sense, via: detects }
-relation { from: sensor_eject_ret.out, to: X9, via: reports_to }
+relation { from: sensor_eject_ret.out, to: plc_main.X9, via: reports_to }
 
+device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer, Y2:digital:producer, Y3:digital:producer, Y4:digital:producer, Y5:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer, X5:digital:consumer, X6:digital:consumer, X7:digital:consumer, X8:digital:consumer, X9:digital:consumer, X10:digital:consumer] }
 [constraints]
 
 # 压装时左右推缸必须保持伸出（requires 而非 conflicts_with）

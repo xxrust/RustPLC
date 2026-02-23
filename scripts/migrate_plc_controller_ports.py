@@ -21,7 +21,7 @@ from typing import List, Tuple
 TOPOLOGY_HEADER_RE = re.compile(r"^\s*\[\s*topology\s*\]\s*$", re.IGNORECASE)
 SECTION_HEADER_RE = re.compile(r"^\s*\[[^\]]+\]\s*$")
 LEGACY_IO_DEVICE_RE = re.compile(
-    r"^\s*device\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(digital_input|digital_output|analog_input|analog_output)\s*$",
+    r"^\s*device\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(digital_input|digital_output|analog_input|analog_output)\b.*$",
     re.IGNORECASE,
 )
 PHYSICAL_IO_NAME_RE = re.compile(r"^(X\d+|Y\d+|AI\d+|AO\d+)$")
@@ -79,6 +79,10 @@ def migrate(content: str) -> Tuple[str, List[str]]:
                 name = m.group(1)
                 if PHYSICAL_IO_NAME_RE.match(name):
                     migrated_ports.append(name)
+                    # Keep declarations that carry attributes (e.g. range/external/subtype)
+                    # and only rely on plc ports to replace plain X/Y/AI/AO declarations.
+                    if "{" in line:
+                        out.append(line)
                     continue
             out.append(line)
             continue
@@ -89,7 +93,14 @@ def migrate(content: str) -> Tuple[str, List[str]]:
         ports = ", ".join(port_contract_for_name(name) for name in migrated_ports)
         out.append(f"device plc_main: plc {{ ports: [{ports}] }}")
 
-    migrated_ports = sorted(set(migrated_ports), key=lambda x: (x[0], len(x), x))
+    seen = set()
+    ordered_ports: List[str] = []
+    for name in migrated_ports:
+        if name in seen:
+            continue
+        seen.add(name)
+        ordered_ports.append(name)
+    migrated_ports = ordered_ports
     rewritten = "\n".join(out)
     if content.endswith("\n"):
         rewritten += "\n"

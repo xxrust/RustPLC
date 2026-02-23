@@ -1,10 +1,5 @@
 [topology]
 
-device X0: digital_input
-device X1: digital_input
-device X2: digital_input
-device Y0: digital_output
-device Y1: digital_output
 
 device start_button: sensor {
     debounce: 20ms
@@ -14,12 +9,13 @@ device station_sensor: sensor
 device conveyor: motor
 device alarm_light: solenoid_valve
 
-relation { from: start_button.out, to: X0, via: reports_to }
-relation { from: power_ok.out, to: X1, via: reports_to }
-relation { from: station_sensor.out, to: X2, via: reports_to }
-relation { from: Y0, to: conveyor.cmd, via: driven_by }
-relation { from: Y1, to: alarm_light.coil, via: driven_by }
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: power_ok.out, to: plc_main.X1, via: reports_to }
+relation { from: station_sensor.out, to: plc_main.X2, via: reports_to }
+relation { from: plc_main.Y0, to: conveyor.cmd, via: driven_by }
+relation { from: plc_main.Y1, to: alarm_light.coil, via: driven_by }
 
+device plc_main: plc { ports: [X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, Y0:digital:producer, Y1:digital:producer] }
 [constraints]
 
 [tasks]

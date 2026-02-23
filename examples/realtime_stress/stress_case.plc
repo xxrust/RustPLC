@@ -1,7 +1,6 @@
 [topology]
-device X0: digital_input
-device Y0: digital_output
 
+device plc_main: plc { ports: [X0:digital:consumer, Y0:digital:producer] }
 [constraints]
 
 [tasks]

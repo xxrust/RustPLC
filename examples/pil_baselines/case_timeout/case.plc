@@ -1,11 +1,11 @@
 [topology]
 
-device X0: digital_input
 
 device start_button: sensor
 
-relation { from: start_button.out, to: X0, via: reports_to }
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 
+device plc_main: plc { ports: [X0:digital:consumer] }
 [constraints]
 
 [tasks]

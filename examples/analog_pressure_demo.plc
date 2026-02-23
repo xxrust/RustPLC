@@ -6,8 +6,6 @@
 [topology]
 
 # ===== 控制器端口 =====
-device Y0: digital_output               # 比例阀数字控制
-device X0: digital_input                 # 启动按钮输入
 
 # ===== 模拟量 I/O =====
 device AI0: analog_input  { range: 0..100, unit: "bar", external: true }
@@ -24,11 +22,12 @@ device start_button: sensor {
     debounce: 20ms
 }
 
-relation { from: Y0, to: prop_valve.coil, via: driven_by }
+relation { from: plc_main.Y0, to: prop_valve.coil, via: driven_by }
 relation { from: prop_valve.on, to: pressure_sensor.sense, via: detects }
-relation { from: pressure_sensor.out, to: AI0, via: reports_to }
-relation { from: start_button.out, to: X0, via: reports_to }
+relation { from: pressure_sensor.out, to: plc_main.AI0, via: reports_to }
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 
+device plc_main: plc { ports: [Y0:digital:producer, X0:digital:consumer, AI0:analog:consumer, AO0:analog:producer] }
 [constraints]
 
 # ===== 时序约束 =====

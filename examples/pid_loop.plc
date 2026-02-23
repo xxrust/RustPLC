@@ -13,6 +13,7 @@ device loop_pressure: pid {
     limit: 0..100
 }
 
+device plc_main: plc { ports: [AI0:analog:consumer, AO0:analog:producer] }
 [constraints]
 
 [tasks]

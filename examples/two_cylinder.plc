@@ -1,12 +1,5 @@
 [topology]
 
-device Y0: digital_output
-device Y1: digital_output
-device X0: digital_input
-device X1: digital_input
-device X2: digital_input
-device X3: digital_input
-device X4: digital_input
 
 device start_button: sensor {
     subtype: "push_button"
@@ -47,20 +40,21 @@ device sensor_B_ret: sensor {
     subtype: "limit_switch"
 }
 
-relation { from: start_button.out, to: X4, via: reports_to }
-relation { from: Y0, to: valve_A.coil, via: driven_by }
+relation { from: start_button.out, to: plc_main.X4, via: reports_to }
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
-relation { from: sensor_A_ext.out, to: X0, via: reports_to }
+relation { from: sensor_A_ext.out, to: plc_main.X0, via: reports_to }
 relation { from: cyl_A.retracted, to: sensor_A_ret.sense, via: detects }
-relation { from: sensor_A_ret.out, to: X1, via: reports_to }
-relation { from: Y1, to: valve_B.coil, via: driven_by }
+relation { from: sensor_A_ret.out, to: plc_main.X1, via: reports_to }
+relation { from: plc_main.Y1, to: valve_B.coil, via: driven_by }
 relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
 relation { from: cyl_B.extended, to: sensor_B_ext.sense, via: detects }
-relation { from: sensor_B_ext.out, to: X2, via: reports_to }
+relation { from: sensor_B_ext.out, to: plc_main.X2, via: reports_to }
 relation { from: cyl_B.retracted, to: sensor_B_ret.sense, via: detects }
-relation { from: sensor_B_ret.out, to: X3, via: reports_to }
+relation { from: sensor_B_ret.out, to: plc_main.X3, via: reports_to }
 
+device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer] }
 [constraints]
 
 safety: cyl_A.extended conflicts_with cyl_B.extended

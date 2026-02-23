@@ -7,12 +7,6 @@
 # - If sensor_fault_code is non-zero: enter fault (requires manual attention)
 
 # Physical IO
-device Y0: digital_output  # DIR
-device Y1: digital_output  # EN
-device Y2: digital_output  # MOVE_CMD
-device X0: digital_input   # INPOS
-device X1: digital_input   # ALARM
-device X2: digital_input   # POS_CONSISTENT (drive-layer computed)
 
 # External feedback provided by the drive / board layer
 device AI0: analog_input { range: 0..4000000, unit: "count", external: true }   # encoder count snapshot
@@ -38,12 +32,13 @@ device alarm_x: sensor
 
 device pos_consistent: digital_input
 
-relation { from: Y1, to: axis_x.cmd, via: driven_by }
+relation { from: plc_main.Y1, to: axis_x.cmd, via: driven_by }
 relation { from: axis_x.position_ok, to: inpos_x.sense, via: detects }
-relation { from: inpos_x.out, to: X0, via: reports_to }
+relation { from: inpos_x.out, to: plc_main.X0, via: reports_to }
 relation { from: axis_x.alarm, to: alarm_x.sense, via: detects }
-relation { from: alarm_x.out, to: X1, via: reports_to }
+relation { from: alarm_x.out, to: plc_main.X1, via: reports_to }
 
+device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer, Y2:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, AI0:analog:consumer, AI1:analog:consumer, AI2:analog:consumer] }
 [constraints]
 
 # Basic: do not enable the axis while drive is alarming.

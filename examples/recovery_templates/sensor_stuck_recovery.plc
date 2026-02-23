@@ -1,11 +1,5 @@
 [topology]
 
-device X0: digital_input
-device X1: digital_input
-device X2: digital_input
-device Y0: digital_output
-device Y1: digital_output
-device Y2: digital_output
 
 device start_button: sensor {
     debounce: 20ms
@@ -16,13 +10,14 @@ device cyl_extend_cmd: solenoid_valve
 device cyl_retract_cmd: solenoid_valve
 device alarm_light: solenoid_valve
 
-relation { from: start_button.out, to: X0, via: reports_to }
-relation { from: sensor_extend.out, to: X1, via: reports_to }
-relation { from: maintenance_reset.out, to: X2, via: reports_to }
-relation { from: Y0, to: cyl_extend_cmd.coil, via: driven_by }
-relation { from: Y1, to: cyl_retract_cmd.coil, via: driven_by }
-relation { from: Y2, to: alarm_light.coil, via: driven_by }
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: sensor_extend.out, to: plc_main.X1, via: reports_to }
+relation { from: maintenance_reset.out, to: plc_main.X2, via: reports_to }
+relation { from: plc_main.Y0, to: cyl_extend_cmd.coil, via: driven_by }
+relation { from: plc_main.Y1, to: cyl_retract_cmd.coil, via: driven_by }
+relation { from: plc_main.Y2, to: alarm_light.coil, via: driven_by }
 
+device plc_main: plc { ports: [X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, Y0:digital:producer, Y1:digital:producer, Y2:digital:producer] }
 [constraints]
 
 [tasks]

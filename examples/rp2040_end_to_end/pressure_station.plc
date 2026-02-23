@@ -1,8 +1,9 @@
 [topology]
-
 device AI0: analog_input  { range: 0..100, unit: "bar", external: true }
 device AO0: analog_output { range: 0..10, unit: "V", ramp_time: 500ms }
 
+
+device plc_main: plc { ports: [AI0:analog:consumer, AO0:analog:producer] }
 [constraints]
 
 [tasks]
