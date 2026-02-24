@@ -57,7 +57,9 @@
       "Bash(/tmp/fix_summary.md:*)",
       "Bash(/tmp/visual_test.html:*)",
       "Bash(git checkout:*)",
-      "Bash(git revert:*)"
+      "Bash(git revert:*)",
+      "Bash(echo:*)",
+      "Bash(printf:*)"
     ]
   }
 }
