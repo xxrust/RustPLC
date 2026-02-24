@@ -29,6 +29,21 @@ flowchart TD
 
 ---
 
+## 本项目与传统 PLC 对比
+
+| 维度 | 传统 PLC（梯形图 / 功能块） | RustPLC |
+|------|----------------------------|---------|
+| 开发入口 | 以 PLC 品牌 IDE + 图形化编程为主 | DSL 文本 + AI 辅助生成 |
+| 安全校验 | 规则校验 + 人工审查为主 | 编译期四引擎形式化验证（Safety/Liveness/Timing/Causality） |
+| 问题暴露阶段 | 现场联调期集中暴露 | 编译/仿真阶段前置暴露 |
+| 变更可审计性 | 图形差异审阅成本高 | DSL 文本 diff + 结构化报告 + release bundle |
+| 仿真与回归 | 依赖厂商工具链，自动化程度受限 | SIL/virtual-board/no-board-gate 可脚本化批量回归 |
+| 硬件绑定方式 | 与厂商生态耦合较深 | 拓扑与 I/O 映射解耦，支持 no-board 与 RP2040 目标 |
+
+> RustPLC 的定位不是否定传统 PLC，而是把“可证明、安全前置、可审计交付”补到工业控制软件工程链路里。
+
+---
+
 ## 快速开始
 
 ```bash
@@ -192,8 +207,9 @@ AI 会通过多轮对话生成完整的 `.plc` 文件并自动验证。
 
 ```plc
 [topology]
-device Y0: digital_output
-device X0: digital_input
+device plc_main: plc {
+    ports: [Y0:digital:producer, X0:digital:consumer]
+}
 device valve_A: solenoid_valve {
     response_time: 20ms,
     ports: [coil:digital:consumer, out:pneumatic:producer]
@@ -204,10 +220,10 @@ device cyl_A: cylinder {
 }
 device sensor_A_ext: sensor
 
-relation { from: Y0, to: valve_A.coil, via: driven_by }
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
-relation { from: sensor_A_ext.out, to: X0, via: reports_to }
+relation { from: sensor_A_ext.out, to: plc_main.X0, via: reports_to }
 
 [constraints]
 safety: cyl_A.extended requires sensor_A_ext.on
@@ -220,9 +236,9 @@ task cycle:
         timeout: 500ms -> goto fault_handler
 ```
 
-> **注意**：设备属性写法 `driven_by/reports_to/detects` 已移除；请统一使用 `relation { from, to, via }`。其中 PLC 点位可直接写 `Y0`/`X1`（无需 `Y0.out`/`X1.in`）。
+> **注意**：设备属性写法 `driven_by/reports_to/detects` 已移除；请统一使用 `relation { from, to, via }`。按新规范推荐显式使用 `plc_main.<port>` 端口引用。
 >
-> **推荐建模（2026-02-23 起）**：优先使用 `device plc_main: plc { ports: [...] }` 声明控制器端口；`device X*/Y*/AI*/AO*` 旧写法处于兼容窗口（2026-02-23 ~ 2026-06-30），当前仅给出 WARN 级提示。
+> **兼容说明（2026-02-23 ~ 2026-06-30）**：旧版“端口当设备”写法仍可运行，但会给出 WARN 级迁移提示。
 
 ### 2. 编译验证
 
