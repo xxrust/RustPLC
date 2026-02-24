@@ -459,14 +459,14 @@ fn collect_items_from_statements(
 
 fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String)> {
     match action {
-        ActionStatement::Extend { target } => Some((format!("extend {target}"), target.clone())),
-        ActionStatement::Retract { target } => Some((format!("retract {target}"), target.clone())),
+        ActionStatement::Extend { target } => Some((format!("extend {}", target.device), target.device.clone())),
+        ActionStatement::Retract { target } => Some((format!("retract {}", target.device), target.device.clone())),
         ActionStatement::Set { target, value } => Some((
-            format!("set {target} {}", binary_value_text(value)),
-            target.clone(),
+            format!("set {} {}", target.device, binary_value_text(value)),
+            target.device.clone(),
         )),
         ActionStatement::SetAnalog { target, value } => {
-            Some((format!("set_analog {target} {value}"), target.clone()))
+            Some((format!("set_analog {} {value}", target.device), target.device.clone()))
         }
         ActionStatement::Log { .. } => None,
     }

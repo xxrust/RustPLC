@@ -94,8 +94,9 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 │  关键模块：                                                                          │
 │  • parser/plc.pest    - PEG 语法定义                                                │
 │  • ast/mod.rs         - AST 类型 (PlcProgram, DeviceDeclaration, StepStatement)    │
-│  • semantic/mod.rs    - 语义分析 + IR 降级                                          │
+│  • semantic/mod.rs    - 语义分析 + IR 降级 + 设备库约束注入                    │
 │  • ir/mod.rs          - IR 类型 (petgraph DiGraph)                                  │
+│  • device_library.rs  - 设备库加载 (devices/*.toml → DeviceLibrary)            │
 └────────────────┬────────────────────────────────────────────────────────────────────┘
                  │
                  ▼
@@ -186,6 +187,7 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 | **🛡️ 恢复模板** | 急停/掉电/传感器卡死恢复模板，关键 wait 可恢复性 lint |
 | **🏷️ 标签驱动拓扑** | 多维标签（功能/危险等级/位置），批量改造，规则引擎，可视化分组 |
 | **🔀 端口级连线** | `driven_by`/`reports_to`/`detects` 明确语义，MIMO 拓扑，端口契约验证 |
+| **📦 设备库** | `devices/*.toml` 声明端口状态与设备级安全约束，编译期自动注入，三段引用 `device.port.state` |
 | **📊 语义 Diff** | 拓扑变更影响分析，节点/端口/关系/标签级 diff，审计记录 |
 | **⚡ 性能门禁** | 500 节点/2000 边基线，编译/解析/渲染 p95 阈值 CI 门禁 |
 
@@ -329,6 +331,7 @@ cargo run --release -- release-bundle examples/assembly_station.plc \
 | [RP2040 Deployment](https://github.com/xxrust/RustPLC/wiki/RP2040-Deployment) | 板级部署 |
 | [Examples Gallery](https://github.com/xxrust/RustPLC/wiki/Examples-Gallery) | 示例详解 |
 | [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) | AI 生成流程 |
+| [Device Library](https://github.com/xxrust/RustPLC/wiki/Device-Library) | 设备库与端口模型 |
 | [Contributing](https://github.com/xxrust/RustPLC/wiki/Contributing) | 开发指南 |
 
 **本地文档（仓库内）：**
@@ -396,6 +399,13 @@ cargo run --release -- release-bundle examples/assembly_station.plc \
 - ✅ 测试盘点矩阵与参数化重构，删除无效测试
 - ✅ 语义 Diff 与影响分析（节点/端口/关系/标签变化 + 受影响规则/测试/模块）
 - ✅ 性能门禁：500 节点/2000 边基线，p95 阈值 CI 告警
+
+**设备库与端口模型：**
+- ✅ 统一端口模型：所有设备都有端口，两段引用 `device.state` 自动填充 `port: "self"`
+- ✅ 三段引用 `device.port.state` 支持多端口设备（如双线圈电磁阀）
+- ✅ 设备库 `devices/*.toml`：声明端口状态域与设备级安全约束
+- ✅ 编译期自动注入设备库约束，`source: "device:<type>"` 标注来源
+- ✅ `ActionTarget` 统一端口感知的动作目标模型
 
 ### 计划中
 

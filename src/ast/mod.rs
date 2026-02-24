@@ -62,6 +62,10 @@ pub struct DevicePort {
     #[serde(rename = "type")]
     pub port_type: PortType,
     pub role: PortRole,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub states: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub default_state: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -172,7 +176,13 @@ pub struct AnalogRange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateReference {
     pub device: String,
+    #[serde(default = "default_port")]
+    pub port: String,
     pub state: String,
+}
+
+fn default_port() -> String {
+    "self".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -190,6 +200,8 @@ pub struct SafetyConstraint {
     pub relation: SafetyRelation,
     pub right: SafetyOperand,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -293,13 +305,39 @@ pub enum StepStatement {
     AllowIndefiniteWait(bool),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ActionTarget {
+    pub device: String,
+    #[serde(default = "default_port")]
+    pub port: String,
+}
+
+impl std::fmt::Display for ActionTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.port == "self" {
+            write!(f, "{}", self.device)
+        } else {
+            write!(f, "{}.{}", self.device, self.port)
+        }
+    }
+}
+
+impl ActionTarget {
+    pub fn simple(device: impl Into<String>) -> Self {
+        Self {
+            device: device.into(),
+            port: "self".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum ActionStatement {
-    Extend { target: String },
-    Retract { target: String },
-    Set { target: String, value: BinaryValue },
-    SetAnalog { target: String, value: f64 },
+    Extend { target: ActionTarget },
+    Retract { target: ActionTarget },
+    Set { target: ActionTarget, value: BinaryValue },
+    SetAnalog { target: ActionTarget, value: f64 },
     Log { message: String },
 }
 

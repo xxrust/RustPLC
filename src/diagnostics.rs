@@ -304,7 +304,7 @@ impl PlcEvidence {
                 | ActionStatement::Retract { target }
                 | ActionStatement::Set { target, .. }
                 | ActionStatement::SetAnalog { target, .. } => {
-                    self.action_targets.insert(target.clone());
+                    self.action_targets.insert(target.device.clone());
                 }
                 ActionStatement::Log { .. } => {}
             },

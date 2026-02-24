@@ -595,7 +595,7 @@ fn collect_threshold_values_from_statements(
                 collect_threshold_values_from_wait(wait, values_by_device);
             }
             StepStatement::Action(ActionStatement::SetAnalog { target, value }) => {
-                add_threshold_value(values_by_device, target, *value);
+                add_threshold_value(values_by_device, &target.device, *value);
             }
             StepStatement::Repeat { body, .. } => {
                 collect_threshold_values_from_statements(body, values_by_device);
@@ -802,7 +802,7 @@ fn transition_effects(
 
     for action in &transition.actions {
         match action {
-            TransitionAction::SetAnalog { target, value_raw } => {
+            TransitionAction::SetAnalog { target, value_raw, .. } => {
                 let Some(device_id) = device_index.get(target).copied() else {
                     continue;
                 };
@@ -836,9 +836,9 @@ fn transition_effects(
 
 fn action_effect(action: &TransitionAction) -> Option<(&str, &str)> {
     match action {
-        TransitionAction::Extend { target } => Some((target.as_str(), "extended")),
-        TransitionAction::Retract { target } => Some((target.as_str(), "retracted")),
-        TransitionAction::Set { target, value } => {
+        TransitionAction::Extend { target, .. } => Some((target.as_str(), "extended")),
+        TransitionAction::Retract { target, .. } => Some((target.as_str(), "retracted")),
+        TransitionAction::Set { target, value, .. } => {
             let state = match value {
                 crate::ir::BinaryValue::On => "on",
                 crate::ir::BinaryValue::Off => "off",
@@ -897,9 +897,9 @@ fn guard_name(guard: &TransitionGuard) -> &'static str {
 
 fn action_name(action: &TransitionAction) -> Option<String> {
     match action {
-        TransitionAction::Extend { target } => Some(format!("extend {target}")),
-        TransitionAction::Retract { target } => Some(format!("retract {target}")),
-        TransitionAction::Set { target, value } => Some(format!(
+        TransitionAction::Extend { target, .. } => Some(format!("extend {target}")),
+        TransitionAction::Retract { target, .. } => Some(format!("retract {target}")),
+        TransitionAction::Set { target, value, .. } => Some(format!(
             "set {} {}",
             target,
             match value {
@@ -907,7 +907,7 @@ fn action_name(action: &TransitionAction) -> Option<String> {
                 crate::ir::BinaryValue::Off => "off",
             }
         )),
-        TransitionAction::SetAnalog { target, value_raw } => {
+        TransitionAction::SetAnalog { target, value_raw, .. } => {
             Some(format!("set_analog {target} {value_raw}"))
         }
         TransitionAction::Log { message } => Some(format!("log \"{message}\"")),
@@ -1895,13 +1895,16 @@ task main:
             left: SafetyExpr::State(StateExpr {
                 device: "unknown_device".to_string(),
                 state: "on".to_string(),
+                port: String::new(),
             }),
             relation: SafetyRelation::ConflictsWith,
             right: SafetyExpr::State(StateExpr {
                 device: "out_a".to_string(),
                 state: "on".to_string(),
+                port: String::new(),
             }),
             reason: None,
+            source: None,
         });
 
         let report = verify_safety(&program, &constraints, &state_machine)
@@ -1949,25 +1952,31 @@ task main:
             left: SafetyExpr::State(StateExpr {
                 device: "unknown_device".to_string(),
                 state: "on".to_string(),
+                port: String::new(),
             }),
             relation: SafetyRelation::ConflictsWith,
             right: SafetyExpr::State(StateExpr {
                 device: "out_a".to_string(),
                 state: "on".to_string(),
+                port: String::new(),
             }),
             reason: None,
+            source: None,
         });
         constraints.safety.push(SafetyRule {
             left: SafetyExpr::State(StateExpr {
                 device: "unknown_device_2".to_string(),
                 state: "on".to_string(),
+                port: String::new(),
             }),
             relation: SafetyRelation::Requires,
             right: SafetyExpr::State(StateExpr {
                 device: "out_a".to_string(),
                 state: "on".to_string(),
+                port: String::new(),
             }),
             reason: None,
+            source: None,
         });
 
         let report = verify_safety(&program, &constraints, &state_machine)

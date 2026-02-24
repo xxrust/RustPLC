@@ -226,34 +226,34 @@ impl TimingContext {
     fn action_duration_ms(&self, action: &ActionStatement) -> Option<(String, u64)> {
         let (target, action_name, own_duration_ms) = match action {
             ActionStatement::Extend { target } => {
-                let profile = self.profiles.get(target)?;
+                let profile = self.profiles.get(&target.device)?;
                 let own = profile
                     .stroke_ms
                     .or(profile.response_ms)
                     .or(profile.ramp_ms)?;
-                (target.as_str(), format!("extend {target}"), own)
+                (target.device.as_str(), format!("extend {}", target.device), own)
             }
             ActionStatement::Retract { target } => {
-                let profile = self.profiles.get(target)?;
+                let profile = self.profiles.get(&target.device)?;
                 let own = profile
                     .retract_ms
                     .or(profile.response_ms)
                     .or(profile.ramp_ms)?;
-                (target.as_str(), format!("retract {target}"), own)
+                (target.device.as_str(), format!("retract {}", target.device), own)
             }
             ActionStatement::Set { target, value } => {
-                let profile = self.profiles.get(target)?;
+                let profile = self.profiles.get(&target.device)?;
                 let own = profile.ramp_ms.or(profile.response_ms)?;
                 (
-                    target.as_str(),
-                    format!("set {target} {}", binary_value_text(value)),
+                    target.device.as_str(),
+                    format!("set {} {}", target.device, binary_value_text(value)),
                     own,
                 )
             }
             ActionStatement::SetAnalog { target, value } => {
-                let profile = self.profiles.get(target)?;
+                let profile = self.profiles.get(&target.device)?;
                 let own = profile.ramp_ms.or(profile.response_ms)?;
-                (target.as_str(), format!("set_analog {target} {value}"), own)
+                (target.device.as_str(), format!("set_analog {} {value}", target.device), own)
             }
             ActionStatement::Log { .. } => return None,
         };

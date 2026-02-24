@@ -7,7 +7,7 @@ number = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
 integer = @{ ASCII_DIGIT+ }
 
 string_literal = @{ "\"" ~ ("\\\"" | !"\"" ~ ANY)* ~ "\"" }
-state_reference = @{ identifier ~ "." ~ identifier }
+state_reference = @{ identifier ~ "." ~ identifier ~ ("." ~ identifier)? }
 duration_value = @{ number ~ ("ms" | "s") }
 measured_value = @{ number ~ ASCII_ALPHA+ }
 boolean_value = { "true" | "false" }
@@ -133,11 +133,12 @@ constraint_declaration = {
 constraints_section = { section_constraints ~ constraint_declaration* }
 constraints_file = { SOI ~ constraints_section ~ EOI }
 
-action_extend = { "extend" ~ identifier }
-action_retract = { "retract" ~ identifier }
+action_target    = @{ identifier ~ ("." ~ identifier)? }
+action_extend    = { "extend" ~ action_target }
+action_retract   = { "retract" ~ action_target }
 binary_output_value = { "on" | "off" }
-action_set_analog = { "set_analog" ~ identifier ~ number }
-action_set = { "set" ~ identifier ~ binary_output_value }
+action_set_analog = { "set_analog" ~ action_target ~ number }
+action_set       = { "set" ~ action_target ~ binary_output_value }
 action_log = { "log" ~ string_literal }
 action_command = {
     action_extend

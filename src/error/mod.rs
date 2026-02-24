@@ -196,6 +196,35 @@ impl PlcError {
         }
     }
 
+    pub fn device_library_parse_error(path: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::ParseError {
+            location: SourceLocation::new(path, 0, 0),
+            message: format!("设备库 TOML 解析失败: {}", detail.into()),
+            reason: Some("请检查 TOML 文件格式".into()),
+        }
+    }
+
+    pub fn device_library_io_error(path: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::ParseError {
+            location: SourceLocation::new(path, 0, 0),
+            message: format!("设备库文件读取失败: {}", detail.into()),
+            reason: None,
+        }
+    }
+
+    pub fn device_library_invalid_port_ref(
+        port_state: impl Into<String>,
+        instance: impl Into<String>,
+    ) -> Self {
+        let ps = port_state.into();
+        let inst = instance.into();
+        Self::SemanticError {
+            location: SourceLocation::from_line(0),
+            message: format!("设备库约束端口引用格式错误: {ps} (设备实例: {inst})"),
+            reason: Some("端口引用格式应为 port.state".into()),
+        }
+    }
+
     pub fn line(&self) -> usize {
         self.location().line
     }

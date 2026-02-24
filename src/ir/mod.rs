@@ -96,10 +96,10 @@ pub enum TransitionGuard {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum TransitionAction {
-    Extend { target: String },
-    Retract { target: String },
-    Set { target: String, value: BinaryValue },
-    SetAnalog { target: String, value_raw: String },
+    Extend { target: String, port: String },
+    Retract { target: String, port: String },
+    Set { target: String, port: String, value: BinaryValue },
+    SetAnalog { target: String, port: String, value_raw: String },
     Log { message: String },
 }
 
@@ -146,7 +146,13 @@ pub struct StateMachine {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StateExpr {
     pub device: String,
+    #[serde(default = "default_self_port")]
+    pub port: String,
     pub state: String,
+}
+
+fn default_self_port() -> String {
+    "self".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -173,6 +179,8 @@ pub struct SafetyRule {
     pub relation: SafetyRelation,
     pub right: SafetyExpr,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -321,6 +329,7 @@ mod tests {
                 },
                 actions: vec![TransitionAction::Extend {
                     target: "cyl_A".to_string(),
+                    port: "self".to_string(),
                 }],
                 timers: vec![TimerOperation {
                     timer_name: "extend_A_timeout".to_string(),
@@ -339,14 +348,17 @@ mod tests {
             safety: vec![SafetyRule {
                 left: SafetyExpr::State(StateExpr {
                     device: "cyl_A".to_string(),
+                    port: "self".to_string(),
                     state: "extended".to_string(),
                 }),
                 relation: SafetyRelation::ConflictsWith,
                 right: SafetyExpr::State(StateExpr {
                     device: "cyl_B".to_string(),
+                    port: "self".to_string(),
                     state: "extended".to_string(),
                 }),
                 reason: Some("避免机械冲突".to_string()),
+                source: None,
             }],
             timing: vec![TimingRule {
                 scope: TimingScope::Task {

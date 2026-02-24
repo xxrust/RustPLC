@@ -1,0 +1,10 @@
+[identity]
+name = "接近传感器"
+type = "sensor"
+
+[[interfaces.ports]]
+name = "self"
+states = ["on", "off"]
+default_state = "off"
+direction = "input"
+port_type = "digital"

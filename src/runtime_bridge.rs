@@ -667,15 +667,15 @@ fn convert_action(
     a: &TransitionAction,
 ) -> Result<Action, BridgeError> {
     match a {
-        TransitionAction::Extend { target } => {
+        TransitionAction::Extend { target, .. } => {
             let output = resolver.resolve_digital_output_id(state_name, target)?;
             Ok(Action::Extend { output })
         }
-        TransitionAction::Retract { target } => {
+        TransitionAction::Retract { target, .. } => {
             let output = resolver.resolve_digital_output_id(state_name, target)?;
             Ok(Action::Retract { output })
         }
-        TransitionAction::Set { target, value } => {
+        TransitionAction::Set { target, value, .. } => {
             let id = resolver.resolve_digital_output_id(state_name, target)?;
             let value = match value {
                 IrBinaryValue::On => true,
@@ -683,7 +683,7 @@ fn convert_action(
             };
             Ok(Action::SetDigital { id, value })
         }
-        TransitionAction::SetAnalog { target, value_raw } => {
+        TransitionAction::SetAnalog { target, value_raw, .. } => {
             let id = resolver.resolve_analog_output_id(state_name, target)?;
             let value =
                 value_raw

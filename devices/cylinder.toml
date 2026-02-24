@@ -1,0 +1,10 @@
+[identity]
+name = "气缸"
+type = "cylinder"
+
+[[interfaces.ports]]
+name = "self"
+states = ["extended", "retracted"]
+default_state = "retracted"
+direction = "output"
+port_type = "pneumatic"

@@ -1,0 +1,23 @@
+[identity]
+name = "双线圈电磁阀"
+type = "solenoid_valve"
+
+[[interfaces.ports]]
+name = "coil_A"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "coil_B"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[device_constraints.safety]]
+left = "coil_A.on"
+right = "coil_B.on"
+relation = "conflicts_with"
+reason = "双线圈不能同时通电"

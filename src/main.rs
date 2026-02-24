@@ -4,7 +4,7 @@ use rust_plc::parser::parse_plc;
 use rust_plc::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
-    preprocess_program,
+    preprocess_program, preprocess_program_with_library,
 };
 use rust_plc::topology_semantic_gate::{
     collect_topology_deprecation_warnings, validate_device_purpose_required,
@@ -9511,7 +9511,25 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
     }
     validate_device_purpose_required(&program.topology)
         .map_err(|gate_error| vec![gate_error.to_string()])?;
-    let expanded_program = preprocess_program(&program).map_err(|errors| {
+
+    // Load device library from `devices/` directory next to the .plc file (or CWD).
+    let devices_dir = std::path::Path::new("devices");
+    let device_library = match rust_plc::device_library::DeviceLibrary::load(devices_dir) {
+        Ok(lib) => lib,
+        Err(errors) => {
+            return Err(errors.into_iter().map(|e| e.to_string()).collect());
+        }
+    };
+
+    let expanded_program = preprocess_program_with_library(
+        &program,
+        if device_library.is_empty() {
+            None
+        } else {
+            Some(&device_library)
+        },
+    )
+    .map_err(|errors| {
         errors
             .into_iter()
             .map(|e| e.to_string())

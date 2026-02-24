@@ -1,5 +1,5 @@
 use crate::ast::{
-    ActionStatement, BinaryValue, Branch, CausalityConstraint, ComparisonOperator,
+    ActionStatement, ActionTarget, BinaryValue, Branch, CausalityConstraint, ComparisonOperator,
     ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DevicePort,
     DeviceTags, DeviceType, DurationValue, GotoDirective, LiteralValue, MeasuredValue,
     OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch,
@@ -418,6 +418,7 @@ fn parse_safety_constraint(pair: Pair<Rule>) -> Result<SafetyConstraint, PlcErro
         relation: relation.ok_or_else(|| PlcError::parse(line, "safety 约束缺少关系符"))?,
         right: right.ok_or_else(|| PlcError::parse(line, "safety 约束缺少右侧操作数"))?,
         reason,
+        source: None,
     })
 }
 
@@ -544,6 +545,7 @@ fn parse_causality_constraint(pair: Pair<Rule>) -> Result<CausalityConstraint, P
                     .filter(|item| item.as_rule() == Rule::identifier)
                     .map(|item| StateReference {
                         device: item.as_str().to_string(),
+                        port: String::new(),
                         // Causality declarations are device-level chains, so state is intentionally empty.
                         state: String::new(),
                     })
@@ -740,30 +742,29 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
 
     match action.as_rule() {
         Rule::action_extend => {
-            let target = action
+            let target_pair = action
                 .into_inner()
                 .next()
-                .ok_or_else(|| PlcError::parse(line, "extend 缺少目标设备"))?
-                .as_str()
-                .to_string();
-            Ok(ActionStatement::Extend { target })
+                .ok_or_else(|| PlcError::parse(line, "extend 缺少目标设备"))?;
+            Ok(ActionStatement::Extend {
+                target: parse_action_target(target_pair)?,
+            })
         }
         Rule::action_retract => {
-            let target = action
+            let target_pair = action
                 .into_inner()
                 .next()
-                .ok_or_else(|| PlcError::parse(line, "retract 缺少目标设备"))?
-                .as_str()
-                .to_string();
-            Ok(ActionStatement::Retract { target })
+                .ok_or_else(|| PlcError::parse(line, "retract 缺少目标设备"))?;
+            Ok(ActionStatement::Retract {
+                target: parse_action_target(target_pair)?,
+            })
         }
         Rule::action_set_analog => {
             let mut parts = action.into_inner();
-            let target = parts
+            let target_pair = parts
                 .next()
-                .ok_or_else(|| PlcError::parse(line, "set_analog 缺少目标设备"))?
-                .as_str()
-                .to_string();
+                .ok_or_else(|| PlcError::parse(line, "set_analog 缺少目标设备"))?;
+            let target = parse_action_target(target_pair)?;
             let value_pair = parts
                 .next()
                 .ok_or_else(|| PlcError::parse(line, "set_analog 缺少数值"))?;
@@ -775,11 +776,10 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
         }
         Rule::action_set => {
             let mut parts = action.into_inner();
-            let target = parts
+            let target_pair = parts
                 .next()
-                .ok_or_else(|| PlcError::parse(line, "set 缺少目标设备"))?
-                .as_str()
-                .to_string();
+                .ok_or_else(|| PlcError::parse(line, "set 缺少目标设备"))?;
+            let target = parse_action_target(target_pair)?;
             let value_pair = parts
                 .next()
                 .ok_or_else(|| PlcError::parse(line, "set 缺少 on/off 值"))?;
@@ -1082,14 +1082,36 @@ fn parse_on_complete_statement(pair: Pair<Rule>) -> Result<OnCompleteDirective, 
 fn parse_state_reference(pair: Pair<Rule>) -> Result<StateReference, PlcError> {
     let line = line_of(&pair);
     let raw = pair.as_str();
-    let (device, state) = raw
-        .split_once('.')
-        .ok_or_else(|| PlcError::parse(line, format!("状态引用格式错误: {raw}")))?;
+    let parts: Vec<&str> = raw.splitn(3, '.').collect();
 
-    Ok(StateReference {
-        device: device.to_string(),
-        state: state.to_string(),
-    })
+    match parts.as_slice() {
+        [device, state] => Ok(StateReference {
+            device: device.to_string(),
+            port: "self".to_string(),
+            state: state.to_string(),
+        }),
+        [device, port, state] => Ok(StateReference {
+            device: device.to_string(),
+            port: port.to_string(),
+            state: state.to_string(),
+        }),
+        _ => Err(PlcError::parse(line, format!("状态引用格式错误: {raw}"))),
+    }
+}
+
+fn parse_action_target(pair: Pair<Rule>) -> Result<ActionTarget, PlcError> {
+    let raw = pair.as_str();
+    if let Some((device, port)) = raw.split_once('.') {
+        Ok(ActionTarget {
+            device: device.to_string(),
+            port: port.to_string(),
+        })
+    } else {
+        Ok(ActionTarget {
+            device: raw.to_string(),
+            port: "self".to_string(),
+        })
+    }
 }
 
 fn parse_duration_value(pair: Pair<Rule>) -> Result<DurationValue, PlcError> {
@@ -1513,6 +1535,8 @@ fn parse_port_definition(pair: Pair<Rule>) -> Result<DevicePort, PlcError> {
         id: port_id.ok_or_else(|| PlcError::parse(line, "端口定义缺少 id"))?,
         port_type: port_type.ok_or_else(|| PlcError::parse(line, "端口定义缺少 type"))?,
         role: role.ok_or_else(|| PlcError::parse(line, "端口定义缺少 role"))?,
+        states: Vec::new(),
+        default_state: String::new(),
     })
 }
 
@@ -2511,7 +2535,7 @@ task ready:
 
         assert!(matches!(
             init_task.steps[0].statements.first(),
-            Some(StepStatement::Action(ActionStatement::Extend { target })) if target == "cyl_A"
+            Some(StepStatement::Action(ActionStatement::Extend { target })) if target.device == "cyl_A"
         ));
     }
 

@@ -2,10 +2,10 @@ use crate::ast::{
     ActionStatement, BinaryValue as AstBinaryValue, ComparisonOperator, ConditionExpression,
     ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType, DurationValue,
     GotoDirective, LiteralValue, OnCompleteDirective, ParallelBlock, PlcProgram, PortRole,
-    PortType, RaceBlock, SafetyOperand, SafetyRelation as AstSafetyRelation, StepStatement,
-    TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective, TimingRelation as AstTimingRelation,
-    TimingTarget, TopologyConnection, TopologyRelation, TopologySection, WaitCondition,
-    WaitStatement,
+    PortType, RaceBlock, SafetyConstraint, SafetyOperand, SafetyRelation as AstSafetyRelation,
+    StateReference, StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective,
+    TimingRelation as AstTimingRelation, TimingTarget, TopologyConnection, TopologyRelation,
+    TopologySection, WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use crate::ir::{
@@ -30,12 +30,135 @@ struct DeviceNode {
 /// Currently this performs compile-time `repeat N:` expansion by rewriting it into `N` sequential
 /// steps named with `_1.._N` suffixes.
 pub fn preprocess_program(program: &PlcProgram) -> Result<PlcProgram, Vec<PlcError>> {
+    preprocess_program_with_library(program, None)
+}
+
+/// Like `preprocess_program`, but also injects device-library constraints when a library is provided.
+pub fn preprocess_program_with_library(
+    program: &PlcProgram,
+    device_library: Option<&crate::device_library::DeviceLibrary>,
+) -> Result<PlcProgram, Vec<PlcError>> {
     let expanded_tasks = expand_repeat_blocks(&program.tasks)?;
     let expanded_topology = expand_plc_controller_devices(&program.topology)?;
     let mut rewritten = program.clone();
     rewritten.tasks = expanded_tasks;
     rewritten.topology = expanded_topology;
+
+    if let Some(library) = device_library {
+        if !library.is_empty() {
+            inject_device_constraints(&mut rewritten, library)?;
+        }
+    }
+
     Ok(rewritten)
+}
+
+fn device_type_str(device_type: &DeviceType) -> &'static str {
+    match device_type {
+        DeviceType::DigitalOutput => "digital_output",
+        DeviceType::DigitalInput => "digital_input",
+        DeviceType::Plc => "plc",
+        DeviceType::SolenoidValve => "solenoid_valve",
+        DeviceType::Cylinder => "cylinder",
+        DeviceType::Sensor => "sensor",
+        DeviceType::Motor => "motor",
+        DeviceType::AnalogInput => "analog_input",
+        DeviceType::AnalogOutput => "analog_output",
+        DeviceType::Pid => "pid",
+    }
+}
+
+fn inject_device_constraints(
+    program: &mut PlcProgram,
+    library: &crate::device_library::DeviceLibrary,
+) -> Result<(), Vec<PlcError>> {
+    let mut errors = Vec::new();
+
+    for device in &mut program.topology.devices {
+        let type_key = device_type_str(&device.device_type);
+        let Some(def) = library.get(type_key) else {
+            continue;
+        };
+
+        // Inject port states from library into device ports
+        for lib_port in &def.interfaces.ports {
+            if let Some(existing) = device
+                .attributes
+                .ports
+                .iter_mut()
+                .find(|p| p.id == lib_port.name)
+            {
+                if existing.states.is_empty() {
+                    existing.states = lib_port.states.clone();
+                }
+                if existing.default_state.is_empty() {
+                    existing.default_state = lib_port.default_state.clone();
+                }
+            }
+            // Don't auto-register ports not declared in DSL — the library enriches, not overrides
+        }
+
+        // Expand device-library safety constraints into AST constraints
+        for lib_safety in &def.device_constraints.safety {
+            let left = match expand_port_state_ref(&lib_safety.left, &device.name) {
+                Ok(sr) => SafetyOperand::State(sr),
+                Err(e) => {
+                    errors.push(e);
+                    continue;
+                }
+            };
+            let right = match expand_port_state_ref(&lib_safety.right, &device.name) {
+                Ok(sr) => SafetyOperand::State(sr),
+                Err(e) => {
+                    errors.push(e);
+                    continue;
+                }
+            };
+            let relation = match lib_safety.relation.as_str() {
+                "conflicts_with" => AstSafetyRelation::ConflictsWith,
+                "requires" => AstSafetyRelation::Requires,
+                other => {
+                    errors.push(PlcError::semantic(
+                        0,
+                        format!(
+                            "设备库约束关系未知: {other} (设备实例: {})",
+                            device.name
+                        ),
+                    ));
+                    continue;
+                }
+            };
+
+            program.constraints.safety.push(SafetyConstraint {
+                line: 0,
+                left,
+                relation,
+                right,
+                reason: lib_safety.reason.clone(),
+                source: Some(format!("device:{}", type_key)),
+            });
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+fn expand_port_state_ref(
+    port_state: &str,
+    instance: &str,
+) -> Result<StateReference, PlcError> {
+    let (port, state) = port_state.split_once('.').ok_or_else(|| {
+        PlcError::device_library_invalid_port_ref(port_state, instance)
+    })?;
+    Ok(StateReference {
+        device: instance.to_string(),
+        port: port.to_string(),
+        state: state.to_string(),
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -987,6 +1110,7 @@ pub fn build_constraint_set_from_ast(
             relation: map_safety_relation(&safety.relation),
             right: map_safety_operand(&safety.right),
             reason: safety.reason.clone(),
+            source: safety.source.clone(),
         });
     }
 
@@ -1669,7 +1793,7 @@ fn validate_analog_actions_in_statements(
     for statement in statements {
         match statement {
             StepStatement::Action(ActionStatement::SetAnalog { target, value }) => {
-                if let Some(kind) = device_kinds.get(target) {
+                if let Some(kind) = device_kinds.get(&target.device) {
                     if *kind != DeviceKind::AnalogOutput && *kind != DeviceKind::Motor {
                         errors.push(PlcError::type_mismatch_with_reason(
                             line,
@@ -1680,7 +1804,7 @@ fn validate_analog_actions_in_statements(
                         ));
                     }
                 }
-                if let Some((min, max)) = device_ranges.get(target) {
+                if let Some((min, max)) = device_ranges.get(&target.device) {
                     if *value < *min || *value > *max {
                         errors.push(PlcError::semantic_with_reason(
                             line,
@@ -1691,7 +1815,7 @@ fn validate_analog_actions_in_statements(
                 }
             }
             StepStatement::Action(ActionStatement::Set { target, .. }) => {
-                if let Some(kind) = device_kinds.get(target) {
+                if let Some(kind) = device_kinds.get(&target.device) {
                     if *kind == DeviceKind::AnalogOutput || *kind == DeviceKind::AnalogInput {
                         errors.push(PlcError::type_mismatch_with_reason(
                             line,
@@ -1967,6 +2091,7 @@ fn map_safety_operand(operand: &SafetyOperand) -> SafetyExpr {
     match operand {
         SafetyOperand::State(state_ref) => SafetyExpr::State(StateExpr {
             device: state_ref.device.clone(),
+            port: state_ref.port.clone(),
             state: state_ref.state.clone(),
         }),
         SafetyOperand::Threshold {
@@ -2083,10 +2208,10 @@ fn action_to_timing(
     errors: &mut Vec<PlcError>,
 ) -> Option<ActionTiming> {
     let (action_kind, target) = match action {
-        ActionStatement::Extend { target } => (ActionKind::Extend, Some(target.as_str())),
-        ActionStatement::Retract { target } => (ActionKind::Retract, Some(target.as_str())),
-        ActionStatement::Set { target, .. } => (ActionKind::Set, Some(target.as_str())),
-        ActionStatement::SetAnalog { target, .. } => (ActionKind::SetAnalog, Some(target.as_str())),
+        ActionStatement::Extend { target } => (ActionKind::Extend, Some(target.device.as_str())),
+        ActionStatement::Retract { target } => (ActionKind::Retract, Some(target.device.as_str())),
+        ActionStatement::Set { target, .. } => (ActionKind::Set, Some(target.device.as_str())),
+        ActionStatement::SetAnalog { target, .. } => (ActionKind::SetAnalog, Some(target.device.as_str())),
         ActionStatement::Log { .. } => (ActionKind::Log, None),
     };
 
@@ -2781,20 +2906,24 @@ fn resolve_task_target(
 fn action_to_transition_action(action: &ActionStatement) -> TransitionAction {
     match action {
         ActionStatement::Extend { target } => TransitionAction::Extend {
-            target: target.clone(),
+            target: target.device.clone(),
+            port: target.port.clone(),
         },
         ActionStatement::Retract { target } => TransitionAction::Retract {
-            target: target.clone(),
+            target: target.device.clone(),
+            port: target.port.clone(),
         },
         ActionStatement::Set { target, value } => TransitionAction::Set {
-            target: target.clone(),
+            target: target.device.clone(),
+            port: target.port.clone(),
             value: match value {
                 AstBinaryValue::On => IrBinaryValue::On,
                 AstBinaryValue::Off => IrBinaryValue::Off,
             },
         },
         ActionStatement::SetAnalog { target, value } => TransitionAction::SetAnalog {
-            target: target.clone(),
+            target: target.device.clone(),
+            port: target.port.clone(),
             value_raw: value.to_string(),
         },
         ActionStatement::Log { message } => TransitionAction::Log {
