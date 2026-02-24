@@ -79,6 +79,7 @@ fn inject_device_constraints(
         let Some(def) = library.get(type_key) else {
             continue;
         };
+        let declared_port_ids = known_port_ids(device);
 
         // Inject port states from library into device ports
         for lib_port in &def.interfaces.ports {
@@ -100,6 +101,25 @@ fn inject_device_constraints(
 
         // Expand device-library safety constraints into AST constraints
         for lib_safety in &def.device_constraints.safety {
+            let Some((left_port, _)) = lib_safety.left.split_once('.') else {
+                errors.push(PlcError::device_library_invalid_port_ref(
+                    &lib_safety.left,
+                    &device.name,
+                ));
+                continue;
+            };
+            let Some((right_port, _)) = lib_safety.right.split_once('.') else {
+                errors.push(PlcError::device_library_invalid_port_ref(
+                    &lib_safety.right,
+                    &device.name,
+                ));
+                continue;
+            };
+            // Library constraints should only apply when the device exposes the referenced ports.
+            if !declared_port_ids.contains(left_port) || !declared_port_ids.contains(right_port) {
+                continue;
+            }
+
             let left = match expand_port_state_ref(&lib_safety.left, &device.name) {
                 Ok(sr) => SafetyOperand::State(sr),
                 Err(e) => {
@@ -144,6 +164,37 @@ fn inject_device_constraints(
         Ok(())
     } else {
         Err(errors)
+    }
+}
+
+fn known_port_ids(device: &DeviceDeclaration) -> HashSet<String> {
+    if !device.attributes.ports.is_empty() {
+        return device
+            .attributes
+            .ports
+            .iter()
+            .map(|port| port.id.clone())
+            .collect();
+    }
+
+    implicit_port_ids_for_device_type(&device.device_type)
+        .iter()
+        .map(|port| (*port).to_string())
+        .collect()
+}
+
+fn implicit_port_ids_for_device_type(device_type: &DeviceType) -> &'static [&'static str] {
+    match device_type {
+        DeviceType::DigitalOutput => &["out"],
+        DeviceType::DigitalInput => &["in"],
+        DeviceType::Plc => &[],
+        DeviceType::SolenoidValve => &["coil", "out"],
+        DeviceType::Cylinder => &["cmd", "extended", "retracted"],
+        DeviceType::Sensor => &["sense", "out"],
+        DeviceType::Motor => &["cmd", "on"],
+        DeviceType::AnalogInput => &["in"],
+        DeviceType::AnalogOutput => &["out"],
+        DeviceType::Pid => &["in", "out"],
     }
 }
 

@@ -20,9 +20,10 @@ fn sim_pid_kpi_cli_is_deterministic_and_within_thresholds() {
 
     let plc = r#"
 [topology]
-device AI0: analog_input { range: 0..100, unit: "bar", external: true }
-device AO0: analog_output { range: 0..100, unit: "%" }
+device AI0: analog_input { purpose: "压力反馈输入", range: 0..100, unit: "bar", external: true }
+device AO0: analog_output { purpose: "调节阀输出", range: 0..100, unit: "%" }
 device loop_pressure: pid {
+    purpose: "压力闭环控制器",
     pv: AI0,
     sp: 60bar,
     kp: 2.0,

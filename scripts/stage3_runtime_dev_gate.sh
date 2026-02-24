@@ -51,22 +51,26 @@ mkdir -p "$TMP_DIR/plcs" "$TMP_DIR/scenarios"
 cat > "$TMP_DIR/plcs/fixture.plc" <<'PLC'
 [topology]
 
-device Y0: digital_output
-device X0: digital_input
+device Y0: digital_output { purpose: "测试输出通道" }
+device X0: digital_input { purpose: "测试输入通道" }
 
 device start_button: digital_input {
+    purpose: "启动按钮输入"
     driven_by: X0
 }
 
 device valve_A: solenoid_valve {
+    purpose: "气缸伸缩控制阀"
     driven_by: Y0
 }
 
 device cyl_A: cylinder {
+    purpose: "执行气缸"
     driven_by: valve_A
 }
 
 device sensor_ext: sensor {
+    purpose: "气缸伸出到位检测"
     driven_by: X0
     detects: cyl_A.extended
 }

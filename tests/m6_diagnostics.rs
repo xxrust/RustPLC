@@ -7,6 +7,23 @@ fn repo_path(p: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(p)
 }
 
+fn read_first_existing_doc(candidates: &[PathBuf]) -> String {
+    for path in candidates {
+        if path.exists() {
+            return fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("read doc failed {}: {e}", path.display()));
+        }
+    }
+    panic!(
+        "read doc failed: none of the expected files exist: {}",
+        candidates
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+
 fn temp_dir(prefix: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "{prefix}_{}_{}",
@@ -235,8 +252,10 @@ inputs:
 
 #[test]
 fn diagnostics_doc_and_cli_usage_include_trace_doctor_and_diag_codes() {
-    let doc =
-        fs::read_to_string(repo_path("docs/m6_diagnostics.md")).expect("read diagnostics doc");
+    let doc = read_first_existing_doc(&[
+        repo_path("docs/m6_diagnostics.md"),
+        repo_path("docs/已实现/m6_diagnostics.md"),
+    ]);
     for needle in [
         "trace-doctor",
         "DIAG-IN-001",

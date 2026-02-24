@@ -456,6 +456,8 @@ fn device_port(id: &str, port_type: PortType, role: PortRole) -> DevicePort {
         id: id.to_string(),
         port_type,
         role,
+        states: Vec::new(),
+        default_state: String::new(),
     }
 }
 

@@ -22,8 +22,8 @@ fn cli_writes_structured_verification_report_with_counts() {
 
     let source = r#"
 [topology]
-device start_button: digital_input
-device motor: digital_output
+device start_button: digital_input { purpose: "启动输入" }
+device motor: digital_output { purpose: "电机输出" }
 
 [constraints]
 
@@ -108,9 +108,9 @@ fn cli_report_captures_bounded_safety_warning() {
 
     let source = r#"
 [topology]
-device mode_switch: digital_input
-device out_a: digital_output
-device out_b: digital_output
+device mode_switch: digital_input { purpose: "模式选择输入" }
+device out_a: digital_output { purpose: "A 支路输出" }
+device out_b: digital_output { purpose: "B 支路输出" }
 
 [constraints]
 safety: out_a.on requires out_a.on
@@ -175,9 +175,9 @@ fn deny_warnings_fails_process_when_warns_exist() {
 
     let source = r#"
 [topology]
-device mode_switch: digital_input
-device out_a: digital_output
-device out_b: digital_output
+device mode_switch: digital_input { purpose: "模式选择输入" }
+device out_a: digital_output { purpose: "A 支路输出" }
+device out_b: digital_output { purpose: "B 支路输出" }
 
 [constraints]
 safety: out_a.on requires out_a.on
@@ -227,8 +227,8 @@ fn budget_thresholds_emit_warn_entries() {
 
     let source = r#"
 [topology]
-device X0: digital_input
-device Y0: digital_output
+device X0: digital_input { purpose: "测试输入通道" }
+device Y0: digital_output { purpose: "测试输出通道" }
 
 [constraints]
 
@@ -278,8 +278,8 @@ fn budget_time_estimate_warns_and_deny_warnings_can_block() {
 
     let source = r#"
 [topology]
-device X0: digital_input
-device Y0: digital_output
+device X0: digital_input { purpose: "测试输入通道" }
+device Y0: digital_output { purpose: "测试输出通道" }
 
 [constraints]
 

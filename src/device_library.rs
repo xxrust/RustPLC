@@ -146,7 +146,6 @@ impl DeviceLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn empty_library_returns_none() {
