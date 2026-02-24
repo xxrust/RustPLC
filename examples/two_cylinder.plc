@@ -2,50 +2,50 @@
 
 
 device start_button: sensor {
-    purpose: "start_button: 传感器状态采集与上报",
+    purpose: "操作员启动按钮，触发双缸顺序动作循环",
     subtype: "push_button"
     debounce: 20ms
 }
 
 device valve_A: solenoid_valve {
-    purpose: "valve_A: 电磁阀执行控制",
+    purpose: "驱动 A 缸伸出/缩回的气动电磁阀",
     response_time: 20ms
 }
 
 device valve_B: solenoid_valve {
-    purpose: "valve_B: 电磁阀执行控制",
+    purpose: "驱动 B 缸伸出/缩回的气动电磁阀",
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    purpose: "cyl_A: 气缸执行机构",
+    purpose: "执行顺序动作第一步的气缸，与 B 缸互锁不得同时伸出",
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device cyl_B: cylinder {
-    purpose: "cyl_B: 气缸执行机构",
+    purpose: "执行顺序动作第二步的气缸，与 A 缸互锁不得同时伸出",
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_A_ext: sensor {
-    purpose: "sensor_A_ext: 传感器状态采集与上报",
+    purpose: "检测 A 缸已完全伸出到位的限位开关",
     subtype: "limit_switch"
 }
 
 device sensor_A_ret: sensor {
-    purpose: "sensor_A_ret: 传感器状态采集与上报",
+    purpose: "检测 A 缸已完全缩回到位的限位开关",
     subtype: "limit_switch"
 }
 
 device sensor_B_ext: sensor {
-    purpose: "sensor_B_ext: 传感器状态采集与上报",
+    purpose: "检测 B 缸已完全伸出到位的限位开关",
     subtype: "limit_switch"
 }
 
 device sensor_B_ret: sensor {
-    purpose: "sensor_B_ret: 传感器状态采集与上报",
+    purpose: "检测 B 缸已完全缩回到位的限位开关",
     subtype: "limit_switch"
 }
 

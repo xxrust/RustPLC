@@ -8,10 +8,10 @@
 # - Scenarios drive the external feedback to exercise nominal + fault paths
 
 # Physical IO (channel IDs only; bind to "virtual" in io_map.toml for motion channels)
-device AO24: analog_output { purpose: "AO24: 模拟量输出控制点",  range: 0..20000, unit: "step_s" } # axis0 vel_cmd_sps (virtual)
-device AO26: analog_output { purpose: "AO26: 模拟量输出控制点",  range: 0..20000, unit: "step_s" } # axis1 vel_cmd_sps (virtual)
-device AI24: analog_input { purpose: "AI24: 模拟量输入采集点",  range: 0..4000000, unit: "count", external: true } # axis0 count
-device AI26: analog_input { purpose: "AI26: 模拟量输入采集点",  range: 0..4000000, unit: "count", external: true } # axis1 count
+device AO24: analog_output { purpose: "axis0 速度指令输出，写入步进频率（steps/s）驱动 X 轴运动",  range: 0..20000, unit: "step_s" } # axis0 vel_cmd_sps (virtual)
+device AO26: analog_output { purpose: "axis1 速度指令输出，写入步进频率（steps/s）驱动 Y 轴运动",  range: 0..20000, unit: "step_s" } # axis1 vel_cmd_sps (virtual)
+device AI24: analog_input { purpose: "axis0 编码器计数反馈，用于判断 X 轴是否到达目标步数",  range: 0..4000000, unit: "count", external: true } # axis0 count
+device AI26: analog_input { purpose: "axis1 编码器计数反馈，用于判断 Y 轴是否到达目标步数",  range: 0..4000000, unit: "count", external: true } # axis1 count
 
 
 

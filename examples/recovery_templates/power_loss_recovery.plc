@@ -2,13 +2,13 @@
 
 
 device start_button: sensor {
-    purpose: "start_button: 传感器状态采集与上报",
+    purpose: "操作员启动按钮，触发传送带送料流程",
     debounce: 20ms
 }
-device power_ok: sensor { purpose: "power_ok: 传感器状态采集与上报" }
-device station_sensor: sensor { purpose: "station_sensor: 传感器状态采集与上报" }
-device conveyor: motor { purpose: "conveyor: 电机执行机构" }
-device alarm_light: solenoid_valve { purpose: "alarm_light: 电磁阀执行控制" }
+device power_ok: sensor { purpose: "电源监测信号，掉电时触发安全停机和恢复流程" }
+device station_sensor: sensor { purpose: "工位到位检测传感器，确认工件已输送到目标工位" }
+device conveyor: motor { purpose: "传送带驱动电机，掉电时立即停止并等待电源恢复后重启" }
+device alarm_light: solenoid_valve { purpose: "报警指示灯，掉电恢复期间持续点亮提示操作员" }
 
 relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 relation { from: power_ok.out, to: plc_main.X1, via: reports_to }

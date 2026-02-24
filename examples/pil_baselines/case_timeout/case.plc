@@ -1,7 +1,7 @@
 [topology]
 
 
-device start_button: sensor { purpose: "start_button: 传感器状态采集与上报" }
+device start_button: sensor { purpose: "启动信号输入，用于触发超时基线测试场景" }
 
 relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 

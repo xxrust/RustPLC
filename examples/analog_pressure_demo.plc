@@ -8,19 +8,19 @@
 # ===== 控制器端口 =====
 
 # ===== 模拟量 I/O =====
-device AI0: analog_input  { purpose: "AI0: 模拟量输入采集点",  range: 0..100, unit: "bar", external: true }
-device AO0: analog_output { purpose: "AO0: 模拟量输出控制点",  range: 0..10, ramp_time: 500ms }
+device AI0: analog_input  { purpose: "液压站压力传感器反馈，量程 0-100 bar",  range: 0..100, unit: "bar", external: true }
+device AO0: analog_output { purpose: "比例阀开度指令输出，0-10V 对应 0-100% 开度",  range: 0..10, ramp_time: 500ms }
 
 # ===== 执行器与传感器 =====
 device prop_valve: solenoid_valve {
-    purpose: "prop_valve: 电磁阀执行控制",
+    purpose: "液压站比例电磁阀，控制系统压力大小",
     response_time: 30ms
 }
 
-device pressure_sensor: sensor { purpose: "pressure_sensor: 传感器状态采集与上报" }
+device pressure_sensor: sensor { purpose: "检测液压站当前压力是否达到目标值的压力传感器" }
 
 device start_button: sensor {
-    purpose: "start_button: 传感器状态采集与上报",
+    purpose: "操作员启动按钮，触发液压升压流程",
     debounce: 20ms
 }
 

@@ -1,6 +1,6 @@
 [topology]
-device AI0: analog_input  { purpose: "AI0: 模拟量输入采集点",  range: 0..100, unit: "bar", external: true }
-device AO0: analog_output { purpose: "AO0: 模拟量输出控制点",  range: 0..10, unit: "V", ramp_time: 500ms }
+device AI0: analog_input  { purpose: "压力站压力传感器反馈，量程 0-100 bar",  range: 0..100, unit: "bar", external: true }
+device AO0: analog_output { purpose: "比例阀开度指令输出，0-10V 对应全关到全开",  range: 0..10, unit: "V", ramp_time: 500ms }
 
 
 device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [AI0:analog:consumer, AO0:analog:producer] }

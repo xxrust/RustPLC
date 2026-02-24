@@ -2,14 +2,14 @@
 
 
 device start_button: sensor {
-    purpose: "start_button: 传感器状态采集与上报",
+    purpose: "操作员启动按钮，触发气缸伸出/缩回循环",
     debounce: 20ms
 }
-device sensor_extend: sensor { purpose: "sensor_extend: 传感器状态采集与上报" }
-device maintenance_reset: sensor { purpose: "maintenance_reset: 传感器状态采集与上报" }
-device cyl_extend_cmd: solenoid_valve { purpose: "cyl_extend_cmd: 电磁阀执行控制" }
-device cyl_retract_cmd: solenoid_valve { purpose: "cyl_retract_cmd: 电磁阀执行控制" }
-device alarm_light: solenoid_valve { purpose: "alarm_light: 电磁阀执行控制" }
+device sensor_extend: sensor { purpose: "检测气缸已完全伸出到位的限位传感器，卡死时触发维护恢复流程" }
+device maintenance_reset: sensor { purpose: "维护人员确认复位按钮，传感器卡死故障处理完毕后按下以恢复运行" }
+device cyl_extend_cmd: solenoid_valve { purpose: "控制气缸伸出动作的电磁阀" }
+device cyl_retract_cmd: solenoid_valve { purpose: "控制气缸缩回动作的电磁阀" }
+device alarm_light: solenoid_valve { purpose: "报警指示灯，传感器卡死期间持续点亮等待维护人员介入" }
 
 relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 relation { from: sensor_extend.out, to: plc_main.X1, via: reports_to }

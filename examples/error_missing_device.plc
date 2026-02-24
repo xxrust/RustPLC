@@ -2,7 +2,7 @@
 
 
 device valve_A: solenoid_valve {
-    purpose: "valve_A: 电磁阀执行控制",
+    purpose: "驱动 A 缸的电磁阀（relation 故意引用不存在的 Y9，用于触发 missing device 错误）",
     response_time: 20ms
 }
 relation { from: Y9, to: valve_A.coil, via: driven_by }

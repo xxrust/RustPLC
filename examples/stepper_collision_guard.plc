@@ -6,30 +6,30 @@
 # - a timeout -> goto fault path
 
 # Physical IO
-device AI0: analog_input { purpose: "AI0: 模拟量输入采集点",  range: 0..4000000, unit: "count", external: true } # axis count snapshot
-device AI1: analog_input { purpose: "AI1: 模拟量输入采集点",  range: 0..3, unit: "zone", external: true } # 0=safe, 1..N=danger
+device AI0: analog_input { purpose: "编码器计数快照，用于判断轴是否到达目标位置",  range: 0..4000000, unit: "count", external: true } # axis count snapshot
+device AI1: analog_input { purpose: "碰撞区域码，0=安全，非零表示轴进入危险窗口，夹紧缸必须缩回",  range: 0..3, unit: "zone", external: true } # 0=safe, 1..N=danger
 
 # Logical devices
 device axis_x: motor {
-    purpose: "axis_x: 电机执行机构",
+    purpose: "X 轴步进电机，进入碰撞区域时必须停止运动",
     ramp_time: 10ms
 }
 
 device clamp_valve: solenoid_valve {
-    purpose: "clamp_valve: 电磁阀执行控制",
+    purpose: "驱动夹紧缸的电磁阀，轴在危险区域时禁止伸出",
     response_time: 20ms
 }
 
 device cyl_clamp: cylinder {
-    purpose: "cyl_clamp: 气缸执行机构",
+    purpose: "工件夹紧气缸，与碰撞区域码互锁，危险窗口内不得伸出",
     stroke_time: 200ms
     retract_time: 200ms
 }
 
-device inpos_x: sensor { purpose: "inpos_x: 传感器状态采集与上报" }
-device alarm_x: sensor { purpose: "alarm_x: 传感器状态采集与上报" }
-device clamp_ext: sensor { purpose: "clamp_ext: 传感器状态采集与上报" }
-device clamp_ret: sensor { purpose: "clamp_ret: 传感器状态采集与上报" }
+device inpos_x: sensor { purpose: "X 轴到位信号，驱动器反馈轴已到达目标位置" }
+device alarm_x: sensor { purpose: "X 轴驱动器报警信号，报警未清除时禁止使能轴" }
+device clamp_ext: sensor { purpose: "检测夹紧缸已完全伸出夹紧到位的限位传感器" }
+device clamp_ret: sensor { purpose: "检测夹紧缸已完全缩回松开到位的限位传感器" }
 
 relation { from: plc_main.Y1, to: axis_x.cmd, via: driven_by }
 relation { from: plc_main.Y2, to: clamp_valve.coil, via: driven_by }

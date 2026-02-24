@@ -2,22 +2,22 @@
 
 
 device start_button: sensor {
-    purpose: "start_button: 传感器状态采集与上报",
+    purpose: "操作员启动按钮，急停解除后重新启动传送带流程",
     subtype: "push_button"
     debounce: 20ms
 }
 device estop_button: sensor {
-    purpose: "estop_button: 传感器状态采集与上报",
+    purpose: "急停按钮，按下时立即停止传送带并触发恢复流程",
     subtype: "e_stop_button"
     inverted: true
     debounce: 20ms
 }
 device part_sensor: sensor {
-    purpose: "part_sensor: 传感器状态采集与上报",
+    purpose: "工件到位检测传感器，确认工件已输送到目标工位",
     subtype: "proximity_sensor"
 }
-device conveyor: motor { purpose: "conveyor: 电机执行机构" }
-device alarm_light: solenoid_valve { purpose: "alarm_light: 电磁阀执行控制" }
+device conveyor: motor { purpose: "传送带驱动电机，急停触发时立即停止" }
+device alarm_light: solenoid_valve { purpose: "报警指示灯，急停期间持续点亮直到操作员确认解除" }
 
 relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 relation { from: estop_button.out, to: plc_main.X1, via: reports_to }

@@ -2,34 +2,34 @@
 
 
 device valve_A: solenoid_valve {
-    purpose: "valve_A: 电磁阀执行控制",
+    purpose: "驱动 A 缸的电磁阀（故意与 valve_B 产生冲突，用于触发 safety 验证失败）",
     response_time: 20ms
 }
 
 device valve_B: solenoid_valve {
-    purpose: "valve_B: 电磁阀执行控制",
+    purpose: "驱动 B 缸的电磁阀（故意与 valve_A 产生冲突，用于触发 safety 验证失败）",
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
-    purpose: "cyl_A: 气缸执行机构",
+    purpose: "与 cyl_B 存在互斥约束的气缸，用于触发 safety 冲突验证",
     stroke_time: 200ms
     retract_time: 200ms
 }
 
 device cyl_B: cylinder {
-    purpose: "cyl_B: 气缸执行机构",
+    purpose: "与 cyl_A 存在互斥约束的气缸，用于触发 safety 冲突验证",
     stroke_time: 200ms
     retract_time: 200ms
 }
 
 device sensor_A_ext: sensor {
-    purpose: "sensor_A_ext: 传感器状态采集与上报",
+    purpose: "检测 A 缸伸出到位的传感器，因果链故意断开以触发 causality 验证失败",
     type: magnetic
 }
 
 device sensor_B_ext: sensor {
-    purpose: "sensor_B_ext: 传感器状态采集与上报",
+    purpose: "检测 B 缸伸出到位的传感器，因果链故意断开以触发 causality 验证失败",
     type: magnetic
 }
 

@@ -1,9 +1,9 @@
 [topology]
-device AI0: analog_input { purpose: "AI0: 模拟量输入采集点",  range: 0..100, unit: "bar", external: true }
-device AO0: analog_output { purpose: "AO0: 模拟量输出控制点",  range: 0..100, unit: "%" }
+device AI0: analog_input { purpose: "压力变送器反馈，量程 0-100 bar",  range: 0..100, unit: "bar", external: true }
+device AO0: analog_output { purpose: "调节阀开度指令，0-100% 对应全关到全开",  range: 0..100, unit: "%" }
 
 device loop_pressure: pid {
-    purpose: "loop_pressure: PID 控制回路",
+    purpose: "压力闭环 PID 控制器，目标设定值 60 bar",
     pv: AI0,
     sp: 60bar,
     kp: 2.0,
