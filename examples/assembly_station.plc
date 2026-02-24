@@ -2,93 +2,114 @@
 
 
 device start_button: sensor {
+    purpose: "start_button: 传感器状态采集与上报",
     subtype: "push_button"
     debounce: 20ms
 }
 
 device motor_left: motor {
+    purpose: "motor_left: 电机执行机构",
     rated_speed: 30rpm
     ramp_time: 50ms
 }
 
 device motor_right: motor {
+    purpose: "motor_right: 电机执行机构",
     rated_speed: 30rpm
     ramp_time: 50ms
 }
 
 device sensor_left_arrive: sensor {
+    purpose: "sensor_left_arrive: 传感器状态采集与上报",
     subtype: "proximity_sensor"
 }
 
 device sensor_right_arrive: sensor {
+    purpose: "sensor_right_arrive: 传感器状态采集与上报",
     subtype: "proximity_sensor"
 }
 
 device valve_push_L: solenoid_valve {
+    purpose: "valve_push_L: 电磁阀执行控制",
     response_time: 20ms
 }
 
 device cyl_push_L: cylinder {
+    purpose: "cyl_push_L: 气缸执行机构",
     stroke_time: 500ms
     retract_time: 500ms
 }
 
 device sensor_push_L_ext: sensor {
+    purpose: "sensor_push_L_ext: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
 device sensor_push_L_ret: sensor {
+    purpose: "sensor_push_L_ret: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
 device valve_push_R: solenoid_valve {
+    purpose: "valve_push_R: 电磁阀执行控制",
     response_time: 20ms
 }
 
 device cyl_push_R: cylinder {
+    purpose: "cyl_push_R: 气缸执行机构",
     stroke_time: 500ms
     retract_time: 500ms
 }
 
 device sensor_push_R_ext: sensor {
+    purpose: "sensor_push_R_ext: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
 device sensor_push_R_ret: sensor {
+    purpose: "sensor_push_R_ret: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
 device valve_press: solenoid_valve {
+    purpose: "valve_press: 电磁阀执行控制",
     response_time: 20ms
 }
 
 device cyl_press: cylinder {
+    purpose: "cyl_press: 气缸执行机构",
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_press_ext: sensor {
+    purpose: "sensor_press_ext: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
 device sensor_press_ret: sensor {
+    purpose: "sensor_press_ret: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
 device valve_eject: solenoid_valve {
+    purpose: "valve_eject: 电磁阀执行控制",
     response_time: 20ms
 }
 
 device cyl_eject: cylinder {
+    purpose: "cyl_eject: 气缸执行机构",
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_eject_ext: sensor {
+    purpose: "sensor_eject_ext: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
 device sensor_eject_ret: sensor {
+    purpose: "sensor_eject_ret: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
@@ -124,7 +145,7 @@ relation { from: sensor_eject_ext.out, to: plc_main.X8, via: reports_to }
 relation { from: cyl_eject.retracted, to: sensor_eject_ret.sense, via: detects }
 relation { from: sensor_eject_ret.out, to: plc_main.X9, via: reports_to }
 
-device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer, Y2:digital:producer, Y3:digital:producer, Y4:digital:producer, Y5:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer, X5:digital:consumer, X6:digital:consumer, X7:digital:consumer, X8:digital:consumer, X9:digital:consumer, X10:digital:consumer] }
+device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [Y0:digital:producer, Y1:digital:producer, Y2:digital:producer, Y3:digital:producer, Y4:digital:producer, Y5:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer, X5:digital:consumer, X6:digital:consumer, X7:digital:consumer, X8:digital:consumer, X9:digital:consumer, X10:digital:consumer] }
 [constraints]
 
 # 压装时左右推缸必须保持伸出（requires 而非 conflicts_with）

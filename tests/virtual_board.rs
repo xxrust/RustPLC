@@ -23,8 +23,10 @@ fn virtual_board_emits_board_log_and_trace_artifacts() {
 
     let plc = r#"
 [topology]
-device X0: digital_input
-device Y0: digital_output
+device plc_main: plc {
+    purpose: "virtual-board 测试控制器",
+    ports: [X0:digital:consumer, Y0:digital:producer]
+}
 
 [constraints]
 

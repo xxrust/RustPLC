@@ -7,7 +7,8 @@ use rust_plc::semantic::{
     preprocess_program,
 };
 use rust_plc::topology_semantic_gate::{
-    collect_topology_deprecation_warnings, validate_topology_semantics,
+    collect_topology_deprecation_warnings, validate_device_purpose_required,
+    validate_topology_semantics,
 };
 use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
 use serde::{Deserialize, Serialize};
@@ -419,7 +420,7 @@ fn default_scenario_init_out_path(plc_path: &Path) -> PathBuf {
 }
 
 fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHints, String> {
-    let program = parse_plc(plc_source).map_err(|e| e.to_string())?;
+    let program = parse_plc_with_required_purpose(plc_source)?;
     let expanded = preprocess_program(&program).map_err(|errors| {
         errors
             .into_iter()
@@ -1970,14 +1971,14 @@ fn run_new_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
     }
 
     let readme = "# RustPLC Bootstrap Project\n\n## Quick Start Checklist\n\n1. Validate scenario contract:\n\n```bash\ncargo run --release -- scenario-validate plc/main.plc --scenario scenarios/normal.yaml --output human\n```\n\n2. Run diagnostic pre-check (`scenario-doctor`):\n\n```bash\ncargo run --release -- scenario-doctor plc/main.plc --scenario scenarios/normal.yaml --output human\n```\n\n3. Run no-board regression gate:\n\n```bash\ncargo run --release -- no-board-gate plc/main.plc --scenario scenarios/normal.yaml --out-dir out/no_board_gate --output human\n```\n\n4. Optional RP2040 build baseline:\n\n```bash\ncargo run --release -- build-rp2040 plc/main.plc --out out/rp2040 --io-map io_map.toml\n```\n\n## VS Code\n\n- Open Command Palette and run `Tasks: Run Task`.\n- Use prefixed tasks (`RustPLC: ...`) from `.vscode/tasks.json`.\n- See `.vscode/README.md` for troubleshooting.\n";
-    let plc = "[topology]\n\ndevice X0: digital_input\ndevice Y0: digital_output\n\n[constraints]\n\n[tasks]\n\ntask main:\n    step wait_start:\n        wait: X0 == true\n        timeout: 100ms -> goto fault\n\n    step run:\n        action: set Y0 on\n        delay: 20ms\n\n    step stop:\n        action: set Y0 off\n\n    on_complete: goto done\n\ntask fault:\n    step safe_stop:\n        action: set Y0 off\n    on_complete: goto done\n\ntask done:\n    step halt:\n";
+    let plc = "[topology]\n\ndevice plc_main: plc {\n    purpose: \"控制器本体与数字I/O端口映射\",\n    ports: [X0:digital:consumer, Y0:digital:producer]\n}\n\n[constraints]\n\n[tasks]\n\ntask main:\n    step wait_start:\n        wait: X0 == true\n        timeout: 100ms -> goto fault\n\n    step run:\n        action: set Y0 on\n        delay: 20ms\n\n    step stop:\n        action: set Y0 off\n\n    on_complete: goto done\n\ntask fault:\n    step safe_stop:\n        action: set Y0 off\n    on_complete: goto done\n\ntask done:\n    step halt:\n";
     let scenario = "tick_ms: 10\nduration_ms: 300\ninputs:\n  - at_ms: 0\n    set:\n      digital_inputs:\n        0: true\n  - at_ms: 50\n    set:\n      digital_inputs:\n        0: false\nforces: []\n";
     let io_map = "schema_version = 1\n\n[digital_inputs]\ndi0 = { gpio = 2, pull = \"up\" }\n\n[digital_outputs]\ndo0 = { gpio = 10, active_low = false }\n\n[safe_state]\nmode = \"all_zero\"\non_exit_timeout_ms = 0\n";
     let workflow = "name: rustplc-no-board-gate\n\non:\n  push:\n  pull_request:\n\njobs:\n  no-board-gate:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: dtolnay/rust-toolchain@stable\n      - name: Scenario validate\n        run: cargo run --release -- scenario-validate plc/main.plc --scenario scenarios/normal.yaml --output json\n      - name: No-board gate\n        run: cargo run --release -- no-board-gate plc/main.plc --scenario scenarios/normal.yaml --out-dir out/no_board_gate --output json\n";
     let vscode_tasks = "{\n  \"version\": \"2.0.0\",\n  \"tasks\": [\n    {\n      \"label\": \"RustPLC: scenario-init (normal)\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release -- scenario-init plc/main.plc --preset normal --out scenarios/normal.yaml\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: scenario-validate\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release -- scenario-validate plc/main.plc --scenario scenarios/normal.yaml --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: scenario-doctor\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release -- scenario-doctor plc/main.plc --scenario scenarios/normal.yaml --fix-preview --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: sim-plc\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release -- sim-plc plc/main.plc --scenario scenarios/normal.yaml --out out/sim_plc/trace.jsonl\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: no-board-gate\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release -- no-board-gate plc/main.plc --scenario scenarios/normal.yaml --out-dir out/no_board_gate --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: build-rp2040\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release -- build-rp2040 plc/main.plc --out out/rp2040 --io-map io_map.toml\",\n      \"problemMatcher\": []\n    }\n  ]\n}\n";
     let vscode_settings = "{\n  \"files.associations\": {\n    \"*.plc\": \"ini\"\n  },\n  \"editor.tabSize\": 4,\n  \"editor.insertSpaces\": true,\n  \"editor.detectIndentation\": false\n}\n";
     let vscode_extensions = "{\n  \"recommendations\": [\n    \"rust-lang.rust-analyzer\",\n    \"redhat.vscode-yaml\",\n    \"tamasfe.even-better-toml\",\n    \"streetsidesoftware.code-spell-checker\"\n  ]\n}\n";
-    let vscode_snippets = "{\n  \"RustPLC: PLC Skeleton\": {\n    \"scope\": \"ini\",\n    \"prefix\": \"plc-skeleton\",\n    \"body\": [\n      \"[topology]\",\n      \"\",\n      \"device X0: digital_input\",\n      \"device Y0: digital_output\",\n      \"\",\n      \"[constraints]\",\n      \"\",\n      \"[tasks]\",\n      \"\",\n      \"task main:\",\n      \"    step wait_start:\",\n      \"        wait: X0 == true\",\n      \"\",\n      \"    step run:\",\n      \"        action: set Y0 on\",\n      \"\",\n      \"    on_complete: goto done\",\n      \"\",\n      \"task done:\",\n      \"    step halt:\"\n    ],\n    \"description\": \"Insert a minimal RustPLC file skeleton\"\n  },\n  \"RustPLC: Wait With Timeout\": {\n    \"scope\": \"ini\",\n    \"prefix\": \"plc-wait-timeout\",\n    \"body\": [\n      \"wait: ${1:X0} == ${2:true}\",\n      \"timeout: ${3:100ms} -> goto ${4:fault}\"\n    ],\n    \"description\": \"Insert wait+timeout pair\"\n  }\n}\n";
+    let vscode_snippets = "{\n  \"RustPLC: PLC Skeleton\": {\n    \"scope\": \"ini\",\n    \"prefix\": \"plc-skeleton\",\n    \"body\": [\n      \"[topology]\",\n      \"\",\n      \"device plc_main: plc {\",\n      \"    purpose: \\\"控制器本体与数字I/O端口映射\\\",\",\n      \"    ports: [X0:digital:consumer, Y0:digital:producer]\",\n      \"}\",\n      \"\",\n      \"[constraints]\",\n      \"\",\n      \"[tasks]\",\n      \"\",\n      \"task main:\",\n      \"    step wait_start:\",\n      \"        wait: X0 == true\",\n      \"\",\n      \"    step run:\",\n      \"        action: set Y0 on\",\n      \"\",\n      \"    on_complete: goto done\",\n      \"\",\n      \"task done:\",\n      \"    step halt:\"\n    ],\n    \"description\": \"Insert a minimal RustPLC file skeleton\"\n  },\n  \"RustPLC: Wait With Timeout\": {\n    \"scope\": \"ini\",\n    \"prefix\": \"plc-wait-timeout\",\n    \"body\": [\n      \"wait: ${1:X0} == ${2:true}\",\n      \"timeout: ${3:100ms} -> goto ${4:fault}\"\n    ],\n    \"description\": \"Insert wait+timeout pair\"\n  }\n}\n";
     let vscode_readme = "# VS Code Day-1 Support for RustPLC\n\n## What this package provides\n\n- `settings.json`: associates `*.plc` with INI highlighting (fallback strategy)\n- `plc.code-snippets`: starter snippets for skeletons and wait/timeout patterns\n- `tasks.json`: one-click commands for scenario-init/doctor/sim/gate/build\n- `extensions.json`: recommended extensions for Rust/YAML/TOML/spell-check\n\n## Highlight strategy\n\nRustPLC currently uses a lightweight no-extension strategy in scaffold projects:\n\n- `*.plc` -> `ini` language mode\n- snippets + tasks provide practical editing/iteration support\n\n## Troubleshooting\n\n1. If snippets do not appear:\n   - confirm file is `*.plc`\n   - run `Developer: Reload Window`\n2. If tasks fail with \"command not found\":\n   - ensure `cargo` is on PATH\n   - run tasks from workspace root\n3. If YAML/TOML diagnostics are missing:\n   - install recommended extensions from `.vscode/extensions.json`\n";
 
     write_scaffold_file(&root.join("README.md"), readme, force)?;
@@ -2048,7 +2049,7 @@ fn run_sequence_lint_subcommand(
 
     let source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
-    let parsed = parse_plc(&source).map_err(|err| err.to_string())?;
+    let parsed = parse_plc_with_required_purpose(&source)?;
     let expanded = preprocess_program(&parsed).map_err(|errors| {
         errors
             .into_iter()
@@ -6071,8 +6072,8 @@ fn emit_rp2040_uf2(
 }
 
 fn build_analog_contract(plc_source: &str) -> Result<AnalogContract, String> {
-    let parsed =
-        parse_plc(plc_source).map_err(|err| format!("Failed to parse PLC source: {err}"))?;
+    let parsed = parse_plc_with_required_purpose(plc_source)
+        .map_err(|err| format!("Failed to parse PLC source: {err}"))?;
     let expanded = preprocess_program(&parsed).map_err(|errors| {
         errors
             .into_iter()
@@ -9393,7 +9394,7 @@ fn compile_plc_to_runtime_program(
     plc_source: &str,
     tick_ms: u64,
 ) -> Result<Program<'static>, String> {
-    let program = parse_plc(plc_source).map_err(|e| e.to_string())?;
+    let program = parse_plc_with_required_purpose(plc_source)?;
     let expanded = preprocess_program(&program).map_err(|errors| {
         errors
             .into_iter()
@@ -9508,6 +9509,8 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
     for warning in collect_topology_deprecation_warnings(&program.topology) {
         eprintln!("WARNING [deprecation] {warning}");
     }
+    validate_device_purpose_required(&program.topology)
+        .map_err(|gate_error| vec![gate_error.to_string()])?;
     let expanded_program = preprocess_program(&program).map_err(|errors| {
         errors
             .into_iter()
@@ -9550,6 +9553,13 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
         runtime_budget,
         verification,
     })
+}
+
+fn parse_plc_with_required_purpose(source: &str) -> Result<rust_plc::ast::PlcProgram, String> {
+    let program = parse_plc(source).map_err(|e| e.to_string())?;
+    validate_device_purpose_required(&program.topology)
+        .map_err(|gate_error| gate_error.to_string())?;
+    Ok(program)
 }
 
 fn collect_stage<T>(result: Result<T, Vec<PlcError>>, errors: &mut Vec<PlcError>) -> Option<T> {

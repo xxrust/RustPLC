@@ -67,7 +67,9 @@ def migrate(content: str) -> Tuple[str, List[str]]:
         if in_topology and SECTION_HEADER_RE.match(line):
             if migrated_ports and not inserted_plc:
                 ports = ", ".join(port_contract_for_name(name) for name in migrated_ports)
-                out.append(f"device plc_main: plc {{ ports: [{ports}] }}")
+                out.append(
+                    f'device plc_main: plc {{ purpose: "控制器本体与端口映射", ports: [{ports}] }}'
+                )
                 inserted_plc = True
             in_topology = False
             out.append(line)
@@ -91,7 +93,9 @@ def migrate(content: str) -> Tuple[str, List[str]]:
 
     if in_topology and migrated_ports and not inserted_plc:
         ports = ", ".join(port_contract_for_name(name) for name in migrated_ports)
-        out.append(f"device plc_main: plc {{ ports: [{ports}] }}")
+        out.append(
+            f'device plc_main: plc {{ purpose: "控制器本体与端口映射", ports: [{ports}] }}'
+        )
 
     seen = set()
     ordered_ports: List[str] = []

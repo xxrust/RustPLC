@@ -93,6 +93,7 @@ export interface DevicePortMetadata {
 }
 
 export interface TopologyComponentParams extends Record<string, unknown> {
+  purpose?: string;
   tags?: DeviceTags;
   ports?: DevicePortMetadata[];
   endpoint_kind?: 'controller_port' | 'controller_device' | 'process_device';

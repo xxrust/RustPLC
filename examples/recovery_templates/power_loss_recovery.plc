@@ -2,12 +2,13 @@
 
 
 device start_button: sensor {
+    purpose: "start_button: 传感器状态采集与上报",
     debounce: 20ms
 }
-device power_ok: sensor
-device station_sensor: sensor
-device conveyor: motor
-device alarm_light: solenoid_valve
+device power_ok: sensor { purpose: "power_ok: 传感器状态采集与上报" }
+device station_sensor: sensor { purpose: "station_sensor: 传感器状态采集与上报" }
+device conveyor: motor { purpose: "conveyor: 电机执行机构" }
+device alarm_light: solenoid_valve { purpose: "alarm_light: 电磁阀执行控制" }
 
 relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 relation { from: power_ok.out, to: plc_main.X1, via: reports_to }
@@ -15,7 +16,7 @@ relation { from: station_sensor.out, to: plc_main.X2, via: reports_to }
 relation { from: plc_main.Y0, to: conveyor.cmd, via: driven_by }
 relation { from: plc_main.Y1, to: alarm_light.coil, via: driven_by }
 
-device plc_main: plc { ports: [X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, Y0:digital:producer, Y1:digital:producer] }
+device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, Y0:digital:producer, Y1:digital:producer] }
 [constraints]
 
 [tasks]

@@ -6,27 +6,30 @@
 # - a timeout -> goto fault path
 
 # Physical IO
-device AI0: analog_input { range: 0..4000000, unit: "count", external: true } # axis count snapshot
-device AI1: analog_input { range: 0..3, unit: "zone", external: true }        # 0=safe, 1..N=danger
+device AI0: analog_input { purpose: "AI0: 模拟量输入采集点",  range: 0..4000000, unit: "count", external: true } # axis count snapshot
+device AI1: analog_input { purpose: "AI1: 模拟量输入采集点",  range: 0..3, unit: "zone", external: true } # 0=safe, 1..N=danger
 
 # Logical devices
 device axis_x: motor {
+    purpose: "axis_x: 电机执行机构",
     ramp_time: 10ms
 }
 
 device clamp_valve: solenoid_valve {
+    purpose: "clamp_valve: 电磁阀执行控制",
     response_time: 20ms
 }
 
 device cyl_clamp: cylinder {
+    purpose: "cyl_clamp: 气缸执行机构",
     stroke_time: 200ms
     retract_time: 200ms
 }
 
-device inpos_x: sensor
-device alarm_x: sensor
-device clamp_ext: sensor
-device clamp_ret: sensor
+device inpos_x: sensor { purpose: "inpos_x: 传感器状态采集与上报" }
+device alarm_x: sensor { purpose: "alarm_x: 传感器状态采集与上报" }
+device clamp_ext: sensor { purpose: "clamp_ext: 传感器状态采集与上报" }
+device clamp_ret: sensor { purpose: "clamp_ret: 传感器状态采集与上报" }
 
 relation { from: plc_main.Y1, to: axis_x.cmd, via: driven_by }
 relation { from: plc_main.Y2, to: clamp_valve.coil, via: driven_by }
@@ -40,7 +43,7 @@ relation { from: clamp_ext.out, to: plc_main.X2, via: reports_to }
 relation { from: cyl_clamp.retracted, to: clamp_ret.sense, via: detects }
 relation { from: clamp_ret.out, to: plc_main.X3, via: reports_to }
 
-device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer, Y2:digital:producer, Y3:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer, AI0:analog:consumer, AI1:analog:consumer] }
+device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [Y0:digital:producer, Y1:digital:producer, Y2:digital:producer, Y3:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer, AI0:analog:consumer, AI1:analog:consumer] }
 [constraints]
 
 # Basic: do not enable the axis while drive is alarming.

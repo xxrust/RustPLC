@@ -208,17 +208,20 @@ AI 会通过多轮对话生成完整的 `.plc` 文件并自动验证。
 ```plc
 [topology]
 device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
     ports: [Y0:digital:producer, X0:digital:consumer]
 }
 device valve_A: solenoid_valve {
+    purpose: "控制A缸主气路通断",
     response_time: 20ms,
     ports: [coil:digital:consumer, out:pneumatic:producer]
 }
 device cyl_A: cylinder {
+    purpose: "A工位执行缸，负责伸缩动作",
     stroke_time: 300ms,
     ports: [cmd:pneumatic:consumer, extended:logical:producer]
 }
-device sensor_A_ext: sensor
+device sensor_A_ext: sensor { purpose: "采集A缸伸出到位信号" }
 
 relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
@@ -239,6 +242,8 @@ task cycle:
 > **注意**：设备属性写法 `driven_by/reports_to/detects` 已移除；请统一使用 `relation { from, to, via }`。按新规范推荐显式使用 `plc_main.<port>` 端口引用。
 >
 > **兼容说明（2026-02-23 ~ 2026-06-30）**：旧版“端口当设备”写法仍可运行，但会给出 WARN 级迁移提示。
+>
+> **强制审核规则（自 2026-02-24 起）**：每个 `device` 都必须声明 `purpose`，缺失将直接审核失败（semantic gate 不通过）。
 
 ### 2. 编译验证
 

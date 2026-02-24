@@ -89,6 +89,8 @@ pub struct TopologyConnection {
 pub struct DeviceAttributes {
     pub driven_by: Option<String>,
     pub reports_to: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ports: Vec<DevicePort>,
     #[serde(default, skip_serializing_if = "DeviceTags::is_empty")]

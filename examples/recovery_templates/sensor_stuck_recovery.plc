@@ -2,13 +2,14 @@
 
 
 device start_button: sensor {
+    purpose: "start_button: 传感器状态采集与上报",
     debounce: 20ms
 }
-device sensor_extend: sensor
-device maintenance_reset: sensor
-device cyl_extend_cmd: solenoid_valve
-device cyl_retract_cmd: solenoid_valve
-device alarm_light: solenoid_valve
+device sensor_extend: sensor { purpose: "sensor_extend: 传感器状态采集与上报" }
+device maintenance_reset: sensor { purpose: "maintenance_reset: 传感器状态采集与上报" }
+device cyl_extend_cmd: solenoid_valve { purpose: "cyl_extend_cmd: 电磁阀执行控制" }
+device cyl_retract_cmd: solenoid_valve { purpose: "cyl_retract_cmd: 电磁阀执行控制" }
+device alarm_light: solenoid_valve { purpose: "alarm_light: 电磁阀执行控制" }
 
 relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 relation { from: sensor_extend.out, to: plc_main.X1, via: reports_to }
@@ -17,7 +18,7 @@ relation { from: plc_main.Y0, to: cyl_extend_cmd.coil, via: driven_by }
 relation { from: plc_main.Y1, to: cyl_retract_cmd.coil, via: driven_by }
 relation { from: plc_main.Y2, to: alarm_light.coil, via: driven_by }
 
-device plc_main: plc { ports: [X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, Y0:digital:producer, Y1:digital:producer, Y2:digital:producer] }
+device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, Y0:digital:producer, Y1:digital:producer, Y2:digital:producer] }
 [constraints]
 
 [tasks]

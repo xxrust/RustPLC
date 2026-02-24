@@ -268,6 +268,9 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         "reports_to" => {
             return Err(legacy_topology_attribute_error(line, col, "reports_to"));
         }
+        "purpose" => {
+            attributes.purpose = Some(expect_string(value, "purpose")?);
+        }
         "response_time" => {
             attributes.response_time = Some(expect_duration(value, "response_time")?);
         }

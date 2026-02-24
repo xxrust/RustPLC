@@ -9,28 +9,29 @@
 # Physical IO
 
 # External feedback provided by the drive / board layer
-device AI0: analog_input { range: 0..4000000, unit: "count", external: true }   # encoder count snapshot
-device AI1: analog_input { range: 0..2000, unit: "mm", external: true }         # laser distance snapshot
-device AI2: analog_input { range: 0..5, unit: "code", external: true }          # 0=ok, 1=laser dropout, 2=pos mismatch, ...
+device AI0: analog_input { purpose: "AI0: 模拟量输入采集点",  range: 0..4000000, unit: "count", external: true } # encoder count snapshot
+device AI1: analog_input { purpose: "AI1: 模拟量输入采集点",  range: 0..2000, unit: "mm", external: true } # laser distance snapshot
+device AI2: analog_input { purpose: "AI2: 模拟量输入采集点",  range: 0..5, unit: "code", external: true } # 0=ok, 1=laser dropout, 2=pos mismatch, ...
 
 # Logical aliases for scenarios/tests.
-device axis_count: analog_input { range: 0..4000000, unit: "count" }
-device laser_pos_mm: analog_input { range: 0..2000, unit: "mm" }
-device sensor_fault_code: analog_input { range: 0..5, unit: "code" }
+device axis_count: analog_input { purpose: "axis_count: 模拟量输入采集点",  range: 0..4000000, unit: "count" }
+device laser_pos_mm: analog_input { purpose: "laser_pos_mm: 模拟量输入采集点",  range: 0..2000, unit: "mm" }
+device sensor_fault_code: analog_input { purpose: "sensor_fault_code: 模拟量输入采集点",  range: 0..5, unit: "code" }
 
 # Logical devices
 device axis_x: motor {
+    purpose: "axis_x: 电机执行机构",
     ramp_time: 10ms
 }
 
-device dir_positive: digital_output
+device dir_positive: digital_output { purpose: "dir_positive: 数字量输出控制点" }
 
-device move_cmd: digital_output
+device move_cmd: digital_output { purpose: "move_cmd: 数字量输出控制点" }
 
-device inpos_x: sensor
-device alarm_x: sensor
+device inpos_x: sensor { purpose: "inpos_x: 传感器状态采集与上报" }
+device alarm_x: sensor { purpose: "alarm_x: 传感器状态采集与上报" }
 
-device pos_consistent: digital_input
+device pos_consistent: digital_input { purpose: "pos_consistent: 数字量输入信号接入点" }
 
 relation { from: plc_main.Y1, to: axis_x.cmd, via: driven_by }
 relation { from: axis_x.position_ok, to: inpos_x.sense, via: detects }
@@ -38,7 +39,7 @@ relation { from: inpos_x.out, to: plc_main.X0, via: reports_to }
 relation { from: axis_x.alarm, to: alarm_x.sense, via: detects }
 relation { from: alarm_x.out, to: plc_main.X1, via: reports_to }
 
-device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer, Y2:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, AI0:analog:consumer, AI1:analog:consumer, AI2:analog:consumer] }
+device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [Y0:digital:producer, Y1:digital:producer, Y2:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, AI0:analog:consumer, AI1:analog:consumer, AI2:analog:consumer] }
 [constraints]
 
 # Basic: do not enable the axis while drive is alarming.

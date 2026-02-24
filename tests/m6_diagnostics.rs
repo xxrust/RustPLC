@@ -23,8 +23,10 @@ fn temp_dir(prefix: &str) -> PathBuf {
 fn write_no_board_gate_fixture_plc(path: &Path) {
     let plc = r#"
 [topology]
-device X0: digital_input
-device Y0: digital_output
+device plc_main: plc {
+    purpose: "诊断 JSON 输出测试控制器",
+    ports: [X0:digital:consumer, Y0:digital:producer]
+}
 
 [constraints]
 

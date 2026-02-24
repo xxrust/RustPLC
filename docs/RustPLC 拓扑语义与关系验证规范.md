@@ -15,6 +15,7 @@
 3. 设备属性写法 `driven_by/reports_to/detects` 已移除，不再兼容。
 4. 非 IO 设备必须显式写 `Device.Port`；PLC IO 点位允许写简写 `Y0`/`X0`/`AI0`/`AO0`。
 5. 推荐使用 `device <name>: plc { ports: [...] }` 建模控制器；`device X0/Y0/...` 旧写法当前仅兼容保留。
+6. 每个 `device` 必须声明 `purpose`（职责描述）；缺失则语义门禁直接失败。
 
 ---
 
@@ -59,6 +60,7 @@ relation { from: sensor_A.out, to: X0, via: reports_to }
 | 语义角色 | `detects` 要求 state -> detector | `SEM-104` |
 | 悬空端口 | 显式声明端口必须参与 relation | `SEM-105` |
 | subtype 兼容 | `device_type` 与 `subtype` 必须在矩阵内 | `SEM-106` |
+| purpose 必填 | 每个 `device` 必须声明非空 `purpose` | `SEM-107` |
 
 ---
 

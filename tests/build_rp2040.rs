@@ -4,17 +4,17 @@ use std::process::Command;
 const PLC_FIXTURE: &str = r#"
 [topology]
 
-device Y0: digital_output
-device X0: digital_input
+device Y0: digital_output { purpose: "测试数字输出通道" }
+device X0: digital_input { purpose: "测试数字输入通道" }
 
-device AI0: analog_input { range: 0..100, unit: "bar" }
-device AO0: analog_output { range: 0..10, ramp_time: 500ms, unit: "V" }
+device AI0: analog_input { purpose: "测试压力采样输入", range: 0..100, unit: "bar" }
+device AO0: analog_output { purpose: "测试模拟控制输出", range: 0..10, ramp_time: 500ms, unit: "V" }
 
-device valve_A: solenoid_valve
+device valve_A: solenoid_valve { purpose: "测试电磁阀执行器" }
 
-device cyl_A: cylinder
+device cyl_A: cylinder { purpose: "测试气缸执行机构" }
 
-device sensor_ext: sensor
+device sensor_ext: sensor { purpose: "测试到位传感器" }
 
 relation { from: Y0.out, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }

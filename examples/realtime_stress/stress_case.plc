@@ -1,6 +1,6 @@
 [topology]
 
-device plc_main: plc { ports: [X0:digital:consumer, Y0:digital:producer] }
+device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [X0:digital:consumer, Y0:digital:producer] }
 [constraints]
 
 [tasks]

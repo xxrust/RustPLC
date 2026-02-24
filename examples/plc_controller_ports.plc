@@ -1,15 +1,19 @@
 [topology]
 device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
     ports: [Y0:digital:producer, X0:digital:consumer, AI0:analog:consumer]
 }
 
 device valve_A: solenoid_valve {
+    purpose: "valve_A: 电磁阀执行控制",
     ports: [coil:digital:consumer, out:pneumatic:producer]
 }
 device cyl_A: cylinder {
+    purpose: "cyl_A: 气缸执行机构",
     ports: [cmd:pneumatic:consumer, extended:logical:producer]
 }
 device sensor_A_ext: sensor {
+    purpose: "sensor_A_ext: 传感器状态采集与上报",
     ports: [sense:logical:consumer, out:digital:producer]
 }
 

@@ -1,11 +1,11 @@
 [topology]
 
 
-device start_button: sensor
+device start_button: sensor { purpose: "start_button: 传感器状态采集与上报" }
 
 relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 
-device plc_main: plc { ports: [X0:digital:consumer] }
+device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [X0:digital:consumer] }
 [constraints]
 
 [tasks]

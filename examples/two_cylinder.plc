@@ -2,41 +2,50 @@
 
 
 device start_button: sensor {
+    purpose: "start_button: 传感器状态采集与上报",
     subtype: "push_button"
     debounce: 20ms
 }
 
 device valve_A: solenoid_valve {
+    purpose: "valve_A: 电磁阀执行控制",
     response_time: 20ms
 }
 
 device valve_B: solenoid_valve {
+    purpose: "valve_B: 电磁阀执行控制",
     response_time: 20ms
 }
 
 device cyl_A: cylinder {
+    purpose: "cyl_A: 气缸执行机构",
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device cyl_B: cylinder {
+    purpose: "cyl_B: 气缸执行机构",
     stroke_time: 300ms
     retract_time: 300ms
 }
 
 device sensor_A_ext: sensor {
+    purpose: "sensor_A_ext: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
 device sensor_A_ret: sensor {
+    purpose: "sensor_A_ret: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
 device sensor_B_ext: sensor {
+    purpose: "sensor_B_ext: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
 device sensor_B_ret: sensor {
+    purpose: "sensor_B_ret: 传感器状态采集与上报",
     subtype: "limit_switch"
 }
 
@@ -54,7 +63,7 @@ relation { from: sensor_B_ext.out, to: plc_main.X2, via: reports_to }
 relation { from: cyl_B.retracted, to: sensor_B_ret.sense, via: detects }
 relation { from: sensor_B_ret.out, to: plc_main.X3, via: reports_to }
 
-device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer] }
+device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [Y0:digital:producer, Y1:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer] }
 [constraints]
 
 safety: cyl_A.extended conflicts_with cyl_B.extended

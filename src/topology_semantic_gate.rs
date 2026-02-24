@@ -25,6 +25,8 @@ pub enum TopologySemanticCode {
     Sem105DanglingPort,
     #[serde(rename = "SEM-106")]
     Sem106SubtypeIncompatible,
+    #[serde(rename = "SEM-107")]
+    Sem107PurposeMissing,
 }
 
 impl TopologySemanticCode {
@@ -36,6 +38,7 @@ impl TopologySemanticCode {
             Self::Sem104SemanticRoleIncompatible => "SEM-104",
             Self::Sem105DanglingPort => "SEM-105",
             Self::Sem106SubtypeIncompatible => "SEM-106",
+            Self::Sem107PurposeMissing => "SEM-107",
         }
     }
 }
@@ -306,6 +309,52 @@ pub fn collect_topology_deprecation_warnings(topology: &TopologySection) -> Vec<
         "检测到旧版 PLC IO 设备建模（{}）。建议迁移到 `device <name>: plc {{ ports: [...] }}`。兼容窗口：2026-02-23 ~ 2026-06-30（当前为 WARN，不阻断）",
         legacy.join(", ")
     )]
+}
+
+pub fn validate_device_purpose_required(
+    topology: &TopologySection,
+) -> Result<(), TopologySemanticGateError> {
+    let mut issues = Vec::<TopologySemanticIssue>::new();
+    for device in &topology.devices {
+        let Some(purpose) = device.attributes.purpose.as_deref() else {
+            issues.push(TopologySemanticIssue {
+                code: TopologySemanticCode::Sem107PurposeMissing,
+                line: device.line.max(1),
+                relation: None,
+                from: Some(device.name.clone()),
+                to: None,
+                from_port: None,
+                to_port: None,
+                message: format!("设备 `{}` 缺少 purpose 字段", device.name),
+                suggestion: "请在设备属性中增加 purpose: \"...\"，清晰描述该设备在工艺中的职责"
+                    .to_string(),
+            });
+            continue;
+        };
+        if purpose.trim().is_empty() {
+            issues.push(TopologySemanticIssue {
+                code: TopologySemanticCode::Sem107PurposeMissing,
+                line: device.line.max(1),
+                relation: None,
+                from: Some(device.name.clone()),
+                to: None,
+                from_port: None,
+                to_port: None,
+                message: format!("设备 `{}` 的 purpose 不能为空", device.name),
+                suggestion: "请将 purpose 写成可审查的职责描述，例如 \"控制A缸主气路通断\""
+                    .to_string(),
+            });
+        }
+    }
+
+    if issues.is_empty() {
+        Ok(())
+    } else {
+        Err(TopologySemanticGateError {
+            code: "semantic_device_metadata_invalid".to_string(),
+            issues,
+        })
+    }
 }
 
 fn validate_device_subtypes(topology: &TopologySection) -> Vec<TopologySemanticIssue> {
@@ -802,7 +851,7 @@ fn topology_connection_line(topology: &TopologySection, connection: &TopologyCon
 
 #[cfg(test)]
 mod tests {
-    use super::validate_topology_semantics;
+    use super::{validate_device_purpose_required, validate_topology_semantics};
     use crate::parser::parse_plc;
 
     #[test]
@@ -1061,5 +1110,43 @@ task main:
         let program = parse_plc(input).expect("parse");
         validate_topology_semantics(&program.topology)
             .expect("unknown subtype should fallback to base type behavior");
+    }
+
+    #[test]
+    fn purpose_gate_rejects_missing_purpose() {
+        let input = r#"
+[topology]
+device sensor_a: sensor
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err = validate_device_purpose_required(&program.topology).expect_err("should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(codes.contains(&"SEM-107"));
+    }
+
+    #[test]
+    fn purpose_gate_accepts_non_empty_purpose() {
+        let input = r#"
+[topology]
+device sensor_a: sensor { purpose: "采集到位信号" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        validate_device_purpose_required(&program.topology).expect("should pass");
     }
 }

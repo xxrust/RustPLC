@@ -5,9 +5,9 @@
 # - Force DO0/AO0 to fixed values (overriding program writes)
 # - Clear forces later to show normal program writes resume
 
-device AO0: analog_output { range: 0..10, unit: "V" }
+device AO0: analog_output { purpose: "AO0: 模拟量输出控制点",  range: 0..10, unit: "V" }
 
-device plc_main: plc { ports: [X0:digital:consumer, Y0:digital:producer, AO0:analog:producer] }
+device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [X0:digital:consumer, Y0:digital:producer, AO0:analog:producer] }
 [constraints]
 
 [tasks]

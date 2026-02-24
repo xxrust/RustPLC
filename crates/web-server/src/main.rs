@@ -13,7 +13,8 @@ use rust_plc::component_scenario::parse_component_scenario_value;
 use rust_plc::component_topology::parse_component_topology_value;
 use rust_plc::parser::parse_plc;
 use rust_plc::topology_semantic_gate::{
-    collect_topology_deprecation_warnings, validate_topology_semantics,
+    collect_topology_deprecation_warnings, validate_device_purpose_required,
+    validate_topology_semantics,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -272,7 +273,9 @@ async fn parse_plc_topology(
         build_topology_preview_plc(normalized).unwrap_or_else(|| normalized.to_string());
     let program = parse_plc(&preview_plc)
         .map_err(|err| bad_request(format!("failed to parse PLC: {err}")))?;
-    let semantic_gate = match validate_topology_semantics(&program.topology) {
+    let semantic_gate = match validate_device_purpose_required(&program.topology)
+        .and_then(|_| validate_topology_semantics(&program.topology))
+    {
         Ok(()) => serde_json::json!({
             "valid": true,
             "code": serde_json::Value::Null,
@@ -314,6 +317,7 @@ async fn parse_plc_topology(
                     "name": device.name,
                     "device_type": plc_device_type_name(&device.device_type),
                     "endpoint_kind": endpoint_kind_for_device_type(&device.device_type),
+                    "purpose": device.attributes.purpose.clone(),
                     "driven_by": device.attributes.driven_by.clone(),
                     "reports_to": device.attributes.reports_to.clone(),
                     "ports": ports,
@@ -1492,12 +1496,15 @@ mod tests {
         let plc = r#"
 [topology]
 device Y0: digital_output {
+    purpose: "测试数字输出端口",
     ports: [out:digital:producer]
 }
 device X0: digital_input {
+    purpose: "测试数字输入端口",
     ports: [in:digital:consumer]
 }
 device valve_A: solenoid_valve {
+    purpose: "测试阀门执行器",
     ports: [coil:digital:consumer, feedback:logical:producer],
     tags: {
         functional_group: [actuation],
@@ -1506,6 +1513,7 @@ device valve_A: solenoid_valve {
     }
 }
 device sensor_A: sensor {
+    purpose: "测试传感器上报",
     ports: [sense:logical:consumer, out:digital:producer]
 }
 

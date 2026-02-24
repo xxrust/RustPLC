@@ -183,22 +183,26 @@ AI will generate a complete `.plc` file through multi-turn dialogue and auto-ver
 
 ```plc
 [topology]
-device Y0: digital_output
-device X0: digital_input
+device plc_main: plc {
+    purpose: "Controller body and process I/O port mapping",
+    ports: [Y0:digital:producer, X0:digital:consumer]
+}
 device valve_A: solenoid_valve {
+    purpose: "Drive the main pneumatic path for cylinder A",
     response_time: 20ms,
     ports: [coil:digital:consumer, out:pneumatic:producer]
 }
 device cyl_A: cylinder {
+    purpose: "Cylinder actuator for station A motion",
     stroke_time: 300ms,
     ports: [cmd:pneumatic:consumer, extended:logical:producer]
 }
-device sensor_A_ext: sensor
+device sensor_A_ext: sensor { purpose: "Sense cylinder A extended position" }
 
-relation { from: Y0, to: valve_A.coil, via: driven_by }
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
-relation { from: sensor_A_ext.out, to: X0, via: reports_to }
+relation { from: sensor_A_ext.out, to: plc_main.X0, via: reports_to }
 
 [constraints]
 safety: cyl_A.extended requires sensor_A_ext.on
@@ -211,9 +215,11 @@ task cycle:
         timeout: 500ms -> goto fault_handler
 ```
 
-> **Note**: Legacy device attributes `driven_by/reports_to/detects` are removed. Use `relation { from, to, via }` only. PLC points can be written as `Y0` / `X1` directly (no `Y0.out` / `X1.in`).
+> **Note**: Legacy device attributes `driven_by/reports_to/detects` are removed. Use `relation { from, to, via }` only. Use explicit `plc_main.<port>` endpoint references in new topology.
 >
 > **Recommended modeling (since February 23, 2026)**: Prefer `device plc_main: plc { ports: [...] }` for controller ports. The old `device X*/Y*/AI*/AO*` style remains in a compatibility window (**February 23, 2026 ~ June 30, 2026**) with WARN-level notices.
+>
+> **Mandatory review rule (effective February 24, 2026)**: every `device` must declare `purpose`; missing `purpose` fails semantic gate review.
 
 ### 2. Compile & Verify
 

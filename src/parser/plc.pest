@@ -33,6 +33,7 @@ device_type = {
 attribute_name = {
     "driven_by"
     | "reports_to"
+    | "purpose"
     | "response_time"
     | "stroke_time"
     | "retract_time"

@@ -2,11 +2,12 @@
 
 
 device valve_A: solenoid_valve {
+    purpose: "valve_A: 电磁阀执行控制",
     response_time: 20ms
 }
 relation { from: Y9, to: valve_A.coil, via: driven_by }
 
-device plc_main: plc { ports: [Y0:digital:producer] }
+device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [Y0:digital:producer] }
 [constraints]
 
 [tasks]
