@@ -9,6 +9,8 @@ pub struct DeviceDef {
     #[serde(default)]
     pub interfaces: DeviceInterfaces,
     #[serde(default)]
+    pub parameters: Vec<DeviceParameterDef>,
+    #[serde(default)]
     pub device_constraints: DeviceConstraints,
 }
 
@@ -55,6 +57,23 @@ pub struct DeviceSafetyConstraint {
     pub relation: String,
     #[serde(default)]
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeviceParameterDef {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub parameter_type: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub default: String,
+    #[serde(default)]
+    pub unit: String,
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -194,9 +213,6 @@ reason = "双线圈不能同时通电"
         assert_eq!(def.interfaces.ports[0].name, "coil_A");
         assert_eq!(def.interfaces.ports[0].states, vec!["on", "off"]);
         assert_eq!(def.device_constraints.safety.len(), 1);
-        assert_eq!(
-            def.device_constraints.safety[0].relation,
-            "conflicts_with"
-        );
+        assert_eq!(def.device_constraints.safety[0].relation, "conflicts_with");
     }
 }

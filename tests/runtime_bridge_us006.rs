@@ -217,6 +217,54 @@ fn bridge_supports_analog_wait_guard_mapped_to_regions() {
     );
 }
 
+const PLC_STEPPER_PORT_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer] }
+device axis_x: stepper_motor
+
+relation { from: plc_main.Y0, to: axis_x.enable, via: driven_by }
+relation { from: plc_main.Y1, to: axis_x.direction, via: driven_by }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step enable_axis:
+        action: set axis_x.enable on
+    step dir_forward:
+        action: set axis_x.direction forward
+    step done:
+        action: log "done"
+"#;
+
+#[test]
+fn bridge_routes_stepper_ports_to_distinct_digital_outputs() {
+    let program = compile_to_runtime(PLC_STEPPER_PORT_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 1, 0, 0);
+
+    rt.tick(&mut io).expect("tick");
+
+    assert_eq!(
+        io.digital_output_edges(),
+        &[
+            sim::DigitalEdge {
+                tick: Tick(0),
+                id: DigitalOutputId(0),
+                value: true,
+            },
+            sim::DigitalEdge {
+                tick: Tick(0),
+                id: DigitalOutputId(1),
+                value: true,
+            },
+        ],
+        "enable/direction should be routed by port, not collapsed onto one output"
+    );
+}
+
 const PLC_PID_FIXTURE: &str = r#"
 [topology]
 

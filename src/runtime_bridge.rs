@@ -220,7 +220,7 @@ fn build_pid_configs(
         };
 
         let pv = resolver.resolve_analog_input_id(&ctx, &loop_spec.pv)?;
-        let out_id = resolver.resolve_analog_output_id(&ctx, &loop_spec.out)?;
+        let out_id = resolver.resolve_analog_output_id(&ctx, &loop_spec.out, "self")?;
 
         let cfg = PidConfig {
             pv,
@@ -667,24 +667,32 @@ fn convert_action(
     a: &TransitionAction,
 ) -> Result<Action, BridgeError> {
     match a {
-        TransitionAction::Extend { target, .. } => {
-            let output = resolver.resolve_digital_output_id(state_name, target)?;
+        TransitionAction::Extend { target, port } => {
+            let output = resolver.resolve_digital_output_id(state_name, target, port)?;
             Ok(Action::Extend { output })
         }
-        TransitionAction::Retract { target, .. } => {
-            let output = resolver.resolve_digital_output_id(state_name, target)?;
+        TransitionAction::Retract { target, port } => {
+            let output = resolver.resolve_digital_output_id(state_name, target, port)?;
             Ok(Action::Retract { output })
         }
-        TransitionAction::Set { target, value, .. } => {
-            let id = resolver.resolve_digital_output_id(state_name, target)?;
+        TransitionAction::Set {
+            target,
+            port,
+            value,
+        } => {
+            let id = resolver.resolve_digital_output_id(state_name, target, port)?;
             let value = match value {
                 IrBinaryValue::On => true,
                 IrBinaryValue::Off => false,
             };
             Ok(Action::SetDigital { id, value })
         }
-        TransitionAction::SetAnalog { target, value_raw, .. } => {
-            let id = resolver.resolve_analog_output_id(state_name, target)?;
+        TransitionAction::SetAnalog {
+            target,
+            port,
+            value_raw,
+        } => {
+            let id = resolver.resolve_analog_output_id(state_name, target, port)?;
             let value =
                 value_raw
                     .parse::<f32>()
@@ -757,7 +765,12 @@ impl<'a> TopologyResolver<'a> {
         &self,
         state_name: &str,
         device: &str,
+        port: &str,
     ) -> Result<DigitalOutputId, BridgeError> {
+        if let Some(id) = self.resolve_digital_output_id_by_port(device, port) {
+            return Ok(DigitalOutputId(id));
+        }
+
         let start =
             self.by_name
                 .get(device)
@@ -780,7 +793,12 @@ impl<'a> TopologyResolver<'a> {
         &self,
         state_name: &str,
         device: &str,
+        port: &str,
     ) -> Result<AnalogOutputId, BridgeError> {
+        if let Some(id) = self.resolve_analog_output_id_by_port(device, port) {
+            return Ok(AnalogOutputId(id));
+        }
+
         let start =
             self.by_name
                 .get(device)
@@ -855,6 +873,52 @@ impl<'a> TopologyResolver<'a> {
         }
 
         out
+    }
+
+    fn resolve_digital_output_id_by_port(&self, device: &str, port: &str) -> Option<u16> {
+        let mut ids = self
+            .topology
+            .links
+            .iter()
+            .filter_map(|link| {
+                if link.to != device || link.kind != crate::ir::ConnectionType::Electrical {
+                    return None;
+                }
+                if port != "self" && link.to_port.as_deref() != Some(port) {
+                    return None;
+                }
+                parse_y_id(&link.from)
+            })
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids.dedup();
+        match ids.as_slice() {
+            [id] => Some(*id),
+            _ => None,
+        }
+    }
+
+    fn resolve_analog_output_id_by_port(&self, device: &str, port: &str) -> Option<u16> {
+        let mut ids = self
+            .topology
+            .links
+            .iter()
+            .filter_map(|link| {
+                if link.to != device || link.kind != crate::ir::ConnectionType::Analog {
+                    return None;
+                }
+                if port != "self" && link.to_port.as_deref() != Some(port) {
+                    return None;
+                }
+                parse_ao_id(&link.from)
+            })
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids.dedup();
+        match ids.as_slice() {
+            [id] => Some(*id),
+            _ => None,
+        }
     }
 
     fn collect_input_physical_ids(

@@ -1,0 +1,111 @@
+[identity]
+name = "通用电机"
+type = "motor"
+category = "actuators/motor/general"
+version = "1.0.0"
+
+[semantics]
+description = "通用电机，支持启停和正反转控制，无位置反馈。"
+primary_function = "run_direction_control"
+role = "actuator"
+typical_applications = ["输送带驱动", "风机", "泵", "搅拌机"]
+key_features = ["run/direction 双输入", "running/fault 双反馈"]
+
+[physical]
+response_time = { typical = "80ms", max = "150ms" }
+power_supply = { voltage = "24VDC", control = "relay_or_contactor" }
+
+[[interfaces.ports]]
+name = "run"
+states = ["on", "off"]
+default_state = "off"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "direction"
+states = ["forward", "reverse"]
+default_state = "forward"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "running"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[parameters]]
+name = "max_speed"
+type = "number"
+required = false
+default = "1500"
+unit = "rpm"
+description = "额定或目标速度"
+
+[[parameters]]
+name = "accel_time"
+type = "time"
+required = false
+default = "300ms"
+description = "从静止到目标速度的加速时间"
+
+[[parameters]]
+name = "decel_time"
+type = "time"
+required = false
+default = "300ms"
+description = "从目标速度减速到静止的减速时间"
+
+[[parameters]]
+name = "rated_power"
+type = "number"
+required = false
+default = "1.5"
+unit = "kW"
+description = "电机额定功率"
+
+[[parameters]]
+name = "rated_freq"
+type = "number"
+required = false
+default = "50"
+unit = "Hz"
+description = "电机额定频率"
+
+[[device_constraints.safety]]
+left = "direction.forward"
+right = "direction.reverse"
+relation = "conflicts_with"
+reason = "正反转指令互斥"
+
+[[device_constraints.safety]]
+left = "run.on"
+right = "fault.on"
+relation = "conflicts_with"
+reason = "故障时不得运行"
+
+[usage_guidance]
+when_to_use = "不需要精确定位、只需要启停和方向控制的场景。"
+when_not_to_use = "需要调速请使用 vfd；需要精确定位请使用 stepper_motor 或 servo_drive。"
+
+[[usage_guidance.common_patterns]]
+name = "启停+方向联锁"
+description = "先停后换向，避免直接反转冲击。"
+
+[[usage_guidance.common_mistakes]]
+mistake = "故障置位时仍下发 run.on"
+consequence = "故障反复触发，可能导致保护跳闸"
+solution = "增加 run.on requires fault.off 约束并在任务中先清故障"
+
+[metadata]
+standards = ["IEC 60947-4-1"]
+tags = ["motor", "actuator", "digital_control"]

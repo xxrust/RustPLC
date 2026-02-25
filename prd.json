@@ -1,131 +1,130 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/explicit-port-topology-breaking",
-  "description": "将拓扑 DSL 升级为严格端口级关系模型：输入/输出都必须显式映射到 Device.Port，移除 driven_by/reports_to/detects 的旧写法兼容，并以双输入阀为首个标准场景。",
+  "branchName": "ralph/motor-control-enhancement-v25-breaking",
+  "description": "实现 motor-control-enhancement v2.5：新增电机设备类型与多端口语义闭环，并采用 motor 旧写法破坏性迁移（不做兼容层）。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "新增端口级 relation DSL 语法",
-      "description": "As a DSL author, I want relation blocks with explicit from/to ports so that every physical connection is unambiguous.",
+      "title": "set 支持枚举状态并做语义白名单校验",
+      "description": "As a DSL author, I want set to accept enum-like states so that direction and active/idle can be expressed.",
       "acceptanceCriteria": [
-        "`[topology]` 支持声明 relation，包含 `from: Device.Port`、`to: Device.Port`、`via: driven_by|reports_to|detects`",
-        "Parser 将 relation 映射到 `TopologySection.connections`，并写入 `from_port`/`to_port`",
-        "relation 缺少 from/to/via 任一字段时给出可定位的语法或语义错误",
+        "action_set 支持 state_value(identifier) 解析",
+        "ActionStatement::Set.value 改为 String",
+        "新增 validate_set_enum_values 且仅允许 on/off/forward/reverse/active/idle",
+        "lowering 继续输出二值 IR，非法值在 lowering 前拦截",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 1,
       "passes": true,
-      "notes": ""
+      "notes": "Implemented and validated via cargo test -p rust_plc -q."
     },
     {
       "id": "US-002",
-      "title": "移除旧拓扑属性写法（破坏性变更）",
-      "description": "As a platform maintainer, I want to remove legacy topology attributes so that the codebase has one strict standard.",
+      "title": "扩展属性白名单并落 extra_params",
+      "description": "As a platform maintainer, I want new motor attributes parsed and preserved for later typed validation.",
       "acceptanceCriteria": [
-        "DSL 不再接受设备属性 `driven_by`、`reports_to`、`detects`",
-        "Parser/semantic 中删除由设备属性自动推导连接的逻辑",
-        "使用旧写法时返回明确迁移错误，提示改用 relation + Device.Port",
+        "attribute_name 增加电机参数字段（steps_per_rev、accel_time 等）",
+        "apply_attribute 将新增参数写入 DeviceAttributes.extra_params",
+        "DeviceAttributes 新增 extra_params: HashMap<String, String>",
+        "未知属性继续报错，不静默吞参",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
       "passes": true,
-      "notes": ""
+      "notes": "Implemented and validated via cargo test -p rust_plc -q."
     },
     {
       "id": "US-003",
-      "title": "语义门禁改为严格端口校验",
-      "description": "As a safety engineer, I want semantic gate validation to run on explicit ports only so that ambiguous topology is rejected early.",
+      "title": "新增 stepper_motor/vfd/servo_drive 类型跨层映射",
+      "description": "As a DSL user, I want new motor-family device types recognized across parser, AST, IR, and semantic layers.",
       "acceptanceCriteria": [
-        "对每条 relation 执行端口存在性校验（SEM-101）",
-        "对每条 relation 执行方向校验 output -> input（SEM-102）",
-        "对每条 relation 执行类型兼容性校验（SEM-103）",
-        "可选语义角色校验保持可用（SEM-104）",
-        "悬空端口校验仅基于显式 relation 参与情况（SEM-105）",
-        "不再进行任何隐式端口推断（即使设备只有一个端口）",
+        "parser/AST/IR/semantic/topology_gate/device_subtype 新增三类设备分支",
+        "所有相关 exhaustive match 补齐并通过编译",
+        "新类型 DSL 示例可解析并进入语义阶段",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "已切换为 relation + Device.Port 校验路径；旧属性迁移错误已锁定。"
+      "notes": "Implemented and validated via cargo test -p rust_plc -q."
     },
     {
       "id": "US-004",
-      "title": "拓扑图与因果验证切换到端口关系源",
-      "description": "As a verification engineer, I want graph building and causality checks to use explicit port relations so that diagnostics match physical wiring.",
+      "title": "新增四类电机设备库 TOML",
+      "description": "As a controls engineer, I want standard device TOMLs so constraints and port contracts are injected consistently.",
       "acceptanceCriteria": [
-        "Topology graph 仅消费 `TopologySection.connections`",
-        "因果链验证仍支持设备级 chain 表达，但其可达性必须来自端口级 relation 图",
-        "错误信息包含关键端口上下文（例如 `valve_eject.coil_retract`）",
+        "新增 devices/motor.toml、devices/stepper_motor.toml、devices/vfd.toml、devices/servo_drive.toml",
+        "端口字段统一使用 port_type 并声明 states/default/direction",
+        "device_constraints 可通过 inject_device_constraints 注入",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "拓扑图/因果链验证与回归用例已统一基于显式 relation。"
+      "notes": "Implemented and validated via cargo test -p rust_plc -q."
     },
     {
       "id": "US-005",
-      "title": "实现双输入阀标准建模（可扩展到多 IO 设备）",
-      "description": "As a controls engineer, I want a dual-coil valve model with explicit port mapping so that each PLC output maps to a concrete physical coil.",
+      "title": "motor 旧写法破坏性迁移并给出迁移提示",
+      "description": "As a maintainer, I want legacy motor shorthand rejected so there is only one explicit-port rule.",
       "acceptanceCriteria": [
-        "新增双输入阀正例：两个 DO 分别连接 `coil_extend` 与 `coil_retract`",
-        "新增反例：端口缺失或接错端口会被语义门禁拦截",
-        "新增多输入/多输出设备最小回归样例（如 motor）以证明框架可扩展",
+        "不实现 normalize_motor_compat 或等效兼容改写",
+        "motor_x.on/off 报语义错误并提示改写为 motor_x.run.on/off",
+        "action: set motor_x on/off 报语义错误并提示改写为 set motor_x.run on/off",
+        "新增 error fixture 锁定破坏性行为",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "已新增双输入阀正反例与多IO motor 回归，语义门禁可拦截端口缺失/误接。"
+      "notes": "Implemented and validated via cargo test -p rust_plc -q."
     },
     {
       "id": "US-006",
-      "title": "核心示例迁移到端口级 relation DSL",
-      "description": "As a RustPLC user, I want canonical examples to use explicit port relations so that I can copy the new standard directly.",
+      "title": "runtime_bridge 完成多端口输出路由",
+      "description": "As a runtime engineer, I want output resolution keyed by device and port so multi-port devices do not alias.",
       "acceptanceCriteria": [
-        "更新 `examples/two_cylinder.plc` 为 relation + Device.Port 写法",
-        "更新 `examples/assembly_station.plc` 为 relation + Device.Port 写法",
-        "更新 `examples/recovery_templates/estop_recovery.plc` 为 relation + Device.Port 写法",
-        "示例中不再出现 `driven_by`/`reports_to`/`detects` 设备属性",
+        "resolve_digital_output_id 接口支持 device+port 路由",
+        "convert_action 调用链传递 TransitionAction::Set.port",
+        "stepper.enable 与 stepper.direction 路由到不同物理通道",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "核心 examples 与恢复模板已迁移 relation DSL。"
+      "notes": "Implemented: runtime_bridge now resolves outputs by device+port using topology links (with safe fallback), and added regression in tests/runtime_bridge_us006.rs for stepper enable/direction channel split."
     },
     {
       "id": "US-007",
-      "title": "测试夹具与门禁回归用例全面迁移",
-      "description": "As a maintainer, I want parser/semantic/verification tests migrated to relation DSL so that CI reflects the new contract.",
+      "title": "safety 引擎完成多端口状态验证",
+      "description": "As a verification engineer, I want safety checks indexed by device+port so constraints validate per-port semantics.",
       "acceptanceCriteria": [
-        "更新 parser/semantic/verification 现有 fixture 到 relation + Device.Port",
-        "新增旧写法失败测试，确保破坏性变更被锁定",
-        "新增端口歧义不允许的测试（缺 from_port/to_port 或错误端口）",
+        "safety 侧状态索引支持 (device, port) 维度",
+        "action_effect 返回包含 port 的动作效果",
+        "enable.off conflicts_with pulse.active 在验证引擎中可正确评估",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 7,
       "passes": true,
-      "notes": "parser/semantic/verification 夹具与大部分回归测试已迁移并通过。"
+      "notes": "Implemented: safety model now indexes (device,port), port-aware rule binding/action effects are enabled, and cross-port conflict regression added in src/verification/safety.rs tests."
     },
     {
       "id": "US-008",
-      "title": "文档标准化与迁移说明",
-      "description": "As a documentation consumer, I want docs to describe the port-first topology standard clearly so that migration and future modeling are consistent.",
+      "title": "更新示例与回归矩阵以锁定新契约",
+      "description": "As a release owner, I want tests and examples updated so CI enforces new syntax and multi-port behavior.",
       "acceptanceCriteria": [
-        "更新 `docs/RustPLC 拓扑语义与关系验证规范.md` 的 DSL 示例为可执行语法",
-        "新增迁移指南：旧属性写法到 relation + Device.Port 的对照表",
-        "在 README 或相关文档中明确声明：旧写法不再兼容",
+        "新增/更新 parser、semantic、verification 回归用例覆盖阶段0~2关键路径",
+        "新增旧 motor 写法报错回归并断言迁移提示",
+        "新设备类型示例（至少 stepper 单轴）可编译运行",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 8,
       "passes": true,
-      "notes": "规范文档改为可执行 DSL，补充旧写法迁移对照；README 已声明旧属性不兼容。"
+      "notes": "Completed: parser/semantic/runtime/safety regression matrix now covers stage0~2, including legacy motor migration errors and multi-port runtime+safety behaviors. Stage3 parameter validation (extra_params typed checks + device-library parameter schema) has also been implemented. Workspace-level integration updated (web-server exhaustive matches for new device types), and cargo check/test --workspace both pass."
     }
   ]
 }

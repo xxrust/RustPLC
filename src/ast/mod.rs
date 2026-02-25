@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlcProgram {
@@ -33,6 +34,9 @@ pub enum DeviceType {
     Cylinder,
     Sensor,
     Motor,
+    StepperMotor,
+    Vfd,
+    ServoDrive,
     AnalogInput,
     AnalogOutput,
     Pid,
@@ -128,6 +132,8 @@ pub struct DeviceAttributes {
     pub out: Option<String>,
     pub period_ms: Option<u64>,
     pub limit: Option<AnalogRange>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub extra_params: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -336,16 +342,9 @@ impl ActionTarget {
 pub enum ActionStatement {
     Extend { target: ActionTarget },
     Retract { target: ActionTarget },
-    Set { target: ActionTarget, value: BinaryValue },
+    Set { target: ActionTarget, value: String },
     SetAnalog { target: ActionTarget, value: f64 },
     Log { message: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BinaryValue {
-    On,
-    Off,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

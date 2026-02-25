@@ -1,0 +1,118 @@
+[identity]
+name = "变频器"
+type = "vfd"
+category = "actuators/motor/vfd"
+version = "1.0.0"
+
+[semantics]
+description = "变频调速驱动器，支持正反转、模拟量调速和故障反馈。"
+primary_function = "variable_frequency_drive"
+role = "actuator"
+typical_applications = ["输送带调速", "风机水泵节能", "搅拌机变速"]
+key_features = ["run/direction 控制", "running/fault/freq_arrive 反馈"]
+
+[physical]
+response_time = { typical = "20ms", max = "100ms" }
+power_supply = { input = "3ph-380VAC", control = "24VDC" }
+
+[[interfaces.ports]]
+name = "run"
+states = ["on", "off"]
+default_state = "off"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "direction"
+states = ["forward", "reverse"]
+default_state = "forward"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "running"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "freq_arrive"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[parameters]]
+name = "max_speed"
+type = "number"
+required = false
+default = "50"
+unit = "Hz"
+description = "最高输出频率"
+
+[[parameters]]
+name = "accel_time"
+type = "time"
+required = false
+default = "1.0s"
+description = "升频加速时间"
+
+[[parameters]]
+name = "decel_time"
+type = "time"
+required = false
+default = "1.0s"
+description = "降频减速时间"
+
+[[parameters]]
+name = "rated_power"
+type = "number"
+required = false
+default = "2.2"
+unit = "kW"
+description = "驱动电机额定功率"
+
+[[parameters]]
+name = "rated_freq"
+type = "number"
+required = false
+default = "50"
+unit = "Hz"
+description = "驱动电机额定频率"
+
+[[device_constraints.safety]]
+left = "direction.forward"
+right = "direction.reverse"
+relation = "conflicts_with"
+reason = "正反转指令互斥"
+
+[[device_constraints.safety]]
+left = "run.on"
+right = "fault.on"
+relation = "conflicts_with"
+reason = "故障时不得运行"
+
+[usage_guidance]
+when_to_use = "需要调速控制、软启动、节能运行的感应电机场景。"
+when_not_to_use = "需要精确定位请使用 servo_drive；简单启停无需调速可使用 motor。"
+
+[[usage_guidance.common_patterns]]
+name = "故障联锁启停"
+description = "只有 fault.off 时允许 run.on。"
+
+[[usage_guidance.common_mistakes]]
+mistake = "运行中直接反向"
+consequence = "冲击电流和机械冲击增加"
+solution = "先 run.off，等待 running.off 后再切 direction"
+
+[metadata]
+standards = ["IEC 61800-5-1"]
+tags = ["vfd", "speed_control", "energy_saving"]

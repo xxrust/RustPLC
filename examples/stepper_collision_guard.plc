@@ -47,7 +47,7 @@ device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  po
 [constraints]
 
 # Basic: do not enable the axis while drive is alarming.
-safety: axis_x.on requires alarm_x.off
+safety: axis_x.run.on requires alarm_x.off
     reason: "Drive alarm must be cleared before enabling axis"
 
 # Collision guard: when we're in any danger window, the clamp must NOT be extended.
@@ -67,7 +67,7 @@ task cycle:
         timeout: 200ms -> goto fault
 
     step enable_axis:
-        action: set axis_x on
+        action: set axis_x.run on
 
     step set_dir_positive:
         action: set Y0 on
@@ -102,7 +102,7 @@ task cycle:
 
 task fault:
     step safe:
-        action: set axis_x off
+        action: set axis_x.run off
         action: retract cyl_clamp
     step log:
         action: log "fault: timeout waiting for safe window / motion feedback"

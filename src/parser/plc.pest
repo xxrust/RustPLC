@@ -24,6 +24,9 @@ device_type = {
     | "solenoid_valve"
     | "cylinder"
     | "sensor"
+    | "stepper_motor"
+    | "servo_drive"
+    | "vfd"
     | "motor"
     | "analog_output"
     | "analog_input"
@@ -60,6 +63,17 @@ attribute_name = {
     | "out"
     | "period_ms"
     | "limit"
+    // Motor enhancement params
+    | "steps_per_rev"
+    | "max_speed"
+    | "accel_time"
+    | "decel_time"
+    | "encoder_resolution"
+    | "electronic_gear_num"
+    | "electronic_gear_den"
+    | "positioning_window"
+    | "rated_power"
+    | "rated_freq"
 }
 
 range_value = @{ number ~ ".." ~ number }
@@ -137,8 +151,9 @@ action_target    = @{ identifier ~ ("." ~ identifier)? }
 action_extend    = { "extend" ~ action_target }
 action_retract   = { "retract" ~ action_target }
 binary_output_value = { "on" | "off" }
+state_value      = @{ identifier }
 action_set_analog = { "set_analog" ~ action_target ~ number }
-action_set       = { "set" ~ action_target ~ binary_output_value }
+action_set       = { "set" ~ action_target ~ state_value }
 action_log = { "log" ~ string_literal }
 action_command = {
     action_extend

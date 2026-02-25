@@ -1,6 +1,6 @@
 # RustPLC 电机控制能力增强方案
 
-**版本**: 2.4
+**版本**: 2.5
 **日期**: 2026-02-25
 **状态**: 设计阶段
 
@@ -33,7 +33,7 @@
 | v2.0 | 改动清单写"10 处"但列了 12 项；函数名 `default_port_names` 不存在 | 已修正 |
 | v2.1 | 前置能力 A 内部矛盾：`action_effect` 改为 String 与"verification 无需改"同时出现 | **本版修正** |
 | v2.1 | 多端口语义未闭环：runtime_bridge 按 device 路由忽略 port，safety 验证也不吃 port | **本版修正** |
-| v2.1 | `parse_state_reference` 兼容方案需要 `device_types` 参数，但调用链无上下文 | **本版修正** |
+| v2.1 | `parse_state_reference` 兼容方案需要 `device_types` 参数，但调用链无上下文 | **本版调整：取消兼容方案，改为破坏性迁移** |
 | v2.1 | 参数处理写"暂存到 extra_attrs"但该字段不存在，空分支等于参数被吃掉 | **本版修正** |
 | v2.1 | 版本号顶部 2.0 底部 v2.1 不一致 | **本版修正** |
 
@@ -90,7 +90,7 @@ action_set = { "set" ~ action_target ~ binary_output_value }
 
 ```plc
 action: set stepper_x.direction forward
-action: set vfd_main.run on          # 保持兼容
+action: set vfd_main.run on          # 标准写法
 ```
 
 **改动方案**：
@@ -282,99 +282,24 @@ pub struct DeviceAttributes {
 
 ---
 
-## 4. `motor` 向后兼容策略
+## 4. `motor` 破坏性迁移策略（不做向后兼容）
 
-现有 `.plc` 文件使用 `motor.on` / `motor.off` 语法（如 `stepper_collision_guard.plc:50`）。`motor` 改造为多端口设备后，`motor.on` 被解析为 `StateReference { port: "self", state: "on" }`，但 `motor` 已无 `self` 端口，验证和 lowering 都会出错。
+用户已明确：如果兼容策略仅用于兼容旧写法且无实质收益，则不引入兼容层，直接废弃旧语法。
 
-**为什么不在解析阶段**：`parse_state_reference`（`parser/mod.rs:1082`）签名无上下文，不知道设备类型，无法判断是否需要映射。透传 `device_types` 到所有调用点（`:919`、`parse_safety_expr`、`parse_timing_constraint` 等）改动范围过大。
+**策略调整**：
 
-**为什么不在验证调用点**：Codex 指出，lowering 路径（`action_to_transition_action:2957`、`map_safety_operand:2141`）直接读原始 AST 的 `port` 字段，不经过验证层。如果只在验证调用点做映射，lowering 产生的 IR 里 `port` 仍是 `"self"`，阶段 2 端口路由闭环后会遗留不一致。
+1. **不实现** `normalize_motor_compat` 之类的 AST 改写逻辑。
+2. 旧写法直接判错（breaking change）：
+   - 状态引用：`motor_x.on` / `motor_x.off`
+   - 动作写法：`action: set motor_x on` / `off`
+3. 统一使用显式端口写法：
+   - `motor_x.run.on` / `motor_x.run.off`
+   - `action: set motor_x.run on` / `off`
+4. 在语义校验阶段新增专门错误提示，给出迁移建议（`self -> run`）。
 
-**正确方案：在预处理阶段做 AST 改写**
+**影响范围**：`semantic/mod.rs`（新增 legacy 写法拦截校验）、相关 fixture 与示例更新。
 
-`preprocess_program_with_library`（`semantic/mod.rs:37`）已有 AST 改写的先例（`expand_repeat_blocks`、`inject_device_constraints`）。在这里新增一个 `normalize_motor_compat` 步骤，在进入验证和 lowering 之前，一次性将所有 `motor` 设备的 `port="self"` 引用改写为 `port="run"`：
-
-```rust
-pub fn preprocess_program_with_library(
-    program: &PlcProgram,
-    device_library: Option<&DeviceLibrary>,
-) -> Result<PlcProgram, Vec<PlcError>> {
-    let expanded_tasks    = expand_repeat_blocks(&program.tasks)?;
-    let expanded_topology = expand_plc_controller_devices(&program.topology)?;
-    let mut rewritten = program.clone();
-    rewritten.tasks    = expanded_tasks;
-    rewritten.topology = expanded_topology;
-
-    if let Some(library) = device_library {
-        if !library.is_empty() {
-            inject_device_constraints(&mut rewritten, library)?;
-        }
-    }
-
-    // 新增：motor 向后兼容归一化，必须在验证和 lowering 之前
-    normalize_motor_compat(&mut rewritten);
-
-    Ok(rewritten)
-}
-```
-
-`normalize_motor_compat` 遍历所有 `StateReference` 和 `ActionTarget`，将 `motor` 设备的 `port="self"` 改写为 `port="run"`：
-
-```rust
-fn normalize_motor_compat(program: &mut PlcProgram) {
-    // 收集所有 motor 设备名
-    let motor_devices: HashSet<String> = program.topology.devices.iter()
-        .filter(|d| matches!(d.device_type, DeviceType::Motor))
-        .map(|d| d.name.clone())
-        .collect();
-
-    if motor_devices.is_empty() { return; }
-
-    // 改写 [constraints].safety 中的 StateReference
-    for constraint in &mut program.constraints.safety {
-        rewrite_safety_operand(&mut constraint.left,  &motor_devices);
-        rewrite_safety_operand(&mut constraint.right, &motor_devices);
-    }
-
-    // 改写 [constraints].causality 中的 StateReference（chain: Vec<StateReference>）
-    for causality in &mut program.constraints.causality {
-        for state_ref in &mut causality.chain {
-            rewrite_state_ref(state_ref, &motor_devices);
-        }
-    }
-
-    // 改写 [tasks] 中的 StateReference 和 ActionTarget
-    // 注意：program.tasks 是 TasksSection，实际字段是 program.tasks.tasks: Vec<TaskDeclaration>
-    for task in &mut program.tasks.tasks {
-        for step in &mut task.steps {
-            for stmt in &mut step.statements {
-                rewrite_step_statement(stmt, &motor_devices);
-            }
-        }
-    }
-}
-
-fn rewrite_state_ref(r: &mut StateReference, motor_devices: &HashSet<String>) {
-    if motor_devices.contains(&r.device)
-        && r.port == "self"
-        && (r.state == "on" || r.state == "off")
-    {
-        eprintln!("WARNING: {}.{} 已废弃，请改用 {}.run.{}",
-                  r.device, r.state, r.device, r.state);
-        r.port = "run".to_string();
-    }
-}
-
-fn rewrite_action_target(t: &mut ActionTarget, motor_devices: &HashSet<String>) {
-    if motor_devices.contains(&t.device) && t.port == "self" {
-        t.port = "run".to_string();
-    }
-}
-```
-
-**影响范围**：`semantic/mod.rs`（新增 `normalize_motor_compat` 函数，修改 `preprocess_program_with_library`）
-
-**优点**：改写在 AST 层一次完成，验证、lowering、IR 全部看到归一化后的引用，阶段 2 端口路由闭环后无需再处理兼容问题。
+**预期结果**：规则更简单、行为更显式、避免隐式改写带来的维护和调试成本。
 
 ---
 
@@ -745,8 +670,8 @@ fn action_effect(action: &TransitionAction) -> Option<(&str, &str, &str)>
         （3 个文件，可单独提交）
 
 阶段 1（新设备类型关键字，依赖阶段 0）
-  ├── motor 正反转改造（含向后兼容映射）
-  │     devices/motor.toml + 15 处代码改动 + normalize_motor_compat
+  ├── motor 正反转改造（破坏性迁移，不保留旧写法）
+  │     devices/motor.toml + 15 处代码改动 + legacy 语义拦截
   ├── stepper_motor
   │     devices/stepper_motor.toml + 15 处代码改动
   ├── vfd
@@ -787,7 +712,7 @@ fn action_effect(action: &TransitionAction) -> Option<(&str, &str, &str)>
 | 新类型解析 | `device x: stepper_motor { ... }` 能解析 | 新增 fixture |
 | 设备库约束注入 | `enable.off conflicts_with pulse.active` 自动注入 | 单元测试 `inject_device_constraints` |
 | 拓扑门通过 | `relation { from: stepper_x.fault, to: plc_main.X0, via: reports_to }` 合法 | 集成测试 |
-| motor 向后兼容 | `motor.on` / `motor.off` 仍可解析（带 warning） | 现有 `stepper_collision_guard.plc` 不报错 |
+| motor 旧写法失效 | `motor.on` / `motor.off` 触发语义错误并给迁移提示 | 新增 error fixture 断言报错文案 |
 | 示例可编译 | `cargo run -- examples/stepper_single_axis.plc --no-print-ir` 无错误 | CI |
 
 ### 阶段 2
@@ -799,7 +724,7 @@ fn action_effect(action: &TransitionAction) -> Option<(&str, &str, &str)>
 
 ---
 
-## 9. Codex 审查问题修正记录（v2.4）
+## 9. Codex 审查问题修正记录（v2.5）
 
 | 版本 | 问题 | 严重度 | 修正方案 |
 |---|---|---|---|
@@ -808,21 +733,20 @@ fn action_effect(action: &TransitionAction) -> Option<(&str, &str, &str)>
 | v1.0 | 设备库 TOML 字段名 `type` 应为 `port_type` | 🟠 | 所有 TOML 示例修正 |
 | v1.0 | `alarm` 与 `fault` 命名冲突 | 🟠 | 统一为 `fault` |
 | v2.0 | runtime_bridge 枚举值映射破坏方向语义 | 🔴 | IR 层保持 `BinaryValue`，映射在 `semantic/mod.rs` 完成 |
-| v2.0 | `validate_state_reference` 签名返回 `()`，不能 `return Ok(...)` | 🔴 | 兼容映射移到预处理阶段 |
+| v2.0 | `validate_state_reference` 签名返回 `()`，不能 `return Ok(...)` | 🔴 | 不在该函数做兼容映射，兼容策略统一取消 |
 | v2.0 | 属性策略矛盾（当前代码对未知属性报错） | 🟠 | 改用方案 B（扩展白名单） |
 | v2.0 | 改动清单写"10 处"但列了 12 项；函数名 `default_port_names` 不存在 | 🟠 | 修正为 12 处；函数名改为 `implicit_port_ids_for_device_type` |
 | v2.1 | 前置能力 A 内部矛盾（`action_effect` 改 String 与"verification 无需改"同时出现） | 🟠 | 明确：`TransitionAction::Set.value` 保持 `BinaryValue`，`safety.rs` 和 `runtime_bridge.rs` 无需改 |
 | v2.1 | 多端口语义未闭环（runtime_bridge 和 safety 都忽略 port） | 🔴 | 拆分为独立的阶段 2，明确接口契约；阶段 1 标注限制 |
-| v2.1 | `parse_state_reference` 兼容方案需要 `device_types` 参数但调用链无上下文 | 🟠 | 兼容映射移到 `preprocess_program_with_library`（`normalize_motor_compat`） |
+| v2.1 | `parse_state_reference` 兼容方案需要 `device_types` 参数但调用链无上下文 | 🟠 | v2.5 决策为不做兼容，直接将旧写法定义为错误 |
 | v2.1 | 参数处理写"暂存到 extra_attrs"但该字段不存在，空分支等于参数被吃掉 | 🟡 | 落 `extra_params: HashMap<String, String>`，阶段 3 再做类型化校验 |
 | v2.1 | 版本号不一致 | 🟡 | 统一版本号 |
 | v2.2 | 改动清单漏 `semantic/mod.rs:479`、`:2344`、`:3185` 三个 exhaustive match | 🔴 | 改动清单扩展至 15 处 |
-| v2.2 | motor 兼容映射放在"验证调用点"不覆盖 lowering 路径 | 🟠 | 移到 `preprocess_program_with_library` 做 AST 改写（`normalize_motor_compat`） |
+| v2.2 | motor 兼容映射放在"验证调用点"不覆盖 lowering 路径 | 🟠 | v2.5 决策为取消映射，改为语义阶段直接报错 |
 | v2.2 | 参数空分支让拼写错误静默通过 | 🟠 | 落 `extra_params` 存储参数，不是空分支 |
 | v2.3 | `action_to_transition_action` 示例用了 `return Err` 和 `line`，但函数签名是 `-> TransitionAction` | 🔴 | 改为前置语义校验 pass（`validate_set_enum_values`）拦截非法值；`action_to_transition_action` 仅处理合法枚举 |
-| v2.3 | `normalize_motor_compat` 遍历写 `program.tasks`，但实际字段是 `program.tasks.tasks` | 🟠 | 修正为 `program.tasks.tasks: Vec<TaskDeclaration>` |
-| v2.3 | `normalize_motor_compat` 漏了 `constraints.causality` 中的 `StateReference` | 🟠 | 补充遍历 `causality.chain: Vec<StateReference>` |
+| v2.5 | 用户决策：兼容旧 motor 仅增加复杂度、收益不足 | 🟠 | 删除兼容改写方案，采用破坏性迁移并补充迁移提示 |
 
 ---
 
-**文档状态**：v2.4 完整版，已根据 Codex v1/v2/v3/v4 审查意见修订所有问题。
+**文档状态**：v2.5 完整版，已根据 Codex 审查与用户迁移策略决策更新。

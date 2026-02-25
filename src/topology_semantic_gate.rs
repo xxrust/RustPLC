@@ -516,12 +516,109 @@ fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
         ],
         DeviceType::Motor => vec![
             gate_port(
+                "run",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "direction",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port("running", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port("fault", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
                 "cmd",
                 PortType::Digital,
                 PortRole::Consumer,
                 Some("actuator_cmd"),
             ),
             gate_port("on", PortType::Logical, PortRole::Producer, Some("state")),
+        ],
+        DeviceType::StepperMotor => vec![
+            gate_port(
+                "enable",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "direction",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "pulse",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port("fault", PortType::Logical, PortRole::Producer, Some("state")),
+        ],
+        DeviceType::Vfd => vec![
+            gate_port(
+                "run",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "direction",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port("running", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port("fault", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "freq_arrive",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+        ],
+        DeviceType::ServoDrive => vec![
+            gate_port(
+                "enable",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "direction",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "pulse",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "clear_fault",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port("ready", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "in_position",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port("fault", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "zero_speed",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
         ],
         DeviceType::AnalogInput => vec![gate_port(
             "in",
@@ -563,7 +660,14 @@ fn infer_semantic_role(port: &DevicePort) -> Option<&'static str> {
         PortRole::Consumer => {
             if id.contains("sense") || id.contains("detector") || id == "in" {
                 Some("detector")
-            } else if id.contains("cmd") || id.contains("coil") || id.contains("power") {
+            } else if id.contains("cmd")
+                || id.contains("coil")
+                || id.contains("power")
+                || id.contains("run")
+                || id.contains("direction")
+                || id.contains("enable")
+                || id.contains("pulse")
+            {
                 Some("actuator_cmd")
             } else {
                 None
@@ -817,6 +921,9 @@ fn device_type_name(device_type: &DeviceType) -> &'static str {
         DeviceType::Cylinder => "cylinder",
         DeviceType::Sensor => "sensor",
         DeviceType::Motor => "motor",
+        DeviceType::StepperMotor => "stepper_motor",
+        DeviceType::Vfd => "vfd",
+        DeviceType::ServoDrive => "servo_drive",
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",

@@ -1,11 +1,10 @@
 use crate::ast::{
-    ActionStatement, BinaryValue as AstBinaryValue, ComparisonOperator, ConditionExpression,
-    ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType, DurationValue,
-    GotoDirective, LiteralValue, OnCompleteDirective, ParallelBlock, PlcProgram, PortRole,
-    PortType, RaceBlock, SafetyConstraint, SafetyOperand, SafetyRelation as AstSafetyRelation,
-    StateReference, StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective,
-    TimingRelation as AstTimingRelation, TimingTarget, TopologyConnection, TopologyRelation,
-    TopologySection, WaitCondition, WaitStatement,
+    ActionStatement, ComparisonOperator, ConditionExpression, ConstraintsSection, DeviceAttributes,
+    DeviceDeclaration, DeviceType, DurationValue, GotoDirective, LiteralValue, OnCompleteDirective,
+    ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, SafetyConstraint, SafetyOperand,
+    SafetyRelation as AstSafetyRelation, StateReference, StepStatement, TaskDeclaration,
+    TasksSection, TimeUnit, TimeoutDirective, TimingRelation as AstTimingRelation, TimingTarget,
+    TopologyConnection, TopologyRelation, TopologySection, WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use crate::ir::{
@@ -13,9 +12,10 @@ use crate::ir::{
     ConnectionType, ConstraintSet, Device, DeviceKind, PidLoop as IrPidLoop, SafetyExpr,
     SafetyRelation as IrSafetyRelation, SafetyRule, State, StateExpr, StateMachine, TimeInterval,
     TimerOperation, TimerOperationKind, TimingModel, TimingRelation as IrTimingRelation,
-    TimingRule, TimingScope, TopologyGraph, Transition, TransitionAction, TransitionGuard,
+    TimingRule, TimingScope, TopologyGraph, TopologyLink, Transition, TransitionAction,
+    TransitionGuard,
 };
-use crate::plc_port::{PlcPortKind, canonical_physical_device_name, parse_plc_port_ref};
+use crate::plc_port::{canonical_physical_device_name, parse_plc_port_ref, PlcPortKind};
 use petgraph::graph::NodeIndex;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -62,6 +62,9 @@ fn device_type_str(device_type: &DeviceType) -> &'static str {
         DeviceType::Cylinder => "cylinder",
         DeviceType::Sensor => "sensor",
         DeviceType::Motor => "motor",
+        DeviceType::StepperMotor => "stepper_motor",
+        DeviceType::Vfd => "vfd",
+        DeviceType::ServoDrive => "servo_drive",
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
@@ -79,6 +82,7 @@ fn inject_device_constraints(
         let Some(def) = library.get(type_key) else {
             continue;
         };
+        validate_device_extra_params(device, type_key, def, &mut errors);
         let declared_port_ids = known_port_ids(device);
 
         // Inject port states from library into device ports
@@ -101,14 +105,14 @@ fn inject_device_constraints(
 
         // Expand device-library safety constraints into AST constraints
         for lib_safety in &def.device_constraints.safety {
-            let Some((left_port, _)) = lib_safety.left.split_once('.') else {
+            let Some((left_port, _left_state)) = lib_safety.left.split_once('.') else {
                 errors.push(PlcError::device_library_invalid_port_ref(
                     &lib_safety.left,
                     &device.name,
                 ));
                 continue;
             };
-            let Some((right_port, _)) = lib_safety.right.split_once('.') else {
+            let Some((right_port, _right_state)) = lib_safety.right.split_once('.') else {
                 errors.push(PlcError::device_library_invalid_port_ref(
                     &lib_safety.right,
                     &device.name,
@@ -119,7 +123,6 @@ fn inject_device_constraints(
             if !declared_port_ids.contains(left_port) || !declared_port_ids.contains(right_port) {
                 continue;
             }
-
             let left = match expand_port_state_ref(&lib_safety.left, &device.name) {
                 Ok(sr) => SafetyOperand::State(sr),
                 Err(e) => {
@@ -140,10 +143,7 @@ fn inject_device_constraints(
                 other => {
                     errors.push(PlcError::semantic(
                         0,
-                        format!(
-                            "设备库约束关系未知: {other} (设备实例: {})",
-                            device.name
-                        ),
+                        format!("设备库约束关系未知: {other} (设备实例: {})", device.name),
                     ));
                     continue;
                 }
@@ -164,6 +164,237 @@ fn inject_device_constraints(
         Ok(())
     } else {
         Err(errors)
+    }
+}
+
+fn validate_device_extra_params(
+    device: &DeviceDeclaration,
+    type_key: &str,
+    def: &crate::device_library::DeviceDef,
+    errors: &mut Vec<PlcError>,
+) {
+    if def.parameters.is_empty() {
+        if !device.attributes.extra_params.is_empty() {
+            for param_name in device.attributes.extra_params.keys() {
+                errors.push(PlcError::semantic_with_reason(
+                    device.line.max(1),
+                    format!(
+                        "设备 {}({}) 参数 `{param_name}` 未在设备库 parameters 中声明",
+                        device.name, type_key
+                    ),
+                    "请在 devices/<type>.toml 中补充 [[parameters]] 定义，或移除该参数".to_string(),
+                ));
+            }
+        }
+        return;
+    }
+
+    let mut schema_by_name = HashMap::<String, &crate::device_library::DeviceParameterDef>::new();
+    for parameter in &def.parameters {
+        schema_by_name.insert(parameter.name.clone(), parameter);
+    }
+
+    for (name, raw_value) in &device.attributes.extra_params {
+        let Some(schema) = schema_by_name.get(name) else {
+            errors.push(PlcError::semantic_with_reason(
+                device.line.max(1),
+                format!(
+                    "设备 {}({}) 参数 `{name}` 未在设备库 parameters 中声明",
+                    device.name, type_key
+                ),
+                "请检查参数名拼写，或在设备库中添加该参数定义".to_string(),
+            ));
+            continue;
+        };
+
+        if let Err(reason) = validate_extra_param_value(raw_value, schema) {
+            errors.push(PlcError::semantic_with_reason(
+                device.line.max(1),
+                format!(
+                    "设备 {}({}) 参数 `{name}` 的值 `{raw_value}` 无效",
+                    device.name, type_key
+                ),
+                reason,
+            ));
+        }
+    }
+
+    for parameter in &def.parameters {
+        if !parameter.required || device.attributes.extra_params.contains_key(&parameter.name) {
+            continue;
+        }
+        if !parameter.default.trim().is_empty() {
+            continue;
+        }
+        errors.push(PlcError::semantic_with_reason(
+            device.line.max(1),
+            format!(
+                "设备 {}({}) 缺少必填参数 `{}`",
+                device.name, type_key, parameter.name
+            ),
+            "请在设备声明中补充该参数，或为设备库参数提供默认值".to_string(),
+        ));
+    }
+}
+
+fn validate_extra_param_value(
+    raw_value: &str,
+    schema: &crate::device_library::DeviceParameterDef,
+) -> Result<(), String> {
+    let kind = schema.parameter_type.trim().to_ascii_lowercase();
+    match kind.as_str() {
+        "integer" | "int" | "u32" | "i32" => {
+            raw_value
+                .trim()
+                .parse::<i64>()
+                .map(|_| ())
+                .map_err(|_| "参数类型要求 integer（示例：200）".to_string())
+        }
+        "float" | "number" | "ratio" => raw_value
+            .trim()
+            .parse::<f64>()
+            .map(|_| ())
+            .or_else(|_| validate_number_with_optional_unit(raw_value, &schema.unit))
+            .map_err(|_| "参数类型要求 number（示例：12.5 或 2.2kW）".to_string()),
+        "time" => validate_time_param(raw_value),
+        "boolean" | "bool" => {
+            let normalized = strip_wrapping_quotes(raw_value.trim())
+                .to_ascii_lowercase()
+                .to_string();
+            if normalized == "true" || normalized == "false" {
+                Ok(())
+            } else {
+                Err("参数类型要求 boolean（true/false）".to_string())
+            }
+        }
+        "enum" => {
+            let candidate = strip_wrapping_quotes(raw_value.trim());
+            if schema.options.iter().any(|option| option == candidate) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "参数类型要求 enum，合法值: {}",
+                    schema.options.join(", ")
+                ))
+            }
+        }
+        "length" | "pressure" => validate_numeric_with_optional_unit(raw_value, &schema.unit),
+        other => Err(format!(
+            "设备库参数类型 `{other}` 暂不支持；请使用 integer/number/time/boolean/enum/length/pressure"
+        )),
+    }
+}
+
+fn validate_time_param(raw_value: &str) -> Result<(), String> {
+    let trimmed = raw_value.trim();
+    if trimmed.len() <= 2 {
+        return Err("参数类型要求 time（示例：100ms 或 2s）".to_string());
+    }
+
+    if let Some(number) = trimmed.strip_suffix("ms") {
+        number
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| "time 参数格式错误，应为 <number>ms".to_string())?;
+        return Ok(());
+    }
+
+    if let Some(number) = trimmed.strip_suffix('s') {
+        number
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| "time 参数格式错误，应为 <number>s".to_string())?;
+        return Ok(());
+    }
+
+    Err("参数类型要求 time（示例：100ms 或 2s）".to_string())
+}
+
+fn validate_numeric_with_optional_unit(raw_value: &str, expected_unit: &str) -> Result<(), String> {
+    let trimmed = raw_value.trim();
+    if trimmed.is_empty() {
+        return Err("参数值不能为空".to_string());
+    }
+
+    let split_index = trimmed
+        .char_indices()
+        .find(|(_, ch)| {
+            !(ch.is_ascii_digit() || *ch == '.' || *ch == '-' || *ch == '+' || *ch == '_')
+        })
+        .map(|(idx, _)| idx)
+        .unwrap_or(trimmed.len());
+
+    let (number_part, unit_part) = trimmed.split_at(split_index);
+    if number_part.trim().is_empty() {
+        return Err("参数值缺少数字部分".to_string());
+    }
+
+    number_part
+        .trim()
+        .replace('_', "")
+        .parse::<f64>()
+        .map_err(|_| "参数值的数字部分解析失败".to_string())?;
+
+    let normalized_unit = unit_part.trim();
+    if expected_unit.trim().is_empty() {
+        return Ok(());
+    }
+
+    if normalized_unit == expected_unit.trim() {
+        Ok(())
+    } else if normalized_unit.is_empty() {
+        Err(format!("参数缺少单位，应为 `{}`", expected_unit.trim()))
+    } else {
+        Err(format!(
+            "参数单位不匹配，期望 `{}`，实际 `{normalized_unit}`",
+            expected_unit.trim()
+        ))
+    }
+}
+
+fn validate_number_with_optional_unit(raw_value: &str, expected_unit: &str) -> Result<(), String> {
+    let trimmed = raw_value.trim();
+    if trimmed.parse::<f64>().is_ok() {
+        return Ok(());
+    }
+
+    let split_index = trimmed
+        .char_indices()
+        .find(|(_, ch)| {
+            !(ch.is_ascii_digit() || *ch == '.' || *ch == '-' || *ch == '+' || *ch == '_')
+        })
+        .map(|(idx, _)| idx)
+        .unwrap_or(trimmed.len());
+    let (number_part, unit_part) = trimmed.split_at(split_index);
+    if number_part.trim().is_empty() {
+        return Err("参数值缺少数字部分".to_string());
+    }
+
+    number_part
+        .trim()
+        .replace('_', "")
+        .parse::<f64>()
+        .map_err(|_| "参数值的数字部分解析失败".to_string())?;
+
+    let actual_unit = unit_part.trim();
+    let expected_unit = expected_unit.trim();
+    if expected_unit.is_empty() {
+        return Ok(());
+    }
+    if actual_unit.is_empty() || actual_unit == expected_unit {
+        Ok(())
+    } else {
+        Err(format!(
+            "参数单位不匹配，期望 `{expected_unit}`，实际 `{actual_unit}`"
+        ))
+    }
+}
+
+fn strip_wrapping_quotes(raw: &str) -> &str {
+    if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
+        &raw[1..raw.len() - 1]
+    } else {
+        raw
     }
 }
 
@@ -191,20 +422,29 @@ fn implicit_port_ids_for_device_type(device_type: &DeviceType) -> &'static [&'st
         DeviceType::SolenoidValve => &["coil", "out"],
         DeviceType::Cylinder => &["cmd", "extended", "retracted"],
         DeviceType::Sensor => &["sense", "out"],
-        DeviceType::Motor => &["cmd", "on"],
+        DeviceType::Motor => &["run", "direction", "running", "fault", "cmd", "on"],
+        DeviceType::StepperMotor => &["enable", "direction", "pulse", "fault"],
+        DeviceType::Vfd => &["run", "direction", "running", "fault", "freq_arrive"],
+        DeviceType::ServoDrive => &[
+            "enable",
+            "direction",
+            "pulse",
+            "clear_fault",
+            "ready",
+            "in_position",
+            "fault",
+            "zero_speed",
+        ],
         DeviceType::AnalogInput => &["in"],
         DeviceType::AnalogOutput => &["out"],
         DeviceType::Pid => &["in", "out"],
     }
 }
 
-fn expand_port_state_ref(
-    port_state: &str,
-    instance: &str,
-) -> Result<StateReference, PlcError> {
-    let (port, state) = port_state.split_once('.').ok_or_else(|| {
-        PlcError::device_library_invalid_port_ref(port_state, instance)
-    })?;
+fn expand_port_state_ref(port_state: &str, instance: &str) -> Result<StateReference, PlcError> {
+    let (port, state) = port_state
+        .split_once('.')
+        .ok_or_else(|| PlcError::device_library_invalid_port_ref(port_state, instance))?;
     Ok(StateReference {
         device: instance.to_string(),
         port: port.to_string(),
@@ -485,6 +725,9 @@ fn device_type_name(device_type: &DeviceType) -> &'static str {
         DeviceType::Cylinder => "cylinder",
         DeviceType::Sensor => "sensor",
         DeviceType::Motor => "motor",
+        DeviceType::StepperMotor => "stepper_motor",
+        DeviceType::Vfd => "vfd",
+        DeviceType::ServoDrive => "servo_drive",
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
@@ -702,7 +945,8 @@ pub fn build_topology_graph(program: &PlcProgram) -> Result<TopologyGraph, Vec<P
 pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
     let wait_ctx = WaitExpressionContext::for_program(&expanded);
-    build_state_machine_from_ast_with_context(&expanded.tasks, &wait_ctx)
+    let device_kinds = collect_device_kinds(&expanded.topology);
+    build_state_machine_from_ast_with_context(&expanded.tasks, &wait_ctx, Some(&device_kinds))
 }
 
 pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<PlcError>> {
@@ -914,7 +1158,14 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
             continue;
         };
 
-        topology_graph.add_connection(from_node.index, to_node.index, connection_type);
+        topology_graph.add_connection(from_node.index, to_node.index, connection_type.clone());
+        topology_graph.links.push(TopologyLink {
+            from: connection.from.clone(),
+            to: connection.to.clone(),
+            from_port: connection.from_port.clone(),
+            to_port: connection.to_port.clone(),
+            kind: connection_type,
+        });
     }
 
     topology_graph.pid_loops = pid_loops;
@@ -1214,6 +1465,13 @@ pub fn build_constraint_set_from_ast(
                 &device_ranges,
                 &mut errors,
             );
+            validate_set_enum_values(&step.statements, step.line.max(1), &mut errors);
+            validate_motor_legacy_set_actions(
+                &step.statements,
+                step.line.max(1),
+                &device_kinds,
+                &mut errors,
+            );
         }
     }
 
@@ -1260,12 +1518,13 @@ pub fn build_timing_model_from_ast(
 }
 
 pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine, Vec<PlcError>> {
-    build_state_machine_from_ast_with_context(tasks, &WaitExpressionContext::default())
+    build_state_machine_from_ast_with_context(tasks, &WaitExpressionContext::default(), None)
 }
 
 fn build_state_machine_from_ast_with_context(
     tasks: &TasksSection,
     wait_ctx: &WaitExpressionContext,
+    device_kinds: Option<&HashMap<String, DeviceKind>>,
 ) -> Result<StateMachine, Vec<PlcError>> {
     let mut builder = StateMachineBuilder::default();
     let mut errors = Vec::new();
@@ -1337,6 +1596,15 @@ fn build_state_machine_from_ast_with_context(
 
     for task in &tasks.tasks {
         for (step_index, step) in task.steps.iter().enumerate() {
+            validate_set_enum_values(&step.statements, step.line.max(1), &mut errors);
+            if let Some(device_kinds) = device_kinds {
+                validate_motor_legacy_set_actions(
+                    &step.statements,
+                    step.line.max(1),
+                    device_kinds,
+                    &mut errors,
+                );
+            }
             let from_state = State {
                 task_name: task.name.clone(),
                 step_name: step.name.clone(),
@@ -1659,6 +1927,12 @@ fn collect_known_states(
         };
 
         let mut states = HashSet::new();
+        for port in &device.attributes.ports {
+            for state in &port.states {
+                states.insert(state.clone());
+            }
+        }
+
         if let Some(custom_states) = &device.attributes.custom_states {
             if custom_states.len() > 8 {
                 eprintln!(
@@ -1715,7 +1989,7 @@ fn validate_state_reference(
     known_states: &HashMap<String, HashSet<String>>,
     errors: &mut Vec<PlcError>,
 ) {
-    let Some(_) = device_kinds.get(&state.device) else {
+    let Some(kind) = device_kinds.get(&state.device) else {
         errors.push(PlcError::undefined_reference_with_reason(
             line,
             "设备",
@@ -1724,6 +1998,21 @@ fn validate_state_reference(
         ));
         return;
     };
+
+    if *kind == DeviceKind::Motor && state.port == "self" {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "{source} 使用了已废弃的电机状态写法 {}.{}",
+                state.device, state.state
+            ),
+            format!(
+                "请改用显式端口状态，例如 {}.run.on/off 或 {}.direction.forward/reverse",
+                state.device, state.device
+            ),
+        ));
+        return;
+    }
 
     if state.state.is_empty() {
         errors.push(PlcError::semantic(
@@ -1845,13 +2134,16 @@ fn validate_analog_actions_in_statements(
         match statement {
             StepStatement::Action(ActionStatement::SetAnalog { target, value }) => {
                 if let Some(kind) = device_kinds.get(&target.device) {
-                    if *kind != DeviceKind::AnalogOutput && *kind != DeviceKind::Motor {
+                    if *kind != DeviceKind::AnalogOutput
+                        && *kind != DeviceKind::Motor
+                        && *kind != DeviceKind::Vfd
+                    {
                         errors.push(PlcError::type_mismatch_with_reason(
                             line,
-                            "analog_output 或 motor",
+                            "analog_output / motor / vfd",
                             device_kind_name(kind),
                             format!("set_analog {target}"),
-                            "set_analog 只能用于 analog_output 或 motor 类型设备",
+                            "set_analog 只能用于 analog_output、motor 或 vfd 类型设备",
                         ));
                     }
                 }
@@ -1914,6 +2206,95 @@ fn validate_analog_actions_in_statements(
     }
 }
 
+fn validate_set_enum_values(statements: &[StepStatement], line: usize, errors: &mut Vec<PlcError>) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::Set { target, value }) => {
+                if set_enum_to_binary(value).is_none() {
+                    errors.push(PlcError::semantic_with_reason(
+                        line,
+                        format!("set {target} {value} 使用了不支持的状态值"),
+                        "set 状态值仅支持 on/off/forward/reverse/active/idle".to_string(),
+                    ));
+                }
+            }
+            StepStatement::Repeat { body, .. } => validate_set_enum_values(body, line, errors),
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_set_enum_values(&branch.statements, line, errors);
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_set_enum_values(&branch.statements, line, errors);
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn validate_motor_legacy_set_actions(
+    statements: &[StepStatement],
+    line: usize,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::Set { target, value })
+                if target.port == "self"
+                    && matches!(device_kinds.get(&target.device), Some(DeviceKind::Motor)) =>
+            {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!("set {} {value} 旧写法已废弃", target.device),
+                    format!(
+                        "请改用显式端口写法：set {}.run on/off 或 set {}.direction forward/reverse",
+                        target.device, target.device
+                    ),
+                ));
+            }
+            StepStatement::Repeat { body, .. } => {
+                validate_motor_legacy_set_actions(body, line, device_kinds, errors)
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_motor_legacy_set_actions(
+                        &branch.statements,
+                        line,
+                        device_kinds,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_motor_legacy_set_actions(
+                        &branch.statements,
+                        line,
+                        device_kinds,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
 fn validate_wait_device_references_in_statements(
     statements: &[StepStatement],
     line: usize,
@@ -1928,6 +2309,7 @@ fn validate_wait_device_references_in_statements(
                 let should_validate_references =
                     matches!(wait.condition, WaitCondition::And(_) | WaitCondition::Or(_));
                 for condition in wait_condition_terms(&wait.condition) {
+                    validate_motor_legacy_wait_operand(&condition.left, line, device_kinds, errors);
                     if should_validate_references {
                         validate_wait_operand_device(
                             &condition.left,
@@ -2024,6 +2406,34 @@ fn validate_wait_operand_device(
 ) {
     if let Some(candidate) = wait_operand_device_name(operand) {
         validate_device_reference(candidate, line, source, device_kinds, errors);
+    }
+}
+
+fn validate_motor_legacy_wait_operand(
+    operand: &str,
+    line: usize,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    let mut parts = operand.split('.');
+    let Some(device) = parts.next() else {
+        return;
+    };
+    let Some(state) = parts.next() else {
+        return;
+    };
+    if parts.next().is_some() {
+        return;
+    }
+
+    if matches!(device_kinds.get(device), Some(DeviceKind::Motor)) {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!("wait 条件使用了已废弃的电机状态写法 {device}.{state}"),
+            format!(
+                "请改用显式端口状态，例如 {device}.run.on/off 或 {device}.direction.forward/reverse"
+            ),
+        ));
     }
 }
 
@@ -2262,7 +2672,9 @@ fn action_to_timing(
         ActionStatement::Extend { target } => (ActionKind::Extend, Some(target.device.as_str())),
         ActionStatement::Retract { target } => (ActionKind::Retract, Some(target.device.as_str())),
         ActionStatement::Set { target, .. } => (ActionKind::Set, Some(target.device.as_str())),
-        ActionStatement::SetAnalog { target, .. } => (ActionKind::SetAnalog, Some(target.device.as_str())),
+        ActionStatement::SetAnalog { target, .. } => {
+            (ActionKind::SetAnalog, Some(target.device.as_str()))
+        }
         ActionStatement::Log { .. } => (ActionKind::Log, None),
     };
 
@@ -2348,7 +2760,10 @@ fn default_states_for_kind(kind: &DeviceKind) -> &'static [&'static str] {
         | DeviceKind::DigitalInput
         | DeviceKind::SolenoidValve
         | DeviceKind::Sensor
-        | DeviceKind::Motor => &["on", "off"],
+        | DeviceKind::Motor
+        | DeviceKind::StepperMotor
+        | DeviceKind::Vfd
+        | DeviceKind::ServoDrive => &["on", "off", "forward", "reverse", "active", "idle"],
         DeviceKind::AnalogInput | DeviceKind::AnalogOutput | DeviceKind::Pid | DeviceKind::Plc => {
             &[]
         }
@@ -2382,7 +2797,9 @@ fn analyze_statements(
     for statement in statements {
         match statement {
             StepStatement::Action(action) => {
-                analyzed.actions.push(action_to_transition_action(action));
+                if let Some(mapped) = action_to_transition_action(action) {
+                    analyzed.actions.push(mapped);
+                }
             }
             StepStatement::Wait(wait) => {
                 analyzed
@@ -2954,32 +3371,37 @@ fn resolve_task_target(
     })
 }
 
-fn action_to_transition_action(action: &ActionStatement) -> TransitionAction {
+fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAction> {
     match action {
-        ActionStatement::Extend { target } => TransitionAction::Extend {
+        ActionStatement::Extend { target } => Some(TransitionAction::Extend {
             target: target.device.clone(),
             port: target.port.clone(),
-        },
-        ActionStatement::Retract { target } => TransitionAction::Retract {
+        }),
+        ActionStatement::Retract { target } => Some(TransitionAction::Retract {
             target: target.device.clone(),
             port: target.port.clone(),
-        },
-        ActionStatement::Set { target, value } => TransitionAction::Set {
+        }),
+        ActionStatement::Set { target, value } => Some(TransitionAction::Set {
             target: target.device.clone(),
             port: target.port.clone(),
-            value: match value {
-                AstBinaryValue::On => IrBinaryValue::On,
-                AstBinaryValue::Off => IrBinaryValue::Off,
-            },
-        },
-        ActionStatement::SetAnalog { target, value } => TransitionAction::SetAnalog {
+            value: set_enum_to_binary(value)?,
+        }),
+        ActionStatement::SetAnalog { target, value } => Some(TransitionAction::SetAnalog {
             target: target.device.clone(),
             port: target.port.clone(),
             value_raw: value.to_string(),
-        },
-        ActionStatement::Log { message } => TransitionAction::Log {
+        }),
+        ActionStatement::Log { message } => Some(TransitionAction::Log {
             message: message.clone(),
-        },
+        }),
+    }
+}
+
+fn set_enum_to_binary(value: &str) -> Option<IrBinaryValue> {
+    match value {
+        "on" | "forward" | "active" => Some(IrBinaryValue::On),
+        "off" | "reverse" | "idle" => Some(IrBinaryValue::Off),
+        _ => None,
     }
 }
 
@@ -3135,6 +3557,9 @@ fn ast_type_to_ir_kind(device_type: &DeviceType) -> DeviceKind {
         DeviceType::Cylinder => DeviceKind::Cylinder,
         DeviceType::Sensor => DeviceKind::Sensor,
         DeviceType::Motor => DeviceKind::Motor,
+        DeviceType::StepperMotor => DeviceKind::StepperMotor,
+        DeviceType::Vfd => DeviceKind::Vfd,
+        DeviceType::ServoDrive => DeviceKind::ServoDrive,
         DeviceType::AnalogInput => DeviceKind::AnalogInput,
         DeviceType::AnalogOutput => DeviceKind::AnalogOutput,
         DeviceType::Pid => DeviceKind::Pid,
@@ -3156,9 +3581,13 @@ fn connection_type_for_relation(
 fn driven_by_connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<ConnectionType> {
     match (from, to) {
         (DeviceKind::DigitalOutput, DeviceKind::SolenoidValve)
-        | (DeviceKind::DigitalOutput, DeviceKind::Motor) => Some(ConnectionType::Electrical),
+        | (DeviceKind::DigitalOutput, DeviceKind::Motor)
+        | (DeviceKind::DigitalOutput, DeviceKind::StepperMotor)
+        | (DeviceKind::DigitalOutput, DeviceKind::Vfd)
+        | (DeviceKind::DigitalOutput, DeviceKind::ServoDrive) => Some(ConnectionType::Electrical),
         (DeviceKind::SolenoidValve, DeviceKind::Cylinder) => Some(ConnectionType::Pneumatic),
-        (DeviceKind::AnalogOutput, DeviceKind::Motor) => Some(ConnectionType::Analog),
+        (DeviceKind::AnalogOutput, DeviceKind::Motor)
+        | (DeviceKind::AnalogOutput, DeviceKind::Vfd) => Some(ConnectionType::Analog),
         _ => None,
     }
 }
@@ -3175,6 +3604,9 @@ fn detects_connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<Con
     match (from, to) {
         (DeviceKind::Cylinder, DeviceKind::Sensor)
         | (DeviceKind::Motor, DeviceKind::Sensor)
+        | (DeviceKind::StepperMotor, DeviceKind::Sensor)
+        | (DeviceKind::Vfd, DeviceKind::Sensor)
+        | (DeviceKind::ServoDrive, DeviceKind::Sensor)
         | (DeviceKind::SolenoidValve, DeviceKind::Sensor) => Some(ConnectionType::Logical),
         _ => None,
     }
@@ -3189,6 +3621,9 @@ fn device_kind_name(kind: &DeviceKind) -> &'static str {
         DeviceKind::Cylinder => "cylinder",
         DeviceKind::Sensor => "sensor",
         DeviceKind::Motor => "motor",
+        DeviceKind::StepperMotor => "stepper_motor",
+        DeviceKind::Vfd => "vfd",
+        DeviceKind::ServoDrive => "servo_drive",
         DeviceKind::AnalogInput => "analog_input",
         DeviceKind::AnalogOutput => "analog_output",
         DeviceKind::Pid => "pid",
@@ -3199,14 +3634,16 @@ fn device_kind_name(kind: &DeviceKind) -> &'static str {
 mod tests {
     use super::{
         build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
-        preprocess_program,
+        preprocess_program, preprocess_program_with_library,
     };
+    use crate::device_library::DeviceLibrary;
     use crate::ir::{
-        ConnectionType, SafetyRelation, TimerOperationKind, TimingRelation, TimingScope,
-        TransitionGuard,
+        ConnectionType, DeviceKind, SafetyRelation, TimerOperationKind, TimingRelation,
+        TimingScope, TransitionGuard,
     };
     use crate::parser::parse_plc;
     use petgraph::visit::EdgeRef;
+    use std::path::Path;
 
     #[test]
     fn preprocess_expands_plc_device_ports_into_internal_io_nodes() {
@@ -3252,6 +3689,123 @@ task main:
                 && c.to_port.as_deref() == Some("coil")
         });
         assert!(y0_edge_exists, "plc_main.Y0 应改写为 Y0 -> valve_A.coil");
+    }
+
+    #[test]
+    fn preprocess_with_library_rejects_unknown_motor_extension_param_for_device_type() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    rated_power: 2.2kW,
+    steps_per_rev: 200
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+
+        let errors = preprocess_program_with_library(&program, Some(&library))
+            .expect_err("stepper_motor 不应接受 rated_power 参数");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("rated_power") && rendered.contains("未在设备库 parameters 中声明"),
+            "应报告参数未在设备库声明，实际: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_with_library_rejects_invalid_typed_motor_extension_param() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    steps_per_rev: 200.5,
+    accel_time: 120ms
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+
+        let errors = preprocess_program_with_library(&program, Some(&library))
+            .expect_err("steps_per_rev 应是 integer");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("steps_per_rev") && rendered.contains("integer"),
+            "应报告参数类型错误，实际: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_with_library_accepts_valid_typed_motor_extension_params() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    steps_per_rev: 200,
+    max_speed: 5000,
+    accel_time: 120ms,
+    decel_time: 120ms
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        preprocess_program_with_library(&program, Some(&library))
+            .expect("合法参数应通过设备库类型校验");
+    }
+
+    #[test]
+    fn preprocess_with_library_accepts_number_params_with_expected_unit_suffix() {
+        let input = r#"
+[topology]
+
+device motor_main: motor {
+    rated_power: 2.2kW,
+    rated_freq: 50Hz,
+    accel_time: 0.8s
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        preprocess_program_with_library(&program, Some(&library))
+            .expect("带单位后缀的 number 参数应通过校验");
     }
 
     #[test]
@@ -3636,7 +4190,7 @@ task init:
 
 task ready:
     step start_motor:
-        action: set motor_ctrl on
+        action: set motor_ctrl.run on
 "#;
 
         let program = parse_plc(input).expect("PRD 5.4 示例应能成功解析为 AST");
@@ -3941,6 +4495,221 @@ task main:
     }
 
     #[test]
+    fn rejects_non_whitelisted_set_enum_value_before_lowering() {
+        let input = r#"
+[topology]
+
+device Y0: digital_output
+
+[constraints]
+
+[tasks]
+
+task main:
+    step run:
+        action: set Y0 diagonal
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let constraints_errors =
+            build_constraint_set(&program).expect_err("非法 set 枚举值应在约束构建阶段报错");
+        let rendered_constraints = constraints_errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered_constraints.contains("on/off/forward/reverse/active/idle"),
+            "应报告 set 枚举值白名单错误"
+        );
+
+        let state_machine_errors =
+            build_state_machine(&program).expect_err("非法 set 枚举值应在 lowering 前被拦截");
+        let rendered_state_machine = state_machine_errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered_state_machine.contains("on/off/forward/reverse/active/idle"),
+            "状态机构建阶段也应返回同样的白名单错误"
+        );
+    }
+
+    #[test]
+    fn maps_set_enum_values_to_binary_ir_values() {
+        let input = r#"
+[topology]
+
+device motor_dir: digital_output
+
+[constraints]
+
+[tasks]
+
+task drive:
+    step forward:
+        action: set motor_dir forward
+    step reverse:
+        action: set motor_dir reverse
+    step active:
+        action: set motor_dir active
+    step idle:
+        action: set motor_dir idle
+    on_complete: goto done
+
+task done:
+    step halt:
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let state_machine = build_state_machine(&program).expect("枚举状态应能成功 lowering");
+
+        let forward_is_on = state_machine.transitions.iter().any(|transition| {
+            transition.from.task_name == "drive"
+                && transition.from.step_name == "forward"
+                && transition.actions.iter().any(|action| {
+                    matches!(
+                        action,
+                        crate::ir::TransitionAction::Set {
+                            value: crate::ir::BinaryValue::On,
+                            ..
+                        }
+                    )
+                })
+        });
+        let reverse_is_off = state_machine.transitions.iter().any(|transition| {
+            transition.from.task_name == "drive"
+                && transition.from.step_name == "reverse"
+                && transition.actions.iter().any(|action| {
+                    matches!(
+                        action,
+                        crate::ir::TransitionAction::Set {
+                            value: crate::ir::BinaryValue::Off,
+                            ..
+                        }
+                    )
+                })
+        });
+        let active_is_on = state_machine.transitions.iter().any(|transition| {
+            transition.from.task_name == "drive"
+                && transition.from.step_name == "active"
+                && transition.actions.iter().any(|action| {
+                    matches!(
+                        action,
+                        crate::ir::TransitionAction::Set {
+                            value: crate::ir::BinaryValue::On,
+                            ..
+                        }
+                    )
+                })
+        });
+        let idle_is_off = state_machine.transitions.iter().any(|transition| {
+            transition.from.task_name == "drive"
+                && transition.from.step_name == "idle"
+                && transition.actions.iter().any(|action| {
+                    matches!(
+                        action,
+                        crate::ir::TransitionAction::Set {
+                            value: crate::ir::BinaryValue::Off,
+                            ..
+                        }
+                    )
+                })
+        });
+
+        assert!(forward_is_on, "forward 应映射为 IR on");
+        assert!(reverse_is_off, "reverse 应映射为 IR off");
+        assert!(active_is_on, "active 应映射为 IR on");
+        assert!(idle_is_off, "idle 应映射为 IR off");
+    }
+
+    #[test]
+    fn rejects_legacy_motor_shorthand_in_action_and_state_refs() {
+        let input = r#"
+[topology]
+
+device motor_x: motor
+device alarm: sensor
+
+[constraints]
+
+safety: motor_x.on conflicts_with alarm.on
+
+[tasks]
+
+task main:
+    step run:
+        action: set motor_x on
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+
+        let constraints_errors =
+            build_constraint_set(&program).expect_err("legacy motor 状态引用应被拒绝");
+        let rendered_constraints = constraints_errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered_constraints.contains("显式端口"),
+            "应提示迁移到显式端口写法"
+        );
+
+        let state_machine_errors =
+            build_state_machine(&program).expect_err("legacy motor set 写法应被拒绝");
+        let rendered_state_machine = state_machine_errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered_state_machine.contains("set motor_x on 旧写法已废弃"),
+            "应提示 set motor_x on 已废弃"
+        );
+    }
+
+    #[test]
+    fn supports_new_motor_family_device_types_in_topology_ir() {
+        let input = r#"
+[topology]
+
+device stepper_x: stepper_motor
+device vfd_main: vfd
+device servo_y: servo_drive
+
+[constraints]
+
+[tasks]
+
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let topology = build_topology_graph(&program).expect("应能构建拓扑图");
+
+        let kinds = topology
+            .graph
+            .node_indices()
+            .map(|idx| {
+                (
+                    topology.graph[idx].name.clone(),
+                    topology.graph[idx].kind.clone(),
+                )
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+
+        assert!(matches!(
+            kinds.get("stepper_x"),
+            Some(DeviceKind::StepperMotor)
+        ));
+        assert!(matches!(kinds.get("vfd_main"), Some(DeviceKind::Vfd)));
+        assert!(matches!(kinds.get("servo_y"), Some(DeviceKind::ServoDrive)));
+    }
+
+    #[test]
     fn maps_analog_wait_conditions_to_region_predicates() {
         let input = r#"
 [topology]
@@ -4018,18 +4787,14 @@ task ready:
         let program = parse_plc(input).expect("PRD 5.5.1 示例应能成功解析为 AST");
         let state_machine = build_state_machine(&program).expect("应能从 5.5.1 示例构建状态机");
 
-        assert!(
-            state_machine
-                .states
-                .iter()
-                .any(|state| state.task_name == "init" && state.step_name == "extend_A")
-        );
-        assert!(
-            state_machine
-                .states
-                .iter()
-                .any(|state| state.task_name == "init" && state.step_name == "retract_B")
-        );
+        assert!(state_machine
+            .states
+            .iter()
+            .any(|state| state.task_name == "init" && state.step_name == "extend_A"));
+        assert!(state_machine
+            .states
+            .iter()
+            .any(|state| state.task_name == "init" && state.step_name == "retract_B"));
 
         let has_wait_transition = state_machine.transitions.iter().any(|transition| {
             transition.from.task_name == "init"
@@ -4170,7 +4935,7 @@ task fault_handler:
 
 task search:
     step start_motor:
-        action: set motor_ctrl on
+        action: set motor_ctrl.run on
     step detect:
         race:
             branch_A:
@@ -4183,17 +4948,17 @@ task search:
 
 task process_A:
     step stop_motor:
-        action: set motor_ctrl off
+        action: set motor_ctrl.run off
     on_complete: goto ready
 
 task process_B:
     step stop_motor:
-        action: set motor_ctrl off
+        action: set motor_ctrl.run off
     on_complete: goto ready
 
 task motor_fault:
     step emergency_stop:
-        action: set motor_ctrl off
+        action: set motor_ctrl.run off
     on_complete: goto ready
 
 task ready:

@@ -1,0 +1,158 @@
+[identity]
+name = "伺服驱动器"
+type = "servo_drive"
+category = "actuators/motor/servo"
+version = "1.0.0"
+
+[semantics]
+description = "闭环伺服驱动器，脉冲+方向接口，内置编码器反馈。"
+primary_function = "closed_loop_positioning"
+role = "actuator"
+typical_applications = ["机械手定位", "数控机床进给轴", "贴片机 XY 平台"]
+key_features = ["pulse/direction 控制", "ready/in_position/fault 多反馈"]
+
+[physical]
+response_time = { typical = "2ms", max = "10ms" }
+power_supply = { input = "220VAC", control = "24VDC" }
+
+[[interfaces.ports]]
+name = "enable"
+states = ["on", "off"]
+default_state = "off"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "direction"
+states = ["forward", "reverse"]
+default_state = "forward"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "pulse"
+states = ["active", "idle"]
+default_state = "idle"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "clear_fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "ready"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "in_position"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "zero_speed"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[parameters]]
+name = "encoder_resolution"
+type = "integer"
+required = false
+default = "131072"
+description = "编码器每转分辨率"
+
+[[parameters]]
+name = "electronic_gear_num"
+type = "integer"
+required = false
+default = "1"
+description = "电子齿轮比分子"
+
+[[parameters]]
+name = "electronic_gear_den"
+type = "integer"
+required = false
+default = "1"
+description = "电子齿轮比分母"
+
+[[parameters]]
+name = "positioning_window"
+type = "number"
+required = false
+default = "0.02"
+unit = "mm"
+description = "到位判定窗口"
+
+[[parameters]]
+name = "max_speed"
+type = "number"
+required = false
+default = "3000"
+unit = "rpm"
+description = "最大转速"
+
+[[parameters]]
+name = "accel_time"
+type = "time"
+required = false
+default = "80ms"
+description = "加速时间"
+
+[[parameters]]
+name = "decel_time"
+type = "time"
+required = false
+default = "80ms"
+description = "减速时间"
+
+[[device_constraints.safety]]
+left = "enable.off"
+right = "pulse.active"
+relation = "conflicts_with"
+reason = "未使能时不得发送脉冲"
+
+[[device_constraints.safety]]
+left = "fault.on"
+right = "enable.on"
+relation = "conflicts_with"
+reason = "故障时不得使能"
+
+[[device_constraints.safety]]
+left = "direction.forward"
+right = "direction.reverse"
+relation = "conflicts_with"
+reason = "方向信号互斥"
+
+[usage_guidance]
+when_to_use = "需要高精度定位、闭环控制、快速响应的场景。"
+when_not_to_use = "简单启停用 motor；调速不定位用 vfd；低成本中等精度用 stepper_motor。"
+
+[[usage_guidance.common_patterns]]
+name = "故障复位后再使能"
+description = "clear_fault 拉高脉冲后，等待 ready.on，再 set enable on。"
+
+[[usage_guidance.common_mistakes]]
+mistake = "fault.on 时直接 enable.on"
+consequence = "驱动器拒绝使能并可能触发连锁停机"
+solution = "加上 fault.on conflicts_with enable.on 约束并串联清故障步骤"
+
+[metadata]
+standards = ["IEC 61800-5-1"]
+tags = ["servo", "closed_loop", "position_control"]

@@ -35,17 +35,17 @@ task cycle:
         wait: estop_button == false
         timeout: 50ms -> goto estop_recovery
     step start_conveyor:
-        action: set conveyor on
+        action: set conveyor.run on
     step wait_part_arrival:
         wait: part_sensor == true
         timeout: 1500ms -> goto estop_recovery
     step stop_conveyor:
-        action: set conveyor off
+        action: set conveyor.run off
     on_complete: goto ready
 
 task estop_recovery:
     step safe_stop:
-        action: set conveyor off
+        action: set conveyor.run off
         action: set alarm_light on
     step wait_estop_release:
         wait: estop_button == false

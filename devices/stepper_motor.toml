@@ -1,0 +1,95 @@
+[identity]
+name = "步进电机驱动器"
+type = "stepper_motor"
+category = "actuators/motor/stepper"
+version = "1.0.0"
+
+[semantics]
+description = "开环步进电机驱动器，脉冲+方向接口，支持使能控制和故障反馈。"
+primary_function = "pulse_direction_motion"
+role = "actuator"
+typical_applications = ["XY 平台定位", "输送带索引", "旋转分度台"]
+key_features = ["enable + direction + pulse 输入", "fault 输出"]
+
+[physical]
+response_time = { typical = "1ms", max = "5ms" }
+power_supply = { voltage = "24VDC", motor = "phase_current_limited" }
+
+[[interfaces.ports]]
+name = "enable"
+states = ["on", "off"]
+default_state = "off"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "direction"
+states = ["forward", "reverse"]
+default_state = "forward"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "pulse"
+states = ["active", "idle"]
+default_state = "idle"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[parameters]]
+name = "steps_per_rev"
+type = "integer"
+required = false
+default = "200"
+description = "每转所需脉冲数"
+
+[[parameters]]
+name = "max_speed"
+type = "number"
+required = false
+default = "5000"
+unit = "pps"
+description = "最大脉冲频率（pulse per second）"
+
+[[parameters]]
+name = "accel_time"
+type = "time"
+required = false
+default = "120ms"
+description = "加速时间"
+
+[[parameters]]
+name = "decel_time"
+type = "time"
+required = false
+default = "120ms"
+description = "减速时间"
+
+[[device_constraints.safety]]
+left = "enable.off"
+right = "pulse.active"
+relation = "conflicts_with"
+reason = "使能关闭时不得发送脉冲"
+
+[usage_guidance]
+when_to_use = "低成本中等精度定位，负载惯量较小时使用。"
+when_not_to_use = "高速高精度大惯量负载应使用 servo_drive。"
+
+[[usage_guidance.common_patterns]]
+name = "脉冲运动前先使能"
+description = "先 set enable on，再发送 direction/pulse。"
+
+[[usage_guidance.common_mistakes]]
+mistake = "enable.off 状态下发送 pulse.active"
+consequence = "失步或机械冲击"
+solution = "启用内置 safety 约束并在动作链中先使能"
+
+[metadata]
+tags = ["stepper", "motion", "pulse_direction"]

@@ -1,5 +1,5 @@
 use crate::ast::{
-    ActionStatement, BinaryValue, ComparisonOperator, ConditionExpression, DeviceType,
+    ActionStatement, ComparisonOperator, ConditionExpression, DeviceType,
     LiteralValue, PlcProgram, StepStatement, WaitCondition, WaitStatement,
 };
 use crate::ir::{ConstraintSet, DeviceKind, TopologyGraph};
@@ -462,20 +462,13 @@ fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String
         ActionStatement::Extend { target } => Some((format!("extend {}", target.device), target.device.clone())),
         ActionStatement::Retract { target } => Some((format!("retract {}", target.device), target.device.clone())),
         ActionStatement::Set { target, value } => Some((
-            format!("set {} {}", target.device, binary_value_text(value)),
+            format!("set {} {value}", target.device),
             target.device.clone(),
         )),
         ActionStatement::SetAnalog { target, value } => {
             Some((format!("set_analog {} {value}", target.device), target.device.clone()))
         }
         ActionStatement::Log { .. } => None,
-    }
-}
-
-fn binary_value_text(value: &BinaryValue) -> &'static str {
-    match value {
-        BinaryValue::On => "on",
-        BinaryValue::Off => "off",
     }
 }
 
@@ -909,9 +902,9 @@ task main:
     step start_both:
         parallel:
             branch_left:
-                action: set motor_left on
+                action: set motor_left.run on
             branch_right:
-                action: set motor_right on
+                action: set motor_right.run on
         wait: sensor_left == true
 "#;
 
@@ -954,10 +947,10 @@ task main:
     step run_parallel:
         parallel:
             branch_left:
-                action: set motor_left on
+                action: set motor_left.run on
                 wait: sensor_left == true
             branch_right:
-                action: set motor_right on
+                action: set motor_right.run on
 "#;
 
         let program = parse_plc(source).expect("测试输入应能解析");
@@ -1062,7 +1055,7 @@ device pressure_in: analog_input {
 
 task main:
     step run:
-        action: set motor_A on
+        action: set motor_A.run on
         wait: pressure_in > 5
 "#;
 
@@ -1102,7 +1095,7 @@ device pressure_in: analog_input {
 
 task main:
     step run:
-        action: set motor_A on
+        action: set motor_A.run on
         wait: pressure_in > 5
 "#;
 

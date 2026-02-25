@@ -246,7 +246,7 @@ impl TimingContext {
                 let own = profile.ramp_ms.or(profile.response_ms)?;
                 (
                     target.device.as_str(),
-                    format!("set {} {}", target.device, binary_value_text(value)),
+                    format!("set {} {value}", target.device),
                     own,
                 )
             }
@@ -582,13 +582,6 @@ fn duration_value_to_ms(duration: &crate::ast::DurationValue) -> u64 {
     match duration.unit {
         crate::ast::TimeUnit::Ms => duration.value,
         crate::ast::TimeUnit::S => duration.value.saturating_mul(1000),
-    }
-}
-
-fn binary_value_text(value: &crate::ast::BinaryValue) -> &'static str {
-    match value {
-        crate::ast::BinaryValue::On => "on",
-        crate::ast::BinaryValue::Off => "off",
     }
 }
 

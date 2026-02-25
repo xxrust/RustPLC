@@ -18,6 +18,9 @@ pub enum DeviceKind {
     Cylinder,
     Sensor,
     Motor,
+    StepperMotor,
+    Vfd,
+    ServoDrive,
     AnalogInput,
     AnalogOutput,
     Pid,
@@ -38,7 +41,7 @@ pub struct PidLoop {
     pub anti_windup: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionType {
     Electrical,
@@ -47,11 +50,24 @@ pub enum ConnectionType {
     Analog,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TopologyLink {
+    pub from: String,
+    pub to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_port: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_port: Option<String>,
+    pub kind: ConnectionType,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TopologyGraph {
     pub graph: DiGraph<Device, ConnectionType>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pid_loops: Vec<PidLoop>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<TopologyLink>,
 }
 
 impl TopologyGraph {
@@ -59,6 +75,7 @@ impl TopologyGraph {
         Self {
             graph: DiGraph::new(),
             pid_loops: Vec::new(),
+            links: Vec::new(),
         }
     }
 

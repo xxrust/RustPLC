@@ -1,111 +1,32 @@
 # Ralph Progress Log
-Started: Mon Feb 23 13:05:43 CST 2026
+Started: Wed Feb 25 2026
 ---
+2026-02-25
+- 执行策略：以 docs/motor-control-enhancement.md v2.5 为核心，先完成阶段0/1与破坏性迁移，再保证全量测试通过。
+- 完成 US-001：set 支持枚举状态（on/off/forward/reverse/active/idle），语义白名单校验前置；IR 仍保持二值映射。
+- 完成 US-002：attribute_name 扩展电机参数白名单；DeviceAttributes 新增 extra_params 并在 parser 中落库。
+- 完成 US-003：新增 stepper_motor/vfd/servo_drive 跨 parser/AST/IR/semantic/topology_gate/device_subtype 的映射分支。
+- 完成 US-004：新增 devices/motor.toml、devices/stepper_motor.toml、devices/vfd.toml、devices/servo_drive.toml（port_type 规范化）。
+- 完成 US-005：motor 旧写法破坏性迁移，拒绝 motor_x.on/off 与 set motor_x on/off，返回显式端口迁移提示。
+- 完成 US-008（部分）：更新 examples、skill fixtures、integration tests 到显式端口写法；新增/更新语义与解析回归。
+- US-006/US-007 保留：runtime_bridge 与 safety 仍未完成真正 (device,port) 维度闭环，仅做阶段1兼容防误报处理。
+- 验证：cargo test -p rust_plc -q 全部通过。
 
-## Codebase Patterns
-- Topology parser now supports mixed entries in `[topology]`; when any explicit `relation { ... }` is present, `TopologySection.connections` should come from relation blocks instead of auto-derived edges.
-- Use dedicated parser helpers (`expect_port_reference`, `expect_topology_relation`) for relation fields so errors stay localized to `relation.from` / `relation.to` / `relation.via`.
-- Topology relation handling should stay single-source: parser/semantic/topology-gate all consume `TopologySection.connections` only (no attribute-based fallback).
+2026-02-25（续）
+- 完成 US-006：runtime_bridge 输出解析升级为 (device,port) 路由，优先按 topology links 解析到物理通道，并保留 self/历史图遍历兜底路径。
+- 完成 US-007：safety 引擎状态域升级为 (device,port) 维度；动作效果按端口建模，`enable.off conflicts_with pulse.active` 可被正确判定。
+- 完成 US-008：补齐 stage-2 回归（`tests/runtime_bridge_us006.rs` 新增多端口路由用例，`src/verification/safety.rs` 新增跨端口冲突用例）。
+- 同步移除设备库约束注入中的“跨端口同态值跳过”限制，允许 run/fault 等跨端口同状态约束进入验证。
+- 验证：再次执行 `cargo test -p rust_plc -q`，全量通过。
 
-## [2026-02-23 13:29:00 CST] - US-001
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Extended grammar with `relation` block syntax in `[topology]` (`from: Device.Port`, `to: Device.Port`, `via: driven_by|reports_to|detects`).
-  - Added parser support to collect explicit relation declarations into `TopologySection.connections`.
-  - Added strict field validation for missing/duplicate `from`/`to`/`via` with actionable parse errors.
-  - Added parser tests for explicit relation parse success and required-field failures.
-- Files changed
-  - src/parser/plc.pest
-  - src/parser/mod.rs
-  - prd.json
-  - progress.txt
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Keep relation-field parsing isolated from attribute parsing to avoid coupling relation DSL rollout with device attribute compatibility changes.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - When changing parser files in this repo, preserve CRLF line endings in `src/parser/mod.rs` to avoid noisy diffs.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - Existing `parses_new_relation_fields_and_ports_into_ast` test still validates legacy attribute-derived edges; keep it green until US-002 removes legacy path.
----
-## [2026-02-23 14:41:41 CST] - US-002
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - Removed parser fallback that auto-derived topology edges from `driven_by`/`reports_to`/`detects`; `[topology]` connections now come only from explicit `relation { ... }` blocks.
-  - Deprecated legacy topology attributes in device blocks: parser now returns migration errors for `driven_by` / `reports_to` / `detects` and points users to `relation + Device.Port`.
-  - Removed semantic and topology gate fallbacks that rebuilt connections from legacy attributes; both now consume only `TopologySection.connections`.
-  - Updated parser/topology-gate unit tests to cover strict relation-only flow and migration diagnostics.
-- Files changed
-  - src/parser/mod.rs
-  - src/semantic/mod.rs
-  - src/topology_semantic_gate.rs
-  - prd.json
-  - progress.txt
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - Topology relation source is now single-path: parser, semantic graph build, and semantic gate should all read only `TopologySection.connections`.
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - Running broad formatting commands can rewrite line endings and create noisy diffs; keep CRLF in core parser/semantic files.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `cargo fmt --check` currently reports pre-existing style drift in `crates/web-server/src/main.rs`; avoid mixing unrelated formatting work into topology stories.
----
-## [2026-02-23 16:52:00 CST] - US-003/US-004/US-006/US-007
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - 批量迁移 examples、recovery templates、技能夹具与核心验证测试到 `relation { from/to/via }` 新 DSL，移除旧属性写法。
-  - 补齐文档与 API 解析测试中的遗留片段（`docs/已实现/stepper_ab_encoder.md`、`crates/web-server/src/main.rs`）并改为端口级 relation。
-  - 修复 `tests/verification_capability.rs` 的全套场景，确保 timing/safety/causality/liveness 在新 DSL 下继续覆盖正反例。
-  - 全量回归通过：`cargo test --workspace`。
-- Files changed
-  - examples/*.plc（含 `two_cylinder.plc`、`assembly_station.plc`、`recovery_templates/*` 等）
-  - .codex/skills/plc-gen/fixtures/valid/*.plc
-  - tests/build_rp2040.rs
-  - tests/examples_integration.rs
-  - tests/large_demo_coverage.rs
-  - tests/runtime_bridge_us006.rs
-  - tests/sim_regress.rs
-  - tests/verification_capability.rs
-  - docs/已实现/stepper_ab_encoder.md
-  - crates/web-server/src/main.rs
-  - src/verification/{timing.rs,safety.rs,causality.rs}
-  - src/semantic/mod.rs
-  - src/scenario_resolve.rs
-  - prd.json
-  - progress.txt
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - `parse_plc` 相关文档测试会扫描 markdown fenced `plc` 代码块，文档片段必须和当前 DSL 同步。
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - 只跑单个 crate 测试容易漏掉 `web-server` 内嵌 PLC 片段；最终仍需 `cargo test --workspace` 兜底。
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `tests/verification_capability.rs` 是四类验证能力的“综合回归哨兵”，DSL 破坏性升级后应优先修复并保持通过。
----
-## [2026-02-23 22:56:10 CST] - US-005/US-008
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented
-  - 修复 PLC 点位表达：`relation` 端点支持 `Y0/X0/AI0/AO0` 简写，不再强制写 `Y0.out` / `X0.in`。
-  - 语义门禁增加约束：端点简写仅允许 PLC IO 设备；非 IO 设备（如 valve/cylinder/motor/sensor）必须显式 `Device.Port`。
-  - 新增 US-005 回归：双输入阀正例、端口错误反例、多输入多输出 motor 正例与非 IO 端点简写反例。
-  - 全量示例与技能夹具 `.plc` 迁移为 PLC IO 简写端点风格。
-  - 更新 US-008 文档：`docs/RustPLC 拓扑语义与关系验证规范.md` 重写为可执行 DSL + 迁移对照；README/README_EN 明确旧属性写法不兼容。
-  - 全量回归通过：`cargo test --workspace`。
-- Files changed
-  - src/parser/plc.pest
-  - src/parser/mod.rs
-  - src/topology_semantic_gate.rs
-  - examples/*.plc（含 recovery templates 与 pil baseline）
-  - .codex/skills/plc-gen/fixtures/valid/*.plc
-  - docs/RustPLC 拓扑语义与关系验证规范.md
-  - docs/已实现/stepper_ab_encoder.md
-  - README.md
-  - README_EN.md
-  - crates/web-server/src/main.rs
-  - prd.json
-  - progress.txt
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    - PLC IO 点位在业务语义上更接近“端口名”而非“设备.端口”，因此 DSL 允许点位简写能显著降低建模歧义。
-  - Gotchas encountered (e.g., "do not forget to update Z when changing W")
-    - 端点简写开放后必须配合门禁限制设备类型，否则会把非 IO 设备的多端口语义重新变模糊。
-  - Useful context (e.g., "the evaluation panel is in component X")
-    - `src/topology_semantic_gate.rs` 的 `resolve_port` 是简写解析与语义约束的核心收口点。
----
+2026-02-25（阶段3补全）
+- 完成 Stage-3：设备库新增 `[[parameters]]` 元数据并在语义预处理阶段启用 `extra_params` 参数名/类型校验（integer/number/time/boolean/enum/length/pressure）。
+- 校验规则：参数未在设备库声明时报错；类型不匹配时报错；必填参数缺失（且无默认值）时报错。
+- 完成“完整版模板”补全：`devices/motor.toml`、`devices/stepper_motor.toml`、`devices/vfd.toml`、`devices/servo_drive.toml` 新增 `semantics/physical/usage_guidance/metadata` 等段落并保留安全约束。
+- 新增回归：`semantic` 层增加 4 个 `preprocess_program_with_library` 用例，覆盖未知参数、类型错误、合法参数、带单位 number 参数。
+- 验证：`cargo test -p rust_plc -q` 全量通过（210 tests）。
+
+2026-02-25（收尾对齐）
+- 修复 `crates/web-server` 对新增设备类型的遗漏：补齐 `StepperMotor/Vfd/ServoDrive` 的 implicit ports、component 映射、device_type 名称和 endpoint kind 分支。
+- 解决工作区构建阻塞：`cargo check --workspace` 由 non-exhaustive match 报错恢复为全绿。
+- 全仓验证：执行 `cargo test --workspace -q`，所有 crate/tests 全量通过。

@@ -1,5 +1,5 @@
 use crate::ast::{
-    ActionStatement, ActionTarget, BinaryValue, Branch, CausalityConstraint, ComparisonOperator,
+    ActionStatement, ActionTarget, Branch, CausalityConstraint, ComparisonOperator,
     ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DevicePort,
     DeviceTags, DeviceType, DurationValue, GotoDirective, LiteralValue, MeasuredValue,
     OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch,
@@ -218,6 +218,9 @@ fn parse_device_type(pair: Pair<Rule>) -> Result<DeviceType, PlcError> {
         "solenoid_valve" => Ok(DeviceType::SolenoidValve),
         "cylinder" => Ok(DeviceType::Cylinder),
         "sensor" => Ok(DeviceType::Sensor),
+        "stepper_motor" => Ok(DeviceType::StepperMotor),
+        "vfd" => Ok(DeviceType::Vfd),
+        "servo_drive" => Ok(DeviceType::ServoDrive),
         "motor" => Ok(DeviceType::Motor),
         "analog_input" => Ok(DeviceType::AnalogInput),
         "analog_output" => Ok(DeviceType::AnalogOutput),
@@ -345,6 +348,20 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         }
         "limit" => {
             attributes.limit = Some(parse_range_value(value)?);
+        }
+        "steps_per_rev"
+        | "max_speed"
+        | "accel_time"
+        | "decel_time"
+        | "encoder_resolution"
+        | "electronic_gear_num"
+        | "electronic_gear_den"
+        | "positioning_window"
+        | "rated_power"
+        | "rated_freq" => {
+            attributes
+                .extra_params
+                .insert(attr_name.to_string(), value.as_str().to_string());
         }
         _ => {
             return Err(PlcError::parse(
@@ -782,8 +799,8 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
             let target = parse_action_target(target_pair)?;
             let value_pair = parts
                 .next()
-                .ok_or_else(|| PlcError::parse(line, "set 缺少 on/off 值"))?;
-            let value = parse_binary_value(value_pair)?;
+                .ok_or_else(|| PlcError::parse(line, "set 缺少状态值"))?;
+            let value = parse_state_value(value_pair)?;
             Ok(ActionStatement::Set { target, value })
         }
         Rule::action_log => {
@@ -801,16 +818,13 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
     }
 }
 
-fn parse_binary_value(pair: Pair<Rule>) -> Result<BinaryValue, PlcError> {
+fn parse_state_value(pair: Pair<Rule>) -> Result<String, PlcError> {
     let line = line_of(&pair);
-    match pair.as_str() {
-        "on" => Ok(BinaryValue::On),
-        "off" => Ok(BinaryValue::Off),
-        other => Err(PlcError::parse(
-            line,
-            format!("set 语句的值必须是 on/off，实际为: {other}"),
-        )),
+    if pair.as_rule() != Rule::state_value {
+        return Err(PlcError::parse(line, "set 语句的状态值格式错误"));
     }
+
+    Ok(pair.as_str().to_string())
 }
 
 fn parse_wait_statement(pair: Pair<Rule>) -> Result<WaitStatement, PlcError> {
@@ -2169,9 +2183,69 @@ device spindle_motor: motor {
     rated_speed: 60rpm,
     ramp_time: 300ms
 }
+
+device axis_stepper: stepper_motor {
+    steps_per_rev: 200,
+    max_speed: 1200,
+    accel_time: 80ms,
+    decel_time: 90ms
+}
+
+device feed_vfd: vfd {
+    rated_power: 2.2,
+    rated_freq: 50
+}
+
+device pick_servo: servo_drive {
+    encoder_resolution: 131072,
+    electronic_gear_num: 10,
+    electronic_gear_den: 1,
+    positioning_window: 5
+}
 "#;
 
         assert!(parse_topology(input).is_ok());
+    }
+
+    #[test]
+    fn stores_motor_extension_attributes_into_extra_params() {
+        let input = r#"
+[topology]
+
+device axis: stepper_motor {
+    steps_per_rev: 200,
+    max_speed: 1200,
+    accel_time: 80ms
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("应能解析 motor 扩展参数");
+        let axis = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "axis")
+            .expect("应包含 axis 设备");
+
+        assert_eq!(
+            axis.attributes.extra_params.get("steps_per_rev"),
+            Some(&"200".to_string())
+        );
+        assert_eq!(
+            axis.attributes.extra_params.get("max_speed"),
+            Some(&"1200".to_string())
+        );
+        assert_eq!(
+            axis.attributes.extra_params.get("accel_time"),
+            Some(&"80ms".to_string())
+        );
     }
 
     #[test]
@@ -2428,6 +2502,19 @@ task search_position:
                 then: goto process_B
         timeout: 2000ms -> goto fault_handler
     on_complete: unreachable
+"#;
+
+        assert!(parse_tasks(input).is_ok());
+    }
+
+    #[test]
+    fn parses_set_with_enum_like_state_value() {
+        let input = r#"
+[tasks]
+
+task drive:
+    step start:
+        action: set stepper_x.direction forward
 "#;
 
         assert!(parse_tasks(input).is_ok());

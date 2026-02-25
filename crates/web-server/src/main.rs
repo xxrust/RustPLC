@@ -442,6 +442,29 @@ fn implicit_ports_for_device_type(device_type: &DeviceType) -> Vec<DevicePort> {
             device_port("cmd", PortType::Digital, PortRole::Consumer),
             device_port("on", PortType::Logical, PortRole::Producer),
         ],
+        DeviceType::StepperMotor => vec![
+            device_port("enable", PortType::Digital, PortRole::Consumer),
+            device_port("direction", PortType::Digital, PortRole::Consumer),
+            device_port("pulse", PortType::Digital, PortRole::Consumer),
+            device_port("fault", PortType::Logical, PortRole::Producer),
+        ],
+        DeviceType::Vfd => vec![
+            device_port("run", PortType::Digital, PortRole::Consumer),
+            device_port("direction", PortType::Digital, PortRole::Consumer),
+            device_port("running", PortType::Logical, PortRole::Producer),
+            device_port("fault", PortType::Logical, PortRole::Producer),
+            device_port("freq_arrive", PortType::Logical, PortRole::Producer),
+        ],
+        DeviceType::ServoDrive => vec![
+            device_port("enable", PortType::Digital, PortRole::Consumer),
+            device_port("direction", PortType::Digital, PortRole::Consumer),
+            device_port("pulse", PortType::Digital, PortRole::Consumer),
+            device_port("clear_fault", PortType::Digital, PortRole::Consumer),
+            device_port("ready", PortType::Logical, PortRole::Producer),
+            device_port("in_position", PortType::Logical, PortRole::Producer),
+            device_port("fault", PortType::Logical, PortRole::Producer),
+            device_port("zero_speed", PortType::Logical, PortRole::Producer),
+        ],
         DeviceType::AnalogInput => vec![device_port("in", PortType::Analog, PortRole::Consumer)],
         DeviceType::AnalogOutput => vec![device_port("out", PortType::Analog, PortRole::Producer)],
         DeviceType::Pid => vec![
@@ -1337,6 +1360,9 @@ fn map_plc_device_to_component_id(kind: &DeviceType) -> &'static str {
         DeviceType::Cylinder => "cylinder",
         DeviceType::Sensor => "sensor",
         DeviceType::Motor => "stepper_pd",
+        DeviceType::StepperMotor => "stepper_pd",
+        DeviceType::Vfd => "stepper_pd",
+        DeviceType::ServoDrive => "stepper_pd",
         DeviceType::AnalogInput => "sensor",
         DeviceType::AnalogOutput => "stepper_pd",
         DeviceType::Pid => "generic",
@@ -1352,6 +1378,9 @@ fn plc_device_type_name(kind: &DeviceType) -> &'static str {
         DeviceType::Cylinder => "cylinder",
         DeviceType::Sensor => "sensor",
         DeviceType::Motor => "motor",
+        DeviceType::StepperMotor => "stepper_motor",
+        DeviceType::Vfd => "vfd",
+        DeviceType::ServoDrive => "servo_drive",
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
@@ -1370,6 +1399,9 @@ fn endpoint_kind_for_device_type(kind: &DeviceType) -> &'static str {
         | DeviceType::Cylinder
         | DeviceType::Sensor
         | DeviceType::Motor
+        | DeviceType::StepperMotor
+        | DeviceType::Vfd
+        | DeviceType::ServoDrive
         | DeviceType::Pid => "process_device",
     }
 }

@@ -193,9 +193,9 @@ causality: Y5 -> valve_eject -> cyl_eject -> sensor_eject_ret
 
 task cycle:
     step start_left:
-        action: set motor_left on
+        action: set motor_left.run on
     step start_right:
-        action: set motor_right on
+        action: set motor_right.run on
     step wait_left_arrive:
         wait: sensor_left_arrive == true
         timeout: 5000ms -> goto fault_handler
@@ -203,9 +203,9 @@ task cycle:
         wait: sensor_right_arrive == true
         timeout: 5000ms -> goto fault_handler
     step stop_left:
-        action: set motor_left off
+        action: set motor_left.run off
     step stop_right:
-        action: set motor_right off
+        action: set motor_right.run off
     step push_left:
         action: extend cyl_push_L
         wait: sensor_push_L_ext == true
@@ -247,8 +247,8 @@ task fault_handler:
         action: retract cyl_push_R
         action: retract cyl_eject
     step safe_stop:
-        action: set motor_left off
-        action: set motor_right off
+        action: set motor_left.run off
+        action: set motor_right.run off
     step alarm:
         action: log "自动装配工位故障：动作超时，请人工确认设备状态"
     on_complete: goto ready

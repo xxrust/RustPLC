@@ -165,7 +165,7 @@ causality: Y0 -> motor_ctrl -> sensor_B
 
 task search:
     step start_motor:
-        action: set motor_ctrl on
+        action: set motor_ctrl.run on
     step detect:
         race:
             branch_A:
@@ -178,21 +178,21 @@ task search:
 
 task process_A:
     step stop_motor:
-        action: set motor_ctrl off
+        action: set motor_ctrl.run off
     step do_work_A:
         action: log "工件在A位置，执行A工艺"
     on_complete: goto ready
 
 task process_B:
     step stop_motor:
-        action: set motor_ctrl off
+        action: set motor_ctrl.run off
     step do_work_B:
         action: log "工件在B位置，执行B工艺"
     on_complete: goto ready
 
 task motor_fault:
     step emergency_stop:
-        action: set motor_ctrl off
+        action: set motor_ctrl.run off
     step alarm:
         action: log "电机旋转超时: 半圈内未检测到任何传感器信号"
         action: log "请检查: 电机是否旋转 / 传感器A,B是否正常 / 工件是否到位"
@@ -270,14 +270,14 @@ timing: task.feed must_complete_within 7000ms
 
 task feed:
     step start:
-        action: set conveyor on
+        action: set conveyor.run on
     step stabilize:
         delay: 2000ms
     step wait_arrival:
         wait: sensor_arrived == true
         timeout: 3000ms -> goto fault_handler
     step stop:
-        action: set conveyor off
+        action: set conveyor.run off
     on_complete: goto idle
 
 task idle:
@@ -286,7 +286,7 @@ task idle:
 
 task fault_handler:
     step recover:
-        action: set conveyor off
+        action: set conveyor.run off
     step alarm:
         action: log "arrival timeout"
     on_complete: goto idle
@@ -512,7 +512,10 @@ fn parses_stepper_multi_sensor_consistency_example_into_verified_ir_json() {
     assert!(
         safety_statuses
             .iter()
-            .any(|status| { status["rule"].as_str().unwrap_or("").contains("axis_x.on") }),
+            .any(|status| {
+                let rule = status["rule"].as_str().unwrap_or("");
+                rule.contains("axis_x.run.on") || rule.contains("axis_x.on")
+            }),
         "verification report should include the axis_x alarm interlock rule"
     );
     assert_eq!(

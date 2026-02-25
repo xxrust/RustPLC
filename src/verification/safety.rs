@@ -1,5 +1,6 @@
 use crate::ast::{
-    ActionStatement, ConditionExpression, DeviceType, LiteralValue, PlcProgram, StepStatement,
+    ActionStatement, ConditionExpression, DeviceType, LiteralValue, PlcProgram, PortType,
+    StepStatement,
     WaitCondition, WaitStatement,
 };
 use crate::ir::{
@@ -125,7 +126,7 @@ struct SafetyModel {
     edges: Vec<ModelEdge>,
     outgoing: Vec<Vec<usize>>,
     devices: Vec<DeviceDomain>,
-    device_index: HashMap<String, usize>,
+    device_index: HashMap<(String, String), usize>,
     device_state_index: Vec<HashMap<String, usize>>,
     suggested_depth: usize,
     max_scc_depth: usize,
@@ -382,7 +383,7 @@ impl SafetyModel {
             .unwrap_or(0);
 
         let (devices, device_index, device_state_index) =
-            collect_device_domains(program, constraints);
+            collect_device_domains(program, constraints, state_machine);
 
         let mut edges = Vec::new();
         let mut outgoing = vec![Vec::new(); states.len()];
@@ -639,14 +640,15 @@ fn collect_threshold_values_from_wait(
 fn collect_device_domains(
     program: &PlcProgram,
     constraints: &ConstraintSet,
+    state_machine: &StateMachine,
 ) -> (
     Vec<DeviceDomain>,
-    HashMap<String, usize>,
+    HashMap<(String, String), usize>,
     Vec<HashMap<String, usize>>,
 ) {
     let analog_regions = compute_analog_regions(program, constraints);
     let mut devices = Vec::<DeviceDomain>::new();
-    let mut device_index = HashMap::<String, usize>::new();
+    let mut device_index = HashMap::<(String, String), usize>::new();
 
     for device in &program.topology.devices {
         let (states, default_state, is_analog, region_bounds) = match device.device_type {
@@ -664,6 +666,9 @@ fn collect_device_domains(
             | DeviceType::SolenoidValve
             | DeviceType::Sensor
             | DeviceType::Motor
+            | DeviceType::StepperMotor
+            | DeviceType::Vfd
+            | DeviceType::ServoDrive
             | DeviceType::Pid => {
                 let states = vec!["on".to_string(), "off".to_string()];
                 let default_state = states.iter().position(|state| state == "off").unwrap_or(0);
@@ -693,20 +698,135 @@ fn collect_device_domains(
             is_analog,
             region_bounds,
         });
-        device_index.insert(device.name.clone(), index);
+        device_index.insert((device.name.clone(), "self".to_string()), index);
     }
 
+    let mut referenced_ports = HashMap::<String, Vec<String>>::new();
     for rule in &constraints.safety {
         if let SafetyExpr::State(ref expr) = rule.left {
-            if let Some(left_device) = device_index.get(&expr.device).copied() {
+            if expr.port != "self" {
+                referenced_ports
+                    .entry(expr.device.clone())
+                    .or_default()
+                    .push(expr.port.clone());
+            }
+            if let Some(left_device) =
+                lookup_device_domain_id(&device_index, &expr.device, &expr.port, false)
+            {
                 ensure_device_state(&mut devices[left_device], &expr.state);
             }
         }
 
         if let SafetyExpr::State(ref expr) = rule.right {
-            if let Some(right_device) = device_index.get(&expr.device).copied() {
+            if expr.port != "self" {
+                referenced_ports
+                    .entry(expr.device.clone())
+                    .or_default()
+                    .push(expr.port.clone());
+            }
+            if let Some(right_device) =
+                lookup_device_domain_id(&device_index, &expr.device, &expr.port, false)
+            {
                 ensure_device_state(&mut devices[right_device], &expr.state);
             }
+        }
+    }
+
+    for transition in &state_machine.transitions {
+        for action in &transition.actions {
+            let (target, port) = match action {
+                TransitionAction::Extend { target, port }
+                | TransitionAction::Retract { target, port }
+                | TransitionAction::Set { target, port, .. }
+                | TransitionAction::SetAnalog { target, port, .. } => (target, port),
+                TransitionAction::Log { .. } => continue,
+            };
+            if port != "self" {
+                referenced_ports
+                    .entry(target.clone())
+                    .or_default()
+                    .push(port.clone());
+            }
+        }
+    }
+
+    for device in &program.topology.devices {
+        let mut ports = referenced_ports.remove(&device.name).unwrap_or_default();
+        for port in &device.attributes.ports {
+            ports.push(port.id.clone());
+        }
+
+        ports.sort();
+        ports.dedup();
+        ports.retain(|port| port != "self");
+
+        for port in ports {
+            if device_index.contains_key(&(device.name.clone(), port.clone())) {
+                continue;
+            }
+
+            let declared_port = device
+                .attributes
+                .ports
+                .iter()
+                .find(|candidate| candidate.id == port);
+
+            let is_analog = declared_port
+                .map(|candidate| matches!(candidate.port_type, PortType::Analog))
+                .unwrap_or(false);
+
+            let mut states = declared_port
+                .map(|candidate| candidate.states.clone())
+                .unwrap_or_default();
+            if states.is_empty() {
+                states = inferred_states_for_port(&port);
+            }
+
+            let default_state_name = declared_port
+                .and_then(|candidate| {
+                    if candidate.default_state.is_empty() {
+                        None
+                    } else {
+                        Some(candidate.default_state.clone())
+                    }
+                })
+                .or_else(|| inferred_default_state_for_port(&states));
+
+            let mut default_state = 0usize;
+            if let Some(name) = default_state_name.as_deref() {
+                if let Some(idx) = states.iter().position(|state| state == name) {
+                    default_state = idx;
+                }
+            } else if let Some(idx) = states.iter().position(|state| state == "off") {
+                default_state = idx;
+            }
+
+            let index = devices.len();
+            let display_name = format!("{}.{}", device.name, port);
+            devices.push(DeviceDomain {
+                name: display_name,
+                states,
+                default_state,
+                is_analog,
+                region_bounds: None,
+            });
+            device_index.insert((device.name.clone(), port), index);
+        }
+    }
+
+    for rule in &constraints.safety {
+        if let SafetyExpr::State(ref expr) = rule.left
+            && let Some(left_device) =
+                lookup_device_domain_id(&device_index, &expr.device, &expr.port, false)
+        {
+            ensure_device_state(&mut devices[left_device], &expr.state);
+        }
+
+        if let SafetyExpr::State(ref expr) = rule.right
+            && let Some(right_device) =
+                lookup_device_domain_id(&device_index, &expr.device, &expr.port, false)
+        {
+            ensure_device_state(&mut devices[right_device], &expr.state);
         }
     }
 
@@ -724,7 +844,7 @@ fn collect_device_domains(
 
 fn collect_analog_input_states(
     program: &PlcProgram,
-    device_index: &HashMap<String, usize>,
+    device_index: &HashMap<(String, String), usize>,
     devices: &[DeviceDomain],
 ) -> Vec<(usize, Vec<usize>)> {
     let mut inputs = Vec::new();
@@ -734,7 +854,8 @@ fn collect_analog_input_states(
             continue;
         }
 
-        let Some(device_id) = device_index.get(&device.name).copied() else {
+        let Some(device_id) = lookup_device_domain_id(device_index, &device.name, "self", false)
+        else {
             continue;
         };
 
@@ -794,7 +915,7 @@ fn ensure_device_state(domain: &mut DeviceDomain, state_name: &str) {
 
 fn transition_effects(
     transition: &Transition,
-    device_index: &HashMap<String, usize>,
+    device_index: &HashMap<(String, String), usize>,
     device_state_index: &[HashMap<String, usize>],
     device_domains: &[DeviceDomain],
 ) -> HashMap<usize, usize> {
@@ -802,8 +923,13 @@ fn transition_effects(
 
     for action in &transition.actions {
         match action {
-            TransitionAction::SetAnalog { target, value_raw, .. } => {
-                let Some(device_id) = device_index.get(target).copied() else {
+            TransitionAction::SetAnalog {
+                target,
+                port,
+                value_raw,
+            } => {
+                let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
+                else {
                     continue;
                 };
                 let Some(state_id) = analog_state_for_value(device_domains, device_id, value_raw)
@@ -812,42 +938,122 @@ fn transition_effects(
                 };
                 effects.insert(device_id, state_id);
             }
-            _ => {
-                let Some((target_device, target_state)) = action_effect(action) else {
-                    continue;
-                };
-
-                let Some(device_id) = device_index.get(target_device).copied() else {
-                    continue;
-                };
-
-                let Some(state_id) = device_state_index[device_id].get(target_state).copied()
+            TransitionAction::Set {
+                target,
+                port,
+                value,
+            } => {
+                let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
                 else {
                     continue;
                 };
-
+                let Some(state_id) = binary_state_for_domain(
+                    &device_domains[device_id],
+                    &device_state_index[device_id],
+                    value,
+                ) else {
+                    continue;
+                };
                 effects.insert(device_id, state_id);
             }
+            TransitionAction::Extend { target, port } => {
+                let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
+                else {
+                    continue;
+                };
+                let Some(state_id) = device_state_index[device_id].get("extended").copied() else {
+                    continue;
+                };
+                effects.insert(device_id, state_id);
+            }
+            TransitionAction::Retract { target, port } => {
+                let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
+                else {
+                    continue;
+                };
+                let Some(state_id) = device_state_index[device_id].get("retracted").copied() else {
+                    continue;
+                };
+                effects.insert(device_id, state_id);
+            }
+            TransitionAction::Log { .. } => {}
         }
     }
 
     effects
 }
 
-fn action_effect(action: &TransitionAction) -> Option<(&str, &str)> {
-    match action {
-        TransitionAction::Extend { target, .. } => Some((target.as_str(), "extended")),
-        TransitionAction::Retract { target, .. } => Some((target.as_str(), "retracted")),
-        TransitionAction::Set { target, value, .. } => {
-            let state = match value {
-                crate::ir::BinaryValue::On => "on",
-                crate::ir::BinaryValue::Off => "off",
-            };
-            Some((target.as_str(), state))
-        }
-        TransitionAction::SetAnalog { .. } => None,
-        TransitionAction::Log { .. } => None,
+fn lookup_device_domain_id(
+    device_index: &HashMap<(String, String), usize>,
+    device: &str,
+    port: &str,
+    allow_self_fallback: bool,
+) -> Option<usize> {
+    if let Some(id) = device_index.get(&(device.to_string(), port.to_string())).copied() {
+        return Some(id);
     }
+    if allow_self_fallback && port != "self" {
+        return device_index
+            .get(&(device.to_string(), "self".to_string()))
+            .copied();
+    }
+    None
+}
+
+fn inferred_states_for_port(port: &str) -> Vec<String> {
+    let lowered = port.to_ascii_lowercase();
+    if lowered.contains("direction") || lowered.ends_with("_dir") || lowered == "dir" {
+        return vec!["forward".to_string(), "reverse".to_string()];
+    }
+    if lowered.contains("pulse") {
+        return vec!["active".to_string(), "idle".to_string()];
+    }
+    vec!["on".to_string(), "off".to_string()]
+}
+
+fn inferred_default_state_for_port(states: &[String]) -> Option<String> {
+    for candidate in ["off", "idle", "retracted", "reverse"] {
+        if states.iter().any(|state| state == candidate) {
+            return Some(candidate.to_string());
+        }
+    }
+    states.first().cloned()
+}
+
+fn binary_state_for_domain(
+    domain: &DeviceDomain,
+    state_index: &HashMap<String, usize>,
+    value: &crate::ir::BinaryValue,
+) -> Option<usize> {
+    let candidates = match value {
+        crate::ir::BinaryValue::On => ["on", "forward", "active", "extended"],
+        crate::ir::BinaryValue::Off => ["off", "reverse", "idle", "retracted"],
+    };
+
+    for candidate in candidates {
+        if let Some(state_id) = state_index.get(candidate).copied() {
+            return Some(state_id);
+        }
+    }
+
+    if domain.states.len() == 2 {
+        return Some(match value {
+            crate::ir::BinaryValue::On => {
+                if domain.default_state == 0 {
+                    1
+                } else {
+                    0
+                }
+            }
+            crate::ir::BinaryValue::Off => domain.default_state.min(1),
+        });
+    }
+
+    if domain.states.len() == 1 {
+        return Some(0);
+    }
+
+    None
 }
 
 fn analog_state_for_value(
@@ -1012,16 +1218,31 @@ fn safety_expr_states_with_reason(
 ) -> Result<(usize, Vec<usize>), String> {
     match expr {
         SafetyExpr::State(state_expr) => {
-            let device_id = model
-                .device_index
-                .get(&state_expr.device)
-                .copied()
-                .ok_or_else(|| format!("未知设备 {}", state_expr.device))?;
+            let device_id = lookup_device_domain_id(
+                &model.device_index,
+                &state_expr.device,
+                &state_expr.port,
+                false,
+            )
+            .ok_or_else(|| {
+                if state_expr.port == "self" {
+                    format!("未知设备 {}", state_expr.device)
+                } else {
+                    format!("未知设备端口 {}.{}", state_expr.device, state_expr.port)
+                }
+            })?;
             let state_id = model.device_state_index[device_id]
                 .get(&state_expr.state)
                 .copied()
                 .ok_or_else(|| {
-                    format!("设备 {} 不存在状态 {}", state_expr.device, state_expr.state)
+                    if state_expr.port == "self" {
+                        format!("设备 {} 不存在状态 {}", state_expr.device, state_expr.state)
+                    } else {
+                        format!(
+                            "设备端口 {}.{} 不存在状态 {}",
+                            state_expr.device, state_expr.port, state_expr.state
+                        )
+                    }
                 })?;
             Ok((device_id, vec![state_id]))
         }
@@ -1030,10 +1251,7 @@ fn safety_expr_states_with_reason(
             operator,
             value,
         } => {
-            let device_id = model
-                .device_index
-                .get(device)
-                .copied()
+            let device_id = lookup_device_domain_id(&model.device_index, device, "self", false)
                 .ok_or_else(|| format!("未知设备 {device}"))?;
             let domain = model
                 .devices
@@ -1116,7 +1334,16 @@ fn region_intersects(op: ComparisonOp, value: f64, min: f64, max: f64) -> bool {
 
 fn safety_expr_text(expr: &SafetyExpr) -> String {
     match expr {
-        SafetyExpr::State(state_expr) => format!("{}.{}", state_expr.device, state_expr.state),
+        SafetyExpr::State(state_expr) => {
+            if state_expr.port == "self" {
+                format!("{}.{}", state_expr.device, state_expr.state)
+            } else {
+                format!(
+                    "{}.{}.{}",
+                    state_expr.device, state_expr.port, state_expr.state
+                )
+            }
+        }
         SafetyExpr::Threshold {
             device,
             operator,
@@ -1145,7 +1372,8 @@ fn collect_analog_threshold_details(
             continue;
         };
 
-        let Some(device_id) = model.device_index.get(device).copied() else {
+        let Some(device_id) = lookup_device_domain_id(&model.device_index, device, "self", false)
+        else {
             continue;
         };
         let Some(domain) = model.devices.get(device_id) else {
@@ -2189,6 +2417,49 @@ task main:
     }
 
     #[test]
+    fn detects_cross_port_conflict_for_stepper_enable_and_pulse() {
+        let source = r#"
+[topology]
+
+device axis_x: stepper_motor
+
+[constraints]
+
+safety: axis_x.enable.off conflicts_with axis_x.pulse.active
+
+[tasks]
+
+task main:
+    step disable_axis:
+        action: set axis_x.enable off
+    step pulse_axis:
+        action: set axis_x.pulse active
+    step done:
+        action: log "done"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let errors = verify_safety(&program, &constraints, &state_machine)
+            .expect_err("enable.off 与 pulse.active 组合应触发冲突");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.constraint.contains("axis_x.enable.off")),
+            "错误应包含端口化安全约束文本"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.constraint.contains("axis_x.pulse.active")),
+            "错误应包含 pulse 端口状态"
+        );
+    }
+
+    #[test]
     fn maps_set_analog_to_region_state() {
         let source = r#"
 [topology]
@@ -2214,7 +2485,10 @@ task main:
         let state_machine = build_state_machine(&program).expect("状态机应能构建");
         let model = SafetyModel::from_inputs(&program, &constraints, &state_machine);
 
-        let device_id = *model.device_index.get("AO0").expect("AO0 应注册为设备");
+        let device_id = *model
+            .device_index
+            .get(&("AO0".to_string(), "self".to_string()))
+            .expect("AO0 应注册为设备");
         let target_state =
             analog_state_for_value(&model.devices, device_id, "7.5").expect("应找到区间状态");
 

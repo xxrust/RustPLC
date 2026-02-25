@@ -58,7 +58,7 @@ causality: Y0 -> motor_conv -> sensor_B
 
 task search:
     step start_conv:
-        action: set motor_conv on
+        action: set motor_conv.run on
     step detect:
         race:
             branch_A:
@@ -71,21 +71,21 @@ task search:
 
 task process_A:
     step stop_conv:
-        action: set motor_conv off
+        action: set motor_conv.run off
     step gate_to_A:
         action: retract cyl_gate
     on_complete: goto ready
 
 task process_B:
     step stop_conv:
-        action: set motor_conv off
+        action: set motor_conv.run off
     step gate_to_B:
         action: extend cyl_gate
     on_complete: goto ready
 
 task fault_handler:
     step safe:
-        action: set motor_conv off
+        action: set motor_conv.run off
         action: retract cyl_gate
     step alarm:
         action: log "fault: race timeout"

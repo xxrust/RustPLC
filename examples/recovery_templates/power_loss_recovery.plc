@@ -26,17 +26,17 @@ task cycle:
         wait: power_ok == true
         timeout: 200ms -> goto power_loss_recovery
     step feed_on:
-        action: set conveyor on
+        action: set conveyor.run on
     step wait_station:
         wait: station_sensor == true
         timeout: 1200ms -> goto power_loss_recovery
     step feed_off:
-        action: set conveyor off
+        action: set conveyor.run off
     on_complete: goto ready
 
 task power_loss_recovery:
     step safe_shutdown:
-        action: set conveyor off
+        action: set conveyor.run off
         action: set alarm_light on
     step wait_power_restore:
         wait: power_ok == true
