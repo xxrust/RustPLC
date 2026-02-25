@@ -11,36 +11,17 @@
 
 ---
 
-## 30 秒了解 RustPLC
-
-```mermaid
-flowchart TD
-    A["自然语言描述工艺"] --> B["AI 生成 .plc"]
-    B --> C["编译器验证"]
-    C --> D{"通过?"}
-    D -- "是" --> E["JSON IR 输出"]
-    D -- "否" --> F["错误报告 + 修复建议"]
-    F --> B
-```
-
 **传统方式**：工程师手写梯形图 → 人工审查安全性 → 现场调试发现碰撞/死锁/超时
 
 **RustPLC 方式**：工程师描述工艺 → AI 生成声明式 DSL → 编译器数学证明安全性 → 问题在编译期全部暴露
 
----
-
-## 本项目与传统 PLC 对比
-
-| 维度 | 传统 PLC（梯形图 / 功能块） | RustPLC |
-|------|----------------------------|---------|
-| 开发入口 | 以 PLC 品牌 IDE + 图形化编程为主 | DSL 文本 + AI 辅助生成 |
-| 安全校验 | 规则校验 + 人工审查为主 | 编译期四引擎形式化验证（Safety/Liveness/Timing/Causality） |
-| 问题暴露阶段 | 现场联调期集中暴露 | 编译/仿真阶段前置暴露 |
-| 变更可审计性 | 图形差异审阅成本高 | DSL 文本 diff + 结构化报告 + release bundle |
-| 仿真与回归 | 依赖厂商工具链，自动化程度受限 | SIL/virtual-board/no-board-gate 可脚本化批量回归 |
-| 硬件绑定方式 | 与厂商生态耦合较深 | 拓扑与 I/O 映射解耦，支持 no-board 与 RP2040 目标 |
-
-> RustPLC 的定位不是否定传统 PLC，而是把“可证明、安全前置、可审计交付”补到工业控制软件工程链路里。
+| 维度 | 传统 PLC | RustPLC |
+|------|----------|---------|
+| 安全校验 | 规则校验 + 人工审查 | 编译期四引擎形式化验证 |
+| 问题暴露 | 现场联调期 | 编译/仿真阶段前置 |
+| 变更审计 | 图形 diff，成本高 | DSL 文本 diff + release bundle |
+| 仿真回归 | 依赖厂商工具链 | SIL/virtual-board 可脚本化批量回归 |
+| 硬件绑定 | 与厂商生态耦合 | 拓扑与 I/O 映射解耦，支持 RP2040 |
 
 ---
 
@@ -55,20 +36,21 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 
 ```
 验证通过：
-  - Safety: 完备证明（深度 4）— conflicts_with 全部满足
-  - Liveness: 通过 — 无死锁风险
-  - Timing: 通过
+  - Safety:    完备证明（深度 4）— conflicts_with 全部满足
+  - Liveness:  通过 — 无死锁风险
+  - Timing:    通过
   - Causality: 通过 — 所有信号链路连通
 ```
 
-## Subtype 标准与示例入口
+推荐示例入口：
+- `examples/two_cylinder.plc` — 最小可运行
+- `examples/assembly_station.plc` — 大型拓扑
+- `examples/recovery_templates/estop_recovery.plc` — 急停恢复
+- `examples/force_override_demo.plc` — 在线强制与调试
 
-- Subtype 规范、迁移规则（legacy `type` → `subtype`）与可执行 DSL 示例：`docs/subtype_standard_and_examples_inventory.md`
-- 建议从以下文件开始：
-  - `examples/two_cylinder.plc`（最小可运行）
-  - `examples/assembly_station.plc`（大型拓扑）
-  - `examples/recovery_templates/estop_recovery.plc`（`e_stop_button` + `inverted: true`）
-  - `examples/force_override_demo.plc`（在线强制与调试）
+> **强制审核规则（自 2026-02-24 起）**：每个 `device` 必须声明 `purpose`，缺失直接 semantic gate 失败。
+>
+> **兼容说明（~ 2026-06-30）**：旧版 `connected_to` / 端口当设备写法仍可运行，但会给出 WARN 级迁移提示。
 
 ---
 
@@ -78,10 +60,9 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                                  📝 输入层                                           │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│  .plc DSL 文件                    场景 YAML (scenario.yaml)                         │
-│  - topology (拓扑)                - digital_inputs / analog_inputs                   │
-│  - constraints (约束)             - tick_ms / duration_ticks                         │
-│  - tasks (控制逻辑)               - fault injection (故障注入)                       │
+│  .plc DSL 文件                         场景 YAML (scenario.yaml)                    │
+│  - topology / constraints / tasks      - digital_inputs / analog_inputs             │
+│                                        - tick_ms / fault injection                  │
 └────────────────┬────────────────────────────────────────────────────────────────────┘
                  │
                  ▼
@@ -91,81 +72,58 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 │  Parser (pest PEG) ──▶ AST ──▶ 语义分析 + 预处理 ──▶ IR                            │
 │                                (repeat/delay 展开)   (TopologyGraph + StateMachine) │
 │                                                                                      │
-│  关键模块：                                                                          │
-│  • parser/plc.pest    - PEG 语法定义                                                │
-│  • ast/mod.rs         - AST 类型 (PlcProgram, DeviceDeclaration, StepStatement)    │
-│  • semantic/mod.rs    - 语义分析 + IR 降级 + 设备库约束注入                    │
-│  • ir/mod.rs          - IR 类型 (petgraph DiGraph)                                  │
-│  • device_library.rs  - 设备库加载 (devices/*.toml → DeviceLibrary)            │
+│  DSL 编译链：parser/plc.pest → ast/ → semantic/ → ir/                              │
+│  设备模型：  device_library.rs (devices/*.toml)  device_subtype.rs                 │
+│  语义门禁：  topology_semantic_gate.rs (SEM-101~107)  sequence_lint.rs             │
+│  I/O 模型：  iec_address.rs  plc_port.rs                                           │
+│  元件链路：  component_{library,topology,scenario,sim,faults,diagnostics}.rs       │
+│  运行时支撑：diagnostics.rs  alarm_runtime.rs                                      │
 └────────────────┬────────────────────────────────────────────────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                        🔬 验证引擎（并行执行）(src/verification/)                    │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐│
-│  │  Safety 引擎    │  │ Liveness 引擎   │  │  Timing 引擎    │  │ Causality 引擎  ││
-│  │  BMC + k-归纳   │  │ SCC + 可达性    │  │  关键路径分析   │  │   拓扑 BFS      ││
-│  │  conflicts_with │  │  死锁检测       │  │  response_time  │  │  connected_to   ││
-│  │  requires       │  │  活锁检测       │  │  budget 上界    │  │  detects 链路   ││
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘  └─────────────────┘│
+│  Safety (BMC + k-归纳)   Liveness (SCC + 可达性)   Timing (关键路径)   Causality (BFS) │
+│  conflicts_with / requires   死锁/活锁检测   response_time 上界   connected_to 链路  │
 │                                      ▼                                               │
-│                          verification_report.json                                    │
-│                          (结构化验证报告 + warnings 分级)                            │
+│                          verification_report.json (结构化报告 + warnings 分级)      │
 └────────────────┬────────────────────────────────────────────────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                          🏃 运行时层 (crates/)                                       │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│                        ┌─────────────────────────────┐                              │
-│                        │   runtime-core (no_std)     │                              │
-│                        │   确定性状态机执行器         │                              │
-│                        │   - Program / Task / Step   │                              │
-│                        │   - Instr / Action          │                              │
-│                        └──────────┬──────────────────┘                              │
-│                                   │                                                  │
-│              ┌────────────────────┼────────────────────┐                            │
-│              ▼                    ▼                    ▼                            │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐                 │
-│  │   SimIO (sim)    │  │  Virtual Board   │  │  RP2040 HAL      │                 │
-│  │   SIL 仿真 I/O   │  │  虚拟板级 Runner │  │  硬件抽象层      │                 │
-│  │   - Plant 模型   │  │  - tick_timing   │  │  - GPIO/ADC/PWM  │                 │
-│  │   - 故障注入     │  │  - 模拟真实板    │  │  - PIO (运动)    │                 │
-│  │   - 波形导出     │  │  - overrun 标记  │  │  - RTT 日志      │                 │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘                 │
-│          │                      │                      │                            │
-│          ▼                      ▼                      ▼                            │
-│   sil_trace.jsonl      board_trace.jsonl      RP2040 固件 (UF2)                    │
-│   sim_report.json      tick_timing.jsonl      + board.log (RTT)                    │
+│              runtime-core (no_std 确定性状态机执行器)                                │
+│                    │                    │                    │                       │
+│           SimIO (sim)          Virtual Board           RP2040 HAL                   │
+│           SIL 仿真 I/O         虚拟板级 Runner          GPIO/ADC/PWM/PIO            │
+│           Plant / 故障注入     tick_timing 采样         RTT 日志                    │
+│                    │                    │                    │                       │
+│           sil_trace.jsonl      board_trace.jsonl       firmware.uf2                 │
+│           alarm_events.ndjson  tick_timing.jsonl       board.log                    │
 └────────────────┬────────────────────────────────────────────────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                          📊 分析与门禁 (src/)                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│  trace-diff              timing-report           no-board-gate                      │
-│  SIL vs Board 对比       p50/p95/p99 统计       实时阈值门禁                        │
-│  - 逐 tick 差异检测      - exec_us / slack_us   - --max-p99-exec-us                │
-│  - context 上下文        - overrun_count        - --max-overrun-count               │
-│  - fail-on-mismatch      - timing_report.json   - 轨迹一致性 + 实时性               │
-│                                                                                      │
-│  release-bundle                                                                      │
-│  可审计交付包                                                                        │
-│  - manifest.json (SHA256 清单)                                                      │
-│  - build_meta.json (git commit / dirty / tool_version)                             │
-│  - 所有验证报告 + trace + timing 证据                                               │
+│  trace-diff        timing-report        no-board-gate       release-bundle          │
+│  trace-doctor      sequence-lint        commissioning-run   pil-run                 │
+│  component-topology-validate/diff       component-scenario-validate                 │
+│  component-sim     io-map-normalize                                                  │
 └────────────────┬────────────────────────────────────────────────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                                📦 输出层                                             │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│  ✅ 编译期：verification_report.json (四引擎证明结果)                               │
-│  🧪 仿真期：trace.jsonl + wave.vcd + sim_report.json                               │
-│  📦 部署期：firmware.uf2 + io_map.toml + analog_contract.toml                      │
-│  🚫 门禁期：diff_report.json + timing_report.json + gate_summary.json              │
-│  📋 交付期：release-bundle/ (manifest + 所有工件 + SHA 清单)                        │
+│  编译期：verification_report.json + SEM-10x 语义门禁报告                            │
+│  仿真期：trace.jsonl + wave.vcd + sim_report.json + alarm_events.ndjson            │
+│  诊断期：diagnosis_report.json + component_diagnosis.json + io_snapshot.json       │
+│  部署期：firmware.uf2 + io_map.toml                                                 │
+│  门禁期：diff_report.json + timing_report.json + gate_summary.json                 │
+│  交付期：release-bundle/ (manifest.json + SHA256 清单 + git 元数据 + 所有工件)      │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -175,21 +133,20 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 
 | 能力 | 说明 |
 |------|------|
-| **🔬 形式化验证** | 四大引擎（Safety / Liveness / Timing / Causality）编译期数学证明 |
-| **🤖 AI 辅助生成** | 自然语言描述工艺 → AI 多轮对话生成 `.plc` → 自动验证 |
-| **🧪 SIL 仿真** | 场景驱动的确定性仿真，故障注入、波形导出、批量回归 |
-| **📋 场景工程** | 场景初始化、验证、展开、批量生成、失败最小化 |
-| **🎛️ PID 控制** | DSL 声明 PID 回路，运行时确定性执行，KPI 回归分析 |
-| **🔄 运动控制** | 步进电机 + AB 编码器，PIO 高速脉冲，碰撞防护，虚拟通道 |
-| **📦 RP2040 部署** | 交叉编译到 Raspberry Pi Pico，I/O 映射，trace 对比门禁 |
-| **⏱️ 实时门禁** | tick 时序采样，p50/p95/p99 统计，实时阈值门禁 |
-| **🚫 无板交付** | 虚拟板级 Runner，SIL vs virtual-board 对比，release-bundle |
-| **🛡️ 恢复模板** | 急停/掉电/传感器卡死恢复模板，关键 wait 可恢复性 lint |
-| **🏷️ 标签驱动拓扑** | 多维标签（功能/危险等级/位置），批量改造，规则引擎，可视化分组 |
-| **🔀 端口级连线** | `driven_by`/`reports_to`/`detects` 明确语义，MIMO 拓扑，端口契约验证 |
-| **📦 设备库** | `devices/*.toml` 声明端口状态与设备级安全约束，编译期自动注入，三段引用 `device.port.state` |
-| **📊 语义 Diff** | 拓扑变更影响分析，节点/端口/关系/标签级 diff，审计记录 |
-| **⚡ 性能门禁** | 500 节点/2000 边基线，编译/解析/渲染 p95 阈值 CI 门禁 |
+| **🔬 形式化验证** | Safety / Liveness / Timing / Causality 四引擎，编译期数学证明 |
+| **🔐 语义门禁** | SEM-101~107 端口/类型/角色/subtype 校验，`purpose` 强制审核 |
+| **🤖 AI 辅助生成** | 自然语言 → AI 多轮对话生成 `.plc` → 自动验证 |
+| **🧪 SIL 仿真** | 场景驱动确定性仿真，故障注入、波形导出、批量回归 |
+| **🧩 元件库仿真** | ComponentLibrary + 元件拓扑/场景/仿真/诊断完整链路 |
+| **🩺 诊断与告警** | 五类诊断引擎，证据锚点排序，AlarmDispatcher WebSocket 推送 |
+| **🔧 调试运行** | `commissioning-run` nominal+fault 双场景，`pil-run` PIL 仿真 |
+| **🌐 在线控制** | 在线强制通道、在线变量注入、保持变量，全程审计输出 |
+| **🎛️ PID / 运动** | PID 回路 KPI 回归，步进 + AB 编码器，PIO 高速脉冲，碰撞防护 |
+| **📦 RP2040 部署** | 交叉编译到 Pico，I/O 映射，trace 对比门禁 |
+| **🚫 无板交付** | virtual-board Runner，SIL vs board 对比，release-bundle |
+| **⏱️ 实时门禁** | p50/p95/p99 统计，`--max-p99-exec-us` / `--max-overrun-count` |
+| **🏷️ 标签拓扑** | 多维标签，规则引擎，语义 Diff，性能门禁（500 节点/2000 边） |
+| **📦 设备库** | `devices/*.toml` 声明端口状态与安全约束，编译期自动注入 |
 
 ---
 
@@ -197,15 +154,13 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 
 ### 1. 编写 / 生成 .plc
 
-**方式一：AI 对话生成（推荐）**
+**AI 对话生成（推荐）**
 
 ```
 > 帮我写个 PLC 程序。我有两个气缸，不能同时伸出，先伸 A 再伸 B...
 ```
 
-AI 会通过多轮对话生成完整的 `.plc` 文件并自动验证。
-
-**方式二：手写 DSL**
+**手写 DSL**
 
 ```plc
 [topology]
@@ -241,12 +196,6 @@ task cycle:
         timeout: 500ms -> goto fault_handler
 ```
 
-> **注意**：设备属性写法 `driven_by/reports_to/detects` 已移除；请统一使用 `relation { from, to, via }`。按新规范推荐显式使用 `plc_main.<port>` 端口引用。
->
-> **兼容说明（2026-02-23 ~ 2026-06-30）**：旧版“端口当设备”写法仍可运行，但会给出 WARN 级迁移提示。
->
-> **强制审核规则（自 2026-02-24 起）**：每个 `device` 都必须声明 `purpose`，缺失将直接审核失败（semantic gate 不通过）。
-
 ### 2. 编译验证
 
 ```bash
@@ -256,22 +205,18 @@ cargo run --release -- your_file.plc --no-print-ir
 ### 3. 场景仿真
 
 ```bash
-# 初始化场景骨架
 cargo run --release -- scenario-init examples/assembly_station.plc \
   --out scenarios/normal.yaml --preset normal
 
-# SIL 仿真
 cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
 
-# 批量回归
 cargo run --release -- sim-regress --plc-dir examples --scenario-dir scenarios
 ```
 
 ### 4. 无板门禁
 
 ```bash
-# SIL vs virtual-board 对比 + 实时阈值检查
 cargo run --release -- no-board-gate examples/assembly_station.plc \
   --scenario scenarios/normal.yaml \
   --out-dir out/gate \
@@ -282,27 +227,15 @@ cargo run --release -- no-board-gate examples/assembly_station.plc \
 ### 5. RP2040 部署
 
 ```bash
-# 生成固件构建输入
-cargo run --release -- build-rp2040 examples/assembly_station.plc --out out/rp2040
-
-# 填写 I/O 映射
-cp out/rp2040/io_map.template.toml out/rp2040/io_map.toml
-# 编辑 io_map.toml 填写 GPIO 引脚
-
-# 一步构建 UF2 固件
 cargo run --release -- build-rp2040 examples/assembly_station.plc \
-  --out out/rp2040 \
-  --io-map out/rp2040/io_map.toml \
-  --emit-uf2 out/firmware.uf2
+  --out out/rp2040 --io-map io_map.toml --emit-uf2 out/firmware.uf2
 
-# 烧录到 Pico
 cargo run --release -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP2
 ```
 
 ### 6. 发布交付
 
 ```bash
-# 打包可审计的发布工件（含 SHA 清单、git 元数据、实时证据）
 cargo run --release -- release-bundle examples/assembly_station.plc \
   --scenario scenarios/normal.yaml \
   --out-dir out/release \
@@ -312,103 +245,37 @@ cargo run --release -- release-bundle examples/assembly_station.plc \
 
 ---
 
-## 📚 详细文档
+## 📚 文档
 
-完整文档请查阅 **[GitHub Wiki](https://github.com/xxrust/RustPLC/wiki)**：
+**GitHub Wiki：**
 
 | 页面 | 内容 |
 |------|------|
-| [Quick Start](https://github.com/xxrust/RustPLC/wiki/Quick-Start) | 5 分钟上手指南 |
+| [Quick Start](https://github.com/xxrust/RustPLC/wiki/Quick-Start) | 5 分钟上手 |
 | [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) | 完整语法参考 |
 | [Architecture](https://github.com/xxrust/RustPLC/wiki/Architecture) | 编译流水线与模块结构 |
 | [Verification Engines](https://github.com/xxrust/RustPLC/wiki/Verification-Engines) | 四大引擎原理 |
 | [SIL Simulation](https://github.com/xxrust/RustPLC/wiki/SIL-Simulation) | 仿真闭环 |
 | [Scenario System](https://github.com/xxrust/RustPLC/wiki/Scenario-System) | 场景工程化 |
+| [Device Library](https://github.com/xxrust/RustPLC/wiki/Device-Library) | 设备库与端口模型 |
+| [No-Board Gate](https://github.com/xxrust/RustPLC/wiki/No-Board-Gate) | 无板交付门禁 |
+| [RP2040 Deployment](https://github.com/xxrust/RustPLC/wiki/RP2040-Deployment) | 板级部署 |
+| [Recovery Templates](https://github.com/xxrust/RustPLC/wiki/Recovery-Templates) | 异常恢复模板 |
 | [PID Control](https://github.com/xxrust/RustPLC/wiki/PID-Control) | PID 回路 |
 | [Motion Control](https://github.com/xxrust/RustPLC/wiki/Motion-Control) | 步进 + AB 编码器 |
-| [No-Board Gate](https://github.com/xxrust/RustPLC/wiki/No-Board-Gate) | 无板交付门禁 |
-| [Recovery Templates](https://github.com/xxrust/RustPLC/wiki/Recovery-Templates) | 异常恢复模板 |
-| [RP2040 Deployment](https://github.com/xxrust/RustPLC/wiki/RP2040-Deployment) | 板级部署 |
-| [Examples Gallery](https://github.com/xxrust/RustPLC/wiki/Examples-Gallery) | 示例详解 |
 | [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) | AI 生成流程 |
-| [Device Library](https://github.com/xxrust/RustPLC/wiki/Device-Library) | 设备库与端口模型 |
+| [Examples Gallery](https://github.com/xxrust/RustPLC/wiki/Examples-Gallery) | 示例详解 |
 | [Contributing](https://github.com/xxrust/RustPLC/wiki/Contributing) | 开发指南 |
 
-**本地文档（仓库内）：**
-- 场景系统：[`docs/scenario_playbook.md`](docs/scenario_playbook.md)、[`docs/scenario_minimization.md`](docs/scenario_minimization.md)
-- 无板交付：[`docs/no_board_playbook.md`](docs/no_board_playbook.md)
-- 运动控制：[`docs/stepper_ab_encoder.md`](docs/stepper_ab_encoder.md)
-- 恢复模板：[`docs/recovery_templates_sequence_lint.md`](docs/recovery_templates_sequence_lint.md)
-- 拓扑重构：[`docs/topology_perf_baseline.md`](docs/topology_perf_baseline.md)、[`docs/testing_inventory_matrix.md`](docs/testing_inventory_matrix.md)
+**本地文档（`docs/已实现/`）：** 场景系统、无板交付、运动控制、恢复模板、拓扑语义门禁、诊断引擎、调试运行、保持变量、在线变量控制、元件库、Subtype 规范等详细设计文档均在此目录。
 
 ---
 
 ## 路线图
 
-### 已完成
+**已完成：** DSL 编译器 + 四引擎验证 · SIL/virtual-board/RP2040 运行时 · 场景工程 · PID/运动控制 · 无板门禁 + release-bundle · 拓扑语义门禁（SEM-101~107）· 设备库 + 端口模型 · 元件库仿真链路 · 诊断引擎 + 告警运行时 · commissioning-run / pil-run · 在线强制/变量/保持变量 · 标签驱动拓扑 + 语义 Diff + 性能门禁
 
-**核心编译器：**
-- ✅ DSL 设计与解析器
-- ✅ 四大形式化验证引擎（Safety / Liveness / Timing / Causality）
-- ✅ 结构化错误报告（行号 + 修复建议）
-- ✅ DSL v2（delay / repeat / wait AND|OR / if-else / goto task.step / 自定义状态）
-- ✅ AI 辅助生成（plc-gen skill）
-
-**I/O 与控制：**
-- ✅ 模拟量 I/O（analog_input / analog_output / set_analog / 阈值比较）
-- ✅ PID 最小可用子集（DSL/IR/runtime 打通 + KPI 回归）
-- ✅ 运动控制（步进 + AB 编码器 + PIO + 碰撞防护 + 虚拟通道）
-
-**仿真与测试：**
-- ✅ SIL 仿真闭环（SimIO / Plant / 故障注入 / 波形导出）
-- ✅ 场景系统（init / validate / expand / gen / 批量回归 / 失败最小化）
-- ✅ 仿真对象模型与 KPI 回归（超调/稳定时间/稳态误差）
-
-**部署与门禁：**
-- ✅ 代码生成 + RP2040 构建/烧录（build-rp2040 / flash-rp2040）
-- ✅ 板级可观测与 SIL 对比（board-parse / trace-diff）
-- ✅ 虚拟板级 Runner + 无板对比门禁（no-board-gate）
-- ✅ 发布包与追溯（release-bundle + SHA 清单 + git 元数据）
-
-**质量与实时性：**
-- ✅ 统一验证报告契约（verification_report.json + warnings 分级）
-- ✅ CLI 门禁（--deny-warnings）
-- ✅ Runtime 上界分析（tick 转移/动作/并行展开预算）
-- ✅ 结构上界到时间预算映射（budget_time_estimate）
-- ✅ Tick 时序观测契约（tick_timing.jsonl + 每 tick 执行时长/slack/overrun）
-- ✅ 时序统计报告（timing-report：p50/p95/p99/max + overrun 计数）
-- ✅ 无板门禁实时阈值（--max-p99-exec-us / --max-overrun-count）
-- ✅ 最坏负载场景注入与可复现回放
-- ✅ 异常恢复模板与顺控 lint（关键 wait 必须可恢复）
-
-**文档与工程化：**
-- ✅ 模拟量安全覆盖透明化（规则绑定率与抽象粒度报告）
-- ✅ 阈值语义强化（类型/range/unit 一致性校验）
-- ✅ No-RTOS Real-Time Playbook 文档
-
-**拓扑语义与标签重构（本次）：**
-- ✅ DSL 拓扑方向统一为生产者 → 消费者（`driven_by` / `reports_to` / `detects`）
-- ✅ 移除 `connected_to` 歧义，提供批量迁移工具与 CI 禁回流检查
-- ✅ 端口为一等公民（`id/type/role`），支持 MIMO 拓扑
-- ✅ 多维标签系统（`functional_group` / `danger_level` / `location_group`）
-- ✅ 标签驱动批量改造（预览 diff、回滚、导出）
-- ✅ 标签规则引擎（危险等级双通道、组内/跨组连接约束）
-- ✅ 前端标签可视化分组与过滤，`location_group` 一键定位
-- ✅ parse-plc API 输出关系与端口元数据（`relation/from_port/to_port/signal`）
-- ✅ 前端端口契约与连线绑定重构（cylinder/sensor/switch/stepper/generic）
-- ✅ 测试盘点矩阵与参数化重构，删除无效测试
-- ✅ 语义 Diff 与影响分析（节点/端口/关系/标签变化 + 受影响规则/测试/模块）
-- ✅ 性能门禁：500 节点/2000 边基线，p95 阈值 CI 告警
-
-**设备库与端口模型：**
-- ✅ 统一端口模型：所有设备都有端口，两段引用 `device.state` 自动填充 `port: "self"`
-- ✅ 三段引用 `device.port.state` 支持多端口设备（如双线圈电磁阀）
-- ✅ 设备库 `devices/*.toml`：声明端口状态域与设备级安全约束
-- ✅ 编译期自动注入设备库约束，`source: "device:<type>"` 标注来源
-- ✅ `ActionTarget` 统一端口感知的动作目标模型
-
-### 计划中
-
+**计划中：**
 - ⏳ 硬件抽象层扩展（EtherCAT / Modbus / 更多 GPIO 板卡）
 - ⏳ 多控制器协同
 - ⏳ LSP 编辑器集成（语法高亮、补全、跳转定义）
