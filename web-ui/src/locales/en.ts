@@ -371,9 +371,15 @@ export const en = {
     // Run Page
     run: {
       title: 'Run Monitor',
-      triggerGate: 'Trigger No-Board Gate',
+      triggerGate: 'Trigger Run',
+      runMode: 'Run Mode',
+      runModeRequired: 'Please select run mode',
+      modeNoBoard: 'No-Board Gate (PLC)',
+      modeComponent: 'Component Sim (Topology)',
       plcFile: 'PLC File',
       plcFileRequired: 'Please enter PLC file path',
+      topologyFile: 'Topology File',
+      topologyFileRequired: 'Please enter topology file path',
       scenarioFile: 'Scenario File',
       scenarioFileRequired: 'Please enter scenario file path',
       run: 'Run',

@@ -80,6 +80,13 @@ export const runApi = {
       scenario_file: scenarioFile,
     }),
 
+  triggerComponentSim: (topologyFile: string, scenarioFile: string) =>
+    apiClient.post<{ run_id: string }>('/run/no-board-gate', {
+      topology_file: topologyFile,
+      scenario_file: scenarioFile,
+      mode: 'component_sim',
+    }),
+
   getRunStatus: (runId: string) =>
     apiClient.get<RunStatus>(`/run/${runId}/status`),
 

@@ -119,36 +119,13 @@ const IDDELayout: React.FC = () => {
 
     const loadReplay = async () => {
       try {
-        const res = await runApi.listRuns(1);
-        const runs = res.data as any[];
-        if (runs.length === 0) {
-          if (!cancelled) {
-            loadDemoSnapshots(setSnapshots);
-          }
-          return;
-        }
-        const latestRun = runs[0];
-        const traceRes = await traceApi.getTrace(latestRun.run_id);
-        const trace = traceRes.data as any;
-        if (!trace.ticks || trace.ticks.length === 0) {
-          if (!cancelled) {
-            loadDemoSnapshots(setSnapshots);
-          }
-          return;
-        }
-        const snapshots = trace.ticks.map((tick: any) => ({
-          tick: tick.tick,
-          components: tick.component_states || {},
-          io: {
-            di: tick.digital_inputs,
-            do: tick.digital_outputs,
-            ai: tick.analog_inputs,
-            ao: tick.analog_outputs,
-          },
-          events: [],
-        }));
+        const snapshots = await fetchLatestComponentReplaySnapshots();
         if (!cancelled) {
-          setSnapshots(snapshots);
+          if (snapshots) {
+            setSnapshots(snapshots);
+          } else {
+            loadDemoSnapshots(setSnapshots);
+          }
         }
       } catch {
         if (!cancelled) {
@@ -166,6 +143,29 @@ const IDDELayout: React.FC = () => {
   }, [currentProject, currentProjectContent, setNodes, setEdges, setSnapshots]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
+
+  useEffect(() => {
+    if (activeTab?.view !== 'replay') return;
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const snapshots = await fetchLatestComponentReplaySnapshots();
+        if (!cancelled && snapshots) {
+          setSnapshots(snapshots);
+        }
+      } catch {
+        // keep existing snapshots when refresh fails
+      }
+    };
+
+    void refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeTab?.view, setSnapshots]);
 
   const handleTabClick = (id: string) => setActiveTabId(id);
 
@@ -533,4 +533,95 @@ function loadDemoSnapshots(setSnapshots: (s: any[]) => void) {
       ? [{ type: 'error' as const, message: 'timeout detected' }]
       : [],
   })));
+}
+
+async function fetchLatestComponentReplaySnapshots(): Promise<any[] | null> {
+  const res = await runApi.listRuns(20);
+  const runs = res.data as any[];
+  const latestComponentRun = runs.find(
+    (run) => run.mode === 'component_sim' && run.artifacts?.trace
+  );
+  if (!latestComponentRun) {
+    return null;
+  }
+
+  const traceRes = await traceApi.getTrace(latestComponentRun.run_id);
+  const trace = traceRes.data as any;
+  if (!trace.ticks || trace.ticks.length === 0) {
+    return null;
+  }
+
+  const snapshots = trace.ticks.map((tick: any) => ({
+    tick: tick.tick,
+    components: normalizeReplayComponents(tick),
+    io: {
+      di: tick.digital_inputs,
+      do: tick.digital_outputs,
+      ai: tick.analog_inputs,
+      ao: tick.analog_outputs,
+    },
+    events: [],
+  }));
+  const hasComponentState = snapshots.some(
+    (snapshot: { components: Record<string, unknown> }) =>
+      Object.keys(snapshot.components).length > 0
+  );
+  return hasComponentState ? snapshots : null;
+}
+
+function normalizeReplayComponents(tick: any): Record<string, Partial<NodeData>> {
+  const rawComponents = tick?.component_states ?? tick?.components;
+  if (!rawComponents || typeof rawComponents !== 'object') {
+    return {};
+  }
+
+  return Object.entries(rawComponents).reduce<Record<string, Partial<NodeData>>>(
+    (acc, [componentId, raw]) => {
+      if (!raw || typeof raw !== 'object') {
+        return acc;
+      }
+      acc[componentId] = normalizeReplayComponent(raw as Record<string, any>);
+      return acc;
+    },
+    {}
+  );
+}
+
+function normalizeReplayComponent(raw: Record<string, any>): Partial<NodeData> {
+  const outputs =
+    raw.outputs && typeof raw.outputs === 'object'
+      ? (raw.outputs as Record<string, unknown>)
+      : {};
+  const componentType =
+    typeof raw.component_type === 'string' ? raw.component_type.toLowerCase() : '';
+  const state =
+    typeof raw.state === 'string'
+      ? raw.state
+      : typeof raw.status === 'string'
+        ? raw.status
+        : '';
+  const hasFault = Array.isArray(raw.active_faults) && raw.active_faults.length > 0;
+
+  let status = state;
+  if (componentType === 'switch') {
+    if (state === 'on') status = 'closed';
+    if (state === 'off') status = 'open';
+  } else if (componentType === 'stepper_pd') {
+    if (state === 'enabled') status = 'running';
+    if (state === 'disabled') status = 'idle';
+  }
+  if (hasFault) {
+    status = 'fault';
+  }
+
+  const normalized: Partial<NodeData> = {};
+  if (status) {
+    normalized.status = status;
+  }
+  if (typeof outputs.state === 'boolean') {
+    normalized.value = outputs.state;
+  } else if (typeof raw.value === 'boolean' || typeof raw.value === 'number') {
+    normalized.value = raw.value;
+  }
+  return normalized;
 }

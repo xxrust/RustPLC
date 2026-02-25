@@ -369,9 +369,15 @@ export const zh = {
     // Run Page
     run: {
       title: '运行监控',
-      triggerGate: '触发 No-Board Gate',
+      triggerGate: '触发运行',
+      runMode: '运行模式',
+      runModeRequired: '请选择运行模式',
+      modeNoBoard: 'No-Board Gate（PLC）',
+      modeComponent: 'Component Sim（拓扑）',
       plcFile: 'PLC 文件',
       plcFileRequired: '请输入 PLC 文件路径',
+      topologyFile: '拓扑文件',
+      topologyFileRequired: '请输入拓扑文件路径',
       scenarioFile: '场景文件',
       scenarioFileRequired: '请输入场景文件路径',
       run: '运行',

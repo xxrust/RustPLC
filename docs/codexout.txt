@@ -1,0 +1,10 @@
+• 这版基本到位了，上轮 3 个问题里 2.5 个已解决；我还有 2 个残留问题：
+
+  - 高：CamDisengage 和 CamPhase 分支缺少 cam_index 边界检查，仍可能越界访问 cam_states。你已经在 CamEngage/CamSwitch 做
+    了防御，但这两处分支未对齐（docs/electronic-cam-enhancement.md:972, docs/electronic-cam-enhancement.md:1001，对比
+    docs/electronic-cam-enhancement.md:958, docs/electronic-cam-enhancement.md:979）。建议统一先校验 cam_index，否则
+    RuntimeError::InvalidCamIndex 形同部分生效。
+  - 中：文档“开放问题决策”写的是 cam_engage/cam_disengage 会“写入端口状态并与 CamState 同步”，但运行时伪代码只更新了
+    CamState.engaged，没有体现端口状态写入路径（docs/electronic-cam-enhancement.md:1407, docs/electronic-cam-
+    enhancement.md:957, docs/electronic-cam-enhancement.md:972）。建议补一句“端口状态由 runtime_bridge 从 CamState 映
+    射”或补伪代码，避免实现歧义。

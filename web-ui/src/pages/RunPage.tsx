@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Card, Button, Form, Input, Space, Table, Tag, Typography, Alert, Spin } from 'antd';
+import { Card, Button, Form, Input, Space, Table, Tag, Typography, Alert, Spin, Select } from 'antd';
 import { PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +7,15 @@ import { runApi } from '../services/api';
 import type { RunStatus } from '../types';
 
 const { Title, Text } = Typography;
+
+type RunTriggerMode = 'no_board_gate' | 'component_sim';
+
+interface RunTriggerFormValues {
+  mode: RunTriggerMode;
+  plcFile?: string;
+  topologyFile?: string;
+  scenarioFile: string;
+}
 
 const RunPage: React.FC = () => {
   const { t } = useTranslation();
@@ -20,8 +29,12 @@ const RunPage: React.FC = () => {
   });
 
   const triggerMutation = useMutation({
-    mutationFn: (values: { plcFile: string; scenarioFile: string }) =>
-      runApi.triggerNoBoard(values.plcFile, values.scenarioFile),
+    mutationFn: (values: RunTriggerFormValues) => {
+      if (values.mode === 'component_sim') {
+        return runApi.triggerComponentSim(values.topologyFile || '', values.scenarioFile);
+      }
+      return runApi.triggerNoBoard(values.plcFile || '', values.scenarioFile);
+    },
     onSuccess: (response) => {
       setSelectedRunId(response.data.run_id);
       refetch();
@@ -52,6 +65,16 @@ const RunPage: React.FC = () => {
       title: t('run.triggeredBy'),
       dataIndex: 'triggered_by',
       key: 'triggered_by',
+    },
+    {
+      title: t('run.runMode'),
+      dataIndex: 'mode',
+      key: 'mode',
+      render: (mode?: string) => {
+        if (mode === 'component_sim') return <Tag color="purple">{t('run.modeComponent')}</Tag>;
+        if (mode === 'no_board_gate') return <Tag color="blue">{t('run.modeNoBoard')}</Tag>;
+        return mode || '-';
+      },
     },
     {
       title: t('run.triggeredAt'),
@@ -89,25 +112,60 @@ const RunPage: React.FC = () => {
       <Card title={t('run.triggerGate')} style={{ marginBottom: 24 }}>
         <Form
           form={form}
-          layout="inline"
+          layout="vertical"
           onFinish={handleTrigger}
-          initialValues={{ plcFile: 'examples/demo.plc', scenarioFile: 'examples/demo_scenario.yaml' }}
+          initialValues={{
+            mode: 'component_sim',
+            topologyFile: 'examples/component_model/topology.json',
+            plcFile: 'examples/demo.plc',
+            scenarioFile: 'examples/component_model/scenario_normal.json',
+          }}
         >
           <Form.Item
-            name="plcFile"
-            label={t('run.plcFile')}
-            rules={[{ required: true, message: t('run.plcFileRequired') }]}
-            style={{ width: 300 }}
+            name="mode"
+            label={t('run.runMode')}
+            rules={[{ required: true, message: t('run.runModeRequired') }]}
+            style={{ width: 360 }}
           >
-            <Input placeholder="examples/demo.plc" />
+            <Select
+              options={[
+                { label: t('run.modeComponent'), value: 'component_sim' },
+                { label: t('run.modeNoBoard'), value: 'no_board_gate' },
+              ]}
+            />
           </Form.Item>
+
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev.mode !== next.mode}>
+            {({ getFieldValue }) =>
+              getFieldValue('mode') === 'component_sim' ? (
+                <Form.Item
+                  name="topologyFile"
+                  label={t('run.topologyFile')}
+                  rules={[{ required: true, message: t('run.topologyFileRequired') }]}
+                  style={{ width: 640 }}
+                >
+                  <Input placeholder="examples/component_model/topology.json" />
+                </Form.Item>
+              ) : (
+                <Form.Item
+                  name="plcFile"
+                  label={t('run.plcFile')}
+                  rules={[{ required: true, message: t('run.plcFileRequired') }]}
+                  style={{ width: 640 }}
+                >
+                  <Input placeholder="examples/demo.plc" />
+                </Form.Item>
+              )
+            }
+          </Form.Item>
+
           <Form.Item
             name="scenarioFile"
             label={t('run.scenarioFile')}
             rules={[{ required: true, message: t('run.scenarioFileRequired') }]}
-            style={{ width: 300 }}
+            style={{ width: 640 }}
           >
-            <Input placeholder="examples/demo_scenario.yaml" />
+            <Input placeholder="examples/component_model/scenario_normal.json" />
           </Form.Item>
           <Form.Item>
             <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={triggerMutation.isPending}>
