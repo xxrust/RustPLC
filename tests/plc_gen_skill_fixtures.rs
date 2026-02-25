@@ -4,6 +4,7 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program,
 };
+use rust_plc::topology_semantic_gate::validate_device_purpose_required;
 use rust_plc::verification::verify_all;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,6 +53,8 @@ fn collect_stage<T>(result: Result<T, Vec<PlcError>>, errors: &mut Vec<PlcError>
 
 fn compile_and_verify(source: &str) -> Result<(), Vec<String>> {
     let program = parse_plc(source).map_err(|err| vec![err.to_string()])?;
+    validate_device_purpose_required(&program.topology)
+        .map_err(|gate_error| vec![gate_error.to_string()])?;
     let expanded_program = preprocess_program(&program).map_err(|errors| {
         errors
             .into_iter()

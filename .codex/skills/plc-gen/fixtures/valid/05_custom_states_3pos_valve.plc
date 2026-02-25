@@ -1,6 +1,7 @@
 [topology]
 
 device valve_3pos: solenoid_valve {
+    purpose: "三位电磁阀，支持 extend/neutral/retract 三种状态",
     states: [extend, neutral, retract]
 }
 
@@ -17,4 +18,3 @@ task main:
         allow_indefinite_wait: true
     step done:
         action: log "valve is neutral"
-

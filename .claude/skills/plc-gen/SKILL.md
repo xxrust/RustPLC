@@ -5,16 +5,17 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 
 # RustPLC DSL Generator
 
-从工程师的自然语言工艺描述，经过多轮对话确认，生成可通过 RustPLC 编译器四大验证引擎的 `.plc` 文件。
+从工程师的自然语言工艺描述，经过多轮对话确认，先生成项目顶层语义描述（`.system.md`），再生成可通过 RustPLC 编译器四大验证引擎的 `.plc` 文件。
 
 ## 维护说明（自测）
 
-本 skill 不仅是“生成 DSL”，还要对 **生成物可验证性** 负责。仓库内提供了该 skill 的自测夹具：
+本 skill 不仅是"生成 DSL"，还要对 **生成物可验证性** 负责。仓库内提供了该 skill 的自测夹具：
 
 - 夹具目录：`.codex/skills/plc-gen/fixtures/valid/*.plc`
-- 运行自测：`cargo test -q`
+- 运行自测：`cargo test --test plc_gen_skill_fixtures`
+- 全量回归：`cargo test -q`
 
-当你修改本 `SKILL.md` 的流程/规则时，应同步新增或更新一个 fixture，用来覆盖该规则的典型场景，避免“写了规则但从未验证”。
+当你修改本 `SKILL.md` 的流程/规则时，应同步新增或更新一个 fixture，用来覆盖该规则的典型场景，避免"写了规则但从未验证"。
 
 ---
 
@@ -25,10 +26,11 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 > "推料缸把工件推到位，传感器检测到后，压紧缸下压，压紧到位后冲压缸动作，完成后全部缩回。"
 
 你的工作是从这段工艺描述中：
-1. **提取动作流程** — 谁先动、谁后动、什么条件触发下一步
-2. **推理出完整设备拓扑** — 每个动作背后需要哪些物理设备
-3. **推导安全约束** — 哪些动作存在物理干涉
-4. **生成合法 DSL** — 通过编译器验证
+1. **建立语义空间** — 先搞清楚这是什么项目、部署在哪、安全等级多高，生成 `.system.md`
+2. **提取动作流程** — 谁先动、谁后动、什么条件触发下一步
+3. **推理出完整设备拓扑** — 每个动作背后需要哪些物理设备
+4. **推导安全约束** — 哪些动作存在物理干涉
+5. **生成合法 DSL** — 通过编译器验证
 
 整个过程需要与工程师多轮确认，不要一次性生成最终结果。
 
@@ -36,9 +38,62 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 
 ## 工作流程（严格按阶段执行）
 
+### 阶段零：生成系统描述（.system.md）
+
+**这是整个流程的第一步，必须在写任何 .plc 代码之前完成。**
+
+收到工程师的描述后，首先生成一份 `.system.md` 文件。这份文件是项目的顶层语义描述，定义了"这是什么系统、为谁服务、安全等级多高、核心工艺意图是什么"。它不包含任何 DSL 语法，纯自然语言，工程师和 AI 都能读写。
+
+**`.system.md` 的作用：**
+- 为后续所有阶段提供语义锚点 — AI 的每一个决策（冗余策略、超时值、约束严格程度）都从这里推导
+- 同一套"两个阀门开关"的工艺，写在核电站 system.md 里就会产生双冗余传感器和 10 秒硬限，写在教学台 system.md 里就只需要简单超时保护
+
+**`.system.md` 必须包含以下段落：**
+
+```markdown
+## 项目身份
+- 项目名称、所属行业、部署场所、最终用户、监管要求（如有）
+
+## 系统使命
+用 2~3 句话说清楚这套系统要干什么，以及它的失效会导致什么后果。
+
+## 安全与可靠性定位
+- 安全等级（SIL 等级 / 行业标准 / 常规工业防护）
+- 故障后果（人身伤害 / 财产损失 / 演示失败）
+- 容错策略（冗余传感器 / 双通道互锁 / 单一超时保护）
+
+## 运行环境
+- 介质、气源、电源、控制器、通信、环境条件
+
+## 核心工艺意图
+用自然语言描述完整的工艺流程，包括正常流程、异常处理、特殊工况。
+
+## 关键约束
+用自然语言列出安全规则、时序要求、互锁关系。
+
+## 设计偏好
+- 命名语言、代码风格、时序参数策略、扩展预期
+
+## 对 AI 的指引
+基于以上背景，明确告诉 AI 在本项目中应该遵循的决策倾向。
+```
+
+**文件命名：** 与 `.plc` 文件同名，后缀为 `.system.md`，放在同一目录。例如 `examples/two_cylinder.system.md` 对应 `examples/two_cylinder.plc`。
+
+**参考样板：**
+- `examples/two_cylinder.system.md` — 教学演示台（低安全等级）
+- `examples/nuclear_coolant_isolation.system.md` — 核电站隔离阀（SIL3 高安全等级）
+
+生成后展示给工程师确认：
+- "项目定位和安全等级对吗？"
+- "系统使命的描述准确吗？"
+- "有没有遗漏的工况或约束？"
+
+**等待工程师确认 `.system.md` 后再进入阶段一。**
+
 ### 阶段一：理解工艺
 
-收到工程师的描述后，先用自己的话复述工艺流程，整理成一个清晰的动作时序表：
+基于已确认的 `.system.md`，深入理解具体工艺流程。用自己的话复述工艺流程，整理成一个清晰的动作时序表：
 
 ```
 动作序列：
@@ -61,11 +116,27 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 **阶段一最小提问清单（缺一不可，不能凭空假设）：**
 - 启动方式：按钮/信号？是否需要复位/急停？
 - 循环模式：单次/自动循环？循环结束停在哪里（全部缩回/保持夹紧/保持到位）？
-- 初始状态：上电后各执行器默认位置（尤其是气缸是否要求“全部回原位”）？
+- 初始状态：上电后各执行器默认位置（尤其是气缸是否要求"全部回原位"）？
 - 人工介入点：是否存在人工装料/取料/确认按钮？对应等待是否允许无限等待？
 - 同步关系：是否允许并行动作？哪些动作必须互锁（互斥/依赖）？
 
 **等待工程师确认后再进入下一阶段。**
+
+### 模拟量与数值比较指引
+
+当工艺描述涉及"压力/温度/位置/流量"等数值比较时：
+- 使用 `analog_input` 建模，并**必须声明 `range` 与 `unit`**。
+- 数值比较直接写在 `wait` 或 `safety` 中，例如：`wait: pressure >= 60`。
+- **避免 `==`**，用区间或容差带代替（例如 `>= 58 AND <= 62`）。
+- 传感器（`sensor`）只用于离散反馈信号（on/off），不承担数值语义。
+- 若输入来自操作员设定值/上位系统，标记为 `external: true`（避免因果误报）。
+
+### PID 控制指引
+
+当工艺需要闭环控制（温度/压力/流量恒定）时：
+- 使用 `pid` 设备类型，声明 `pv`（过程变量）、`sp`（设定值）、`kp/ki/kd`、`out`（输出）、`period_ms`、`limit`。
+- PID 设备自动关联 `analog_input`（pv）和 `analog_output`（out）。
+- 参考 fixture：`13_analog_pid_loop.plc`。
 
 ### 阶段二：推理设备拓扑
 
@@ -74,21 +145,21 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 ```
 推理出的设备拓扑：
 
+PLC 控制器：
+  - plc_main: plc { ports: [Y0, Y1, Y2, X0..X6] }
+
 执行机构：
-  - 推料缸 (cyl_push)    ← 电磁阀 (valve_push)    ← 输出口 Y0
-  - 压紧缸 (cyl_clamp)   ← 电磁阀 (valve_clamp)   ← 输出口 Y1
-  - 冲压缸 (cyl_press)   ← 电磁阀 (valve_press)   ← 输出口 Y2
+  - 推料缸 (cyl_push)    ← 电磁阀 (valve_push)    ← plc_main.Y0
+  - 压紧缸 (cyl_clamp)   ← 电磁阀 (valve_clamp)   ← plc_main.Y1
+  - 冲压缸 (cyl_press)   ← 电磁阀 (valve_press)   ← plc_main.Y2
 
 传感器：
-  - 推料到位 (sensor_push_ext)   → 输入口 X0，检测 cyl_push.extended
-  - 推料缩回 (sensor_push_ret)   → 输入口 X1，检测 cyl_push.retracted
-  - 压紧到位 (sensor_clamp_ext)  → 输入口 X2，检测 cyl_clamp.extended
-  - 压紧缩回 (sensor_clamp_ret)  → 输入口 X3，检测 cyl_clamp.retracted
-  - 冲压到位 (sensor_press_ext)  → 输入口 X4，检测 cyl_press.extended
-  - 冲压缩回 (sensor_press_ret)  → 输入口 X5，检测 cyl_press.retracted
+  - 推料到位 (sensor_push_ext)   → plc_main.X0，检测 cyl_push.extended
+  - 推料缩回 (sensor_push_ret)   → plc_main.X1，检测 cyl_push.retracted
+  - ...（其余类推）
 
 人机交互：
-  - 启动按钮 (start_button)      → 输入口 X6
+  - 启动按钮 (start_button)      → plc_main.X6
 
 默认时序参数：
   - 电磁阀响应: 20ms
@@ -102,7 +173,7 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 - "I/O 口分配需要和实际接线一致吗？如果是，请告诉我实际分配。"
 
 **I/O 未知时的约定（避免编造）：**
-- 如果工程师没有给出真实 I/O，对外展示时明确标注“占位分配”，例如 `Y?`/`X?` 或按顺序 `Y0..` `X0..`。
+- 如果工程师没有给出真实 I/O，对外展示时明确标注"占位分配"，例如 `Y?`/`X?` 或按顺序 `Y0..` `X0..`。
 - fixture/示例代码中允许使用按顺序分配的 I/O（用于验证 DSL 语义），但在工程落地时必须替换为真实接线表。
 
 **等待工程师确认后再进入下一阶段。**
@@ -120,9 +191,8 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
   - （如果推料缸和冲压缸在同一轴线）推料缸伸出与冲压缸伸出冲突
     → safety: cyl_push.extended conflicts_with cyl_press.extended
 
-因果链（可选，仅用于文档可读性；编译器会从拓扑自动推断）：
+因果链（可选，仅用于文档可读性；编译器会从拓扑 relation 自动推断）：
   - Y0 -> valve_push -> cyl_push -> sensor_push_ext
-  - Y0 -> valve_push -> cyl_push -> sensor_push_ret
   - ...（其余类推）
 
 ⚠️ 需要你确认的问题：
@@ -137,7 +207,7 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 
 进入阶段四之前，逐条核对：
 - 工程师确认的每一条安全关系，是否都已转化为 `safety:` 约束？
-- 拓扑中 `connected_to` 和 `detects` 链是否完整？（编译器会自动从拓扑推断因果可达性，无需显式写 `causality:` 约束。显式声明仅用于文档可读性。）
+- 拓扑中 `relation` 和 `detects` 链是否完整？（编译器会自动从拓扑推断因果可达性，无需显式写 `causality:` 约束。显式声明仅用于文档可读性。）
 
 **`conflicts_with` vs `requires` 判断指引：**
 
@@ -162,6 +232,14 @@ cargo run --release -- examples/<filename>.plc
 - 如果验证通过，展示结果给工程师
 - 如果验证失败，阅读错误信息，修复后重新验证，直到全部通过
 - 将最终通过验证的文件展示给工程师做最后确认
+
+**可选（推荐）：SIL 仿真做一次"软件在环"冒烟测试**
+
+在不接硬件的情况下，用内置 SIL 运行一次场景，尽早暴露超时/死锁/点位脚本问题（需要你准备一个 scenario YAML）：
+
+```bash
+cargo run --release -- sim examples/<filename>.plc --scenario scenarios/<scenario>.yaml --out out/<run>/
+```
 
 **DSL 延时（delay）与超时（timeout）：**
 
@@ -197,7 +275,7 @@ step glue_cycle:
 ### 文件结构
 
 ```plc
-[topology]          # 物理设备与连接
+[topology]          # 物理设备、PLC 端口与 relation 连接
 [constraints]       # 安全、时序、因果约束
 [tasks]             # 控制逻辑（状态机）
 ```
@@ -206,12 +284,21 @@ step glue_cycle:
 
 | 类型 | 用途 | 关键属性 | 可用状态（用于 safety/wait） |
 |------|------|----------|------------------------------|
-| `digital_output` | 输出端口 (Y0, Y1...) | — | `on`, `off` |
-| `digital_input` | 输入端口 (X0, X1...) | `debounce` | `on`, `off` |
-| `solenoid_valve` | 电磁阀 | `connected_to`, `response_time`, `states`(可选) | 默认 `on`, `off`（可用 `states: [...]` 自定义） |
-| `cylinder` | 气缸 | `connected_to`, `stroke_time`, `retract_time`, `states`(可选) | 默认 `extended`, `retracted`（可用 `states: [...]` 自定义） |
-| `motor` | 电机 | `connected_to`, `rated_speed`, `ramp_time` | `on`, `off` |
-| `sensor` | 传感器 | `connected_to`, `type`, `detects`, `states`(可选) | 默认 `on`, `off` + `detects` 声明的状态（可用 `states: [...]` 自定义） |
+| `plc` | PLC 控制器本体 | `purpose`(必填), `ports` | — |
+| `solenoid_valve` | 电磁阀 | `purpose`(必填), `response_time`, `states`(可选) | 默认 `on`, `off`（可用 `states: [...]` 自定义） |
+| `cylinder` | 气缸 | `purpose`(必填), `stroke_time`, `retract_time`, `states`(可选) | 默认 `extended`, `retracted`（可用 `states: [...]` 自定义） |
+| `motor` | 电机 | `purpose`(必填), `rated_speed`, `ramp_time` | `on`, `off` |
+| `sensor` | 离散传感器 | `purpose`(必填), `subtype`(标准做法), `debounce` | `on`, `off` |
+| `analog_input` | 模拟量输入 | `purpose`(必填), `range`(必填), `unit`(必填), `external` | 数值比较 |
+| `analog_output` | 模拟量输出 | `purpose`(必填), `range`(必填), `unit` | 数值设定 |
+| `pid` | PID 控制器 | `purpose`(必填), `pv`, `sp`, `kp/ki/kd`, `out`, `period_ms`, `limit` | — |
+| `digital_input` | 独立数字输入 | `purpose`(必填), `debounce` | `on`, `off` |
+| `digital_output` | 独立数字输出 | `purpose`(必填), `subtype` | `on`, `off` |
+
+**必填字段规则：**
+- `purpose:` — 所有设备必填，描述该设备在工艺中的职责。编译器会做门禁检查。
+- `subtype:` — 传感器的标准做法（`push_button`、`e_stop_button`、`limit_switch`、`proximity_sensor`、`selector_switch`）。`e_stop_button` 必须同时声明 `inverted: true`。
+- `external: true` — 标记来自外部系统的输入（操作员设定值、上位系统），避免因果性误报。
 
 状态在 `safety:` 约束中使用时格式为 `device.state`，例如：
 - `cyl_A.extended` — 气缸伸出状态
@@ -221,19 +308,65 @@ step glue_cycle:
 当需要建模超过 2 个状态的设备（如三位电磁阀），在设备属性中声明自定义状态集：
 ```plc
 device valve_3pos: solenoid_valve {
+    purpose: "三位电磁阀，支持 extend/neutral/retract 三种状态",
     states: [extend, neutral, retract]
 }
 ```
-声明后，该设备在 `safety:` / `detects:` 等需要 `device.state` 的位置将使用自定义状态集合（states 数量 > 8 会输出 warning，非错误）。
 
-### 连接链规则
+### I/O 声明与拓扑模式
 
-设备通过 `connected_to` 形成上游链：
+**所有 PLC I/O 端口统一在 `plc_main` 设备中声明：**
+
+```plc
+device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
+    ports: [Y0:digital:producer, Y1:digital:producer, X0:digital:consumer, X1:digital:consumer, AI0:analog:consumer, AO0:analog:producer]
+}
 ```
-digital_output ← solenoid_valve ← cylinder
-                                        ↘ sensor (通过 detects 关联)
-digital_output ← motor
-                    ↘ sensor (通过 detects 关联)
+
+端口格式：`<名称>:<类型>:<角色>`
+- 类型：`digital` | `analog` | `pneumatic` | `logical` | `generic`
+- 角色：`producer`（输出）| `consumer`（输入）| `bidirectional`
+
+**设备间连接使用 `relation` 声明：**
+
+```plc
+# PLC 输出 → 电磁阀线圈
+relation { from: plc_main.Y0, to: valve_push.coil, via: driven_by }
+
+# 电磁阀气路 → 气缸命令
+relation { from: valve_push.out, to: cyl_push.cmd, via: driven_by }
+
+# 气缸状态 → 传感器检测
+relation { from: cyl_push.extended, to: sensor_push_ext.sense, via: detects }
+
+# 传感器输出 → PLC 输入
+relation { from: sensor_push_ext.out, to: plc_main.X0, via: reports_to }
+
+# 按钮 → PLC 输入
+relation { from: start_button.out, to: plc_main.X6, via: reports_to }
+```
+
+三种关系类型：
+- `driven_by` — 驱动链（PLC→阀→缸，PLC→电机）
+- `reports_to` — 反馈链（传感器→PLC，按钮→PLC）
+- `detects` — 检测链（气缸状态→传感器，电机位置→传感器）
+
+**隐式端口（无需在设备上声明 ports）：**
+- `solenoid_valve`：`coil`(consumer) + `out`(producer)
+- `cylinder`：`cmd`(consumer) + `extended`(producer) + `retracted`(producer)
+- `sensor`：`sense`(consumer) + `out`(producer)
+- `motor`：`cmd`(consumer) + `on`(producer)
+
+**模拟量 I/O 不需要放在 plc_main 中，可以独立声明：**
+
+```plc
+device AI0: analog_input {
+    purpose: "压力传感器反馈",
+    range: 0..100,
+    unit: "bar",
+    external: true
+}
 ```
 
 ### 约束语法
@@ -245,11 +378,14 @@ safety: cyl_A.extended conflicts_with cyl_B.extended
 # 依赖：状态A为真时，状态B必须也为真
 safety: cyl_press.extended requires cyl_clamp.extended
 
+# 模拟量安全约束
+safety: AI0 > 90 conflicts_with AI0 < 10
+
 # 时序：任务/步骤必须在指定时间内完成
 timing: task.cycle must_complete_within 8000ms
 timing: task.cycle must_complete_within_worst_case 12000ms
 
-# 因果链：信号传播路径必须在拓扑中连通
+# 因果链：信号传播路径必须在拓扑中连通（可选，编译器自动推断）
 causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
 ```
 
@@ -261,11 +397,13 @@ task <名称>:
         action: extend <气缸>          # 伸出
         action: retract <气缸>         # 缩回
         action: set <设备> on/off      # 开关
+        action: set_analog <AO> <值>   # 模拟量输出
         action: log "<消息>"           # 日志
         delay: 2000ms                  # 固定延时（有界等待）
         wait: <传感器> == true          # 等待条件
         wait: A == true AND B == true  # AND 条件（不可与 OR 混用）
         wait: A == true OR B == true   # OR 条件（不可与 AND 混用）
+        wait: AI0 >= 60               # 模拟量阈值等待
         timeout: 500ms -> goto <任务>   # 超时跳转（goto 目标同下）
         goto <任务>                     # 跳转到 task 首步
         goto <任务>.<step>              # 跳转到 task 内指定 step
@@ -297,67 +435,6 @@ step detect:
     timeout: 800ms -> goto fault
 ```
 
-### 新语法完整片段（示例）
-
-```plc
-[topology]
-device mode_switch: digital_input
-
-[constraints]
-
-[tasks]
-task choose:
-    step decide:
-        if: mode_switch == true goto process_A.run else: goto process_B.run
-
-task process_A:
-    step run:
-        action: log "A"
-    on_complete: goto done
-
-task process_B:
-    step run:
-        action: log "B"
-    on_complete: goto done
-
-task done:
-    step finish:
-        action: log "done"
-```
-
-```plc
-[topology]
-device valve_3pos: solenoid_valve {
-    states: [extend, neutral, retract]
-}
-device sensor_a: sensor
-device sensor_b: sensor
-
-[constraints]
-safety: valve_3pos.extend conflicts_with valve_3pos.retract
-timing: task.cycle must_complete_within 3000ms
-timing: task.cycle must_complete_within_worst_case 6000ms
-
-[tasks]
-task cycle:
-    step work:
-        repeat 3:
-            action: log "tick"
-            delay: 200ms
-            wait: sensor_a == true AND sensor_b == true
-            timeout: 1500ms -> goto fault
-    on_complete: goto idle
-
-task idle:
-    step ready:
-        wait: valve_3pos == neutral OR sensor_a == true
-        allow_indefinite_wait: true
-
-task fault:
-    step stop:
-        action: log "fault"
-```
-
 ---
 
 ## 验证规则速查
@@ -374,13 +451,13 @@ task fault:
 - 不能有孤立的死胡同状态
 
 ### Timing（时序）
-- `must_complete_within`：基于动作/延时的关键路径估计（忽略 timeout 上界），更贴近“设备实际动作时间 + 固定 delay”。并行动作取最大值。
+- `must_complete_within`：基于动作/延时的关键路径估计（忽略 timeout 上界），更贴近"设备实际动作时间 + 固定 delay"。并行动作取最大值。
 - `must_complete_within_worst_case`：将 timeout 作为最坏上界纳入估计（保守），适合把容错超时也算进周期 SLA 的场景。并行动作取最大值。
-- 经验：如果你给每个 step 都加了较大的 timeout（容错），但仍希望约束按真实节拍衡量，用 `must_complete_within`；如果你希望“连超时都算进去仍要满足”，用 `must_complete_within_worst_case`。
+- 经验：如果你给每个 step 都加了较大的 timeout（容错），但仍希望约束按真实节拍衡量，用 `must_complete_within`；如果你希望"连超时都算进去仍要满足"，用 `must_complete_within_worst_case`。
 - `delay:` 会计入两种估计中的关键路径。
 
 ### Causality（因果性）
-- 编译器自动从拓扑图（`connected_to` + `detects`）推断 action→sensor 的因果可达性
+- 编译器自动从拓扑图（`relation` + `detects`）推断 action→sensor 的因果可达性
 - 只要拓扑声明完整，**不需要**显式写 `causality:` 约束（显式声明仅用于文档可读性）
 - `wait: sensor == false` 与 `== true` 的因果检查完全相同
 - AND/OR wait 中的每个传感器都会被独立检查
@@ -389,13 +466,12 @@ task fault:
 **race 块注意事项：**
 - 每个 branch 需要 `wait:` + `then: goto`，step 级需要 `timeout:`
 - action 应在 race 之前的 step 中完成，race 内部只放 wait
-- 参考：`half_rotation.plc`、`grind_station.plc`
 
 **`goto task.step`：** 可跳转到目标 task 的指定 step。目标 step 必须存在。`on_complete` 必须是 task 最后一行，不能在其后再写 step。
 
 ---
 
-## 推荐的“可验证任务骨架”（模板）
+## 推荐的"可验证任务骨架"（模板）
 
 当工程师没有提供更复杂的状态机需求时，优先使用这个骨架，能显著降低 Liveness/Timing/Causality 的失败概率：
 
@@ -427,6 +503,118 @@ task ready:
 
 ---
 
+## 完整代码示例
+
+### 基础气缸顺序控制（plc_main + relation 模式）
+
+```plc
+[topology]
+
+device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
+    ports: [Y0:digital:producer, Y1:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer]
+}
+
+device start_button: sensor {
+    purpose: "操作员启动按钮，触发双缸顺序动作循环",
+    subtype: "push_button",
+    debounce: 20ms
+}
+
+device valve_A: solenoid_valve {
+    purpose: "驱动 A 缸伸出/缩回的气动电磁阀",
+    response_time: 20ms
+}
+
+device cyl_A: cylinder {
+    purpose: "执行顺序动作第一步的气缸",
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device sensor_A_ext: sensor {
+    purpose: "检测 A 缸已完全伸出到位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_A_ret: sensor {
+    purpose: "检测 A 缸已完全缩回到位的限位开关",
+    subtype: "limit_switch"
+}
+
+relation { from: start_button.out, to: plc_main.X4, via: reports_to }
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_A_ret.sense, via: detects }
+relation { from: sensor_A_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
+
+[tasks]
+
+task cycle:
+    step extend_A:
+        action: extend cyl_A
+        wait: sensor_A_ext == true
+        timeout: 500ms -> goto fault_handler
+    step retract_A:
+        action: retract cyl_A
+        wait: sensor_A_ret == true
+        timeout: 500ms -> goto fault_handler
+    on_complete: goto ready
+
+task fault_handler:
+    step safe:
+        action: retract cyl_A
+    step alarm:
+        action: log "动作超时报警"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+```
+
+### 条件分支（无物理拓扑极简示例）
+
+```plc
+[topology]
+
+device mode_switch: digital_input {
+    purpose: "模式选择开关，true 选择 A 流程，false 选择 B 流程"
+}
+
+[constraints]
+
+[tasks]
+
+task choose:
+    step decide:
+        if: mode_switch == true goto process_A.run else: goto process_B.run
+
+task process_A:
+    step run:
+        action: log "A"
+    on_complete: goto done
+
+task process_B:
+    step run:
+        action: log "B"
+    on_complete: goto done
+
+task done:
+    step finish:
+        action: log "done"
+```
+
+---
+
 ## 默认时序参数
 
 当工程师未指定具体参数时，使用以下默认值：
@@ -446,12 +634,15 @@ task ready:
 
 | 对象 | 格式 | 示例 |
 |------|------|------|
+| PLC 控制器 | `plc_main` | `plc_main` |
 | 气缸 | `cyl_<功能>` | `cyl_push`, `cyl_clamp`, `cyl_press` |
 | 电磁阀 | `valve_<对应气缸功能>` | `valve_push`, `valve_clamp` |
 | 传感器 | `sensor_<气缸>_<状态>` | `sensor_push_ext`, `sensor_push_ret` |
 | 电机 | `motor_<功能>` | `motor_conveyor`, `motor_spindle` |
-| 输出口 | `Y0`, `Y1`, ... | 按声明顺序分配 |
-| 输入口 | `X0`, `X1`, ... | 按声明顺序分配 |
+| 输出口 | `Y0`, `Y1`, ... | 在 plc_main.ports 中声明 |
+| 输入口 | `X0`, `X1`, ... | 在 plc_main.ports 中声明 |
+| 模拟输入 | `AI0`, `AI1`, ... | 独立设备或 plc_main.ports |
+| 模拟输出 | `AO0`, `AO1`, ... | 独立设备或 plc_main.ports |
 | 任务 | 动作导向 | `cycle`, `init`, `fault_handler`, `ready` |
 | 步骤 | 动词_名词 | `extend_push`, `wait_clamp`, `retract_all` |
 
@@ -463,24 +654,16 @@ task ready:
 
 每个生成的 `.plc` 文件都必须包含：
 
-1. **fault_handler 任务** — 缩回所有气缸 / 关闭所有电机，输出报警日志，提示操作员人工确认设备状态
-2. **ready 任务** — 等待启动按钮，标记 `allow_indefinite_wait: true`
-3. **所有 wait 都有 timeout** — 指向 fault_handler（人工等待除外）
-4. **工程师确认的所有安全约束** — 不能遗漏
-5. **完整的拓扑连接链** — 每个设备的 `connected_to` 和传感器的 `detects` 必须正确声明（编译器据此自动推断因果性）
-6. **每个气缸都应有 _ext 和 _ret 两个传感器** — 即使当前流程中某个方向没有 `wait` 确认
-
----
-
-## 完整示例
-
-完整的阶段一→四对话示例，参见 `examples/half_rotation.plc`（电机+竞争检测+多 task 跳转）。
-
-该示例展示了：
-- 阶段一：从"电机转动，转到A或B位置停下来"提取动作流程
-- 阶段二：推理出 motor + 2 个 position sensor + start_button 的拓扑
-- 阶段三：timing 约束 + causality 链
-- 阶段四：race 块检测位置 + 多 task 分支处理 + fault_handler + ready
+1. **对应的 `.system.md` 文件** — 在阶段零生成并经工程师确认，作为所有决策的语义锚点
+2. **plc_main 设备** — 声明所有 I/O 端口，必须有 `purpose:`
+3. **所有设备必须有 `purpose:`** — 编译器门禁会拒绝缺少 purpose 的设备
+4. **传感器必须有 `subtype:`** — 标准做法，明确传感器类型
+5. **fault_handler 任务** — 缩回所有气缸 / 关闭所有电机，输出报警日志
+6. **ready 任务** — 等待启动按钮，标记 `allow_indefinite_wait: true`
+7. **所有 wait 都有 timeout** — 指向 fault_handler（人工等待除外）
+8. **工程师确认的所有安全约束** — 不能遗漏
+9. **完整的 relation 连接链** — 每个设备的 relation 和传感器的 detects 必须正确声明（编译器据此自动推断因果性）
+10. **每个气缸都应有 _ext 和 _ret 两个传感器** — 即使当前流程中某个方向没有 `wait` 确认
 
 ---
 
@@ -490,26 +673,36 @@ task ready:
 
 | 文件 | 场景 | 涉及模式 |
 |------|------|----------|
-| `two_cylinder.plc` | 双气缸顺序动作 | 基础顺序、conflicts_with |
-| `half_rotation.plc` | 电机+竞争检测 | motor、race、多 task 跳转 |
-| `drill_station.plc` | 传送带+夹紧+钻孔 | motor+cylinder 混合、requires、传感器 false 等待 |
-| `label_station.plc` | 传送带+升降+贴标 | conflicts_with(cylinder vs motor)、完整因果链（含 _ret） |
-| `assembly_station.plc` | 双传送带+推缸+压装+出料 | 多设备顺序启动替代 parallel、requires vs conflicts_with 区分、timing 约束 |
-| `grind_station.plc` | 选择开关+打磨+延时 | race 做模式选择、timeout 模拟延时、对立条件等待、多 task 共享收尾 |
-| `stamp_bend_line.plc` | 冲压+折弯串联产线 | 多工位 task 链、共用传送带多位置传感器、大量 conflicts_with + requires |
-| `glue_station.plc` | 涂胶+循环展开 | 循环动作展开为顺序步骤、同一气缸多次伸缩 |
+| `two_cylinder.plc` | 双气缸顺序动作 | 基础顺序、conflicts_with、plc_main + relation |
+| `assembly_station.plc` | 双传送带+推缸+压装+出料 | 多设备顺序、requires vs conflicts_with、timing |
+| `analog_pressure_demo.plc` | 液压站比例阀压力控制 | analog_input/output、set_analog、external、阈值 wait |
+| `pid_loop.plc` | PID 闭环压力控制 | pid 设备、analog I/O |
+| `nuclear_coolant_isolation.plc` | 核电站隔离阀控制 | SIL3 双冗余传感器、OR 容错、parallel 并行关阀、严格时序硬限 |
 
-遇到类似场景时，先读取对应示例文件了解已验证的模式，再生成新文件。
+`.system.md` 参考样板：
+
+| 文件 | 场景 | 安全等级 |
+|------|------|----------|
+| `two_cylinder.system.md` | 教学演示台 | 常规工业防护 |
+| `nuclear_coolant_isolation.system.md` | 核电站一回路隔离阀 | SIL3 / 核安全 1E 级 |
+
+遇到类似场景时，先读取对应示例文件及其 `.system.md` 了解已验证的模式，再生成新文件。
 
 ---
 
 ## 生成覆盖度自检
 
-生成 .plc 文件后，对照以下清单确认：
+生成 `.system.md` + `.plc` 文件后，对照以下清单确认：
 
-- [ ] 所有气缸是否都有 _ext 和 _ret 传感器，且 `detects` 声明正确？
-- [ ] 所有设备的 `connected_to` 链是否完整？（编译器据此推断因果性）
+- [ ] 是否先生成了 `.system.md` 并经工程师确认？
+- [ ] `.system.md` 中的安全等级是否与 `.plc` 中的约束严格程度匹配？
+- [ ] 所有设备是否都有 `purpose:` 字段？
+- [ ] 所有传感器是否都有 `subtype:` 字段？
+- [ ] 是否使用 `plc_main: plc { ports: [...] }` 声明 I/O？
+- [ ] 所有设备间连接是否使用 `relation { from, to, via }` 声明？
+- [ ] 所有气缸是否都有 _ext 和 _ret 传感器，且 `detects` 关系正确？
 - [ ] 所有 wait 是否都有 timeout？（人工等待除外）
 - [ ] fault_handler 是否覆盖了所有执行器的安全复位？
 - [ ] 是否需要 `race`/`parallel`/`repeat`/`if-else`/`goto task.step`？
 - [ ] 是否有时序约束？
+- [ ] 模拟量设备是否声明了 `range` 和 `unit`？

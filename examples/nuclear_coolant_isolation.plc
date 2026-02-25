@@ -1,0 +1,278 @@
+# ============================================================
+# 核电站一回路冷却剂隔离阀控制系统
+# 安全等级：SIL3 / 核安全 1E 级
+# 详见 nuclear_coolant_isolation.system.md
+# ============================================================
+
+[topology]
+
+device plc_main: plc {
+    purpose: "安全级双通道冗余 PLC，负责隔离阀控制与安全联锁",
+    ports: [
+        Y0:digital:producer,
+        Y1:digital:producer,
+        X0:digital:consumer,
+        X1:digital:consumer,
+        X2:digital:consumer,
+        X3:digital:consumer,
+        X4:digital:consumer,
+        X5:digital:consumer,
+        X6:digital:consumer,
+        X7:digital:consumer,
+        X8:digital:consumer,
+        X9:digital:consumer,
+        X10:digital:consumer,
+        X11:digital:consumer,
+        X12:digital:consumer
+    ]
+}
+
+# ===== 操作员接口 =====
+
+device cmd_open: sensor {
+    purpose: "主控室开阀指令按钮，值班员触发正常开阀流程",
+    subtype: "push_button",
+    debounce: 20ms
+}
+
+device cmd_reset: sensor {
+    purpose: "主控室复位按钮，紧急关阀后值班员手动确认复位",
+    subtype: "push_button",
+    debounce: 20ms
+}
+
+# ===== 安全联锁信号 =====
+
+device sig_leak: sensor {
+    purpose: "冷却剂泄漏检测信号，来自辐射监测系统，触发紧急关阀",
+    subtype: "proximity_sensor"
+}
+
+device sig_scram: sensor {
+    purpose: "反应堆紧急停堆信号，来自反应堆保护系统，触发紧急关阀",
+    subtype: "proximity_sensor"
+}
+
+device sig_air_ok: sensor {
+    purpose: "仪表气源压力正常信号，失压时执行机构弹簧复位关阀",
+    subtype: "proximity_sensor"
+}
+
+# ===== 阀门 A（上游隔离阀） =====
+
+device sol_valve_A: solenoid_valve {
+    purpose: "A 阀气动执行机构电磁阀，失电时弹簧复位关闭 A 阀",
+    response_time: 50ms
+}
+
+device valve_A: cylinder {
+    purpose: "一回路上游主隔离阀 A，气动薄膜式，弹簧复位关闭，承压 15.5MPa",
+    stroke_time: 3000ms,
+    retract_time: 2000ms
+}
+
+device sensor_A_open_1: sensor {
+    purpose: "A 阀开到位行程开关（冗余通道 1）",
+    subtype: "limit_switch"
+}
+
+device sensor_A_open_2: sensor {
+    purpose: "A 阀开到位行程开关（冗余通道 2）",
+    subtype: "limit_switch"
+}
+
+device sensor_A_close_1: sensor {
+    purpose: "A 阀关到位行程开关（冗余通道 1）",
+    subtype: "limit_switch"
+}
+
+device sensor_A_close_2: sensor {
+    purpose: "A 阀关到位行程开关（冗余通道 2）",
+    subtype: "limit_switch"
+}
+
+# ===== 阀门 B（下游隔离阀） =====
+
+device sol_valve_B: solenoid_valve {
+    purpose: "B 阀气动执行机构电磁阀，失电时弹簧复位关闭 B 阀",
+    response_time: 50ms
+}
+
+device valve_B: cylinder {
+    purpose: "一回路下游主隔离阀 B，气动薄膜式，弹簧复位关闭，承压 15.5MPa",
+    stroke_time: 3000ms,
+    retract_time: 2000ms
+}
+
+device sensor_B_open_1: sensor {
+    purpose: "B 阀开到位行程开关（冗余通道 1）",
+    subtype: "limit_switch"
+}
+
+device sensor_B_open_2: sensor {
+    purpose: "B 阀开到位行程开关（冗余通道 2）",
+    subtype: "limit_switch"
+}
+
+device sensor_B_close_1: sensor {
+    purpose: "B 阀关到位行程开关（冗余通道 1）",
+    subtype: "limit_switch"
+}
+
+device sensor_B_close_2: sensor {
+    purpose: "B 阀关到位行程开关（冗余通道 2）",
+    subtype: "limit_switch"
+}
+
+# ===== 拓扑关系 =====
+
+# 操作员接口 → PLC
+relation { from: cmd_open.out, to: plc_main.X8, via: reports_to }
+relation { from: cmd_reset.out, to: plc_main.X9, via: reports_to }
+
+# 安全联锁信号 → PLC
+relation { from: sig_leak.out, to: plc_main.X10, via: reports_to }
+relation { from: sig_scram.out, to: plc_main.X11, via: reports_to }
+relation { from: sig_air_ok.out, to: plc_main.X12, via: reports_to }
+
+# PLC → 电磁阀 → 阀门 A
+relation { from: plc_main.Y0, to: sol_valve_A.coil, via: driven_by }
+relation { from: sol_valve_A.out, to: valve_A.cmd, via: driven_by }
+
+# 阀门 A → 冗余传感器 → PLC
+relation { from: valve_A.extended, to: sensor_A_open_1.sense, via: detects }
+relation { from: sensor_A_open_1.out, to: plc_main.X0, via: reports_to }
+relation { from: valve_A.extended, to: sensor_A_open_2.sense, via: detects }
+relation { from: sensor_A_open_2.out, to: plc_main.X1, via: reports_to }
+relation { from: valve_A.retracted, to: sensor_A_close_1.sense, via: detects }
+relation { from: sensor_A_close_1.out, to: plc_main.X2, via: reports_to }
+relation { from: valve_A.retracted, to: sensor_A_close_2.sense, via: detects }
+relation { from: sensor_A_close_2.out, to: plc_main.X3, via: reports_to }
+
+# PLC → 电磁阀 → 阀门 B
+relation { from: plc_main.Y1, to: sol_valve_B.coil, via: driven_by }
+relation { from: sol_valve_B.out, to: valve_B.cmd, via: driven_by }
+
+# 阀门 B → 冗余传感器 → PLC
+relation { from: valve_B.extended, to: sensor_B_open_1.sense, via: detects }
+relation { from: sensor_B_open_1.out, to: plc_main.X4, via: reports_to }
+relation { from: valve_B.extended, to: sensor_B_open_2.sense, via: detects }
+relation { from: sensor_B_open_2.out, to: plc_main.X5, via: reports_to }
+relation { from: valve_B.retracted, to: sensor_B_close_1.sense, via: detects }
+relation { from: sensor_B_close_1.out, to: plc_main.X6, via: reports_to }
+relation { from: valve_B.retracted, to: sensor_B_close_2.sense, via: detects }
+relation { from: sensor_B_close_2.out, to: plc_main.X7, via: reports_to }
+
+[constraints]
+
+# ===== 安全约束 =====
+
+# 上游阀 A 开启时，下游阀 B 必须也处于开启状态，防止管道死端超压
+safety: valve_A.extended requires valve_B.extended
+    reason: "核安全要求：上游阀 A 开启时下游阀 B 必须开启，防止管段死端超压导致管道破裂"
+
+# ===== 时序约束 =====
+
+# 紧急关阀：两阀同时关闭，关阀时间取决于执行机构（retract_time 2000ms）
+# 动作时间估算：50ms(电磁阀) + 2000ms(关阀行程) = 2050ms，远小于 10s
+timing: task.emergency_close must_complete_within 5000ms
+    reason: "核安全要求：紧急关阀动作路径应在 5 秒内完成，留充足裕度"
+
+timing: task.emergency_close must_complete_within_worst_case 10000ms
+    reason: "核安全硬限：含超时容错的绝对上限 10 秒"
+
+timing: task.normal_open must_complete_within 12000ms
+    reason: "正常开阀流程应在 12 秒内完成"
+
+# ===== 因果链 =====
+
+causality: Y0 -> sol_valve_A -> valve_A -> sensor_A_open_1
+causality: Y0 -> sol_valve_A -> valve_A -> sensor_A_close_1
+causality: Y1 -> sol_valve_B -> valve_B -> sensor_B_open_1
+causality: Y1 -> sol_valve_B -> valve_B -> sensor_B_close_1
+
+[tasks]
+
+# ===== 紧急关阀（最高优先级） =====
+# 两阀同时切断气源，弹簧复位关闭，并行等待关到位
+
+task emergency_close:
+    step cut_air_supply:
+        action: retract valve_A
+        action: retract valve_B
+        action: log "紧急关阀：切断两道阀门气源"
+    step wait_both_closed:
+        parallel:
+            branch_A:
+                wait: sensor_A_close_1 == true OR sensor_A_close_2 == true
+            branch_B:
+                wait: sensor_B_close_1 == true OR sensor_B_close_2 == true
+        timeout: 7900ms -> goto emergency_fault
+    step isolation_complete:
+        action: log "隔离完成：两道阀门已全关，等待值班员复位确认"
+    on_complete: goto wait_reset
+
+# ===== 紧急关阀故障（阀门未在规定时间内关闭） =====
+
+task emergency_fault:
+    step force_close:
+        action: retract valve_A
+        action: retract valve_B
+        action: log "严重告警：阀门未在规定时间内关到位，请立即派人现场确认"
+    on_complete: goto wait_reset
+
+# ===== 等待复位 =====
+
+task wait_reset:
+    step wait_operator:
+        wait: cmd_reset == true
+        allow_indefinite_wait: true
+        action: log "等待值班员复位确认"
+    on_complete: goto standby
+
+# ===== 待机状态 =====
+
+task standby:
+    step check_interlock:
+        if: sig_leak == true goto emergency_close else: goto standby.wait_command
+    step wait_command:
+        race:
+            branch_open:
+                wait: cmd_open == true
+                then: goto normal_open
+            branch_leak:
+                wait: sig_leak == true
+                then: goto emergency_close
+            branch_scram:
+                wait: sig_scram == true
+                then: goto emergency_close
+        timeout: 60000ms -> goto standby
+
+# ===== 正常开阀流程 =====
+# 先开下游 B 阀，再开上游 A 阀，满足 requires 约束
+
+task normal_open:
+    step verify_interlock:
+        if: sig_leak == true goto emergency_close else: goto normal_open.open_B
+    step open_B:
+        action: extend valve_B
+        action: log "正常开阀：开启下游阀 B"
+        wait: sensor_B_open_1 == true OR sensor_B_open_2 == true
+        timeout: 5000ms -> goto open_fault
+    step open_A:
+        action: extend valve_A
+        action: log "正常开阀：开启上游阀 A"
+        wait: sensor_A_open_1 == true OR sensor_A_open_2 == true
+        timeout: 5000ms -> goto open_fault
+    step running:
+        action: log "两阀全开，进入正常运行监视"
+    on_complete: goto standby
+
+# ===== 开阀故障 =====
+
+task open_fault:
+    step close_all:
+        action: retract valve_A
+        action: retract valve_B
+        action: log "开阀故障：阀门未在规定时间内开到位，已关闭所有阀门"
+    on_complete: goto wait_reset

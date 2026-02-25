@@ -3,6 +3,11 @@ name: rp2040-hil-nightly
 on:
   workflow_dispatch:
     inputs:
+      run_hil:
+        description: "Run self-hosted HIL gate"
+        required: false
+        type: boolean
+        default: false
       mount:
         description: "RP2040 UF2 mount path (e.g. /media/RPI-RP2)"
         required: false
@@ -18,8 +23,27 @@ on:
   schedule:
     - cron: "0 1 * * *"
 
+concurrency:
+  group: rp2040-hil-nightly
+  cancel-in-progress: true
+
 jobs:
+  hil-disabled-notice:
+    if: |
+      (github.event_name == 'schedule' && vars.ENABLE_SELF_HOSTED_HIL_NIGHTLY != 'true') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_hil != 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: HIL gate disabled
+        run: |
+          echo "Self-hosted HIL gate is currently disabled."
+          echo "For nightly schedule, set repository variable ENABLE_SELF_HOSTED_HIL_NIGHTLY=true."
+          echo "For manual dispatch, set input run_hil=true."
+
   hil-gate:
+    if: |
+      (github.event_name == 'schedule' && vars.ENABLE_SELF_HOSTED_HIL_NIGHTLY == 'true') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_hil == 'true')
     # Requires a physically connected RP2040 board.
     runs-on: [self-hosted, linux]
     timeout-minutes: 30

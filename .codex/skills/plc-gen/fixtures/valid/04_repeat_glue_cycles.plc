@@ -1,34 +1,44 @@
 [topology]
 
-device Y0: digital_output
-device X0: digital_input
-device X1: digital_input
-device X2: digital_input
+device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
+    ports: [Y0:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer]
+}
 
 device start_button: sensor {
+    purpose: "操作员启动按钮，触发涂胶循环",
+    subtype: "push_button",
     debounce: 20ms
 }
 
 device valve_glue: solenoid_valve {
+    purpose: "驱动涂胶缸伸出/缩回的气动电磁阀",
     response_time: 20ms
 }
 
 device cyl_glue: cylinder {
-    stroke_time: 300ms
+    purpose: "执行涂胶动作的气缸，循环伸缩 4 次",
+    stroke_time: 300ms,
     retract_time: 300ms
 }
 
-device sensor_glue_ext: sensor
+device sensor_glue_ext: sensor {
+    purpose: "检测涂胶缸已完全伸出到位的限位开关",
+    subtype: "limit_switch"
+}
 
-device sensor_glue_ret: sensor
+device sensor_glue_ret: sensor {
+    purpose: "检测涂胶缸已完全缩回到位的限位开关",
+    subtype: "limit_switch"
+}
 
-relation { from: start_button.out, to: X2, via: reports_to }
-relation { from: Y0, to: valve_glue.coil, via: driven_by }
+relation { from: start_button.out, to: plc_main.X2, via: reports_to }
+relation { from: plc_main.Y0, to: valve_glue.coil, via: driven_by }
 relation { from: valve_glue.out, to: cyl_glue.cmd, via: driven_by }
-relation { from: sensor_glue_ext.out, to: X0, via: reports_to }
 relation { from: cyl_glue.extended, to: sensor_glue_ext.sense, via: detects }
-relation { from: sensor_glue_ret.out, to: X1, via: reports_to }
+relation { from: sensor_glue_ext.out, to: plc_main.X0, via: reports_to }
 relation { from: cyl_glue.retracted, to: sensor_glue_ret.sense, via: detects }
+relation { from: sensor_glue_ret.out, to: plc_main.X1, via: reports_to }
 
 [constraints]
 
@@ -59,4 +69,3 @@ task ready:
         wait: start_button == true
         allow_indefinite_wait: true
     on_complete: goto cycle
-
