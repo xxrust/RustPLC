@@ -14,7 +14,7 @@ use rust_plc::component_topology::parse_component_topology_value;
 use rust_plc::parser::parse_plc;
 use rust_plc::topology_semantic_gate::{
     collect_topology_deprecation_warnings, validate_device_purpose_required,
-    validate_topology_semantics,
+    validate_removed_legacy_io_model, validate_topology_semantics,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -273,7 +273,8 @@ async fn parse_plc_topology(
         build_topology_preview_plc(normalized).unwrap_or_else(|| normalized.to_string());
     let program = parse_plc(&preview_plc)
         .map_err(|err| bad_request(format!("failed to parse PLC: {err}")))?;
-    let semantic_gate = match validate_device_purpose_required(&program.topology)
+    let semantic_gate = match validate_removed_legacy_io_model(&program.topology)
+        .and_then(|_| validate_device_purpose_required(&program.topology))
         .and_then(|_| validate_topology_semantics(&program.topology))
     {
         Ok(()) => serde_json::json!({
@@ -464,6 +465,14 @@ fn implicit_ports_for_device_type(device_type: &DeviceType) -> Vec<DevicePort> {
             device_port("in_position", PortType::Logical, PortRole::Producer),
             device_port("fault", PortType::Logical, PortRole::Producer),
             device_port("zero_speed", PortType::Logical, PortRole::Producer),
+        ],
+        DeviceType::CamCoupling => vec![
+            device_port("engage", PortType::Digital, PortRole::Consumer),
+            device_port("in_sync", PortType::Logical, PortRole::Producer),
+            device_port("fault", PortType::Logical, PortRole::Producer),
+            device_port("following_error", PortType::Analog, PortRole::Producer),
+            device_port("master_pos", PortType::Analog, PortRole::Producer),
+            device_port("slave_cmd", PortType::Analog, PortRole::Producer),
         ],
         DeviceType::AnalogInput => vec![device_port("in", PortType::Analog, PortRole::Consumer)],
         DeviceType::AnalogOutput => vec![device_port("out", PortType::Analog, PortRole::Producer)],
@@ -1367,6 +1376,7 @@ fn map_plc_device_to_component_id(kind: &DeviceType) -> &'static str {
         DeviceType::AnalogOutput => "stepper_pd",
         DeviceType::Pid => "generic",
         DeviceType::Plc => "generic",
+        DeviceType::CamCoupling => "generic",
     }
 }
 
@@ -1385,6 +1395,7 @@ fn plc_device_type_name(kind: &DeviceType) -> &'static str {
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
         DeviceType::Plc => "plc",
+        DeviceType::CamCoupling => "cam_coupling",
     }
 }
 
@@ -1402,7 +1413,8 @@ fn endpoint_kind_for_device_type(kind: &DeviceType) -> &'static str {
         | DeviceType::StepperMotor
         | DeviceType::Vfd
         | DeviceType::ServoDrive
-        | DeviceType::Pid => "process_device",
+        | DeviceType::Pid
+        | DeviceType::CamCoupling => "process_device",
     }
 }
 
@@ -1529,13 +1541,9 @@ mod tests {
     async fn parse_plc_topology_returns_relation_port_and_tag_metadata() {
         let plc = r#"
 [topology]
-device Y0: digital_output {
-    purpose: "测试数字输出端口",
-    ports: [out:digital:producer]
-}
-device X0: digital_input {
-    purpose: "测试数字输入端口",
-    ports: [in:digital:consumer]
+device plc_main: plc {
+    purpose: "主 PLC",
+    ports: [X0:digital:consumer, Y0:digital:producer]
 }
 device valve_A: solenoid_valve {
     purpose: "测试阀门执行器",
@@ -1551,9 +1559,9 @@ device sensor_A: sensor {
     ports: [sense:logical:consumer, out:digital:producer]
 }
 
-relation { from: Y0, to: valve_A.coil, via: driven_by }
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.feedback, to: sensor_A.sense, via: detects }
-relation { from: sensor_A.out, to: X0, via: reports_to }
+relation { from: sensor_A.out, to: plc_main.X0, via: reports_to }
 
 [constraints]
 

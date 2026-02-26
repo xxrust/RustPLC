@@ -27,6 +27,8 @@ pub enum TopologySemanticCode {
     Sem106SubtypeIncompatible,
     #[serde(rename = "SEM-107")]
     Sem107PurposeMissing,
+    #[serde(rename = "SEM-108")]
+    Sem108LegacyIoModelRemoved,
 }
 
 impl TopologySemanticCode {
@@ -39,6 +41,7 @@ impl TopologySemanticCode {
             Self::Sem105DanglingPort => "SEM-105",
             Self::Sem106SubtypeIncompatible => "SEM-106",
             Self::Sem107PurposeMissing => "SEM-107",
+            Self::Sem108LegacyIoModelRemoved => "SEM-108",
         }
     }
 }
@@ -273,6 +276,25 @@ pub fn validate_topology_semantics(
 }
 
 pub fn collect_topology_deprecation_warnings(topology: &TopologySection) -> Vec<String> {
+    let _ = topology;
+    Vec::new()
+}
+
+pub fn validate_removed_legacy_io_model(
+    topology: &TopologySection,
+) -> Result<(), TopologySemanticGateError> {
+    let issues = collect_removed_legacy_io_model_issues(topology);
+    if issues.is_empty() {
+        Ok(())
+    } else {
+        Err(TopologySemanticGateError {
+            code: "semantic_topology_invalid".to_string(),
+            issues,
+        })
+    }
+}
+
+fn collect_removed_legacy_io_model_issues(topology: &TopologySection) -> Vec<TopologySemanticIssue> {
     if topology
         .devices
         .iter()
@@ -281,34 +303,36 @@ pub fn collect_topology_deprecation_warnings(topology: &TopologySection) -> Vec<
         return Vec::new();
     }
 
-    let mut legacy = Vec::<String>::new();
+    let mut issues = Vec::new();
     for device in &topology.devices {
         let Some(port) = parse_physical_plc_port_ref(&device.name) else {
             continue;
         };
-        let matches_legacy = matches!(
+        let is_removed_legacy = matches!(
             (port.kind, &device.device_type),
             (PlcPortKind::DigitalInput, DeviceType::DigitalInput)
                 | (PlcPortKind::DigitalOutput, DeviceType::DigitalOutput)
                 | (PlcPortKind::AnalogInput, DeviceType::AnalogInput)
                 | (PlcPortKind::AnalogOutput, DeviceType::AnalogOutput)
         );
-        if matches_legacy {
-            legacy.push(device.name.clone());
+        if !is_removed_legacy {
+            continue;
         }
+
+        issues.push(TopologySemanticIssue {
+            code: TopologySemanticCode::Sem108LegacyIoModelRemoved,
+            line: device.line.max(1),
+            relation: None,
+            from: Some(device.name.clone()),
+            to: None,
+            from_port: None,
+            to_port: None,
+            message: format!("旧版 PLC IO 设备建模 `{}` 已移除", device.name),
+            suggestion: "请声明 `device plc_main: plc { ports: [X0:digital:consumer, Y0:digital:producer, AI0:analog:consumer, AO0:analog:producer] }`，并在 relation 中使用 `plc_main.<port>` 连接".to_string(),
+        });
     }
 
-    if legacy.is_empty() {
-        return Vec::new();
-    }
-
-    legacy.sort();
-    legacy.dedup();
-
-    vec![format!(
-        "检测到旧版 PLC IO 设备建模（{}）。建议迁移到 `device <name>: plc {{ ports: [...] }}`。兼容窗口：2026-02-23 ~ 2026-06-30（当前为 WARN，不阻断）",
-        legacy.join(", ")
-    )]
+    issues
 }
 
 pub fn validate_device_purpose_required(
@@ -620,6 +644,34 @@ fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
                 Some("state"),
             ),
         ],
+        DeviceType::CamCoupling => vec![
+            gate_port(
+                "engage",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port("in_sync", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port("fault", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "following_error",
+                PortType::Analog,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "master_pos",
+                PortType::Analog,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "slave_cmd",
+                PortType::Analog,
+                PortRole::Producer,
+                Some("state"),
+            ),
+        ],
         DeviceType::AnalogInput => vec![gate_port(
             "in",
             PortType::Analog,
@@ -924,6 +976,7 @@ fn device_type_name(device_type: &DeviceType) -> &'static str {
         DeviceType::StepperMotor => "stepper_motor",
         DeviceType::Vfd => "vfd",
         DeviceType::ServoDrive => "servo_drive",
+        DeviceType::CamCoupling => "cam_coupling",
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
@@ -958,7 +1011,10 @@ fn topology_connection_line(topology: &TopologySection, connection: &TopologyCon
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_device_purpose_required, validate_topology_semantics};
+    use super::{
+        validate_device_purpose_required, validate_removed_legacy_io_model,
+        validate_topology_semantics,
+    };
     use crate::parser::parse_plc;
 
     #[test]
@@ -987,13 +1043,41 @@ task main:
     }
 
     #[test]
-    fn gate_accepts_basic_digital_to_valve_to_cylinder_chain() {
+    fn gate_rejects_removed_legacy_io_model_without_plc_device() {
         let input = r#"
 [topology]
 device Y0: digital_output
+device valve_A: solenoid_valve
+relation { from: Y0, to: valve_A.coil, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err =
+            validate_removed_legacy_io_model(&program.topology).expect_err("gate should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&"SEM-108"),
+            "legacy IO model should now be rejected"
+        );
+    }
+
+    #[test]
+    fn gate_accepts_basic_digital_to_valve_to_cylinder_chain() {
+        let input = r#"
+[topology]
+device plc_main: plc { ports: [Y0:digital:producer] }
 device valve_A: solenoid_valve { response_time: 15ms }
 device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms }
-relation { from: Y0, to: valve_A.coil, via: driven_by }
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 
 [constraints]
@@ -1032,14 +1116,13 @@ task main:
     fn gate_accepts_dual_input_valve_with_explicit_ports() {
         let input = r#"
 [topology]
-device Y5: digital_output
-device Y6: digital_output
+device plc_main: plc { ports: [Y5:digital:producer, Y6:digital:producer] }
 device valve_eject: solenoid_valve {
     ports: [coil_extend:digital:consumer, coil_retract:digital:consumer, out:pneumatic:producer]
 }
 device cyl_eject: cylinder
-relation { from: Y5, to: valve_eject.coil_extend, via: driven_by }
-relation { from: Y6, to: valve_eject.coil_retract, via: driven_by }
+relation { from: plc_main.Y5, to: valve_eject.coil_extend, via: driven_by }
+relation { from: plc_main.Y6, to: valve_eject.coil_retract, via: driven_by }
 relation { from: valve_eject.out, to: cyl_eject.cmd, via: driven_by }
 
 [constraints]
@@ -1083,21 +1166,18 @@ task main:
     fn gate_accepts_multi_io_motor_with_explicit_ports() {
         let input = r#"
 [topology]
-device Y0: digital_output
-device Y1: digital_output
-device X0: digital_input
-device X1: digital_input
+device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer, X0:digital:consumer, X1:digital:consumer] }
 device axis_feed: motor {
     ports: [cmd_fwd:digital:consumer, cmd_rev:digital:consumer, speed_ok:logical:producer, alarm:logical:producer]
 }
 device speed_ok_sensor: sensor
 device alarm_sensor: sensor
-relation { from: Y0, to: axis_feed.cmd_fwd, via: driven_by }
-relation { from: Y1, to: axis_feed.cmd_rev, via: driven_by }
+relation { from: plc_main.Y0, to: axis_feed.cmd_fwd, via: driven_by }
+relation { from: plc_main.Y1, to: axis_feed.cmd_rev, via: driven_by }
 relation { from: axis_feed.speed_ok, to: speed_ok_sensor.sense, via: detects }
-relation { from: speed_ok_sensor.out, to: X0, via: reports_to }
+relation { from: speed_ok_sensor.out, to: plc_main.X0, via: reports_to }
 relation { from: axis_feed.alarm, to: alarm_sensor.sense, via: detects }
-relation { from: alarm_sensor.out, to: X1, via: reports_to }
+relation { from: alarm_sensor.out, to: plc_main.X1, via: reports_to }
 
 [constraints]
 

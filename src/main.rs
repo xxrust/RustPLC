@@ -1,16 +1,16 @@
 use rust_plc::error::PlcError;
 use rust_plc::ir::{ConstraintSet, DeviceKind, StateMachine, TimingModel, TopologyGraph};
 use rust_plc::parser::parse_plc;
-use rust_plc::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
+use rust_plc::plc_port::{parse_physical_plc_port_ref, PlcPortKind};
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program, preprocess_program_with_library,
 };
 use rust_plc::topology_semantic_gate::{
     collect_topology_deprecation_warnings, validate_device_purpose_required,
-    validate_topology_semantics,
+    validate_removed_legacy_io_model, validate_topology_semantics,
 };
-use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
+use rust_plc::verification::{verify_all, VerificationSummary, WarningEntry, WarningLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
@@ -24,27 +24,27 @@ use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, 
 use petgraph::Direction;
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::alarm_runtime::{
-    AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity, build_alarm_event,
+    build_alarm_event, AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity,
 };
-use rust_plc::component_diagnostics::{ComponentDiagnosisReport, diagnose_component_sim};
+use rust_plc::component_diagnostics::{diagnose_component_sim, ComponentDiagnosisReport};
 use rust_plc::component_scenario::{parse_component_scenario_json, write_component_scenario_json};
-use rust_plc::component_sim::{ComponentSimReport, run_component_simulation};
+use rust_plc::component_sim::{run_component_simulation, ComponentSimReport};
 use rust_plc::component_topology::{
     diff_component_topology_semantics, parse_component_topology_json, write_component_topology_json,
 };
 use rust_plc::diagnostics::{
-    DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport, EvidenceInputKind,
-    EvidenceSource, IoSnapshotArtifact, IoTickSnapshot, diagnose,
+    diagnose, DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport,
+    EvidenceInputKind, EvidenceSource, IoSnapshotArtifact, IoTickSnapshot,
 };
 use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
 use rust_plc::sequence_lint::{
-    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
+    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
 };
-use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
-use rust_plc::tick_timing::{TickTimingSample, parse_tick_timing_jsonl, to_tick_timing_jsonl};
-use rust_plc::timing_report::{TimingReport, build_timing_report};
+use rust_plc::sim_regress::{run_sim_regress_with_options, SimRegressOptions, SimRegressSummary};
+use rust_plc::tick_timing::{parse_tick_timing_jsonl, to_tick_timing_jsonl, TickTimingSample};
+use rust_plc::timing_report::{build_timing_report, TimingReport};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -216,6 +216,9 @@ static SIM_TASKS: [Task<'static>; 1] = [Task {
 static SIM_PROGRAM: Program<'static> = Program {
     tasks: &SIM_TASKS,
     pid_loops: &[],
+    var_init: &[],
+    cam_configs: &[],
+    cam_tables: &[],
 };
 
 const SCENARIO_YAML_MINIMAL_TEMPLATE: &str = r#"tick_ms: 10
@@ -456,9 +459,19 @@ fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHint
                 Instr::WaitAnalog { id, .. } => {
                     used_ai.insert(id.0);
                 }
-                Instr::Action { .. } | Instr::Delay { .. } | Instr::Goto { .. } | Instr::Halt => {}
+                Instr::WaitExpr { .. }
+                | Instr::WaitCamDigital { .. }
+                | Instr::WaitCamAnalog { .. }
+                | Instr::Action { .. }
+                | Instr::Delay { .. }
+                | Instr::Goto { .. }
+                | Instr::Halt => {}
             }
         }
+    }
+    for cam in runtime.cam_configs {
+        used_ai.insert(cam.master_input.0);
+        used_ai.insert(cam.slave_feedback.0);
     }
     for pid in runtime.pid_loops {
         used_ai.insert(pid.pv.0);
@@ -6299,13 +6312,31 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                             Action::SetAnalog { id, .. } => {
                                 aos.insert(id.0);
                             }
+                            Action::SetAnalogExpr { id, .. } => {
+                                aos.insert(id.0);
+                            }
+                            Action::Compute { .. }
+                            | Action::CamEngage { .. }
+                            | Action::CamDisengage { .. }
+                            | Action::CamSwitch { .. }
+                            | Action::CamPhase { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
                 }
-                Instr::Delay { .. } | Instr::Goto { .. } | Instr::Halt => {}
+                Instr::WaitExpr { .. }
+                | Instr::WaitCamDigital { .. }
+                | Instr::WaitCamAnalog { .. }
+                | Instr::Delay { .. }
+                | Instr::Goto { .. }
+                | Instr::Halt => {}
             }
         }
+    }
+    for cam in program.cam_configs {
+        ais.insert(cam.master_input.0);
+        ais.insert(cam.slave_feedback.0);
+        aos.insert(cam.slave_output.0);
     }
     for pid in program.pid_loops {
         ais.insert(pid.pv.0);
@@ -6454,13 +6485,31 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                             Action::SetAnalog { id, .. } => {
                                 aos.insert(id.0);
                             }
+                            Action::SetAnalogExpr { id, .. } => {
+                                aos.insert(id.0);
+                            }
+                            Action::Compute { .. }
+                            | Action::CamEngage { .. }
+                            | Action::CamDisengage { .. }
+                            | Action::CamSwitch { .. }
+                            | Action::CamPhase { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
                 }
-                Instr::Delay { .. } | Instr::Goto { .. } | Instr::Halt => {}
+                Instr::WaitExpr { .. }
+                | Instr::WaitCamDigital { .. }
+                | Instr::WaitCamAnalog { .. }
+                | Instr::Delay { .. }
+                | Instr::Goto { .. }
+                | Instr::Halt => {}
             }
         }
+    }
+    for cam in program.cam_configs {
+        ais.insert(cam.master_input.0);
+        ais.insert(cam.slave_feedback.0);
+        aos.insert(cam.slave_output.0);
     }
     for pid in program.pid_loops {
         ais.insert(pid.pv.0);
@@ -7870,7 +7919,7 @@ fn format_component_sim_error(err: &rust_plc::component_sim::ComponentSimError) 
 }
 
 fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
-    use rust_plc::iec_address::{LogicalChannelKind, parse_iec_address};
+    use rust_plc::iec_address::{parse_iec_address, LogicalChannelKind};
     use toml::value::Table;
 
     let root = v
@@ -9450,6 +9499,14 @@ fn io_sizes_for_program_and_scenario(
                             Action::SetAnalog { id, .. } => {
                                 max_ao = Some(max_ao.map_or(id.0, |m| m.max(id.0)));
                             }
+                            Action::SetAnalogExpr { id, .. } => {
+                                max_ao = Some(max_ao.map_or(id.0, |m| m.max(id.0)));
+                            }
+                            Action::Compute { .. }
+                            | Action::CamEngage { .. }
+                            | Action::CamDisengage { .. }
+                            | Action::CamSwitch { .. }
+                            | Action::CamPhase { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
@@ -9457,6 +9514,11 @@ fn io_sizes_for_program_and_scenario(
                 _ => {}
             }
         }
+    }
+    for cam in program.cam_configs {
+        max_ai = Some(max_ai.map_or(cam.master_input.0, |m| m.max(cam.master_input.0)));
+        max_ai = Some(max_ai.map_or(cam.slave_feedback.0, |m| m.max(cam.slave_feedback.0)));
+        max_ao = Some(max_ao.map_or(cam.slave_output.0, |m| m.max(cam.slave_output.0)));
     }
     for pid in program.pid_loops {
         max_ai = Some(max_ai.map_or(pid.pv.0, |m| m.max(pid.pv.0)));
@@ -9509,6 +9571,8 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
     for warning in collect_topology_deprecation_warnings(&program.topology) {
         eprintln!("WARNING [deprecation] {warning}");
     }
+    validate_removed_legacy_io_model(&program.topology)
+        .map_err(|gate_error| vec![gate_error.to_string()])?;
     validate_device_purpose_required(&program.topology)
         .map_err(|gate_error| vec![gate_error.to_string()])?;
 
@@ -9575,6 +9639,8 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
 
 fn parse_plc_with_required_purpose(source: &str) -> Result<rust_plc::ast::PlcProgram, String> {
     let program = parse_plc(source).map_err(|e| e.to_string())?;
+    validate_removed_legacy_io_model(&program.topology)
+        .map_err(|gate_error| gate_error.to_string())?;
     validate_device_purpose_required(&program.topology)
         .map_err(|gate_error| gate_error.to_string())?;
     Ok(program)

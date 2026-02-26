@@ -227,6 +227,10 @@ fn budget_thresholds_emit_warn_entries() {
 
     let source = r#"
 [topology]
+device plc_main: plc {
+    purpose: "主 PLC",
+    ports: [X0:digital:consumer, Y0:digital:producer]
+}
 device X0: digital_input { purpose: "测试输入通道" }
 device Y0: digital_output { purpose: "测试输出通道" }
 
@@ -278,6 +282,10 @@ fn budget_time_estimate_warns_and_deny_warnings_can_block() {
 
     let source = r#"
 [topology]
+device plc_main: plc {
+    purpose: "主 PLC",
+    ports: [X0:digital:consumer, Y0:digital:producer]
+}
 device X0: digital_input { purpose: "测试输入通道" }
 device Y0: digital_output { purpose: "测试输出通道" }
 

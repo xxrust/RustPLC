@@ -862,7 +862,7 @@ device valve_glue: solenoid_valve {
 }
 
 device cyl_glue: cylinder {
-    type: double_acting,
+    subtype: double_acting,
     stroke: 50mm,
     stroke_time: 120ms,
     retract_time: 110ms
@@ -918,7 +918,7 @@ device valve_glue: solenoid_valve {
 }
 
 device cyl_glue: cylinder {
-    type: double_acting,
+    subtype: double_acting,
     stroke: 50mm,
     stroke_time: 120ms,
     retract_time: 110ms

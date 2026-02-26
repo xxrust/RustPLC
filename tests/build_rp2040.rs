@@ -4,6 +4,11 @@ use std::process::Command;
 const PLC_FIXTURE: &str = r#"
 [topology]
 
+device plc_main: plc {
+    purpose: "测试主控器",
+    ports: [Y0:digital:producer, X0:digital:consumer, AI0:analog:consumer, AO0:analog:producer]
+}
+
 device Y0: digital_output { purpose: "测试数字输出通道" }
 device X0: digital_input { purpose: "测试数字输入通道" }
 

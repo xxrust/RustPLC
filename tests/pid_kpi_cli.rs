@@ -18,8 +18,12 @@ fn sim_pid_kpi_cli_is_deterministic_and_within_thresholds() {
     let out1_path = base.join("kpi1.json");
     let out2_path = base.join("kpi2.json");
 
-    let plc = r#"
+let plc = r#"
 [topology]
+device plc_main: plc {
+    purpose: "控制器端口映射",
+    ports: [AI0:analog:consumer, AO0:analog:producer]
+}
 device AI0: analog_input { purpose: "压力反馈输入", range: 0..100, unit: "bar", external: true }
 device AO0: analog_output { purpose: "调节阀输出", range: 0..100, unit: "%" }
 device loop_pressure: pid {

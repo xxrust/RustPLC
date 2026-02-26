@@ -25,12 +25,12 @@ device cyl_B: cylinder {
 
 device sensor_A_ext: sensor {
     purpose: "检测 A 缸伸出到位的传感器，因果链故意断开以触发 causality 验证失败",
-    type: magnetic
+    subtype: magnetic
 }
 
 device sensor_B_ext: sensor {
     purpose: "检测 B 缸伸出到位的传感器，因果链故意断开以触发 causality 验证失败",
-    type: magnetic
+    subtype: magnetic
 }
 
 relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
