@@ -21,9 +21,66 @@ pub enum DeviceKind {
     StepperMotor,
     Vfd,
     ServoDrive,
+    CamCoupling,
     AnalogInput,
     AnalogOutput,
     Pid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VariableType {
+    Float,
+    Int,
+    Bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VariableDef {
+    pub name: String,
+    pub var_type: VariableType,
+    pub initial_value: f32,
+    pub index: u16,
+}
+
+pub const MAX_CAM_POINTS: usize = 256;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SplineCoeff {
+    pub a: f32,
+    pub b: f32,
+    pub c: f32,
+    pub d: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CamTableIr {
+    pub name: String,
+    pub periodic: bool,
+    pub num_points: usize,
+    pub master_positions: Vec<f32>,
+    pub slave_positions: Vec<f32>,
+    pub spline_coeffs: Vec<SplineCoeff>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CamInterpolation {
+    Linear,
+    CubicSpline,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CamCouplingDef {
+    pub name: String,
+    pub master: String,
+    pub slave: String,
+    pub table: String,
+    pub interpolation: CamInterpolation,
+    pub gear_ratio: f32,
+    pub phase_offset: f32,
+    pub following_error_limit: f32,
+    pub slave_feedback: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,6 +125,12 @@ pub struct TopologyGraph {
     pub pid_loops: Vec<PidLoop>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<TopologyLink>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<VariableDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cam_tables: Vec<CamTableIr>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cam_couplings: Vec<CamCouplingDef>,
 }
 
 impl TopologyGraph {
@@ -76,6 +139,9 @@ impl TopologyGraph {
             graph: DiGraph::new(),
             pid_loops: Vec::new(),
             links: Vec::new(),
+            variables: Vec::new(),
+            cam_tables: Vec::new(),
+            cam_couplings: Vec::new(),
         }
     }
 
@@ -113,11 +179,50 @@ pub enum TransitionGuard {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum TransitionAction {
-    Extend { target: String, port: String },
-    Retract { target: String, port: String },
-    Set { target: String, port: String, value: BinaryValue },
-    SetAnalog { target: String, port: String, value_raw: String },
-    Log { message: String },
+    Extend {
+        target: String,
+        port: String,
+    },
+    Retract {
+        target: String,
+        port: String,
+    },
+    Set {
+        target: String,
+        port: String,
+        value: BinaryValue,
+    },
+    SetAnalog {
+        target: String,
+        port: String,
+        value_raw: String,
+    },
+    SetAnalogExpr {
+        target: String,
+        port: String,
+        expr_raw: String,
+    },
+    Compute {
+        target: String,
+        expr_raw: String,
+    },
+    CamEngage {
+        target: String,
+    },
+    CamDisengage {
+        target: String,
+    },
+    CamSwitch {
+        target: String,
+        new_table: String,
+    },
+    CamPhase {
+        target: String,
+        offset_expr_raw: String,
+    },
+    Log {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -243,6 +348,12 @@ pub enum ActionKind {
     Retract,
     Set,
     SetAnalog,
+    SetAnalogExpr,
+    Compute,
+    CamEngage,
+    CamDisengage,
+    CamSwitch,
+    CamPhase,
     Log,
 }
 

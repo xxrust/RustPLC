@@ -71,6 +71,7 @@ fn device_type_label(device_type: &DeviceType) -> &'static str {
         DeviceType::StepperMotor => "stepper_motor",
         DeviceType::Vfd => "vfd",
         DeviceType::ServoDrive => "servo_drive",
+        DeviceType::CamCoupling => "cam_coupling",
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",

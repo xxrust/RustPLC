@@ -1,17 +1,18 @@
 use crate::ast::{
-    ActionStatement, ActionTarget, Branch, CausalityConstraint, ComparisonOperator,
-    ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DevicePort,
-    DeviceTags, DeviceType, DurationValue, GotoDirective, LiteralValue, MeasuredValue,
-    OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch,
-    SafetyConstraint, SafetyOperand, SafetyRelation, StateReference, StepDeclaration,
-    StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective, TimingConstraint,
-    TimingRelation, TimingTarget, TopologyConnection, TopologyRelation, TopologySection,
-    WaitCondition, WaitStatement,
+    ActionStatement, ActionTarget, BinaryOperator, Branch, CamPoint, CamTableDeclaration,
+    CamTableMode, CausalityConstraint, ComparisonOperator, ConditionExpression, ConstraintsSection,
+    DeviceAttributes, DeviceDeclaration, DevicePort, DeviceTags, DeviceType, DurationValue,
+    Expression, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective, ParallelBlock,
+    PlcProgram, PortRole, PortType, RaceBlock, RaceBranch, SafetyConstraint, SafetyOperand,
+    SafetyRelation, StateReference, StepDeclaration, StepStatement, TaskDeclaration, TasksSection,
+    TimeUnit, TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget, TopologyConnection,
+    TopologyRelation, TopologySection, VariableDeclaration, VariableType, WaitCondition,
+    WaitStatement,
 };
 use crate::error::PlcError;
-use pest::Parser;
 use pest::error::LineColLocation;
 use pest::iterators::Pair;
+use pest::Parser;
 
 #[derive(pest_derive::Parser)]
 #[grammar = "parser/plc.pest"]
@@ -82,6 +83,8 @@ fn parse_plc_pair(pair: Pair<Rule>) -> Result<PlcProgram, PlcError> {
 fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError> {
     let mut devices = Vec::new();
     let mut explicit_connections = Vec::new();
+    let mut variables = Vec::new();
+    let mut cam_tables = Vec::new();
 
     for entry in pair.into_inner() {
         match entry.as_rule() {
@@ -89,6 +92,8 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
             Rule::relation_declaration => {
                 explicit_connections.push(parse_relation_declaration(entry)?);
             }
+            Rule::variable_declaration => variables.push(parse_variable_declaration(entry)?),
+            Rule::cam_table_declaration => cam_tables.push(parse_cam_table_declaration(entry)?),
             _ => {}
         }
     }
@@ -96,6 +101,8 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
     Ok(TopologySection {
         devices,
         connections: explicit_connections,
+        variables,
+        cam_tables,
     })
 }
 
@@ -221,12 +228,118 @@ fn parse_device_type(pair: Pair<Rule>) -> Result<DeviceType, PlcError> {
         "stepper_motor" => Ok(DeviceType::StepperMotor),
         "vfd" => Ok(DeviceType::Vfd),
         "servo_drive" => Ok(DeviceType::ServoDrive),
+        "cam_coupling" => Ok(DeviceType::CamCoupling),
         "motor" => Ok(DeviceType::Motor),
         "analog_input" => Ok(DeviceType::AnalogInput),
         "analog_output" => Ok(DeviceType::AnalogOutput),
         "pid" => Ok(DeviceType::Pid),
         other => Err(PlcError::parse(line, format!("未知设备类型: {other}"))),
     }
+}
+
+fn parse_variable_declaration(pair: Pair<Rule>) -> Result<VariableDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut var_type = None;
+    let mut initial_value = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::variable_type => var_type = Some(parse_variable_type(part)?),
+            Rule::variable_initializer => {
+                let init = first_inner(part, line, "variable 初始值")?;
+                initial_value = Some(init.as_str().to_string());
+            }
+            _ => {}
+        }
+    }
+
+    Ok(VariableDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "variable 声明缺少名称"))?,
+        var_type: var_type.ok_or_else(|| PlcError::parse(line, "variable 声明缺少类型"))?,
+        initial_value: initial_value
+            .ok_or_else(|| PlcError::parse(line, "variable 声明缺少初始值"))?,
+    })
+}
+
+fn parse_variable_type(pair: Pair<Rule>) -> Result<VariableType, PlcError> {
+    let line = line_of(&pair);
+    match pair.as_str() {
+        "float" => Ok(VariableType::Float),
+        "int" => Ok(VariableType::Int),
+        "bool" => Ok(VariableType::Bool),
+        other => Err(PlcError::parse(line, format!("不支持的变量类型: {other}"))),
+    }
+}
+
+fn parse_cam_table_declaration(pair: Pair<Rule>) -> Result<CamTableDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut mode = None;
+    let mut points = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::cam_table_mode => mode = Some(parse_cam_table_mode(part)?),
+            Rule::cam_point_list => points = parse_cam_point_list(part)?,
+            _ => {}
+        }
+    }
+
+    Ok(CamTableDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "cam_table 声明缺少名称"))?,
+        mode: mode.ok_or_else(|| PlcError::parse(line, "cam_table 声明缺少 mode"))?,
+        points,
+    })
+}
+
+fn parse_cam_table_mode(pair: Pair<Rule>) -> Result<CamTableMode, PlcError> {
+    let line = line_of(&pair);
+    match pair.as_str() {
+        "periodic" => Ok(CamTableMode::Periodic),
+        "oneshot" => Ok(CamTableMode::Oneshot),
+        other => Err(PlcError::parse(
+            line,
+            format!("不支持的 cam_table mode: {other}"),
+        )),
+    }
+}
+
+fn parse_cam_point_list(pair: Pair<Rule>) -> Result<Vec<CamPoint>, PlcError> {
+    let mut points = Vec::new();
+    for part in pair.into_inner() {
+        if part.as_rule() == Rule::cam_point {
+            points.push(parse_cam_point(part)?);
+        }
+    }
+    Ok(points)
+}
+
+fn parse_cam_point(pair: Pair<Rule>) -> Result<CamPoint, PlcError> {
+    let line = line_of(&pair);
+    let mut numbers = Vec::new();
+    for part in pair.into_inner() {
+        if part.as_rule() == Rule::number {
+            let parsed = part
+                .as_str()
+                .parse::<f64>()
+                .map_err(|_| PlcError::parse(line, "cam_table 点位数值解析失败"))?;
+            numbers.push(parsed);
+        }
+    }
+
+    if numbers.len() != 2 {
+        return Err(PlcError::parse(line, "cam_table 点位必须为 (master, slave)"));
+    }
+
+    Ok(CamPoint {
+        master: numbers[0],
+        slave: numbers[1],
+    })
 }
 
 fn parse_attribute_block(pair: Pair<Rule>) -> Result<DeviceAttributes, PlcError> {
@@ -236,14 +349,6 @@ fn parse_attribute_block(pair: Pair<Rule>) -> Result<DeviceAttributes, PlcError>
         if attr.as_rule() == Rule::attribute {
             apply_attribute(&mut attributes, attr)?;
         }
-    }
-
-    if attributes.subtype.is_none() {
-        attributes.subtype = attributes.r#type.clone();
-    } else if attributes.r#type.is_some() {
-        eprintln!(
-            "WARNING [parser] 检测到同时声明 `type` 与 `subtype`，将以 `subtype` 为准；请迁移到 `subtype`"
-        );
     }
 
     Ok(attributes)
@@ -290,7 +395,12 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
             attributes.subtype = Some(expect_identifier_or_string(value, "subtype")?);
         }
         "type" => {
-            attributes.r#type = Some(expect_identifier_or_string(value, "type")?);
+            return Err(PlcError::parse_at(
+                "<input>",
+                line,
+                col,
+                "属性 type 已移除，请使用 subtype".to_string(),
+            ));
         }
         "detects" => {
             return Err(legacy_topology_attribute_error(line, col, "detects"));
@@ -348,6 +458,30 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         }
         "limit" => {
             attributes.limit = Some(parse_range_value(value)?);
+        }
+        "master" => {
+            attributes.master = Some(expect_identifier(value, "master")?);
+        }
+        "slave" => {
+            attributes.slave = Some(expect_identifier(value, "slave")?);
+        }
+        "table" => {
+            attributes.table = Some(expect_identifier(value, "table")?);
+        }
+        "interpolation" => {
+            attributes.interpolation = Some(expect_identifier(value, "interpolation")?);
+        }
+        "gear_ratio" => {
+            attributes.gear_ratio = Some(expect_number(value, "gear_ratio")?);
+        }
+        "phase_offset" => {
+            attributes.phase_offset = Some(expect_number(value, "phase_offset")?);
+        }
+        "following_error_limit" => {
+            attributes.following_error_limit = Some(expect_number(value, "following_error_limit")?);
+        }
+        "slave_feedback" => {
+            attributes.slave_feedback = Some(expect_identifier(value, "slave_feedback")?);
         }
         "steps_per_rev"
         | "max_speed"
@@ -450,7 +584,9 @@ fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
             let mut unit = None;
             for part in inner.into_inner() {
                 match part.as_rule() {
-                    Rule::identifier => device = Some(part.as_str().to_string()),
+                    Rule::identifier | Rule::state_reference => {
+                        device = Some(part.as_str().to_string())
+                    }
                     Rule::comparison_operator => operator = Some(parse_comparison_operator(part)?),
                     Rule::number => {
                         value =
@@ -791,6 +927,76 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
                 .map_err(|_| PlcError::parse(line, "set_analog 数值解析失败"))?;
             Ok(ActionStatement::SetAnalog { target, value })
         }
+        Rule::action_set_analog_expr => {
+            let mut parts = action.into_inner();
+            let target_pair = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "set_analog 缺少目标设备"))?;
+            let target = parse_action_target(target_pair)?;
+            let expr_pair = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "set_analog 缺少表达式"))?;
+            let expr = parse_expression(expr_pair)?;
+            Ok(ActionStatement::SetAnalogExpr { target, expr })
+        }
+        Rule::compute_statement => {
+            let mut parts = action.into_inner();
+            let target = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "compute 缺少目标变量"))?
+                .as_str()
+                .to_string();
+            let expr_pair = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "compute 缺少表达式"))?;
+            let expr = parse_expression(expr_pair)?;
+            Ok(ActionStatement::Compute { target, expr })
+        }
+        Rule::action_cam_engage => {
+            let target = action
+                .into_inner()
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "cam_engage 缺少目标设备"))?
+                .as_str()
+                .to_string();
+            Ok(ActionStatement::CamEngage { target })
+        }
+        Rule::action_cam_disengage => {
+            let target = action
+                .into_inner()
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "cam_disengage 缺少目标设备"))?
+                .as_str()
+                .to_string();
+            Ok(ActionStatement::CamDisengage { target })
+        }
+        Rule::action_cam_switch => {
+            let mut parts = action.into_inner();
+            let target = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "cam_switch 缺少目标设备"))?
+                .as_str()
+                .to_string();
+            let new_table = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "cam_switch 缺少新表名"))?
+                .as_str()
+                .to_string();
+            Ok(ActionStatement::CamSwitch { target, new_table })
+        }
+        Rule::action_cam_phase => {
+            let mut parts = action.into_inner();
+            let target = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "cam_phase 缺少目标设备"))?
+                .as_str()
+                .to_string();
+            let expr_pair = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "cam_phase 缺少偏移表达式"))?;
+            let offset = parse_expression(expr_pair)?;
+            Ok(ActionStatement::CamPhase { target, offset })
+        }
         Rule::action_set => {
             let mut parts = action.into_inner();
             let target_pair = parts
@@ -879,27 +1085,56 @@ fn parse_wait_statement(pair: Pair<Rule>) -> Result<WaitStatement, PlcError> {
 
 fn parse_simple_condition(pair: Pair<Rule>) -> Result<ConditionExpression, PlcError> {
     let line = line_of(&pair);
-    let mut operand = None;
+    let mut legacy_operand = None;
+    let mut legacy_value = None;
+    let mut expr_left = None;
+    let mut expr_right = None;
     let mut operator = None;
-    let mut value = None;
 
     for part in pair.into_inner() {
         match part.as_rule() {
             Rule::condition_operand => {
                 let inner = first_inner(part, line, "wait 左值")?;
-                operand = Some(inner.as_str().to_string());
+                legacy_operand = Some(inner.as_str().to_string());
             }
             Rule::comparison_operator => operator = Some(parse_comparison_operator(part)?),
-            Rule::condition_value => value = Some(parse_condition_value(part)?),
+            Rule::condition_value => legacy_value = Some(parse_condition_value(part)?),
+            Rule::condition_expr => {
+                let mut inner = part.into_inner();
+                let left_pair = inner
+                    .next()
+                    .ok_or_else(|| PlcError::parse(line, "wait 条件缺少左侧表达式"))?;
+                let op_pair = inner
+                    .next()
+                    .ok_or_else(|| PlcError::parse(line, "wait 条件缺少比较符"))?;
+                let right_pair = inner
+                    .next()
+                    .ok_or_else(|| PlcError::parse(line, "wait 条件缺少右侧表达式"))?;
+                expr_left = Some(parse_expression(left_pair)?);
+                operator = Some(parse_comparison_operator(op_pair)?);
+                expr_right = Some(parse_expression(right_pair)?);
+            }
             _ => {}
         }
     }
 
-    Ok(ConditionExpression {
-        left: operand.ok_or_else(|| PlcError::parse(line, "wait 缺少左值"))?,
-        operator: operator.ok_or_else(|| PlcError::parse(line, "wait 缺少比较符"))?,
-        right: value.ok_or_else(|| PlcError::parse(line, "wait 缺少右值"))?,
-    })
+    if let (Some(left), Some(op), Some(right)) = (legacy_operand, operator.clone(), legacy_value) {
+        return Ok(ConditionExpression::legacy(left, op, right));
+    }
+
+    if let (Some(left_expr), Some(op), Some(right_expr)) = (expr_left, operator, expr_right) {
+        let left_raw = expression_to_raw(&left_expr);
+        let right_raw = expression_to_raw(&right_expr);
+        return Ok(ConditionExpression {
+            left: left_raw,
+            operator: op,
+            right: LiteralValue::String(right_raw),
+            left_expr: Some(left_expr),
+            right_expr: Some(right_expr),
+        });
+    }
+
+    Err(PlcError::parse(line, "wait 缺少完整条件表达式"))
 }
 
 fn parse_comparison_operator(pair: Pair<Rule>) -> Result<ComparisonOperator, PlcError> {
@@ -936,6 +1171,143 @@ fn parse_condition_value(pair: Pair<Rule>) -> Result<LiteralValue, PlcError> {
             line,
             format!("不支持的 wait 右值类型: {rule:?}"),
         )),
+    }
+}
+
+fn parse_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
+    let line = line_of(&pair);
+    match pair.as_rule() {
+        Rule::expression => {
+            let mut inner = pair.into_inner();
+            let first = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "表达式为空"))?;
+            let mut expr = parse_expression(first)?;
+            while let Some(op) = inner.next() {
+                let rhs_pair = inner
+                    .next()
+                    .ok_or_else(|| PlcError::parse(line, "表达式缺少右操作数"))?;
+                let rhs = parse_expression(rhs_pair)?;
+                expr = Expression::BinaryOp {
+                    op: parse_binary_operator(op)?,
+                    left: Box::new(expr),
+                    right: Box::new(rhs),
+                };
+            }
+            Ok(expr)
+        }
+        Rule::expr_mul => {
+            let mut inner = pair.into_inner();
+            let first = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "乘除表达式为空"))?;
+            let mut expr = parse_expression(first)?;
+            while let Some(op) = inner.next() {
+                let rhs_pair = inner
+                    .next()
+                    .ok_or_else(|| PlcError::parse(line, "乘除表达式缺少右操作数"))?;
+                let rhs = parse_expression(rhs_pair)?;
+                expr = Expression::BinaryOp {
+                    op: parse_binary_operator(op)?,
+                    left: Box::new(expr),
+                    right: Box::new(rhs),
+                };
+            }
+            Ok(expr)
+        }
+        Rule::expr_unary => {
+            let raw = pair.as_str().trim_start();
+            let mut inner = pair.into_inner();
+            let inner_pair = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "一元表达式为空"))?;
+            let expr = parse_expression(inner_pair)?;
+            if raw.starts_with('-') {
+                Ok(Expression::UnaryNeg(Box::new(expr)))
+            } else {
+                Ok(expr)
+            }
+        }
+        Rule::expr_atom => {
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "表达式原子为空"))?;
+            parse_expression(inner)
+        }
+        Rule::expr_func_call => parse_function_call_expression(pair),
+        Rule::expr_literal => {
+            let parsed = pair
+                .as_str()
+                .parse::<f64>()
+                .map_err(|_| PlcError::parse(line, "数字字面量解析失败"))?;
+            Ok(Expression::Literal(parsed))
+        }
+        Rule::expr_variable => Ok(Expression::Variable(pair.as_str().to_string())),
+        rule => Err(PlcError::parse(
+            line,
+            format!("不支持的表达式节点: {rule:?}"),
+        )),
+    }
+}
+
+fn parse_function_call_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
+    let line = line_of(&pair);
+    let mut inner = pair.into_inner();
+    let name = inner
+        .next()
+        .ok_or_else(|| PlcError::parse(line, "函数调用缺少函数名"))?
+        .as_str()
+        .to_string();
+    let mut args = Vec::new();
+    for item in inner {
+        if item.as_rule() == Rule::expression {
+            args.push(parse_expression(item)?);
+        }
+    }
+    Ok(Expression::FunctionCall { name, args })
+}
+
+fn parse_binary_operator(pair: Pair<Rule>) -> Result<BinaryOperator, PlcError> {
+    let line = line_of(&pair);
+    match pair.as_str() {
+        "+" => Ok(BinaryOperator::Add),
+        "-" => Ok(BinaryOperator::Sub),
+        "*" => Ok(BinaryOperator::Mul),
+        "/" => Ok(BinaryOperator::Div),
+        "%" => Ok(BinaryOperator::Mod),
+        other => Err(PlcError::parse(
+            line,
+            format!("不支持的二元运算符: {other}"),
+        )),
+    }
+}
+
+fn expression_to_raw(expr: &Expression) -> String {
+    match expr {
+        Expression::Literal(value) => value.to_string(),
+        Expression::Variable(name) => name.clone(),
+        Expression::UnaryNeg(inner) => format!("-({})", expression_to_raw(inner)),
+        Expression::BinaryOp { op, left, right } => format!(
+            "({}{}{})",
+            expression_to_raw(left),
+            match op {
+                BinaryOperator::Add => "+",
+                BinaryOperator::Sub => "-",
+                BinaryOperator::Mul => "*",
+                BinaryOperator::Div => "/",
+                BinaryOperator::Mod => "%",
+            },
+            expression_to_raw(right)
+        ),
+        Expression::FunctionCall { name, args } => format!(
+            "{}({})",
+            name,
+            args.iter()
+                .map(expression_to_raw)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
     }
 }
 
@@ -1607,8 +1979,8 @@ fn map_parse_error(err: pest::error::Error<Rule>) -> PlcError {
 mod tests {
     use super::{parse_constraints, parse_plc, parse_tasks, parse_topology};
     use crate::ast::{
-        ActionStatement, DeviceType, LiteralValue, OnCompleteDirective, PortRole, PortType,
-        StepStatement, WaitCondition,
+        ActionStatement, BinaryOperator, DeviceType, Expression, LiteralValue, OnCompleteDirective,
+        PortRole, PortType, StepStatement, WaitCondition,
     };
 
     #[test]
@@ -1951,11 +2323,10 @@ task main:
     }
 
     #[test]
-    fn keeps_type_compatibility_and_subtype_precedence() {
+    fn rejects_removed_type_attribute_with_hint() {
         let input = r#"
 [topology]
 device legacy_limit: digital_input { type: "limit_switch" }
-device e_stop: digital_input { type: "push_button", subtype: "e_stop_button" }
 
 [constraints]
 
@@ -1964,29 +2335,10 @@ task main:
     step idle:
 "#;
 
-        let program = parse_plc(input).expect("type/subtype compatibility should parse");
-        let legacy_limit = program
-            .topology
-            .devices
-            .iter()
-            .find(|device| device.name == "legacy_limit")
-            .expect("should include legacy_limit");
-        let e_stop = program
-            .topology
-            .devices
-            .iter()
-            .find(|device| device.name == "e_stop")
-            .expect("should include e_stop");
-
-        assert_eq!(
-            legacy_limit.attributes.subtype.as_deref(),
-            Some("limit_switch"),
-            "legacy `type` should map to subtype"
-        );
-        assert_eq!(
-            e_stop.attributes.subtype.as_deref(),
-            Some("e_stop_button"),
-            "`subtype` should override `type` when both are provided"
+        let err = parse_plc(input).expect_err("legacy type attribute should be rejected");
+        assert!(
+            err.to_string().contains("属性 type 已移除"),
+            "应提示 type 已移除，实际: {err}"
         );
     }
 
@@ -2165,18 +2517,18 @@ device estop: digital_input {
 
 device spindle_valve: solenoid_valve {
     response_time: 25ms,
-    type: "3/2"
+    subtype: "3/2"
 }
 
 device spindle_cyl: cylinder {
     stroke_time: 120ms,
     retract_time: 110ms,
     stroke: 80mm,
-    type: compact
+    subtype: compact
 }
 
 device spindle_sensor: sensor {
-    type: optical
+    subtype: optical
 }
 
 device spindle_motor: motor {
@@ -2646,11 +2998,11 @@ device motor_ctrl: motor {
 }
 
 device sensor_A: sensor {
-    type: proximity
+    subtype: proximity
 }
 
 device sensor_B: sensor {
-    type: proximity
+    subtype: proximity
 }
 
 [constraints]
@@ -2731,18 +3083,14 @@ task ready:
             .find(|step| step.name == "detect")
             .expect("search 任务应包含 detect step");
 
-        assert!(
-            detect_step
-                .statements
-                .iter()
-                .any(|stmt| matches!(stmt, StepStatement::Race(_)))
-        );
-        assert!(
-            detect_step
-                .statements
-                .iter()
-                .any(|stmt| matches!(stmt, StepStatement::Timeout(_)))
-        );
+        assert!(detect_step
+            .statements
+            .iter()
+            .any(|stmt| matches!(stmt, StepStatement::Race(_))));
+        assert!(detect_step
+            .statements
+            .iter()
+            .any(|stmt| matches!(stmt, StepStatement::Timeout(_))));
 
         let ready_task = ast
             .tasks
@@ -2771,6 +3119,237 @@ safety: cyl_A.extended conflicts_with
 
         let err = parse_plc(bad_input).expect_err("错误输入应返回解析错误");
         assert!(err.line() >= 6);
+    }
+
+    #[test]
+    fn parses_variable_declarations_in_topology() {
+        let input = r#"
+[topology]
+device plc_main: plc
+variable master_pos: float = 0.0
+variable cycle_count: int = 0
+variable cam_active: bool = false
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let ast = parse_plc(input).expect("变量声明应能解析");
+        assert_eq!(ast.topology.variables.len(), 3);
+        assert_eq!(ast.topology.variables[0].name, "master_pos");
+        assert!(matches!(
+            ast.topology.variables[0].var_type,
+            crate::ast::VariableType::Float
+        ));
+        assert_eq!(ast.topology.variables[0].initial_value, "0.0");
+        assert!(matches!(
+            ast.topology.variables[1].var_type,
+            crate::ast::VariableType::Int
+        ));
+        assert_eq!(ast.topology.variables[1].initial_value, "0");
+        assert!(matches!(
+            ast.topology.variables[2].var_type,
+            crate::ast::VariableType::Bool
+        ));
+        assert_eq!(ast.topology.variables[2].initial_value, "false");
+    }
+
+    #[test]
+    fn parses_cam_table_declarations_in_topology() {
+        let input = r#"
+[topology]
+cam_table linear_cam: periodic [
+    (0, 0),
+    (90, 50),
+    (180, 50),
+    (360, 0),
+]
+cam_table shear_profile: oneshot [
+    (0, 0),
+    (30, 5),
+    (60, 45),
+]
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let ast = parse_plc(input).expect("cam_table 声明应能解析");
+        assert_eq!(ast.topology.cam_tables.len(), 2);
+        assert_eq!(ast.topology.cam_tables[0].name, "linear_cam");
+        assert!(matches!(
+            ast.topology.cam_tables[0].mode,
+            crate::ast::CamTableMode::Periodic
+        ));
+        assert_eq!(ast.topology.cam_tables[0].points.len(), 4);
+        assert!((ast.topology.cam_tables[0].points[1].master - 90.0).abs() < f64::EPSILON);
+        assert!((ast.topology.cam_tables[0].points[1].slave - 50.0).abs() < f64::EPSILON);
+        assert!(matches!(
+            ast.topology.cam_tables[1].mode,
+            crate::ast::CamTableMode::Oneshot
+        ));
+    }
+
+    #[test]
+    fn parses_cam_coupling_device_with_attributes() {
+        let input = r#"
+[topology]
+device encoder_main: analog_input
+device servo_x: servo_drive
+device cam_xy: cam_coupling {
+    master: encoder_main,
+    slave: servo_x,
+    table: linear_cam,
+    interpolation: cubic_spline,
+    gear_ratio: 1.5,
+    phase_offset: 10.0,
+    following_error_limit: 2.0,
+    slave_feedback: servo_x,
+}
+cam_table linear_cam: periodic [
+    (0, 0),
+    (360, 0),
+]
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let ast = parse_plc(input).expect("cam_coupling 声明应能解析");
+        let cam = ast
+            .topology
+            .devices
+            .iter()
+            .find(|d| d.name == "cam_xy")
+            .expect("应包含 cam_xy");
+        assert!(matches!(cam.device_type, DeviceType::CamCoupling));
+        assert_eq!(cam.attributes.master.as_deref(), Some("encoder_main"));
+        assert_eq!(cam.attributes.slave.as_deref(), Some("servo_x"));
+        assert_eq!(cam.attributes.table.as_deref(), Some("linear_cam"));
+        assert_eq!(cam.attributes.interpolation.as_deref(), Some("cubic_spline"));
+    }
+
+    #[test]
+    fn parses_cam_action_statements() {
+        let input = r#"
+[topology]
+device cam_xy: cam_coupling
+cam_table t0: periodic [
+    (0, 0),
+    (360, 0),
+]
+cam_table t1: periodic [
+    (0, 0),
+    (360, 0),
+]
+variable phase: float = 12.5
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: cam_engage cam_xy
+        action: cam_switch cam_xy t1
+        action: cam_phase cam_xy phase + 1.0
+        action: cam_disengage cam_xy
+"#;
+
+        let ast = parse_plc(input).expect("cam actions 应能解析");
+        let step = &ast.tasks.tasks[0].steps[0];
+        assert!(matches!(
+            step.statements[0],
+            StepStatement::Action(ActionStatement::CamEngage { .. })
+        ));
+        assert!(matches!(
+            step.statements[1],
+            StepStatement::Action(ActionStatement::CamSwitch { .. })
+        ));
+        assert!(matches!(
+            step.statements[2],
+            StepStatement::Action(ActionStatement::CamPhase { .. })
+        ));
+        assert!(matches!(
+            step.statements[3],
+            StepStatement::Action(ActionStatement::CamDisengage { .. })
+        ));
+    }
+
+    #[test]
+    fn parses_compute_and_set_analog_expression_actions() {
+        let input = r#"
+[topology]
+device ao0: analog_output { range: 0..100 }
+variable x: float = 1.0
+variable y: float = 2.0
+
+[constraints]
+
+[tasks]
+task main:
+    step calc:
+        action: compute x = x + y * 2
+        action: set_analog ao0 x + 1
+        action: compute y = clamp(abs(x), 0, 10)
+"#;
+
+        let ast = parse_plc(input).expect("表达式 action 应能解析");
+        let step = &ast.tasks.tasks[0].steps[0];
+        assert_eq!(step.statements.len(), 3);
+
+        match &step.statements[0] {
+            StepStatement::Action(ActionStatement::Compute { target, expr }) => {
+                assert_eq!(target, "x");
+                match expr {
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Add,
+                        ..
+                    } => {}
+                    other => panic!("compute 表达式应为加法根节点，实际: {other:?}"),
+                }
+            }
+            other => panic!("期望 compute action，实际: {other:?}"),
+        }
+
+        match &step.statements[1] {
+            StepStatement::Action(ActionStatement::SetAnalogExpr { target, expr }) => {
+                assert_eq!(target.device, "ao0");
+                match expr {
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Add,
+                        ..
+                    } => {}
+                    other => panic!("set_analog 表达式应为加法根节点，实际: {other:?}"),
+                }
+            }
+            other => panic!("期望 set_analog_expr action，实际: {other:?}"),
+        }
+
+        match &step.statements[2] {
+            StepStatement::Action(ActionStatement::Compute { target, expr }) => {
+                assert_eq!(target, "y");
+                match expr {
+                    Expression::FunctionCall { name, args } => {
+                        assert_eq!(name, "clamp");
+                        assert_eq!(args.len(), 3);
+                    }
+                    other => panic!("期望 clamp 函数调用，实际: {other:?}"),
+                }
+            }
+            other => panic!("期望 compute(clamp) action，实际: {other:?}"),
+        }
     }
 
     #[test]
@@ -2870,6 +3449,48 @@ task main:
             err.to_string().contains("混用 AND/OR"),
             "应提示 AND/OR 混用错误"
         );
+    }
+
+    #[test]
+    fn parses_expression_conditions_in_wait_and_if() {
+        let input = r#"
+[topology]
+variable master_pos: float = 0.0
+variable slave_pos: float = 0.0
+
+[constraints]
+
+[tasks]
+task main:
+    step s1:
+        wait: abs(master_pos - slave_pos) < 0.5
+        if: (master_pos + 1.0) >= (slave_pos * 2.0)
+            goto done
+        else:
+            goto main.s1
+
+task done:
+    step halt:
+"#;
+
+        let ast = parse_plc(input).expect("表达式条件应能解析");
+        let statements = &ast.tasks.tasks[0].steps[0].statements;
+        match &statements[0] {
+            StepStatement::Wait(wait) => match &wait.condition {
+                WaitCondition::Single(condition) => {
+                    assert!(condition.expression_pair().is_some(), "wait 条件应为表达式比较");
+                }
+                other => panic!("期望单条件 wait，实际: {other:?}"),
+            },
+            other => panic!("期望 wait 语句，实际: {other:?}"),
+        }
+
+        match &statements[1] {
+            StepStatement::IfElse { condition, .. } => {
+                assert!(condition.expression_pair().is_some(), "if 条件应为表达式比较");
+            }
+            other => panic!("期望 if/else 语句，实际: {other:?}"),
+        }
     }
 
     #[test]

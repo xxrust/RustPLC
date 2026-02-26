@@ -1,22 +1,26 @@
 use crate::ast::{
-    ActionStatement, ComparisonOperator, ConditionExpression, ConstraintsSection, DeviceAttributes,
-    DeviceDeclaration, DeviceType, DurationValue, GotoDirective, LiteralValue, OnCompleteDirective,
+    ActionStatement, BinaryOperator as AstBinaryOperator, CamTableMode, ComparisonOperator,
+    ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType,
+    DurationValue, Expression as AstExpression, GotoDirective, LiteralValue, OnCompleteDirective,
     ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, SafetyConstraint, SafetyOperand,
     SafetyRelation as AstSafetyRelation, StateReference, StepStatement, TaskDeclaration,
     TasksSection, TimeUnit, TimeoutDirective, TimingRelation as AstTimingRelation, TimingTarget,
-    TopologyConnection, TopologyRelation, TopologySection, WaitCondition, WaitStatement,
+    TopologyConnection, TopologyRelation, TopologySection, VariableDeclaration,
+    VariableType as AstVariableType, WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use crate::ir::{
-    ActionKind, ActionRef, ActionTiming, BinaryValue as IrBinaryValue, CausalityChain,
-    ConnectionType, ConstraintSet, Device, DeviceKind, PidLoop as IrPidLoop, SafetyExpr,
-    SafetyRelation as IrSafetyRelation, SafetyRule, State, StateExpr, StateMachine, TimeInterval,
-    TimerOperation, TimerOperationKind, TimingModel, TimingRelation as IrTimingRelation,
-    TimingRule, TimingScope, TopologyGraph, TopologyLink, Transition, TransitionAction,
-    TransitionGuard,
+    ActionKind, ActionRef, ActionTiming, BinaryValue as IrBinaryValue, CamCouplingDef,
+    CamInterpolation, CamTableIr, CausalityChain, ConnectionType, ConstraintSet, Device,
+    DeviceKind, MAX_CAM_POINTS, PidLoop as IrPidLoop, SafetyExpr,
+    SafetyRelation as IrSafetyRelation, SafetyRule, SplineCoeff, State, StateExpr, StateMachine,
+    TimeInterval, TimerOperation, TimerOperationKind, TimingModel,
+    TimingRelation as IrTimingRelation, TimingRule, TimingScope, TopologyGraph, TopologyLink,
+    Transition, TransitionAction, TransitionGuard, VariableDef, VariableType as IrVariableType,
 };
 use crate::plc_port::{canonical_physical_device_name, parse_plc_port_ref, PlcPortKind};
 use petgraph::graph::NodeIndex;
+use runtime_core::MAX_VARIABLES as RUNTIME_MAX_VARIABLES;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -65,6 +69,7 @@ fn device_type_str(device_type: &DeviceType) -> &'static str {
         DeviceType::StepperMotor => "stepper_motor",
         DeviceType::Vfd => "vfd",
         DeviceType::ServoDrive => "servo_drive",
+        DeviceType::CamCoupling => "cam_coupling",
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
@@ -243,13 +248,11 @@ fn validate_extra_param_value(
 ) -> Result<(), String> {
     let kind = schema.parameter_type.trim().to_ascii_lowercase();
     match kind.as_str() {
-        "integer" | "int" | "u32" | "i32" => {
-            raw_value
-                .trim()
-                .parse::<i64>()
-                .map(|_| ())
-                .map_err(|_| "参数类型要求 integer（示例：200）".to_string())
-        }
+        "integer" | "int" | "u32" | "i32" => raw_value
+            .trim()
+            .parse::<i64>()
+            .map(|_| ())
+            .map_err(|_| "参数类型要求 integer（示例：200）".to_string()),
         "float" | "number" | "ratio" => raw_value
             .trim()
             .parse::<f64>()
@@ -435,6 +438,14 @@ fn implicit_port_ids_for_device_type(device_type: &DeviceType) -> &'static [&'st
             "fault",
             "zero_speed",
         ],
+        DeviceType::CamCoupling => &[
+            "engage",
+            "in_sync",
+            "fault",
+            "following_error",
+            "master_pos",
+            "slave_cmd",
+        ],
         DeviceType::AnalogInput => &["in"],
         DeviceType::AnalogOutput => &["out"],
         DeviceType::Pid => &["in", "out"],
@@ -612,6 +623,8 @@ fn expand_plc_controller_devices(
     Ok(TopologySection {
         devices: rewritten_devices,
         connections: rewritten_connections,
+        variables: topology.variables.clone(),
+        cam_tables: topology.cam_tables.clone(),
     })
 }
 
@@ -728,6 +741,7 @@ fn device_type_name(device_type: &DeviceType) -> &'static str {
         DeviceType::StepperMotor => "stepper_motor",
         DeviceType::Vfd => "vfd",
         DeviceType::ServoDrive => "servo_drive",
+        DeviceType::CamCoupling => "cam_coupling",
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
@@ -944,8 +958,31 @@ pub fn build_topology_graph(program: &PlcProgram) -> Result<TopologyGraph, Vec<P
 
 pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
-    let wait_ctx = WaitExpressionContext::for_program(&expanded);
+    let variable_names = expanded
+        .topology
+        .variables
+        .iter()
+        .map(|v| v.name.clone())
+        .collect::<HashSet<_>>();
+    let mut expr_errors = Vec::new();
+    validate_expression_actions_in_tasks(&expanded.tasks, &variable_names, &mut expr_errors);
     let device_kinds = collect_device_kinds(&expanded.topology);
+    let cam_table_names = expanded
+        .topology
+        .cam_tables
+        .iter()
+        .map(|table| table.name.clone())
+        .collect::<HashSet<_>>();
+    validate_cam_actions_in_tasks(
+        &expanded.tasks,
+        &device_kinds,
+        &cam_table_names,
+        &mut expr_errors,
+    );
+    if !expr_errors.is_empty() {
+        return Err(expr_errors);
+    }
+    let wait_ctx = WaitExpressionContext::for_program(&expanded);
     build_state_machine_from_ast_with_context(&expanded.tasks, &wait_ctx, Some(&device_kinds))
 }
 
@@ -1049,6 +1086,9 @@ fn collect_threshold_values_from_statements(
                 };
 
                 for condition in terms {
+                    if condition.is_expression_compare() {
+                        continue;
+                    }
                     if let LiteralValue::Number(value) = &condition.right {
                         if let Some(device_name) = wait_operand_device_name(&condition.left) {
                             values_by_device
@@ -1090,6 +1130,12 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
     let mut device_nodes = HashMap::<String, DeviceNode>::new();
     let mut errors = Vec::new();
     let pid_loops = extract_pid_loops(topology, &mut errors);
+    let variable_defs = extract_variable_defs(topology, &mut errors);
+    let cam_table_defs = extract_cam_table_defs(topology, &mut errors);
+    let cam_table_names = cam_table_defs
+        .iter()
+        .map(|table| table.name.clone())
+        .collect::<HashSet<_>>();
 
     for device in &topology.devices {
         let kind = ast_type_to_ir_kind(&device.device_type);
@@ -1168,7 +1214,37 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
         });
     }
 
+    let cam_couplings = extract_cam_coupling_defs(topology, &cam_table_names, &mut errors);
+    for coupling in &cam_couplings {
+        let Some(cam_node) = device_nodes.get(&coupling.name) else {
+            continue;
+        };
+        if let Some(master_node) = device_nodes.get(&coupling.master) {
+            topology_graph.add_connection(master_node.index, cam_node.index, ConnectionType::Analog);
+            topology_graph.links.push(TopologyLink {
+                from: coupling.master.clone(),
+                to: coupling.name.clone(),
+                from_port: None,
+                to_port: Some("master_pos".to_string()),
+                kind: ConnectionType::Analog,
+            });
+        }
+        if let Some(slave_node) = device_nodes.get(&coupling.slave) {
+            topology_graph.add_connection(cam_node.index, slave_node.index, ConnectionType::Analog);
+            topology_graph.links.push(TopologyLink {
+                from: coupling.name.clone(),
+                to: coupling.slave.clone(),
+                from_port: Some("slave_cmd".to_string()),
+                to_port: None,
+                kind: ConnectionType::Analog,
+            });
+        }
+    }
+
     topology_graph.pid_loops = pid_loops;
+    topology_graph.variables = variable_defs;
+    topology_graph.cam_tables = cam_table_defs;
+    topology_graph.cam_couplings = cam_couplings;
 
     if errors.is_empty() {
         Ok(topology_graph)
@@ -1212,6 +1288,440 @@ fn topology_relation_name(relation: &TopologyRelation) -> &'static str {
         TopologyRelation::DrivenBy => "driven_by",
         TopologyRelation::ReportsTo => "reports_to",
         TopologyRelation::Detects => "detects",
+    }
+}
+
+fn extract_variable_defs(
+    topology: &TopologySection,
+    errors: &mut Vec<PlcError>,
+) -> Vec<VariableDef> {
+    let mut defs = Vec::new();
+    let mut seen = HashSet::<String>::new();
+
+    for variable in &topology.variables {
+        let line = variable.line.max(1);
+        if !seen.insert(variable.name.clone()) {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                line,
+                "变量",
+                &variable.name,
+                "变量名必须唯一，请重命名重复声明",
+            ));
+            continue;
+        }
+
+        if topology.devices.iter().any(|d| d.name == variable.name)
+            || topology.cam_tables.iter().any(|t| t.name == variable.name)
+        {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                line,
+                "符号",
+                &variable.name,
+                "变量名不能与设备名或 cam_table 名相同",
+            ));
+            continue;
+        }
+
+        let (ir_type, initial_value) = match lower_variable_initial_value(variable) {
+            Ok(value) => value,
+            Err(err) => {
+                errors.push(err);
+                continue;
+            }
+        };
+
+        defs.push(VariableDef {
+            name: variable.name.clone(),
+            var_type: ir_type,
+            initial_value,
+            index: (defs.len() as u16),
+        });
+    }
+
+    if defs.len() > RUNTIME_MAX_VARIABLES {
+        errors.push(PlcError::semantic_with_reason(
+            1,
+            format!(
+                "变量数量超限：声明 {} 个，最大支持 {} 个",
+                defs.len(),
+                RUNTIME_MAX_VARIABLES
+            ),
+            "请减少 variable 声明数量，或在运行时扩容前保持 <= 64".to_string(),
+        ));
+    }
+
+    defs
+}
+
+fn extract_cam_table_defs(
+    topology: &TopologySection,
+    errors: &mut Vec<PlcError>,
+) -> Vec<CamTableIr> {
+    let mut defs = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    let variable_names = topology
+        .variables
+        .iter()
+        .map(|v| v.name.as_str())
+        .collect::<HashSet<_>>();
+    let device_names = topology
+        .devices
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect::<HashSet<_>>();
+
+    for table in &topology.cam_tables {
+        let line = table.line.max(1);
+        if !seen.insert(table.name.clone()) {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                line,
+                "cam_table",
+                &table.name,
+                "cam_table 名称必须唯一，请重命名重复声明",
+            ));
+            continue;
+        }
+
+        if variable_names.contains(table.name.as_str()) || device_names.contains(table.name.as_str())
+        {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                line,
+                "符号",
+                &table.name,
+                "cam_table 名称不能与 device/variable 重名",
+            ));
+            continue;
+        }
+
+        if table.points.len() < 2 {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!("cam_table {} 至少需要 2 个点", table.name),
+                "请至少保留起点和终点坐标".to_string(),
+            ));
+            continue;
+        }
+        if table.points.len() > MAX_CAM_POINTS {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!(
+                    "cam_table {} 点数超限：{} > {}",
+                    table.name,
+                    table.points.len(),
+                    MAX_CAM_POINTS
+                ),
+                "请减少点数量或分拆为多个表".to_string(),
+            ));
+            continue;
+        }
+
+        let mut master_positions = Vec::with_capacity(table.points.len());
+        let mut slave_positions = Vec::with_capacity(table.points.len());
+        let mut monotonic_ok = true;
+        for point in &table.points {
+            master_positions.push(point.master as f32);
+            slave_positions.push(point.slave as f32);
+        }
+        for i in 1..master_positions.len() {
+            if master_positions[i] <= master_positions[i - 1] {
+                monotonic_ok = false;
+                break;
+            }
+        }
+        if !monotonic_ok {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!("cam_table {} 的 master 坐标必须严格递增", table.name),
+                "请确保后一个点的 master 值始终大于前一个点".to_string(),
+            ));
+            continue;
+        }
+
+        if matches!(table.mode, CamTableMode::Periodic) {
+            let first = slave_positions.first().copied().unwrap_or(0.0);
+            let last = slave_positions.last().copied().unwrap_or(0.0);
+            if (first - last).abs() > f32::EPSILON {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!("周期 cam_table {} 要求首尾 slave 值相等", table.name),
+                    "periodic 模式下请保持首尾点从轴值一致".to_string(),
+                ));
+                continue;
+            }
+        }
+
+        defs.push(CamTableIr {
+            name: table.name.clone(),
+            periodic: matches!(table.mode, CamTableMode::Periodic),
+            num_points: master_positions.len(),
+            spline_coeffs: compute_spline_coeffs(
+                &master_positions,
+                &slave_positions,
+                matches!(table.mode, CamTableMode::Periodic),
+            ),
+            master_positions,
+            slave_positions,
+        });
+    }
+
+    defs
+}
+
+fn extract_cam_coupling_defs(
+    topology: &TopologySection,
+    cam_table_names: &HashSet<String>,
+    errors: &mut Vec<PlcError>,
+) -> Vec<CamCouplingDef> {
+    let device_names = topology
+        .devices
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect::<HashSet<_>>();
+
+    let mut defs = Vec::new();
+    for device in &topology.devices {
+        if !matches!(device.device_type, DeviceType::CamCoupling) {
+            continue;
+        }
+        let line = device.line.max(1);
+        let attrs = &device.attributes;
+
+        let Some(master) = attrs.master.as_ref() else {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!("cam_coupling {} 缺少 master 属性", device.name),
+                "请配置主轴设备名称，例如 master: encoder_main".to_string(),
+            ));
+            continue;
+        };
+        let Some(slave) = attrs.slave.as_ref() else {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!("cam_coupling {} 缺少 slave 属性", device.name),
+                "请配置从轴设备名称，例如 slave: servo_x".to_string(),
+            ));
+            continue;
+        };
+        let Some(table) = attrs.table.as_ref() else {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!("cam_coupling {} 缺少 table 属性", device.name),
+                "请配置凸轮表名称，例如 table: linear_cam".to_string(),
+            ));
+            continue;
+        };
+
+        if !device_names.contains(master.as_str()) {
+            errors.push(PlcError::undefined_reference_with_reason(
+                line,
+                "设备",
+                master,
+                format!("cam_coupling {} 的 master 引用了未定义设备", device.name),
+            ));
+            continue;
+        }
+        if !device_names.contains(slave.as_str()) {
+            errors.push(PlcError::undefined_reference_with_reason(
+                line,
+                "设备",
+                slave,
+                format!("cam_coupling {} 的 slave 引用了未定义设备", device.name),
+            ));
+            continue;
+        }
+        if !cam_table_names.contains(table) {
+            errors.push(PlcError::undefined_reference_with_reason(
+                line,
+                "cam_table",
+                table,
+                format!("cam_coupling {} 的 table 引用了未定义表", device.name),
+            ));
+            continue;
+        }
+
+        let interpolation = match attrs.interpolation.as_deref().unwrap_or("cubic_spline") {
+            "linear" => CamInterpolation::Linear,
+            "cubic_spline" => CamInterpolation::CubicSpline,
+            other => {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "cam_coupling {} 的 interpolation 不支持 {}",
+                        device.name, other
+                    ),
+                    "支持值: linear / cubic_spline".to_string(),
+                ));
+                continue;
+            }
+        };
+
+        let slave_feedback = attrs
+            .slave_feedback
+            .clone()
+            .unwrap_or_else(|| slave.clone());
+        if !device_names.contains(slave_feedback.as_str()) {
+            errors.push(PlcError::undefined_reference_with_reason(
+                line,
+                "设备",
+                &slave_feedback,
+                format!("cam_coupling {} 的 slave_feedback 引用了未定义设备", device.name),
+            ));
+            continue;
+        }
+
+        defs.push(CamCouplingDef {
+            name: device.name.clone(),
+            master: master.clone(),
+            slave: slave.clone(),
+            table: table.clone(),
+            interpolation,
+            gear_ratio: attrs.gear_ratio.unwrap_or(1.0) as f32,
+            phase_offset: attrs.phase_offset.unwrap_or(0.0) as f32,
+            following_error_limit: attrs.following_error_limit.unwrap_or(1.0) as f32,
+            slave_feedback,
+        });
+    }
+
+    defs
+}
+
+fn compute_spline_coeffs(master: &[f32], slave: &[f32], periodic: bool) -> Vec<SplineCoeff> {
+    if periodic {
+        // 周期边界条件的三次样条会在后续迭代补齐；当前先提供稳定的线性系数。
+        return compute_linear_spline_coeffs(master, slave);
+    }
+
+    let n = master.len();
+    if n < 2 || slave.len() != n {
+        return Vec::new();
+    }
+    if n == 2 {
+        return compute_linear_spline_coeffs(master, slave);
+    }
+
+    let mut h = vec![0.0f32; n - 1];
+    for i in 0..(n - 1) {
+        let dx = master[i + 1] - master[i];
+        if dx <= 0.0 {
+            return compute_linear_spline_coeffs(master, slave);
+        }
+        h[i] = dx;
+    }
+
+    let mut alpha = vec![0.0f32; n];
+    for i in 1..(n - 1) {
+        alpha[i] = 3.0 / h[i] * (slave[i + 1] - slave[i])
+            - 3.0 / h[i - 1] * (slave[i] - slave[i - 1]);
+    }
+
+    let mut l = vec![0.0f32; n];
+    let mut mu = vec![0.0f32; n];
+    let mut z = vec![0.0f32; n];
+    let mut c = vec![0.0f32; n];
+
+    l[0] = 1.0;
+    for i in 1..(n - 1) {
+        l[i] = 2.0 * (master[i + 1] - master[i - 1]) - h[i - 1] * mu[i - 1];
+        if l[i] == 0.0 {
+            return compute_linear_spline_coeffs(master, slave);
+        }
+        mu[i] = h[i] / l[i];
+        z[i] = (alpha[i] - h[i - 1] * z[i - 1]) / l[i];
+    }
+    l[n - 1] = 1.0;
+
+    let mut coeffs = vec![
+        SplineCoeff {
+            a: 0.0,
+            b: 0.0,
+            c: 0.0,
+            d: 0.0,
+        };
+        n - 1
+    ];
+    for j in (0..(n - 1)).rev() {
+        c[j] = z[j] - mu[j] * c[j + 1];
+        let b = (slave[j + 1] - slave[j]) / h[j] - h[j] * (c[j + 1] + 2.0 * c[j]) / 3.0;
+        let d = (c[j + 1] - c[j]) / (3.0 * h[j]);
+        coeffs[j] = SplineCoeff {
+            a: slave[j],
+            b,
+            c: c[j],
+            d,
+        };
+    }
+
+    coeffs
+}
+
+fn compute_linear_spline_coeffs(master: &[f32], slave: &[f32]) -> Vec<SplineCoeff> {
+    if master.len() < 2 || slave.len() < 2 {
+        return Vec::new();
+    }
+    let mut coeffs = Vec::with_capacity(master.len().saturating_sub(1));
+    for i in 0..(master.len() - 1) {
+        let dx = master[i + 1] - master[i];
+        let slope = if dx == 0.0 {
+            0.0
+        } else {
+            (slave[i + 1] - slave[i]) / dx
+        };
+        coeffs.push(SplineCoeff {
+            a: slave[i],
+            b: slope,
+            c: 0.0,
+            d: 0.0,
+        });
+    }
+    coeffs
+}
+
+fn lower_variable_initial_value(
+    variable: &VariableDeclaration,
+) -> Result<(IrVariableType, f32), PlcError> {
+    let line = variable.line.max(1);
+    let raw = variable.initial_value.trim();
+    match variable.var_type {
+        AstVariableType::Float => {
+            let value = raw.parse::<f32>().map_err(|_| {
+                PlcError::type_mismatch_with_reason(
+                    line,
+                    "float",
+                    raw,
+                    format!("variable {}", variable.name),
+                    "float 初值应为数字字面量（如 0.0）",
+                )
+            })?;
+            Ok((IrVariableType::Float, value))
+        }
+        AstVariableType::Int => {
+            let value = raw.parse::<i32>().map_err(|_| {
+                PlcError::type_mismatch_with_reason(
+                    line,
+                    "int",
+                    raw,
+                    format!("variable {}", variable.name),
+                    "int 初值应为整数（如 0）",
+                )
+            })?;
+            Ok((IrVariableType::Int, value as f32))
+        }
+        AstVariableType::Bool => {
+            let value = match raw {
+                "true" => 1.0,
+                "false" => 0.0,
+                _ => {
+                    return Err(PlcError::type_mismatch_with_reason(
+                        line,
+                        "bool",
+                        raw,
+                        format!("variable {}", variable.name),
+                        "bool 初值应为 true 或 false",
+                    ));
+                }
+            };
+            Ok((IrVariableType::Bool, value))
+        }
     }
 }
 
@@ -2157,6 +2667,22 @@ fn validate_analog_actions_in_statements(
                     }
                 }
             }
+            StepStatement::Action(ActionStatement::SetAnalogExpr { target, .. }) => {
+                if let Some(kind) = device_kinds.get(&target.device) {
+                    if *kind != DeviceKind::AnalogOutput
+                        && *kind != DeviceKind::Motor
+                        && *kind != DeviceKind::Vfd
+                    {
+                        errors.push(PlcError::type_mismatch_with_reason(
+                            line,
+                            "analog_output / motor / vfd",
+                            device_kind_name(kind),
+                            format!("set_analog {target}"),
+                            "set_analog 只能用于 analog_output、motor 或 vfd 类型设备",
+                        ));
+                    }
+                }
+            }
             StepStatement::Action(ActionStatement::Set { target, .. }) => {
                 if let Some(kind) = device_kinds.get(&target.device) {
                     if *kind == DeviceKind::AnalogOutput || *kind == DeviceKind::AnalogInput {
@@ -2240,6 +2766,269 @@ fn validate_set_enum_values(statements: &[StepStatement], line: usize, errors: &
     }
 }
 
+fn validate_expression_actions_in_tasks(
+    tasks: &TasksSection,
+    variables: &HashSet<String>,
+    errors: &mut Vec<PlcError>,
+) {
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            validate_expression_actions_in_statements(
+                &step.statements,
+                step.line.max(1),
+                variables,
+                errors,
+            );
+        }
+    }
+}
+
+fn validate_expression_actions_in_statements(
+    statements: &[StepStatement],
+    line: usize,
+    variables: &HashSet<String>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::Compute { target, expr }) => {
+                if !variables.contains(target) {
+                    errors.push(PlcError::undefined_reference_with_reason(
+                        line,
+                        "变量",
+                        target,
+                        "compute 目标变量必须先在 [topology] 中使用 variable 声明".to_string(),
+                    ));
+                }
+                validate_expression_variables(expr, line, variables, errors);
+            }
+            StepStatement::Action(ActionStatement::SetAnalogExpr { expr, .. }) => {
+                validate_expression_variables(expr, line, variables, errors);
+            }
+            StepStatement::Action(ActionStatement::CamPhase { offset, .. }) => {
+                validate_expression_variables(offset, line, variables, errors);
+            }
+            StepStatement::Wait(wait) => {
+                for condition in wait_condition_terms(&wait.condition) {
+                    if let Some((left, right)) = condition.expression_pair() {
+                        validate_expression_variables(left, line, variables, errors);
+                        validate_expression_variables(right, line, variables, errors);
+                    }
+                }
+            }
+            StepStatement::IfElse { condition, .. } => {
+                if let Some((left, right)) = condition.expression_pair() {
+                    validate_expression_variables(left, line, variables, errors);
+                    validate_expression_variables(right, line, variables, errors);
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                validate_expression_actions_in_statements(body, line, variables, errors);
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_expression_actions_in_statements(
+                        &branch.statements,
+                        line,
+                        variables,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_expression_actions_in_statements(
+                        &branch.statements,
+                        line,
+                        variables,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn validate_cam_actions_in_tasks(
+    tasks: &TasksSection,
+    device_kinds: &HashMap<String, DeviceKind>,
+    cam_table_names: &HashSet<String>,
+    errors: &mut Vec<PlcError>,
+) {
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            validate_cam_actions_in_statements(
+                &step.statements,
+                step.line.max(1),
+                device_kinds,
+                cam_table_names,
+                errors,
+            );
+        }
+    }
+}
+
+fn validate_cam_actions_in_statements(
+    statements: &[StepStatement],
+    line: usize,
+    device_kinds: &HashMap<String, DeviceKind>,
+    cam_table_names: &HashSet<String>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::CamEngage { target })
+            | StepStatement::Action(ActionStatement::CamDisengage { target })
+            | StepStatement::Action(ActionStatement::CamPhase { target, .. }) => {
+                match device_kinds.get(target) {
+                    Some(DeviceKind::CamCoupling) => {}
+                    Some(kind) => errors.push(PlcError::type_mismatch_with_reason(
+                        line,
+                        "cam_coupling",
+                        device_kind_name(kind),
+                        format!("cam action {target}"),
+                        "cam 动作仅支持作用于 cam_coupling 设备",
+                    )),
+                    None => errors.push(PlcError::undefined_reference_with_reason(
+                        line,
+                        "设备",
+                        target,
+                        "cam 动作引用前需要在 [topology] 中定义 cam_coupling 设备".to_string(),
+                    )),
+                }
+            }
+            StepStatement::Action(ActionStatement::CamSwitch { target, new_table }) => {
+                match device_kinds.get(target) {
+                    Some(DeviceKind::CamCoupling) => {}
+                    Some(kind) => errors.push(PlcError::type_mismatch_with_reason(
+                        line,
+                        "cam_coupling",
+                        device_kind_name(kind),
+                        format!("cam_switch {target}"),
+                        "cam_switch 仅支持作用于 cam_coupling 设备",
+                    )),
+                    None => errors.push(PlcError::undefined_reference_with_reason(
+                        line,
+                        "设备",
+                        target,
+                        "cam_switch 引用前需要定义 cam_coupling 设备".to_string(),
+                    )),
+                }
+                if !cam_table_names.contains(new_table) {
+                    errors.push(PlcError::undefined_reference_with_reason(
+                        line,
+                        "cam_table",
+                        new_table,
+                        "cam_switch 的目标表需要先在 [topology] 中声明".to_string(),
+                    ));
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                validate_cam_actions_in_statements(body, line, device_kinds, cam_table_names, errors)
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_cam_actions_in_statements(
+                        &branch.statements,
+                        line,
+                        device_kinds,
+                        cam_table_names,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_cam_actions_in_statements(
+                        &branch.statements,
+                        line,
+                        device_kinds,
+                        cam_table_names,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn validate_expression_variables(
+    expr: &AstExpression,
+    line: usize,
+    variables: &HashSet<String>,
+    errors: &mut Vec<PlcError>,
+) {
+    match expr {
+        AstExpression::Literal(_) => {}
+        AstExpression::Variable(name) => {
+            if !variables.contains(name) {
+                errors.push(PlcError::undefined_reference_with_reason(
+                    line,
+                    "变量",
+                    name,
+                    "表达式变量必须先在 [topology] 中使用 variable 声明".to_string(),
+                ));
+            }
+        }
+        AstExpression::UnaryNeg(inner) => {
+            validate_expression_variables(inner, line, variables, errors)
+        }
+        AstExpression::BinaryOp { left, right, .. } => {
+            validate_expression_variables(left, line, variables, errors);
+            validate_expression_variables(right, line, variables, errors);
+        }
+        AstExpression::FunctionCall { args, .. } => {
+            for arg in args {
+                validate_expression_variables(arg, line, variables, errors);
+            }
+            validate_builtin_function_call(expr, line, errors);
+        }
+    }
+}
+
+fn validate_builtin_function_call(expr: &AstExpression, line: usize, errors: &mut Vec<PlcError>) {
+    let AstExpression::FunctionCall { name, args } = expr else {
+        return;
+    };
+
+    let expected_arity = match name.as_str() {
+        "abs" | "sin" | "cos" | "sqrt" => 1,
+        "min" | "max" | "pow" | "fmod" => 2,
+        "clamp" => 3,
+        _ => {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!("不支持的内置函数: {name}"),
+                "支持函数: abs/min/max/sin/cos/sqrt/pow/fmod/clamp".to_string(),
+            ));
+            return;
+        }
+    };
+
+    if args.len() != expected_arity {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "函数 {name} 参数个数错误：期望 {expected_arity} 个，实际 {} 个",
+                args.len()
+            ),
+            "请检查函数调用参数数量".to_string(),
+        ));
+    }
+}
+
 fn validate_motor_legacy_set_actions(
     statements: &[StepStatement],
     line: usize,
@@ -2309,6 +3098,9 @@ fn validate_wait_device_references_in_statements(
                 let should_validate_references =
                     matches!(wait.condition, WaitCondition::And(_) | WaitCondition::Or(_));
                 for condition in wait_condition_terms(&wait.condition) {
+                    if condition.is_expression_compare() {
+                        continue;
+                    }
                     validate_motor_legacy_wait_operand(&condition.left, line, device_kinds, errors);
                     if should_validate_references {
                         validate_wait_operand_device(
@@ -2675,6 +3467,16 @@ fn action_to_timing(
         ActionStatement::SetAnalog { target, .. } => {
             (ActionKind::SetAnalog, Some(target.device.as_str()))
         }
+        ActionStatement::SetAnalogExpr { target, .. } => {
+            (ActionKind::SetAnalogExpr, Some(target.device.as_str()))
+        }
+        ActionStatement::Compute { .. } => (ActionKind::Compute, None),
+        ActionStatement::CamEngage { target } => (ActionKind::CamEngage, Some(target.as_str())),
+        ActionStatement::CamDisengage { target } => {
+            (ActionKind::CamDisengage, Some(target.as_str()))
+        }
+        ActionStatement::CamSwitch { target, .. } => (ActionKind::CamSwitch, Some(target.as_str())),
+        ActionStatement::CamPhase { target, .. } => (ActionKind::CamPhase, Some(target.as_str())),
         ActionStatement::Log { .. } => (ActionKind::Log, None),
     };
 
@@ -2701,8 +3503,15 @@ fn action_to_timing(
             .retract_ms
             .or(profile.response_ms)
             .or(profile.ramp_ms),
-        ActionKind::Set | ActionKind::SetAnalog => profile.ramp_ms.or(profile.response_ms),
-        ActionKind::Log => None,
+        ActionKind::Set | ActionKind::SetAnalog | ActionKind::SetAnalogExpr => {
+            profile.ramp_ms.or(profile.response_ms)
+        }
+        ActionKind::CamEngage
+        | ActionKind::CamDisengage
+        | ActionKind::CamSwitch
+        | ActionKind::CamPhase
+        | ActionKind::Compute
+        | ActionKind::Log => None,
     }?;
 
     Some(ActionTiming {
@@ -2749,6 +3558,12 @@ fn action_kind_name(action_kind: &ActionKind) -> &'static str {
         ActionKind::Retract => "retract",
         ActionKind::Set => "set",
         ActionKind::SetAnalog => "set_analog",
+        ActionKind::SetAnalogExpr => "set_analog_expr",
+        ActionKind::Compute => "compute",
+        ActionKind::CamEngage => "cam_engage",
+        ActionKind::CamDisengage => "cam_disengage",
+        ActionKind::CamSwitch => "cam_switch",
+        ActionKind::CamPhase => "cam_phase",
         ActionKind::Log => "log",
     }
 }
@@ -2763,7 +3578,8 @@ fn default_states_for_kind(kind: &DeviceKind) -> &'static [&'static str] {
         | DeviceKind::Motor
         | DeviceKind::StepperMotor
         | DeviceKind::Vfd
-        | DeviceKind::ServoDrive => &["on", "off", "forward", "reverse", "active", "idle"],
+        | DeviceKind::ServoDrive
+        | DeviceKind::CamCoupling => &["on", "off", "forward", "reverse", "active", "idle"],
         DeviceKind::AnalogInput | DeviceKind::AnalogOutput | DeviceKind::Pid | DeviceKind::Plc => {
             &[]
         }
@@ -3391,9 +4207,64 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             port: target.port.clone(),
             value_raw: value.to_string(),
         }),
+        ActionStatement::SetAnalogExpr { target, expr } => Some(TransitionAction::SetAnalogExpr {
+            target: target.device.clone(),
+            port: target.port.clone(),
+            expr_raw: expression_to_raw(expr),
+        }),
+        ActionStatement::Compute { target, expr } => Some(TransitionAction::Compute {
+            target: target.clone(),
+            expr_raw: expression_to_raw(expr),
+        }),
+        ActionStatement::CamEngage { target } => Some(TransitionAction::CamEngage {
+            target: target.clone(),
+        }),
+        ActionStatement::CamDisengage { target } => Some(TransitionAction::CamDisengage {
+            target: target.clone(),
+        }),
+        ActionStatement::CamSwitch { target, new_table } => Some(TransitionAction::CamSwitch {
+            target: target.clone(),
+            new_table: new_table.clone(),
+        }),
+        ActionStatement::CamPhase { target, offset } => Some(TransitionAction::CamPhase {
+            target: target.clone(),
+            offset_expr_raw: expression_to_raw(offset),
+        }),
         ActionStatement::Log { message } => Some(TransitionAction::Log {
             message: message.clone(),
         }),
+    }
+}
+
+fn expression_to_raw(expr: &AstExpression) -> String {
+    match expr {
+        AstExpression::Literal(v) => v.to_string(),
+        AstExpression::Variable(name) => name.clone(),
+        AstExpression::UnaryNeg(inner) => format!("-({})", expression_to_raw(inner)),
+        AstExpression::BinaryOp { op, left, right } => format!(
+            "({}{}{})",
+            expression_to_raw(left),
+            binary_operator_to_raw(*op),
+            expression_to_raw(right)
+        ),
+        AstExpression::FunctionCall { name, args } => format!(
+            "{}({})",
+            name,
+            args.iter()
+                .map(expression_to_raw)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    }
+}
+
+fn binary_operator_to_raw(op: AstBinaryOperator) -> &'static str {
+    match op {
+        AstBinaryOperator::Add => "+",
+        AstBinaryOperator::Sub => "-",
+        AstBinaryOperator::Mul => "*",
+        AstBinaryOperator::Div => "/",
+        AstBinaryOperator::Mod => "%",
     }
 }
 
@@ -3474,6 +4345,10 @@ fn wait_term_to_expression(
     condition: &ConditionExpression,
     wait_ctx: &WaitExpressionContext,
 ) -> String {
+    if condition.is_expression_compare() {
+        return condition_to_expression(condition);
+    }
+
     if let Some((value, _unit)) = threshold_literal_value_and_unit(&condition.right) {
         if let Some(device_name) = wait_operand_device_name(&condition.left) {
             if let Some(regions) = wait_ctx.analog_input_regions.get(device_name) {
@@ -3502,6 +4377,22 @@ fn wait_term_to_expression(
 }
 
 fn condition_to_expression(condition: &ConditionExpression) -> String {
+    if let Some((left, right)) = condition.expression_pair() {
+        return format!(
+            "{} {} {}",
+            expression_to_raw(left),
+            match condition.operator {
+                ComparisonOperator::Eq => "==",
+                ComparisonOperator::Neq => "!=",
+                ComparisonOperator::Gt => ">",
+                ComparisonOperator::Lt => "<",
+                ComparisonOperator::Gte => ">=",
+                ComparisonOperator::Lte => "<=",
+            },
+            expression_to_raw(right)
+        );
+    }
+
     let operator = match condition.operator {
         ComparisonOperator::Eq => "==",
         ComparisonOperator::Neq => "!=",
@@ -3560,6 +4451,7 @@ fn ast_type_to_ir_kind(device_type: &DeviceType) -> DeviceKind {
         DeviceType::StepperMotor => DeviceKind::StepperMotor,
         DeviceType::Vfd => DeviceKind::Vfd,
         DeviceType::ServoDrive => DeviceKind::ServoDrive,
+        DeviceType::CamCoupling => DeviceKind::CamCoupling,
         DeviceType::AnalogInput => DeviceKind::AnalogInput,
         DeviceType::AnalogOutput => DeviceKind::AnalogOutput,
         DeviceType::Pid => DeviceKind::Pid,
@@ -3584,10 +4476,12 @@ fn driven_by_connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<C
         | (DeviceKind::DigitalOutput, DeviceKind::Motor)
         | (DeviceKind::DigitalOutput, DeviceKind::StepperMotor)
         | (DeviceKind::DigitalOutput, DeviceKind::Vfd)
-        | (DeviceKind::DigitalOutput, DeviceKind::ServoDrive) => Some(ConnectionType::Electrical),
+        | (DeviceKind::DigitalOutput, DeviceKind::ServoDrive)
+        | (DeviceKind::DigitalOutput, DeviceKind::CamCoupling) => Some(ConnectionType::Electrical),
         (DeviceKind::SolenoidValve, DeviceKind::Cylinder) => Some(ConnectionType::Pneumatic),
         (DeviceKind::AnalogOutput, DeviceKind::Motor)
         | (DeviceKind::AnalogOutput, DeviceKind::Vfd) => Some(ConnectionType::Analog),
+        (DeviceKind::AnalogOutput, DeviceKind::CamCoupling) => Some(ConnectionType::Analog),
         _ => None,
     }
 }
@@ -3607,6 +4501,7 @@ fn detects_connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<Con
         | (DeviceKind::StepperMotor, DeviceKind::Sensor)
         | (DeviceKind::Vfd, DeviceKind::Sensor)
         | (DeviceKind::ServoDrive, DeviceKind::Sensor)
+        | (DeviceKind::CamCoupling, DeviceKind::Sensor)
         | (DeviceKind::SolenoidValve, DeviceKind::Sensor) => Some(ConnectionType::Logical),
         _ => None,
     }
@@ -3624,6 +4519,7 @@ fn device_kind_name(kind: &DeviceKind) -> &'static str {
         DeviceKind::StepperMotor => "stepper_motor",
         DeviceKind::Vfd => "vfd",
         DeviceKind::ServoDrive => "servo_drive",
+        DeviceKind::CamCoupling => "cam_coupling",
         DeviceKind::AnalogInput => "analog_input",
         DeviceKind::AnalogOutput => "analog_output",
         DeviceKind::Pid => "pid",
@@ -3854,25 +4750,25 @@ device alarm_light: motor
 
 # ===== solenoid valves =====
 device valve_A: solenoid_valve {
-    type: "5/2",
+    subtype: "5/2",
     response_time: 15ms
 }
 
 device valve_B: solenoid_valve {
-    type: "5/2",
+    subtype: "5/2",
     response_time: 15ms
 }
 
 # ===== cylinders =====
 device cyl_A: cylinder {
-    type: double_acting,
+    subtype: double_acting,
     stroke: 100mm,
     stroke_time: 200ms,
     retract_time: 180ms
 }
 
 device cyl_B: cylinder {
-    type: double_acting,
+    subtype: double_acting,
     stroke: 150mm,
     stroke_time: 300ms,
     retract_time: 250ms
@@ -3880,19 +4776,19 @@ device cyl_B: cylinder {
 
 # ===== sensors =====
 device sensor_A_ext: sensor {
-    type: magnetic
+    subtype: magnetic
 }
 
 device sensor_A_ret: sensor {
-    type: magnetic
+    subtype: magnetic
 }
 
 device sensor_B_ext: sensor {
-    type: magnetic
+    subtype: magnetic
 }
 
 device sensor_B_ret: sensor {
-    type: magnetic
+    subtype: magnetic
 }
 
 relation { from: start_button.out, to: X4.in, via: reports_to }
@@ -4741,6 +5637,35 @@ task main:
     }
 
     #[test]
+    fn lowers_expression_wait_conditions_to_guard_expression() {
+        let input = r#"
+[topology]
+variable master_pos: float = 0.0
+variable slave_pos: float = 0.0
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_sync:
+        wait: abs(master_pos - slave_pos) < 0.5
+    step done:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("表达式 wait 示例应能解析");
+        let state_machine = build_state_machine(&program).expect("表达式 wait 应能构建状态机");
+        let has_expr_guard = state_machine.transitions.iter().any(|transition| {
+            matches!(
+                transition.guard,
+                TransitionGuard::Condition { ref expression }
+                    if expression.contains("abs(") && expression.contains("< 0.5")
+            )
+        });
+        assert!(has_expr_guard, "表达式 wait 应保留为 guard 表达式");
+    }
+
+    #[test]
     fn builds_state_machine_from_prd_5_5_1_sequence_example() {
         let input = r#"
 [topology]
@@ -5211,5 +6136,328 @@ task init:
             joined.contains("不允许嵌套 repeat"),
             "应包含嵌套 repeat 错误提示"
         );
+    }
+
+    #[test]
+    fn lowers_topology_variables_into_ir_defs() {
+        let input = r#"
+[topology]
+device plc_main: plc
+variable master_pos: float = 0.5
+variable cycle_count: int = 2
+variable cam_active: bool = true
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("变量示例应能解析");
+        let topology = build_topology_graph(&program).expect("变量示例应能构建拓扑");
+
+        assert_eq!(topology.variables.len(), 3);
+        assert_eq!(topology.variables[0].name, "master_pos");
+        assert!(matches!(
+            topology.variables[0].var_type,
+            crate::ir::VariableType::Float
+        ));
+        assert_eq!(topology.variables[0].initial_value, 0.5);
+        assert_eq!(topology.variables[0].index, 0);
+        assert!(matches!(
+            topology.variables[1].var_type,
+            crate::ir::VariableType::Int
+        ));
+        assert_eq!(topology.variables[1].initial_value, 2.0);
+        assert!(matches!(
+            topology.variables[2].var_type,
+            crate::ir::VariableType::Bool
+        ));
+        assert_eq!(topology.variables[2].initial_value, 1.0);
+    }
+
+    #[test]
+    fn lowers_cam_tables_into_ir_defs() {
+        let input = r#"
+[topology]
+cam_table linear_cam: periodic [
+    (0, 0),
+    (180, 50),
+    (360, 0),
+]
+cam_table shear_profile: oneshot [
+    (0, 0),
+    (30, 20),
+    (60, 45),
+    (90, 20),
+]
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("cam_table 示例应能解析");
+        let topology = build_topology_graph(&program).expect("cam_table 示例应能构建拓扑");
+
+        assert_eq!(topology.cam_tables.len(), 2);
+        assert_eq!(topology.cam_tables[0].name, "linear_cam");
+        assert!(topology.cam_tables[0].periodic);
+        assert_eq!(topology.cam_tables[0].num_points, 3);
+        assert_eq!(topology.cam_tables[0].spline_coeffs.len(), 2);
+        assert_eq!(topology.cam_tables[1].name, "shear_profile");
+        assert!(!topology.cam_tables[1].periodic);
+        assert!(
+            topology.cam_tables[1]
+                .spline_coeffs
+                .iter()
+                .any(|coeff| coeff.c.abs() > 1e-6 || coeff.d.abs() > 1e-6),
+            "oneshot 曲线应生成非零二/三次项系数"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cam_table_shapes() {
+        let input = r#"
+[topology]
+device linear_cam: sensor
+cam_table linear_cam: periodic [
+    (0, 0),
+    (360, 0),
+]
+cam_table bad_profile: periodic [
+    (0, 0),
+    (120, 40),
+    (90, 40),
+    (360, 10),
+]
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_topology_graph(&program).expect_err("无效 cam_table 应报错");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("cam_table 名称不能与 device/variable 重名"));
+        assert!(joined.contains("master 坐标必须严格递增"));
+    }
+
+    #[test]
+    fn lowers_cam_coupling_defs_and_links() {
+        let input = r#"
+[topology]
+device AI0: analog_input { range: 0..360 }
+device AO0: analog_output { range: 0..360 }
+device cam_xy: cam_coupling {
+    master: AI0,
+    slave: AO0,
+    table: linear_cam,
+    interpolation: linear,
+    gear_ratio: 2.0,
+    phase_offset: 3.0,
+    following_error_limit: 1.5,
+}
+cam_table linear_cam: periodic [
+    (0, 0),
+    (360, 0),
+]
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("cam_coupling 示例应能解析");
+        let topology = build_topology_graph(&program).expect("cam_coupling 示例应能构建拓扑");
+        assert_eq!(topology.cam_couplings.len(), 1);
+        let cam = &topology.cam_couplings[0];
+        assert_eq!(cam.name, "cam_xy");
+        assert_eq!(cam.master, "AI0");
+        assert_eq!(cam.slave, "AO0");
+        assert_eq!(cam.table, "linear_cam");
+        assert!(matches!(cam.interpolation, crate::ir::CamInterpolation::Linear));
+    }
+
+    #[test]
+    fn rejects_invalid_cam_actions() {
+        let input = r#"
+[topology]
+device AI0: analog_input { range: 0..360 }
+device AO0: analog_output { range: 0..360 }
+device cam_xy: cam_coupling { master: AI0, slave: AO0, table: t0 }
+device motor_x: motor
+cam_table t0: periodic [
+    (0, 0),
+    (360, 0),
+]
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: cam_switch cam_xy missing_table
+        action: cam_engage motor_x
+"#;
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("无效 cam action 应报错");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("cam_switch 的目标表需要先在 [topology] 中声明"));
+        assert!(joined.contains("cam 动作仅支持作用于 cam_coupling 设备"));
+    }
+
+    #[test]
+    fn rejects_variable_initial_value_type_mismatch() {
+        let input = r#"
+[topology]
+device plc_main: plc
+variable cycle_count: int = true
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_topology_graph(&program).expect_err("错误变量初值应被拒绝");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("int 初值应为整数"),
+            "应提示 int 初值类型错误"
+        );
+    }
+
+    #[test]
+    fn rejects_variable_name_colliding_with_device() {
+        let input = r#"
+[topology]
+device cam_xy: plc
+variable cam_xy: bool = false
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_topology_graph(&program).expect_err("变量与设备重名应报错");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("变量名不能与设备名或 cam_table 名相同"),
+            "应提示符号重名冲突"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_builtin_function_in_expression() {
+        let input = r#"
+[topology]
+device ao0: analog_output { range: 0..100 }
+variable x: float = 1.0
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: set_analog ao0 foo(x)
+"#;
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("未知函数应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("不支持的内置函数"), "应提示不支持的函数名");
+    }
+
+    #[test]
+    fn rejects_undefined_variable_in_expression_condition() {
+        let input = r#"
+[topology]
+variable known: float = 1.0
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_expr:
+        wait: known + missing > 0.0
+"#;
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("条件表达式中未知变量应报错");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("表达式变量必须先在 [topology] 中使用 variable 声明"),
+            "应报告表达式条件中的未知变量"
+        );
+    }
+
+    #[test]
+    fn rejects_builtin_function_with_wrong_arity() {
+        let input = r#"
+[topology]
+device ao0: analog_output { range: 0..100 }
+variable x: float = 1.0
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: set_analog ao0 clamp(x, 0)
+"#;
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("函数参数个数错误应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("参数个数错误"), "应提示函数参数个数错误");
     }
 }

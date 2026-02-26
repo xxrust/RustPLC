@@ -303,8 +303,16 @@ impl PlcEvidence {
                 ActionStatement::Extend { target }
                 | ActionStatement::Retract { target }
                 | ActionStatement::Set { target, .. }
-                | ActionStatement::SetAnalog { target, .. } => {
+                | ActionStatement::SetAnalog { target, .. }
+                | ActionStatement::SetAnalogExpr { target, .. } => {
                     self.action_targets.insert(target.device.clone());
+                }
+                ActionStatement::Compute { .. } => {}
+                ActionStatement::CamEngage { target }
+                | ActionStatement::CamDisengage { target }
+                | ActionStatement::CamSwitch { target, .. }
+                | ActionStatement::CamPhase { target, .. } => {
+                    self.action_targets.insert(target.clone());
                 }
                 ActionStatement::Log { .. } => {}
             },
@@ -1079,12 +1087,10 @@ inputs: []
             io_snapshot: None,
         })
         .expect("trace-only diagnosis should succeed");
-        assert!(
-            trace_only
-                .anchors
-                .iter()
-                .any(|anchor| anchor.kind == AnchorKind::Timeout)
-        );
+        assert!(trace_only
+            .anchors
+            .iter()
+            .any(|anchor| anchor.kind == AnchorKind::Timeout));
 
         let diff_only = diagnose(DiagnosisInput {
             plc_source: fixture_plc(),
@@ -1096,12 +1102,10 @@ inputs: []
             io_snapshot: None,
         })
         .expect("diff-only diagnosis should succeed");
-        assert!(
-            diff_only
-                .anchors
-                .iter()
-                .any(|anchor| anchor.kind == AnchorKind::FirstTraceMismatch)
-        );
+        assert!(diff_only
+            .anchors
+            .iter()
+            .any(|anchor| anchor.kind == AnchorKind::FirstTraceMismatch));
     }
 
     #[test]

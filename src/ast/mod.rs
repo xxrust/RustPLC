@@ -13,6 +13,49 @@ pub struct TopologySection {
     pub devices: Vec<DeviceDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connections: Vec<TopologyConnection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<VariableDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cam_tables: Vec<CamTableDeclaration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VariableType {
+    Float,
+    Int,
+    Bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VariableDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub var_type: VariableType,
+    pub initial_value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CamTableMode {
+    Periodic,
+    Oneshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CamPoint {
+    pub master: f64,
+    pub slave: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CamTableDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub mode: CamTableMode,
+    pub points: Vec<CamPoint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +80,7 @@ pub enum DeviceType {
     StepperMotor,
     Vfd,
     ServoDrive,
+    CamCoupling,
     AnalogInput,
     AnalogOutput,
     Pid,
@@ -109,8 +153,6 @@ pub struct DeviceAttributes {
     pub stroke: Option<MeasuredValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtype: Option<String>,
-    #[serde(rename = "type")]
-    pub r#type: Option<String>,
     pub detects: Option<StateReference>,
     pub debounce: Option<DurationValue>,
     pub inverted: Option<bool>,
@@ -132,6 +174,14 @@ pub struct DeviceAttributes {
     pub out: Option<String>,
     pub period_ms: Option<u64>,
     pub limit: Option<AnalogRange>,
+    pub master: Option<String>,
+    pub slave: Option<String>,
+    pub table: Option<String>,
+    pub interpolation: Option<String>,
+    pub gear_ratio: Option<f64>,
+    pub phase_offset: Option<f64>,
+    pub following_error_limit: Option<f64>,
+    pub slave_feedback: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub extra_params: HashMap<String, String>,
 }
@@ -340,11 +390,71 @@ impl ActionTarget {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum ActionStatement {
-    Extend { target: ActionTarget },
-    Retract { target: ActionTarget },
-    Set { target: ActionTarget, value: String },
-    SetAnalog { target: ActionTarget, value: f64 },
-    Log { message: String },
+    Extend {
+        target: ActionTarget,
+    },
+    Retract {
+        target: ActionTarget,
+    },
+    Set {
+        target: ActionTarget,
+        value: String,
+    },
+    SetAnalog {
+        target: ActionTarget,
+        value: f64,
+    },
+    SetAnalogExpr {
+        target: ActionTarget,
+        expr: Expression,
+    },
+    Compute {
+        target: String,
+        expr: Expression,
+    },
+    CamEngage {
+        target: String,
+    },
+    CamDisengage {
+        target: String,
+    },
+    CamSwitch {
+        target: String,
+        new_table: String,
+    },
+    CamPhase {
+        target: String,
+        offset: Expression,
+    },
+    Log {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Expression {
+    Literal(f64),
+    Variable(String),
+    UnaryNeg(Box<Expression>),
+    BinaryOp {
+        op: BinaryOperator,
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+    FunctionCall {
+        name: String,
+        args: Vec<Expression>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BinaryOperator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -365,6 +475,44 @@ pub struct ConditionExpression {
     pub left: String,
     pub operator: ComparisonOperator,
     pub right: LiteralValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left_expr: Option<Expression>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right_expr: Option<Expression>,
+}
+
+impl ConditionExpression {
+    pub fn legacy(left: String, operator: ComparisonOperator, right: LiteralValue) -> Self {
+        Self {
+            left,
+            operator,
+            right,
+            left_expr: None,
+            right_expr: None,
+        }
+    }
+
+    pub fn expression(
+        left_expr: Expression,
+        operator: ComparisonOperator,
+        right_expr: Expression,
+    ) -> Self {
+        Self {
+            left: String::new(),
+            operator,
+            right: LiteralValue::Number(0.0),
+            left_expr: Some(left_expr),
+            right_expr: Some(right_expr),
+        }
+    }
+
+    pub fn expression_pair(&self) -> Option<(&Expression, &Expression)> {
+        self.left_expr.as_ref().zip(self.right_expr.as_ref())
+    }
+
+    pub fn is_expression_compare(&self) -> bool {
+        self.expression_pair().is_some()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
