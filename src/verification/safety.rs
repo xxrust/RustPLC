@@ -598,6 +598,8 @@ fn collect_threshold_values_from_statements(
             StepStatement::Action(ActionStatement::SetAnalog { target, value }) => {
                 add_threshold_value(values_by_device, &target.device, *value);
             }
+            StepStatement::Action(ActionStatement::SetAnalogExpr { .. })
+            | StepStatement::Action(ActionStatement::Compute { .. }) => {}
             StepStatement::Repeat { body, .. } => {
                 collect_threshold_values_from_statements(body, values_by_device);
             }
@@ -628,6 +630,9 @@ fn collect_threshold_values_from_wait(
     };
 
     for condition in terms {
+        if condition.is_expression_compare() {
+            continue;
+        }
         if let LiteralValue::Number(value) = &condition.right {
             add_threshold_value(values_by_device, &condition.left, *value);
         }
@@ -669,6 +674,7 @@ fn collect_device_domains(
             | DeviceType::StepperMotor
             | DeviceType::Vfd
             | DeviceType::ServoDrive
+            | DeviceType::CamCoupling
             | DeviceType::Pid => {
                 let states = vec!["on".to_string(), "off".to_string()];
                 let default_state = states.iter().position(|state| state == "off").unwrap_or(0);
@@ -738,8 +744,13 @@ fn collect_device_domains(
                 TransitionAction::Extend { target, port }
                 | TransitionAction::Retract { target, port }
                 | TransitionAction::Set { target, port, .. }
-                | TransitionAction::SetAnalog { target, port, .. } => (target, port),
-                TransitionAction::Log { .. } => continue,
+                | TransitionAction::SetAnalog { target, port, .. }
+                | TransitionAction::SetAnalogExpr { target, port, .. } => (target, port),
+                TransitionAction::CamEngage { .. }
+                | TransitionAction::CamDisengage { .. }
+                | TransitionAction::CamSwitch { .. }
+                | TransitionAction::CamPhase { .. } => continue,
+                TransitionAction::Compute { .. } | TransitionAction::Log { .. } => continue,
             };
             if port != "self" {
                 referenced_ports
@@ -938,6 +949,7 @@ fn transition_effects(
                 };
                 effects.insert(device_id, state_id);
             }
+            TransitionAction::SetAnalogExpr { .. } => {}
             TransitionAction::Set {
                 target,
                 port,
@@ -956,6 +968,11 @@ fn transition_effects(
                 };
                 effects.insert(device_id, state_id);
             }
+            TransitionAction::Compute { .. } => {}
+            TransitionAction::CamEngage { .. }
+            | TransitionAction::CamDisengage { .. }
+            | TransitionAction::CamSwitch { .. }
+            | TransitionAction::CamPhase { .. } => {}
             TransitionAction::Extend { target, port } => {
                 let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
                 else {
@@ -1116,6 +1133,19 @@ fn action_name(action: &TransitionAction) -> Option<String> {
         TransitionAction::SetAnalog { target, value_raw, .. } => {
             Some(format!("set_analog {target} {value_raw}"))
         }
+        TransitionAction::SetAnalogExpr {
+            target, expr_raw, ..
+        } => Some(format!("set_analog {target} {expr_raw}")),
+        TransitionAction::Compute { target, expr_raw } => Some(format!("compute {target}={expr_raw}")),
+        TransitionAction::CamEngage { target } => Some(format!("cam_engage {target}")),
+        TransitionAction::CamDisengage { target } => Some(format!("cam_disengage {target}")),
+        TransitionAction::CamSwitch { target, new_table } => {
+            Some(format!("cam_switch {target} {new_table}"))
+        }
+        TransitionAction::CamPhase {
+            target,
+            offset_expr_raw,
+        } => Some(format!("cam_phase {target} {offset_expr_raw}")),
         TransitionAction::Log { message } => Some(format!("log \"{message}\"")),
     }
 }
@@ -1251,12 +1281,20 @@ fn safety_expr_states_with_reason(
             operator,
             value,
         } => {
-            let device_id = lookup_device_domain_id(&model.device_index, device, "self", false)
-                .ok_or_else(|| format!("未知设备 {device}"))?;
+            let (device_name, port_name) = split_threshold_target(device);
+            let device_id =
+                lookup_device_domain_id(&model.device_index, device_name, port_name, false)
+                    .ok_or_else(|| {
+                        if port_name == "self" {
+                            format!("未知设备 {device_name}")
+                        } else {
+                            format!("未知设备端口 {device_name}.{port_name}")
+                        }
+                    })?;
             let domain = model
                 .devices
                 .get(device_id)
-                .ok_or_else(|| format!("内部错误：设备 {device} 未注册"))?;
+                .ok_or_else(|| format!("内部错误：设备 {device_name} 未注册"))?;
             if !domain.is_analog {
                 return Err(format!("设备 {device} 非模拟量设备，无法进行阈值建模"));
             }
@@ -1372,7 +1410,9 @@ fn collect_analog_threshold_details(
             continue;
         };
 
-        let Some(device_id) = lookup_device_domain_id(&model.device_index, device, "self", false)
+        let (device_name, port_name) = split_threshold_target(device);
+        let Some(device_id) =
+            lookup_device_domain_id(&model.device_index, device_name, port_name, false)
         else {
             continue;
         };
@@ -1400,6 +1440,20 @@ fn collect_analog_threshold_details(
         });
     }
     out
+}
+
+fn split_threshold_target(device_ref: &str) -> (&str, &str) {
+    let mut parts = device_ref.split('.');
+    let Some(device) = parts.next() else {
+        return (device_ref, "self");
+    };
+    let Some(port) = parts.next() else {
+        return (device_ref, "self");
+    };
+    if parts.next().is_some() {
+        return (device_ref, "self");
+    }
+    (device, port)
 }
 
 fn split_points_from_region_bounds(bounds: &[(f64, f64)]) -> Vec<f64> {

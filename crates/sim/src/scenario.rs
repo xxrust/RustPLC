@@ -445,6 +445,9 @@ inputs:
         static PROGRAM: Program<'static> = Program {
             tasks: &TASKS,
             pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
         };
 
         fn run(scenario: &Scenario) -> (Vec<String>, Vec<crate::DigitalEdge>) {

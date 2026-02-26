@@ -1,0 +1,60 @@
+[identity]
+name = "电子凸轮耦合"
+type = "cam_coupling"
+category = "controllers/motion/cam"
+version = "1.0.0"
+
+[semantics]
+description = "软件定义的主从轴位置同步控制，支持凸轮表插值、相位调整与切表。"
+primary_function = "electronic_cam_sync"
+role = "controller"
+typical_applications = ["飞剪", "印刷套色", "旋转灌装", "包装封切"]
+
+[[interfaces.ports]]
+name = "engage"
+states = ["on", "off"]
+default_state = "off"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "in_sync"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "following_error"
+default_state = "0"
+direction = "output"
+port_type = "analog"
+
+[[interfaces.ports]]
+name = "master_pos"
+default_state = "0"
+direction = "output"
+port_type = "analog"
+
+[[interfaces.ports]]
+name = "slave_cmd"
+default_state = "0"
+direction = "output"
+port_type = "analog"
+
+[[device_constraints.safety]]
+left = "fault.on"
+right = "engage.on"
+relation = "conflicts_with"
+reason = "凸轮故障时必须解除耦合（IEC 61800-5-2）"
+
+[usage_guidance]
+when_to_use = "需要主从轴位置同步、相位动态修正或快速切换运动曲线的场景。"
+when_not_to_use = "简单启停或单点定位请使用 motor/servo_drive。"

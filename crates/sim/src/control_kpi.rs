@@ -394,6 +394,9 @@ mod tests {
         Program {
             tasks: &TASKS,
             pid_loops: &PID,
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
         }
     }
 

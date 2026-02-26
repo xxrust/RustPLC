@@ -440,6 +440,9 @@ mod tests {
         static PROGRAM: Program<'static> = Program {
             tasks: &TASKS,
             pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
         };
 
         let mut io = SimIo::new(1, 1, 0, 0).with_plant(plant);

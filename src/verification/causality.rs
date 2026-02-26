@@ -1,6 +1,6 @@
 use crate::ast::{
-    ActionStatement, ComparisonOperator, ConditionExpression, DeviceType,
-    LiteralValue, PlcProgram, StepStatement, WaitCondition, WaitStatement,
+    ActionStatement, ComparisonOperator, ConditionExpression, DeviceType, LiteralValue, PlcProgram,
+    StepStatement, WaitCondition, WaitStatement,
 };
 use crate::ir::{ConstraintSet, DeviceKind, TopologyGraph};
 use petgraph::algo::has_path_connecting;
@@ -459,15 +459,35 @@ fn collect_items_from_statements(
 
 fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String)> {
     match action {
-        ActionStatement::Extend { target } => Some((format!("extend {}", target.device), target.device.clone())),
-        ActionStatement::Retract { target } => Some((format!("retract {}", target.device), target.device.clone())),
+        ActionStatement::Extend { target } => {
+            Some((format!("extend {}", target.device), target.device.clone()))
+        }
+        ActionStatement::Retract { target } => {
+            Some((format!("retract {}", target.device), target.device.clone()))
+        }
         ActionStatement::Set { target, value } => Some((
             format!("set {} {value}", target.device),
             target.device.clone(),
         )),
-        ActionStatement::SetAnalog { target, value } => {
-            Some((format!("set_analog {} {value}", target.device), target.device.clone()))
-        }
+        ActionStatement::SetAnalog { target, value } => Some((
+            format!("set_analog {} {value}", target.device),
+            target.device.clone(),
+        )),
+        ActionStatement::SetAnalogExpr { target, .. } => Some((
+            format!("set_analog {} <expr>", target.device),
+            target.device.clone(),
+        )),
+        ActionStatement::Compute { .. } => None,
+        ActionStatement::CamEngage { target }
+        | ActionStatement::CamDisengage { target }
+        | ActionStatement::CamPhase { target, .. } => Some((
+            format!("cam_action {target}"),
+            target.clone(),
+        )),
+        ActionStatement::CamSwitch { target, new_table } => Some((
+            format!("cam_switch {target} {new_table}"),
+            target.clone(),
+        )),
         ActionStatement::Log { .. } => None,
     }
 }
@@ -477,6 +497,9 @@ fn infer_wait_sensors(wait: &WaitStatement, sensor_names: &HashSet<String>) -> V
     let mut seen = HashSet::new();
 
     for condition in wait_conditions(wait) {
+        if condition.is_expression_compare() {
+            continue;
+        }
         if sensor_names.contains(&condition.left) {
             if seen.insert(condition.left.clone()) {
                 sensors.push(condition.left.clone());
@@ -531,6 +554,15 @@ fn wait_to_text(wait: &WaitStatement) -> String {
 }
 
 fn condition_to_text(condition: &ConditionExpression) -> String {
+    if let Some((left, right)) = condition.expression_pair() {
+        return format!(
+            "{} {} {}",
+            render_expression(left),
+            comparison_operator_text(&condition.operator),
+            render_expression(right)
+        );
+    }
+
     format!(
         "{} {} {}",
         condition.left,
@@ -557,6 +589,34 @@ fn literal_to_text(literal: &LiteralValue) -> String {
         LiteralValue::Measured(measured) => format!("{}{}", measured.value, measured.unit),
         LiteralValue::String(value) => format!("\"{value}\""),
         LiteralValue::State(state) => format!("{}.{}", state.device, state.state),
+    }
+}
+
+fn render_expression(expr: &crate::ast::Expression) -> String {
+    match expr {
+        crate::ast::Expression::Literal(value) => value.to_string(),
+        crate::ast::Expression::Variable(name) => name.clone(),
+        crate::ast::Expression::UnaryNeg(inner) => format!("-({})", render_expression(inner)),
+        crate::ast::Expression::BinaryOp { op, left, right } => format!(
+            "({}{}{})",
+            render_expression(left),
+            match op {
+                crate::ast::BinaryOperator::Add => "+",
+                crate::ast::BinaryOperator::Sub => "-",
+                crate::ast::BinaryOperator::Mul => "*",
+                crate::ast::BinaryOperator::Div => "/",
+                crate::ast::BinaryOperator::Mod => "%",
+            },
+            render_expression(right)
+        ),
+        crate::ast::Expression::FunctionCall { name, args } => format!(
+            "{}({})",
+            name,
+            args.iter()
+                .map(render_expression)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
     }
 }
 

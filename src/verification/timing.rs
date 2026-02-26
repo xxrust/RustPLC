@@ -231,7 +231,11 @@ impl TimingContext {
                     .stroke_ms
                     .or(profile.response_ms)
                     .or(profile.ramp_ms)?;
-                (target.device.as_str(), format!("extend {}", target.device), own)
+                (
+                    target.device.as_str(),
+                    format!("extend {}", target.device),
+                    own,
+                )
             }
             ActionStatement::Retract { target } => {
                 let profile = self.profiles.get(&target.device)?;
@@ -239,7 +243,11 @@ impl TimingContext {
                     .retract_ms
                     .or(profile.response_ms)
                     .or(profile.ramp_ms)?;
-                (target.device.as_str(), format!("retract {}", target.device), own)
+                (
+                    target.device.as_str(),
+                    format!("retract {}", target.device),
+                    own,
+                )
             }
             ActionStatement::Set { target, value } => {
                 let profile = self.profiles.get(&target.device)?;
@@ -253,8 +261,26 @@ impl TimingContext {
             ActionStatement::SetAnalog { target, value } => {
                 let profile = self.profiles.get(&target.device)?;
                 let own = profile.ramp_ms.or(profile.response_ms)?;
-                (target.device.as_str(), format!("set_analog {} {value}", target.device), own)
+                (
+                    target.device.as_str(),
+                    format!("set_analog {} {value}", target.device),
+                    own,
+                )
             }
+            ActionStatement::SetAnalogExpr { target, .. } => {
+                let profile = self.profiles.get(&target.device)?;
+                let own = profile.ramp_ms.or(profile.response_ms)?;
+                (
+                    target.device.as_str(),
+                    format!("set_analog {} <expr>", target.device),
+                    own,
+                )
+            }
+            ActionStatement::CamEngage { .. }
+            | ActionStatement::CamDisengage { .. }
+            | ActionStatement::CamSwitch { .. }
+            | ActionStatement::CamPhase { .. } => return None,
+            ActionStatement::Compute { .. } => return None,
             ActionStatement::Log { .. } => return None,
         };
 

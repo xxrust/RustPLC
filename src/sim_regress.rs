@@ -761,6 +761,14 @@ fn io_sizes_for_program_and_scenario(
                             Action::SetAnalog { id, .. } => {
                                 max_ao = Some(max_ao.map_or(id.0, |m| m.max(id.0)));
                             }
+                            Action::SetAnalogExpr { id, .. } => {
+                                max_ao = Some(max_ao.map_or(id.0, |m| m.max(id.0)));
+                            }
+                            Action::Compute { .. } => {}
+                            Action::CamEngage { .. }
+                            | Action::CamDisengage { .. }
+                            | Action::CamSwitch { .. }
+                            | Action::CamPhase { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
@@ -768,6 +776,11 @@ fn io_sizes_for_program_and_scenario(
                 _ => {}
             }
         }
+    }
+    for cam in program.cam_configs {
+        max_ai = Some(max_ai.map_or(cam.master_input.0, |m| m.max(cam.master_input.0)));
+        max_ai = Some(max_ai.map_or(cam.slave_feedback.0, |m| m.max(cam.slave_feedback.0)));
+        max_ao = Some(max_ao.map_or(cam.slave_output.0, |m| m.max(cam.slave_output.0)));
     }
     for pid in program.pid_loops {
         max_ai = Some(max_ai.map_or(pid.pv.0, |m| m.max(pid.pv.0)));

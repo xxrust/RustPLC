@@ -471,6 +471,15 @@ fn wait_to_text(wait: &WaitStatement) -> String {
 }
 
 fn condition_to_text(condition: &ConditionExpression) -> String {
+    if let Some((left, right)) = condition.expression_pair() {
+        return format!(
+            "{} {} {}",
+            render_expression(left),
+            comparison_operator_text(&condition.operator),
+            render_expression(right)
+        );
+    }
+
     format!(
         "{} {} {}",
         condition.left,
@@ -497,6 +506,34 @@ fn literal_to_text(literal: &LiteralValue) -> String {
         LiteralValue::Measured(measured) => format!("{}{}", measured.value, measured.unit),
         LiteralValue::String(value) => format!("\"{value}\""),
         LiteralValue::State(state) => format!("{}.{}", state.device, state.state),
+    }
+}
+
+fn render_expression(expr: &crate::ast::Expression) -> String {
+    match expr {
+        crate::ast::Expression::Literal(value) => value.to_string(),
+        crate::ast::Expression::Variable(name) => name.clone(),
+        crate::ast::Expression::UnaryNeg(inner) => format!("-({})", render_expression(inner)),
+        crate::ast::Expression::BinaryOp { op, left, right } => format!(
+            "({}{}{})",
+            render_expression(left),
+            match op {
+                crate::ast::BinaryOperator::Add => "+",
+                crate::ast::BinaryOperator::Sub => "-",
+                crate::ast::BinaryOperator::Mul => "*",
+                crate::ast::BinaryOperator::Div => "/",
+                crate::ast::BinaryOperator::Mod => "%",
+            },
+            render_expression(right)
+        ),
+        crate::ast::Expression::FunctionCall { name, args } => format!(
+            "{}({})",
+            name,
+            args.iter()
+                .map(render_expression)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
     }
 }
 

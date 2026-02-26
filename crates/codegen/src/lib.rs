@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
-use runtime_core::{Action, Instr, Program, StepId, Timeout};
+use runtime_core::{
+    Action, CamAnalogField, CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr, Program,
+    StepId, Timeout,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodegenError {
@@ -57,6 +60,36 @@ pub fn generate_program_module(
                         }
                     }
                 }
+                Instr::WaitExpr { next, timeout, .. } => {
+                    if !check(next, task.steps.len()) {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
+                    if let Some(tmo) = timeout
+                        && !check(tmo.target, task.steps.len())
+                    {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
+                }
+                Instr::WaitCamDigital { next, timeout, .. } => {
+                    if !check(next, task.steps.len()) {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
+                    if let Some(tmo) = timeout
+                        && !check(tmo.target, task.steps.len())
+                    {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
+                }
+                Instr::WaitCamAnalog { next, timeout, .. } => {
+                    if !check(next, task.steps.len()) {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
+                    if let Some(tmo) = timeout
+                        && !check(tmo.target, task.steps.len())
+                    {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
+                }
                 Instr::Delay { next, .. } => {
                     if !check(next, task.steps.len()) {
                         return Err(CodegenError::StepIdOutOfRange);
@@ -85,7 +118,7 @@ pub fn generate_program_module(
     out.push_str(
         "  use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, AnalogOutputId};\n",
     );
-    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, Instr, PidConfig, Program, Step, StepId, Task, Timeout};\n\n");
+    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, CamAnalogField, CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr, PidConfig, Program, Step, StepId, Task, Timeout};\n\n");
 
     // Emit actions arrays, then steps, then tasks, then program.
     for (tidx, task) in program.tasks.iter().enumerate() {
@@ -148,7 +181,7 @@ pub fn generate_program_module(
 
     if program.pid_loops.is_empty() {
         out.push_str(
-            "  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[] };\n",
+            "  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[], var_init: &[], cam_configs: &[], cam_tables: &[] };\n",
         );
     } else {
         out.push_str(&format!(
@@ -161,7 +194,7 @@ pub fn generate_program_module(
             out.push_str(",\n");
         }
         out.push_str("  ];\n\n");
-        out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &PID_LOOPS };\n");
+        out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &PID_LOOPS, var_init: &[], cam_configs: &[], cam_tables: &[] };\n");
     }
     out.push_str("}\n");
 
@@ -179,6 +212,37 @@ fn format_action(a: &Action) -> String {
             id.0,
             format_f32(value)
         ),
+        Action::SetAnalogExpr { id, expr } => format!(
+            "Action::SetAnalogExpr {{ id: AnalogOutputId({}), expr: {} }}",
+            id.0,
+            format_expr_program(&expr)
+        ),
+        Action::Compute { target_var, expr } => format!(
+            "Action::Compute {{ target_var: {}, expr: {} }}",
+            target_var,
+            format_expr_program(&expr)
+        ),
+        Action::CamEngage { cam_index } => {
+            format!("Action::CamEngage {{ cam_index: {cam_index} }}")
+        }
+        Action::CamDisengage { cam_index } => {
+            format!("Action::CamDisengage {{ cam_index: {cam_index} }}")
+        }
+        Action::CamSwitch {
+            cam_index,
+            table_index,
+        } => format!(
+            "Action::CamSwitch {{ cam_index: {}, table_index: {} }}",
+            cam_index, table_index
+        ),
+        Action::CamPhase {
+            cam_index,
+            offset_expr,
+        } => format!(
+            "Action::CamPhase {{ cam_index: {}, offset_expr: {} }}",
+            cam_index,
+            format_expr_program(&offset_expr)
+        ),
         Action::Extend { output } => {
             format!("Action::Extend {{ output: DigitalOutputId({}) }}", output.0)
         }
@@ -193,6 +257,39 @@ fn format_action(a: &Action) -> String {
             "Action::Log {{ message_id: {}, message: {:?} }}",
             message_id, message
         ),
+    }
+}
+
+fn format_expr_program(expr: &ExprProgram) -> String {
+    let mut ops = String::new();
+    for (idx, op) in expr.ops.iter().enumerate() {
+        if idx > 0 {
+            ops.push_str(", ");
+        }
+        ops.push_str(&format_expr_op(op));
+    }
+    format!("ExprProgram {{ ops: [{ops}], len: {} }}", expr.len)
+}
+
+fn format_expr_op(op: &ExprOp) -> String {
+    match *op {
+        ExprOp::PushLiteral(v) => format!("ExprOp::PushLiteral({})", format_f32(v)),
+        ExprOp::PushVariable(idx) => format!("ExprOp::PushVariable({idx})"),
+        ExprOp::Add => "ExprOp::Add".to_string(),
+        ExprOp::Sub => "ExprOp::Sub".to_string(),
+        ExprOp::Mul => "ExprOp::Mul".to_string(),
+        ExprOp::Div => "ExprOp::Div".to_string(),
+        ExprOp::Mod => "ExprOp::Mod".to_string(),
+        ExprOp::Neg => "ExprOp::Neg".to_string(),
+        ExprOp::CallAbs => "ExprOp::CallAbs".to_string(),
+        ExprOp::CallMin => "ExprOp::CallMin".to_string(),
+        ExprOp::CallMax => "ExprOp::CallMax".to_string(),
+        ExprOp::CallSin => "ExprOp::CallSin".to_string(),
+        ExprOp::CallCos => "ExprOp::CallCos".to_string(),
+        ExprOp::CallSqrt => "ExprOp::CallSqrt".to_string(),
+        ExprOp::CallPow => "ExprOp::CallPow".to_string(),
+        ExprOp::CallFmod => "ExprOp::CallFmod".to_string(),
+        ExprOp::CallClamp => "ExprOp::CallClamp".to_string(),
     }
 }
 
@@ -256,12 +353,119 @@ fn format_instr(tidx: usize, sidx: usize, instr: &Instr<'_>) -> String {
                 id.0, ranges_ref, next.0, tmo
             )
         }
+        Instr::WaitExpr {
+            left,
+            op,
+            right,
+            next,
+            timeout,
+        } => {
+            let tmo = match timeout {
+                None => "None".to_string(),
+                Some(Timeout {
+                    after_ticks,
+                    target,
+                }) => format!(
+                    "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
+                    after_ticks, target.0
+                ),
+            };
+            format!(
+                "Instr::WaitExpr {{ left: {}, op: {}, right: {}, next: StepId({}), timeout: {} }}",
+                format_expr_program(&left),
+                format_compare_op(op),
+                format_expr_program(&right),
+                next.0,
+                tmo
+            )
+        }
+        Instr::WaitCamDigital {
+            cam_index,
+            field,
+            equals,
+            next,
+            timeout,
+        } => {
+            let tmo = match timeout {
+                None => "None".to_string(),
+                Some(Timeout {
+                    after_ticks,
+                    target,
+                }) => format!(
+                    "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
+                    after_ticks, target.0
+                ),
+            };
+            format!(
+                "Instr::WaitCamDigital {{ cam_index: {}, field: {}, equals: {}, next: StepId({}), timeout: {} }}",
+                cam_index,
+                format_cam_digital_field(field),
+                equals,
+                next.0,
+                tmo
+            )
+        }
+        Instr::WaitCamAnalog {
+            cam_index,
+            field,
+            op,
+            value,
+            next,
+            timeout,
+        } => {
+            let tmo = match timeout {
+                None => "None".to_string(),
+                Some(Timeout {
+                    after_ticks,
+                    target,
+                }) => format!(
+                    "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
+                    after_ticks, target.0
+                ),
+            };
+            format!(
+                "Instr::WaitCamAnalog {{ cam_index: {}, field: {}, op: {}, value: {}, next: StepId({}), timeout: {} }}",
+                cam_index,
+                format_cam_analog_field(field),
+                format_compare_op(op),
+                format_f32(value),
+                next.0,
+                tmo
+            )
+        }
         Instr::Delay { ticks, next } => format!(
             "Instr::Delay {{ ticks: {}, next: StepId({}) }}",
             ticks, next.0
         ),
         Instr::Goto { target } => format!("Instr::Goto {{ target: StepId({}) }}", target.0),
         Instr::Halt => "Instr::Halt".to_string(),
+    }
+}
+
+fn format_compare_op(op: CompareOp) -> &'static str {
+    match op {
+        CompareOp::Eq => "CompareOp::Eq",
+        CompareOp::Ne => "CompareOp::Ne",
+        CompareOp::Gt => "CompareOp::Gt",
+        CompareOp::Lt => "CompareOp::Lt",
+        CompareOp::Ge => "CompareOp::Ge",
+        CompareOp::Le => "CompareOp::Le",
+    }
+}
+
+fn format_cam_digital_field(field: CamDigitalField) -> &'static str {
+    match field {
+        CamDigitalField::Engage => "CamDigitalField::Engage",
+        CamDigitalField::InSync => "CamDigitalField::InSync",
+        CamDigitalField::Fault => "CamDigitalField::Fault",
+    }
+}
+
+fn format_cam_analog_field(field: CamAnalogField) -> &'static str {
+    match field {
+        CamAnalogField::FollowingError => "CamAnalogField::FollowingError",
+        CamAnalogField::MasterPos => "CamAnalogField::MasterPos",
+        CamAnalogField::SlaveCmd => "CamAnalogField::SlaveCmd",
     }
 }
 
@@ -345,6 +549,9 @@ mod tests {
         static PROGRAM: Program<'static> = Program {
             tasks: &TASKS,
             pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
         };
 
         let src = generate_program_module(&PROGRAM, "gen").expect("codegen ok");

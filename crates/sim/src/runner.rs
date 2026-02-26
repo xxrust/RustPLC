@@ -158,6 +158,9 @@ mod tests {
         static PROGRAM: Program<'static> = Program {
             tasks: &TASKS,
             pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
         };
 
         let yaml = r#"

@@ -329,3 +329,93 @@ fn bridge_maps_pid_declaration_into_runtime_program_and_clamps_output() {
         "PID output should be clamped within limit, got {final_u}"
     );
 }
+
+const PLC_CAM_FIXTURE: &str = r#"
+[topology]
+device AI0: analog_input { range: 0..360, unit: "deg", external: true }
+device AO0: analog_output { range: 0..360, unit: "deg" }
+cam_table cam_a: periodic [
+    (0, 0),
+    (360, 0),
+]
+cam_table cam_b: periodic [
+    (0, 0),
+    (180, 180),
+    (360, 0),
+]
+device cam_xy: cam_coupling {
+    master: AI0,
+    slave: AO0,
+    table: cam_a,
+    interpolation: linear,
+    gear_ratio: 1.0,
+    phase_offset: 0.0,
+    following_error_limit: 999.0,
+    slave_feedback: AI0,
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step engage:
+        action: cam_engage cam_xy
+    step switch_and_phase:
+        action: cam_switch cam_xy cam_b
+        action: cam_phase cam_xy 10.0
+    step wait_master:
+        wait: cam_xy.master_pos > 5
+        timeout: 5ms -> goto done
+    on_complete: goto done
+
+task done:
+    step halt:
+"#;
+
+#[test]
+fn bridge_maps_cam_tables_configs_and_actions() {
+    let program = compile_to_runtime(PLC_CAM_FIXTURE, 1);
+    assert_eq!(program.cam_tables.len(), 2, "cam tables should be bridged");
+    assert_eq!(program.cam_configs.len(), 1, "cam config should be bridged");
+    assert_eq!(program.cam_configs[0].table_index, 0, "default table should map to index 0");
+
+    let mut saw_switch = false;
+    let mut saw_phase = false;
+    for task in program.tasks {
+        for step in task.steps {
+            if let runtime_core::Instr::Action { actions, .. } = step.instr {
+                for action in actions {
+                    match action {
+                        runtime_core::Action::CamSwitch { .. } => saw_switch = true,
+                        runtime_core::Action::CamPhase { .. } => saw_phase = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    assert!(saw_switch, "cam_switch should be lowered into runtime action");
+    assert!(saw_phase, "cam_phase should be lowered into runtime action");
+}
+
+#[test]
+fn bridge_waits_on_cam_runtime_state_and_drives_output() {
+    let program = compile_to_runtime(PLC_CAM_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 1, 1);
+
+    io.schedule_analog_input(Tick(1), AnalogInputId(0), 20.0);
+    for _ in 0..4 {
+        rt.tick(&mut io).expect("tick");
+    }
+
+    let last_ao = io
+        .analog_output_edges()
+        .last()
+        .map(|edge| edge.value)
+        .unwrap_or(0.0);
+    assert!(
+        (last_ao - 30.0).abs() < 1e-3,
+        "cam output should include phase offset after wait path, got {last_ao}"
+    );
+}

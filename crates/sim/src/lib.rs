@@ -13,13 +13,13 @@ mod runner;
 mod scenario;
 mod waveform;
 pub use control_kpi::{
-    ControlKpiError, PidControlScenario, PidKpiReport, ProcessModelConfig, run_pid_kpi,
+    run_pid_kpi, ControlKpiError, PidControlScenario, PidKpiReport, ProcessModelConfig,
 };
 pub use plant::{CylinderConfig, LimitKind, LimitSensorConfig, Plant, SolenoidValveConfig};
 pub use report::{ScenarioSummary, SimFailure, SimReport};
 pub use runner::{
-    SimRunError, SimRunOutput, run_program_for_scenario,
-    run_program_for_scenario_with_tick_observer,
+    run_program_for_scenario, run_program_for_scenario_with_tick_observer, SimRunError,
+    SimRunOutput,
 };
 pub use scenario::{
     DigitalBurstEvent, FaultEvent, ForceEvent, ForceSet, InputEvent, InputSet, Scenario,
@@ -625,6 +625,9 @@ mod tests {
         static PROGRAM: Program<'static> = Program {
             tasks: &TASKS,
             pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
         };
 
         let mut io = SimIo::new(1, 1, 0, 0);

@@ -1,13 +1,16 @@
 use crate::ir::{
-    BinaryValue as IrBinaryValue, DeviceKind, State, StateMachine, TopologyGraph, Transition,
-    TransitionAction, TransitionGuard,
+    BinaryValue as IrBinaryValue, CamInterpolation as IrCamInterpolation, DeviceKind, State,
+    StateMachine, TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
-use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
+use crate::plc_port::{parse_physical_plc_port_ref, PlcPortKind};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
-use petgraph::Direction;
 use petgraph::graph::NodeIndex;
+use petgraph::Direction;
 use runtime_core::{
-    Action, AnalogRange, AntiWindup, Instr, PidConfig, Program, Step, StepId, Task, Timeout,
+    Action, AnalogRange, AntiWindup, CamAnalogField, CamCouplingConfig,
+    CamDigitalField, CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, ExprOp,
+    ExprProgram, Instr, PidConfig, Program, SplineCoeff as RtSplineCoeff, Step, StepId, Task,
+    Timeout, MAX_CAM_POINTS,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -51,7 +54,9 @@ pub enum BridgeError {
     )]
     UnresolvableDigitalOutput { state: String, device: String },
 
-    #[error("unable to resolve a unique physical analog input for device {device} (state {state})")]
+    #[error(
+        "unable to resolve a unique physical analog input for device {device} (state {state})"
+    )]
     UnresolvableAnalogInput { state: String, device: String },
 
     #[error(
@@ -85,6 +90,9 @@ pub enum BridgeError {
         field: String,
         value: String,
     },
+
+    #[error("cam_coupling {cam} references unknown cam table {table}")]
+    UnknownCamTableReference { cam: String, table: String },
 }
 
 /// Convert a compiler/semantic `StateMachine` IR into a minimal `runtime-core` `Program`.
@@ -93,7 +101,7 @@ pub enum BridgeError {
 /// - `action`: set (digital), extend, retract
 /// - `action`: log
 /// - `action`: set_analog
-/// - `wait`: single boolean equality/inequality (no AND/OR/NOT)
+/// - `wait`: boolean equality/inequality and arithmetic expression comparisons (no AND/OR/NOT)
 /// - `delay`
 /// - `timeout -> goto`
 /// - `goto`
@@ -111,6 +119,23 @@ pub fn state_machine_to_runtime_program(
     }
 
     let resolver = TopologyResolver::new(topology);
+    let variable_indices = topology
+        .variables
+        .iter()
+        .map(|v| (v.name.clone(), v.index))
+        .collect::<HashMap<_, _>>();
+    let cam_index_by_name = topology
+        .cam_couplings
+        .iter()
+        .enumerate()
+        .map(|(idx, cam)| (cam.name.clone(), idx as u16))
+        .collect::<HashMap<_, _>>();
+    let cam_table_index_by_name = topology
+        .cam_tables
+        .iter()
+        .enumerate()
+        .map(|(idx, table)| (table.name.clone(), idx as u16))
+        .collect::<HashMap<_, _>>();
 
     // Assign StepId to every IR state (flattened).
     let mut state_to_step = HashMap::<(String, String), StepId>::new();
@@ -166,6 +191,9 @@ pub fn state_machine_to_runtime_program(
             &mut steps,
             sm,
             tick_ms,
+            &variable_indices,
+            &cam_index_by_name,
+            &cam_table_index_by_name,
         )?;
 
         steps[idx].instr = instr;
@@ -182,9 +210,25 @@ pub fn state_machine_to_runtime_program(
 
     let leaked_pid_loops: &'static [PidConfig] =
         Box::leak(build_pid_configs(&resolver, topology, tick_ms)?.into_boxed_slice());
+    let leaked_cam_tables: &'static [CamTableData] =
+        Box::leak(build_cam_tables(topology).into_boxed_slice());
+    let leaked_cam_configs: &'static [CamCouplingConfig] = Box::leak(
+        build_cam_configs(&resolver, topology, &cam_table_index_by_name)?.into_boxed_slice(),
+    );
+    let leaked_var_init: &'static [f32] = Box::leak(
+        topology
+            .variables
+            .iter()
+            .map(|var| var.initial_value)
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    );
     Ok(Program {
         tasks: leaked_tasks,
         pid_loops: leaked_pid_loops,
+        var_init: leaked_var_init,
+        cam_configs: leaked_cam_configs,
+        cam_tables: leaked_cam_tables,
     })
 }
 
@@ -242,6 +286,91 @@ fn build_pid_configs(
     Ok(out)
 }
 
+fn build_cam_tables(topology: &TopologyGraph) -> Vec<CamTableData> {
+    let mut out = Vec::with_capacity(topology.cam_tables.len());
+
+    for table in &topology.cam_tables {
+        let mut master = [0.0f32; MAX_CAM_POINTS];
+        let mut slave = [0.0f32; MAX_CAM_POINTS];
+        let mut coeffs = [RtSplineCoeff {
+            a: 0.0,
+            b: 0.0,
+            c: 0.0,
+            d: 0.0,
+        }; MAX_CAM_POINTS];
+
+        for (idx, value) in table.master_positions.iter().copied().enumerate() {
+            if idx >= MAX_CAM_POINTS {
+                break;
+            }
+            master[idx] = value;
+        }
+        for (idx, value) in table.slave_positions.iter().copied().enumerate() {
+            if idx >= MAX_CAM_POINTS {
+                break;
+            }
+            slave[idx] = value;
+        }
+        for (idx, c) in table.spline_coeffs.iter().enumerate() {
+            if idx >= MAX_CAM_POINTS {
+                break;
+            }
+            coeffs[idx] = RtSplineCoeff {
+                a: c.a,
+                b: c.b,
+                c: c.c,
+                d: c.d,
+            };
+        }
+
+        out.push(CamTableData {
+            periodic: table.periodic,
+            num_points: table.num_points.min(MAX_CAM_POINTS) as u16,
+            master,
+            slave,
+            coeffs,
+            last_index: 0,
+        });
+    }
+
+    out
+}
+
+fn build_cam_configs(
+    resolver: &TopologyResolver,
+    topology: &TopologyGraph,
+    table_indices: &HashMap<String, u16>,
+) -> Result<Vec<CamCouplingConfig>, BridgeError> {
+    let mut out = Vec::with_capacity(topology.cam_couplings.len());
+
+    for cam in &topology.cam_couplings {
+        let ctx = format!("cam:{}", cam.name);
+        let Some(table_index) = table_indices.get(&cam.table).copied() else {
+            return Err(BridgeError::UnknownCamTableReference {
+                cam: cam.name.clone(),
+                table: cam.table.clone(),
+            });
+        };
+        let interpolation = match cam.interpolation {
+            IrCamInterpolation::Linear => RtCamInterpolation::Linear,
+            IrCamInterpolation::CubicSpline => RtCamInterpolation::CubicSpline,
+        };
+
+        out.push(CamCouplingConfig {
+            master_input: resolver.resolve_analog_input_id(&ctx, &cam.master)?,
+            slave_output: resolver.resolve_analog_output_id(&ctx, &cam.slave, "self")?,
+            table_index,
+            interpolation,
+            gear_ratio: cam.gear_ratio,
+            initial_phase_offset: cam.phase_offset,
+            following_error_limit: cam.following_error_limit,
+            slave_feedback: resolver.resolve_analog_input_id(&ctx, &cam.slave_feedback)?,
+        });
+    }
+
+    Ok(out)
+}
+
 fn convert_state_outgoing(
     resolver: &TopologyResolver,
     state_name: &str,
@@ -250,6 +379,9 @@ fn convert_state_outgoing(
     steps: &mut Vec<Step<'static>>,
     sm: &StateMachine,
     tick_ms: u64,
+    variable_indices: &HashMap<String, u16>,
+    cam_indices: &HashMap<String, u16>,
+    cam_table_indices: &HashMap<String, u16>,
 ) -> Result<Instr<'static>, BridgeError> {
     match outs.len() {
         0 => Ok(Instr::Halt),
@@ -261,6 +393,9 @@ fn convert_state_outgoing(
             steps,
             sm,
             tick_ms,
+            variable_indices,
+            cam_indices,
+            cam_table_indices,
         ),
         2 => convert_wait_with_timeout(
             resolver,
@@ -270,6 +405,9 @@ fn convert_state_outgoing(
             steps,
             sm,
             tick_ms,
+            variable_indices,
+            cam_indices,
+            cam_table_indices,
         ),
         n => Err(BridgeError::UnsupportedTransitionShape {
             state: state_name.to_string(),
@@ -286,6 +424,9 @@ fn convert_single_transition(
     steps: &mut Vec<Step<'static>>,
     sm: &StateMachine,
     tick_ms: u64,
+    variable_indices: &HashMap<String, u16>,
+    cam_indices: &HashMap<String, u16>,
+    cam_table_indices: &HashMap<String, u16>,
 ) -> Result<Instr<'static>, BridgeError> {
     match &t.guard {
         TransitionGuard::Always => {
@@ -293,7 +434,14 @@ fn convert_single_transition(
             if t.actions.is_empty() {
                 Ok(Instr::Goto { target })
             } else {
-                let actions = leak_actions(resolver, state_name, &t.actions)?;
+                let actions = leak_actions(
+                    resolver,
+                    state_name,
+                    &t.actions,
+                    variable_indices,
+                    cam_indices,
+                    cam_table_indices,
+                )?;
                 Ok(Instr::Action {
                     actions,
                     next: target,
@@ -317,6 +465,9 @@ fn convert_single_transition(
                     state_name,
                     &t.actions,
                     target,
+                    variable_indices,
+                    cam_indices,
+                    cam_table_indices,
                 )?;
                 Ok(Instr::Delay {
                     ticks,
@@ -326,23 +477,25 @@ fn convert_single_transition(
         }
         TransitionGuard::Condition { expression } => {
             let expr = expression.trim();
+            let target = lookup_target_step(state_name, &t.to, state_to_step)?;
+            let next = if t.actions.is_empty() {
+                target
+            } else {
+                push_action_step(
+                    steps,
+                    &format!("{state_name}__cond_actions"),
+                    resolver,
+                    state_name,
+                    &t.actions,
+                    target,
+                    variable_indices,
+                    cam_indices,
+                    cam_table_indices,
+                )?
+            };
             if let Some((device, ranges)) = parse_analog_region_guard(expr) {
                 let id = resolver.resolve_analog_input_id(state_name, &device)?;
                 let analog_ranges = ranges_to_analog_ranges(sm, state_name, &device, &ranges)?;
-
-                let target = lookup_target_step(state_name, &t.to, state_to_step)?;
-                let next = if t.actions.is_empty() {
-                    target
-                } else {
-                    push_action_step(
-                        steps,
-                        &format!("{state_name}__cond_actions"),
-                        resolver,
-                        state_name,
-                        &t.actions,
-                        target,
-                    )?
-                };
 
                 Ok(Instr::WaitAnalog {
                     id,
@@ -350,29 +503,46 @@ fn convert_single_transition(
                     next,
                     timeout: None,
                 })
-            } else {
-                let (device, equals) = parse_single_bool_guard(state_name, expr)?;
-                let id = resolver.resolve_digital_input_id(state_name, &device)?;
-
-                let target = lookup_target_step(state_name, &t.to, state_to_step)?;
-                let next = if t.actions.is_empty() {
-                    target
-                } else {
-                    push_action_step(
-                        steps,
-                        &format!("{state_name}__cond_actions"),
-                        resolver,
+            } else if let Some(cam_guard) = parse_cam_wait_guard(expr, cam_indices) {
+                Ok(cam_guard.into_instr(next, None))
+            } else if let Ok((lhs, equals)) = parse_single_bool_guard(state_name, expr) {
+                if variable_indices.contains_key(&lhs) {
+                    let left = compile_guard_expr_program(state_name, &lhs, variable_indices)?;
+                    let right = compile_guard_expr_program(
                         state_name,
-                        &t.actions,
-                        target,
-                    )?
-                };
-
-                Ok(Instr::WaitDigital {
-                    id,
-                    equals,
+                        if equals { "1.0" } else { "0.0" },
+                        variable_indices,
+                    )?;
+                    Ok(Instr::WaitExpr {
+                        left,
+                        op: CompareOp::Eq,
+                        right,
+                        next,
+                        timeout: None,
+                    })
+                } else {
+                    let id = resolver.resolve_digital_input_id(state_name, &lhs)?;
+                    Ok(Instr::WaitDigital {
+                        id,
+                        equals,
+                        next,
+                        timeout: None,
+                    })
+                }
+            } else if let Some((left_raw, op, right_raw)) = parse_compare_guard(expr) {
+                let left = compile_guard_expr_program(state_name, &left_raw, variable_indices)?;
+                let right = compile_guard_expr_program(state_name, &right_raw, variable_indices)?;
+                Ok(Instr::WaitExpr {
+                    left,
+                    op,
+                    right,
                     next,
                     timeout: None,
+                })
+            } else {
+                Err(BridgeError::UnsupportedGuardExpression {
+                    state: state_name.to_string(),
+                    expression: expr.to_string(),
                 })
             }
         }
@@ -391,6 +561,9 @@ fn convert_wait_with_timeout(
     steps: &mut Vec<Step<'static>>,
     sm: &StateMachine,
     tick_ms: u64,
+    variable_indices: &HashMap<String, u16>,
+    cam_indices: &HashMap<String, u16>,
+    cam_table_indices: &HashMap<String, u16>,
 ) -> Result<Instr<'static>, BridgeError> {
     let (cond, timeout) = match (outs[0], outs[1]) {
         (a, b)
@@ -434,6 +607,9 @@ fn convert_wait_with_timeout(
             state_name,
             &cond.actions,
             cond_target,
+            variable_indices,
+            cam_indices,
+            cam_table_indices,
         )?
     };
 
@@ -448,6 +624,9 @@ fn convert_wait_with_timeout(
             state_name,
             &timeout.actions,
             timeout_target,
+            variable_indices,
+            cam_indices,
+            cam_table_indices,
         )?
     };
 
@@ -464,17 +643,61 @@ fn convert_wait_with_timeout(
                 target: timeout_next,
             }),
         })
-    } else {
-        let (device, equals) = parse_single_bool_guard(state_name, expr)?;
-        let id = resolver.resolve_digital_input_id(state_name, &device)?;
-        Ok(Instr::WaitDigital {
-            id,
-            equals,
+    } else if let Some(cam_guard) = parse_cam_wait_guard(expr, cam_indices) {
+        Ok(cam_guard.into_instr(
+            cond_next,
+            Some(Timeout {
+                after_ticks,
+                target: timeout_next,
+            }),
+        ))
+    } else if let Ok((lhs, equals)) = parse_single_bool_guard(state_name, expr) {
+        if variable_indices.contains_key(&lhs) {
+            let left = compile_guard_expr_program(state_name, &lhs, variable_indices)?;
+            let right = compile_guard_expr_program(
+                state_name,
+                if equals { "1.0" } else { "0.0" },
+                variable_indices,
+            )?;
+            Ok(Instr::WaitExpr {
+                left,
+                op: CompareOp::Eq,
+                right,
+                next: cond_next,
+                timeout: Some(Timeout {
+                    after_ticks,
+                    target: timeout_next,
+                }),
+            })
+        } else {
+            let id = resolver.resolve_digital_input_id(state_name, &lhs)?;
+            Ok(Instr::WaitDigital {
+                id,
+                equals,
+                next: cond_next,
+                timeout: Some(Timeout {
+                    after_ticks,
+                    target: timeout_next,
+                }),
+            })
+        }
+    } else if let Some((left_raw, op, right_raw)) = parse_compare_guard(expr) {
+        let left = compile_guard_expr_program(state_name, &left_raw, variable_indices)?;
+        let right = compile_guard_expr_program(state_name, &right_raw, variable_indices)?;
+        Ok(Instr::WaitExpr {
+            left,
+            op,
+            right,
             next: cond_next,
             timeout: Some(Timeout {
                 after_ticks,
                 target: timeout_next,
             }),
+        })
+    } else {
+        Err(BridgeError::UnsupportedGuardExpression {
+            state: state_name.to_string(),
+            expression: expr.to_string(),
         })
     }
 }
@@ -503,6 +726,175 @@ fn parse_analog_region_guard(expr: &str) -> Option<(String, Vec<usize>)> {
     } else {
         Some((device.to_string(), out))
     }
+}
+
+fn parse_compare_guard(expr: &str) -> Option<(String, CompareOp, String)> {
+    if expr.contains(" AND ") || expr.contains(" OR ") || expr.contains("NOT(") {
+        return None;
+    }
+    if is_single_bool_guard_shape(expr) {
+        return None;
+    }
+
+    for (raw_op, op) in [
+        ("==", CompareOp::Eq),
+        ("!=", CompareOp::Ne),
+        (">=", CompareOp::Ge),
+        ("<=", CompareOp::Le),
+        (">", CompareOp::Gt),
+        ("<", CompareOp::Lt),
+    ] {
+        if let Some((left, right)) = expr.split_once(raw_op) {
+            let left = left.trim();
+            let right = right.trim();
+            if left.is_empty() || right.is_empty() {
+                return None;
+            }
+            return Some((left.to_string(), op, right.to_string()));
+        }
+    }
+
+    None
+}
+
+enum CamWaitGuard {
+    Digital {
+        cam_index: u16,
+        field: CamDigitalField,
+        equals: bool,
+    },
+    Analog {
+        cam_index: u16,
+        field: CamAnalogField,
+        op: CompareOp,
+        value: f32,
+    },
+}
+
+impl CamWaitGuard {
+    fn into_instr(self, next: StepId, timeout: Option<Timeout>) -> Instr<'static> {
+        match self {
+            CamWaitGuard::Digital {
+                cam_index,
+                field,
+                equals,
+            } => Instr::WaitCamDigital {
+                cam_index,
+                field,
+                equals,
+                next,
+                timeout,
+            },
+            CamWaitGuard::Analog {
+                cam_index,
+                field,
+                op,
+                value,
+            } => Instr::WaitCamAnalog {
+                cam_index,
+                field,
+                op,
+                value,
+                next,
+                timeout,
+            },
+        }
+    }
+}
+
+fn parse_cam_wait_guard(expr: &str, cam_indices: &HashMap<String, u16>) -> Option<CamWaitGuard> {
+    let (left_raw, op, right_raw) = parse_compare_guard(expr)?;
+    let mut parts = left_raw.split('.');
+    let cam_name = parts.next()?.trim();
+    let field_name = parts.next()?.trim();
+    if parts.next().is_some() {
+        return None;
+    }
+    let cam_index = cam_indices.get(cam_name).copied()?;
+
+    let parse_bool = |raw: &str| match raw.trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    };
+
+    match field_name {
+        "engage" => {
+            let rhs = parse_bool(&right_raw)?;
+            let equals = match op {
+                CompareOp::Eq => rhs,
+                CompareOp::Ne => !rhs,
+                _ => return None,
+            };
+            Some(CamWaitGuard::Digital {
+                cam_index,
+                field: CamDigitalField::Engage,
+                equals,
+            })
+        }
+        "in_sync" => {
+            let rhs = parse_bool(&right_raw)?;
+            let equals = match op {
+                CompareOp::Eq => rhs,
+                CompareOp::Ne => !rhs,
+                _ => return None,
+            };
+            Some(CamWaitGuard::Digital {
+                cam_index,
+                field: CamDigitalField::InSync,
+                equals,
+            })
+        }
+        "fault" => {
+            let rhs = parse_bool(&right_raw)?;
+            let equals = match op {
+                CompareOp::Eq => rhs,
+                CompareOp::Ne => !rhs,
+                _ => return None,
+            };
+            Some(CamWaitGuard::Digital {
+                cam_index,
+                field: CamDigitalField::Fault,
+                equals,
+            })
+        }
+        "following_error" => right_raw
+            .parse::<f32>()
+            .ok()
+            .map(|value| CamWaitGuard::Analog {
+                cam_index,
+                field: CamAnalogField::FollowingError,
+                op,
+                value,
+            }),
+        "master_pos" => right_raw.parse::<f32>().ok().map(|value| CamWaitGuard::Analog {
+            cam_index,
+            field: CamAnalogField::MasterPos,
+            op,
+            value,
+        }),
+        "slave_cmd" => right_raw.parse::<f32>().ok().map(|value| CamWaitGuard::Analog {
+            cam_index,
+            field: CamAnalogField::SlaveCmd,
+            op,
+            value,
+        }),
+        _ => None,
+    }
+}
+
+fn is_single_bool_guard_shape(expr: &str) -> bool {
+    let parts: Vec<&str> = expr.split_whitespace().collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    let lhs = parts[0].trim();
+    let op = parts[1].trim();
+    let rhs = parts[2].trim();
+    !lhs.is_empty()
+        && !lhs.contains('.')
+        && (op == "==" || op == "!=")
+        && (rhs == "true" || rhs == "false")
 }
 
 fn ranges_to_analog_ranges(
@@ -628,6 +1020,19 @@ fn parse_single_bool_guard(
     Ok((lhs.to_string(), equals))
 }
 
+fn compile_guard_expr_program(
+    state_name: &str,
+    raw: &str,
+    variable_indices: &HashMap<String, u16>,
+) -> Result<ExprProgram, BridgeError> {
+    compile_expr_program(state_name, raw, variable_indices).map_err(|_| {
+        BridgeError::UnsupportedGuardExpression {
+            state: state_name.to_string(),
+            expression: raw.to_string(),
+        }
+    })
+}
+
 fn push_action_step(
     steps: &mut Vec<Step<'static>>,
     name: &str,
@@ -635,9 +1040,19 @@ fn push_action_step(
     state_name: &str,
     actions: &[TransitionAction],
     next: StepId,
+    variable_indices: &HashMap<String, u16>,
+    cam_indices: &HashMap<String, u16>,
+    cam_table_indices: &HashMap<String, u16>,
 ) -> Result<StepId, BridgeError> {
     let leaked_name: &'static str = Box::leak(name.to_string().into_boxed_str());
-    let leaked_actions = leak_actions(resolver, state_name, actions)?;
+    let leaked_actions = leak_actions(
+        resolver,
+        state_name,
+        actions,
+        variable_indices,
+        cam_indices,
+        cam_table_indices,
+    )?;
     let id = StepId(steps.len() as u16);
     steps.push(Step {
         name: leaked_name,
@@ -653,10 +1068,20 @@ fn leak_actions(
     resolver: &TopologyResolver,
     state_name: &str,
     actions: &[TransitionAction],
+    variable_indices: &HashMap<String, u16>,
+    cam_indices: &HashMap<String, u16>,
+    cam_table_indices: &HashMap<String, u16>,
 ) -> Result<&'static [Action], BridgeError> {
     let mut out: Vec<Action> = Vec::with_capacity(actions.len());
     for a in actions {
-        out.push(convert_action(resolver, state_name, a)?);
+        out.push(convert_action(
+            resolver,
+            state_name,
+            a,
+            variable_indices,
+            cam_indices,
+            cam_table_indices,
+        )?);
     }
     Ok(Box::leak(out.into_boxed_slice()))
 }
@@ -665,6 +1090,9 @@ fn convert_action(
     resolver: &TopologyResolver,
     state_name: &str,
     a: &TransitionAction,
+    variable_indices: &HashMap<String, u16>,
+    cam_indices: &HashMap<String, u16>,
+    cam_table_indices: &HashMap<String, u16>,
 ) -> Result<Action, BridgeError> {
     match a {
         TransitionAction::Extend { target, port } => {
@@ -703,6 +1131,77 @@ fn convert_action(
                     })?;
             Ok(Action::SetAnalog { id, value })
         }
+        TransitionAction::SetAnalogExpr {
+            target,
+            port,
+            expr_raw,
+        } => {
+            let id = resolver.resolve_analog_output_id(state_name, target, port)?;
+            let expr = compile_expr_program(state_name, expr_raw, variable_indices)?;
+            Ok(Action::SetAnalogExpr { id, expr })
+        }
+        TransitionAction::Compute { target, expr_raw } => {
+            let Some(target_var) = variable_indices.get(target).copied() else {
+                return Err(BridgeError::UnsupportedAction {
+                    state: state_name.to_string(),
+                    action: format!("compute {target}"),
+                });
+            };
+            let expr = compile_expr_program(state_name, expr_raw, variable_indices)?;
+            Ok(Action::Compute { target_var, expr })
+        }
+        TransitionAction::CamEngage { target } => {
+            let Some(cam_index) = cam_indices.get(target).copied() else {
+                return Err(BridgeError::UnsupportedAction {
+                    state: state_name.to_string(),
+                    action: format!("cam_engage {target}"),
+                });
+            };
+            Ok(Action::CamEngage { cam_index })
+        }
+        TransitionAction::CamDisengage { target } => {
+            let Some(cam_index) = cam_indices.get(target).copied() else {
+                return Err(BridgeError::UnsupportedAction {
+                    state: state_name.to_string(),
+                    action: format!("cam_disengage {target}"),
+                });
+            };
+            Ok(Action::CamDisengage { cam_index })
+        }
+        TransitionAction::CamSwitch { target, new_table } => {
+            let Some(cam_index) = cam_indices.get(target).copied() else {
+                return Err(BridgeError::UnsupportedAction {
+                    state: state_name.to_string(),
+                    action: format!("cam_switch {target} {new_table}"),
+                });
+            };
+            let Some(table_index) = cam_table_indices.get(new_table).copied() else {
+                return Err(BridgeError::UnsupportedAction {
+                    state: state_name.to_string(),
+                    action: format!("cam_switch {target} {new_table}"),
+                });
+            };
+            Ok(Action::CamSwitch {
+                cam_index,
+                table_index,
+            })
+        }
+        TransitionAction::CamPhase {
+            target,
+            offset_expr_raw,
+        } => {
+            let Some(cam_index) = cam_indices.get(target).copied() else {
+                return Err(BridgeError::UnsupportedAction {
+                    state: state_name.to_string(),
+                    action: format!("cam_phase {target} {offset_expr_raw}"),
+                });
+            };
+            let offset_expr = compile_expr_program(state_name, offset_expr_raw, variable_indices)?;
+            Ok(Action::CamPhase {
+                cam_index,
+                offset_expr,
+            })
+        }
         TransitionAction::Log { message } => {
             let leaked_message: &'static str = Box::leak(message.clone().into_boxed_str());
             Ok(Action::Log {
@@ -710,6 +1209,300 @@ fn convert_action(
                 message: leaked_message,
             })
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExprToken<'a> {
+    Number(&'a str),
+    Ident(&'a str),
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    LParen,
+    RParen,
+    Comma,
+}
+
+fn compile_expr_program(
+    state_name: &str,
+    raw: &str,
+    variable_indices: &HashMap<String, u16>,
+) -> Result<ExprProgram, BridgeError> {
+    let tokens = tokenize_expr(raw).map_err(|_| BridgeError::UnsupportedAction {
+        state: state_name.to_string(),
+        action: format!("expr: {raw}"),
+    })?;
+
+    let mut compiler = ExprCompiler {
+        state_name,
+        raw,
+        variable_indices,
+        tokens,
+        pos: 0,
+        output: [ExprOp::PushLiteral(0.0); runtime_core::MAX_EXPR_OPS],
+        out_len: 0,
+    };
+    compiler.parse_expression()?;
+    if compiler.pos != compiler.tokens.len() {
+        return Err(BridgeError::UnsupportedAction {
+            state: state_name.to_string(),
+            action: format!("unexpected trailing expression content: {raw}"),
+        });
+    }
+
+    Ok(ExprProgram {
+        ops: compiler.output,
+        len: compiler.out_len as u8,
+    })
+}
+
+fn tokenize_expr(raw: &str) -> Result<Vec<ExprToken<'_>>, ()> {
+    let mut out = Vec::new();
+    let bytes = raw.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let ch = bytes[i] as char;
+        if ch.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+
+        if ch.is_ascii_digit() || ch == '.' {
+            let start = i;
+            i += 1;
+            while i < bytes.len() {
+                let c = bytes[i] as char;
+                if c.is_ascii_digit() || c == '.' {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            out.push(ExprToken::Number(&raw[start..i]));
+            continue;
+        }
+
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let start = i;
+            i += 1;
+            while i < bytes.len() {
+                let c = bytes[i] as char;
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            out.push(ExprToken::Ident(&raw[start..i]));
+            continue;
+        }
+
+        match ch {
+            '(' => {
+                out.push(ExprToken::LParen);
+                i += 1;
+            }
+            ')' => {
+                out.push(ExprToken::RParen);
+                i += 1;
+            }
+            '+' => {
+                out.push(ExprToken::Plus);
+                i += 1;
+            }
+            '-' => {
+                out.push(ExprToken::Minus);
+                i += 1;
+            }
+            '*' => {
+                out.push(ExprToken::Star);
+                i += 1;
+            }
+            '/' => {
+                out.push(ExprToken::Slash);
+                i += 1;
+            }
+            '%' => {
+                out.push(ExprToken::Percent);
+                i += 1;
+            }
+            ',' => {
+                out.push(ExprToken::Comma);
+                i += 1;
+            }
+            _ => return Err(()),
+        }
+    }
+
+    Ok(out)
+}
+
+struct ExprCompiler<'a> {
+    state_name: &'a str,
+    raw: &'a str,
+    variable_indices: &'a HashMap<String, u16>,
+    tokens: Vec<ExprToken<'a>>,
+    pos: usize,
+    output: [ExprOp; runtime_core::MAX_EXPR_OPS],
+    out_len: usize,
+}
+
+impl<'a> ExprCompiler<'a> {
+    fn parse_expression(&mut self) -> Result<(), BridgeError> {
+        self.parse_additive()
+    }
+
+    fn parse_additive(&mut self) -> Result<(), BridgeError> {
+        self.parse_multiplicative()?;
+        loop {
+            let op = if self.consume_if(ExprToken::Plus) {
+                Some(ExprOp::Add)
+            } else if self.consume_if(ExprToken::Minus) {
+                Some(ExprOp::Sub)
+            } else {
+                None
+            };
+            let Some(op) = op else { break };
+            self.parse_multiplicative()?;
+            self.push_op(op)?;
+        }
+        Ok(())
+    }
+
+    fn parse_multiplicative(&mut self) -> Result<(), BridgeError> {
+        self.parse_unary()?;
+        loop {
+            let op = if self.consume_if(ExprToken::Star) {
+                Some(ExprOp::Mul)
+            } else if self.consume_if(ExprToken::Slash) {
+                Some(ExprOp::Div)
+            } else if self.consume_if(ExprToken::Percent) {
+                Some(ExprOp::Mod)
+            } else {
+                None
+            };
+            let Some(op) = op else { break };
+            self.parse_unary()?;
+            self.push_op(op)?;
+        }
+        Ok(())
+    }
+
+    fn parse_unary(&mut self) -> Result<(), BridgeError> {
+        if self.consume_if(ExprToken::Minus) {
+            self.parse_unary()?;
+            self.push_op(ExprOp::Neg)?;
+            return Ok(());
+        }
+        self.parse_primary()
+    }
+
+    fn parse_primary(&mut self) -> Result<(), BridgeError> {
+        let Some(token) = self.peek().copied() else {
+            return self.err("unexpected end of expression");
+        };
+
+        match token {
+            ExprToken::Number(raw_number) => {
+                self.pos += 1;
+                let parsed =
+                    raw_number
+                        .parse::<f32>()
+                        .map_err(|_| BridgeError::UnsupportedAction {
+                            state: self.state_name.to_string(),
+                            action: format!("invalid number in expr: {}", self.raw),
+                        })?;
+                self.push_op(ExprOp::PushLiteral(parsed))
+            }
+            ExprToken::Ident(name) => {
+                self.pos += 1;
+                if self.consume_if(ExprToken::LParen) {
+                    self.parse_function_call(name)
+                } else {
+                    let Some(idx) = self.variable_indices.get(name).copied() else {
+                        return self.err(format!("undefined variable in expr: {name}"));
+                    };
+                    self.push_op(ExprOp::PushVariable(idx))
+                }
+            }
+            ExprToken::LParen => {
+                self.pos += 1;
+                self.parse_expression()?;
+                if !self.consume_if(ExprToken::RParen) {
+                    return self.err("missing ')' in expression");
+                }
+                Ok(())
+            }
+            _ => self.err("unexpected token in expression"),
+        }
+    }
+
+    fn parse_function_call(&mut self, name: &str) -> Result<(), BridgeError> {
+        let mut arg_count = 0usize;
+        if !self.consume_if(ExprToken::RParen) {
+            loop {
+                self.parse_expression()?;
+                arg_count += 1;
+                if self.consume_if(ExprToken::Comma) {
+                    continue;
+                }
+                if self.consume_if(ExprToken::RParen) {
+                    break;
+                }
+                return self.err("function call missing ')'");
+            }
+        }
+
+        let op = match (name, arg_count) {
+            ("abs", 1) => ExprOp::CallAbs,
+            ("min", 2) => ExprOp::CallMin,
+            ("max", 2) => ExprOp::CallMax,
+            ("sin", 1) => ExprOp::CallSin,
+            ("cos", 1) => ExprOp::CallCos,
+            ("sqrt", 1) => ExprOp::CallSqrt,
+            ("pow", 2) => ExprOp::CallPow,
+            ("fmod", 2) => ExprOp::CallFmod,
+            ("clamp", 3) => ExprOp::CallClamp,
+            _ => {
+                return self.err(format!(
+                    "unsupported function call in expr: {} with {} args",
+                    name, arg_count
+                ));
+            }
+        };
+        self.push_op(op)
+    }
+
+    fn push_op(&mut self, op: ExprOp) -> Result<(), BridgeError> {
+        if self.out_len >= runtime_core::MAX_EXPR_OPS {
+            return self.err("expression too long");
+        }
+        self.output[self.out_len] = op;
+        self.out_len += 1;
+        Ok(())
+    }
+
+    fn consume_if(&mut self, token: ExprToken<'_>) -> bool {
+        if self.peek().copied() == Some(token) {
+            self.pos += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn peek(&self) -> Option<&ExprToken<'a>> {
+        self.tokens.get(self.pos)
+    }
+
+    fn err<T>(&self, detail: impl Into<String>) -> Result<T, BridgeError> {
+        Err(BridgeError::UnsupportedAction {
+            state: self.state_name.to_string(),
+            action: format!("{}: {}", detail.into(), self.raw),
+        })
     }
 }
 
