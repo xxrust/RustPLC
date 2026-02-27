@@ -1,159 +1,279 @@
-﻿{
+{
   "project": "RustPLC",
-  "branchName": "ralph/st-codegen-phase1-2",
-  "description": "实现 ST 代码生成阶段1+2（面向 OpenPLC 的最小可行生成器 + 端到端验证闭环），打通验证到可执行代码的落地链路。",
+  "branchName": "ralph/dsl-control-rust-compute",
+  "description": "Implement the hybrid architecture where DSL keeps deterministic control logic and complex numerical computation is executed by Rust extern functions with contract checks.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "实现 ST 代码生成主流程（基于 StateMachine + TopologyGraph）",
-      "description": "As a compiler engineer, I want to generate IEC 61131-3 ST from the semantic IR so that verified logic can be deployed on PLC runtimes.",
+      "title": "Freeze extern-function MVP syntax and scope",
+      "description": "As a language designer, I want a finalized MVP syntax spec so that parser/runtime work can proceed without ambiguity.",
       "acceptanceCriteria": [
-        "新增 `src/codegen/st.rs` 并实现 `generate_st(topology, state_machine, config)`",
-        "生成结构包含 PROGRAM/VAR/CASE，动作与跳转正确映射",
-        "`TransitionGuard::Always` 映射为分支末尾的无条件 `_state := <next_id>;`",
-        "`TransitionGuard::Condition` 映射为 `IF ... THEN _state := <next_id>; END_IF;`",
-        "`TransitionGuard::Timeout/Delay` 映射为定时器检查分支（`IF/ELSIF ... _timer_<id>.Q THEN _state := <next_id>;`，实现可为 IF 或 ELSIF 但语义等价）",
-        "`TransitionAction::Log` 生成注释行 `(* LOG: message *)`，不依赖厂商功能块",
-        "遇到 `parallel`/`race` 块返回 `ParallelNotSupported`/`RaceNotSupported` 错误",
-        "Typecheck passes",
-        "Tests pass"
+        "Document supported MVP syntax for `extern function` declaration and `action: call` invocation",
+        "Mark unsupported items explicitly (for example: overloads, variadic args, generics, callbacks)",
+        "Provide at least 10 valid/invalid DSL examples in docs",
+        "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": ""
+      "notes": "MVP syntax spec frozen in docs/extern_function_mvp_spec.md"
     },
     {
       "id": "US-002",
-      "title": "状态 ID 规则固定为 IR 原始顺序映射",
-      "description": "As a codegen maintainer, I want deterministic state IDs based on the IR order so that initial state mapping cannot drift.",
+      "title": "Parser support for extern function declarations",
+      "description": "As a compiler engineer, I want the DSL parser to read extern declarations so that contract metadata is available in the AST.",
       "acceptanceCriteria": [
-        "状态 ID 按 `StateMachine.states` 原始顺序分配：0, 10, 20, ...，步长 10",
-        "保留 9999 作为内部错误状态，不分配给任何 state",
-        "所有 `transition.from/to` 均通过名称到 ID 的映射表生成，不硬编码",
-        "`_state` 初始值与 `StateMachine.initial` 对应的 ID 一致",
-        "生成的状态常量注释与实际 ID 一致",
+        "Extend `plc.pest` to parse `extern function <name>(...) -> ... { ... }` inside `[topology]`",
+        "Parse required contract fields: `rust_module`, `pure`, `time_bound_us`",
+        "Reject missing required fields with line-aware parse errors",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "变量命名规范化与类型冲突检查",
-      "description": "As a runtime integrator, I want all generated ST variables to be valid, stable, and conflict-free.",
+      "title": "Parser support for extern call actions",
+      "description": "As a DSL user, I want to call extern functions in task steps so that complex math can execute outside expression grammar.",
       "acceptanceCriteria": [
-        "变量名统一转小写，非法字符替换为 `_`，连续 `_` 压缩",
-        "以数字开头的变量名前置 `_`",
-        "与 ST 保留字冲突时前置 `_`",
-        "与内部变量（`_state`、`_timer_*`）冲突时前置 `_u_`",
-        "规范化后仍冲突直接报错 `VariableNameConflict`",
-        "变量类型推断冲突（BOOL vs REAL）直接报错 `TypeConflict`",
+        "Parse `action: call func(a, b) -> out_var`",
+        "Parse tuple return binding form `-> (a, b, c)`",
+        "Restrict extern calls to action context and reject expression-context usage",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "条件表达式仅支持简单形式并硬拒绝复杂表达式",
-      "description": "As a compiler engineer, I want predictable expression parsing in phase 1 so that unsupported syntax fails fast.",
+      "title": "AST and IR extensions for extern metadata and call actions",
+      "description": "As a compiler maintainer, I want explicit AST/IR nodes for extern functions and calls so that semantic checks and runtime lowering are type-safe.",
       "acceptanceCriteria": [
-        "仅支持 `<name> == <value>`、`<name> != <value>`、`<name> > <value>`、`<name> < <value>` 四类简单形式",
-        "其他表达式形式一律返回 `ExpressionNotSupported` 错误",
-        "`two_cylinder.plc` 与 `assembly_station.plc` 的所有 wait 条件均在支持范围内，可生成 ST",
+        "Add `ExternFunctionDeclaration` and related param/return/constraint types to AST",
+        "Add runtime action variant for extern invocation with argument and return-variable bindings",
+        "Serde roundtrip for new AST nodes succeeds",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "定时器生成与 Cancel 静默忽略策略",
-      "description": "As a controls engineer, I want deterministic TON behavior that matches the state machine semantics.",
+      "title": "Semantic validation for function declaration and call signatures",
+      "description": "As a verification engineer, I want compile-time signature checks so that invalid extern calls fail before runtime.",
       "acceptanceCriteria": [
-        "每个 Timeout/Delay transition 生成一个独立的 TON 实例，命名为 `_timer_<state_id>`",
-        "所有定时器调用位于 CASE 块之前，`IN` 条件为 `_state = <id>`，状态切换后自动复位",
-        "`TimerOperation::Cancel` 静默忽略，不报错，不生成任何代码",
+        "Collect extern function symbols with unique names during semantic analysis",
+        "Validate call argument count and argument types against declaration",
+        "Validate return binding arity/types for single and tuple returns",
+        "Emit diagnostics with function name and source line",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "CLI: gen-st 子命令",
-      "description": "As a user, I want a CLI entry to generate ST so that I can integrate it into scripts and CI.",
+      "title": "Compile-time contract checks for determinism constraints",
+      "description": "As a safety engineer, I want static contract checks so that nondeterministic or unsafe extern declarations are rejected early.",
       "acceptanceCriteria": [
-        "新增 `gen-st` 子命令，接受 `.plc` 文件路径作为第一个参数",
-        "`--out <path>` 指定输出文件路径，默认输出到 stdout",
-        "`--program-name <name>` 指定 ST PROGRAM 名称，默认 `Main`",
-        "`--no-verification-summary` 关闭注释头中的验证摘要",
-        "生成失败时输出结构化错误信息并以非零退出码退出",
+        "Reject non-positive `time_bound_us` values",
+        "Reject missing or empty `rust_module`",
+        "Reject unsupported type usage in extern signatures for Phase 1 scalar-only scope",
+        "Add diagnostics for duplicate function names (no overloads)",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-007",
-      "title": "阶段 1 测试矩阵落地",
-      "description": "As a QA engineer, I want a minimal test matrix so that the generator is stable and regression-safe.",
+      "title": "Implement ExternFunctionRegistry core",
+      "description": "As a runtime engineer, I want a registry abstraction so that extern calls resolve to Rust implementations with metadata.",
       "acceptanceCriteria": [
-        "新增单元测试：状态 ID 唯一且与 IR 原始顺序一致",
-        "新增单元测试：定时器调用在 CASE 块之前（字符串位置断言）",
-        "新增单元测试：VAR 块包含所有 action 和 wait 中出现的变量",
-        "新增单元测试：`_state` 初始值与 `StateMachine.initial` 一致",
-        "新增单元测试：`parallel` 返回 `ParallelNotSupported`",
-        "新增单元测试：复杂表达式返回 `ExpressionNotSupported`",
-        "`two_cylinder.plc` 生成的 ST 代码经人工审查结构正确、可读",
-        "现有所有测试（约 87 个）继续通过",
+        "Add registry API: register/get/call for extern functions",
+        "Define structured runtime errors (`InvalidArgCount`, range errors, timeout, runtime error)",
+        "Ensure missing-function lookup returns deterministic error",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 7,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-008",
-      "title": "阶段 2：MATIEC 编译验证集成",
-      "description": "As a release owner, I want CI to compile generated ST with MATIEC so that syntax and semantic correctness is proven on a real compiler.",
+      "title": "Integrate extern call execution into runtime tick",
+      "description": "As a controls runtime user, I want extern calls to execute within step actions so that results can drive subsequent control logic.",
       "acceptanceCriteria": [
-        "CI 中安装 MATIEC 并调用 `iec2c` 编译生成的 ST 文件",
-        "`two_cylinder.plc` 和 `assembly_station.plc` 生成的 ST 编译无错误",
-        "MATIEC 具体命令行参数在实施时对照实际安装版本文档确认",
+        "Handle `Action::CallExtern` in runtime execution path",
+        "Map variable indices to argument list and write returned values back to bound variables",
+        "Propagate registry errors as runtime errors with function context",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 8,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-009",
-      "title": "阶段 2：OpenPLC trace 采集方案定义与对比验收",
-      "description": "As a release owner, I want a defined trace collection method for OpenPLC so that ST execution can be compared against SIL simulation.",
+      "title": "Deliver built-in math externs (add/multiply/quadratic_fit)",
+      "description": "As an application engineer, I want baseline math externs available so that the hybrid architecture can be validated with real workloads.",
       "acceptanceCriteria": [
-        "明确 OpenPLC 变量采集方案（运行时 API 或 Modbus TCP 地址映射二选一）",
-        "定义变量到地址的映射规则，确保 `_state`、`valve_a`、`valve_b` 等可采集",
-        "`two_cylinder.plc` 核心场景的 SIL trace 与 OpenPLC trace 对比通过率 ≥ 95%",
-        "允许 ±1 tick 的时序偏差",
+        "Implement `add` and `multiply` extern functions",
+        "Implement `quadratic_fit` extern function and singular-matrix error path",
+        "Register these built-ins in registry bootstrap",
+        "Add unit tests for happy path and invalid argument counts",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "依赖 US-008 完成后进行"
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Deliver stateful PID extern function",
+      "description": "As a controls engineer, I want a non-pure PID extern implementation so that closed-loop control scenarios can run through the new call path.",
+      "acceptanceCriteria": [
+        "Implement `pid_update(error, kp, ki, kd, dt) -> output` with internal state",
+        "Provide a deterministic reset path for tests",
+        "Add unit tests covering first-step response and multi-step accumulation",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Runtime contract enforcement for range and timeout",
+      "description": "As a reliability engineer, I want runtime guardrails so that extern function violations are caught and reported deterministically.",
+      "acceptanceCriteria": [
+        "Validate input ranges before function invocation when `input_range` is configured",
+        "Validate output ranges after function invocation when `output_range` is configured",
+        "Measure call duration via host timing hook and enforce `time_bound_us`",
+        "Return explicit timeout/range errors with offending index and value",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Compile-time tick budget and non-pure conflict checks",
+      "description": "As a system verifier, I want scheduler-level checks so that total extern cost and non-pure call conflicts are detected before deployment.",
+      "acceptanceCriteria": [
+        "Compute per-tick worst-case sum of extern `time_bound_us` values",
+        "Fail compilation when extern budget exceeds configured tick budget",
+        "Detect and report unsafe concurrent usage patterns for non-pure externs",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Extend causality verification to include extern calls",
+      "description": "As a formal verification user, I want extern call edges in causality analysis so that control-plane safety guarantees remain intact.",
+      "acceptanceCriteria": [
+        "Model extern call nodes in causality graph",
+        "Treat `pure` extern functions as deterministic transforms in propagation checks",
+        "Add positive and negative causality tests covering extern call chains",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Standardize extern error handling in DSL flow",
+      "description": "As a PLC developer, I want a clear error reporting pattern so that call failures can be handled with explicit control logic.",
+      "acceptanceCriteria": [
+        "Implement runtime error code surface for extern failures (for example `last_error` mapping)",
+        "Document and test explicit branching pattern for retry/fallback/error tasks",
+        "Keep syntax backward-compatible without introducing mandatory new control keywords",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "End-to-end integration tests for compile-to-runtime extern flow",
+      "description": "As a release owner, I want full integration coverage so that extern features are verified from DSL source to runtime state updates.",
+      "acceptanceCriteria": [
+        "Add integration test for quadratic fitting DSL program with tuple return binding",
+        "Add integration test for PID control loop using extern output in subsequent actions",
+        "Add integration test for at least one runtime error path (range/timeout/runtime failure)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Performance benchmark and regression gate for extern calls",
+      "description": "As a performance owner, I want benchmark gates so that extern integration remains within real-time overhead limits.",
+      "acceptanceCriteria": [
+        "Add benchmark for simple extern call overhead and complex extern call overhead",
+        "Record baseline and compare against regression branch in CI or script gate",
+        "Fail gate when overhead exceeds documented thresholds",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Developer tooling for extern registration and declaration generation",
+      "description": "As a library author, I want helper tooling so that new extern functions can be added quickly and consistently.",
+      "acceptanceCriteria": [
+        "Provide `register_extern_function!`-style macro or equivalent helper API",
+        "Generate DSL extern declaration stubs from Rust registration metadata",
+        "Add tests for generated declaration consistency with runtime signatures",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Documentation and examples for hybrid architecture rollout",
+      "description": "As a user adopting the feature, I want complete docs and examples so that I can safely implement extern-based control programs.",
+      "acceptanceCriteria": [
+        "Publish extern function development guide and contract design best practices",
+        "Add at least 10 practical DSL examples including PID and fitting scenarios",
+        "Document migration guidance and known limitations for current phase",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
