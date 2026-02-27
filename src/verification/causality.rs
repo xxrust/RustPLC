@@ -477,7 +477,7 @@ fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String
             format!("set_analog {} <expr>", target.device),
             target.device.clone(),
         )),
-        ActionStatement::Compute { .. } => None,
+        ActionStatement::Compute { .. } | ActionStatement::Call { .. } => None,
         ActionStatement::CamEngage { target }
         | ActionStatement::CamDisengage { target }
         | ActionStatement::CamPhase { target, .. } => {

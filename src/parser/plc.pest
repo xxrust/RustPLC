@@ -204,6 +204,9 @@ expression = { expr_mul ~ (expr_add_op ~ expr_mul)* }
 action_set_analog = { "set_analog" ~ action_target ~ number }
 action_set_analog_expr = { "set_analog" ~ action_target ~ expression }
 compute_statement = { "compute" ~ identifier ~ "=" ~ expression }
+extern_call_args = { expression ~ ("," ~ expression)* }
+extern_call_binding = { identifier | "(" ~ identifier ~ ("," ~ identifier)* ~ ","? ~ ")" }
+action_call_extern = { "call" ~ identifier ~ "(" ~ extern_call_args? ~ ")" ~ "->" ~ extern_call_binding }
 action_cam_engage = { "cam_engage" ~ identifier }
 action_cam_disengage = { "cam_disengage" ~ identifier }
 action_cam_switch = { "cam_switch" ~ identifier ~ identifier }
@@ -220,6 +223,7 @@ action_command = {
     | action_set_analog
     | action_set_analog_expr
     | compute_statement
+    | action_call_extern
     | action_set
     | action_log
 }

@@ -439,6 +439,11 @@ pub enum ActionStatement {
         target: String,
         expr: Expression,
     },
+    Call {
+        function: String,
+        args: Vec<Expression>,
+        binding: ExternCallBinding,
+    },
     CamEngage {
         target: String,
     },
@@ -456,6 +461,13 @@ pub enum ActionStatement {
     Log {
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "binding", content = "targets", rename_all = "snake_case")]
+pub enum ExternCallBinding {
+    Single(String),
+    Tuple(Vec<String>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

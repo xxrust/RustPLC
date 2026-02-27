@@ -2975,6 +2975,11 @@ fn validate_expression_actions_in_statements(
             StepStatement::Action(ActionStatement::SetAnalogExpr { expr, .. }) => {
                 validate_expression_variables(expr, line, variables, errors);
             }
+            StepStatement::Action(ActionStatement::Call { args, .. }) => {
+                for arg in args {
+                    validate_expression_variables(arg, line, variables, errors);
+                }
+            }
             StepStatement::Action(ActionStatement::CamPhase { offset, .. }) => {
                 validate_expression_variables(offset, line, variables, errors);
             }
@@ -3709,6 +3714,7 @@ fn action_to_timing(
             (ActionKind::SetAnalogExpr, Some(target.device.as_str()))
         }
         ActionStatement::Compute { .. } => (ActionKind::Compute, None),
+        ActionStatement::Call { .. } => return None,
         ActionStatement::CamEngage { target } => (ActionKind::CamEngage, Some(target.as_str())),
         ActionStatement::CamDisengage { target } => {
             (ActionKind::CamDisengage, Some(target.as_str()))
@@ -4454,6 +4460,7 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             target: target.clone(),
             expr_raw: expression_to_raw(expr),
         }),
+        ActionStatement::Call { .. } => None,
         ActionStatement::CamEngage { target } => Some(TransitionAction::CamEngage {
             target: target.clone(),
         }),

@@ -280,7 +280,7 @@ impl TimingContext {
             | ActionStatement::CamDisengage { .. }
             | ActionStatement::CamSwitch { .. }
             | ActionStatement::CamPhase { .. } => return None,
-            ActionStatement::Compute { .. } => return None,
+            ActionStatement::Compute { .. } | ActionStatement::Call { .. } => return None,
             ActionStatement::Log { .. } => return None,
         };
 

@@ -2,18 +2,19 @@ use crate::ast::{
     ActionStatement, ActionTarget, BinaryOperator, Branch, CamPoint, CamTableDeclaration,
     CamTableMode, CausalityConstraint, ComparisonOperator, ConditionExpression, ConstraintsSection,
     DeviceAttributes, DeviceDeclaration, DevicePort, DeviceTags, DeviceType, DurationValue,
-    Expression, ExternFunctionContract, ExternFunctionDeclaration, ExternFunctionParameter,
-    GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective, ParallelBlock, PlcProgram,
-    PortRole, PortType, RaceBlock, RaceBranch, SafetyConstraint, SafetyOperand, SafetyRelation,
-    StateReference, StepDeclaration, StepStatement, TaskDeclaration, TasksSection, TimeUnit,
-    TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget, TopologyConnection,
-    TopologyRelation, TopologySection, VariableDeclaration, VariableType, WaitCondition,
-    WaitStatement,
+    Expression, ExternCallBinding, ExternFunctionContract, ExternFunctionDeclaration,
+    ExternFunctionParameter, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective,
+    ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch, SafetyConstraint,
+    SafetyOperand, SafetyRelation, StateReference, StepDeclaration, StepStatement, TaskDeclaration,
+    TasksSection, TimeUnit, TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget,
+    TopologyConnection, TopologyRelation, TopologySection, VariableDeclaration, VariableType,
+    WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use pest::Parser;
 use pest::error::LineColLocation;
 use pest::iterators::Pair;
+use std::collections::HashSet;
 
 #[derive(pest_derive::Parser)]
 #[grammar = "parser/plc.pest"]
@@ -38,7 +39,9 @@ pub fn parse_plc(input: &str) -> Result<PlcProgram, PlcError> {
         .next()
         .ok_or_else(|| PlcError::parse(1, "未找到可解析的 PLC 程序"))?;
 
-    parse_plc_pair(plc_pair)
+    let program = parse_plc_pair(plc_pair)?;
+    reject_extern_calls_in_expression_context(&program)?;
+    Ok(program)
 }
 
 fn reject_deprecated_connected_to(input: &str) -> Result<(), PlcError> {
@@ -79,6 +82,200 @@ fn parse_plc_pair(pair: Pair<Rule>) -> Result<PlcProgram, PlcError> {
         constraints: constraints.ok_or_else(|| PlcError::parse(1, "缺少 [constraints] 段"))?,
         tasks: tasks.ok_or_else(|| PlcError::parse(1, "缺少 [tasks] 段"))?,
     })
+}
+
+fn reject_extern_calls_in_expression_context(program: &PlcProgram) -> Result<(), PlcError> {
+    let extern_names: HashSet<&str> = program
+        .topology
+        .extern_functions
+        .iter()
+        .map(|func| func.name.as_str())
+        .collect();
+
+    if extern_names.is_empty() {
+        return Ok(());
+    }
+
+    for task in &program.tasks.tasks {
+        for step in &task.steps {
+            reject_extern_calls_in_statements(
+                &step.statements,
+                &extern_names,
+                step.line.max(1),
+                &task.name,
+                &step.name,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn reject_extern_calls_in_statements(
+    statements: &[StepStatement],
+    extern_names: &HashSet<&str>,
+    line: usize,
+    task_name: &str,
+    step_name: &str,
+) -> Result<(), PlcError> {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(action) => {
+                reject_extern_calls_in_action(action, extern_names, line, task_name, step_name)?;
+            }
+            StepStatement::Wait(wait) => {
+                reject_extern_calls_in_wait(wait, extern_names, line, task_name, step_name)?;
+            }
+            StepStatement::IfElse { condition, .. } => {
+                reject_extern_calls_in_condition(
+                    condition,
+                    extern_names,
+                    line,
+                    task_name,
+                    step_name,
+                )?;
+            }
+            StepStatement::Repeat { body, .. } => {
+                reject_extern_calls_in_statements(body, extern_names, line, task_name, step_name)?;
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    reject_extern_calls_in_statements(
+                        &branch.statements,
+                        extern_names,
+                        line,
+                        task_name,
+                        step_name,
+                    )?;
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    reject_extern_calls_in_statements(
+                        &branch.statements,
+                        extern_names,
+                        line,
+                        task_name,
+                        step_name,
+                    )?;
+                }
+            }
+            StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn reject_extern_calls_in_action(
+    action: &ActionStatement,
+    extern_names: &HashSet<&str>,
+    line: usize,
+    task_name: &str,
+    step_name: &str,
+) -> Result<(), PlcError> {
+    match action {
+        ActionStatement::SetAnalogExpr { expr, .. } | ActionStatement::Compute { expr, .. } => {
+            reject_extern_calls_in_expression(expr, extern_names, line, task_name, step_name)?;
+        }
+        ActionStatement::CamPhase { offset, .. } => {
+            reject_extern_calls_in_expression(offset, extern_names, line, task_name, step_name)?;
+        }
+        ActionStatement::Call { args, .. } => {
+            for arg in args {
+                reject_extern_calls_in_expression(arg, extern_names, line, task_name, step_name)?;
+            }
+        }
+        ActionStatement::Extend { .. }
+        | ActionStatement::Retract { .. }
+        | ActionStatement::Set { .. }
+        | ActionStatement::SetAnalog { .. }
+        | ActionStatement::CamEngage { .. }
+        | ActionStatement::CamDisengage { .. }
+        | ActionStatement::CamSwitch { .. }
+        | ActionStatement::Log { .. } => {}
+    }
+
+    Ok(())
+}
+
+fn reject_extern_calls_in_wait(
+    wait: &WaitStatement,
+    extern_names: &HashSet<&str>,
+    line: usize,
+    task_name: &str,
+    step_name: &str,
+) -> Result<(), PlcError> {
+    match &wait.condition {
+        WaitCondition::Single(condition) => {
+            reject_extern_calls_in_condition(condition, extern_names, line, task_name, step_name)?;
+        }
+        WaitCondition::And(conditions) | WaitCondition::Or(conditions) => {
+            for condition in conditions {
+                reject_extern_calls_in_condition(
+                    condition,
+                    extern_names,
+                    line,
+                    task_name,
+                    step_name,
+                )?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn reject_extern_calls_in_condition(
+    condition: &ConditionExpression,
+    extern_names: &HashSet<&str>,
+    line: usize,
+    task_name: &str,
+    step_name: &str,
+) -> Result<(), PlcError> {
+    if let Some((left, right)) = condition.expression_pair() {
+        reject_extern_calls_in_expression(left, extern_names, line, task_name, step_name)?;
+        reject_extern_calls_in_expression(right, extern_names, line, task_name, step_name)?;
+    }
+
+    Ok(())
+}
+
+fn reject_extern_calls_in_expression(
+    expr: &Expression,
+    extern_names: &HashSet<&str>,
+    line: usize,
+    task_name: &str,
+    step_name: &str,
+) -> Result<(), PlcError> {
+    match expr {
+        Expression::Literal(_) | Expression::Variable(_) => Ok(()),
+        Expression::UnaryNeg(inner) => {
+            reject_extern_calls_in_expression(inner, extern_names, line, task_name, step_name)
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            reject_extern_calls_in_expression(left, extern_names, line, task_name, step_name)?;
+            reject_extern_calls_in_expression(right, extern_names, line, task_name, step_name)
+        }
+        Expression::FunctionCall { name, args } => {
+            if extern_names.contains(name.as_str()) {
+                return Err(PlcError::parse_with_reason(
+                    line,
+                    format!("extern 函数 {name} 只能在 action: call 中调用"),
+                    format!(
+                        "请改写为 `action: call {name}(...) -> <binding>`（task: {task_name}, step: {step_name}）"
+                    ),
+                ));
+            }
+            for arg in args {
+                reject_extern_calls_in_expression(arg, extern_names, line, task_name, step_name)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError> {
@@ -1150,6 +1347,38 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
             let expr = parse_expression(expr_pair)?;
             Ok(ActionStatement::Compute { target, expr })
         }
+        Rule::action_call_extern => {
+            let mut parts = action.into_inner();
+            let function = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "call 缺少函数名"))?
+                .as_str()
+                .to_string();
+            let mut args = Vec::new();
+            let mut binding = None;
+
+            for part in parts {
+                match part.as_rule() {
+                    Rule::extern_call_args => {
+                        for item in part.into_inner() {
+                            if item.as_rule() == Rule::expression {
+                                args.push(parse_expression(item)?);
+                            }
+                        }
+                    }
+                    Rule::extern_call_binding => {
+                        binding = Some(parse_extern_call_binding(part)?);
+                    }
+                    _ => {}
+                }
+            }
+
+            Ok(ActionStatement::Call {
+                function,
+                args,
+                binding: binding.ok_or_else(|| PlcError::parse(line, "call 缺少返回绑定"))?,
+            })
+        }
         Rule::action_cam_engage => {
             let target = action
                 .into_inner()
@@ -1219,6 +1448,31 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
             line,
             format!("不支持的 action 命令: {rule:?}"),
         )),
+    }
+}
+
+fn parse_extern_call_binding(pair: Pair<Rule>) -> Result<ExternCallBinding, PlcError> {
+    let line = line_of(&pair);
+    let is_tuple = pair.as_str().trim_start().starts_with('(');
+    let names: Vec<String> = pair
+        .into_inner()
+        .filter(|item| item.as_rule() == Rule::identifier)
+        .map(|item| item.as_str().to_string())
+        .collect();
+
+    if names.is_empty() {
+        return Err(PlcError::parse(line, "call 返回绑定至少需要一个变量名"));
+    }
+
+    if is_tuple {
+        Ok(ExternCallBinding::Tuple(names))
+    } else {
+        Ok(ExternCallBinding::Single(
+            names
+                .into_iter()
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "call 返回绑定缺少变量名"))?,
+        ))
     }
 }
 
@@ -2177,8 +2431,8 @@ fn map_parse_error(err: pest::error::Error<Rule>) -> PlcError {
 mod tests {
     use super::{parse_constraints, parse_plc, parse_tasks, parse_topology};
     use crate::ast::{
-        ActionStatement, BinaryOperator, DeviceType, Expression, LiteralValue, OnCompleteDirective,
-        PortRole, PortType, StepStatement, VariableType, WaitCondition,
+        ActionStatement, BinaryOperator, DeviceType, Expression, ExternCallBinding, LiteralValue,
+        OnCompleteDirective, PortRole, PortType, StepStatement, VariableType, WaitCondition,
     };
 
     #[test]
@@ -2726,6 +2980,100 @@ task main:
             err.to_string()
                 .contains("缺少必填 contract 字段 rust_module"),
             "错误信息应明确缺失字段，实际: {err}"
+        );
+    }
+
+    #[test]
+    fn parses_extern_call_actions_with_single_and_tuple_bindings() {
+        let input = r#"
+[topology]
+extern function add(a: float, b: float) -> float {
+    rust_module: "math::basic"
+    pure: true
+    time_bound_us: 10
+}
+extern function split(v: float) -> (float, float) {
+    rust_module: "math::split"
+    pure: true
+    time_bound_us: 15
+}
+variable x: float = 1.0
+variable y: float = 2.0
+variable sum: float = 0.0
+variable lo: float = 0.0
+variable hi: float = 0.0
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: call add(x, y) -> sum
+        action: call split(sum) -> (lo, hi)
+"#;
+
+        let program = parse_plc(input).expect("extern call action 应能解析");
+        let statements = &program.tasks.tasks[0].steps[0].statements;
+        assert_eq!(statements.len(), 2);
+
+        match &statements[0] {
+            StepStatement::Action(ActionStatement::Call {
+                function,
+                args,
+                binding,
+            }) => {
+                assert_eq!(function, "add");
+                assert_eq!(args.len(), 2);
+                assert!(matches!(&args[0], Expression::Variable(name) if name == "x"));
+                assert!(matches!(&args[1], Expression::Variable(name) if name == "y"));
+                assert!(matches!(binding, ExternCallBinding::Single(name) if name == "sum"));
+            }
+            other => panic!("第一个 action 应为 extern call，实际: {other:?}"),
+        }
+
+        match &statements[1] {
+            StepStatement::Action(ActionStatement::Call {
+                function,
+                args,
+                binding,
+            }) => {
+                assert_eq!(function, "split");
+                assert_eq!(args.len(), 1);
+                assert!(matches!(&args[0], Expression::Variable(name) if name == "sum"));
+                assert!(matches!(
+                    binding,
+                    ExternCallBinding::Tuple(names) if names == &vec!["lo".to_string(), "hi".to_string()]
+                ));
+            }
+            other => panic!("第二个 action 应为 tuple extern call，实际: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_extern_calls_in_expression_context() {
+        let input = r#"
+[topology]
+extern function add(a: float, b: float) -> float {
+    rust_module: "math::basic"
+    pure: true
+    time_bound_us: 10
+}
+variable x: float = 1.0
+variable y: float = 2.0
+variable out: float = 0.0
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: compute out = add(x, y)
+"#;
+
+        let err = parse_plc(input).expect_err("extern 函数在表达式上下文中应被拒绝");
+        assert!(
+            err.to_string().contains("只能在 action: call 中调用"),
+            "错误信息应提示 extern 调用上下文限制，实际: {err}"
         );
     }
 

@@ -1,0 +1,27 @@
+[topology]
+
+device mode_switch: digital_input {
+    purpose: "模式选择开关，true 选择 A 流程，false 选择 B 流程"
+}
+
+[constraints]
+
+[tasks]
+
+task choose:
+    step decide:
+        if: mode_switch == true goto process_A.run else: goto process_B.run
+
+task process_A:
+    step run:
+        action: log "A"
+    on_complete: goto done
+
+task process_B:
+    step run:
+        action: log "B"
+    on_complete: goto done
+
+task done:
+    step finish:
+        action: log "done"

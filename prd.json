@@ -44,8 +44,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Parser now supports action: call extern invocations (single/tuple bindings) and rejects extern use in expression context"
     },
     {
       "id": "US-004",

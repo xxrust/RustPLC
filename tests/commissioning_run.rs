@@ -110,7 +110,9 @@ fn commissioning_run_executes_nominal_and_fault_rehearsals_and_emits_index() {
         artifacts_root
             .get("gate_nominal_diagnosis")
             .and_then(Value::as_str)
-            .map(|path| path.replace('\\', "/").ends_with("gate_nominal/diagnosis_report.json"))
+            .map(|path| path
+                .replace('\\', "/")
+                .ends_with("gate_nominal/diagnosis_report.json"))
             .unwrap_or(false),
         "index should expose gate_nominal_diagnosis path"
     );
@@ -118,7 +120,9 @@ fn commissioning_run_executes_nominal_and_fault_rehearsals_and_emits_index() {
         artifacts_root
             .get("gate_fault_diagnosis")
             .and_then(Value::as_str)
-            .map(|path| path.replace('\\', "/").ends_with("gate_fault/diagnosis_report.json"))
+            .map(|path| path
+                .replace('\\', "/")
+                .ends_with("gate_fault/diagnosis_report.json"))
             .unwrap_or(false),
         "index should expose gate_fault_diagnosis path"
     );

@@ -681,7 +681,8 @@ fn collect_threshold_values_from_statements(
                 add_threshold_value(values_by_device, &target.device, *value);
             }
             StepStatement::Action(ActionStatement::SetAnalogExpr { .. })
-            | StepStatement::Action(ActionStatement::Compute { .. }) => {}
+            | StepStatement::Action(ActionStatement::Compute { .. })
+            | StepStatement::Action(ActionStatement::Call { .. }) => {}
             StepStatement::Repeat { body, .. } => {
                 collect_threshold_values_from_statements(body, values_by_device);
             }

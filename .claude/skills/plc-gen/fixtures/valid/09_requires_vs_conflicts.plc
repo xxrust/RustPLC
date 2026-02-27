@@ -1,0 +1,114 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
+    ports: [Y0:digital:producer, Y1:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer]
+}
+
+device start_button: sensor {
+    purpose: "操作员启动按钮，触发夹紧-工作循环",
+    subtype: "push_button",
+    debounce: 20ms
+}
+
+device valve_hold: solenoid_valve {
+    purpose: "驱动夹紧缸伸出/缩回的气动电磁阀",
+    response_time: 20ms
+}
+
+device valve_work: solenoid_valve {
+    purpose: "驱动工艺缸伸出/缩回的气动电磁阀",
+    response_time: 20ms
+}
+
+device cyl_hold: cylinder {
+    purpose: "夹紧工件的气缸，工艺缸动作前必须保持伸出",
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device cyl_work: cylinder {
+    purpose: "执行工艺动作的气缸，需要夹紧缸保持才能动作",
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device sensor_hold_ext: sensor {
+    purpose: "检测夹紧缸已完全伸出到位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_hold_ret: sensor {
+    purpose: "检测夹紧缸已完全缩回到位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_work_ext: sensor {
+    purpose: "检测工艺缸已完全伸出到位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_work_ret: sensor {
+    purpose: "检测工艺缸已完全缩回到位的限位开关",
+    subtype: "limit_switch"
+}
+
+relation { from: start_button.out, to: plc_main.X4, via: reports_to }
+relation { from: plc_main.Y0, to: valve_hold.coil, via: driven_by }
+relation { from: plc_main.Y1, to: valve_work.coil, via: driven_by }
+relation { from: valve_hold.out, to: cyl_hold.cmd, via: driven_by }
+relation { from: valve_work.out, to: cyl_work.cmd, via: driven_by }
+relation { from: cyl_hold.extended, to: sensor_hold_ext.sense, via: detects }
+relation { from: sensor_hold_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_hold.retracted, to: sensor_hold_ret.sense, via: detects }
+relation { from: sensor_hold_ret.out, to: plc_main.X1, via: reports_to }
+relation { from: cyl_work.extended, to: sensor_work_ext.sense, via: detects }
+relation { from: sensor_work_ext.out, to: plc_main.X2, via: reports_to }
+relation { from: cyl_work.retracted, to: sensor_work_ret.sense, via: detects }
+relation { from: sensor_work_ret.out, to: plc_main.X3, via: reports_to }
+
+[constraints]
+
+safety: cyl_work.extended requires cyl_hold.extended
+    reason: "工艺缸动作要求夹紧保持"
+
+safety: cyl_work.extended conflicts_with cyl_hold.retracted
+    reason: "同一约束的另一种写法：工作时夹紧不能缩回"
+
+causality: Y0 -> valve_hold -> cyl_hold -> sensor_hold_ext
+causality: Y1 -> valve_work -> cyl_work -> sensor_work_ext
+
+[tasks]
+
+task cycle:
+    step hold:
+        action: extend cyl_hold
+        wait: sensor_hold_ext == true
+        timeout: 1200ms -> goto fault_handler
+    step work:
+        action: extend cyl_work
+        wait: sensor_work_ext == true
+        timeout: 1200ms -> goto fault_handler
+    step back:
+        action: retract cyl_work
+        wait: sensor_work_ret == true
+        timeout: 1200ms -> goto fault_handler
+    step release:
+        action: retract cyl_hold
+        wait: sensor_hold_ret == true
+        timeout: 1200ms -> goto fault_handler
+    on_complete: goto ready
+
+task fault_handler:
+    step safe:
+        action: retract cyl_work
+        action: retract cyl_hold
+    step alarm:
+        action: log "fault: interlock violated or timeout"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle

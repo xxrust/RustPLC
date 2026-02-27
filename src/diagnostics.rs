@@ -307,7 +307,7 @@ impl PlcEvidence {
                 | ActionStatement::SetAnalogExpr { target, .. } => {
                     self.action_targets.insert(target.device.clone());
                 }
-                ActionStatement::Compute { .. } => {}
+                ActionStatement::Compute { .. } | ActionStatement::Call { .. } => {}
                 ActionStatement::CamEngage { target }
                 | ActionStatement::CamDisengage { target }
                 | ActionStatement::CamSwitch { target, .. }

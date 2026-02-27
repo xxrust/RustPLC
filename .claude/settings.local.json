@@ -60,7 +60,14 @@
       "Bash(git revert:*)",
       "Bash(echo:*)",
       "Bash(printf:*)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(xargs:*)",
+      "Bash(export:*)",
+      "Bash(git stash:*)",
+      "Bash(git restore:*)",
+      "Bash(git reset:*)",
+      "Bash(rm:*)",
+      "Bash(E:personal_projectrust_plcdocsdsl_computation_analysis.md:*)"
     ]
   }
 }

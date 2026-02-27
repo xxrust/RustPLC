@@ -4,6 +4,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - Run `cargo check --workspace` for typecheck and `cargo test --workspace` for regression gate before committing.
 - Keep DSL syntax decisions in dedicated docs under `docs/` and link story completion back to `prd.json` + `progress.txt`.
 - For new `[topology]` DSL entries, keep grammar (`src/parser/plc.pest`), parser wiring (`src/parser/mod.rs`), and semantic topology cloning (`src/semantic/mod.rs`) in sync.
+- When adding a new `action:` DSL command, keep `action_command` grammar alternatives, `parse_action_statement` match arms, and parser unit tests synchronized.
 
 ---
 ## [2026-02-28 00:01:57] - US-002
@@ -44,4 +45,26 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `progress.txt` may start without a `## Codebase Patterns` section; add it near the top once reusable patterns are identified.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Extern-function MVP scope is now frozen in `docs/extern_function_mvp_spec.md`; later parser/runtime stories should implement exactly this surface.
+---
+## [2026-02-28 07:25:15] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added DSL grammar + parser support for `action: call func(a, b) -> binding` and tuple binding form `-> (a, b, c)`.
+  - Added AST action variant (`ActionStatement::Call`) plus return binding representation (`ExternCallBinding`).
+  - Added parser guard that rejects extern function usage in expression contexts and points users to `action: call`.
+  - Added parser tests for single/tuple extern call actions and expression-context rejection.
+  - Marked US-003 as completed (`passes: true`) in `prd.json`.
+- Files changed
+  - src/ast/mod.rs
+  - src/parser/plc.pest
+  - src/parser/mod.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Context-sensitive DSL rules are enforced after parse by scanning AST statements/expressions rather than over-constraining pest grammar.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Extern-in-expression checks must recurse into nested statement containers (`repeat`, `parallel`, `race`) to avoid escape paths.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Extern calls now parse into `StepStatement::Action(ActionStatement::Call { ... })`, ready for semantic/runtime handling in follow-up stories.
 ---

@@ -7,6 +7,7 @@ set -e
 # Parse arguments
 TOOL="amp"  # Default to amp for backwards compatibility
 MAX_ITERATIONS=10
+ITERATION_TIMEOUT_SECONDS="${ITERATION_TIMEOUT_SECONDS:-3600}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -103,6 +104,7 @@ if [ ! -f "$PROGRESS_FILE" ]; then
 fi
 
 echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
+echo "Per-iteration timeout: ${ITERATION_TIMEOUT_SECONDS}s"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
@@ -110,15 +112,28 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   echo "  Ralph Iteration $i of $MAX_ITERATIONS ($TOOL)"
   echo "==============================================================="
 
-  # Run the selected tool with the ralph prompt
+  # Run the selected tool with the ralph prompt.
+  # Capture output in a temp file (instead of a giant shell variable) to avoid
+  # memory pressure and allow simple "tail" checks for completion markers.
+  RUN_LOG="$(mktemp)"
+  OUTPUT_STATUS=0
+
+  # Run the selected tool with a watchdog timeout to avoid hanging forever.
   if [[ "$TOOL" == "amp" ]]; then
-    OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
+    timeout "${ITERATION_TIMEOUT_SECONDS}" bash -lc "cat \"$SCRIPT_DIR/prompt.md\" | amp --dangerously-allow-all" \
+      2>&1 | tee /dev/stderr | tee "$RUN_LOG" >/dev/null || OUTPUT_STATUS=$?
   elif [[ "$TOOL" == "claude" ]]; then
     # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
-    OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
+    timeout "${ITERATION_TIMEOUT_SECONDS}" claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/CLAUDE.md" \
+      2>&1 | tee /dev/stderr | tee "$RUN_LOG" >/dev/null || OUTPUT_STATUS=$?
   else
     # Codex CLI: use --dangerously-bypass-approvals-and-sandbox for autonomous operation
-    OUTPUT=$(codex exec --dangerously-bypass-approvals-and-sandbox - < "$SCRIPT_DIR/CODEX.md" 2>&1 | tee /dev/stderr) || true
+    timeout "${ITERATION_TIMEOUT_SECONDS}" codex exec --dangerously-bypass-approvals-and-sandbox - < "$SCRIPT_DIR/CODEX.md" \
+      2>&1 | tee /dev/stderr | tee "$RUN_LOG" >/dev/null || OUTPUT_STATUS=$?
+  fi
+
+  if [[ "$OUTPUT_STATUS" -eq 124 ]]; then
+    echo "Iteration $i timed out after ${ITERATION_TIMEOUT_SECONDS}s. Continuing..."
   fi
   
   # Completion should be based on PRD state; completion token in the prompt can be a false positive.
@@ -130,9 +145,11 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   fi
 
   # Keep logging a completion token if it appears near the end, but do not terminate on token alone.
-  if echo "$OUTPUT" | tail -n 80 | grep -q "<promise>COMPLETE</promise>"; then
+  if tail -n 80 "$RUN_LOG" | grep -q "<promise>COMPLETE</promise>"; then
     echo "Completion token detected, but PRD still has pending stories. Continuing..."
   fi
+
+  rm -f "$RUN_LOG"
   
   echo "Iteration $i complete. Continuing..."
   sleep 2
