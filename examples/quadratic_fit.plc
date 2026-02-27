@@ -1,0 +1,201 @@
+# ============================================================
+# 二次函数拟合示例
+# 对一组数据点进行最小二乘法二次拟合，求拟合函数 y = ax² + bx + c
+# 输入：数组 x[n], y[n]，输出：拟合系数 a, b, c
+# ============================================================
+
+[topology]
+
+# ===== 变量声明 =====
+# 输入数据点（示例：5个点）
+variable x0: float = 0.0
+variable x1: float = 1.0
+variable x2: float = 2.0
+variable x3: float = 3.0
+variable x4: float = 4.0
+
+variable y0: float = 1.0
+variable y1: float = 3.5
+variable y2: float = 8.0
+variable y3: float = 14.5
+variable y4: float = 23.0
+
+# 数据点数量
+variable n: float = 5.0
+
+# 中间计算变量（最小二乘法矩阵元素）
+variable sum_x: float = 0.0
+variable sum_x2: float = 0.0
+variable sum_x3: float = 0.0
+variable sum_x4: float = 0.0
+variable sum_y: float = 0.0
+variable sum_xy: float = 0.0
+variable sum_x2y: float = 0.0
+
+# 临时变量
+variable x_val: float = 0.0
+variable y_val: float = 0.0
+variable x2_val: float = 0.0
+variable x3_val: float = 0.0
+variable x4_val: float = 0.0
+
+# 矩阵求解中间变量（简化的高斯消元）
+variable det: float = 0.0
+variable det_a: float = 0.0
+variable det_b: float = 0.0
+variable det_c: float = 0.0
+
+# 拟合结果
+variable a: float = 0.0
+variable b: float = 0.0
+variable c: float = 0.0
+
+# 计数器
+variable i: float = 0.0
+
+device plc_main: plc {
+    purpose: "控制器本体",
+    ports: [X0:digital:consumer]
+}
+
+[constraints]
+
+# ===== 时序约束 =====
+timing: task.main must_complete_within 5000ms
+    reason: "拟合计算应在 5 秒内完成"
+
+[tasks]
+
+task main:
+    step init:
+        action: log "开始二次函数拟合计算"
+        action: compute sum_x = 0.0
+        action: compute sum_x2 = 0.0
+        action: compute sum_x3 = 0.0
+        action: compute sum_x4 = 0.0
+        action: compute sum_y = 0.0
+        action: compute sum_xy = 0.0
+        action: compute sum_x2y = 0.0
+        action: compute i = 0.0
+        delay: 10ms
+
+    # 累加第0个点
+    step accumulate_0:
+        action: compute x_val = x0
+        action: compute y_val = y0
+        action: compute x2_val = x_val * x_val
+        action: compute x3_val = x2_val * x_val
+        action: compute x4_val = x2_val * x2_val
+        action: compute sum_x = sum_x + x_val
+        action: compute sum_x2 = sum_x2 + x2_val
+        action: compute sum_x3 = sum_x3 + x3_val
+        action: compute sum_x4 = sum_x4 + x4_val
+        action: compute sum_y = sum_y + y_val
+        action: compute sum_xy = sum_xy + x_val * y_val
+        action: compute sum_x2y = sum_x2y + x2_val * y_val
+        delay: 10ms
+
+    # 累加第1个点
+    step accumulate_1:
+        action: compute x_val = x1
+        action: compute y_val = y1
+        action: compute x2_val = x_val * x_val
+        action: compute x3_val = x2_val * x_val
+        action: compute x4_val = x2_val * x2_val
+        action: compute sum_x = sum_x + x_val
+        action: compute sum_x2 = sum_x2 + x2_val
+        action: compute sum_x3 = sum_x3 + x3_val
+        action: compute sum_x4 = sum_x4 + x4_val
+        action: compute sum_y = sum_y + y_val
+        action: compute sum_xy = sum_xy + x_val * y_val
+        action: compute sum_x2y = sum_x2y + x2_val * y_val
+        delay: 10ms
+
+    # 累加第2个点
+    step accumulate_2:
+        action: compute x_val = x2
+        action: compute y_val = y2
+        action: compute x2_val = x_val * x_val
+        action: compute x3_val = x2_val * x_val
+        action: compute x4_val = x2_val * x2_val
+        action: compute sum_x = sum_x + x_val
+        action: compute sum_x2 = sum_x2 + x2_val
+        action: compute sum_x3 = sum_x3 + x3_val
+        action: compute sum_x4 = sum_x4 + x4_val
+        action: compute sum_y = sum_y + y_val
+        action: compute sum_xy = sum_xy + x_val * y_val
+        action: compute sum_x2y = sum_x2y + x2_val * y_val
+        delay: 10ms
+
+    # 累加第3个点
+    step accumulate_3:
+        action: compute x_val = x3
+        action: compute y_val = y3
+        action: compute x2_val = x_val * x_val
+        action: compute x3_val = x2_val * x_val
+        action: compute x4_val = x2_val * x2_val
+        action: compute sum_x = sum_x + x_val
+        action: compute sum_x2 = sum_x2 + x2_val
+        action: compute sum_x3 = sum_x3 + x3_val
+        action: compute sum_x4 = sum_x4 + x4_val
+        action: compute sum_y = sum_y + y_val
+        action: compute sum_xy = sum_xy + x_val * y_val
+        action: compute sum_x2y = sum_x2y + x2_val * y_val
+        delay: 10ms
+
+    # 累加第4个点
+    step accumulate_4:
+        action: compute x_val = x4
+        action: compute y_val = y4
+        action: compute x2_val = x_val * x_val
+        action: compute x3_val = x2_val * x_val
+        action: compute x4_val = x2_val * x2_val
+        action: compute sum_x = sum_x + x_val
+        action: compute sum_x2 = sum_x2 + x2_val
+        action: compute sum_x3 = sum_x3 + x3_val
+        action: compute sum_x4 = sum_x4 + x4_val
+        action: compute sum_y = sum_y + y_val
+        action: compute sum_xy = sum_xy + x_val * y_val
+        action: compute sum_x2y = sum_x2y + x2_val * y_val
+        delay: 10ms
+
+    # 求解线性方程组（克拉默法则简化版）
+    # 方程组：
+    # n*a + sum_x*b + sum_x2*c = sum_y
+    # sum_x*a + sum_x2*b + sum_x3*c = sum_xy
+    # sum_x2*a + sum_x3*b + sum_x4*c = sum_x2y
+    step solve_system:
+        action: log "求解线性方程组"
+        # 简化计算：假设数据点均匀分布，使用直接公式
+        # 这里使用简化的计算方法
+        action: compute det = n * sum_x2 * sum_x4 + sum_x * sum_x3 * sum_x2 + sum_x2 * sum_x * sum_x3
+        action: compute det = det - sum_x2 * sum_x2 * sum_x2 - sum_x * sum_x * sum_x4 - n * sum_x3 * sum_x3
+        delay: 10ms
+
+    step compute_a:
+        action: compute det_a = sum_y * sum_x2 * sum_x4 + sum_xy * sum_x3 * sum_x2 + sum_x2y * sum_x * sum_x3
+        action: compute det_a = det_a - sum_x2y * sum_x2 * sum_x2 - sum_xy * sum_x * sum_x4 - sum_y * sum_x3 * sum_x3
+        action: compute a = det_a / det
+        delay: 10ms
+
+    step compute_b:
+        action: compute det_b = n * sum_xy * sum_x4 + sum_x * sum_x2y * sum_x2 + sum_x2 * sum_y * sum_x3
+        action: compute det_b = det_b - sum_x2 * sum_xy * sum_x2 - sum_x * sum_y * sum_x4 - n * sum_x2y * sum_x3
+        action: compute b = det_b / det
+        delay: 10ms
+
+    step compute_c:
+        action: compute det_c = n * sum_x2 * sum_x2y + sum_x * sum_x3 * sum_y + sum_x2 * sum_x * sum_xy
+        action: compute det_c = det_c - sum_x2 * sum_x2 * sum_y - sum_x * sum_x * sum_x2y - n * sum_x3 * sum_xy
+        action: compute c = det_c / det
+        delay: 10ms
+
+    step output_result:
+        action: log "拟合完成"
+        delay: 50ms
+
+    on_complete: goto done
+
+task done:
+    step wait:
+        allow_indefinite_wait: true
