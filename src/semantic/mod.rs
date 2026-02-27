@@ -625,6 +625,7 @@ fn expand_plc_controller_devices(
         connections: rewritten_connections,
         variables: topology.variables.clone(),
         cam_tables: topology.cam_tables.clone(),
+        extern_functions: topology.extern_functions.clone(),
     })
 }
 

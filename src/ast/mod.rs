@@ -17,6 +17,8 @@ pub struct TopologySection {
     pub variables: Vec<VariableDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cam_tables: Vec<CamTableDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extern_functions: Vec<ExternFunctionDeclaration>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -34,6 +36,31 @@ pub struct VariableDeclaration {
     pub name: String,
     pub var_type: VariableType,
     pub initial_value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExternFunctionDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<ExternFunctionParameter>,
+    pub return_types: Vec<VariableType>,
+    pub contract: ExternFunctionContract,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExternFunctionParameter {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub var_type: VariableType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExternFunctionContract {
+    pub rust_module: String,
+    pub pure: bool,
+    pub time_bound_us: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

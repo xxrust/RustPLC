@@ -3,7 +3,30 @@ Started: Fri Feb 27 23:19:22 CST 2026
 ## Codebase Patterns
 - Run `cargo check --workspace` for typecheck and `cargo test --workspace` for regression gate before committing.
 - Keep DSL syntax decisions in dedicated docs under `docs/` and link story completion back to `prd.json` + `progress.txt`.
+- For new `[topology]` DSL entries, keep grammar (`src/parser/plc.pest`), parser wiring (`src/parser/mod.rs`), and semantic topology cloning (`src/semantic/mod.rs`) in sync.
 
+---
+## [2026-02-28 00:01:57] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added parser grammar and AST support for `extern function <name>(...) -> ... { ... }` declarations in `[topology]`.
+  - Implemented required contract field parsing/validation (`rust_module`, `pure`, `time_bound_us`) with line-aware parse errors for missing fields.
+  - Added parser tests covering successful extern declaration parsing and missing-required-field rejection.
+  - Marked US-002 as completed (`passes: true`) in `prd.json`.
+- Files changed
+  - src/ast/mod.rs
+  - src/parser/plc.pest
+  - src/parser/mod.rs
+  - src/semantic/mod.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - `TopologySection` data added by parser should be propagated through semantic preprocessing, even before semantic checks consume it.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Missing required DSL contract keys are best surfaced from parser post-processing (`parse_at`) instead of relying on generic pest syntax errors.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Extern declarations currently parse into `topology.extern_functions`; call-site parsing (`action: call`) remains for subsequent stories.
 ---
 ## [2026-02-27 23:44:07] - US-001
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID

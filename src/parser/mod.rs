@@ -2,10 +2,11 @@ use crate::ast::{
     ActionStatement, ActionTarget, BinaryOperator, Branch, CamPoint, CamTableDeclaration,
     CamTableMode, CausalityConstraint, ComparisonOperator, ConditionExpression, ConstraintsSection,
     DeviceAttributes, DeviceDeclaration, DevicePort, DeviceTags, DeviceType, DurationValue,
-    Expression, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective, ParallelBlock,
-    PlcProgram, PortRole, PortType, RaceBlock, RaceBranch, SafetyConstraint, SafetyOperand,
-    SafetyRelation, StateReference, StepDeclaration, StepStatement, TaskDeclaration, TasksSection,
-    TimeUnit, TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget, TopologyConnection,
+    Expression, ExternFunctionContract, ExternFunctionDeclaration, ExternFunctionParameter,
+    GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective, ParallelBlock, PlcProgram,
+    PortRole, PortType, RaceBlock, RaceBranch, SafetyConstraint, SafetyOperand, SafetyRelation,
+    StateReference, StepDeclaration, StepStatement, TaskDeclaration, TasksSection, TimeUnit,
+    TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget, TopologyConnection,
     TopologyRelation, TopologySection, VariableDeclaration, VariableType, WaitCondition,
     WaitStatement,
 };
@@ -85,6 +86,7 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
     let mut explicit_connections = Vec::new();
     let mut variables = Vec::new();
     let mut cam_tables = Vec::new();
+    let mut extern_functions = Vec::new();
 
     for entry in pair.into_inner() {
         match entry.as_rule() {
@@ -94,6 +96,9 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
             }
             Rule::variable_declaration => variables.push(parse_variable_declaration(entry)?),
             Rule::cam_table_declaration => cam_tables.push(parse_cam_table_declaration(entry)?),
+            Rule::extern_function_declaration => {
+                extern_functions.push(parse_extern_function_declaration(entry)?);
+            }
             _ => {}
         }
     }
@@ -103,6 +108,7 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
         connections: explicit_connections,
         variables,
         cam_tables,
+        extern_functions,
     })
 }
 
@@ -272,6 +278,195 @@ fn parse_variable_type(pair: Pair<Rule>) -> Result<VariableType, PlcError> {
         "bool" => Ok(VariableType::Bool),
         other => Err(PlcError::parse(line, format!("不支持的变量类型: {other}"))),
     }
+}
+
+fn parse_extern_function_declaration(
+    pair: Pair<Rule>,
+) -> Result<ExternFunctionDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let col = col_of(&pair);
+    let mut name = None;
+    let mut params = Vec::new();
+    let mut return_types = None;
+    let mut contract = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::extern_param_list => params = parse_extern_param_list(part)?,
+            Rule::extern_return_spec => return_types = Some(parse_extern_return_spec(part)?),
+            Rule::extern_contract_block => {
+                contract = Some(parse_extern_contract_block(
+                    part,
+                    name.as_deref().unwrap_or("<unknown>"),
+                    line,
+                    col,
+                )?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ExternFunctionDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "extern function 声明缺少名称"))?,
+        params,
+        return_types: return_types
+            .ok_or_else(|| PlcError::parse(line, "extern function 声明缺少返回类型"))?,
+        contract: contract
+            .ok_or_else(|| PlcError::parse(line, "extern function 声明缺少 contract"))?,
+    })
+}
+
+fn parse_extern_param_list(pair: Pair<Rule>) -> Result<Vec<ExternFunctionParameter>, PlcError> {
+    let mut params = Vec::new();
+    for param in pair.into_inner() {
+        if param.as_rule() == Rule::extern_param {
+            params.push(parse_extern_param(param)?);
+        }
+    }
+    Ok(params)
+}
+
+fn parse_extern_param(pair: Pair<Rule>) -> Result<ExternFunctionParameter, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut var_type = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::variable_type => var_type = Some(parse_variable_type(part)?),
+            _ => {}
+        }
+    }
+
+    Ok(ExternFunctionParameter {
+        name: name.ok_or_else(|| PlcError::parse(line, "extern 参数缺少名称"))?,
+        var_type: var_type.ok_or_else(|| PlcError::parse(line, "extern 参数缺少类型"))?,
+    })
+}
+
+fn parse_extern_return_spec(pair: Pair<Rule>) -> Result<Vec<VariableType>, PlcError> {
+    let line = line_of(&pair);
+    let mut return_types = Vec::new();
+
+    for part in pair.into_inner() {
+        if part.as_rule() == Rule::variable_type {
+            return_types.push(parse_variable_type(part)?);
+        }
+    }
+
+    if return_types.is_empty() {
+        return Err(PlcError::parse(line, "extern function 返回类型不能为空"));
+    }
+
+    Ok(return_types)
+}
+
+fn parse_extern_contract_block(
+    pair: Pair<Rule>,
+    function_name: &str,
+    declaration_line: usize,
+    declaration_col: usize,
+) -> Result<ExternFunctionContract, PlcError> {
+    let mut rust_module = None;
+    let mut pure = None;
+    let mut time_bound_us = None;
+
+    for entry in pair.into_inner() {
+        if entry.as_rule() != Rule::extern_contract_entry {
+            continue;
+        }
+
+        let line = line_of(&entry);
+        let col = col_of(&entry);
+        let mut inner = entry.into_inner();
+        let field = inner
+            .next()
+            .ok_or_else(|| PlcError::parse(line, "extern contract 字段缺少名称"))?
+            .as_str()
+            .to_string();
+        let value_wrapper = inner
+            .next()
+            .ok_or_else(|| PlcError::parse(line, format!("extern contract 字段 {field} 缺少值")))?;
+        let value = first_inner(value_wrapper, line, "extern contract 字段值")?;
+
+        match field.as_str() {
+            "rust_module" => {
+                if rust_module.is_some() {
+                    return Err(PlcError::parse_at(
+                        "<input>",
+                        line,
+                        col,
+                        "extern contract 字段 rust_module 重复声明",
+                    ));
+                }
+                rust_module = Some(expect_string(value, "rust_module")?);
+            }
+            "pure" => {
+                if pure.is_some() {
+                    return Err(PlcError::parse_at(
+                        "<input>",
+                        line,
+                        col,
+                        "extern contract 字段 pure 重复声明",
+                    ));
+                }
+                pure = Some(expect_boolean(value, "pure")?);
+            }
+            "time_bound_us" => {
+                if time_bound_us.is_some() {
+                    return Err(PlcError::parse_at(
+                        "<input>",
+                        line,
+                        col,
+                        "extern contract 字段 time_bound_us 重复声明",
+                    ));
+                }
+                time_bound_us = Some(expect_u64(value, "time_bound_us")?);
+            }
+            _ => {
+                return Err(PlcError::parse_at(
+                    "<input>",
+                    line,
+                    col,
+                    format!("不支持的 extern contract 字段: {field}"),
+                ));
+            }
+        }
+    }
+
+    let rust_module = rust_module.ok_or_else(|| {
+        PlcError::parse_at(
+            "<input>",
+            declaration_line,
+            declaration_col,
+            format!("extern function {function_name} 缺少必填 contract 字段 rust_module"),
+        )
+    })?;
+    let pure = pure.ok_or_else(|| {
+        PlcError::parse_at(
+            "<input>",
+            declaration_line,
+            declaration_col,
+            format!("extern function {function_name} 缺少必填 contract 字段 pure"),
+        )
+    })?;
+    let time_bound_us = time_bound_us.ok_or_else(|| {
+        PlcError::parse_at(
+            "<input>",
+            declaration_line,
+            declaration_col,
+            format!("extern function {function_name} 缺少必填 contract 字段 time_bound_us"),
+        )
+    })?;
+
+    Ok(ExternFunctionContract {
+        rust_module,
+        pure,
+        time_bound_us,
+    })
 }
 
 fn parse_cam_table_declaration(pair: Pair<Rule>) -> Result<CamTableDeclaration, PlcError> {
@@ -1983,7 +2178,7 @@ mod tests {
     use super::{parse_constraints, parse_plc, parse_tasks, parse_topology};
     use crate::ast::{
         ActionStatement, BinaryOperator, DeviceType, Expression, LiteralValue, OnCompleteDirective,
-        PortRole, PortType, StepStatement, WaitCondition,
+        PortRole, PortType, StepStatement, VariableType, WaitCondition,
     };
 
     #[test]
@@ -2454,6 +2649,83 @@ task main:
             analog.attributes.external,
             Some(true),
             "analog_input external 应解析为 true"
+        );
+    }
+
+    #[test]
+    fn parses_extern_function_declarations_into_ast() {
+        let input = r#"
+[topology]
+extern function add(a: float, b: float) -> float {
+    rust_module: "math::basic"
+    pure: true
+    time_bound_us: 10
+}
+
+extern function split(v: float) -> (float, float) {
+    rust_module: "math::split"
+    pure: true
+    time_bound_us: 15
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("extern function 声明应能解析到 AST");
+        assert_eq!(program.topology.extern_functions.len(), 2);
+
+        let add = &program.topology.extern_functions[0];
+        assert_eq!(add.name, "add");
+        assert_eq!(add.params.len(), 2);
+        assert_eq!(add.params[0].name, "a");
+        assert_eq!(add.params[0].var_type, VariableType::Float);
+        assert_eq!(add.params[1].name, "b");
+        assert_eq!(add.params[1].var_type, VariableType::Float);
+        assert_eq!(add.return_types, vec![VariableType::Float]);
+        assert_eq!(add.contract.rust_module, "math::basic");
+        assert!(add.contract.pure);
+        assert_eq!(add.contract.time_bound_us, 10);
+
+        let split = &program.topology.extern_functions[1];
+        assert_eq!(split.name, "split");
+        assert_eq!(split.params.len(), 1);
+        assert_eq!(split.params[0].name, "v");
+        assert_eq!(split.params[0].var_type, VariableType::Float);
+        assert_eq!(
+            split.return_types,
+            vec![VariableType::Float, VariableType::Float]
+        );
+        assert_eq!(split.contract.rust_module, "math::split");
+        assert!(split.contract.pure);
+        assert_eq!(split.contract.time_bound_us, 15);
+    }
+
+    #[test]
+    fn rejects_extern_declaration_missing_required_contract_fields() {
+        let input = r#"
+[topology]
+extern function add(a: float, b: float) -> float {
+    pure: true
+    time_bound_us: 10
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let err = parse_plc(input).expect_err("缺少 rust_module 时应返回错误");
+        assert_eq!(err.line(), 3, "错误应定位到 extern 声明行");
+        assert!(
+            err.to_string()
+                .contains("缺少必填 contract 字段 rust_module"),
+            "错误信息应明确缺失字段，实际: {err}"
         );
     }
 

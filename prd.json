@@ -29,8 +29,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Parser now supports extern function declarations with required contract field validation and AST capture"
     },
     {
       "id": "US-003",

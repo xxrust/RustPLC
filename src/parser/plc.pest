@@ -121,6 +121,19 @@ variable_initializer = { number | integer | boolean_value }
 variable_declaration = {
     "variable" ~ identifier ~ ":" ~ variable_type ~ "=" ~ variable_initializer
 }
+extern_param = { identifier ~ ":" ~ variable_type }
+extern_param_list = { extern_param ~ ("," ~ extern_param)* ~ ","? }
+extern_return_spec = {
+    variable_type
+    | "(" ~ variable_type ~ ("," ~ variable_type)+ ~ ","? ~ ")"
+}
+extern_contract_field = { "rust_module" | "pure" | "time_bound_us" }
+extern_contract_value = { string_literal | boolean_value | integer }
+extern_contract_entry = { extern_contract_field ~ ":" ~ extern_contract_value }
+extern_contract_block = { "{" ~ extern_contract_entry ~ ((","? ~ extern_contract_entry))* ~ ","? ~ "}" }
+extern_function_declaration = {
+    "extern" ~ "function" ~ identifier ~ "(" ~ extern_param_list? ~ ")" ~ "->" ~ extern_return_spec ~ extern_contract_block
+}
 cam_table_mode = { "periodic" | "oneshot" }
 cam_point = { "(" ~ number ~ "," ~ number ~ ")" }
 cam_point_list = { "[" ~ cam_point ~ ("," ~ cam_point)* ~ ","? ~ "]" }
@@ -140,6 +153,7 @@ topology_entry = _{
     | relation_declaration
     | variable_declaration
     | cam_table_declaration
+    | extern_function_declaration
 }
 
 topology_section = { section_topology ~ topology_entry* }
