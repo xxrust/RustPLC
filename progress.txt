@@ -6,6 +6,8 @@ Started: Thu Feb 26 2026
 - Cam 插值语义在 `src/semantic/mod.rs` 生成系数，运行时只消费系数；样条问题优先在语义层修复并配套连续性测试。
 - 安全阈值建模走 `verification/safety.rs` 的离散区间逻辑；新增模拟量端口阈值时要同步补齐 `compute_analog_regions` 与端口域注册。
 - Cam 相关回归应覆盖 parser/semantic/runtime/runtime_bridge/verification 五层，使用 `scripts/cam_regression_gate.sh` 统一入口。
+- ST 代码生成统一走 `src/codegen/st.rs::generate_st`，并保持“定时器调用在 CASE 之前”的固定模板。
+- OpenPLC trace 对比统一先归一化到 `tick + vars(JSONL)`，再用 `scripts/openplc_trace.py compare` 做 ±1 tick 容差校验。
 
 ## [2026-02-26 13:37:56 CST] - US-001
 Thread: https://ampcode.com/threads/N-A-codex-cli
@@ -102,4 +104,128 @@ Thread: https://ampcode.com/threads/N-A-codex-cli
   - .github/workflows/rp2040_regression.yml
 - **Learnings for future iterations:**
   - 对 `rust_plc` 单元 gate 建议带 `--lib`，可避免跑大量无关 integration 测试并显著提速。
+---
+
+## [2026-02-27 15:06:24 CST] - US-001
+Thread: https://ampcode.com/threads/N-A-codex-cli
+- What was implemented
+  - 新增 `src/codegen/st.rs`，实现 `generate_st(topology, state_machine, config)` 主流程，输出 PROGRAM/VAR/CASE 结构。
+  - 覆盖 `TransitionGuard::Always/Condition/Timeout/Delay` 到 ST 分支映射；Timeout/Delay 统一生成 `_timer_<state_id>.Q` 检查并在 CASE 前调用 TON。
+  - `TransitionAction::Log` 映射为 `(* LOG: ... *)` 注释；检测到 `parallel`/`race` 合成状态时分别返回 `ParallelNotSupported`/`RaceNotSupported`。
+  - 新增 `gen-st` CLI 子命令，支持 `--out`、`--program-name`、`--no-verification-summary`。
+- Files changed
+  - src/lib.rs
+  - src/codegen/mod.rs
+  - src/codegen/st.rs
+  - src/main.rs
+  - prd.json
+- **Learnings for future iterations:**
+  - `StateMachine.transitions` 的 guard 顺序会影响生成 IF/ELSIF 顺序，生成器应保持输入顺序并只做语义等价重排。
+  - ST 定时器调用放在 CASE 前是必要约束；后续扩展更多 guard 类型时要继续保持这个布局。
+---
+
+## [2026-02-27 15:59:43 CST] - US-002
+Thread: https://ampcode.com/threads/N-A-codex-cli
+- What was implemented
+  - `assign_state_ids` 固定按 `StateMachine.states` 原始顺序分配 0,10,20...，并在生成注释中显式输出 state->id 映射。
+  - 预留内部错误状态 ID `9999`（仅保留注释，不分配给业务 state）。
+  - 所有跳转统一走名称到 ID 映射，避免硬编码。
+  - `_state` 初始值与 `StateMachine.initial` 的映射 ID 保持一致。
+- Files changed
+  - src/codegen/st.rs
+  - out/two_cylinder.st（本地验证产物，未纳入 git）
+- **Learnings for future iterations:**
+  - ST 代码中的“状态常量注释块”对人工审查和 trace 对齐非常关键，建议后续保持稳定格式。
+---
+
+## [2026-02-27 15:59:43 CST] - US-003
+Thread: https://ampcode.com/threads/N-A-codex-cli
+- What was implemented
+  - 变量名规范化实现：小写、非法字符转 `_`、连续 `_` 压缩、数字开头补 `_`。
+  - 与 ST 保留字冲突时自动前缀 `_`；与内部变量 `_state`/`_timer_*` 冲突时前缀 `_u_`。
+  - 规范化后不同原名映射到同名时返回 `VariableNameConflict`。
+  - 同一变量出现 BOOL/REAL（或与其冲突）类型时返回 `TypeConflict`。
+- Files changed
+  - src/codegen/st.rs
+- **Learnings for future iterations:**
+  - 命名冲突应在“渲染前”一次性失败，避免一半变量成功、一半变量在输出阶段才报错。
+---
+
+## [2026-02-27 15:59:43 CST] - US-004
+Thread: https://ampcode.com/threads/N-A-codex-cli
+- What was implemented
+  - 条件表达式解析收敛为四类：`==`、`!=`、`>`、`<`。
+  - `>=`、`<=`、布尔组合（`&&`/`||`）等复杂形式统一返回 `ExpressionNotSupported`。
+  - `two_cylinder.plc` 与 `assembly_station.plc` 经过 `gen-st` 验证可生成 ST。
+- Files changed
+  - src/codegen/st.rs
+- **Learnings for future iterations:**
+  - 解析器应先拒绝复杂操作符，再做 token 化，错误定位更稳定。
+---
+
+## [2026-02-27 15:59:43 CST] - US-005
+Thread: https://ampcode.com/threads/N-A-codex-cli
+- What was implemented
+  - Timeout/Delay 转换为 `_timer_<state_id>` TON 实例，并统一在 CASE 前调用。
+  - TON `IN` 规则固定为 `_state = <id>`，状态切换后自动复位。
+  - `TimerOperation::Cancel` 明确静默忽略，不生成代码也不报错。
+- Files changed
+  - src/codegen/st.rs
+- **Learnings for future iterations:**
+  - Timeout/Delay 语义和 TON 调用位置强耦合，回归测试必须包含“timer-before-case”断言。
+---
+
+## [2026-02-27 15:59:43 CST] - US-006
+Thread: https://ampcode.com/threads/N-A-codex-cli
+- What was implemented
+  - 完成 `gen-st` 子命令参数面：`--out`、`--program-name`、`--no-verification-summary`。
+  - 失败路径统一为结构化错误列表（`ST code generation failed: ...`）。
+  - CLI 使用和帮助文本同步更新。
+- Files changed
+  - src/main.rs
+- **Learnings for future iterations:**
+  - 新子命令建议始终提供单独 usage 字符串，避免与主命令参数混淆。
+---
+
+## [2026-02-27 15:59:43 CST] - US-007
+Thread: https://ampcode.com/threads/N-A-codex-cli
+- What was implemented
+  - 扩充 `src/codegen/st.rs` 单元测试矩阵：状态 ID 唯一性、初始态映射、变量块完整性、timer-before-case、parallel/race 拒绝、复杂表达式拒绝。
+  - 新增 `tests/st_codegen_integration.rs`：`gen-st` CLI 生成双示例文件，验证结构与定时器位置。
+  - 全量回归：`cargo test --workspace` 通过。
+- Files changed
+  - src/codegen/st.rs
+  - tests/st_codegen_integration.rs
+- **Learnings for future iterations:**
+  - ST 生成器需要“单元 + CLI 集成”双层测试，才能同时覆盖纯函数逻辑和参数解析路径。
+---
+
+## [2026-02-27 15:59:43 CST] - US-008
+Thread: https://ampcode.com/threads/N-A-codex-cli
+- What was implemented
+  - 新增 CI workflow：`.github/workflows/st_codegen_matiec.yml`，在 Ubuntu 安装 `matiec` 并执行 `iec2c` 编译 gate。
+  - 新增脚本 `scripts/st_codegen_matiec_gate.sh`：对 `two_cylinder.plc`、`assembly_station.plc` 执行 `gen-st` 后调用 `iec2c` 编译。
+  - 集成测试中增加“若本机有 iec2c 则执行编译，否则跳过”的测试用例。
+- Files changed
+  - .github/workflows/st_codegen_matiec.yml
+  - scripts/st_codegen_matiec_gate.sh
+  - tests/st_codegen_integration.rs
+- **Learnings for future iterations:**
+  - 本地环境可用“可选编译测试+CI强制编译”组合，兼顾开发效率与发布可信度。
+---
+
+## [2026-02-27 15:59:43 CST] - US-009
+Thread: https://ampcode.com/threads/N-A-codex-cli
+- What was implemented
+  - 定义 OpenPLC trace 采集方案为 Modbus TCP 轮询，并形成映射文档与配置。
+  - 新增映射文件 `scenarios/openplc_trace_map.two_cylinder.json`，覆盖 `_state`、`valve_a`、`valve_b`。
+  - 新增 `scripts/openplc_trace.py`：支持 raw CSV 归一化和 SIL/OpenPLC trace 对比，支持 `--tick-tolerance 1` 与 `--min-pass-rate 0.95`。
+  - 新增 `scripts/openplc_trace_gate.sh` 包装 gate 命令，便于流水线接入。
+- Files changed
+  - docs/openplc-trace-phase2.md
+  - scenarios/openplc_trace_map.two_cylinder.json
+  - scripts/openplc_trace.py
+  - scripts/openplc_trace_gate.sh
+- **Learnings for future iterations:**
+  - trace 对比应统一使用“tick+vars JSONL”中间格式，避免不同采集源之间重复写转换逻辑。
 ---

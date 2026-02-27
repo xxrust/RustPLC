@@ -2,6 +2,7 @@ pub mod alarm_runtime;
 pub mod ast;
 pub mod board_log;
 pub mod board_trace;
+pub mod codegen;
 pub mod component_diagnostics;
 pub mod component_faults;
 pub mod component_library;

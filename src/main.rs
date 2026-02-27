@@ -26,6 +26,7 @@ use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::alarm_runtime::{
     build_alarm_event, AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity,
 };
+use rust_plc::codegen::st::{generate_st, StCodegenConfig, StCodegenError};
 use rust_plc::component_diagnostics::{diagnose_component_sim, ComponentDiagnosisReport};
 use rust_plc::component_scenario::{parse_component_scenario_json, write_component_scenario_json};
 use rust_plc::component_sim::{run_component_simulation, ComponentSimReport};
@@ -1606,6 +1607,13 @@ fn main() {
         }
         return;
     }
+    if first == "gen-st" {
+        if let Err(msg) = run_gen_st_subcommand(&program, args) {
+            eprintln!("[STGEN-000] {msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "new" {
         if let Err(msg) = run_new_subcommand(&program, args) {
             eprintln!("{msg}");
@@ -1917,6 +1925,9 @@ fn print_usage(program: &str) {
     eprintln!(
         "  {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir> [--coverage-mode <pairwise|boundary-first|risk-first>] [--dry-run] [--template-library <metadata.json>]"
     );
+    eprintln!(
+        "  {program} gen-st <file.plc> [--out <output.st>] [--program-name <Main>] [--no-verification-summary]"
+    );
     eprintln!();
     eprintln!("Budget options (also configurable via env vars):");
     eprintln!("  --budget-max-actions-per-transition <n>");
@@ -1944,6 +1955,87 @@ fn write_scaffold_file(path: &Path, content: &str, force: bool) -> Result<(), St
         }
     }
     fs::write(path, content).map_err(|err| format!("Failed to write {}: {err}", path.display()))
+}
+
+fn run_gen_st_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = format!(
+        "Usage: {program} gen-st <file.plc> [--out <output.st>] [--program-name <Main>] [--no-verification-summary]"
+    );
+
+    let Some(plc_path) = args.next() else {
+        return Err(usage);
+    };
+
+    let mut out_path: Option<PathBuf> = None;
+    let mut program_name = "Main".to_string();
+    let mut include_verification_summary = true;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--out" => {
+                let value = args.next().ok_or_else(|| {
+                    "Missing value for --out <output.st> in gen-st subcommand".to_string()
+                })?;
+                out_path = Some(PathBuf::from(value));
+            }
+            "--program-name" => {
+                program_name = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --program-name <Main>".to_string())?;
+                if program_name.trim().is_empty() {
+                    return Err("--program-name cannot be empty".to_string());
+                }
+            }
+            "--no-verification-summary" => {
+                include_verification_summary = false;
+            }
+            "-h" | "--help" => return Err(usage.clone()),
+            other => return Err(format!("Unknown argument for gen-st: {other}\n{usage}")),
+        }
+    }
+
+    if Path::new(&plc_path).extension().and_then(|ext| ext.to_str()) != Some("plc") {
+        return Err(format!("gen-st expects a .plc file path, got: {plc_path}"));
+    }
+
+    let source = fs::read_to_string(&plc_path)
+        .map_err(|err| format!("Failed to read PLC file {plc_path}: {err}"))?;
+    let ir_bundle = compile_pipeline(&source).map_err(|errors| errors.join("\n"))?;
+
+    let config = StCodegenConfig {
+        program_name,
+        source_file: plc_path.clone(),
+        include_verification_summary,
+    };
+    let st_text = generate_st(&ir_bundle.topology, &ir_bundle.state_machine, &config)
+        .map_err(format_st_codegen_errors)?;
+
+    if let Some(path) = out_path {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)
+                    .map_err(|err| format!("Failed to create output directory {parent:?}: {err}"))?;
+            }
+        }
+        fs::write(&path, st_text)
+            .map_err(|err| format!("Failed to write ST file {}: {err}", path.display()))?;
+        eprintln!("st_output: {}", path.display());
+        return Ok(());
+    }
+
+    print!("{st_text}");
+    Ok(())
+}
+
+fn format_st_codegen_errors(errors: Vec<StCodegenError>) -> String {
+    let mut out = String::from("ST code generation failed:\n");
+    for error in errors {
+        out.push_str(&format!("  - {error}\n"));
+    }
+    out.trim_end().to_string()
 }
 
 fn run_new_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
