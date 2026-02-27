@@ -699,8 +699,8 @@ impl<'a> Runtime<'a> {
 
         let old_cmd = self.cam_states[cam_idx].slave_cmd;
         self.cam_states[cam_idx].active_table = table_index;
-        let adjusted =
-            self.cam_states[cam_idx].master_pos * cfg.gear_ratio + self.cam_states[cam_idx].phase_offset;
+        let adjusted = self.cam_states[cam_idx].master_pos * cfg.gear_ratio
+            + self.cam_states[cam_idx].phase_offset;
         let new_table = &self.program.cam_tables[table_index as usize];
         let new_cmd = interpolate_cam(cfg.interpolation, new_table, adjusted);
         let state = &mut self.cam_states[cam_idx];
@@ -736,11 +736,7 @@ impl<'a> Runtime<'a> {
         })
     }
 
-    fn cam_analog_field(
-        &self,
-        cam_index: u16,
-        field: CamAnalogField,
-    ) -> Result<f32, RuntimeError> {
+    fn cam_analog_field(&self, cam_index: u16, field: CamAnalogField) -> Result<f32, RuntimeError> {
         let cam_idx = cam_index as usize;
         if cam_idx >= self.program.cam_configs.len() {
             return Err(RuntimeError::InvalidCamIndex { cam_index });
@@ -916,11 +912,7 @@ fn eval_expr(program: &ExprProgram, vars: &[f32; MAX_VARIABLES]) -> f32 {
         }
     }
 
-    if sp == 0 {
-        0.0
-    } else {
-        stack[0]
-    }
+    if sp == 0 { 0.0 } else { stack[0] }
 }
 
 const MAX_PID_LOOPS: usize = 8;
@@ -1528,6 +1520,41 @@ mod tests {
     }
 
     #[test]
+    fn binary_search_interval_covers_boundaries_exact_hits_and_inner_points() {
+        let table = build_cam_table(false, &[(0.0, 0.0), (100.0, 40.0), (200.0, 100.0)]);
+        assert_eq!(
+            binary_search_interval(&table, 0.0),
+            0,
+            "表首边界应定位到首段"
+        );
+        assert_eq!(
+            binary_search_interval(&table, 40.0),
+            0,
+            "区间内点应定位到对应段"
+        );
+        assert_eq!(
+            binary_search_interval(&table, 100.0),
+            1,
+            "精确命中中间节点时应定位到右侧段"
+        );
+        assert_eq!(
+            binary_search_interval(&table, 200.0),
+            1,
+            "表尾边界应钉在最后一段"
+        );
+    }
+
+    #[test]
+    fn linear_interpolate_matches_known_midpoint_precision() {
+        let table = build_cam_table(false, &[(0.0, 0.0), (10.0, 20.0)]);
+        let y = linear_interpolate(&table, 5.0);
+        assert!(
+            (y - 10.0).abs() < 1e-6,
+            "线性插值中值误差应小于 1e-6，实际 {y}"
+        );
+    }
+
+    #[test]
     fn cubic_interpolate_evaluates_horner_polynomial() {
         let mut table = build_cam_table(false, &[(0.0, 0.0), (10.0, 10.0)]);
         table.coeffs[0] = SplineCoeff {
@@ -1540,6 +1567,28 @@ mod tests {
         assert!(
             (out - 49.0).abs() < 1e-6,
             "Horner 多项式应为 49，实际 {out}"
+        );
+    }
+
+    #[test]
+    fn cubic_derivative_matches_central_difference() {
+        let mut table = build_cam_table(false, &[(0.0, 0.0), (10.0, 0.0)]);
+        table.coeffs[0] = SplineCoeff {
+            a: 0.5,
+            b: 1.2,
+            c: -0.3,
+            d: 0.08,
+        };
+
+        let x = 3.0f32;
+        let h = 1e-3f32;
+        let analytical = cubic_derivative(&table, x);
+        let finite_diff =
+            (cubic_interpolate(&table, x + h) - cubic_interpolate(&table, x - h)) / (2.0 * h);
+
+        assert!(
+            (analytical - finite_diff).abs() < 1e-3,
+            "cubic_derivative 应与有限差分近似一致，解析={analytical}, 差分={finite_diff}"
         );
     }
 
@@ -1829,6 +1878,107 @@ mod tests {
     }
 
     #[test]
+    fn runtime_rejects_too_many_cam_couplings_at_init() {
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "halt",
+            instr: Instr::Halt,
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+
+        let cam_tables: &'static [CamTableData] = Box::leak(
+            vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice(),
+        );
+        let cam_configs: &'static [CamCouplingConfig] = Box::leak(
+            vec![
+                CamCouplingConfig {
+                    master_input: AnalogInputId(0),
+                    slave_output: AnalogOutputId(0),
+                    table_index: 0,
+                    interpolation: CamInterpolation::Linear,
+                    gear_ratio: 1.0,
+                    initial_phase_offset: 0.0,
+                    following_error_limit: 1.0,
+                    slave_feedback: AnalogInputId(1),
+                };
+                MAX_CAM_COUPLINGS + 1
+            ]
+            .into_boxed_slice(),
+        );
+        let program = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs,
+            cam_tables,
+        };
+
+        let err = match Runtime::new(&program) {
+            Ok(_) => panic!("超过 cam coupling 上限应报错"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            err,
+            RuntimeError::TooManyCamCouplings {
+                configured: MAX_CAM_COUPLINGS + 1,
+                max: MAX_CAM_COUPLINGS,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_invalid_initial_cam_table_index() {
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "halt",
+            instr: Instr::Halt,
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+
+        let cam_tables: &'static [CamTableData] = Box::leak(
+            vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice(),
+        );
+        let cam_configs: &'static [CamCouplingConfig] = Box::leak(
+            vec![CamCouplingConfig {
+                master_input: AnalogInputId(0),
+                slave_output: AnalogOutputId(0),
+                table_index: 1,
+                interpolation: CamInterpolation::Linear,
+                gear_ratio: 1.0,
+                initial_phase_offset: 0.0,
+                following_error_limit: 1.0,
+                slave_feedback: AnalogInputId(1),
+            }]
+            .into_boxed_slice(),
+        );
+        let program = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs,
+            cam_tables,
+        };
+
+        let err = match Runtime::new(&program) {
+            Ok(_) => panic!("初始化 table_index 越界应报错"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            err,
+            RuntimeError::InvalidCamTableIndex {
+                cam_index: 0,
+                table_index: 1,
+            }
+        );
+    }
+
+    #[test]
     fn pid_conditional_integration_prevents_windup_after_saturation() {
         let cfg = PidConfig {
             pv: AnalogInputId(0),
@@ -1874,8 +2024,9 @@ mod tests {
             entry: StepId(0),
         }];
 
-        let cam_tables: &'static [CamTableData] =
-            Box::leak(vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice());
+        let cam_tables: &'static [CamTableData] = Box::leak(
+            vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice(),
+        );
         let cam_configs: &'static [CamCouplingConfig] = Box::leak(
             vec![CamCouplingConfig {
                 master_input: AnalogInputId(0),
@@ -1904,6 +2055,59 @@ mod tests {
     }
 
     #[test]
+    fn cam_phase_rejects_invalid_index() {
+        static PHASE_EXPR: ExprProgram = ExprProgram {
+            ops: [ExprOp::PushLiteral(5.0); MAX_EXPR_OPS],
+            len: 1,
+        };
+        static ACTIONS: [Action; 1] = [Action::CamPhase {
+            cam_index: 2,
+            offset_expr: PHASE_EXPR,
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "bad_phase",
+            instr: Instr::Action {
+                actions: &ACTIONS,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+
+        let cam_tables: &'static [CamTableData] = Box::leak(
+            vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice(),
+        );
+        let cam_configs: &'static [CamCouplingConfig] = Box::leak(
+            vec![CamCouplingConfig {
+                master_input: AnalogInputId(0),
+                slave_output: AnalogOutputId(0),
+                table_index: 0,
+                interpolation: CamInterpolation::Linear,
+                gear_ratio: 1.0,
+                initial_phase_offset: 0.0,
+                following_error_limit: 1.0,
+                slave_feedback: AnalogInputId(1),
+            }]
+            .into_boxed_slice(),
+        );
+        let program = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs,
+            cam_tables,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&program).expect("runtime init");
+        let err = rt.tick(&mut io).expect_err("非法 cam_index 应报错");
+        assert_eq!(err, RuntimeError::InvalidCamIndex { cam_index: 2 });
+    }
+
+    #[test]
     fn cam_switch_rejects_invalid_table_index() {
         static ACTIONS: [Action; 1] = [Action::CamSwitch {
             cam_index: 0,
@@ -1922,8 +2126,9 @@ mod tests {
             entry: StepId(0),
         }];
 
-        let cam_tables: &'static [CamTableData] =
-            Box::leak(vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice());
+        let cam_tables: &'static [CamTableData] = Box::leak(
+            vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice(),
+        );
         let cam_configs: &'static [CamCouplingConfig] = Box::leak(
             vec![CamCouplingConfig {
                 master_input: AnalogInputId(0),
@@ -1954,6 +2159,110 @@ mod tests {
                 cam_index: 0,
                 table_index: 9,
             }
+        );
+    }
+
+    #[test]
+    fn cam_switch_keeps_continuity_with_ratio_phase_and_decay() {
+        static ENGAGE: [Action; 1] = [Action::CamEngage { cam_index: 0 }];
+        static SWITCH: [Action; 1] = [Action::CamSwitch {
+            cam_index: 0,
+            table_index: 1,
+        }];
+        static STEPS: [Step<'static>; 4] = [
+            Step {
+                name: "engage",
+                instr: Instr::Action {
+                    actions: &ENGAGE,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "settle_one_tick",
+                instr: Instr::Delay {
+                    ticks: 1,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "switch",
+                instr: Instr::Action {
+                    actions: &SWITCH,
+                    next: StepId(3),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+
+        let cam_tables: &'static [CamTableData] = Box::leak(
+            vec![
+                build_cam_table(true, &[(0.0, 0.0), (180.0, 180.0), (360.0, 0.0)]),
+                build_cam_table(true, &[(0.0, 50.0), (180.0, 100.0), (360.0, 50.0)]),
+            ]
+            .into_boxed_slice(),
+        );
+        let cam_configs: &'static [CamCouplingConfig] = Box::leak(
+            vec![CamCouplingConfig {
+                master_input: AnalogInputId(0),
+                slave_output: AnalogOutputId(0),
+                table_index: 0,
+                interpolation: CamInterpolation::Linear,
+                gear_ratio: 2.0,
+                initial_phase_offset: 30.0,
+                following_error_limit: 9999.0,
+                slave_feedback: AnalogInputId(1),
+            }]
+            .into_boxed_slice(),
+        );
+        let program = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs,
+            cam_tables,
+        };
+
+        let mut io = MemIo::new();
+        io.ai[0] = 45.0;
+        io.ai[1] = 0.0;
+
+        let mut rt = Runtime::new(&program).expect("runtime init");
+        rt.tick(&mut io).expect("tick0 engage");
+        rt.tick(&mut io).expect("tick1 switch");
+        let before_switch = io.ao[0];
+
+        rt.tick(&mut io).expect("tick2 apply switch offset");
+        let after_switch = io.ao[0];
+        assert!(
+            (after_switch - before_switch).abs() < 1e-4,
+            "切表瞬间输出应连续，before={before_switch}, after={after_switch}"
+        );
+        assert_eq!(
+            rt.cam_states()[0].switch_decay_ticks,
+            99,
+            "切表后应进入衰减路径"
+        );
+
+        let adjusted_master = io.ai[0] * 2.0 + 30.0;
+        let switched_base = linear_interpolate(&cam_tables[1], adjusted_master);
+        assert!(
+            (after_switch - switched_base).abs() > 1e-3,
+            "刚切表时应仍含 switch_offset 补偿"
+        );
+
+        rt.tick(&mut io).expect("tick3 decay continues");
+        assert_eq!(rt.cam_states()[0].switch_decay_ticks, 98);
+        assert!(
+            (io.ao[0] - after_switch).abs() > 1e-4,
+            "衰减推进后输出应发生变化"
         );
     }
 
@@ -2015,8 +2324,9 @@ mod tests {
             entry: StepId(0),
         }];
 
-        let cam_tables: &'static [CamTableData] =
-            Box::leak(vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice());
+        let cam_tables: &'static [CamTableData] = Box::leak(
+            vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice(),
+        );
         let cam_configs: &'static [CamCouplingConfig] = Box::leak(
             vec![CamCouplingConfig {
                 master_input: AnalogInputId(0),
@@ -2043,12 +2353,16 @@ mod tests {
         io.ai[1] = 0.0;
         let mut rt = Runtime::new(&program).expect("runtime init");
 
-        rt.tick(&mut io).expect("tick0 should progress to wait_master");
+        rt.tick(&mut io)
+            .expect("tick0 should progress to wait_master");
         assert_eq!(rt.location().step, StepId(3));
 
         rt.tick(&mut io).expect("tick1 should satisfy wait_master");
         assert_eq!(rt.location().step, StepId(4));
-        assert!((io.ao[0] - 30.0).abs() < 1e-5, "phase offset should shift cam output");
+        assert!(
+            (io.ao[0] - 30.0).abs() < 1e-5,
+            "phase offset should shift cam output"
+        );
     }
 
     #[test]
@@ -2073,8 +2387,9 @@ mod tests {
             entry: StepId(0),
         }];
 
-        let cam_tables: &'static [CamTableData] =
-            Box::leak(vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice());
+        let cam_tables: &'static [CamTableData] = Box::leak(
+            vec![build_cam_table(false, &[(0.0, 0.0), (360.0, 360.0)])].into_boxed_slice(),
+        );
         let cam_configs: &'static [CamCouplingConfig] = Box::leak(
             vec![CamCouplingConfig {
                 master_input: AnalogInputId(0),

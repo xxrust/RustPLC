@@ -576,7 +576,85 @@ fn compute_analog_regions(
         regions_by_device.insert(device.name.clone(), regions);
     }
 
+    for (target, values) in values_by_device {
+        if regions_by_device.contains_key(&target) {
+            continue;
+        }
+        let Some((device, port)) = split_device_port_ref(&target) else {
+            continue;
+        };
+        if !is_analog_port_target(program, device, port) {
+            continue;
+        }
+        regions_by_device.insert(target, synthetic_regions_from_threshold_values(&values));
+    }
+
     regions_by_device
+}
+
+fn split_device_port_ref(target: &str) -> Option<(&str, &str)> {
+    let mut parts = target.split('.');
+    let device = parts.next()?.trim();
+    let port = parts.next()?.trim();
+    if device.is_empty() || port.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    Some((device, port))
+}
+
+fn is_analog_port_target(program: &PlcProgram, device: &str, port: &str) -> bool {
+    let Some(decl) = program.topology.devices.iter().find(|entry| entry.name == device) else {
+        return false;
+    };
+
+    if let Some(explicit_port) = decl.attributes.ports.iter().find(|entry| entry.id == port) {
+        return matches!(explicit_port.port_type, PortType::Analog);
+    }
+
+    default_analog_port_for_device_type(&decl.device_type, port)
+}
+
+fn default_analog_port_for_device_type(device_type: &DeviceType, port: &str) -> bool {
+    match device_type {
+        DeviceType::CamCoupling => matches!(port, "following_error" | "master_pos" | "slave_cmd"),
+        DeviceType::AnalogInput => port == "in",
+        DeviceType::AnalogOutput => port == "out",
+        DeviceType::Pid => matches!(port, "in" | "out"),
+        _ => false,
+    }
+}
+
+fn synthetic_regions_from_threshold_values(values: &[f64]) -> Vec<(f64, f64)> {
+    if values.is_empty() {
+        return vec![(0.0, 1.0)];
+    }
+
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.dedup_by(|a, b| (*a - *b).abs() <= f64::EPSILON);
+
+    let min = sorted[0];
+    let max = *sorted.last().unwrap_or(&min);
+    let span = (max - min).abs();
+    let pad = if span > f64::EPSILON {
+        span
+    } else {
+        max.abs().max(1.0)
+    };
+
+    let mut bounds = vec![min - pad, max + pad];
+    bounds.extend(sorted);
+    bounds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    bounds.dedup_by(|a, b| (*a - *b).abs() <= f64::EPSILON);
+
+    let mut regions = Vec::new();
+    for window in bounds.windows(2) {
+        regions.push((window[0], window[1]));
+    }
+    if regions.is_empty() {
+        regions.push((min - pad, max + pad));
+    }
+    regions
 }
 
 fn add_threshold_value(values_by_device: &mut HashMap<String, Vec<f64>>, device: &str, value: f64) {
@@ -721,6 +799,14 @@ fn collect_device_domains(
             {
                 ensure_device_state(&mut devices[left_device], &expr.state);
             }
+        } else if let SafetyExpr::Threshold { device, .. } = &rule.left {
+            let (device_name, port_name) = split_threshold_target(device);
+            if port_name != "self" {
+                referenced_ports
+                    .entry(device_name.to_string())
+                    .or_default()
+                    .push(port_name.to_string());
+            }
         }
 
         if let SafetyExpr::State(ref expr) = rule.right {
@@ -734,6 +820,14 @@ fn collect_device_domains(
                 lookup_device_domain_id(&device_index, &expr.device, &expr.port, false)
             {
                 ensure_device_state(&mut devices[right_device], &expr.state);
+            }
+        } else if let SafetyExpr::Threshold { device, .. } = &rule.right {
+            let (device_name, port_name) = split_threshold_target(device);
+            if port_name != "self" {
+                referenced_ports
+                    .entry(device_name.to_string())
+                    .or_default()
+                    .push(port_name.to_string());
             }
         }
     }
@@ -784,42 +878,60 @@ fn collect_device_domains(
 
             let is_analog = declared_port
                 .map(|candidate| matches!(candidate.port_type, PortType::Analog))
-                .unwrap_or(false);
-
-            let mut states = declared_port
-                .map(|candidate| candidate.states.clone())
-                .unwrap_or_default();
-            if states.is_empty() {
-                states = inferred_states_for_port(&port);
-            }
-
-            let default_state_name = declared_port
-                .and_then(|candidate| {
-                    if candidate.default_state.is_empty() {
-                        None
+                .unwrap_or_else(|| default_analog_port_for_device_type(&device.device_type, &port));
+            let display_name = format!("{}.{}", device.name, port);
+            let region_bounds = if is_analog {
+                analog_regions.get(&display_name).cloned()
+            } else {
+                None
+            };
+            let states = if let Some(bounds) = &region_bounds {
+                bounds
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| analog_region_state_name(index))
+                    .collect::<Vec<_>>()
+            } else {
+                let mut out = declared_port
+                    .map(|candidate| candidate.states.clone())
+                    .unwrap_or_default();
+                if out.is_empty() {
+                    out = if is_analog {
+                        vec!["analog_active".to_string()]
                     } else {
-                        Some(candidate.default_state.clone())
-                    }
-                })
-                .or_else(|| inferred_default_state_for_port(&states));
+                        inferred_states_for_port(&port)
+                    };
+                }
+                out
+            };
 
             let mut default_state = 0usize;
-            if let Some(name) = default_state_name.as_deref() {
-                if let Some(idx) = states.iter().position(|state| state == name) {
+            if region_bounds.is_none() {
+                let default_state_name = declared_port
+                    .and_then(|candidate| {
+                        if candidate.default_state.is_empty() {
+                            None
+                        } else {
+                            Some(candidate.default_state.clone())
+                        }
+                    })
+                    .or_else(|| inferred_default_state_for_port(&states));
+                if let Some(name) = default_state_name.as_deref() {
+                    if let Some(idx) = states.iter().position(|state| state == name) {
+                        default_state = idx;
+                    }
+                } else if let Some(idx) = states.iter().position(|state| state == "off") {
                     default_state = idx;
                 }
-            } else if let Some(idx) = states.iter().position(|state| state == "off") {
-                default_state = idx;
             }
 
             let index = devices.len();
-            let display_name = format!("{}.{}", device.name, port);
             devices.push(DeviceDomain {
                 name: display_name,
                 states,
                 default_state,
                 is_analog,
-                region_bounds: None,
+                region_bounds,
             });
             device_index.insert((device.name.clone(), port), index);
         }
@@ -2510,6 +2622,95 @@ task main:
                 .iter()
                 .any(|error| error.constraint.contains("axis_x.pulse.active")),
             "错误应包含 pulse 端口状态"
+        );
+    }
+
+    #[test]
+    fn models_cam_following_error_threshold_on_port_domain() {
+        let source = r#"
+[topology]
+
+device encoder_main: analog_input { range: 0..360 }
+device servo_cmd: analog_output { range: 0..360 }
+device cam_xy: cam_coupling {
+    master: encoder_main,
+    slave: servo_cmd,
+    table: cam_a,
+}
+cam_table cam_a: periodic [
+    (0, 0),
+    (180, 100),
+    (360, 0),
+]
+
+[constraints]
+
+safety: cam_xy.following_error > 2 conflicts_with cam_xy.in_sync.on
+
+[tasks]
+
+task main:
+    step run:
+        action: cam_engage cam_xy
+        wait: cam_xy.in_sync == true
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("cam following_error 阈值应可建模并返回 safety 结果");
+
+        assert_eq!(report.rule_statuses.len(), 1);
+        assert_eq!(report.rule_statuses[0].analog_thresholds.len(), 1);
+        let detail = &report.rule_statuses[0].analog_thresholds[0];
+        assert_eq!(detail.device, "cam_xy.following_error");
+        assert!(
+            detail.split_points.contains(&2.0),
+            "阈值分割点应包含 following_error 阈值"
+        );
+    }
+
+    #[test]
+    fn validates_cam_fault_interlock_rule_on_cam_ports() {
+        let source = r#"
+[topology]
+
+device encoder_main: analog_input { range: 0..360 }
+device servo_cmd: analog_output { range: 0..360 }
+device cam_xy: cam_coupling {
+    master: encoder_main,
+    slave: servo_cmd,
+    table: cam_a,
+}
+cam_table cam_a: periodic [
+    (0, 0),
+    (180, 100),
+    (360, 0),
+]
+
+[constraints]
+
+safety: cam_xy.fault.on conflicts_with cam_xy.engage.off
+
+[tasks]
+
+task main:
+    step force_fault:
+        action: set cam_xy.fault on
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("cam fault 互锁规则应完成绑定并参与验证");
+        assert_eq!(report.rule_statuses.len(), 1);
+        assert!(
+            report.rule_statuses[0].rule.contains("cam_xy.fault.on")
+                && report.rule_statuses[0].rule.contains("cam_xy.engage.off"),
+            "规则文本应包含 cam fault 互锁约束"
         );
     }
 

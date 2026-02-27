@@ -18,7 +18,7 @@ use crate::ir::{
     TimingRelation as IrTimingRelation, TimingRule, TimingScope, TopologyGraph, TopologyLink,
     Transition, TransitionAction, TransitionGuard, VariableDef, VariableType as IrVariableType,
 };
-use crate::plc_port::{canonical_physical_device_name, parse_plc_port_ref, PlcPortKind};
+use crate::plc_port::{PlcPortKind, canonical_physical_device_name, parse_plc_port_ref};
 use petgraph::graph::NodeIndex;
 use runtime_core::MAX_VARIABLES as RUNTIME_MAX_VARIABLES;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -1220,7 +1220,11 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
             continue;
         };
         if let Some(master_node) = device_nodes.get(&coupling.master) {
-            topology_graph.add_connection(master_node.index, cam_node.index, ConnectionType::Analog);
+            topology_graph.add_connection(
+                master_node.index,
+                cam_node.index,
+                ConnectionType::Analog,
+            );
             topology_graph.links.push(TopologyLink {
                 from: coupling.master.clone(),
                 to: coupling.name.clone(),
@@ -1382,7 +1386,8 @@ fn extract_cam_table_defs(
             continue;
         }
 
-        if variable_names.contains(table.name.as_str()) || device_names.contains(table.name.as_str())
+        if variable_names.contains(table.name.as_str())
+            || device_names.contains(table.name.as_str())
         {
             errors.push(PlcError::duplicate_definition_with_reason(
                 line,
@@ -1564,7 +1569,10 @@ fn extract_cam_coupling_defs(
                 line,
                 "设备",
                 &slave_feedback,
-                format!("cam_coupling {} 的 slave_feedback 引用了未定义设备", device.name),
+                format!(
+                    "cam_coupling {} 的 slave_feedback 引用了未定义设备",
+                    device.name
+                ),
             ));
             continue;
         }
@@ -1586,17 +1594,16 @@ fn extract_cam_coupling_defs(
 }
 
 fn compute_spline_coeffs(master: &[f32], slave: &[f32], periodic: bool) -> Vec<SplineCoeff> {
-    if periodic {
-        // 周期边界条件的三次样条会在后续迭代补齐；当前先提供稳定的线性系数。
-        return compute_linear_spline_coeffs(master, slave);
-    }
-
     let n = master.len();
     if n < 2 || slave.len() != n {
         return Vec::new();
     }
     if n == 2 {
         return compute_linear_spline_coeffs(master, slave);
+    }
+    if periodic {
+        return compute_periodic_spline_coeffs(master, slave)
+            .unwrap_or_else(|| compute_linear_spline_coeffs(master, slave));
     }
 
     let mut h = vec![0.0f32; n - 1];
@@ -1610,8 +1617,8 @@ fn compute_spline_coeffs(master: &[f32], slave: &[f32], periodic: bool) -> Vec<S
 
     let mut alpha = vec![0.0f32; n];
     for i in 1..(n - 1) {
-        alpha[i] = 3.0 / h[i] * (slave[i + 1] - slave[i])
-            - 3.0 / h[i - 1] * (slave[i] - slave[i - 1]);
+        alpha[i] =
+            3.0 / h[i] * (slave[i + 1] - slave[i]) - 3.0 / h[i - 1] * (slave[i] - slave[i - 1]);
     }
 
     let mut l = vec![0.0f32; n];
@@ -1652,6 +1659,129 @@ fn compute_spline_coeffs(master: &[f32], slave: &[f32], periodic: bool) -> Vec<S
     }
 
     coeffs
+}
+
+fn compute_periodic_spline_coeffs(master: &[f32], slave: &[f32]) -> Option<Vec<SplineCoeff>> {
+    let n = master.len();
+    if n < 3 || slave.len() != n {
+        return None;
+    }
+
+    let unique = n - 1;
+    if unique < 2 {
+        return None;
+    }
+
+    let mut h = vec![0.0f64; unique];
+    for i in 0..unique {
+        let dx = (master[i + 1] - master[i]) as f64;
+        if dx <= 0.0 {
+            return None;
+        }
+        h[i] = dx;
+    }
+
+    let mut matrix = vec![vec![0.0f64; unique]; unique];
+    let mut rhs = vec![0.0f64; unique];
+    for i in 0..unique {
+        let prev = if i == 0 { unique - 1 } else { i - 1 };
+        let next = (i + 1) % unique;
+
+        let h_prev = h[prev];
+        let h_curr = h[i];
+        matrix[i][prev] = h_prev;
+        matrix[i][i] = 2.0 * (h_prev + h_curr);
+        matrix[i][next] = h_curr;
+
+        let y_prev = slave[prev] as f64;
+        let y_curr = slave[i] as f64;
+        let y_next = if i + 1 < unique {
+            slave[i + 1] as f64
+        } else {
+            slave[0] as f64
+        };
+        rhs[i] = 6.0 * ((y_next - y_curr) / h_curr - (y_curr - y_prev) / h_prev);
+    }
+
+    let second = solve_linear_system(matrix, rhs)?;
+    if second.len() != unique {
+        return None;
+    }
+
+    let mut coeffs = Vec::with_capacity(unique);
+    for i in 0..unique {
+        let dx = (master[i + 1] - master[i]) as f64;
+        let y0 = slave[i] as f64;
+        let y1 = slave[i + 1] as f64;
+        let m0 = second[i];
+        let m1 = if i + 1 < unique {
+            second[i + 1]
+        } else {
+            second[0]
+        };
+        let b = (y1 - y0) / dx - dx * (2.0 * m0 + m1) / 6.0;
+        let c = m0 / 2.0;
+        let d = (m1 - m0) / (6.0 * dx);
+        coeffs.push(SplineCoeff {
+            a: y0 as f32,
+            b: b as f32,
+            c: c as f32,
+            d: d as f32,
+        });
+    }
+
+    Some(coeffs)
+}
+
+fn solve_linear_system(mut matrix: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> Option<Vec<f64>> {
+    let n = rhs.len();
+    if matrix.len() != n || matrix.iter().any(|row| row.len() != n) {
+        return None;
+    }
+
+    for col in 0..n {
+        let mut pivot = col;
+        for row in (col + 1)..n {
+            if matrix[row][col].abs() > matrix[pivot][col].abs() {
+                pivot = row;
+            }
+        }
+        if matrix[pivot][col].abs() <= f64::EPSILON {
+            return None;
+        }
+        if pivot != col {
+            matrix.swap(pivot, col);
+            rhs.swap(pivot, col);
+        }
+
+        let pivot_value = matrix[col][col];
+        for row in (col + 1)..n {
+            let factor = matrix[row][col] / pivot_value;
+            if factor.abs() <= f64::EPSILON {
+                continue;
+            }
+            matrix[row][col] = 0.0;
+            for c in (col + 1)..n {
+                matrix[row][c] -= factor * matrix[col][c];
+            }
+            rhs[row] -= factor * rhs[col];
+        }
+    }
+
+    let mut solution = vec![0.0f64; n];
+    for row in (0..n).rev() {
+        let mut value = rhs[row];
+        for col in (row + 1)..n {
+            value -= matrix[row][col] * solution[col];
+        }
+        let denom = matrix[row][row];
+        if denom.abs() <= f64::EPSILON {
+            return None;
+        }
+        solution[row] = value / denom;
+    }
+
+    Some(solution)
 }
 
 fn compute_linear_spline_coeffs(master: &[f32], slave: &[f32]) -> Vec<SplineCoeff> {
@@ -1892,6 +2022,7 @@ pub fn build_constraint_set_from_ast(
     let device_kinds = collect_device_kinds(topology);
     let known_states = collect_known_states(topology, &device_kinds);
     let task_steps = collect_task_steps(tasks);
+    let device_port_types = collect_device_port_types(topology, &device_kinds);
     let device_ranges = collect_device_ranges(topology);
     let device_units = collect_device_units(topology);
 
@@ -1902,6 +2033,7 @@ pub fn build_constraint_set_from_ast(
             "safety 左侧",
             &device_kinds,
             &known_states,
+            &device_port_types,
             &device_ranges,
             &device_units,
             &mut errors,
@@ -1912,6 +2044,7 @@ pub fn build_constraint_set_from_ast(
             "safety 右侧",
             &device_kinds,
             &known_states,
+            &device_port_types,
             &device_ranges,
             &device_units,
             &mut errors,
@@ -1964,6 +2097,7 @@ pub fn build_constraint_set_from_ast(
                 &step.statements,
                 step.line.max(1),
                 &device_kinds,
+                &device_port_types,
                 &device_ranges,
                 &device_units,
                 &mut errors,
@@ -2619,6 +2753,31 @@ fn collect_device_ranges(topology: &TopologySection) -> HashMap<String, (f64, f6
         .collect()
 }
 
+fn collect_device_port_types(
+    topology: &TopologySection,
+    device_kinds: &HashMap<String, DeviceKind>,
+) -> HashMap<String, PortType> {
+    let mut out = HashMap::new();
+
+    for device in &topology.devices {
+        for port in &device.attributes.ports {
+            out.insert(
+                format!("{}.{}", device.name, port.id),
+                port.port_type.clone(),
+            );
+        }
+
+        if let Some(kind) = device_kinds.get(&device.name) {
+            for port in default_analog_ports_for_kind(kind) {
+                out.entry(format!("{}.{}", device.name, port))
+                    .or_insert(PortType::Analog);
+            }
+        }
+    }
+
+    out
+}
+
 fn collect_device_units(topology: &TopologySection) -> HashMap<String, String> {
     topology
         .devices
@@ -2631,6 +2790,16 @@ fn collect_device_units(topology: &TopologySection) -> HashMap<String, String> {
                 .map(|unit| (device.name.clone(), unit.clone()))
         })
         .collect()
+}
+
+fn default_analog_ports_for_kind(kind: &DeviceKind) -> &'static [&'static str] {
+    match kind {
+        DeviceKind::CamCoupling => &["following_error", "master_pos", "slave_cmd"],
+        DeviceKind::AnalogInput => &["in"],
+        DeviceKind::AnalogOutput => &["out"],
+        DeviceKind::Pid => &["in", "out"],
+        _ => &[],
+    }
 }
 
 fn validate_analog_actions_in_statements(
@@ -2928,9 +3097,13 @@ fn validate_cam_actions_in_statements(
                     ));
                 }
             }
-            StepStatement::Repeat { body, .. } => {
-                validate_cam_actions_in_statements(body, line, device_kinds, cam_table_names, errors)
-            }
+            StepStatement::Repeat { body, .. } => validate_cam_actions_in_statements(
+                body,
+                line,
+                device_kinds,
+                cam_table_names,
+                errors,
+            ),
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
                     validate_cam_actions_in_statements(
@@ -3088,6 +3261,7 @@ fn validate_wait_device_references_in_statements(
     statements: &[StepStatement],
     line: usize,
     device_kinds: &HashMap<String, DeviceKind>,
+    device_port_types: &HashMap<String, PortType>,
     device_ranges: &HashMap<String, (f64, f64)>,
     device_units: &HashMap<String, String>,
     errors: &mut Vec<PlcError>,
@@ -3122,14 +3296,15 @@ fn validate_wait_device_references_in_statements(
                     }
                     if let Some((value, unit)) = threshold_literal_value_and_unit(&condition.right)
                     {
-                        if let Some(device) = wait_operand_device_name(&condition.left) {
+                        if wait_operand_device_name(&condition.left).is_some() {
                             validate_analog_threshold_comparison(
-                                device,
+                                &condition.left,
                                 value,
                                 unit,
                                 line,
                                 "wait 条件阈值比较",
                                 device_kinds,
+                                device_port_types,
                                 device_ranges,
                                 device_units,
                                 errors,
@@ -3144,6 +3319,7 @@ fn validate_wait_device_references_in_statements(
                     body,
                     line,
                     device_kinds,
+                    device_port_types,
                     device_ranges,
                     device_units,
                     errors,
@@ -3155,6 +3331,7 @@ fn validate_wait_device_references_in_statements(
                         &branch.statements,
                         line,
                         device_kinds,
+                        device_port_types,
                         device_ranges,
                         device_units,
                         errors,
@@ -3167,6 +3344,7 @@ fn validate_wait_device_references_in_statements(
                         &branch.statements,
                         line,
                         device_kinds,
+                        device_port_types,
                         device_ranges,
                         device_units,
                         errors,
@@ -3239,6 +3417,25 @@ fn wait_operand_device_name(operand: &str) -> Option<&str> {
     }
 }
 
+fn parse_threshold_target(target: &str) -> Option<(&str, Option<&str>)> {
+    let mut parts = target.split('.');
+    let device = parts.next()?.trim();
+    if device.is_empty() {
+        return None;
+    }
+    let Some(port) = parts.next() else {
+        return Some((device, None));
+    };
+    if parts.next().is_some() {
+        return None;
+    }
+    let port = port.trim();
+    if port.is_empty() {
+        return None;
+    }
+    Some((device, Some(port)))
+}
+
 fn map_safety_relation(relation: &AstSafetyRelation) -> IrSafetyRelation {
     match relation {
         AstSafetyRelation::ConflictsWith => IrSafetyRelation::ConflictsWith,
@@ -3252,6 +3449,7 @@ fn validate_safety_operand(
     source: &str,
     device_kinds: &HashMap<String, DeviceKind>,
     known_states: &HashMap<String, HashSet<String>>,
+    device_port_types: &HashMap<String, PortType>,
     device_ranges: &HashMap<String, (f64, f64)>,
     device_units: &HashMap<String, String>,
     errors: &mut Vec<PlcError>,
@@ -3266,7 +3464,9 @@ fn validate_safety_operand(
             unit,
             ..
         } => {
-            validate_device_reference(device, line, source, device_kinds, errors);
+            if let Some(device_name) = wait_operand_device_name(device) {
+                validate_device_reference(device_name, line, source, device_kinds, errors);
+            }
             validate_analog_threshold_comparison(
                 device,
                 *value,
@@ -3274,6 +3474,7 @@ fn validate_safety_operand(
                 line,
                 "safety 阈值比较",
                 device_kinds,
+                device_port_types,
                 device_ranges,
                 device_units,
                 errors,
@@ -3283,39 +3484,83 @@ fn validate_safety_operand(
 }
 
 fn validate_analog_threshold_comparison(
-    device: &str,
+    target: &str,
     value: f64,
     value_unit: Option<&str>,
     line: usize,
     source: &str,
     device_kinds: &HashMap<String, DeviceKind>,
+    device_port_types: &HashMap<String, PortType>,
     device_ranges: &HashMap<String, (f64, f64)>,
     device_units: &HashMap<String, String>,
     errors: &mut Vec<PlcError>,
 ) {
+    let Some((device, port)) = parse_threshold_target(target) else {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!("{source} 目标 {target} 格式非法"),
+            "阈值比较目标仅支持 device 或 device.port".to_string(),
+        ));
+        return;
+    };
+
     let Some(kind) = device_kinds.get(device) else {
         return;
     };
 
-    if *kind != DeviceKind::AnalogInput {
-        errors.push(PlcError::type_mismatch_with_reason(
-            line,
-            "analog_input",
-            device_kind_name(kind),
-            format!("{source} {device}"),
-            "阈值比较仅支持 analog_input 设备",
-        ));
-        return;
-    }
-
-    let Some((min, max)) = device_ranges.get(device) else {
-        errors.push(PlcError::semantic_with_reason(
-            line,
-            format!("模拟量输入 {device} 缺少 range，无法进行阈值比较"),
-            "请在 [topology] 段为该设备声明 range: min..max",
-        ));
-        return;
+    let range_key = if let Some(port_name) = port {
+        let key = format!("{device}.{port_name}");
+        let is_analog = device_port_types
+            .get(&key)
+            .is_some_and(|port_type| matches!(port_type, PortType::Analog));
+        if !is_analog {
+            errors.push(PlcError::type_mismatch_with_reason(
+                line,
+                "analog 端口",
+                format!("{}.{}", device_kind_name(kind), port_name),
+                format!("{source} {target}"),
+                "阈值比较仅支持模拟量端口（如 cam_xy.following_error）",
+            ));
+            return;
+        }
+        Some(key)
+    } else {
+        if *kind != DeviceKind::AnalogInput {
+            errors.push(PlcError::type_mismatch_with_reason(
+                line,
+                "analog_input",
+                device_kind_name(kind),
+                format!("{source} {target}"),
+                "阈值比较仅支持 analog_input 设备，或 device.port 形式的模拟量端口",
+            ));
+            return;
+        }
+        Some(device.to_string())
     };
+
+    let range = range_key
+        .as_ref()
+        .and_then(|key| device_ranges.get(key))
+        .copied();
+
+    if port.is_none() {
+        let Some((min, max)) = range else {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!("模拟量输入 {device} 缺少 range，无法进行阈值比较"),
+                "请在 [topology] 段为该设备声明 range: min..max",
+            ));
+            return;
+        };
+
+        if value < min || value > max {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!("阈值 {value} 超出 {device} 的 range {min}..{max}"),
+                "请调整阈值或更新 range 范围",
+            ));
+        }
+    }
 
     if let Some(expected_unit) = device_units.get(device) {
         if let Some(got_unit) = value_unit
@@ -3329,14 +3574,6 @@ fn validate_analog_threshold_comparison(
                 "请统一单位（修改 unit 或比较值单位），或移除比较值的单位后缀",
             ));
         }
-    }
-
-    if value < *min || value > *max {
-        errors.push(PlcError::semantic_with_reason(
-            line,
-            format!("阈值 {value} 超出 {device} 的 range {min}..{max}"),
-            "请调整阈值或更新 range 范围",
-        ));
     }
 }
 
@@ -4705,6 +4942,56 @@ task main:
     }
 
     #[test]
+    fn preprocess_with_library_injects_cam_fault_interlock_constraint() {
+        let input = r#"
+[topology]
+
+device encoder_main: analog_input { range: 0..360 }
+device servo_cmd: analog_output { range: 0..360 }
+device cam_xy: cam_coupling {
+    master: encoder_main,
+    slave: servo_cmd,
+    table: cam_a,
+}
+cam_table cam_a: periodic [
+    (0, 0),
+    (180, 100),
+    (360, 0),
+]
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        let expanded = preprocess_program_with_library(&program, Some(&library))
+            .expect("cam device-library constraints should inject");
+
+        assert!(
+            expanded.constraints.safety.iter().any(|rule| {
+                matches!(
+                    (&rule.left, &rule.right),
+                    (
+                        crate::ast::SafetyOperand::State(left),
+                        crate::ast::SafetyOperand::State(right)
+                    ) if left.device == "cam_xy"
+                        && left.port == "fault"
+                        && left.state == "on"
+                        && right.device == "cam_xy"
+                        && right.port == "engage"
+                        && right.state == "on"
+                )
+            }),
+            "应注入 cam_coupling.toml 的 fault.on conflicts_with engage.on 约束"
+        );
+    }
+
+    #[test]
     fn preprocess_rejects_plc_endpoint_without_explicit_port() {
         let input = r#"
 [topology]
@@ -5391,6 +5678,87 @@ task main:
     }
 
     #[test]
+    fn accepts_cam_following_error_threshold_with_device_port_target() {
+        let input = r#"
+[topology]
+
+device encoder_main: analog_input { range: 0..360 }
+device servo_cmd: analog_output { range: 0..360 }
+device cam_xy: cam_coupling {
+    master: encoder_main,
+    slave: servo_cmd,
+    table: cam_a,
+}
+cam_table cam_a: periodic [
+    (0, 0),
+    (180, 100),
+    (360, 0),
+]
+
+[constraints]
+
+safety: cam_xy.fault.on conflicts_with cam_xy.engage.on
+safety: cam_xy.following_error > 2 conflicts_with cam_xy.in_sync.on
+
+[tasks]
+
+task main:
+    step s1:
+        action: cam_engage cam_xy
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let constraints = build_constraint_set(&program).expect("cam 端口阈值应通过约束构建");
+        assert_eq!(constraints.safety.len(), 2);
+        assert!(matches!(
+            constraints.safety[1].left,
+            crate::ir::SafetyExpr::Threshold { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_non_analog_cam_port_threshold_target() {
+        let input = r#"
+[topology]
+
+device encoder_main: analog_input { range: 0..360 }
+device servo_cmd: analog_output { range: 0..360 }
+device cam_xy: cam_coupling {
+    master: encoder_main,
+    slave: servo_cmd,
+    table: cam_a,
+}
+cam_table cam_a: periodic [
+    (0, 0),
+    (180, 100),
+    (360, 0),
+]
+
+[constraints]
+
+safety: cam_xy.engage > 1 conflicts_with cam_xy.fault.on
+
+[tasks]
+
+task main:
+    step s1:
+        action: cam_engage cam_xy
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let errors = build_constraint_set(&program).expect_err("数字阈值不应作用于数字端口");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("analog 端口"),
+            "应报告阈值目标必须是模拟量端口"
+        );
+    }
+
+    #[test]
     fn rejects_non_whitelisted_set_enum_value_before_lowering() {
         let input = r#"
 [topology]
@@ -5712,14 +6080,18 @@ task ready:
         let program = parse_plc(input).expect("PRD 5.5.1 示例应能成功解析为 AST");
         let state_machine = build_state_machine(&program).expect("应能从 5.5.1 示例构建状态机");
 
-        assert!(state_machine
-            .states
-            .iter()
-            .any(|state| state.task_name == "init" && state.step_name == "extend_A"));
-        assert!(state_machine
-            .states
-            .iter()
-            .any(|state| state.task_name == "init" && state.step_name == "retract_B"));
+        assert!(
+            state_machine
+                .states
+                .iter()
+                .any(|state| state.task_name == "init" && state.step_name == "extend_A")
+        );
+        assert!(
+            state_machine
+                .states
+                .iter()
+                .any(|state| state.task_name == "init" && state.step_name == "retract_B")
+        );
 
         let has_wait_transition = state_machine.transitions.iter().any(|transition| {
             transition.from.task_name == "init"
@@ -6210,6 +6582,13 @@ task main:
         assert!(topology.cam_tables[0].periodic);
         assert_eq!(topology.cam_tables[0].num_points, 3);
         assert_eq!(topology.cam_tables[0].spline_coeffs.len(), 2);
+        assert!(
+            topology.cam_tables[0]
+                .spline_coeffs
+                .iter()
+                .any(|coeff| coeff.c.abs() > 1e-6 || coeff.d.abs() > 1e-6),
+            "periodic 曲线应生成非零二/三次项系数"
+        );
         assert_eq!(topology.cam_tables[1].name, "shear_profile");
         assert!(!topology.cam_tables[1].periodic);
         assert!(
@@ -6218,6 +6597,83 @@ task main:
                 .iter()
                 .any(|coeff| coeff.c.abs() > 1e-6 || coeff.d.abs() > 1e-6),
             "oneshot 曲线应生成非零二/三次项系数"
+        );
+    }
+
+    #[test]
+    fn periodic_cam_table_coeffs_are_c2_continuous_on_boundaries() {
+        let input = r#"
+[topology]
+cam_table smooth_periodic: periodic [
+    (0, 0),
+    (90, 40),
+    (180, 10),
+    (270, 50),
+    (360, 0),
+]
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("cam_table 示例应能解析");
+        let topology = build_topology_graph(&program).expect("cam_table 示例应能构建拓扑");
+        let table = topology
+            .cam_tables
+            .iter()
+            .find(|table| table.name == "smooth_periodic")
+            .expect("应包含 smooth_periodic");
+        let eval = |coeff: &crate::ir::SplineCoeff, dx: f32| {
+            coeff.a + dx * (coeff.b + dx * (coeff.c + dx * coeff.d))
+        };
+        let d1 = |coeff: &crate::ir::SplineCoeff, dx: f32| {
+            coeff.b + dx * (2.0 * coeff.c + 3.0 * coeff.d * dx)
+        };
+        let d2 = |coeff: &crate::ir::SplineCoeff, dx: f32| 2.0 * coeff.c + 6.0 * coeff.d * dx;
+
+        let pos_tol = 1e-3f32;
+        let d1_tol = 1e-3f32;
+        let d2_tol = 2e-3f32;
+        let last_segment = table.num_points.saturating_sub(2);
+
+        for boundary in 1..table.num_points.saturating_sub(1) {
+            let left = &table.spline_coeffs[boundary - 1];
+            let right = &table.spline_coeffs[boundary];
+            let dx_left = table.master_positions[boundary] - table.master_positions[boundary - 1];
+
+            assert!(
+                (eval(left, dx_left) - eval(right, 0.0)).abs() <= pos_tol,
+                "boundary {boundary} position continuity failed"
+            );
+            assert!(
+                (d1(left, dx_left) - d1(right, 0.0)).abs() <= d1_tol,
+                "boundary {boundary} first-derivative continuity failed"
+            );
+            assert!(
+                (d2(left, dx_left) - d2(right, 0.0)).abs() <= d2_tol,
+                "boundary {boundary} second-derivative continuity failed"
+            );
+        }
+
+        let left = &table.spline_coeffs[last_segment];
+        let right = &table.spline_coeffs[0];
+        let dx_left =
+            table.master_positions[last_segment + 1] - table.master_positions[last_segment];
+        assert!(
+            (eval(left, dx_left) - eval(right, 0.0)).abs() <= pos_tol,
+            "periodic boundary position continuity failed"
+        );
+        assert!(
+            (d1(left, dx_left) - d1(right, 0.0)).abs() <= d1_tol,
+            "periodic boundary first-derivative continuity failed"
+        );
+        assert!(
+            (d2(left, dx_left) - d2(right, 0.0)).abs() <= d2_tol,
+            "periodic boundary second-derivative continuity failed"
         );
     }
 
@@ -6292,7 +6748,10 @@ task main:
         assert_eq!(cam.master, "AI0");
         assert_eq!(cam.slave, "AO0");
         assert_eq!(cam.table, "linear_cam");
-        assert!(matches!(cam.interpolation, crate::ir::CamInterpolation::Linear));
+        assert!(matches!(
+            cam.interpolation,
+            crate::ir::CamInterpolation::Linear
+        ));
     }
 
     #[test]
