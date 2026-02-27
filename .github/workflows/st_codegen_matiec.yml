@@ -1,0 +1,23 @@
+name: st-codegen-matiec
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  st-codegen-matiec-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install MATIEC (iec2c)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y matiec
+      - name: Verify iec2c availability
+        run: |
+          iec2c --version || iec2c --help
+      - name: Generate ST and compile with MATIEC
+        run: |
+          bash scripts/st_codegen_matiec_gate.sh out/ci_st_codegen_matiec

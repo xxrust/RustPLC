@@ -1,0 +1,17 @@
+[topology]
+
+device AI0: analog_input { range: 0..360 }
+device AO0: analog_output { range: 0..360 }
+device cam_xy: cam_coupling {
+    master: AI0,
+    slave: AO0,
+    table: missing_table,
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step run:
+        action: cam_engage cam_xy

@@ -1166,4 +1166,121 @@ task main:
         verify_causality(&program, &topology, &constraints)
             .expect("external analog_input 应跳过因果推断");
     }
+
+    #[test]
+    fn accepts_encoder_cam_servo_chain_with_cam_actions() {
+        let source = r#"
+[topology]
+
+device encoder_main: analog_input { range: 0..360 }
+device servo_axis: motor
+device sensor_sync: sensor
+
+device cam_xy: cam_coupling {
+    master: encoder_main,
+    slave: servo_axis,
+    table: cam_a,
+}
+
+cam_table cam_a: periodic [
+    (0, 0),
+    (180, 90),
+    (360, 0),
+]
+cam_table cam_b: periodic [
+    (0, 40),
+    (180, 120),
+    (360, 40),
+]
+
+relation { from: servo_axis.on, to: sensor_sync.sense, via: detects }
+
+[constraints]
+
+causality: encoder_main -> cam_xy -> servo_axis -> sensor_sync
+causality: cam_xy -> servo_axis -> sensor_sync
+
+[tasks]
+
+task main:
+    step engage_cam:
+        action: cam_engage cam_xy
+        wait: sensor_sync == true
+    step switch_cam:
+        action: cam_switch cam_xy cam_b
+        wait: sensor_sync == true
+    step phase_cam:
+        action: cam_phase cam_xy 15.0
+        wait: sensor_sync == true
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        verify_causality(&program, &topology, &constraints)
+            .expect("encoder -> cam -> servo 因果链与 cam 动作关联路径应通过");
+    }
+
+    #[test]
+    fn reports_broken_encoder_cam_servo_chain_when_master_disconnects() {
+        let source = r#"
+[topology]
+
+device encoder_main: analog_input { range: 0..360 }
+device encoder_aux: analog_input { range: 0..360 }
+device servo_axis: motor
+device sensor_sync: sensor
+
+device cam_xy: cam_coupling {
+    master: encoder_aux,
+    slave: servo_axis,
+    table: cam_a,
+}
+
+cam_table cam_a: periodic [
+    (0, 0),
+    (180, 90),
+    (360, 0),
+]
+cam_table cam_b: periodic [
+    (0, 40),
+    (180, 120),
+    (360, 40),
+]
+
+relation { from: servo_axis.on, to: sensor_sync.sense, via: detects }
+
+[constraints]
+
+causality: encoder_main -> cam_xy -> servo_axis -> sensor_sync
+causality: cam_xy -> servo_axis -> sensor_sync
+
+[tasks]
+
+task main:
+    step engage_cam:
+        action: cam_engage cam_xy
+        wait: sensor_sync == true
+    step switch_cam:
+        action: cam_switch cam_xy cam_b
+        wait: sensor_sync == true
+    step phase_cam:
+        action: cam_phase cam_xy 15.0
+        wait: sensor_sync == true
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        let errors = verify_causality(&program, &topology, &constraints)
+            .expect_err("encoder -> cam 链路断裂应报 causality 错误");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.broken_link == "encoder_main -> cam_xy"),
+            "错误应定位 encoder -> cam 断链"
+        );
+    }
 }

@@ -116,6 +116,32 @@ fn parses_two_cylinder_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_flying_shear_example_into_verified_ir_json() {
+    let source = read_example("flying_shear.plc");
+    let ir_json = compile_source_to_json(&source).expect("flying_shear example should compile");
+
+    let safety_level = ir_json["verification"]["safety"]["level"]
+        .as_str()
+        .expect("verification.safety.level should be present");
+    assert!(
+        matches!(safety_level, "完备证明" | "有界验证"),
+        "safety level should report proof quality"
+    );
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
 fn parses_half_rotation_example_into_verified_ir_json() {
     let source = r#"
 [topology]
@@ -510,12 +536,10 @@ fn parses_stepper_multi_sensor_consistency_example_into_verified_ir_json() {
         "verification report should include a status entry for the safety rule"
     );
     assert!(
-        safety_statuses
-            .iter()
-            .any(|status| {
-                let rule = status["rule"].as_str().unwrap_or("");
-                rule.contains("axis_x.run.on") || rule.contains("axis_x.on")
-            }),
+        safety_statuses.iter().any(|status| {
+            let rule = status["rule"].as_str().unwrap_or("");
+            rule.contains("axis_x.run.on") || rule.contains("axis_x.on")
+        }),
         "verification report should include the axis_x alarm interlock rule"
     );
     assert_eq!(
@@ -994,6 +1018,26 @@ fn reports_undefined_device_for_error_example() {
     assert!(
         errors.iter().any(|error| error.contains("未定义设备 Y9")),
         "error output should include missing device name"
+    );
+}
+
+#[test]
+fn reports_undefined_cam_table_for_cam_coupling_error_example() {
+    let source = read_example("error_cam_missing_table.plc");
+    let errors = compile_source_to_json(&source)
+        .expect_err("error_cam_missing_table should fail semantic checks");
+
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("cam_coupling cam_xy 的 table 引用了未定义表")),
+        "error output should include undefined cam_table reference"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("ERROR [undefined_reference]")),
+        "error output should include undefined_reference class"
     );
 }
 

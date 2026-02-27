@@ -30,6 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Cam regression gate
+        run: bash scripts/cam_regression_gate.sh
       - name: Cargo test (workspace)
         run: cargo test --workspace
 
