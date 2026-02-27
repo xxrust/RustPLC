@@ -12,13 +12,17 @@ Use **Modbus TCP polling** (not runtime API) so the pipeline is deterministic an
 
 ## Variable-to-address mapping rule
 
-Mapping file: `scenarios/openplc_trace_map.two_cylinder.json`
+Mapping files:
+- `scenarios/openplc_trace_map.two_cylinder.json`
+- `scenarios/openplc_trace_map.assembly_station.json`
 
 Current required variables:
 
 - `_state` -> `holding_register:4096` (int)
 - `valve_a` -> `coil:0` (bool)
 - `valve_b` -> `coil:1` (bool)
+- `motor_left` -> `coil:2` (bool)
+- `motor_right` -> `coil:3` (bool)
 
 When adding a new variable, update mapping JSON with:
 
@@ -53,6 +57,21 @@ python3 scripts/openplc_trace.py compare \
 ```
 
 The compare command exits non-zero if pass rate is below `0.95`.
+
+## CI gate
+
+Run both core scenarios (`two_cylinder` + `assembly_station`) via:
+
+```bash
+bash scripts/openplc_trace_phase2_gate.sh \
+  examples/openplc_trace_phase2 \
+  out/openplc_trace_phase2
+```
+
+The gate performs:
+1) `normalize-modbus` for each scenario raw CSV
+2) `compare` with `--tick-tolerance 1 --min-pass-rate 0.95`
+3) non-zero exit when any core scenario fails
 
 ## Acceptance target
 

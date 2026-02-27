@@ -1,0 +1,17 @@
+{
+  "_state": {
+    "source": "holding_register",
+    "address": 4096,
+    "type": "int"
+  },
+  "motor_left": {
+    "source": "coil",
+    "address": 2,
+    "type": "bool"
+  },
+  "motor_right": {
+    "source": "coil",
+    "address": 3,
+    "type": "bool"
+  }
+}
