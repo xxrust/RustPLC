@@ -361,6 +361,85 @@ fn cli_build_rp2040_emit_uf2_requires_explicit_io_map() {
     );
 }
 
+/// Write a platform-appropriate fake `cargo` stub that creates an empty ELF artifact.
+/// Returns the path to the created script.
+fn write_fake_cargo(scripts: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        let path = scripts.join("fake_cargo.ps1");
+        fs::write(
+            &path,
+            "$targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'target' }\n\
+             $elfDir = Join-Path $targetDir 'thumbv6m-none-eabi/release'\n\
+             New-Item -ItemType Directory -Path $elfDir -Force | Out-Null\n\
+             New-Item -ItemType File -Path (Join-Path $elfDir 'board-rp2040') -Force | Out-Null\n",
+        )
+        .expect("write fake_cargo.ps1");
+        path
+    }
+    #[cfg(not(windows))]
+    {
+        let path = scripts.join("fake_cargo.sh");
+        fs::write(
+            &path,
+            "#!/usr/bin/env bash\nset -eu\nTARGET_DIR=\"${CARGO_TARGET_DIR:-target}\"\nmkdir -p \"$TARGET_DIR/thumbv6m-none-eabi/release\"\n: > \"$TARGET_DIR/thumbv6m-none-eabi/release/board-rp2040\"\n",
+        )
+        .expect("write fake_cargo.sh");
+        make_executable(&path);
+        path
+    }
+}
+
+/// Write a platform-appropriate fake `cargo` stub that does NOT create an ELF (missing ELF test).
+fn write_fake_cargo_no_elf(scripts: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        let path = scripts.join("fake_cargo_no_elf.ps1");
+        fs::write(
+            &path,
+            "$targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'target' }\n\
+             $elfDir = Join-Path $targetDir 'thumbv6m-none-eabi/release'\n\
+             New-Item -ItemType Directory -Path $elfDir -Force | Out-Null\n\
+             # intentionally no ELF\n",
+        )
+        .expect("write fake_cargo_no_elf.ps1");
+        path
+    }
+    #[cfg(not(windows))]
+    {
+        let path = scripts.join("fake_cargo_no_elf.sh");
+        fs::write(
+            &path,
+            "#!/usr/bin/env bash\nset -eu\nTARGET_DIR=\"${CARGO_TARGET_DIR:-target}\"\nmkdir -p \"$TARGET_DIR/thumbv6m-none-eabi/release\"\n# intentionally no ELF\n",
+        )
+        .expect("write fake_cargo_no_elf.sh");
+        make_executable(&path);
+        path
+    }
+}
+
+/// Write a platform-appropriate fake `elf2uf2` stub that copies its first arg to its second.
+fn write_fake_elf2uf2(scripts: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        let path = scripts.join("fake_elf2uf2.ps1");
+        fs::write(
+            &path,
+            "param([string]$Src, [string]$Dst)\nCopy-Item -Path $Src -Destination $Dst -Force\n",
+        )
+        .expect("write fake_elf2uf2.ps1");
+        path
+    }
+    #[cfg(not(windows))]
+    {
+        let path = scripts.join("fake_elf2uf2.sh");
+        fs::write(&path, "#!/usr/bin/env bash\nset -eu\ncp \"$1\" \"$2\"\n")
+            .expect("write fake_elf2uf2.sh");
+        make_executable(&path);
+        path
+    }
+}
+
 #[cfg(unix)]
 fn make_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
@@ -368,9 +447,6 @@ fn make_executable(path: &std::path::Path) {
     p.set_mode(0o755);
     fs::set_permissions(path, p).expect("chmod");
 }
-
-#[cfg(not(unix))]
-fn make_executable(_path: &std::path::Path) {}
 
 fn write_io_map(path: &std::path::Path) {
     fs::write(
@@ -400,21 +476,8 @@ fn cli_build_rp2040_emit_uf2_with_mocked_toolchain_succeeds() {
     let scripts = base.join("scripts");
     fs::create_dir_all(&scripts).expect("create scripts dir");
 
-    let fake_cargo = scripts.join("fake_cargo.sh");
-    fs::write(
-        &fake_cargo,
-        "#!/usr/bin/env bash\nset -eu\nTARGET_DIR=\"${CARGO_TARGET_DIR:-target}\"\nmkdir -p \"$TARGET_DIR/thumbv6m-none-eabi/release\"\n: > \"$TARGET_DIR/thumbv6m-none-eabi/release/board-rp2040\"\n",
-    )
-    .expect("write fake cargo");
-    make_executable(&fake_cargo);
-
-    let fake_elf2uf2 = scripts.join("fake_elf2uf2.sh");
-    fs::write(
-        &fake_elf2uf2,
-        "#!/usr/bin/env bash\nset -eu\ncp \"$1\" \"$2\"\n",
-    )
-    .expect("write fake elf2uf2");
-    make_executable(&fake_elf2uf2);
+    let fake_cargo = write_fake_cargo(&scripts);
+    let fake_elf2uf2 = write_fake_elf2uf2(&scripts);
 
     let plc_path = base.join("fixture.plc");
     let out_dir = base.join("out");
@@ -461,13 +524,7 @@ fn cli_build_rp2040_emit_uf2_reports_missing_converter_tool() {
     let scripts = base.join("scripts");
     fs::create_dir_all(&scripts).expect("create scripts dir");
 
-    let fake_cargo = scripts.join("fake_cargo.sh");
-    fs::write(
-        &fake_cargo,
-        "#!/usr/bin/env bash\nset -eu\nTARGET_DIR=\"${CARGO_TARGET_DIR:-target}\"\nmkdir -p \"$TARGET_DIR/thumbv6m-none-eabi/release\"\n: > \"$TARGET_DIR/thumbv6m-none-eabi/release/board-rp2040\"\n",
-    )
-    .expect("write fake cargo");
-    make_executable(&fake_cargo);
+    let fake_cargo = write_fake_cargo(&scripts);
 
     let plc_path = base.join("fixture.plc");
     let out_dir = base.join("out");
@@ -517,21 +574,8 @@ fn cli_build_rp2040_emit_uf2_reports_missing_elf_output() {
     let scripts = base.join("scripts");
     fs::create_dir_all(&scripts).expect("create scripts dir");
 
-    let fake_cargo = scripts.join("fake_cargo_no_elf.sh");
-    fs::write(
-        &fake_cargo,
-        "#!/usr/bin/env bash\nset -eu\nTARGET_DIR=\"${CARGO_TARGET_DIR:-target}\"\nmkdir -p \"$TARGET_DIR/thumbv6m-none-eabi/release\"\n# intentionally no ELF\n",
-    )
-        .expect("write fake cargo");
-    make_executable(&fake_cargo);
-
-    let fake_elf2uf2 = scripts.join("fake_elf2uf2.sh");
-    fs::write(
-        &fake_elf2uf2,
-        "#!/usr/bin/env bash\nset -eu\ncp \"$1\" \"$2\"\n",
-    )
-    .expect("write fake elf2uf2");
-    make_executable(&fake_elf2uf2);
+    let fake_cargo = write_fake_cargo_no_elf(&scripts);
+    let fake_elf2uf2 = write_fake_elf2uf2(&scripts);
 
     let plc_path = base.join("fixture.plc");
     let out_dir = base.join("out");

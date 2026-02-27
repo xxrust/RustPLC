@@ -1,7 +1,7 @@
 use rust_plc::error::PlcError;
 use rust_plc::ir::{ConstraintSet, DeviceKind, StateMachine, TimingModel, TopologyGraph};
 use rust_plc::parser::parse_plc;
-use rust_plc::plc_port::{parse_physical_plc_port_ref, PlcPortKind};
+use rust_plc::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program, preprocess_program_with_library,
@@ -10,7 +10,7 @@ use rust_plc::topology_semantic_gate::{
     collect_topology_deprecation_warnings, validate_device_purpose_required,
     validate_removed_legacy_io_model, validate_topology_semantics,
 };
-use rust_plc::verification::{verify_all, VerificationSummary, WarningEntry, WarningLevel};
+use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
@@ -24,28 +24,28 @@ use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, 
 use petgraph::Direction;
 use runtime_core::{Action, Instr, Program, Step, StepId, Task};
 use rust_plc::alarm_runtime::{
-    build_alarm_event, AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity,
+    AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity, build_alarm_event,
 };
-use rust_plc::codegen::st::{generate_st, StCodegenConfig, StCodegenError};
-use rust_plc::component_diagnostics::{diagnose_component_sim, ComponentDiagnosisReport};
+use rust_plc::codegen::st::{StCodegenConfig, StCodegenError, generate_st};
+use rust_plc::component_diagnostics::{ComponentDiagnosisReport, diagnose_component_sim};
 use rust_plc::component_scenario::{parse_component_scenario_json, write_component_scenario_json};
-use rust_plc::component_sim::{run_component_simulation, ComponentSimReport};
+use rust_plc::component_sim::{ComponentSimReport, run_component_simulation};
 use rust_plc::component_topology::{
     diff_component_topology_semantics, parse_component_topology_json, write_component_topology_json,
 };
 use rust_plc::diagnostics::{
-    diagnose, DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport,
-    EvidenceInputKind, EvidenceSource, IoSnapshotArtifact, IoTickSnapshot,
+    DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport, EvidenceInputKind,
+    EvidenceSource, IoSnapshotArtifact, IoTickSnapshot, diagnose,
 };
 use rust_plc::io_map::{IoMap, IoMapError, IoUsage};
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
 use rust_plc::sequence_lint::{
-    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
+    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
 };
-use rust_plc::sim_regress::{run_sim_regress_with_options, SimRegressOptions, SimRegressSummary};
-use rust_plc::tick_timing::{parse_tick_timing_jsonl, to_tick_timing_jsonl, TickTimingSample};
-use rust_plc::timing_report::{build_timing_report, TimingReport};
+use rust_plc::sim_regress::{SimRegressOptions, SimRegressSummary, run_sim_regress_with_options};
+use rust_plc::tick_timing::{TickTimingSample, parse_tick_timing_jsonl, to_tick_timing_jsonl};
+use rust_plc::timing_report::{TimingReport, build_timing_report};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
@@ -1997,7 +1997,11 @@ fn run_gen_st_subcommand(
         }
     }
 
-    if Path::new(&plc_path).extension().and_then(|ext| ext.to_str()) != Some("plc") {
+    if Path::new(&plc_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        != Some("plc")
+    {
         return Err(format!("gen-st expects a .plc file path, got: {plc_path}"));
     }
 
@@ -2016,8 +2020,9 @@ fn run_gen_st_subcommand(
     if let Some(path) = out_path {
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)
-                    .map_err(|err| format!("Failed to create output directory {parent:?}: {err}"))?;
+                fs::create_dir_all(parent).map_err(|err| {
+                    format!("Failed to create output directory {parent:?}: {err}")
+                })?;
             }
         }
         fs::write(&path, st_text)
@@ -6096,6 +6101,30 @@ Start from the generated `io_map.template.toml` under `--out-dir <dir>` and fill
     Ok(())
 }
 
+/// Build a `Command` for an external tool binary.
+/// On Windows, `.bat` and `.ps1` files cannot be spawned directly:
+///   - `.bat` → `cmd /C <path>`
+///   - `.ps1` → `powershell -NonInteractive -File <path>`
+/// This wrapper handles that transparently so callers can pass the raw path
+/// from an environment variable.
+fn tool_command(bin: &str) -> std::process::Command {
+    #[cfg(windows)]
+    {
+        let lower = bin.to_ascii_lowercase();
+        if lower.ends_with(".bat") {
+            let mut cmd = std::process::Command::new("cmd");
+            cmd.arg("/C").arg(bin);
+            return cmd;
+        }
+        if lower.ends_with(".ps1") {
+            let mut cmd = std::process::Command::new("powershell");
+            cmd.arg("-NonInteractive").arg("-File").arg(bin);
+            return cmd;
+        }
+    }
+    std::process::Command::new(bin)
+}
+
 fn emit_rp2040_uf2(
     generated_program_rs: &Path,
     io_map_toml: &Path,
@@ -6118,7 +6147,7 @@ fn emit_rp2040_uf2(
     let cargo_bin = env::var("RUST_PLC_CARGO_BIN").unwrap_or_else(|_| "cargo".to_string());
     let elf2uf2_bin = env::var("RUST_PLC_ELF2UF2_BIN").unwrap_or_else(|_| "elf2uf2-rs".to_string());
 
-    let cargo = std::process::Command::new(&cargo_bin)
+    let cargo = tool_command(&cargo_bin)
         .current_dir(&repo_root)
         .env("RUST_PLC_GENERATED_PROGRAM_RS", &generated_program_rs)
         .env("RUST_PLC_IO_MAP_TOML", &io_map_toml)
@@ -6158,7 +6187,7 @@ fn emit_rp2040_uf2(
         ));
     }
 
-    let uf2 = std::process::Command::new(&elf2uf2_bin)
+    let uf2 = tool_command(&elf2uf2_bin)
         .arg(&elf)
         .arg(&uf2_out)
         .output()
@@ -8011,7 +8040,7 @@ fn format_component_sim_error(err: &rust_plc::component_sim::ComponentSimError) 
 }
 
 fn normalize_io_map_toml(v: &toml::Value) -> Result<toml::Value, String> {
-    use rust_plc::iec_address::{parse_iec_address, LogicalChannelKind};
+    use rust_plc::iec_address::{LogicalChannelKind, parse_iec_address};
     use toml::value::Table;
 
     let root = v

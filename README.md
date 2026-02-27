@@ -133,6 +133,7 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 
 | 能力 | 说明 |
 |------|------|
+| **📝 ST 代码生成** | `gen-st` 将验证后的 IR 编译为 IEC 61131-3 ST 代码；vendored `iec2c` 在 CI 中验证语法 |
 | **🔬 形式化验证** | Safety / Liveness / Timing / Causality 四引擎，编译期数学证明 |
 | **🔐 语义门禁** | SEM-101~107 端口/类型/角色/subtype 校验，`purpose` 强制审核 |
 | **🤖 AI 辅助生成** | 自然语言 → AI 多轮对话生成 `.plc` → 自动验证 |
@@ -273,7 +274,7 @@ cargo run --release -- release-bundle examples/assembly_station.plc \
 
 ## 路线图
 
-**已完成：** DSL 编译器 + 四引擎验证 · SIL/virtual-board/RP2040 运行时 · 场景工程 · PID/运动控制 · 无板门禁 + release-bundle · 拓扑语义门禁（SEM-101~107）· 设备库 + 端口模型 · 元件库仿真链路 · 诊断引擎 + 告警运行时 · commissioning-run / pil-run · 在线强制/变量/保持变量 · 标签驱动拓扑 + 语义 Diff + 性能门禁
+**已完成：** DSL 编译器 + 四引擎验证 · SIL/virtual-board/RP2040 运行时 · 场景工程 · PID/运动控制 · 无板门禁 + release-bundle · 拓扑语义门禁（SEM-101~107）· 设备库 + 端口模型 · 元件库仿真链路 · 诊断引擎 + 告警运行时 · commissioning-run / pil-run · 在线强制/变量/保持变量 · 标签驱动拓扑 + 语义 Diff + 性能门禁 · **ST 代码生成 + matiec 闭环验证**（`gen-st` 命令生成 IEC 61131-3 ST 代码，vendored `iec2c` 编译验证，跨平台测试闭环）
 
 **计划中：**
 - ⏳ 硬件抽象层扩展（EtherCAT / Modbus / 更多 GPIO 板卡）

@@ -150,6 +150,7 @@ Verification passed:
 
 | Capability | Description |
 |------------|-------------|
+| **📝 ST Code Generation** | `gen-st` compiles verified IR to IEC 61131-3 Structured Text; vendored `iec2c` validates syntax in CI |
 | **🔬 Formal Verification** | Four engines (Safety / Liveness / Timing / Causality) with compile-time mathematical proofs |
 | **🤖 AI-Assisted Generation** | Natural language → AI multi-turn dialogue → `.plc` generation → auto-verification |
 | **🧪 SIL Simulation** | Scenario-driven deterministic simulation, fault injection, waveform export, batch regression |
@@ -359,7 +360,12 @@ Full documentation available on **[GitHub Wiki](https://github.com/xxrust/RustPL
 - ✅ Threshold semantic hardening (type / range / unit consistency checks)
 - ✅ No-RTOS Real-Time Playbook documentation
 
-**Topology Semantics & Tag Refactor (this release):**
+**ST Code Generation (this release):**
+- ✅ `gen-st` command: compile verified IR → IEC 61131-3 Structured Text
+- ✅ Vendored matiec (`vendor/matiec/`) — `iec2c` binary + standard library, no external install needed
+- ✅ Full round-trip test: `.plc` → ST → `iec2c` compile → `POUS.c`/`POUS.h` artifacts verified
+- ✅ Cross-platform test harness: Windows uses vendored `iec2c.exe`; Linux uses PATH fallback; graceful skip when unavailable
+- ✅ `matiec_vendor_directory_is_complete` guard test catches broken vendor state early
 - ✅ Unified topology direction: producer → consumer (`driven_by` / `reports_to` / `detects`)
 - ✅ Removed `connected_to` ambiguity; batch migration tool + CI regression guard
 - ✅ Ports as first-class citizens (`id/type/role`), MIMO topology support
