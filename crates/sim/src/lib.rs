@@ -13,13 +13,13 @@ mod runner;
 mod scenario;
 mod waveform;
 pub use control_kpi::{
-    run_pid_kpi, ControlKpiError, PidControlScenario, PidKpiReport, ProcessModelConfig,
+    ControlKpiError, PidControlScenario, PidKpiReport, ProcessModelConfig, run_pid_kpi,
 };
 pub use plant::{CylinderConfig, LimitKind, LimitSensorConfig, Plant, SolenoidValveConfig};
 pub use report::{ScenarioSummary, SimFailure, SimReport};
 pub use runner::{
-    run_program_for_scenario, run_program_for_scenario_with_tick_observer, SimRunError,
-    SimRunOutput,
+    SimRunError, SimRunOutput, run_program_for_scenario,
+    run_program_for_scenario_with_tick_observer,
 };
 pub use scenario::{
     DigitalBurstEvent, FaultEvent, ForceEvent, ForceSet, InputEvent, InputSet, Scenario,

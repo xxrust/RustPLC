@@ -294,7 +294,9 @@ pub fn validate_removed_legacy_io_model(
     }
 }
 
-fn collect_removed_legacy_io_model_issues(topology: &TopologySection) -> Vec<TopologySemanticIssue> {
+fn collect_removed_legacy_io_model_issues(
+    topology: &TopologySection,
+) -> Vec<TopologySemanticIssue> {
     if topology
         .devices
         .iter()
@@ -551,8 +553,18 @@ fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
                 PortRole::Consumer,
                 Some("actuator_cmd"),
             ),
-            gate_port("running", PortType::Logical, PortRole::Producer, Some("state")),
-            gate_port("fault", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "running",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
             gate_port(
                 "cmd",
                 PortType::Digital,
@@ -580,7 +592,12 @@ fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
                 PortRole::Consumer,
                 Some("actuator_cmd"),
             ),
-            gate_port("fault", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
         ],
         DeviceType::Vfd => vec![
             gate_port(
@@ -595,8 +612,18 @@ fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
                 PortRole::Consumer,
                 Some("actuator_cmd"),
             ),
-            gate_port("running", PortType::Logical, PortRole::Producer, Some("state")),
-            gate_port("fault", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "running",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
             gate_port(
                 "freq_arrive",
                 PortType::Logical,
@@ -629,14 +656,24 @@ fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
                 PortRole::Consumer,
                 Some("actuator_cmd"),
             ),
-            gate_port("ready", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "ready",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
             gate_port(
                 "in_position",
                 PortType::Logical,
                 PortRole::Producer,
                 Some("state"),
             ),
-            gate_port("fault", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
             gate_port(
                 "zero_speed",
                 PortType::Logical,
@@ -651,8 +688,18 @@ fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
                 PortRole::Consumer,
                 Some("actuator_cmd"),
             ),
-            gate_port("in_sync", PortType::Logical, PortRole::Producer, Some("state")),
-            gate_port("fault", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "in_sync",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
             gate_port(
                 "following_error",
                 PortType::Analog,

@@ -6,7 +6,9 @@ fn read_doc() -> String {
     let base = Path::new(env!("CARGO_MANIFEST_DIR"));
     let candidates = [
         base.join("docs").join("commissioning_playbook.md"),
-        base.join("docs").join("已实现").join("commissioning_playbook.md"),
+        base.join("docs")
+            .join("已实现")
+            .join("commissioning_playbook.md"),
     ];
     read_first_existing_doc(&candidates)
 }

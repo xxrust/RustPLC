@@ -10,9 +10,9 @@ use crate::ast::{
     WaitStatement,
 };
 use crate::error::PlcError;
+use pest::Parser;
 use pest::error::LineColLocation;
 use pest::iterators::Pair;
-use pest::Parser;
 
 #[derive(pest_derive::Parser)]
 #[grammar = "parser/plc.pest"]
@@ -333,7 +333,10 @@ fn parse_cam_point(pair: Pair<Rule>) -> Result<CamPoint, PlcError> {
     }
 
     if numbers.len() != 2 {
-        return Err(PlcError::parse(line, "cam_table 点位必须为 (master, slave)"));
+        return Err(PlcError::parse(
+            line,
+            "cam_table 点位必须为 (master, slave)",
+        ));
     }
 
     Ok(CamPoint {
@@ -3083,14 +3086,18 @@ task ready:
             .find(|step| step.name == "detect")
             .expect("search 任务应包含 detect step");
 
-        assert!(detect_step
-            .statements
-            .iter()
-            .any(|stmt| matches!(stmt, StepStatement::Race(_))));
-        assert!(detect_step
-            .statements
-            .iter()
-            .any(|stmt| matches!(stmt, StepStatement::Timeout(_))));
+        assert!(
+            detect_step
+                .statements
+                .iter()
+                .any(|stmt| matches!(stmt, StepStatement::Race(_)))
+        );
+        assert!(
+            detect_step
+                .statements
+                .iter()
+                .any(|stmt| matches!(stmt, StepStatement::Timeout(_)))
+        );
 
         let ready_task = ast
             .tasks
@@ -3238,7 +3245,10 @@ task main:
         assert_eq!(cam.attributes.master.as_deref(), Some("encoder_main"));
         assert_eq!(cam.attributes.slave.as_deref(), Some("servo_x"));
         assert_eq!(cam.attributes.table.as_deref(), Some("linear_cam"));
-        assert_eq!(cam.attributes.interpolation.as_deref(), Some("cubic_spline"));
+        assert_eq!(
+            cam.attributes.interpolation.as_deref(),
+            Some("cubic_spline")
+        );
     }
 
     #[test]
@@ -3478,7 +3488,10 @@ task done:
         match &statements[0] {
             StepStatement::Wait(wait) => match &wait.condition {
                 WaitCondition::Single(condition) => {
-                    assert!(condition.expression_pair().is_some(), "wait 条件应为表达式比较");
+                    assert!(
+                        condition.expression_pair().is_some(),
+                        "wait 条件应为表达式比较"
+                    );
                 }
                 other => panic!("期望单条件 wait，实际: {other:?}"),
             },
@@ -3487,7 +3500,10 @@ task done:
 
         match &statements[1] {
             StepStatement::IfElse { condition, .. } => {
-                assert!(condition.expression_pair().is_some(), "if 条件应为表达式比较");
+                assert!(
+                    condition.expression_pair().is_some(),
+                    "if 条件应为表达式比较"
+                );
             }
             other => panic!("期望 if/else 语句，实际: {other:?}"),
         }

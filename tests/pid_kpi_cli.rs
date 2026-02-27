@@ -18,7 +18,7 @@ fn sim_pid_kpi_cli_is_deterministic_and_within_thresholds() {
     let out1_path = base.join("kpi1.json");
     let out2_path = base.join("kpi2.json");
 
-let plc = r#"
+    let plc = r#"
 [topology]
 device plc_main: plc {
     purpose: "控制器端口映射",

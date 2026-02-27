@@ -68,6 +68,14 @@ bash scripts/openplc_trace_phase2_gate.sh \
   out/openplc_trace_phase2
 ```
 
+Windows PowerShell:
+
+```powershell
+.\scripts\openplc_trace_phase2_gate.ps1 `
+  -FixtureDir examples/openplc_trace_phase2 `
+  -OutDir out/openplc_trace_phase2
+```
+
 The gate performs:
 1) `normalize-modbus` for each scenario raw CSV
 2) `compare` with `--tick-tolerance 1 --min-pass-rate 0.95`

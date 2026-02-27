@@ -1,7 +1,6 @@
 use crate::ast::{
     ActionStatement, ConditionExpression, DeviceType, LiteralValue, PlcProgram, PortType,
-    StepStatement,
-    WaitCondition, WaitStatement,
+    StepStatement, WaitCondition, WaitStatement,
 };
 use crate::ir::{
     ConstraintSet, SafetyExpr, SafetyRelation, State, StateMachine, Transition, TransitionAction,
@@ -603,7 +602,12 @@ fn split_device_port_ref(target: &str) -> Option<(&str, &str)> {
 }
 
 fn is_analog_port_target(program: &PlcProgram, device: &str, port: &str) -> bool {
-    let Some(decl) = program.topology.devices.iter().find(|entry| entry.name == device) else {
+    let Some(decl) = program
+        .topology
+        .devices
+        .iter()
+        .find(|entry| entry.name == device)
+    else {
         return false;
     };
 
@@ -1118,7 +1122,10 @@ fn lookup_device_domain_id(
     port: &str,
     allow_self_fallback: bool,
 ) -> Option<usize> {
-    if let Some(id) = device_index.get(&(device.to_string(), port.to_string())).copied() {
+    if let Some(id) = device_index
+        .get(&(device.to_string(), port.to_string()))
+        .copied()
+    {
         return Some(id);
     }
     if allow_self_fallback && port != "self" {
@@ -1242,13 +1249,15 @@ fn action_name(action: &TransitionAction) -> Option<String> {
                 crate::ir::BinaryValue::Off => "off",
             }
         )),
-        TransitionAction::SetAnalog { target, value_raw, .. } => {
-            Some(format!("set_analog {target} {value_raw}"))
-        }
+        TransitionAction::SetAnalog {
+            target, value_raw, ..
+        } => Some(format!("set_analog {target} {value_raw}")),
         TransitionAction::SetAnalogExpr {
             target, expr_raw, ..
         } => Some(format!("set_analog {target} {expr_raw}")),
-        TransitionAction::Compute { target, expr_raw } => Some(format!("compute {target}={expr_raw}")),
+        TransitionAction::Compute { target, expr_raw } => {
+            Some(format!("compute {target}={expr_raw}"))
+        }
         TransitionAction::CamEngage { target } => Some(format!("cam_engage {target}")),
         TransitionAction::CamDisengage { target } => Some(format!("cam_disengage {target}")),
         TransitionAction::CamSwitch { target, new_table } => {

@@ -480,14 +480,12 @@ fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String
         ActionStatement::Compute { .. } => None,
         ActionStatement::CamEngage { target }
         | ActionStatement::CamDisengage { target }
-        | ActionStatement::CamPhase { target, .. } => Some((
-            format!("cam_action {target}"),
-            target.clone(),
-        )),
-        ActionStatement::CamSwitch { target, new_table } => Some((
-            format!("cam_switch {target} {new_table}"),
-            target.clone(),
-        )),
+        | ActionStatement::CamPhase { target, .. } => {
+            Some((format!("cam_action {target}"), target.clone()))
+        }
+        ActionStatement::CamSwitch { target, new_table } => {
+            Some((format!("cam_switch {target} {new_table}"), target.clone()))
+        }
         ActionStatement::Log { .. } => None,
     }
 }

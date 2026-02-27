@@ -377,7 +377,10 @@ fn bridge_maps_cam_tables_configs_and_actions() {
     let program = compile_to_runtime(PLC_CAM_FIXTURE, 1);
     assert_eq!(program.cam_tables.len(), 2, "cam tables should be bridged");
     assert_eq!(program.cam_configs.len(), 1, "cam config should be bridged");
-    assert_eq!(program.cam_configs[0].table_index, 0, "default table should map to index 0");
+    assert_eq!(
+        program.cam_configs[0].table_index, 0,
+        "default table should map to index 0"
+    );
 
     let mut saw_switch = false;
     let mut saw_phase = false;
@@ -394,7 +397,10 @@ fn bridge_maps_cam_tables_configs_and_actions() {
             }
         }
     }
-    assert!(saw_switch, "cam_switch should be lowered into runtime action");
+    assert!(
+        saw_switch,
+        "cam_switch should be lowered into runtime action"
+    );
     assert!(saw_phase, "cam_phase should be lowered into runtime action");
 }
 
