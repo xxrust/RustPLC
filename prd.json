@@ -258,8 +258,8 @@
         "Tests pass"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added register_extern_function! macro plus registry signature export/DSL declaration stub generation with parser-roundtrip consistency tests."
     },
     {
       "id": "US-018",

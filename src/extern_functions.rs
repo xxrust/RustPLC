@@ -1,4 +1,4 @@
-use crate::ir::{ExternFunctionContract, VariableType};
+use crate::ir::{ExternFunctionContract, ExternFunctionDef, ExternFunctionParam, VariableType};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -7,6 +7,70 @@ use std::time::Instant;
 use thiserror::Error;
 
 pub type ExternFunctionImpl = Arc<dyn Fn(&[f32]) -> Result<Vec<f32>, String> + Send + Sync>;
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __rust_plc_extern_type {
+    (float) => {
+        $crate::ir::VariableType::Float
+    };
+    (int) => {
+        $crate::ir::VariableType::Int
+    };
+    (bool) => {
+        $crate::ir::VariableType::Bool
+    };
+}
+
+#[macro_export]
+macro_rules! register_extern_function {
+    (
+        $registry:expr,
+        name: $name:expr,
+        params: [$($param_ty:ident),* $(,)?],
+        returns: $return_ty:ident,
+        rust_module: $rust_module:expr,
+        pure: $pure:expr,
+        time_bound_us: $time_bound_us:expr,
+        impl: $impl:expr $(,)?
+    ) => {{
+        let extern_info = $crate::extern_functions::ExternFunctionInfo::new(
+            $name,
+            vec![$($crate::__rust_plc_extern_type!($param_ty)),*],
+            vec![$crate::__rust_plc_extern_type!($return_ty)],
+            $crate::ir::ExternFunctionContract {
+                rust_module: $rust_module.to_string(),
+                pure: $pure,
+                time_bound_us: $time_bound_us,
+            },
+            $impl,
+        );
+        $registry.register(extern_info)
+    }};
+    (
+        $registry:expr,
+        name: $name:expr,
+        params: [$($param_ty:ident),* $(,)?],
+        returns: [$($return_ty:ident),* $(,)?],
+        rust_module: $rust_module:expr,
+        pure: $pure:expr,
+        time_bound_us: $time_bound_us:expr,
+        impl: $impl:expr $(,)?
+    ) => {{
+        let extern_info = $crate::extern_functions::ExternFunctionInfo::new(
+            $name,
+            vec![$($crate::__rust_plc_extern_type!($param_ty)),*],
+            vec![$($crate::__rust_plc_extern_type!($return_ty)),*],
+            $crate::ir::ExternFunctionContract {
+                rust_module: $rust_module.to_string(),
+                pure: $pure,
+                time_bound_us: $time_bound_us,
+            },
+            $impl,
+        );
+        $registry.register(extern_info)
+    }};
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ValueRange {
@@ -62,6 +126,27 @@ impl ExternFunctionInfo {
     pub fn with_output_ranges(mut self, ranges: Vec<ValueRange>) -> Self {
         self.output_ranges = Some(ranges);
         self
+    }
+
+    pub fn signature(&self) -> ExternFunctionDef {
+        ExternFunctionDef {
+            name: self.name.clone(),
+            params: self
+                .param_types
+                .iter()
+                .enumerate()
+                .map(|(index, var_type)| ExternFunctionParam {
+                    name: format!("arg{}", index + 1),
+                    var_type: var_type.clone(),
+                })
+                .collect(),
+            return_types: self.return_types.clone(),
+            contract: self.contract.clone(),
+        }
+    }
+
+    pub fn dsl_declaration_stub(&self) -> String {
+        render_extern_declaration(&self.signature())
     }
 
     fn invoke(&self, args: &[f32]) -> Result<Vec<f32>, String> {
@@ -168,6 +253,45 @@ pub fn extern_runtime_error_code(error: &ExternRuntimeError) -> u16 {
     }
 }
 
+fn render_variable_type(var_type: &VariableType) -> &'static str {
+    match var_type {
+        VariableType::Float => "float",
+        VariableType::Int => "int",
+        VariableType::Bool => "bool",
+    }
+}
+
+fn render_return_types(return_types: &[VariableType]) -> String {
+    let rendered = return_types
+        .iter()
+        .map(render_variable_type)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if return_types.len() == 1 {
+        rendered
+    } else {
+        format!("({rendered})")
+    }
+}
+
+fn render_extern_declaration(signature: &ExternFunctionDef) -> String {
+    let params = signature
+        .params
+        .iter()
+        .map(|param| format!("{}: {}", param.name, render_variable_type(&param.var_type)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "extern function {}({}) -> {} {{\n    rust_module: \"{}\"\n    pure: {}\n    time_bound_us: {}\n}}",
+        signature.name,
+        params,
+        render_return_types(&signature.return_types),
+        signature.contract.rust_module,
+        signature.contract.pure,
+        signature.contract.time_bound_us
+    )
+}
+
 pub struct ExternFunctionRegistry {
     functions: HashMap<String, ExternFunctionInfo>,
     time_source: Arc<dyn Fn() -> u64 + Send + Sync>,
@@ -242,6 +366,24 @@ impl ExternFunctionRegistry {
 
     pub fn get(&self, name: &str) -> Option<&ExternFunctionInfo> {
         self.functions.get(name)
+    }
+
+    pub fn signatures(&self) -> Vec<ExternFunctionDef> {
+        let mut signatures = self
+            .functions
+            .values()
+            .map(ExternFunctionInfo::signature)
+            .collect::<Vec<_>>();
+        signatures.sort_by(|a, b| a.name.cmp(&b.name));
+        signatures
+    }
+
+    pub fn generate_dsl_declaration_stubs(&self) -> String {
+        self.signatures()
+            .iter()
+            .map(render_extern_declaration)
+            .collect::<Vec<_>>()
+            .join("\n\n")
     }
 
     pub fn call(&self, name: &str, args: &[f32]) -> Result<Vec<f32>, ExternRuntimeError> {
@@ -561,6 +703,8 @@ fn solve_quadratic_fit_coefficients(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::VariableType as AstVariableType;
+    use crate::parser::parse_plc;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -582,6 +726,14 @@ mod tests {
         )
     }
 
+    fn ast_var_type_to_ir(var_type: &AstVariableType) -> VariableType {
+        match var_type {
+            AstVariableType::Float => VariableType::Float,
+            AstVariableType::Int => VariableType::Int,
+            AstVariableType::Bool => VariableType::Bool,
+        }
+    }
+
     #[test]
     fn register_get_and_call_succeeds() {
         let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
@@ -594,6 +746,46 @@ mod tests {
 
         let result = registry.call("add", &[1.5, 2.0]).expect("call should pass");
         assert_eq!(result, vec![3.5]);
+    }
+
+    #[test]
+    fn register_extern_function_macro_registers_signatures() {
+        let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+        register_extern_function!(
+            registry,
+            name: "macro_add",
+            params: [float, float],
+            returns: float,
+            rust_module: "math::macro",
+            pure: true,
+            time_bound_us: 123,
+            impl: |args| Ok(vec![args[0] + args[1]])
+        )
+        .expect("macro registration should pass");
+        register_extern_function!(
+            registry,
+            name: "macro_split",
+            params: [float],
+            returns: [float, float],
+            rust_module: "math::macro",
+            pure: true,
+            time_bound_us: 123,
+            impl: |args| Ok(vec![args[0], args[0] * 2.0])
+        )
+        .expect("macro registration should pass");
+
+        let add_result = registry
+            .call("macro_add", &[1.0, 2.0])
+            .expect("macro_add should run");
+        assert_eq!(add_result, vec![3.0]);
+
+        let split_sig = registry
+            .get("macro_split")
+            .expect("macro_split should be registered");
+        assert_eq!(
+            split_sig.return_types,
+            vec![VariableType::Float, VariableType::Float]
+        );
     }
 
     #[test]
@@ -954,6 +1146,78 @@ mod tests {
                 got: 9,
             }
         );
+    }
+
+    #[test]
+    fn generated_declarations_match_runtime_signatures() {
+        let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+        register_extern_function!(
+            registry,
+            name: "sum3",
+            params: [float, float, float],
+            returns: float,
+            rust_module: "math::sum",
+            pure: true,
+            time_bound_us: 88,
+            impl: |args| Ok(vec![args[0] + args[1] + args[2]])
+        )
+        .expect("sum3 registration should pass");
+        register_extern_function!(
+            registry,
+            name: "split_threshold",
+            params: [float],
+            returns: [bool, int],
+            rust_module: "logic::split",
+            pure: false,
+            time_bound_us: 150,
+            impl: |args| Ok(vec![if args[0] > 0.0 { 1.0 } else { 0.0 }, args[0]])
+        )
+        .expect("split_threshold registration should pass");
+
+        let declarations = registry.generate_dsl_declaration_stubs();
+        let source = format!(
+            "[topology]\n{declarations}\n\n[constraints]\n\n[tasks]\ntask main:\n    step idle:\n"
+        );
+        let program = parse_plc(&source).expect("generated declarations should be parseable");
+        let mut parsed = program.topology.extern_functions;
+        parsed.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let signatures = registry.signatures();
+        assert_eq!(parsed.len(), signatures.len());
+
+        for (parsed_decl, signature) in parsed.iter().zip(signatures.iter()) {
+            assert_eq!(parsed_decl.name, signature.name);
+            assert_eq!(parsed_decl.params.len(), signature.params.len());
+            assert_eq!(parsed_decl.return_types.len(), signature.return_types.len());
+
+            for (parsed_param, signature_param) in
+                parsed_decl.params.iter().zip(signature.params.iter())
+            {
+                assert_eq!(parsed_param.name, signature_param.name);
+                assert_eq!(
+                    ast_var_type_to_ir(&parsed_param.var_type),
+                    signature_param.var_type
+                );
+            }
+
+            for (parsed_return, signature_return) in parsed_decl
+                .return_types
+                .iter()
+                .zip(signature.return_types.iter())
+            {
+                assert_eq!(ast_var_type_to_ir(parsed_return), *signature_return);
+            }
+
+            assert_eq!(
+                parsed_decl.contract.rust_module,
+                signature.contract.rust_module
+            );
+            assert_eq!(parsed_decl.contract.pure, signature.contract.pure);
+            assert_eq!(
+                parsed_decl.contract.time_bound_us,
+                signature.contract.time_bound_us
+            );
+        }
     }
 
     #[test]
