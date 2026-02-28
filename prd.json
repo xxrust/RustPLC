@@ -228,8 +228,8 @@
         "Tests pass"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added end-to-end runtime-bridge integration tests for quadratic_fit tuple binding success, pid_update->add follow-up action chaining, and quadratic_fit runtime-error propagation."
     },
     {
       "id": "US-016",

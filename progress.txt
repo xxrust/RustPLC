@@ -14,6 +14,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - Integration tests for extern contract guardrails should assert `RuntimeTickError::ExternCallFailed` plus nested `ExternRuntimeError` payload details (function context and offending index/value).
 - `ExternFunctionRegistry::new()` bootstraps built-ins (`add`, `multiply`, `quadratic_fit`, `pid_update`); deterministic tests built with `with_time_source` must register needed built-ins explicitly and use `reset_builtin_pid_state()` before PID assertions that require a fresh integrator.
 - Extern scheduler guardrails are stage-split: detect non-pure cross-branch conflicts during semantic task validation, and enforce per-tick `time_bound_us` budget against configured `tick_ms` in runtime bridging.
+- Runtime ticks may consume multiple immediate action-only transitions in a single `tick_with_extern` call; add wait/delay boundaries when tests need one control update per scheduler tick.
 - Causality extern chains are modeled across semantic + verifier: allow causality nodes to reference devices/variables/extern names, wire call-site `arg -> function` edges, and only propagate `function -> binding` for `pure: true` externs.
 
 ## [2026-02-28 00:01:57] - US-002
@@ -325,4 +326,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Retry/error-flow tests with multiple extern calls must respect compile-time extern tick budget checks (`tick_ms` vs summed `time_bound_us`), or runtime bridging fails before execution.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `tick_with_extern_error_code` intentionally stops executing remaining actions in a step after a handled extern failure, then transitions so the next step can branch on `last_error` deterministically.
+---
+## [2026-02-28 11:47:11] - US-015
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added end-to-end extern integration coverage for a DSL `quadratic_fit` flow that binds tuple return values into `(coef_a, coef_b, coef_c)` through runtime tick execution.
+  - Added integration coverage for a PID control fixture where `pid_update` output is consumed by a subsequent `add` extern action in the same control flow.
+  - Added runtime-error-path integration coverage for singular-input `quadratic_fit`, asserting `RuntimeTickError::ExternCallFailed` and nested `ExternRuntimeError::RuntimeError` details.
+  - Marked US-015 as completed (`passes: true`) in `prd.json`.
+  - Ran `cargo check --workspace` and `cargo test --workspace` successfully.
+- Files changed
+  - tests/runtime_bridge_us006.rs
+  - AGENTS.md
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Extern end-to-end tests are easiest to keep deterministic by compiling DSL fixtures through `compile_runtime_and_topology` and wiring built-ins via `ExternFunctionRegistry::new()` + the shared `call_registry` adapter.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Runtime can traverse multiple immediate action steps in one tick, so fixtures expecting per-tick accumulation should add a blocking wait/delay edge instead of relying on step boundaries alone.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Built-in `quadratic_fit` currently expects 10 float args (5 x-values then 5 y-values); shorter call signatures fail with deterministic `InvalidArgCount`.
 ---

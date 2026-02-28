@@ -1003,3 +1003,231 @@ fn bridge_rejects_program_when_extern_worst_case_exceeds_tick_budget() {
         other => panic!("unexpected bridge error: {other:?}"),
     }
 }
+
+const PLC_EXTERN_QUADRATIC_TUPLE_FIXTURE: &str = r#"
+[topology]
+
+extern function quadratic_fit(
+    x1: float,
+    x2: float,
+    x3: float,
+    x4: float,
+    x5: float,
+    y1: float,
+    y2: float,
+    y3: float,
+    y4: float,
+    y5: float
+) -> (float, float, float) {
+    rust_module: "math::fit",
+    pure: true,
+    time_bound_us: 1000
+}
+
+variable x1: float = 0.0
+variable x2: float = 1.0
+variable x3: float = 2.0
+variable x4: float = 3.0
+variable x5: float = 4.0
+variable y1: float = 1.0
+variable y2: float = 6.0
+variable y3: float = 17.0
+variable y4: float = 34.0
+variable y5: float = 57.0
+variable coef_a: float = 0.0
+variable coef_b: float = 0.0
+variable coef_c: float = 0.0
+
+[constraints]
+
+[tasks]
+
+task main:
+    step fit_curve:
+        action: call quadratic_fit(x1, x2, x3, x4, x5, y1, y2, y3, y4, y5) -> (coef_a, coef_b, coef_c)
+    on_complete: goto done
+
+task done:
+    step halt:
+"#;
+
+#[test]
+fn bridge_executes_quadratic_fit_with_tuple_binding_end_to_end() {
+    let (program, topology) = compile_runtime_and_topology(PLC_EXTERN_QUADRATIC_TUPLE_FIXTURE, 2);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let registry = ExternFunctionRegistry::new();
+
+    rt.tick_with_extern(&mut io, |function, args, outputs| {
+        call_registry(&registry, function, args, outputs)
+    })
+    .expect("quadratic_fit should execute");
+
+    let coef_a = rt.variables()[variable_index(&topology, "coef_a") as usize];
+    let coef_b = rt.variables()[variable_index(&topology, "coef_b") as usize];
+    let coef_c = rt.variables()[variable_index(&topology, "coef_c") as usize];
+    assert!((coef_a - 1.0).abs() < 1e-4, "expected a≈1, got {coef_a}");
+    assert!((coef_b - 2.0).abs() < 1e-4, "expected b≈2, got {coef_b}");
+    assert!((coef_c - 3.0).abs() < 1e-4, "expected c≈3, got {coef_c}");
+}
+
+const PLC_EXTERN_PID_CONTROL_FIXTURE: &str = r#"
+[topology]
+
+extern function pid_update(error: float, kp: float, ki: float, kd: float, dt: float) -> float {
+    rust_module: "control::pid",
+    pure: false,
+    time_bound_us: 1000
+}
+
+extern function add(lhs: float, rhs: float) -> float {
+    rust_module: "math::basic",
+    pure: true,
+    time_bound_us: 1000
+}
+
+variable error: float = 2.0
+variable kp: float = 1.5
+variable ki: float = 0.5
+variable kd: float = 0.1
+variable dt: float = 1.0
+variable bias: float = 1.0
+variable pid_out: float = 0.0
+variable command: float = 0.0
+
+[constraints]
+
+[tasks]
+
+task main:
+    step control_tick_1:
+        action: call pid_update(error, kp, ki, kd, dt) -> pid_out
+        action: call add(pid_out, bias) -> command
+    step control_tick_2:
+        action: call pid_update(error, kp, ki, kd, dt) -> pid_out
+        action: call add(pid_out, bias) -> command
+    on_complete: goto done
+
+task done:
+    step halt:
+"#;
+
+#[test]
+fn bridge_executes_pid_then_uses_output_in_followup_extern_action() {
+    let (program, topology) = compile_runtime_and_topology(PLC_EXTERN_PID_CONTROL_FIXTURE, 5);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let registry = ExternFunctionRegistry::new();
+    let pid_out_idx = variable_index(&topology, "pid_out") as usize;
+    let command_idx = variable_index(&topology, "command") as usize;
+
+    rt.tick_with_extern(&mut io, |function, args, outputs| {
+        call_registry(&registry, function, args, outputs)
+    })
+    .expect("first control tick should execute");
+
+    assert!(
+        (rt.variables()[pid_out_idx] - 5.0).abs() < 1e-4,
+        "two PID updates should run through the task in one runtime tick, got {}",
+        rt.variables()[pid_out_idx]
+    );
+    assert!(
+        (rt.variables()[command_idx] - 6.0).abs() < 1e-4,
+        "follow-up add call should consume fresh pid_out from pid_update, got {}",
+        rt.variables()[command_idx]
+    );
+
+    rt.tick_with_extern(&mut io, |function, args, outputs| {
+        call_registry(&registry, function, args, outputs)
+    })
+    .expect("second control tick should execute");
+
+    assert!(
+        (rt.variables()[pid_out_idx] - 5.0).abs() < 1e-4,
+        "once task reaches halt, pid output should stay stable, got {}",
+        rt.variables()[pid_out_idx]
+    );
+    assert!(
+        (rt.variables()[command_idx] - 6.0).abs() < 1e-4,
+        "command should remain pid output + bias, got {}",
+        rt.variables()[command_idx]
+    );
+}
+
+const PLC_EXTERN_QUADRATIC_ERROR_FIXTURE: &str = r#"
+[topology]
+
+extern function quadratic_fit(
+    x1: float,
+    x2: float,
+    x3: float,
+    x4: float,
+    x5: float,
+    y1: float,
+    y2: float,
+    y3: float,
+    y4: float,
+    y5: float
+) -> (float, float, float) {
+    rust_module: "math::fit",
+    pure: true,
+    time_bound_us: 1000
+}
+
+variable x1: float = 1.0
+variable x2: float = 1.0
+variable x3: float = 1.0
+variable x4: float = 1.0
+variable x5: float = 1.0
+variable y1: float = 2.0
+variable y2: float = 3.0
+variable y3: float = 4.0
+variable y4: float = 5.0
+variable y5: float = 6.0
+variable coef_a: float = 0.0
+variable coef_b: float = 0.0
+variable coef_c: float = 0.0
+
+[constraints]
+
+[tasks]
+
+task main:
+    step fit_curve:
+        action: call quadratic_fit(x1, x2, x3, x4, x5, y1, y2, y3, y4, y5) -> (coef_a, coef_b, coef_c)
+    on_complete: goto done
+
+task done:
+    step halt:
+"#;
+
+#[test]
+fn runtime_tick_with_extern_propagates_quadratic_fit_runtime_error() {
+    let program = compile_to_runtime(PLC_EXTERN_QUADRATIC_ERROR_FIXTURE, 2);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let registry = ExternFunctionRegistry::new();
+
+    let err = rt
+        .tick_with_extern(&mut io, |function, args, outputs| {
+            call_registry(&registry, function, args, outputs)
+        })
+        .expect_err("singular quadratic inputs should fail at runtime");
+
+    match err {
+        RuntimeTickError::ExternCallFailed { function, error } => {
+            assert_eq!(function, "quadratic_fit");
+            match error {
+                ExternRuntimeError::RuntimeError { function, message } => {
+                    assert_eq!(function, "quadratic_fit");
+                    assert!(
+                        message.contains("singular matrix"),
+                        "expected singular-matrix message, got {message}"
+                    );
+                }
+                other => panic!("unexpected nested error variant: {other:?}"),
+            }
+        }
+        other => panic!("unexpected tick error variant: {other:?}"),
+    }
+}
