@@ -13,6 +13,7 @@ pub mod device_library;
 pub mod device_subtype;
 pub mod diagnostics;
 pub mod error;
+pub mod extern_functions;
 pub mod iec_address;
 pub mod io_map;
 pub mod ir;

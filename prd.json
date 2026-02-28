@@ -106,8 +106,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added ExternFunctionRegistry core API (register/get/call) with deterministic missing-function behavior and structured runtime errors for arg count, range, timeout, and runtime failures"
     },
     {
       "id": "US-008",

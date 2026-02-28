@@ -8,6 +8,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - Introducing a new IR `TransitionAction` variant requires coordinated updates in semantic lowering, runtime bridge conversion, ST codegen rendering/inference, and verification matchers to keep compile/runtime behavior consistent.
 - Extern call semantics rely on predeclared `[topology] variable` symbols for return bindings; signature checks should validate arg/binding arity+types and report step-level line numbers.
 - Keep extern declaration contract validation in semantic signature collection (`collect_extern_function_signatures`) so declaration-level diagnostics fire before per-step call-site checks.
+- Keep extern runtime contract checks centralized in `src/extern_functions.rs`; use `ExternFunctionRegistry::with_time_source` in tests so timeout assertions stay deterministic.
 
 ---
 ## [2026-02-28 00:01:57] - US-002
@@ -137,4 +138,26 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `rust_module` presence is parser-enforced, but semantic must still trim-check for empty string literals like `"   "`.
   - Useful context (e.g., 'the evaluation panel is in component X')
     - `build_state_machine` currently hosts extern contract diagnostics; `build_topology_graph` intentionally stays focused on topology graph construction.
+---
+## [2026-02-28 09:04:21] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `ExternFunctionRegistry` core runtime abstraction in `src/extern_functions.rs` with `register/get/call` APIs.
+  - Added structured `ExternRuntimeError` variants for deterministic missing-function lookup, invalid arg count, input/output range violations, timeout, and runtime execution failures.
+  - Added deterministic timing-hook support (`with_time_source`) plus registry validation for duplicate registrations and invalid range configs.
+  - Added focused unit tests covering happy path and all major error surfaces.
+  - Marked US-007 as completed (`passes: true`) in `prd.json`.
+- Files changed
+  - AGENTS.md
+  - src/extern_functions.rs
+  - src/lib.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Runtime extern guardrails are easiest to reuse when all checks (arity/range/timeout/runtime) stay inside the registry call boundary.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Timeout tests should avoid wall-clock sleeps; inject a monotonic fake clock through `with_time_source` to keep assertions stable.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `ExternFunctionInfo` stores both signature metadata and callable implementation, so later runtime-tick integration can map declarations to registry lookups by function name only.
 ---
