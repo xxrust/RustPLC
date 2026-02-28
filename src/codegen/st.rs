@@ -1,6 +1,6 @@
 use crate::ir::{
-    BinaryValue, State, StateMachine, TimerOperationKind, TopologyGraph, Transition,
-    TransitionAction, TransitionGuard, VariableType,
+    BinaryValue, ExternCallBinding, State, StateMachine, TimerOperationKind, TopologyGraph,
+    Transition, TransitionAction, TransitionGuard, VariableType,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -307,6 +307,22 @@ fn collect_variable_candidates_from_transitions(
                         var_type: StVarType::Real,
                     });
                 }
+                TransitionAction::CallExtern { binding, .. } => match binding {
+                    ExternCallBinding::Single(name) => {
+                        candidates.push(VariableCandidate {
+                            original: name.clone(),
+                            var_type: StVarType::Real,
+                        });
+                    }
+                    ExternCallBinding::Tuple(names) => {
+                        for name in names {
+                            candidates.push(VariableCandidate {
+                                original: name.clone(),
+                                var_type: StVarType::Real,
+                            });
+                        }
+                    }
+                },
                 TransitionAction::CamEngage { .. }
                 | TransitionAction::CamDisengage { .. }
                 | TransitionAction::CamSwitch { .. }
@@ -643,6 +659,26 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
                 "{} := {};",
                 resolved_variables.resolve_identifier(target),
                 expr_raw.trim()
+            )
+        }
+        TransitionAction::CallExtern {
+            function,
+            args_raw,
+            binding,
+        } => {
+            let rendered_binding = match binding {
+                ExternCallBinding::Single(name) => resolved_variables.resolve_identifier(name),
+                ExternCallBinding::Tuple(names) => names
+                    .iter()
+                    .map(|name| resolved_variables.resolve_identifier(name))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            };
+            format!(
+                "(* CALL_EXTERN {}({}) -> {} *)",
+                normalize_identifier_for_st(function),
+                args_raw.join(", "),
+                rendered_binding
             )
         }
         TransitionAction::Log { message } => {

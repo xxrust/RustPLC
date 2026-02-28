@@ -5,6 +5,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - Keep DSL syntax decisions in dedicated docs under `docs/` and link story completion back to `prd.json` + `progress.txt`.
 - For new `[topology]` DSL entries, keep grammar (`src/parser/plc.pest`), parser wiring (`src/parser/mod.rs`), and semantic topology cloning (`src/semantic/mod.rs`) in sync.
 - When adding a new `action:` DSL command, keep `action_command` grammar alternatives, `parse_action_statement` match arms, and parser unit tests synchronized.
+- Introducing a new IR `TransitionAction` variant requires coordinated updates in semantic lowering, runtime bridge conversion, ST codegen rendering/inference, and verification matchers to keep compile/runtime behavior consistent.
 
 ---
 ## [2026-02-28 00:01:57] - US-002
@@ -67,4 +68,30 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Extern-in-expression checks must recurse into nested statement containers (`repeat`, `parallel`, `race`) to avoid escape paths.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Extern calls now parse into `StepStatement::Action(ActionStatement::Call { ... })`, ready for semantic/runtime handling in follow-up stories.
+---
+## [2026-02-28 08:18:54] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Extended IR topology with extern metadata (`ExternFunctionDef` + params/contract) and propagated parser AST extern declarations into `TopologyGraph`.
+  - Added IR/runtime action surface for extern invocation (`TransitionAction::CallExtern`) including argument raw expressions and single/tuple bindings.
+  - Lowered `ActionStatement::Call` into IR call actions and updated dependent layers (runtime bridge unsupported-action path, ST codegen rendering/variable inference, safety verifier action handling).
+  - Added serde/lowering coverage: AST roundtrip test for extern declaration + call action, IR serialization test for extern metadata/call action, and semantic tests for extern metadata + call lowering.
+  - Marked US-004 as completed (`passes: true`) in `prd.json`.
+- Files changed
+  - AGENTS.md
+  - src/ast/mod.rs
+  - src/ir/mod.rs
+  - src/semantic/mod.rs
+  - src/runtime_bridge.rs
+  - src/codegen/st.rs
+  - src/verification/safety.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Extern feature delivery is cross-layer: AST parse success is insufficient unless IR projection + downstream action consumers are updated together.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Single-step tasks without `on_complete` may not emit action transitions, so semantic lowering tests should include an explicit completion target when asserting transition actions.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `TransitionAction::CallExtern` is currently structural only; runtime bridge reports deterministic `UnsupportedAction` until execution support lands in later stories.
 ---

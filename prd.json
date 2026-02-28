@@ -59,8 +59,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "IR now carries extern function metadata and call_extern actions with binding info; AST/IR serde+lowering coverage added"
     },
     {
       "id": "US-005",

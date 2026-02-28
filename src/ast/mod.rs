@@ -616,3 +616,90 @@ pub enum OnCompleteDirective {
     Goto { target: GotoDirective },
     Unreachable,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extern_nodes_roundtrip_through_serde_json() {
+        let program = PlcProgram {
+            topology: TopologySection {
+                devices: vec![DeviceDeclaration {
+                    line: 1,
+                    name: "Y0".to_string(),
+                    device_type: DeviceType::DigitalOutput,
+                    attributes: DeviceAttributes::default(),
+                }],
+                connections: Vec::new(),
+                variables: Vec::new(),
+                cam_tables: Vec::new(),
+                extern_functions: vec![ExternFunctionDeclaration {
+                    line: 2,
+                    name: "split".to_string(),
+                    params: vec![ExternFunctionParameter {
+                        name: "v".to_string(),
+                        var_type: VariableType::Float,
+                    }],
+                    return_types: vec![VariableType::Float, VariableType::Float],
+                    contract: ExternFunctionContract {
+                        rust_module: "math::split".to_string(),
+                        pure: true,
+                        time_bound_us: 200,
+                    },
+                }],
+            },
+            constraints: ConstraintsSection::default(),
+            tasks: TasksSection {
+                tasks: vec![TaskDeclaration {
+                    line: 6,
+                    name: "main".to_string(),
+                    steps: vec![StepDeclaration {
+                        line: 7,
+                        name: "run".to_string(),
+                        statements: vec![StepStatement::Action(ActionStatement::Call {
+                            function: "split".to_string(),
+                            args: vec![Expression::Variable("input".to_string())],
+                            binding: ExternCallBinding::Tuple(vec![
+                                "lo".to_string(),
+                                "hi".to_string(),
+                            ]),
+                        })],
+                    }],
+                    on_complete_line: None,
+                    on_complete: None,
+                }],
+            },
+        };
+
+        let json = serde_json::to_string(&program).expect("AST should serialize");
+        let decoded: PlcProgram = serde_json::from_str(&json).expect("AST should deserialize");
+
+        assert_eq!(decoded.topology.extern_functions.len(), 1);
+        let function = &decoded.topology.extern_functions[0];
+        assert_eq!(function.name, "split");
+        assert_eq!(
+            function.return_types,
+            vec![VariableType::Float, VariableType::Float]
+        );
+        assert_eq!(function.contract.rust_module, "math::split");
+        assert_eq!(function.contract.time_bound_us, 200);
+
+        let step = &decoded.tasks.tasks[0].steps[0];
+        match &step.statements[0] {
+            StepStatement::Action(ActionStatement::Call {
+                function,
+                args,
+                binding,
+            }) => {
+                assert_eq!(function, "split");
+                assert_eq!(args.len(), 1);
+                assert!(matches!(
+                    binding,
+                    ExternCallBinding::Tuple(names) if names == &vec!["lo".to_string(), "hi".to_string()]
+                ));
+            }
+            other => panic!("expected action call after roundtrip, got {other:?}"),
+        }
+    }
+}

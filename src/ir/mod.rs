@@ -84,6 +84,29 @@ pub struct CamCouplingDef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExternFunctionDef {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<ExternFunctionParam>,
+    pub return_types: Vec<VariableType>,
+    pub contract: ExternFunctionContract,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExternFunctionParam {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub var_type: VariableType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExternFunctionContract {
+    pub rust_module: String,
+    pub pure: bool,
+    pub time_bound_us: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PidLoop {
     pub name: String,
     pub pv: String,
@@ -131,6 +154,8 @@ pub struct TopologyGraph {
     pub cam_tables: Vec<CamTableIr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cam_couplings: Vec<CamCouplingDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extern_functions: Vec<ExternFunctionDef>,
 }
 
 impl TopologyGraph {
@@ -142,6 +167,7 @@ impl TopologyGraph {
             variables: Vec::new(),
             cam_tables: Vec::new(),
             cam_couplings: Vec::new(),
+            extern_functions: Vec::new(),
         }
     }
 
@@ -206,6 +232,12 @@ pub enum TransitionAction {
         target: String,
         expr_raw: String,
     },
+    CallExtern {
+        function: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args_raw: Vec<String>,
+        binding: ExternCallBinding,
+    },
     CamEngage {
         target: String,
     },
@@ -223,6 +255,13 @@ pub enum TransitionAction {
     Log {
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "binding", content = "targets", rename_all = "snake_case")]
+pub enum ExternCallBinding {
+    Single(String),
+    Tuple(Vec<String>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -350,6 +389,7 @@ pub enum ActionKind {
     SetAnalog,
     SetAnalogExpr,
     Compute,
+    CallExtern,
     CamEngage,
     CamDisengage,
     CamSwitch,
@@ -431,6 +471,25 @@ mod tests {
             kind: DeviceKind::SolenoidValve,
         });
         topology.add_connection(y0, valve, ConnectionType::Electrical);
+        topology.extern_functions.push(ExternFunctionDef {
+            name: "add".to_string(),
+            params: vec![
+                ExternFunctionParam {
+                    name: "a".to_string(),
+                    var_type: VariableType::Float,
+                },
+                ExternFunctionParam {
+                    name: "b".to_string(),
+                    var_type: VariableType::Float,
+                },
+            ],
+            return_types: vec![VariableType::Float],
+            contract: ExternFunctionContract {
+                rust_module: "math::add".to_string(),
+                pure: true,
+                time_bound_us: 50,
+            },
+        });
 
         let state_machine = StateMachine {
             states: vec![
@@ -455,10 +514,17 @@ mod tests {
                 guard: TransitionGuard::Condition {
                     expression: "sensor_A_ext == true".to_string(),
                 },
-                actions: vec![TransitionAction::Extend {
-                    target: "cyl_A".to_string(),
-                    port: "self".to_string(),
-                }],
+                actions: vec![
+                    TransitionAction::Extend {
+                        target: "cyl_A".to_string(),
+                        port: "self".to_string(),
+                    },
+                    TransitionAction::CallExtern {
+                        function: "add".to_string(),
+                        args_raw: vec!["left".to_string(), "right".to_string()],
+                        binding: ExternCallBinding::Single("sum".to_string()),
+                    },
+                ],
                 timers: vec![TimerOperation {
                     timer_name: "extend_A_timeout".to_string(),
                     operation: TimerOperationKind::Start,
@@ -525,7 +591,9 @@ mod tests {
         let timing_json = to_pretty_json(&timing_model).expect("timing model should serialize");
 
         assert!(topology_json.contains("graph"));
+        assert!(topology_json.contains("extern_functions"));
         assert!(sm_json.contains("transitions"));
+        assert!(sm_json.contains("call_extern"));
         assert!(constraints_json.contains("conflicts_with"));
         assert!(timing_json.contains("intervals"));
 
@@ -533,5 +601,6 @@ mod tests {
             serde_json::from_str(&topology_json).expect("topology should deserialize");
         assert_eq!(decoded_topology.graph.node_count(), 2);
         assert_eq!(decoded_topology.graph.edge_count(), 1);
+        assert_eq!(decoded_topology.extern_functions.len(), 1);
     }
 }

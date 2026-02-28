@@ -1153,6 +1153,22 @@ fn convert_action(
             let expr = compile_expr_program(state_name, expr_raw, variable_indices)?;
             Ok(Action::Compute { target_var, expr })
         }
+        TransitionAction::CallExtern {
+            function,
+            args_raw,
+            binding,
+        } => Err(BridgeError::UnsupportedAction {
+            state: state_name.to_string(),
+            action: format!(
+                "call {}({}) -> {}",
+                function,
+                args_raw.join(", "),
+                match binding {
+                    crate::ir::ExternCallBinding::Single(name) => name.clone(),
+                    crate::ir::ExternCallBinding::Tuple(names) => format!("({})", names.join(", ")),
+                }
+            ),
+        }),
         TransitionAction::CamEngage { target } => {
             let Some(cam_index) = cam_indices.get(target).copied() else {
                 return Err(BridgeError::UnsupportedAction {

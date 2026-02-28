@@ -1,18 +1,22 @@
 use crate::ast::{
     ActionStatement, BinaryOperator as AstBinaryOperator, CamTableMode, ComparisonOperator,
     ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType,
-    DurationValue, Expression as AstExpression, GotoDirective, LiteralValue, OnCompleteDirective,
-    ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, SafetyConstraint, SafetyOperand,
-    SafetyRelation as AstSafetyRelation, StateReference, StepStatement, TaskDeclaration,
-    TasksSection, TimeUnit, TimeoutDirective, TimingRelation as AstTimingRelation, TimingTarget,
-    TopologyConnection, TopologyRelation, TopologySection, VariableDeclaration,
-    VariableType as AstVariableType, WaitCondition, WaitStatement,
+    DurationValue, Expression as AstExpression, ExternCallBinding as AstExternCallBinding,
+    ExternFunctionDeclaration as AstExternFunctionDeclaration, GotoDirective, LiteralValue,
+    OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock,
+    SafetyConstraint, SafetyOperand, SafetyRelation as AstSafetyRelation, StateReference,
+    StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective,
+    TimingRelation as AstTimingRelation, TimingTarget, TopologyConnection, TopologyRelation,
+    TopologySection, VariableDeclaration, VariableType as AstVariableType, WaitCondition,
+    WaitStatement,
 };
 use crate::error::PlcError;
 use crate::ir::{
     ActionKind, ActionRef, ActionTiming, BinaryValue as IrBinaryValue, CamCouplingDef,
     CamInterpolation, CamTableIr, CausalityChain, ConnectionType, ConstraintSet, Device,
-    DeviceKind, MAX_CAM_POINTS, PidLoop as IrPidLoop, SafetyExpr,
+    DeviceKind, ExternCallBinding as IrExternCallBinding,
+    ExternFunctionContract as IrExternContract, ExternFunctionDef as IrExternFunctionDef,
+    ExternFunctionParam as IrExternFunctionParam, MAX_CAM_POINTS, PidLoop as IrPidLoop, SafetyExpr,
     SafetyRelation as IrSafetyRelation, SafetyRule, SplineCoeff, State, StateExpr, StateMachine,
     TimeInterval, TimerOperation, TimerOperationKind, TimingModel,
     TimingRelation as IrTimingRelation, TimingRule, TimingScope, TopologyGraph, TopologyLink,
@@ -1133,6 +1137,7 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
     let pid_loops = extract_pid_loops(topology, &mut errors);
     let variable_defs = extract_variable_defs(topology, &mut errors);
     let cam_table_defs = extract_cam_table_defs(topology, &mut errors);
+    let extern_function_defs = extract_extern_function_defs(topology);
     let cam_table_names = cam_table_defs
         .iter()
         .map(|table| table.name.clone())
@@ -1250,6 +1255,7 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
     topology_graph.variables = variable_defs;
     topology_graph.cam_tables = cam_table_defs;
     topology_graph.cam_couplings = cam_couplings;
+    topology_graph.extern_functions = extern_function_defs;
 
     if errors.is_empty() {
         Ok(topology_graph)
@@ -1853,6 +1859,46 @@ fn lower_variable_initial_value(
             };
             Ok((IrVariableType::Bool, value))
         }
+    }
+}
+
+fn extract_extern_function_defs(topology: &TopologySection) -> Vec<IrExternFunctionDef> {
+    topology
+        .extern_functions
+        .iter()
+        .map(lower_extern_function_def)
+        .collect()
+}
+
+fn lower_extern_function_def(decl: &AstExternFunctionDeclaration) -> IrExternFunctionDef {
+    IrExternFunctionDef {
+        name: decl.name.clone(),
+        params: decl
+            .params
+            .iter()
+            .map(|param| IrExternFunctionParam {
+                name: param.name.clone(),
+                var_type: ast_variable_type_to_ir(&param.var_type),
+            })
+            .collect(),
+        return_types: decl
+            .return_types
+            .iter()
+            .map(ast_variable_type_to_ir)
+            .collect(),
+        contract: IrExternContract {
+            rust_module: decl.contract.rust_module.clone(),
+            pure: decl.contract.pure,
+            time_bound_us: decl.contract.time_bound_us,
+        },
+    }
+}
+
+fn ast_variable_type_to_ir(var_type: &AstVariableType) -> IrVariableType {
+    match var_type {
+        AstVariableType::Float => IrVariableType::Float,
+        AstVariableType::Int => IrVariableType::Int,
+        AstVariableType::Bool => IrVariableType::Bool,
     }
 }
 
@@ -3754,6 +3800,7 @@ fn action_to_timing(
         | ActionKind::CamDisengage
         | ActionKind::CamSwitch
         | ActionKind::CamPhase
+        | ActionKind::CallExtern
         | ActionKind::Compute
         | ActionKind::Log => None,
     }?;
@@ -3804,6 +3851,7 @@ fn action_kind_name(action_kind: &ActionKind) -> &'static str {
         ActionKind::SetAnalog => "set_analog",
         ActionKind::SetAnalogExpr => "set_analog_expr",
         ActionKind::Compute => "compute",
+        ActionKind::CallExtern => "call_extern",
         ActionKind::CamEngage => "cam_engage",
         ActionKind::CamDisengage => "cam_disengage",
         ActionKind::CamSwitch => "cam_switch",
@@ -4460,7 +4508,15 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             target: target.clone(),
             expr_raw: expression_to_raw(expr),
         }),
-        ActionStatement::Call { .. } => None,
+        ActionStatement::Call {
+            function,
+            args,
+            binding,
+        } => Some(TransitionAction::CallExtern {
+            function: function.clone(),
+            args_raw: args.iter().map(expression_to_raw).collect(),
+            binding: lower_extern_call_binding(binding),
+        }),
         ActionStatement::CamEngage { target } => Some(TransitionAction::CamEngage {
             target: target.clone(),
         }),
@@ -4478,6 +4534,13 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
         ActionStatement::Log { message } => Some(TransitionAction::Log {
             message: message.clone(),
         }),
+    }
+}
+
+fn lower_extern_call_binding(binding: &AstExternCallBinding) -> IrExternCallBinding {
+    match binding {
+        AstExternCallBinding::Single(name) => IrExternCallBinding::Single(name.clone()),
+        AstExternCallBinding::Tuple(names) => IrExternCallBinding::Tuple(names.clone()),
     }
 }
 
@@ -6926,5 +6989,87 @@ task main:
             .collect::<Vec<_>>()
             .join("\n");
         assert!(joined.contains("参数个数错误"), "应提示函数参数个数错误");
+    }
+
+    #[test]
+    fn lowers_extern_function_metadata_into_ir_topology() {
+        let input = r#"
+[topology]
+extern function add(a: float, b: float) -> float {
+    rust_module: "math::add"
+    pure: true
+    time_bound_us: 100
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("extern function 示例应能解析");
+        let topology = build_topology_graph(&program).expect("应能构建包含 extern 的拓扑");
+
+        assert_eq!(topology.extern_functions.len(), 1);
+        let add = &topology.extern_functions[0];
+        assert_eq!(add.name, "add");
+        assert_eq!(add.params.len(), 2);
+        assert!(matches!(
+            add.return_types.as_slice(),
+            [crate::ir::VariableType::Float]
+        ));
+        assert_eq!(add.contract.rust_module, "math::add");
+        assert!(add.contract.pure);
+        assert_eq!(add.contract.time_bound_us, 100);
+    }
+
+    #[test]
+    fn lowers_action_call_into_ir_transition_action() {
+        let input = r#"
+[topology]
+variable temperature: float = 0.0
+extern function split(v: float) -> (float, float) {
+    rust_module: "math::split"
+    pure: true
+    time_bound_us: 120
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: call split(temperature) -> (lo, hi)
+    on_complete: goto done
+
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("extern call 示例应能解析");
+        let sm = build_state_machine(&program).expect("extern call 应能 lowering 到 IR");
+
+        let action = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::CallExtern {
+                    function,
+                    args_raw,
+                    binding,
+                } => Some((function, args_raw, binding)),
+                _ => None,
+            })
+            .expect("状态机 transition 中应包含 call_extern 动作");
+
+        assert_eq!(action.0, "split");
+        assert_eq!(action.1, &vec!["temperature".to_string()]);
+        assert!(matches!(
+            action.2,
+            crate::ir::ExternCallBinding::Tuple(names)
+                if names == &vec!["lo".to_string(), "hi".to_string()]
+        ));
     }
 }

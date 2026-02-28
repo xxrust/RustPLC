@@ -849,7 +849,9 @@ fn collect_device_domains(
                 | TransitionAction::CamDisengage { .. }
                 | TransitionAction::CamSwitch { .. }
                 | TransitionAction::CamPhase { .. } => continue,
-                TransitionAction::Compute { .. } | TransitionAction::Log { .. } => continue,
+                TransitionAction::Compute { .. }
+                | TransitionAction::CallExtern { .. }
+                | TransitionAction::Log { .. } => continue,
             };
             if port != "self" {
                 referenced_ports
@@ -1086,6 +1088,7 @@ fn transition_effects(
                 effects.insert(device_id, state_id);
             }
             TransitionAction::Compute { .. } => {}
+            TransitionAction::CallExtern { .. } => {}
             TransitionAction::CamEngage { .. }
             | TransitionAction::CamDisengage { .. }
             | TransitionAction::CamSwitch { .. }
@@ -1259,6 +1262,19 @@ fn action_name(action: &TransitionAction) -> Option<String> {
         TransitionAction::Compute { target, expr_raw } => {
             Some(format!("compute {target}={expr_raw}"))
         }
+        TransitionAction::CallExtern {
+            function,
+            args_raw,
+            binding,
+        } => Some(format!(
+            "call {}({}) -> {}",
+            function,
+            args_raw.join(", "),
+            match binding {
+                crate::ir::ExternCallBinding::Single(name) => name.clone(),
+                crate::ir::ExternCallBinding::Tuple(names) => format!("({})", names.join(", ")),
+            }
+        )),
         TransitionAction::CamEngage { target } => Some(format!("cam_engage {target}")),
         TransitionAction::CamDisengage { target } => Some(format!("cam_disengage {target}")),
         TransitionAction::CamSwitch { target, new_table } => {
