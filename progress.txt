@@ -10,7 +10,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - Keep extern declaration contract validation in semantic signature collection (`collect_extern_function_signatures`) so declaration-level diagnostics fire before per-step call-site checks.
 - Keep extern runtime contract checks centralized in `src/extern_functions.rs`; use `ExternFunctionRegistry::with_time_source` in tests so timeout assertions stay deterministic.
 - `Action::CallExtern` executes only through runtime extern-aware APIs (`tick_with_extern` / `tick_with_trace_and_logs_and_extern`); plain `tick*` methods intentionally return `ExternCallRequiresHandler`.
-- `ExternFunctionRegistry::new()` bootstraps built-in math externs (`add`, `multiply`, `quadratic_fit`); deterministic tests built with `with_time_source` must call `register_builtin_math_functions()` explicitly.
+- `ExternFunctionRegistry::new()` bootstraps built-ins (`add`, `multiply`, `quadratic_fit`, `pid_update`); deterministic tests built with `with_time_source` must register needed built-ins explicitly and use `reset_builtin_pid_state()` before PID assertions that require a fresh integrator.
 
 ---
 ## [2026-02-28 00:01:57] - US-002
@@ -209,4 +209,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `with_time_source` intentionally constructs an empty registry; tests expecting built-ins must call `register_builtin_math_functions()` before invoking `call`.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `quadratic_fit` currently models `y = a + b*x + c*x^2` and reports singular inputs through `ExternRuntimeError::RuntimeError` message text.
+---
+## [2026-02-28 10:11:38] - US-010
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added built-in non-pure extern `pid_update(error, kp, ki, kd, dt) -> output` with registry-local PID state (integral + previous error) and deterministic runtime behavior.
+  - Added `ExternFunctionRegistry::register_builtin_control_functions()` and wired `ExternFunctionRegistry::new()` to auto-register `pid_update` alongside existing built-ins.
+  - Added deterministic test reset hook `ExternFunctionRegistry::reset_builtin_pid_state()` for stateful PID assertions.
+  - Added unit tests covering first-step PID response, multi-step accumulation behavior, and explicit state reset reproducibility.
+  - Marked US-010 as completed (`passes: true`) in `prd.json`.
+- Files changed
+  - AGENTS.md
+  - src/extern_functions.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Stateful built-in externs should capture per-registry mutable state (for example via `Arc<Mutex<_>>`) so behavior stays deterministic and isolated across registries.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - When adding built-ins that use `with_time_source`, remember the registry starts empty in tests; explicitly register control built-ins before calling `pid_update`.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `pid_update` currently computes derivative from previous error (or zero baseline on first call) and rejects non-positive/non-finite `dt` with runtime error text.
 ---

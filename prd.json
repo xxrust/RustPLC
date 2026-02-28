@@ -152,8 +152,8 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added built-in non-pure `pid_update(error, kp, ki, kd, dt)` with registry-local state and `reset_builtin_pid_state()` for deterministic tests"
     },
     {
       "id": "US-011",

@@ -2,6 +2,7 @@ use crate::ir::{ExternFunctionContract, VariableType};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Instant;
 use thiserror::Error;
 
@@ -145,6 +146,7 @@ pub enum ExternRuntimeError {
 pub struct ExternFunctionRegistry {
     functions: HashMap<String, ExternFunctionInfo>,
     time_source: Arc<dyn Fn() -> u64 + Send + Sync>,
+    builtin_pid_state: Arc<Mutex<PidRuntimeState>>,
 }
 
 impl Default for ExternFunctionRegistry {
@@ -156,16 +158,21 @@ impl Default for ExternFunctionRegistry {
 impl ExternFunctionRegistry {
     pub fn new() -> Self {
         let start = Instant::now();
+        let pid_state = Arc::new(Mutex::new(PidRuntimeState::default()));
         let mut registry = Self {
             functions: HashMap::new(),
             time_source: Arc::new(move || {
                 let elapsed = start.elapsed().as_micros();
                 elapsed.min(u128::from(u64::MAX)) as u64
             }),
+            builtin_pid_state: pid_state,
         };
         registry
             .register_builtin_math_functions()
             .expect("built-in extern functions should register");
+        registry
+            .register_builtin_control_functions()
+            .expect("built-in control extern functions should register");
         registry
     }
 
@@ -173,6 +180,7 @@ impl ExternFunctionRegistry {
         Self {
             functions: HashMap::new(),
             time_source: Arc::new(time_source),
+            builtin_pid_state: Arc::new(Mutex::new(PidRuntimeState::default())),
         }
     }
 
@@ -181,6 +189,19 @@ impl ExternFunctionRegistry {
         self.register(builtin_multiply_info())?;
         self.register(builtin_quadratic_fit_info())?;
         Ok(())
+    }
+
+    pub fn register_builtin_control_functions(&mut self) -> Result<(), ExternRuntimeError> {
+        self.register(builtin_pid_update_info(Arc::clone(&self.builtin_pid_state)))?;
+        Ok(())
+    }
+
+    pub fn reset_builtin_pid_state(&self) {
+        let mut state = self
+            .builtin_pid_state
+            .lock()
+            .expect("pid builtin state lock should not be poisoned");
+        *state = PidRuntimeState::default();
     }
 
     pub fn register(&mut self, info: ExternFunctionInfo) -> Result<(), ExternRuntimeError> {
@@ -328,9 +349,18 @@ impl ExternFunctionRegistry {
 const BUILTIN_ADD: &str = "add";
 const BUILTIN_MULTIPLY: &str = "multiply";
 const BUILTIN_QUADRATIC_FIT: &str = "quadratic_fit";
+const BUILTIN_PID_UPDATE: &str = "pid_update";
 const QUADRATIC_FIT_POINT_COUNT: usize = 5;
 const QUADRATIC_FIT_ARG_COUNT: usize = QUADRATIC_FIT_POINT_COUNT * 2;
+const PID_UPDATE_ARG_COUNT: usize = 5;
 const BUILTIN_TIME_BOUND_US: u64 = 1_000_000;
+
+#[derive(Debug, Default)]
+struct PidRuntimeState {
+    integral_error: f32,
+    previous_error: f32,
+    has_previous_error: bool,
+}
 
 fn builtin_add_info() -> ExternFunctionInfo {
     ExternFunctionInfo::new(
@@ -378,6 +408,20 @@ fn builtin_quadratic_fit_info() -> ExternFunctionInfo {
     )
 }
 
+fn builtin_pid_update_info(pid_state: Arc<Mutex<PidRuntimeState>>) -> ExternFunctionInfo {
+    ExternFunctionInfo::new(
+        BUILTIN_PID_UPDATE,
+        vec![VariableType::Float; PID_UPDATE_ARG_COUNT],
+        vec![VariableType::Float],
+        ExternFunctionContract {
+            rust_module: "control::pid".to_string(),
+            pure: false,
+            time_bound_us: BUILTIN_TIME_BOUND_US,
+        },
+        move |args| builtin_pid_update(args, &pid_state),
+    )
+}
+
 fn builtin_add(args: &[f32]) -> Result<Vec<f32>, String> {
     Ok(vec![args[0] + args[1]])
 }
@@ -400,6 +444,36 @@ fn builtin_quadratic_fit(args: &[f32]) -> Result<Vec<f32>, String> {
         .collect();
     let [a, b, c] = solve_quadratic_fit_coefficients(&x_values, &y_values)?;
     Ok(vec![a as f32, b as f32, c as f32])
+}
+
+fn builtin_pid_update(
+    args: &[f32],
+    state: &Arc<Mutex<PidRuntimeState>>,
+) -> Result<Vec<f32>, String> {
+    let error = args[0];
+    let kp = args[1];
+    let ki = args[2];
+    let kd = args[3];
+    let dt = args[4];
+
+    if !dt.is_finite() || dt <= 0.0 {
+        return Err("pid_update requires dt > 0".to_string());
+    }
+
+    let mut state = state
+        .lock()
+        .expect("pid builtin state lock should not be poisoned");
+    state.integral_error += error * dt;
+    let derivative_error = if state.has_previous_error {
+        (error - state.previous_error) / dt
+    } else {
+        error / dt
+    };
+    let output = kp * error + ki * state.integral_error + kd * derivative_error;
+    state.previous_error = error;
+    state.has_previous_error = true;
+
+    Ok(vec![output])
 }
 
 fn solve_quadratic_fit_coefficients(
@@ -462,8 +536,8 @@ fn solve_quadratic_fit_coefficients(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
 
     fn contract(time_bound_us: u64) -> ExternFunctionContract {
         ExternFunctionContract {
@@ -701,6 +775,7 @@ mod tests {
         assert!(registry.get(BUILTIN_ADD).is_some());
         assert!(registry.get(BUILTIN_MULTIPLY).is_some());
         assert!(registry.get(BUILTIN_QUADRATIC_FIT).is_some());
+        assert!(registry.get(BUILTIN_PID_UPDATE).is_some());
     }
 
     #[test]
@@ -801,5 +876,52 @@ mod tests {
                 got: 9,
             }
         );
+    }
+
+    #[test]
+    fn builtin_pid_update_supports_first_step_and_multistep_accumulation() {
+        let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+        registry
+            .register_builtin_control_functions()
+            .expect("pid registration should pass");
+
+        let first = registry
+            .call(BUILTIN_PID_UPDATE, &[1.0, 2.0, 0.5, 0.25, 0.1])
+            .expect("first pid update should pass");
+        assert!(
+            (first[0] - 4.55).abs() < 1e-5,
+            "unexpected first step: {first:?}"
+        );
+
+        let second = registry
+            .call(BUILTIN_PID_UPDATE, &[0.5, 2.0, 0.5, 0.25, 0.1])
+            .expect("second pid update should pass");
+        assert!(
+            (second[0] - -0.175).abs() < 1e-5,
+            "unexpected second step: {second:?}"
+        );
+    }
+
+    #[test]
+    fn builtin_pid_update_state_reset_is_deterministic_for_tests() {
+        let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+        registry
+            .register_builtin_control_functions()
+            .expect("pid registration should pass");
+
+        let _ = registry
+            .call(BUILTIN_PID_UPDATE, &[1.0, 2.0, 0.5, 0.25, 0.1])
+            .expect("first pid update should pass");
+        let second_without_reset = registry
+            .call(BUILTIN_PID_UPDATE, &[1.0, 2.0, 0.5, 0.25, 0.1])
+            .expect("second pid update should pass");
+
+        registry.reset_builtin_pid_state();
+        let after_reset = registry
+            .call(BUILTIN_PID_UPDATE, &[1.0, 2.0, 0.5, 0.25, 0.1])
+            .expect("pid update after reset should pass");
+
+        assert!((second_without_reset[0] - 2.1).abs() < 1e-5);
+        assert!((after_reset[0] - 4.55).abs() < 1e-5);
     }
 }
