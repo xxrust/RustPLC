@@ -62,7 +62,7 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  .plc DSL 文件                         场景 YAML (scenario.yaml)                    │
 │  - topology / constraints / tasks      - digital_inputs / analog_inputs             │
-│                                        - tick_ms / fault injection                  │
+│  - extern fn 声明 + 调用               - tick_ms / fault injection                  │
 └────────────────┬────────────────────────────────────────────────────────────────────┘
                  │
                  ▼
@@ -77,32 +77,37 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 │  语义门禁：  topology_semantic_gate.rs (SEM-101~107)  sequence_lint.rs             │
 │  I/O 模型：  iec_address.rs  plc_port.rs                                           │
 │  元件链路：  component_{library,topology,scenario,sim,faults,diagnostics}.rs       │
+│  Extern 解析：extern_functions.rs — 签名校验 / 合约注入 / tick 预算检查            │
 │  运行时支撑：diagnostics.rs  alarm_runtime.rs                                      │
 └────────────────┬────────────────────────────────────────────────────────────────────┘
                  │
                  ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                        🔬 验证引擎（并行执行）(src/verification/)                    │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│  Safety (BMC + k-归纳)   Liveness (SCC + 可达性)   Timing (关键路径)   Causality (BFS) │
-│  conflicts_with / requires   死锁/活锁检测   response_time 上界   connected_to 链路  │
-│                                      ▼                                               │
-│                          verification_report.json (结构化报告 + warnings 分级)      │
-└────────────────┬────────────────────────────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                          🏃 运行时层 (crates/)                                       │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│              runtime-core (no_std 确定性状态机执行器)                                │
-│                    │                    │                    │                       │
-│           SimIO (sim)          Virtual Board           RP2040 HAL                   │
-│           SIL 仿真 I/O         虚拟板级 Runner          GPIO/ADC/PWM/PIO            │
-│           Plant / 故障注入     tick_timing 采样         RTT 日志                    │
-│                    │                    │                    │                       │
-│           sil_trace.jsonl      board_trace.jsonl       firmware.uf2                 │
-│           alarm_events.ndjson  tick_timing.jsonl       board.log                    │
-└────────────────┬────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐  ┌──────────────────────────┐
+│          🔬 验证引擎（并行执行）(src/verification/)   │  │  🦀 Rust 计算平面        │
+├──────────────────────────────────────────────────────┤  │  (extern functions)      │
+│  Safety    (BMC + k-归纳)   conflicts_with / requires │  ├──────────────────────────┤
+│  Liveness  (SCC + 可达性)   死锁 / 活锁检测           │  │  ┌──────────────────┐   │
+│  Timing    (关键路径)       response_time 上界        │◀─┤  │  数值算法         │   │
+│  Causality (BFS)            connected_to 链路         │  │  │  (拟合 / 统计)    │   │
+│  Extern    non-pure 冲突 / tick 预算超限检查          │  │  └──────────────────┘   │
+│                    ▼                                  │  │  ┌──────────────────┐   │
+│      verification_report.json                        │  │  │  线性代数         │   │
+│      (结构化报告 + warnings 分级)                     │  │  │  (矩阵运算)       │   │
+└────────────────┬─────────────────────────────────────┘  │  └──────────────────┘   │
+                 │                                         │  ┌──────────────────┐   │
+                 ▼                                         │  │  优化求解         │   │
+┌──────────────────────────────────────────────────────┐  │  │  (PID / MPC)      │   │
+│                  🏃 运行时层 (crates/)                │  │  └──────────────────┘   │
+├──────────────────────────────────────────────────────┤  │                          │
+│        runtime-core (no_std 确定性状态机执行器)       │  │  注册：                  │
+│               │              │             │          │◀─┤  ExternFunctionRegistry  │
+│        SimIO (sim)    Virtual Board   RP2040 HAL      │  │  合约：                  │
+│        SIL 仿真 I/O   虚拟板级 Runner  GPIO/ADC/PWM   │  │  deterministic / pure    │
+│        Plant/故障注入  tick_timing采样  PIO/RTT日志   │  │  range / timeout         │
+│               │              │             │          │  │  验证：                  │
+│        sil_trace.jsonl  board_trace.jsonl  firmware   │  │  单元测试 + perf bench   │
+│        alarm_events     tick_timing.jsonl  board.log  │  │  + 数值稳定性分析        │
+└────────────────┬─────────────────────────────────────┘  └──────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
@@ -110,8 +115,8 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  trace-diff        timing-report        no-board-gate       release-bundle          │
 │  trace-doctor      sequence-lint        commissioning-run   pil-run                 │
-│  component-topology-validate/diff       component-scenario-validate                 │
-│  component-sim     io-map-normalize                                                  │
+│  extern-perf-gate  component-topology-validate/diff         component-sim           │
+│  component-scenario-validate            io-map-normalize                            │
 └────────────────┬────────────────────────────────────────────────────────────────────┘
                  │
                  ▼
