@@ -133,6 +133,16 @@ pub fn state_machine_to_runtime_program(
         .enumerate()
         .map(|(idx, table)| (table.name.clone(), idx as u16))
         .collect::<HashMap<_, _>>();
+    let extern_signature_by_name = topology
+        .extern_functions
+        .iter()
+        .map(|function| {
+            (
+                function.name.clone(),
+                (function.params.len(), function.return_types.len()),
+            )
+        })
+        .collect::<HashMap<_, _>>();
 
     // Assign StepId to every IR state (flattened).
     let mut state_to_step = HashMap::<(String, String), StepId>::new();
@@ -191,6 +201,7 @@ pub fn state_machine_to_runtime_program(
             &variable_indices,
             &cam_index_by_name,
             &cam_table_index_by_name,
+            &extern_signature_by_name,
         )?;
 
         steps[idx].instr = instr;
@@ -379,6 +390,7 @@ fn convert_state_outgoing(
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
+    extern_signatures: &HashMap<String, (usize, usize)>,
 ) -> Result<Instr<'static>, BridgeError> {
     match outs.len() {
         0 => Ok(Instr::Halt),
@@ -393,6 +405,7 @@ fn convert_state_outgoing(
             variable_indices,
             cam_indices,
             cam_table_indices,
+            extern_signatures,
         ),
         2 => convert_wait_with_timeout(
             resolver,
@@ -405,6 +418,7 @@ fn convert_state_outgoing(
             variable_indices,
             cam_indices,
             cam_table_indices,
+            extern_signatures,
         ),
         n => Err(BridgeError::UnsupportedTransitionShape {
             state: state_name.to_string(),
@@ -424,6 +438,7 @@ fn convert_single_transition(
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
+    extern_signatures: &HashMap<String, (usize, usize)>,
 ) -> Result<Instr<'static>, BridgeError> {
     match &t.guard {
         TransitionGuard::Always => {
@@ -438,6 +453,7 @@ fn convert_single_transition(
                     variable_indices,
                     cam_indices,
                     cam_table_indices,
+                    extern_signatures,
                 )?;
                 Ok(Instr::Action {
                     actions,
@@ -465,6 +481,7 @@ fn convert_single_transition(
                     variable_indices,
                     cam_indices,
                     cam_table_indices,
+                    extern_signatures,
                 )?;
                 Ok(Instr::Delay {
                     ticks,
@@ -488,6 +505,7 @@ fn convert_single_transition(
                     variable_indices,
                     cam_indices,
                     cam_table_indices,
+                    extern_signatures,
                 )?
             };
             if let Some((device, ranges)) = parse_analog_region_guard(expr) {
@@ -561,6 +579,7 @@ fn convert_wait_with_timeout(
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
+    extern_signatures: &HashMap<String, (usize, usize)>,
 ) -> Result<Instr<'static>, BridgeError> {
     let (cond, timeout) = match (outs[0], outs[1]) {
         (a, b)
@@ -607,6 +626,7 @@ fn convert_wait_with_timeout(
             variable_indices,
             cam_indices,
             cam_table_indices,
+            extern_signatures,
         )?
     };
 
@@ -624,6 +644,7 @@ fn convert_wait_with_timeout(
             variable_indices,
             cam_indices,
             cam_table_indices,
+            extern_signatures,
         )?
     };
 
@@ -1046,6 +1067,7 @@ fn push_action_step(
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
+    extern_signatures: &HashMap<String, (usize, usize)>,
 ) -> Result<StepId, BridgeError> {
     let leaked_name: &'static str = Box::leak(name.to_string().into_boxed_str());
     let leaked_actions = leak_actions(
@@ -1055,6 +1077,7 @@ fn push_action_step(
         variable_indices,
         cam_indices,
         cam_table_indices,
+        extern_signatures,
     )?;
     let id = StepId(steps.len() as u16);
     steps.push(Step {
@@ -1074,6 +1097,7 @@ fn leak_actions(
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
+    extern_signatures: &HashMap<String, (usize, usize)>,
 ) -> Result<&'static [Action], BridgeError> {
     let mut out: Vec<Action> = Vec::with_capacity(actions.len());
     for a in actions {
@@ -1084,6 +1108,7 @@ fn leak_actions(
             variable_indices,
             cam_indices,
             cam_table_indices,
+            extern_signatures,
         )?);
     }
     Ok(Box::leak(out.into_boxed_slice()))
@@ -1096,6 +1121,7 @@ fn convert_action(
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
+    extern_signatures: &HashMap<String, (usize, usize)>,
 ) -> Result<Action, BridgeError> {
     match a {
         TransitionAction::Extend { target, port } => {
@@ -1157,18 +1183,75 @@ fn convert_action(
             function,
             args_raw,
             binding,
-        } => Err(BridgeError::UnsupportedAction {
-            state: state_name.to_string(),
-            action: format!(
+        } => {
+            let rendered_binding = match binding {
+                crate::ir::ExternCallBinding::Single(name) => name.clone(),
+                crate::ir::ExternCallBinding::Tuple(names) => format!("({})", names.join(", ")),
+            };
+            let rendered_action = format!(
                 "call {}({}) -> {}",
                 function,
                 args_raw.join(", "),
-                match binding {
-                    crate::ir::ExternCallBinding::Single(name) => name.clone(),
-                    crate::ir::ExternCallBinding::Tuple(names) => format!("({})", names.join(", ")),
-                }
-            ),
-        }),
+                rendered_binding
+            );
+
+            let Some((expected_args, expected_returns)) = extern_signatures.get(function).copied()
+            else {
+                return Err(BridgeError::UnsupportedAction {
+                    state: state_name.to_string(),
+                    action: format!("{rendered_action} (extern function not declared)"),
+                });
+            };
+            if args_raw.len() != expected_args {
+                return Err(BridgeError::UnsupportedAction {
+                    state: state_name.to_string(),
+                    action: format!(
+                        "{rendered_action} (expected {expected_args} args, got {})",
+                        args_raw.len()
+                    ),
+                });
+            }
+
+            let arg_exprs = args_raw
+                .iter()
+                .map(|raw| compile_expr_program(state_name, raw, variable_indices))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let binding_names = match binding {
+                crate::ir::ExternCallBinding::Single(name) => vec![name.clone()],
+                crate::ir::ExternCallBinding::Tuple(names) => names.clone(),
+            };
+            if binding_names.len() != expected_returns {
+                return Err(BridgeError::UnsupportedAction {
+                    state: state_name.to_string(),
+                    action: format!(
+                        "{rendered_action} (expected {expected_returns} return bindings, got {})",
+                        binding_names.len()
+                    ),
+                });
+            }
+
+            let mut binding_vars = Vec::with_capacity(binding_names.len());
+            for target in binding_names {
+                let Some(index) = variable_indices.get(&target).copied() else {
+                    return Err(BridgeError::UnsupportedAction {
+                        state: state_name.to_string(),
+                        action: format!("{rendered_action} (unknown binding variable {target})"),
+                    });
+                };
+                binding_vars.push(index);
+            }
+
+            let leaked_function: &'static str = Box::leak(function.clone().into_boxed_str());
+            let leaked_arg_exprs: &'static [ExprProgram] = Box::leak(arg_exprs.into_boxed_slice());
+            let leaked_binding_vars: &'static [u16] =
+                Box::leak(binding_vars.into_boxed_slice());
+            Ok(Action::CallExtern {
+                function: leaked_function,
+                arg_exprs: leaked_arg_exprs,
+                binding_vars: leaked_binding_vars,
+            })
+        }
         TransitionAction::CamEngage { target } => {
             let Some(cam_index) = cam_indices.get(target).copied() else {
                 return Err(BridgeError::UnsupportedAction {

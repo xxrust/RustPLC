@@ -121,8 +121,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Runtime bridge now lowers call_extern into runtime-core Action::CallExtern; runtime tick executes externs via tick_with_extern APIs and propagates registry errors with function context"
     },
     {
       "id": "US-009",

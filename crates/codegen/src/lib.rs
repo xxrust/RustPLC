@@ -222,6 +222,16 @@ fn format_action(a: &Action) -> String {
             target_var,
             format_expr_program(&expr)
         ),
+        Action::CallExtern {
+            function,
+            arg_exprs,
+            binding_vars,
+        } => format!(
+            "Action::CallExtern {{ function: {:?}, arg_exprs: &{}, binding_vars: &{} }}",
+            function,
+            format_expr_program_slice(arg_exprs),
+            format_u16_slice(binding_vars)
+        ),
         Action::CamEngage { cam_index } => {
             format!("Action::CamEngage {{ cam_index: {cam_index} }}")
         }
@@ -269,6 +279,32 @@ fn format_expr_program(expr: &ExprProgram) -> String {
         ops.push_str(&format_expr_op(op));
     }
     format!("ExprProgram {{ ops: [{ops}], len: {} }}", expr.len)
+}
+
+fn format_expr_program_slice(exprs: &[ExprProgram]) -> String {
+    let mut out = String::new();
+    out.push('[');
+    for (idx, expr) in exprs.iter().enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&format_expr_program(expr));
+    }
+    out.push(']');
+    out
+}
+
+fn format_u16_slice(values: &[u16]) -> String {
+    let mut out = String::new();
+    out.push('[');
+    for (idx, value) in values.iter().enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&value.to_string());
+    }
+    out.push(']');
+    out
 }
 
 fn format_expr_op(op: &ExprOp) -> String {

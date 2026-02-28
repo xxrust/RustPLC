@@ -6437,6 +6437,7 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                                 aos.insert(id.0);
                             }
                             Action::Compute { .. }
+                            | Action::CallExtern { .. }
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }
@@ -6610,6 +6611,7 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                                 aos.insert(id.0);
                             }
                             Action::Compute { .. }
+                            | Action::CallExtern { .. }
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }
@@ -9624,6 +9626,7 @@ fn io_sizes_for_program_and_scenario(
                                 max_ao = Some(max_ao.map_or(id.0, |m| m.max(id.0)));
                             }
                             Action::Compute { .. }
+                            | Action::CallExtern { .. }
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }

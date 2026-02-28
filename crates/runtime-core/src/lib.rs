@@ -50,6 +50,45 @@ pub enum RuntimeError {
     TooManyCamCouplings { configured: usize, max: usize },
     InvalidCamTableIndex { cam_index: usize, table_index: u16 },
     InvalidCamIndex { cam_index: u16 },
+    ExternCallRequiresHandler {
+        function: &'static str,
+    },
+    ExternCallFailed {
+        function: &'static str,
+    },
+    ExternReturnArityMismatch {
+        function: &'static str,
+        expected: usize,
+        got: usize,
+    },
+    ExternArgumentLimitExceeded {
+        function: &'static str,
+        configured: usize,
+        max: usize,
+    },
+    ExternReturnLimitExceeded {
+        function: &'static str,
+        configured: usize,
+        max: usize,
+    },
+    ExternBindingVariableOutOfRange {
+        function: &'static str,
+        variable: u16,
+    },
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RuntimeTickError<E> {
+    Core(RuntimeError),
+    ExternCallFailed {
+        function: &'static str,
+        error: E,
+    },
+    ExternReturnArityMismatch {
+        function: &'static str,
+        expected: usize,
+        got: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -69,6 +108,11 @@ pub enum Action {
     Compute {
         target_var: u16,
         expr: ExprProgram,
+    },
+    CallExtern {
+        function: &'static str,
+        arg_exprs: &'static [ExprProgram],
+        binding_vars: &'static [u16],
     },
     CamEngage {
         cam_index: u16,
@@ -434,6 +478,69 @@ impl<'a> Runtime<'a> {
         mut on_event: impl FnMut(TraceEvent),
         mut on_log: impl FnMut(LogEvent),
     ) -> Result<(), RuntimeError> {
+        #[derive(Debug)]
+        struct MissingExternHandler;
+        let mut missing_extern =
+            |_function: &'static str,
+             _args: &[f32],
+             _results: &mut [f32]|
+             -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
+        self.tick_with_trace_and_logs_impl(io, &mut on_event, &mut on_log, &mut missing_extern)
+            .map_err(|err| match err {
+                RuntimeTickError::Core(err) => err,
+                RuntimeTickError::ExternCallFailed { function, .. } => {
+                    RuntimeError::ExternCallRequiresHandler { function }
+                }
+                RuntimeTickError::ExternReturnArityMismatch {
+                    function,
+                    expected,
+                    got,
+                } => RuntimeError::ExternReturnArityMismatch {
+                    function,
+                    expected,
+                    got,
+                },
+            })
+    }
+
+    pub fn tick_with_extern<IO: Io, E>(
+        &mut self,
+        io: &mut IO,
+        mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
+    ) -> Result<(), RuntimeTickError<E>> {
+        self.tick_with_trace_and_logs_and_extern(io, |_| {}, |_| {}, move |f, a, o| {
+            on_extern_call(f, a, o)
+        })
+    }
+
+    pub fn tick_with_trace_and_extern<IO: Io, E>(
+        &mut self,
+        io: &mut IO,
+        mut on_event: impl FnMut(TraceEvent),
+        mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
+    ) -> Result<(), RuntimeTickError<E>> {
+        self.tick_with_trace_and_logs_and_extern(io, &mut on_event, |_| {}, move |f, a, o| {
+            on_extern_call(f, a, o)
+        })
+    }
+
+    pub fn tick_with_trace_and_logs_and_extern<IO: Io, E>(
+        &mut self,
+        io: &mut IO,
+        mut on_event: impl FnMut(TraceEvent),
+        mut on_log: impl FnMut(LogEvent),
+        mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
+    ) -> Result<(), RuntimeTickError<E>> {
+        self.tick_with_trace_and_logs_impl(io, &mut on_event, &mut on_log, &mut on_extern_call)
+    }
+
+    fn tick_with_trace_and_logs_impl<IO: Io, E>(
+        &mut self,
+        io: &mut IO,
+        on_event: &mut impl FnMut(TraceEvent),
+        on_log: &mut impl FnMut(LogEvent),
+        on_extern_call: &mut impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
+    ) -> Result<(), RuntimeTickError<E>> {
         let now = io.tick();
         if self.step_entered_at.is_none() {
             self.step_entered_at = Some(now);
@@ -448,15 +555,18 @@ impl<'a> Runtime<'a> {
         loop {
             transitions += 1;
             if transitions > 64 {
-                return Err(RuntimeError::TooManyTransitionsInOneTick);
+                return Err(RuntimeTickError::Core(RuntimeError::TooManyTransitionsInOneTick));
             }
 
-            let task = self.program.task(self.loc.task)?;
+            let task = self
+                .program
+                .task(self.loc.task)
+                .map_err(RuntimeTickError::Core)?;
             let Some(step) = task.step(self.loc.step) else {
-                return Err(RuntimeError::InvalidStepId {
+                return Err(RuntimeTickError::Core(RuntimeError::InvalidStepId {
                     task: self.loc.task,
                     step: self.loc.step,
-                });
+                }));
             };
 
             let entered_at = self.step_entered_at.unwrap_or(now);
@@ -478,24 +588,37 @@ impl<'a> Runtime<'a> {
                                     self.variables[idx] = eval_expr(&expr, &self.variables);
                                 }
                             }
+                            Action::CallExtern {
+                                function,
+                                arg_exprs,
+                                binding_vars,
+                            } => self.execute_extern_action(
+                                function,
+                                arg_exprs,
+                                binding_vars,
+                                on_extern_call,
+                            )?,
                             Action::CamEngage { cam_index } => {
-                                self.cam_engage(cam_index)?;
+                                self.cam_engage(cam_index).map_err(RuntimeTickError::Core)?;
                             }
                             Action::CamDisengage { cam_index } => {
-                                self.cam_disengage(cam_index)?;
+                                self.cam_disengage(cam_index)
+                                    .map_err(RuntimeTickError::Core)?;
                             }
                             Action::CamSwitch {
                                 cam_index,
                                 table_index,
                             } => {
-                                self.cam_switch(cam_index, table_index)?;
+                                self.cam_switch(cam_index, table_index)
+                                    .map_err(RuntimeTickError::Core)?;
                             }
                             Action::CamPhase {
                                 cam_index,
                                 offset_expr,
                             } => {
                                 let offset = eval_expr(&offset_expr, &self.variables);
-                                self.cam_phase(cam_index, offset)?;
+                                self.cam_phase(cam_index, offset)
+                                    .map_err(RuntimeTickError::Core)?;
                             }
                             Action::Extend { output } => io.write_digital_output(output, true),
                             Action::Retract { output } => io.write_digital_output(output, false),
@@ -511,16 +634,19 @@ impl<'a> Runtime<'a> {
                             }),
                         }
                     }
-                    self.transition(now, next, TransitionReason::Action, &mut on_event)?;
+                    self.transition(now, next, TransitionReason::Action, on_event)
+                        .map_err(RuntimeTickError::Core)?;
                     continue;
                 }
                 Instr::Goto { target } => {
-                    self.transition(now, target, TransitionReason::Goto, &mut on_event)?;
+                    self.transition(now, target, TransitionReason::Goto, on_event)
+                        .map_err(RuntimeTickError::Core)?;
                     continue;
                 }
                 Instr::Delay { ticks, next } => {
                     if elapsed >= ticks {
-                        self.transition(now, next, TransitionReason::DelayElapsed, &mut on_event)?;
+                        self.transition(now, next, TransitionReason::DelayElapsed, on_event)
+                            .map_err(RuntimeTickError::Core)?;
                         continue;
                     }
                     break;
@@ -533,7 +659,8 @@ impl<'a> Runtime<'a> {
                 } => {
                     let v = io.read_digital_input(id);
                     if v == equals {
-                        self.transition(now, next, TransitionReason::WaitSatisfied, &mut on_event)?;
+                        self.transition(now, next, TransitionReason::WaitSatisfied, on_event)
+                            .map_err(RuntimeTickError::Core)?;
                         continue;
                     }
                     if let Some(tmo) = timeout {
@@ -542,8 +669,9 @@ impl<'a> Runtime<'a> {
                                 now,
                                 tmo.target,
                                 TransitionReason::Timeout,
-                                &mut on_event,
-                            )?;
+                                on_event,
+                            )
+                            .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
                     }
@@ -557,7 +685,8 @@ impl<'a> Runtime<'a> {
                 } => {
                     let v = io.read_analog_input(id);
                     if analog_in_selected_ranges(v, ranges) {
-                        self.transition(now, next, TransitionReason::WaitSatisfied, &mut on_event)?;
+                        self.transition(now, next, TransitionReason::WaitSatisfied, on_event)
+                            .map_err(RuntimeTickError::Core)?;
                         continue;
                     }
                     if let Some(tmo) = timeout {
@@ -566,8 +695,9 @@ impl<'a> Runtime<'a> {
                                 now,
                                 tmo.target,
                                 TransitionReason::Timeout,
-                                &mut on_event,
-                            )?;
+                                on_event,
+                            )
+                            .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
                     }
@@ -583,7 +713,8 @@ impl<'a> Runtime<'a> {
                     let lhs = eval_expr(&left, &self.variables);
                     let rhs = eval_expr(&right, &self.variables);
                     if compare_f32(lhs, op, rhs) {
-                        self.transition(now, next, TransitionReason::WaitSatisfied, &mut on_event)?;
+                        self.transition(now, next, TransitionReason::WaitSatisfied, on_event)
+                            .map_err(RuntimeTickError::Core)?;
                         continue;
                     }
                     if let Some(tmo) = timeout {
@@ -592,8 +723,9 @@ impl<'a> Runtime<'a> {
                                 now,
                                 tmo.target,
                                 TransitionReason::Timeout,
-                                &mut on_event,
-                            )?;
+                                on_event,
+                            )
+                            .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
                     }
@@ -606,9 +738,12 @@ impl<'a> Runtime<'a> {
                     next,
                     timeout,
                 } => {
-                    let actual = self.cam_digital_field(cam_index, field)?;
+                    let actual = self
+                        .cam_digital_field(cam_index, field)
+                        .map_err(RuntimeTickError::Core)?;
                     if actual == equals {
-                        self.transition(now, next, TransitionReason::WaitSatisfied, &mut on_event)?;
+                        self.transition(now, next, TransitionReason::WaitSatisfied, on_event)
+                            .map_err(RuntimeTickError::Core)?;
                         continue;
                     }
                     if let Some(tmo) = timeout {
@@ -617,8 +752,9 @@ impl<'a> Runtime<'a> {
                                 now,
                                 tmo.target,
                                 TransitionReason::Timeout,
-                                &mut on_event,
-                            )?;
+                                on_event,
+                            )
+                            .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
                     }
@@ -632,9 +768,12 @@ impl<'a> Runtime<'a> {
                     next,
                     timeout,
                 } => {
-                    let actual = self.cam_analog_field(cam_index, field)?;
+                    let actual = self
+                        .cam_analog_field(cam_index, field)
+                        .map_err(RuntimeTickError::Core)?;
                     if compare_f32(actual, op, value) {
-                        self.transition(now, next, TransitionReason::WaitSatisfied, &mut on_event)?;
+                        self.transition(now, next, TransitionReason::WaitSatisfied, on_event)
+                            .map_err(RuntimeTickError::Core)?;
                         continue;
                     }
                     if let Some(tmo) = timeout {
@@ -643,8 +782,9 @@ impl<'a> Runtime<'a> {
                                 now,
                                 tmo.target,
                                 TransitionReason::Timeout,
-                                &mut on_event,
-                            )?;
+                                on_event,
+                            )
+                            .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
                     }
@@ -655,6 +795,68 @@ impl<'a> Runtime<'a> {
         }
 
         io.advance_tick();
+        Ok(())
+    }
+
+    fn execute_extern_action<E>(
+        &mut self,
+        function: &'static str,
+        arg_exprs: &'static [ExprProgram],
+        binding_vars: &'static [u16],
+        on_extern_call: &mut impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
+    ) -> Result<(), RuntimeTickError<E>> {
+        if arg_exprs.len() > MAX_EXTERN_ARGS {
+            return Err(RuntimeTickError::Core(
+                RuntimeError::ExternArgumentLimitExceeded {
+                    function,
+                    configured: arg_exprs.len(),
+                    max: MAX_EXTERN_ARGS,
+                },
+            ));
+        }
+        if binding_vars.len() > MAX_EXTERN_RETURNS {
+            return Err(RuntimeTickError::Core(
+                RuntimeError::ExternReturnLimitExceeded {
+                    function,
+                    configured: binding_vars.len(),
+                    max: MAX_EXTERN_RETURNS,
+                },
+            ));
+        }
+
+        let mut args = [0.0_f32; MAX_EXTERN_ARGS];
+        for (idx, expr) in arg_exprs.iter().enumerate() {
+            args[idx] = eval_expr(expr, &self.variables);
+        }
+
+        let mut results = [0.0_f32; MAX_EXTERN_RETURNS];
+        let produced = on_extern_call(
+            function,
+            &args[..arg_exprs.len()],
+            &mut results[..binding_vars.len()],
+        )
+        .map_err(|error| RuntimeTickError::ExternCallFailed { function, error })?;
+
+        if produced != binding_vars.len() {
+            return Err(RuntimeTickError::ExternReturnArityMismatch {
+                function,
+                expected: binding_vars.len(),
+                got: produced,
+            });
+        }
+
+        for (result_idx, var_index) in binding_vars.iter().enumerate() {
+            let idx = *var_index as usize;
+            if idx >= MAX_VARIABLES {
+                return Err(RuntimeTickError::Core(
+                    RuntimeError::ExternBindingVariableOutOfRange {
+                        function,
+                        variable: *var_index,
+                    },
+                ));
+            }
+            self.variables[idx] = results[result_idx];
+        }
         Ok(())
     }
 
@@ -921,6 +1123,8 @@ pub const MAX_EXPR_OPS: usize = 32;
 pub const MAX_EXPR_STACK: usize = 16;
 pub const MAX_CAM_POINTS: usize = 256;
 pub const MAX_CAM_COUPLINGS: usize = 8;
+pub const MAX_EXTERN_ARGS: usize = 16;
+pub const MAX_EXTERN_RETURNS: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PidState {

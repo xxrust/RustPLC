@@ -1,5 +1,7 @@
 use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
-use runtime_core::Runtime;
+use runtime_core::{Runtime, RuntimeTickError};
+use rust_plc::extern_functions::{ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError};
+use rust_plc::ir::{ExternFunctionContract, VariableType};
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
@@ -424,4 +426,118 @@ fn bridge_waits_on_cam_runtime_state_and_drives_output() {
         (last_ao - 30.0).abs() < 1e-3,
         "cam output should include phase offset after wait path, got {last_ao}"
     );
+}
+
+const PLC_EXTERN_FIXTURE: &str = r#"
+[topology]
+
+extern function add(a: float, b: float) -> float {
+    rust_module: "math::basic",
+    pure: true,
+    time_bound_us: 1000
+}
+
+variable x: float = 1.5
+variable y: float = 2.0
+variable out: float = 0.0
+
+[constraints]
+
+[tasks]
+
+task main:
+    step compute:
+        action: call add(x, y) -> out
+    on_complete: goto done
+
+task done:
+    step halt:
+"#;
+
+fn make_add_registry() -> ExternFunctionRegistry {
+    let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+    registry
+        .register(ExternFunctionInfo::new(
+            "add",
+            vec![VariableType::Float, VariableType::Float],
+            vec![VariableType::Float],
+            ExternFunctionContract {
+                rust_module: "math::basic".to_string(),
+                pure: true,
+                time_bound_us: 1000,
+            },
+            |args| Ok(vec![args[0] + args[1]]),
+        ))
+        .expect("register add");
+    registry
+}
+
+fn call_registry(
+    registry: &ExternFunctionRegistry,
+    function: &'static str,
+    args: &[f32],
+    outputs: &mut [f32],
+) -> Result<usize, ExternRuntimeError> {
+    let values = registry.call(function, args)?;
+    for (index, value) in values.iter().enumerate().take(outputs.len()) {
+        outputs[index] = *value;
+    }
+    Ok(values.len())
+}
+
+#[test]
+fn bridge_executes_call_extern_and_writes_bound_variable() {
+    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let registry = make_add_registry();
+
+    rt.tick_with_extern(&mut io, |function, args, outputs| {
+        call_registry(&registry, function, args, outputs)
+    })
+    .expect("extern call should execute");
+
+    assert!(
+        (rt.variables()[2] - 3.5).abs() < f32::EPSILON,
+        "extern result should be written into bound variable"
+    );
+}
+
+#[test]
+fn runtime_tick_without_handler_reports_extern_handler_requirement() {
+    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+
+    let err = rt.tick(&mut io).expect_err("extern action requires handler");
+    assert_eq!(
+        err,
+        runtime_core::RuntimeError::ExternCallRequiresHandler { function: "add" }
+    );
+}
+
+#[test]
+fn runtime_tick_with_extern_propagates_registry_error_with_function_context() {
+    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let registry = ExternFunctionRegistry::with_time_source(|| 0);
+
+    let err = rt
+        .tick_with_extern(&mut io, |function, args, outputs| {
+            call_registry(&registry, function, args, outputs)
+        })
+        .expect_err("missing function should propagate");
+    match err {
+        RuntimeTickError::ExternCallFailed { function, error } => {
+            assert_eq!(function, "add");
+            assert_eq!(
+                error,
+                ExternRuntimeError::FunctionNotFound {
+                    name: "add".to_string()
+                }
+            );
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
 }
