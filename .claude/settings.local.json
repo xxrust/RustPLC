@@ -67,7 +67,8 @@
       "Bash(git restore:*)",
       "Bash(git reset:*)",
       "Bash(rm:*)",
-      "Bash(E:personal_projectrust_plcdocsdsl_computation_analysis.md:*)"
+      "Bash(E:personal_projectrust_plcdocsdsl_computation_analysis.md:*)",
+      "WebSearch"
     ]
   }
 }
