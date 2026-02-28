@@ -2216,6 +2216,16 @@ pub fn build_constraint_set_from_ast(
     let device_port_types = collect_device_port_types(topology, &device_kinds);
     let device_ranges = collect_device_ranges(topology);
     let device_units = collect_device_units(topology);
+    let variable_names = topology
+        .variables
+        .iter()
+        .map(|var| var.name.clone())
+        .collect::<HashSet<_>>();
+    let extern_function_names = topology
+        .extern_functions
+        .iter()
+        .map(|func| func.name.clone())
+        .collect::<HashSet<_>>();
 
     for safety in &constraints.safety {
         validate_safety_operand(
@@ -2263,11 +2273,12 @@ pub fn build_constraint_set_from_ast(
 
     for causality in &constraints.causality {
         for node in &causality.chain {
-            validate_device_reference(
+            validate_causality_node_reference(
                 &node.device,
                 causality.line,
-                "causality",
                 &device_kinds,
+                &variable_names,
+                &extern_function_names,
                 &mut errors,
             );
         }
@@ -2887,6 +2898,29 @@ fn validate_device_reference(
             format!("{source} 约束引用前需要定义该设备"),
         ));
     }
+}
+
+fn validate_causality_node_reference(
+    node_name: &str,
+    line: usize,
+    device_kinds: &HashMap<String, DeviceKind>,
+    variable_names: &HashSet<String>,
+    extern_function_names: &HashSet<String>,
+    errors: &mut Vec<PlcError>,
+) {
+    if device_kinds.contains_key(node_name)
+        || variable_names.contains(node_name)
+        || extern_function_names.contains(node_name)
+    {
+        return;
+    }
+
+    errors.push(PlcError::undefined_reference_with_reason(
+        line,
+        "因果节点",
+        node_name,
+        "causality 链路节点需要先定义为设备、[topology] variable 或 extern function".to_string(),
+    ));
 }
 
 fn validate_timing_target(
@@ -6069,6 +6103,41 @@ task init:
                 .iter()
                 .any(|err| err.to_string().contains("未定义 task unknown")),
             "应报告未定义 task"
+        );
+    }
+
+    #[test]
+    fn allows_causality_nodes_for_extern_functions_and_variables() {
+        let input = r#"
+[topology]
+
+device pressure_in: analog_input { range: 0..10 }
+variable normalized: float = 0.0
+extern function normalize(v: float) -> float {
+    rust_module: "math::normalize"
+    pure: true
+    time_bound_us: 100
+}
+
+[constraints]
+
+causality: pressure_in -> normalize -> normalized
+
+[tasks]
+
+task main:
+    step run:
+        action: call normalize(pressure_in) -> normalized
+"#;
+
+        let program = parse_plc(input).expect("测试输入应能解析为 AST");
+        let constraints = build_constraint_set(&program)
+            .expect("causality 约束应允许引用 extern 函数和 topology 变量");
+
+        assert_eq!(constraints.causality.len(), 1);
+        assert_eq!(
+            constraints.causality[0].devices,
+            vec!["pressure_in", "normalize", "normalized"]
         );
     }
 

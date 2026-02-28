@@ -198,8 +198,8 @@
         "Tests pass"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Causality now models extern call nodes by wiring call-site argument dependencies into the graph, propagates only through `pure: true` extern transforms, and includes positive/negative verification tests for extern call chains."
     },
     {
       "id": "US-014",

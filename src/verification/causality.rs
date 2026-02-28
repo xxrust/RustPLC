@@ -1,6 +1,6 @@
 use crate::ast::{
-    ActionStatement, ComparisonOperator, ConditionExpression, DeviceType, LiteralValue, PlcProgram,
-    StepStatement, WaitCondition, WaitStatement,
+    ActionStatement, ComparisonOperator, ConditionExpression, DeviceType, ExternCallBinding,
+    LiteralValue, PlcProgram, StepStatement, WaitCondition, WaitStatement,
 };
 use crate::ir::{ConstraintSet, DeviceKind, TopologyGraph};
 use petgraph::algo::has_path_connecting;
@@ -221,7 +221,9 @@ impl RuntimeGraph {
             graph.add_edge(*source, *target, ());
         }
 
-        Self { graph, nodes }
+        let mut runtime_graph = Self { graph, nodes };
+        runtime_graph.add_extern_call_edges(program);
+        runtime_graph
     }
 
     fn path_exists(&self, from: &str, to: &str) -> bool {
@@ -233,6 +235,128 @@ impl RuntimeGraph {
         };
 
         has_path_connecting(&self.graph, *source, *target, None)
+    }
+
+    fn ensure_node(&mut self, name: &str) -> NodeIndex {
+        if let Some(index) = self.nodes.get(name) {
+            return *index;
+        }
+
+        let owned = name.to_string();
+        let index = self.graph.add_node(owned.clone());
+        self.nodes.insert(owned, index);
+        index
+    }
+
+    fn add_edge_by_name(&mut self, from: &str, to: &str) {
+        let source = self.ensure_node(from);
+        let target = self.ensure_node(to);
+        self.graph.add_edge(source, target, ());
+    }
+
+    fn add_extern_call_edges(&mut self, program: &PlcProgram) {
+        for variable in &program.topology.variables {
+            self.ensure_node(&variable.name);
+        }
+
+        let pure_externs = program
+            .topology
+            .extern_functions
+            .iter()
+            .map(|func| (func.name.clone(), func.contract.pure))
+            .collect::<HashMap<_, _>>();
+
+        for task in &program.tasks.tasks {
+            for step in &task.steps {
+                collect_extern_edges_from_statements(&step.statements, &pure_externs, self);
+            }
+        }
+    }
+}
+
+fn collect_extern_edges_from_statements(
+    statements: &[StepStatement],
+    pure_externs: &HashMap<String, bool>,
+    runtime_graph: &mut RuntimeGraph,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::Call {
+                function,
+                args,
+                binding,
+            }) => {
+                runtime_graph.ensure_node(function);
+
+                for arg in args {
+                    for dep in expression_variables(arg) {
+                        runtime_graph.add_edge_by_name(&dep, function);
+                    }
+                }
+
+                if pure_externs.get(function).copied().unwrap_or(false) {
+                    for target in extern_binding_targets(binding) {
+                        runtime_graph.add_edge_by_name(function, target);
+                    }
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                collect_extern_edges_from_statements(body, pure_externs, runtime_graph);
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    collect_extern_edges_from_statements(
+                        &branch.statements,
+                        pure_externs,
+                        runtime_graph,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    collect_extern_edges_from_statements(
+                        &branch.statements,
+                        pure_externs,
+                        runtime_graph,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn expression_variables(expr: &crate::ast::Expression) -> HashSet<String> {
+    let mut vars = HashSet::new();
+    collect_expression_variables(expr, &mut vars);
+    vars
+}
+
+fn collect_expression_variables(expr: &crate::ast::Expression, vars: &mut HashSet<String>) {
+    match expr {
+        crate::ast::Expression::Literal(_) => {}
+        crate::ast::Expression::Variable(name) => {
+            vars.insert(name.clone());
+        }
+        crate::ast::Expression::UnaryNeg(inner) => {
+            collect_expression_variables(inner, vars);
+        }
+        crate::ast::Expression::BinaryOp { left, right, .. } => {
+            collect_expression_variables(left, vars);
+            collect_expression_variables(right, vars);
+        }
+        crate::ast::Expression::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_expression_variables(arg, vars);
+            }
+        }
+    }
+}
+
+fn extern_binding_targets(binding: &ExternCallBinding) -> Vec<&str> {
+    match binding {
+        ExternCallBinding::Single(target) => vec![target.as_str()],
+        ExternCallBinding::Tuple(targets) => targets.iter().map(String::as_str).collect(),
     }
 }
 
@@ -1279,6 +1403,82 @@ task main:
                 .iter()
                 .any(|error| error.broken_link == "encoder_main -> cam_xy"),
             "错误应定位 encoder -> cam 断链"
+        );
+    }
+
+    #[test]
+    fn accepts_causality_chains_with_pure_extern_call_nodes() {
+        let source = r#"
+[topology]
+
+device pressure_in: analog_input {
+    range: 0..10
+}
+variable normalized: float = 0.0
+extern function normalize(v: float) -> float {
+    rust_module: "math::normalize"
+    pure: true
+    time_bound_us: 80
+}
+
+[constraints]
+
+causality: pressure_in -> normalize -> normalized
+causality: pressure_in -> normalized
+
+[tasks]
+
+task main:
+    step run:
+        action: call normalize(pressure_in) -> normalized
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        verify_causality(&program, &topology, &constraints)
+            .expect("pure extern 应在因果图中作为确定性变换节点参与传播");
+    }
+
+    #[test]
+    fn reports_broken_chain_when_non_pure_extern_is_used_for_propagation() {
+        let source = r#"
+[topology]
+
+device pressure_in: analog_input {
+    range: 0..10
+}
+variable normalized: float = 0.0
+extern function normalize(v: float) -> float {
+    rust_module: "math::normalize"
+    pure: false
+    time_bound_us: 80
+}
+
+[constraints]
+
+causality: pressure_in -> normalized
+
+[tasks]
+
+task main:
+    step run:
+        action: call normalize(pressure_in) -> normalized
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        let errors = verify_causality(&program, &topology, &constraints)
+            .expect_err("non-pure extern 不应通过因果传播");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.broken_link == "pressure_in -> normalized"),
+            "错误应报告 non-pure extern 链路无法传播"
         );
     }
 }
