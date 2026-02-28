@@ -18,6 +18,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - Causality extern chains are modeled across semantic + verifier: allow causality nodes to reference devices/variables/extern names, wire call-site `arg -> function` edges, and only propagate `function -> binding` for `pure: true` externs.
 - Performance regression gates should bundle four artifacts together: benchmark emitter (stable JSON schema), thresholds JSON, baseline JSON, and a script-level contract test that can inject fixture payloads via CLI.
 - Extern developer tooling should keep one source of truth: register via `register_extern_function!`, derive `signatures()`, and parser-roundtrip `generate_dsl_declaration_stubs()` output to prevent runtime/DSL signature drift.
+- Keep extern documentation split between a frozen syntax contract (`docs/extern_function_mvp_spec.md`) and a rollout guide (`docs/extern_function_development_guide.md`) so examples/migration notes can evolve without changing grammar guarantees.
 
 ## [2026-02-28 00:01:57] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -398,4 +399,27 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - `cargo fmt` can rewrite unrelated CRLF-heavy files; revert incidental formatting in untouched files before commit to keep story scope minimal.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Generated stubs currently synthesize parameter names as `arg1..argN`; tests assert parser-level type/contract parity with registry signatures.
+---
+## [2026-02-28 12:41:33] - US-018
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Published `docs/extern_function_development_guide.md` covering extern development workflow, contract design best practices, Rust implementation checklist, migration steps, and Phase-1 limitations.
+  - Added 10 practical DSL extern examples in the new guide, explicitly including PID (`pid_update`) and quadratic fitting (`quadratic_fit`) scenarios plus fallback/retry/error-flow patterns.
+  - Linked the frozen MVP syntax spec to the new rollout guide from `docs/extern_function_mvp_spec.md` so syntax contract and implementation guidance are clearly separated.
+  - Added reusable documentation-structure guidance to `AGENTS.md` and updated `## Codebase Patterns` in `progress.txt`.
+  - Marked US-018 as completed (`passes: true`) in `prd.json`.
+  - Ran `cargo check --workspace` and `cargo test --workspace` successfully.
+- Files changed
+  - AGENTS.md
+  - docs/extern_function_development_guide.md
+  - docs/extern_function_mvp_spec.md
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Extern documentation works best with a strict split: frozen grammar contract in one doc, evolving best-practice playbook/examples in another.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Story completion in this repo is not done until documentation updates, `prd.json` status, and `progress.txt` log entries land together in one commit.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - The new extern guide intentionally includes migration and known-limitations sections so Phase-1 users can adopt externs without changing DSL control-plane structure.
 ---

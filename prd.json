@@ -272,8 +272,8 @@
         "Typecheck passes"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Published extern function development guide with contract best practices, 10 practical DSL examples (including PID/quadratic_fit), and Phase-1 migration + limitations documentation"
     }
   ]
 }

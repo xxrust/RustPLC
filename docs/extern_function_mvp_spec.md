@@ -5,6 +5,9 @@ Status: **MVP frozen for implementation (US-001)**
 This document defines the only supported DSL surface for Phase 1 extern integration.
 Parser/runtime work must follow this contract exactly until a later RFC updates it.
 
+For rollout-oriented implementation guidance, practical usage patterns, migration notes, and
+known limitations, see `docs/extern_function_development_guide.md`.
+
 ## 1) Supported Syntax
 
 ### 1.1 Extern function declaration
