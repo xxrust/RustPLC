@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "thresholds_p95_us": {
+    "simple_add": 5.0,
+    "complex_quadratic_fit": 25.0
+  },
+  "max_regression_pct_vs_baseline": 35.0
+}

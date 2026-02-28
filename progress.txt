@@ -16,6 +16,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - Extern scheduler guardrails are stage-split: detect non-pure cross-branch conflicts during semantic task validation, and enforce per-tick `time_bound_us` budget against configured `tick_ms` in runtime bridging.
 - Runtime ticks may consume multiple immediate action-only transitions in a single `tick_with_extern` call; add wait/delay boundaries when tests need one control update per scheduler tick.
 - Causality extern chains are modeled across semantic + verifier: allow causality nodes to reference devices/variables/extern names, wire call-site `arg -> function` edges, and only propagate `function -> binding` for `pure: true` externs.
+- Performance regression gates should bundle four artifacts together: benchmark emitter (stable JSON schema), thresholds JSON, baseline JSON, and a script-level contract test that can inject fixture payloads via CLI.
 
 ## [2026-02-28 00:01:57] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -347,4 +348,32 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Runtime can traverse multiple immediate action steps in one tick, so fixtures expecting per-tick accumulation should add a blocking wait/delay edge instead of relying on step boundaries alone.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Built-in `quadratic_fit` currently expects 10 float args (5 x-values then 5 y-values); shorter call signatures fail with deterministic `InvalidArgCount`.
+---
+## [2026-02-28 12:16:50] - US-016
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added release benchmark binary `extern_perf_bench` that measures per-call overhead for simple `add` and complex `quadratic_fit` extern invocations, with human/JSON output.
+  - Added extern performance regression gate script `scripts/extern_perf_gate.py` that can run the benchmark (or consume `--benchmark-json` fixtures) and fail on p95 threshold/baseline regressions.
+  - Added documented perf configs (`scripts/perf/extern_perf_thresholds.json`, `scripts/perf/extern_perf_baseline.json`) and implementation guide `docs/已实现/extern_perf_gate.md`.
+  - Added integration coverage for benchmark JSON contract and gate pass/fail behavior (`tests/extern_perf_bench_cli.rs`, `tests/extern_perf_gate_script.rs`).
+  - Marked US-016 as completed (`passes: true`) in `prd.json`.
+  - Ran `cargo check --workspace` and `cargo test --workspace` successfully.
+- Files changed
+  - AGENTS.md
+  - src/bin/extern_perf_bench.rs
+  - scripts/extern_perf_gate.py
+  - scripts/perf/extern_perf_thresholds.json
+  - scripts/perf/extern_perf_baseline.json
+  - docs/已实现/extern_perf_gate.md
+  - tests/extern_perf_bench_cli.rs
+  - tests/extern_perf_gate_script.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Performance gates in this repo are easiest to maintain when benchmark emission and gate evaluation share a stable JSON schema consumed by both scripts and tests.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Gate scripts that accept absolute fixture paths should avoid forcing repo-relative serialization (`relative_to`) or script tests using temp files will break.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `extern_perf_gate.py` supports lightweight CI/script testing through `--benchmark-json`, so tests can validate threshold logic without compiling/running release benchmarks.
 ---

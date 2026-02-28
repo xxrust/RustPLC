@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "benchmark": "extern_perf_bench",
+  "metrics_p95_us": {
+    "simple_add": 0.9,
+    "complex_quadratic_fit": 3.0
+  },
+  "notes": "Baseline from local release run on 2026-02-28"
+}

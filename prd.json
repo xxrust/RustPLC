@@ -243,8 +243,8 @@
         "Tests pass"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added release-mode extern benchmark binary (`extern_perf_bench`) for simple add and complex quadratic_fit call overhead, plus `scripts/extern_perf_gate.py` that compares measured p95 against documented thresholds and baseline regression limits."
     },
     {
       "id": "US-017",
