@@ -75,8 +75,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Semantic analysis now builds an extern signature table and validates call arg count/types plus return binding arity/types with line-aware diagnostics"
     },
     {
       "id": "US-006",

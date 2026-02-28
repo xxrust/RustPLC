@@ -6,6 +6,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - For new `[topology]` DSL entries, keep grammar (`src/parser/plc.pest`), parser wiring (`src/parser/mod.rs`), and semantic topology cloning (`src/semantic/mod.rs`) in sync.
 - When adding a new `action:` DSL command, keep `action_command` grammar alternatives, `parse_action_statement` match arms, and parser unit tests synchronized.
 - Introducing a new IR `TransitionAction` variant requires coordinated updates in semantic lowering, runtime bridge conversion, ST codegen rendering/inference, and verification matchers to keep compile/runtime behavior consistent.
+- Extern call semantics rely on predeclared `[topology] variable` symbols for return bindings; signature checks should validate arg/binding arity+types and report step-level line numbers.
 
 ---
 ## [2026-02-28 00:01:57] - US-002
@@ -94,4 +95,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Single-step tasks without `on_complete` may not emit action transitions, so semantic lowering tests should include an explicit completion target when asserting transition actions.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `TransitionAction::CallExtern` is currently structural only; runtime bridge reports deterministic `UnsupportedAction` until execution support lands in later stories.
+---
+## [2026-02-28 08:34:52] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added semantic extern signature-table collection with duplicate-name diagnostics during state-machine build.
+  - Added compile-time checks for `action: call` argument count/types and return-binding arity/types (single + tuple), including undefined binding targets.
+  - Added/updated semantic tests for arg-count mismatch, arg-type mismatch, return arity/type mismatches, duplicate extern names, and line-aware diagnostics.
+  - Updated existing extern call lowering test to declare bound variables explicitly.
+  - Marked US-005 as completed (`passes: true`) in `prd.json`.
+- Files changed
+  - AGENTS.md
+  - src/semantic/mod.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Extern call validation should run in the same semantic pass as expression-variable checks so arg inference can reuse declared variable types.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Existing extern lowering tests may rely on implicit return targets; after signature checks, tuple/single bindings must reference declared variables.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Duplicate extern function names are now rejected from semantic symbol collection even when no call site references them.
 ---

@@ -963,14 +963,18 @@ pub fn build_topology_graph(program: &PlcProgram) -> Result<TopologyGraph, Vec<P
 
 pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
-    let variable_names = expanded
-        .topology
-        .variables
-        .iter()
-        .map(|v| v.name.clone())
-        .collect::<HashSet<_>>();
+    let variable_types = collect_variable_types(&expanded.topology);
+    let variable_names = variable_types.keys().cloned().collect::<HashSet<_>>();
     let mut expr_errors = Vec::new();
     validate_expression_actions_in_tasks(&expanded.tasks, &variable_names, &mut expr_errors);
+    let extern_signatures =
+        collect_extern_function_signatures(&expanded.topology, &mut expr_errors);
+    validate_extern_calls_in_tasks(
+        &expanded.tasks,
+        &extern_signatures,
+        &variable_types,
+        &mut expr_errors,
+    );
     let device_kinds = collect_device_kinds(&expanded.topology);
     let cam_table_names = expanded
         .topology
@@ -989,6 +993,59 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
     }
     let wait_ctx = WaitExpressionContext::for_program(&expanded);
     build_state_machine_from_ast_with_context(&expanded.tasks, &wait_ctx, Some(&device_kinds))
+}
+
+#[derive(Debug, Clone)]
+struct ExternFunctionSignature {
+    line: usize,
+    param_types: Vec<AstVariableType>,
+    return_types: Vec<AstVariableType>,
+}
+
+fn collect_variable_types(topology: &TopologySection) -> HashMap<String, AstVariableType> {
+    topology
+        .variables
+        .iter()
+        .map(|variable| (variable.name.clone(), variable.var_type.clone()))
+        .collect()
+}
+
+fn collect_extern_function_signatures(
+    topology: &TopologySection,
+    errors: &mut Vec<PlcError>,
+) -> HashMap<String, ExternFunctionSignature> {
+    let mut signatures: HashMap<String, ExternFunctionSignature> = HashMap::new();
+
+    for decl in &topology.extern_functions {
+        let line = decl.line.max(1);
+        if let Some(previous) = signatures.get(&decl.name) {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                line,
+                "extern 函数",
+                &decl.name,
+                format!(
+                    "extern 函数 {} 已在第 {} 行声明，请保持函数签名唯一",
+                    decl.name, previous.line
+                ),
+            ));
+            continue;
+        }
+
+        signatures.insert(
+            decl.name.clone(),
+            ExternFunctionSignature {
+                line,
+                param_types: decl
+                    .params
+                    .iter()
+                    .map(|param| param.var_type.clone())
+                    .collect(),
+                return_types: decl.return_types.clone(),
+            },
+        );
+    }
+
+    signatures
 }
 
 pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<PlcError>> {
@@ -1899,6 +1956,14 @@ fn ast_variable_type_to_ir(var_type: &AstVariableType) -> IrVariableType {
         AstVariableType::Float => IrVariableType::Float,
         AstVariableType::Int => IrVariableType::Int,
         AstVariableType::Bool => IrVariableType::Bool,
+    }
+}
+
+fn ast_variable_type_name(var_type: &AstVariableType) -> &'static str {
+    match var_type {
+        AstVariableType::Float => "float",
+        AstVariableType::Int => "int",
+        AstVariableType::Bool => "bool",
     }
 }
 
@@ -2996,6 +3061,205 @@ fn validate_expression_actions_in_tasks(
                 errors,
             );
         }
+    }
+}
+
+fn validate_extern_calls_in_tasks(
+    tasks: &TasksSection,
+    extern_signatures: &HashMap<String, ExternFunctionSignature>,
+    variable_types: &HashMap<String, AstVariableType>,
+    errors: &mut Vec<PlcError>,
+) {
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            validate_extern_calls_in_statements(
+                &step.statements,
+                step.line.max(1),
+                extern_signatures,
+                variable_types,
+                errors,
+            );
+        }
+    }
+}
+
+fn validate_extern_calls_in_statements(
+    statements: &[StepStatement],
+    line: usize,
+    extern_signatures: &HashMap<String, ExternFunctionSignature>,
+    variable_types: &HashMap<String, AstVariableType>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::Call {
+                function,
+                args,
+                binding,
+            }) => {
+                validate_extern_call_signature(
+                    function,
+                    args,
+                    binding,
+                    line,
+                    extern_signatures,
+                    variable_types,
+                    errors,
+                );
+            }
+            StepStatement::Repeat { body, .. } => validate_extern_calls_in_statements(
+                body,
+                line,
+                extern_signatures,
+                variable_types,
+                errors,
+            ),
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_extern_calls_in_statements(
+                        &branch.statements,
+                        line,
+                        extern_signatures,
+                        variable_types,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_extern_calls_in_statements(
+                        &branch.statements,
+                        line,
+                        extern_signatures,
+                        variable_types,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn validate_extern_call_signature(
+    function: &str,
+    args: &[AstExpression],
+    binding: &AstExternCallBinding,
+    line: usize,
+    extern_signatures: &HashMap<String, ExternFunctionSignature>,
+    variable_types: &HashMap<String, AstVariableType>,
+    errors: &mut Vec<PlcError>,
+) {
+    let Some(signature) = extern_signatures.get(function) else {
+        errors.push(PlcError::undefined_reference_with_reason(
+            line,
+            "extern 函数",
+            function,
+            format!("action: call {function}(...) 调用前需要先在 [topology] 中声明"),
+        ));
+        return;
+    };
+
+    if args.len() != signature.param_types.len() {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "extern 函数 {function} 参数个数错误：期望 {} 个，实际 {} 个",
+                signature.param_types.len(),
+                args.len()
+            ),
+            "请检查 action: call 参数列表与 extern function 声明是否一致".to_string(),
+        ));
+    }
+
+    for (index, (arg, expected_type)) in args.iter().zip(&signature.param_types).enumerate() {
+        let Some(actual_type) = infer_expression_type(arg, variable_types) else {
+            continue;
+        };
+        if actual_type != *expected_type {
+            errors.push(PlcError::type_mismatch_with_reason(
+                line,
+                ast_variable_type_name(expected_type),
+                ast_variable_type_name(&actual_type),
+                format!("extern 调用 {function} 参数 #{}", index + 1),
+                "请将实参与 extern function 声明的参数类型保持一致",
+            ));
+        }
+    }
+
+    let binding_targets: &[String] = match binding {
+        AstExternCallBinding::Single(name) => std::slice::from_ref(name),
+        AstExternCallBinding::Tuple(names) => names.as_slice(),
+    };
+
+    let expected_return_count = signature.return_types.len();
+    if binding_targets.len() != expected_return_count {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "extern 函数 {function} 返回值绑定数量错误：期望 {expected_return_count} 个，实际 {} 个",
+                binding_targets.len()
+            ),
+            "请让 -> 绑定变量数量与 extern function 返回类型数量保持一致".to_string(),
+        ));
+        return;
+    }
+
+    for (index, (target, expected_type)) in binding_targets
+        .iter()
+        .zip(&signature.return_types)
+        .enumerate()
+    {
+        let Some(actual_type) = variable_types.get(target) else {
+            errors.push(PlcError::undefined_reference_with_reason(
+                line,
+                "变量",
+                target,
+                format!("extern 函数 {function} 返回值绑定目标必须先在 [topology] 中声明"),
+            ));
+            continue;
+        };
+
+        if actual_type != expected_type {
+            errors.push(PlcError::type_mismatch_with_reason(
+                line,
+                ast_variable_type_name(expected_type),
+                ast_variable_type_name(actual_type),
+                format!("extern 调用 {function} 返回绑定 #{} ({target})", index + 1),
+                "请将绑定变量类型与 extern function 返回类型保持一致",
+            ));
+        }
+    }
+}
+
+fn infer_expression_type(
+    expr: &AstExpression,
+    variable_types: &HashMap<String, AstVariableType>,
+) -> Option<AstVariableType> {
+    match expr {
+        AstExpression::Literal(_) => Some(AstVariableType::Float),
+        AstExpression::Variable(name) => variable_types.get(name).cloned(),
+        AstExpression::UnaryNeg(inner) => infer_expression_type(inner, variable_types),
+        AstExpression::BinaryOp { left, right, .. } => {
+            let left_type = infer_expression_type(left, variable_types)?;
+            let right_type = infer_expression_type(right, variable_types)?;
+            match (left_type, right_type) {
+                (AstVariableType::Bool, _) | (_, AstVariableType::Bool) => {
+                    Some(AstVariableType::Bool)
+                }
+                (AstVariableType::Float, _) | (_, AstVariableType::Float) => {
+                    Some(AstVariableType::Float)
+                }
+                (AstVariableType::Int, AstVariableType::Int) => Some(AstVariableType::Int),
+            }
+        }
+        AstExpression::FunctionCall { .. } => Some(AstVariableType::Float),
     }
 }
 
@@ -7029,6 +7293,8 @@ task main:
         let input = r#"
 [topology]
 variable temperature: float = 0.0
+variable lo: float = 0.0
+variable hi: float = 0.0
 extern function split(v: float) -> (float, float) {
     rust_module: "math::split"
     pure: true
@@ -7071,5 +7337,178 @@ task done:
             crate::ir::ExternCallBinding::Tuple(names)
                 if names == &vec!["lo".to_string(), "hi".to_string()]
         ));
+    }
+
+    #[test]
+    fn rejects_extern_call_with_wrong_argument_count_and_reports_line() {
+        let input = "[topology]
+variable lhs: float = 1.0
+variable rhs: float = 2.0
+variable out: float = 0.0
+extern function add(a: float, b: float) -> float {
+    rust_module: \"math::add\"
+    pure: true
+    time_bound_us: 100
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: call add(lhs) -> out
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("参数个数错误应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("extern 函数 add 参数个数错误"),
+            "应提示 extern 函数名和参数个数错误，实际: {joined}"
+        );
+        assert!(
+            errors.iter().any(|err| err.line() == 15),
+            "错误应定位到调用所在 step 行"
+        );
+    }
+
+    #[test]
+    fn rejects_extern_call_with_argument_type_mismatch() {
+        let input = "[topology]
+variable enabled: bool = true
+variable rhs: float = 2.0
+variable out: float = 0.0
+extern function add(a: float, b: float) -> float {
+    rust_module: \"math::add\"
+    pure: true
+    time_bound_us: 100
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: call add(enabled, rhs) -> out
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("参数类型不匹配应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("extern 调用 add 参数 #1 类型不匹配"),
+            "应提示 extern 函数参数类型不匹配，实际: {joined}"
+        );
+    }
+
+    #[test]
+    fn rejects_extern_call_with_return_binding_arity_mismatch() {
+        let input = "[topology]
+variable value: float = 1.0
+variable out: float = 0.0
+extern function split(v: float) -> (float, float) {
+    rust_module: \"math::split\"
+    pure: true
+    time_bound_us: 100
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: call split(value) -> out
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("返回绑定数量不匹配应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("extern 函数 split 返回值绑定数量错误"),
+            "应提示 extern 函数返回值绑定数量错误，实际: {joined}"
+        );
+    }
+
+    #[test]
+    fn rejects_extern_call_with_return_binding_type_mismatch() {
+        let input = "[topology]
+variable trigger: bool = true
+variable out: float = 0.0
+extern function is_ready(trigger: bool) -> bool {
+    rust_module: \"logic::is_ready\"
+    pure: true
+    time_bound_us: 80
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: call is_ready(trigger) -> out
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("返回绑定类型不匹配应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("extern 调用 is_ready 返回绑定 #1 (out) 类型不匹配"),
+            "应提示 extern 函数返回绑定类型不匹配，实际: {joined}"
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_extern_function_names_during_semantic_analysis() {
+        let input = "[topology]
+extern function add(a: float, b: float) -> float {
+    rust_module: \"math::add\"
+    pure: true
+    time_bound_us: 100
+}
+extern function add(v: float) -> float {
+    rust_module: \"math::add_alt\"
+    pure: true
+    time_bound_us: 120
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: log \"ok\"
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("重复 extern 函数名应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("重复定义extern 函数 add"),
+            "应报告重复 extern 函数定义，实际: {joined}"
+        );
+        assert!(
+            errors.iter().any(|err| err.line() == 7),
+            "错误应定位到重复声明所在行"
+        );
     }
 }
