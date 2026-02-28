@@ -56,64 +56,80 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 
 ## 系统架构
 
-```mermaid
-flowchart TD
-    subgraph INPUT["📝 输入层"]
-        A1[".plc DSL 文件\ntopology / constraints / tasks\nextern fn 声明 + 调用"]
-        A2["场景 YAML\ndigital_inputs / analog_inputs\ntick_ms / fault injection"]
-    end
-
-    subgraph COMPILER["⚙️ 编译器核心 (src/)"]
-        B1["Parser (pest PEG) → AST → 语义分析 + 预处理 → IR\n(TopologyGraph + StateMachine)"]
-        B2["设备模型：device_library.rs · device_subtype.rs\n语义门禁：topology_semantic_gate.rs (SEM-101~107) · sequence_lint.rs\nExtern 解析：extern_functions.rs — 签名校验 / 合约注入 / tick 预算检查\n运行时支撑：diagnostics.rs · alarm_runtime.rs · iec_address.rs"]
-    end
-
-    subgraph VERIFY["🔬 验证引擎（并行执行）src/verification/"]
-        C1["Safety    (BMC + k-归纳)   conflicts_with / requires"]
-        C2["Liveness  (SCC + 可达性)   死锁 / 活锁检测"]
-        C3["Timing    (关键路径)        response_time 上界"]
-        C4["Causality (BFS)             connected_to 链路"]
-        C5["Extern    non-pure 冲突 / tick 预算超限检查"]
-        C6["→ verification_report.json（结构化报告 + warnings 分级）"]
-    end
-
-    subgraph RUST["🦀 Rust 计算平面 (extern functions)"]
-        R1["数值算法\n拟合 / 统计 / quadratic_fit"]
-        R2["线性代数\n矩阵运算 / 向量变换"]
-        R3["优化求解\nPID / MPC / 控制器"]
-        R4["注册：ExternFunctionRegistry\n合约：deterministic · pure · range · timeout\n验证：单元测试 + perf bench + 数值稳定性分析"]
-    end
-
-    subgraph RUNTIME["🏃 运行时层 (crates/)"]
-        D0["runtime-core（no_std 确定性状态机执行器）"]
-        D1["SimIO (sim)\nSIL 仿真 I/O · Plant / 故障注入\nsil_trace.jsonl · alarm_events.ndjson"]
-        D2["Virtual Board\n虚拟板级 Runner · tick_timing 采样\nboard_trace.jsonl · tick_timing.jsonl"]
-        D3["RP2040 HAL\nGPIO/ADC/PWM · PIO / RTT 日志\nfirmware.uf2 · board.log"]
-    end
-
-    subgraph GATE["📊 分析与门禁 (src/)"]
-        E1["trace-diff · timing-report · no-board-gate · release-bundle · trace-doctor"]
-        E2["sequence-lint · commissioning-run · pil-run · extern-perf-gate"]
-        E3["component-topology-validate/diff · component-scenario-validate · component-sim · io-map-normalize"]
-    end
-
-    subgraph OUTPUT["📦 输出层"]
-        F1["编译期：verification_report.json + SEM-10x 语义门禁报告"]
-        F2["仿真期：trace.jsonl + wave.vcd + sim_report.json + alarm_events.ndjson"]
-        F3["诊断期：diagnosis_report.json + component_diagnosis.json + io_snapshot.json"]
-        F4["部署期：firmware.uf2 + io_map.toml"]
-        F5["门禁期：diff_report.json + timing_report.json + gate_summary.json"]
-        F6["交付期：release-bundle/ (manifest.json + SHA256 清单 + git 元数据 + 所有工件)"]
-    end
-
-    INPUT --> COMPILER
-    COMPILER --> VERIFY
-    VERIFY --> RUNTIME
-    RUNTIME --> GATE
-    GATE --> OUTPUT
-
-    RUST <-->|"extern 调用 / 合约校验"| VERIFY
-    RUST <-->|"每 tick 执行"| RUNTIME
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                  📝 输入层                                           │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  .plc DSL 文件                         场景 YAML (scenario.yaml)                    │
+│  - topology / constraints / tasks      - digital_inputs / analog_inputs             │
+│  - extern fn 声明 + 调用               - tick_ms / fault injection                  │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              ⚙️ 编译器核心 (src/)                                   │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  Parser (pest PEG) ──▶ AST ──▶ 语义分析 + 预处理 ──▶ IR                            │
+│                                (repeat/delay 展开)   (TopologyGraph + StateMachine) │
+│                                                                                      │
+│  DSL 编译链：parser/plc.pest → ast/ → semantic/ → ir/                              │
+│  设备模型：  device_library.rs (devices/*.toml)  device_subtype.rs                 │
+│  语义门禁：  topology_semantic_gate.rs (SEM-101~107)  sequence_lint.rs             │
+│  I/O 模型：  iec_address.rs  plc_port.rs                                           │
+│  元件链路：  component_{library,topology,scenario,sim,faults,diagnostics}.rs       │
+│  Extern 解析：extern_functions.rs — 签名校验 / 合约注入 / tick 预算检查            │
+│  运行时支撑：diagnostics.rs  alarm_runtime.rs                                      │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────────┐  ┌──────────────────────────┐
+│          🔬 验证引擎（并行执行）(src/verification/)   │  │  🦀 Rust 计算平面        │
+├──────────────────────────────────────────────────────┤  │  (extern functions)      │
+│  Safety    (BMC + k-归纳)   conflicts_with / requires │  ├──────────────────────────┤
+│  Liveness  (SCC + 可达性)   死锁 / 活锁检测           │  │  ┌──────────────────┐   │
+│  Timing    (关键路径)       response_time 上界        │◀─┤  │  数值算法         │   │
+│  Causality (BFS)            connected_to 链路         │  │  │  (拟合 / 统计)    │   │
+│  Extern    non-pure 冲突 / tick 预算超限检查          │  │  └──────────────────┘   │
+│                    ▼                                  │  │  ┌──────────────────┐   │
+│      verification_report.json                        │  │  │  线性代数         │   │
+│      (结构化报告 + warnings 分级)                     │  │  │  (矩阵运算)       │   │
+└────────────────┬─────────────────────────────────────┘  │  └──────────────────┘   │
+                 │                                         │  ┌──────────────────┐   │
+                 ▼                                         │  │  优化求解         │   │
+┌──────────────────────────────────────────────────────┐  │  │  (PID / MPC)      │   │
+│                  🏃 运行时层 (crates/)                │  │  └──────────────────┘   │
+├──────────────────────────────────────────────────────┤  │                          │
+│        runtime-core (no_std 确定性状态机执行器)       │  │  注册：                  │
+│               │              │             │          │◀─┤  ExternFunctionRegistry  │
+│        SimIO (sim)    Virtual Board   RP2040 HAL      │  │  合约：                  │
+│        SIL 仿真 I/O   虚拟板级 Runner  GPIO/ADC/PWM   │  │  deterministic / pure    │
+│        Plant/故障注入  tick_timing采样  PIO/RTT日志   │  │  range / timeout         │
+│               │              │             │          │  │  验证：                  │
+│        sil_trace.jsonl  board_trace.jsonl  firmware   │  │  单元测试 + perf bench   │
+│        alarm_events     tick_timing.jsonl  board.log  │  │  + 数值稳定性分析        │
+└────────────────┬─────────────────────────────────────┘  └──────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          📊 分析与门禁 (src/)                                        │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  trace-diff        timing-report        no-board-gate       release-bundle          │
+│  trace-doctor      sequence-lint        commissioning-run   pil-run                 │
+│  extern-perf-gate  component-topology-validate/diff         component-sim           │
+│  component-scenario-validate            io-map-normalize                            │
+└────────────────┬────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                📦 输出层                                             │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│  编译期：verification_report.json + SEM-10x 语义门禁报告                            │
+│  仿真期：trace.jsonl + wave.vcd + sim_report.json + alarm_events.ndjson            │
+│  诊断期：diagnosis_report.json + component_diagnosis.json + io_snapshot.json       │
+│  部署期：firmware.uf2 + io_map.toml                                                 │
+│  门禁期：diff_report.json + timing_report.json + gate_summary.json                 │
+│  交付期：release-bundle/ (manifest.json + SHA256 清单 + git 元数据 + 所有工件)      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
