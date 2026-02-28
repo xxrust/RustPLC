@@ -91,8 +91,8 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Semantic analysis now enforces extern contract constraints (non-empty rust_module, positive time_bound_us, Phase-1 scalar signature guard) with line-aware diagnostics"
     },
     {
       "id": "US-007",

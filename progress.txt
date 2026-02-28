@@ -7,6 +7,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - When adding a new `action:` DSL command, keep `action_command` grammar alternatives, `parse_action_statement` match arms, and parser unit tests synchronized.
 - Introducing a new IR `TransitionAction` variant requires coordinated updates in semantic lowering, runtime bridge conversion, ST codegen rendering/inference, and verification matchers to keep compile/runtime behavior consistent.
 - Extern call semantics rely on predeclared `[topology] variable` symbols for return bindings; signature checks should validate arg/binding arity+types and report step-level line numbers.
+- Keep extern declaration contract validation in semantic signature collection (`collect_extern_function_signatures`) so declaration-level diagnostics fire before per-step call-site checks.
 
 ---
 ## [2026-02-28 00:01:57] - US-002
@@ -116,4 +117,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Existing extern lowering tests may rely on implicit return targets; after signature checks, tuple/single bindings must reference declared variables.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Duplicate extern function names are now rejected from semantic symbol collection even when no call site references them.
+---
+## [2026-02-28 08:46:43] - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added semantic extern-contract validation for declaration-level determinism constraints: reject empty `rust_module` and reject `time_bound_us: 0` with line-aware diagnostics.
+  - Kept duplicate extern-name diagnostics in semantic signature collection and added a Phase-1 scalar signature guard hook (`bool`/`int`/`float`) to centralize declaration checks.
+  - Added semantic tests for zero `time_bound_us`, empty `rust_module`, and positive coverage for valid bool/int scalar signatures.
+  - Marked US-006 as completed (`passes: true`) in `prd.json`.
+- Files changed
+  - AGENTS.md
+  - src/semantic/mod.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., 'this codebase uses X for Y')
+    - Declaration-level extern validation should be co-located with extern signature table construction to avoid deferring contract failures to call-site validation.
+  - Gotchas encountered (e.g., 'do not forget to update Z when changing W')
+    - `rust_module` presence is parser-enforced, but semantic must still trim-check for empty string literals like `"   "`.
+  - Useful context (e.g., 'the evaluation panel is in component X')
+    - `build_state_machine` currently hosts extern contract diagnostics; `build_topology_graph` intentionally stays focused on topology graph construction.
 ---

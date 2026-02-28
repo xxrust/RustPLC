@@ -1018,6 +1018,8 @@ fn collect_extern_function_signatures(
 
     for decl in &topology.extern_functions {
         let line = decl.line.max(1);
+        validate_extern_function_contract(decl, errors);
+        validate_extern_function_signature_types(decl, errors);
         if let Some(previous) = signatures.get(&decl.name) {
             errors.push(PlcError::duplicate_definition_with_reason(
                 line,
@@ -1046,6 +1048,76 @@ fn collect_extern_function_signatures(
     }
 
     signatures
+}
+
+fn validate_extern_function_contract(
+    decl: &AstExternFunctionDeclaration,
+    errors: &mut Vec<PlcError>,
+) {
+    let line = decl.line.max(1);
+
+    if decl.contract.rust_module.trim().is_empty() {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!("extern 函数 {} 的 rust_module 不能为空", decl.name),
+            "请为 rust_module 设置非空字符串（例如 \"math::add\"）",
+        ));
+    }
+
+    if decl.contract.time_bound_us == 0 {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "extern 函数 {} 的 time_bound_us 必须为正整数，当前为 0",
+                decl.name
+            ),
+            "请将 time_bound_us 设置为大于 0 的整数值（单位：微秒）",
+        ));
+    }
+}
+
+fn validate_extern_function_signature_types(
+    decl: &AstExternFunctionDeclaration,
+    errors: &mut Vec<PlcError>,
+) {
+    let line = decl.line.max(1);
+
+    for (index, param) in decl.params.iter().enumerate() {
+        if !is_phase1_supported_extern_type(&param.var_type) {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!(
+                    "extern 函数 {} 参数 #{} 使用了不支持的类型 {}",
+                    decl.name,
+                    index + 1,
+                    ast_variable_type_name(&param.var_type)
+                ),
+                "Phase 1 仅支持标量类型：bool/int/float",
+            ));
+        }
+    }
+
+    for (index, return_type) in decl.return_types.iter().enumerate() {
+        if !is_phase1_supported_extern_type(return_type) {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!(
+                    "extern 函数 {} 返回值 #{} 使用了不支持的类型 {}",
+                    decl.name,
+                    index + 1,
+                    ast_variable_type_name(return_type)
+                ),
+                "Phase 1 仅支持标量类型：bool/int/float",
+            ));
+        }
+    }
+}
+
+fn is_phase1_supported_extern_type(var_type: &AstVariableType) -> bool {
+    matches!(
+        var_type,
+        AstVariableType::Float | AstVariableType::Int | AstVariableType::Bool
+    )
 }
 
 pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<PlcError>> {
@@ -7510,5 +7582,98 @@ task main:
             errors.iter().any(|err| err.line() == 7),
             "错误应定位到重复声明所在行"
         );
+    }
+
+    #[test]
+    fn rejects_extern_function_with_zero_time_bound() {
+        let input = "[topology]
+extern function add(a: float, b: float) -> float {
+    rust_module: \"math::add\"
+    pure: true
+    time_bound_us: 0
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: log \"ok\"
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("time_bound_us 为 0 应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("time_bound_us 必须为正整数"),
+            "应提示 time_bound_us 需大于 0，实际: {joined}"
+        );
+        assert!(
+            errors.iter().any(|err| err.line() == 2),
+            "错误应定位到 extern 声明所在行"
+        );
+    }
+
+    #[test]
+    fn rejects_extern_function_with_empty_rust_module() {
+        let input = "[topology]
+extern function add(a: float, b: float) -> float {
+    rust_module: \"   \"
+    pure: true
+    time_bound_us: 10
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: log \"ok\"
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("空 rust_module 应报语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("rust_module 不能为空"),
+            "应提示 rust_module 不能为空，实际: {joined}"
+        );
+        assert!(
+            errors.iter().any(|err| err.line() == 2),
+            "错误应定位到 extern 声明所在行"
+        );
+    }
+
+    #[test]
+    fn accepts_phase1_scalar_types_in_extern_signatures() {
+        let input = "[topology]
+variable state: bool = true
+variable count: int = 1
+variable next_state: bool = false
+variable next_count: int = 0
+extern function step_logic(flag: bool, value: int) -> (bool, int) {
+    rust_module: \"logic::step\"
+    pure: true
+    time_bound_us: 20
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: call step_logic(state, count) -> (next_state, next_count)
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        build_state_machine(&program).expect("Phase 1 标量类型签名应通过语义检查");
     }
 }
