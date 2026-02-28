@@ -10,6 +10,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - Keep extern declaration contract validation in semantic signature collection (`collect_extern_function_signatures`) so declaration-level diagnostics fire before per-step call-site checks.
 - Keep extern runtime contract checks centralized in `src/extern_functions.rs`; use `ExternFunctionRegistry::with_time_source` in tests so timeout assertions stay deterministic.
 - `Action::CallExtern` executes only through runtime extern-aware APIs (`tick_with_extern` / `tick_with_trace_and_logs_and_extern`); plain `tick*` methods intentionally return `ExternCallRequiresHandler`.
+- Integration tests for extern contract guardrails should assert `RuntimeTickError::ExternCallFailed` plus nested `ExternRuntimeError` payload details (function context and offending index/value).
 - `ExternFunctionRegistry::new()` bootstraps built-ins (`add`, `multiply`, `quadratic_fit`, `pid_update`); deterministic tests built with `with_time_source` must register needed built-ins explicitly and use `reset_builtin_pid_state()` before PID assertions that require a fresh integrator.
 
 ---
@@ -230,4 +231,26 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - When adding built-ins that use `with_time_source`, remember the registry starts empty in tests; explicitly register control built-ins before calling `pid_update`.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `pid_update` currently computes derivative from previous error (or zero baseline on first call) and rejects non-positive/non-finite `dt` with runtime error text.
+---
+## [2026-02-28 10:22:14] - US-011
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added runtime-bridge integration tests that execute `action: call` through `tick_with_extern` and verify registry contract failures propagate as structured runtime tick errors.
+  - Covered input-range and output-range contract violations with explicit assertions for offending index/value payloads.
+  - Added deterministic timeout propagation coverage using `ExternFunctionRegistry::with_time_source` so `time_bound_us` overruns are reproducible in tests.
+  - Updated root AGENTS guidance for asserting nested extern runtime errors in integration tests.
+  - Marked US-011 as completed (`passes: true`) in `prd.json`.
+  - Ran `cargo check --workspace` and `cargo test --workspace` successfully.
+- Files changed
+  - AGENTS.md
+  - tests/runtime_bridge_us006.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Extern contract enforcement is validated end-to-end by matching `RuntimeTickError::ExternCallFailed` in runtime integration tests, not only by unit-testing the registry.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Runtime callback adapters can hide contract failures if they swallow registry errors; keep tests asserting exact nested `ExternRuntimeError` payloads.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - The shared `call_registry` adapter in `tests/runtime_bridge_us006.rs` is the canonical path for wiring `ExternFunctionRegistry::call` into runtime-core extern callbacks.
 ---

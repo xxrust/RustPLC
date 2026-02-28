@@ -168,8 +168,8 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Extern runtime contract errors now covered end-to-end: runtime tick extern path propagates input/output range and timeout violations with explicit offending index/value details."
     },
     {
       "id": "US-012",

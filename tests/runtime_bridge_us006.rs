@@ -1,10 +1,14 @@
 use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use runtime_core::{Runtime, RuntimeTickError};
-use rust_plc::extern_functions::{ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError};
+use rust_plc::extern_functions::{
+    ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError, ValueRange,
+};
 use rust_plc::ir::{ExternFunctionContract, VariableType};
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'static> {
     let program = parse_plc(plc_source).expect("parse plc");
@@ -535,6 +539,155 @@ fn runtime_tick_with_extern_propagates_registry_error_with_function_context() {
                 error,
                 ExternRuntimeError::FunctionNotFound {
                     name: "add".to_string()
+                }
+            );
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+}
+
+fn make_range_checked_registry() -> ExternFunctionRegistry {
+    let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+    registry
+        .register(
+            ExternFunctionInfo::new(
+                "add",
+                vec![VariableType::Float, VariableType::Float],
+                vec![VariableType::Float],
+                ExternFunctionContract {
+                    rust_module: "math::basic".to_string(),
+                    pure: true,
+                    time_bound_us: 1000,
+                },
+                |args| Ok(vec![args[0] + args[1]]),
+            )
+            .with_input_ranges(vec![ValueRange::new(-10.0, 10.0), ValueRange::new(-1.0, 1.0)])
+            .with_output_ranges(vec![ValueRange::new(-10.0, 10.0)]),
+        )
+        .expect("register add with ranges");
+    registry
+}
+
+#[test]
+fn runtime_tick_with_extern_propagates_input_range_violation_details() {
+    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let registry = make_range_checked_registry();
+
+    let err = rt
+        .tick_with_extern(&mut io, |function, args, outputs| {
+            call_registry(&registry, function, args, outputs)
+        })
+        .expect_err("input range should fail");
+
+    match err {
+        RuntimeTickError::ExternCallFailed { function, error } => {
+            assert_eq!(function, "add");
+            assert_eq!(
+                error,
+                ExternRuntimeError::InputOutOfRange {
+                    function: "add".to_string(),
+                    arg_index: 1,
+                    value: 2.0,
+                    min: -1.0,
+                    max: 1.0,
+                }
+            );
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+}
+
+#[test]
+fn runtime_tick_with_extern_propagates_output_range_violation_details() {
+    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+    registry
+        .register(
+            ExternFunctionInfo::new(
+                "add",
+                vec![VariableType::Float, VariableType::Float],
+                vec![VariableType::Float],
+                ExternFunctionContract {
+                    rust_module: "math::basic".to_string(),
+                    pure: true,
+                    time_bound_us: 1000,
+                },
+                |args| Ok(vec![args[0] + args[1]]),
+            )
+            .with_output_ranges(vec![ValueRange::new(-1.0, 1.0)]),
+        )
+        .expect("register add with output range");
+
+    let err = rt
+        .tick_with_extern(&mut io, |function, args, outputs| {
+            call_registry(&registry, function, args, outputs)
+        })
+        .expect_err("output range should fail");
+
+    match err {
+        RuntimeTickError::ExternCallFailed { function, error } => {
+            assert_eq!(function, "add");
+            assert_eq!(
+                error,
+                ExternRuntimeError::OutputOutOfRange {
+                    function: "add".to_string(),
+                    result_index: 0,
+                    value: 3.5,
+                    min: -1.0,
+                    max: 1.0,
+                }
+            );
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+}
+
+#[test]
+fn runtime_tick_with_extern_propagates_timeout_details() {
+    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+
+    let ticks = Arc::new(AtomicU64::new(0));
+    let clock = Arc::clone(&ticks);
+    let mut registry = ExternFunctionRegistry::with_time_source(move || {
+        let now = clock.load(Ordering::Relaxed);
+        clock.store(now + 50, Ordering::Relaxed);
+        now
+    });
+    registry
+        .register(ExternFunctionInfo::new(
+            "add",
+            vec![VariableType::Float, VariableType::Float],
+            vec![VariableType::Float],
+            ExternFunctionContract {
+                rust_module: "math::basic".to_string(),
+                pure: true,
+                time_bound_us: 10,
+            },
+            |args| Ok(vec![args[0] + args[1]]),
+        ))
+        .expect("register add");
+
+    let err = rt
+        .tick_with_extern(&mut io, |function, args, outputs| {
+            call_registry(&registry, function, args, outputs)
+        })
+        .expect_err("timeout should fail");
+
+    match err {
+        RuntimeTickError::ExternCallFailed { function, error } => {
+            assert_eq!(function, "add");
+            assert_eq!(
+                error,
+                ExternRuntimeError::TimeoutExceeded {
+                    function: "add".to_string(),
+                    elapsed_us: 50,
+                    limit_us: 10,
                 }
             );
         }
