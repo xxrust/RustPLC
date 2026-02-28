@@ -56,146 +56,65 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 
 ## 系统架构
 
-<p align="center">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1020" width="900" font-family="'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="12">
-  <defs>
-    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-      <path d="M0,0 L0,6 L8,3 z" fill="#555"/>
-    </marker>
-    <marker id="arr2" markerWidth="8" markerHeight="8" refX="2" refY="3" orient="auto">
-      <path d="M8,0 L8,6 L0,3 z" fill="#888"/>
-    </marker>
-  </defs>
+```mermaid
+flowchart TD
+    subgraph INPUT["📝 输入层"]
+        A1[".plc DSL 文件\ntopology / constraints / tasks\nextern fn 声明 + 调用"]
+        A2["场景 YAML\ndigital_inputs / analog_inputs\ntick_ms / fault injection"]
+    end
 
-  <!-- ── 输入层 ── -->
-  <rect x="20" y="10" width="620" height="80" rx="6" fill="#f0f4ff" stroke="#7090d0" stroke-width="1.5"/>
-  <rect x="20" y="10" width="620" height="24" rx="6" fill="#7090d0"/>
-  <rect x="20" y="28" width="620" height="6" fill="#7090d0"/>
-  <text x="330" y="27" text-anchor="middle" fill="white" font-weight="bold" font-size="13">📝 输入层</text>
-  <text x="36" y="52" fill="#333">.plc DSL 文件</text>
-  <text x="36" y="68" fill="#555" font-size="11">  topology / constraints / tasks · extern fn 声明 + 调用</text>
-  <text x="360" y="52" fill="#333">场景 YAML (scenario.yaml)</text>
-  <text x="360" y="68" fill="#555" font-size="11">  digital_inputs / analog_inputs · tick_ms / fault injection</text>
+    subgraph COMPILER["⚙️ 编译器核心 (src/)"]
+        B1["Parser (pest PEG) → AST → 语义分析 + 预处理 → IR\n(TopologyGraph + StateMachine)"]
+        B2["设备模型：device_library.rs · device_subtype.rs\n语义门禁：topology_semantic_gate.rs (SEM-101~107) · sequence_lint.rs\nExtern 解析：extern_functions.rs — 签名校验 / 合约注入 / tick 预算检查\n运行时支撑：diagnostics.rs · alarm_runtime.rs · iec_address.rs"]
+    end
 
-  <!-- 箭头 输入→编译器 -->
-  <line x1="330" y1="90" x2="330" y2="112" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+    subgraph VERIFY["🔬 验证引擎（并行执行）src/verification/"]
+        C1["Safety    (BMC + k-归纳)   conflicts_with / requires"]
+        C2["Liveness  (SCC + 可达性)   死锁 / 活锁检测"]
+        C3["Timing    (关键路径)        response_time 上界"]
+        C4["Causality (BFS)             connected_to 链路"]
+        C5["Extern    non-pure 冲突 / tick 预算超限检查"]
+        C6["→ verification_report.json（结构化报告 + warnings 分级）"]
+    end
 
-  <!-- ── 编译器核心 ── -->
-  <rect x="20" y="112" width="620" height="148" rx="6" fill="#fff8f0" stroke="#d08030" stroke-width="1.5"/>
-  <rect x="20" y="112" width="620" height="24" rx="6" fill="#d08030"/>
-  <rect x="20" y="130" width="620" height="6" fill="#d08030"/>
-  <text x="330" y="129" text-anchor="middle" fill="white" font-weight="bold" font-size="13">⚙️ 编译器核心 (src/)</text>
-  <text x="36" y="152" fill="#333" font-size="11.5">Parser (pest PEG)  ──▶  AST  ──▶  语义分析 + 预处理  ──▶  IR (TopologyGraph + StateMachine)</text>
-  <line x1="36" y1="160" x2="624" y2="160" stroke="#e8c090" stroke-width="0.8" stroke-dasharray="4,3"/>
-  <text x="36" y="174" fill="#555" font-size="11">DSL 编译链：parser/plc.pest → ast/ → semantic/ → ir/</text>
-  <text x="36" y="190" fill="#555" font-size="11">设备模型：device_library.rs (devices/*.toml)  ·  device_subtype.rs</text>
-  <text x="36" y="206" fill="#555" font-size="11">语义门禁：topology_semantic_gate.rs (SEM-101~107)  ·  sequence_lint.rs</text>
-  <text x="36" y="222" fill="#555" font-size="11">Extern 解析：extern_functions.rs — 签名校验 / 合约注入 / tick 预算检查</text>
-  <text x="36" y="238" fill="#555" font-size="11">运行时支撑：diagnostics.rs  ·  alarm_runtime.rs  ·  iec_address.rs  ·  plc_port.rs</text>
+    subgraph RUST["🦀 Rust 计算平面 (extern functions)"]
+        R1["数值算法\n拟合 / 统计 / quadratic_fit"]
+        R2["线性代数\n矩阵运算 / 向量变换"]
+        R3["优化求解\nPID / MPC / 控制器"]
+        R4["注册：ExternFunctionRegistry\n合约：deterministic · pure · range · timeout\n验证：单元测试 + perf bench + 数值稳定性分析"]
+    end
 
-  <!-- 箭头 编译器→验证引擎 -->
-  <line x1="250" y1="260" x2="250" y2="282" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+    subgraph RUNTIME["🏃 运行时层 (crates/)"]
+        D0["runtime-core（no_std 确定性状态机执行器）"]
+        D1["SimIO (sim)\nSIL 仿真 I/O · Plant / 故障注入\nsil_trace.jsonl · alarm_events.ndjson"]
+        D2["Virtual Board\n虚拟板级 Runner · tick_timing 采样\nboard_trace.jsonl · tick_timing.jsonl"]
+        D3["RP2040 HAL\nGPIO/ADC/PWM · PIO / RTT 日志\nfirmware.uf2 · board.log"]
+    end
 
-  <!-- ── 验证引擎 ── -->
-  <rect x="20" y="282" width="430" height="148" rx="6" fill="#f0fff4" stroke="#30a060" stroke-width="1.5"/>
-  <rect x="20" y="282" width="430" height="24" rx="6" fill="#30a060"/>
-  <rect x="20" y="300" width="430" height="6" fill="#30a060"/>
-  <text x="235" y="299" text-anchor="middle" fill="white" font-weight="bold" font-size="13">🔬 验证引擎（并行执行）src/verification/</text>
-  <text x="36" y="322" fill="#333" font-size="11.5">Safety    (BMC + k-归纳)    conflicts_with / requires</text>
-  <text x="36" y="338" fill="#333" font-size="11.5">Liveness  (SCC + 可达性)   死锁 / 活锁检测</text>
-  <text x="36" y="354" fill="#333" font-size="11.5">Timing    (关键路径)        response_time 上界</text>
-  <text x="36" y="370" fill="#333" font-size="11.5">Causality (BFS)             connected_to 链路</text>
-  <text x="36" y="386" fill="#333" font-size="11.5">Extern    non-pure 冲突 / tick 预算超限检查</text>
-  <line x1="36" y1="394" x2="434" y2="394" stroke="#90d0a0" stroke-width="0.8" stroke-dasharray="4,3"/>
-  <text x="36" y="410" fill="#555" font-size="11">→ verification_report.json（结构化报告 + warnings 分级）</text>
+    subgraph GATE["📊 分析与门禁 (src/)"]
+        E1["trace-diff · timing-report · no-board-gate · release-bundle · trace-doctor"]
+        E2["sequence-lint · commissioning-run · pil-run · extern-perf-gate"]
+        E3["component-topology-validate/diff · component-scenario-validate · component-sim · io-map-normalize"]
+    end
 
-  <!-- ── Rust 计算平面 ── -->
-  <rect x="470" y="282" width="210" height="280" rx="6" fill="#fff0f8" stroke="#c040a0" stroke-width="1.5"/>
-  <rect x="470" y="282" width="210" height="24" rx="6" fill="#c040a0"/>
-  <rect x="470" y="300" width="210" height="6" fill="#c040a0"/>
-  <text x="575" y="299" text-anchor="middle" fill="white" font-weight="bold" font-size="13">🦀 Rust 计算平面</text>
-  <text x="575" y="318" text-anchor="middle" fill="#a00080" font-size="11">(extern functions)</text>
-  <!-- 子模块 -->
-  <rect x="486" y="326" width="178" height="38" rx="4" fill="white" stroke="#e080c0" stroke-width="1"/>
-  <text x="575" y="341" text-anchor="middle" fill="#333" font-size="11.5" font-weight="bold">数值算法</text>
-  <text x="575" y="356" text-anchor="middle" fill="#666" font-size="10.5">拟合 / 统计 / quadratic_fit</text>
-  <rect x="486" y="372" width="178" height="38" rx="4" fill="white" stroke="#e080c0" stroke-width="1"/>
-  <text x="575" y="387" text-anchor="middle" fill="#333" font-size="11.5" font-weight="bold">线性代数</text>
-  <text x="575" y="402" text-anchor="middle" fill="#666" font-size="10.5">矩阵运算 / 向量变换</text>
-  <rect x="486" y="418" width="178" height="38" rx="4" fill="white" stroke="#e080c0" stroke-width="1"/>
-  <text x="575" y="433" text-anchor="middle" fill="#333" font-size="11.5" font-weight="bold">优化求解</text>
-  <text x="575" y="448" text-anchor="middle" fill="#666" font-size="10.5">PID / MPC / 控制器</text>
-  <!-- 注册/合约 -->
-  <line x1="486" y1="464" x2="664" y2="464" stroke="#e080c0" stroke-width="0.8" stroke-dasharray="4,3"/>
-  <text x="486" y="478" fill="#a00080" font-size="10">注册：ExternFunctionRegistry</text>
-  <text x="486" y="492" fill="#a00080" font-size="10">合约：deterministic · pure</text>
-  <text x="486" y="506" fill="#a00080" font-size="10">       range · timeout</text>
-  <text x="486" y="520" fill="#a00080" font-size="10">验证：单元测试 + perf bench</text>
-  <text x="486" y="534" fill="#a00080" font-size="10">       + 数值稳定性分析</text>
-  <text x="486" y="550" fill="#a00080" font-size="10">       + extern_perf_gate</text>
+    subgraph OUTPUT["📦 输出层"]
+        F1["编译期：verification_report.json + SEM-10x 语义门禁报告"]
+        F2["仿真期：trace.jsonl + wave.vcd + sim_report.json + alarm_events.ndjson"]
+        F3["诊断期：diagnosis_report.json + component_diagnosis.json + io_snapshot.json"]
+        F4["部署期：firmware.uf2 + io_map.toml"]
+        F5["门禁期：diff_report.json + timing_report.json + gate_summary.json"]
+        F6["交付期：release-bundle/ (manifest.json + SHA256 清单 + git 元数据 + 所有工件)"]
+    end
 
-  <!-- 双向箭头 验证引擎 ↔ Rust计算平面 -->
-  <line x1="450" y1="356" x2="468" y2="356" stroke="#c040a0" stroke-width="1.5" marker-end="url(#arr)" marker-start="url(#arr2)"/>
+    INPUT --> COMPILER
+    COMPILER --> VERIFY
+    VERIFY --> RUNTIME
+    RUNTIME --> GATE
+    GATE --> OUTPUT
 
-  <!-- 箭头 验证引擎→运行时层 -->
-  <line x1="250" y1="430" x2="250" y2="452" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
-
-  <!-- ── 运行时层 ── -->
-  <rect x="20" y="452" width="430" height="148" rx="6" fill="#f4f0ff" stroke="#6050c0" stroke-width="1.5"/>
-  <rect x="20" y="452" width="430" height="24" rx="6" fill="#6050c0"/>
-  <rect x="20" y="470" width="430" height="6" fill="#6050c0"/>
-  <text x="235" y="469" text-anchor="middle" fill="white" font-weight="bold" font-size="13">🏃 运行时层 (crates/)</text>
-  <text x="235" y="492" text-anchor="middle" fill="#333" font-size="11.5">runtime-core（no_std 确定性状态机执行器）</text>
-  <!-- 三列 -->
-  <line x1="176" y1="498" x2="176" y2="588" stroke="#b0a0e0" stroke-width="0.8" stroke-dasharray="3,3"/>
-  <line x1="322" y1="498" x2="322" y2="588" stroke="#b0a0e0" stroke-width="0.8" stroke-dasharray="3,3"/>
-  <text x="98" y="512" text-anchor="middle" fill="#444" font-size="11" font-weight="bold">SimIO (sim)</text>
-  <text x="98" y="526" text-anchor="middle" fill="#666" font-size="10.5">SIL 仿真 I/O</text>
-  <text x="98" y="540" text-anchor="middle" fill="#666" font-size="10.5">Plant / 故障注入</text>
-  <text x="98" y="556" text-anchor="middle" fill="#888" font-size="10">sil_trace.jsonl</text>
-  <text x="98" y="570" text-anchor="middle" fill="#888" font-size="10">alarm_events.ndjson</text>
-  <text x="249" y="512" text-anchor="middle" fill="#444" font-size="11" font-weight="bold">Virtual Board</text>
-  <text x="249" y="526" text-anchor="middle" fill="#666" font-size="10.5">虚拟板级 Runner</text>
-  <text x="249" y="540" text-anchor="middle" fill="#666" font-size="10.5">tick_timing 采样</text>
-  <text x="249" y="556" text-anchor="middle" fill="#888" font-size="10">board_trace.jsonl</text>
-  <text x="249" y="570" text-anchor="middle" fill="#888" font-size="10">tick_timing.jsonl</text>
-  <text x="371" y="512" text-anchor="middle" fill="#444" font-size="11" font-weight="bold">RP2040 HAL</text>
-  <text x="371" y="526" text-anchor="middle" fill="#666" font-size="10.5">GPIO/ADC/PWM</text>
-  <text x="371" y="540" text-anchor="middle" fill="#666" font-size="10.5">PIO / RTT 日志</text>
-  <text x="371" y="556" text-anchor="middle" fill="#888" font-size="10">firmware.uf2</text>
-  <text x="371" y="570" text-anchor="middle" fill="#888" font-size="10">board.log</text>
-
-  <!-- 双向箭头 运行时层 ↔ Rust计算平面 -->
-  <line x1="450" y1="510" x2="468" y2="510" stroke="#c040a0" stroke-width="1.5" marker-end="url(#arr)" marker-start="url(#arr2)"/>
-
-  <!-- 箭头 运行时→分析门禁 -->
-  <line x1="250" y1="600" x2="250" y2="622" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
-
-  <!-- ── 分析与门禁 ── -->
-  <rect x="20" y="622" width="660" height="90" rx="6" fill="#fffbf0" stroke="#c09020" stroke-width="1.5"/>
-  <rect x="20" y="622" width="660" height="24" rx="6" fill="#c09020"/>
-  <rect x="20" y="640" width="660" height="6" fill="#c09020"/>
-  <text x="350" y="639" text-anchor="middle" fill="white" font-weight="bold" font-size="13">📊 分析与门禁 (src/)</text>
-  <text x="36" y="662" fill="#555" font-size="11">trace-diff · timing-report · no-board-gate · release-bundle · trace-doctor</text>
-  <text x="36" y="678" fill="#555" font-size="11">sequence-lint · commissioning-run · pil-run · extern-perf-gate</text>
-  <text x="36" y="694" fill="#555" font-size="11">component-topology-validate/diff · component-scenario-validate · component-sim · io-map-normalize</text>
-
-  <!-- 箭头 分析门禁→输出层 -->
-  <line x1="350" y1="712" x2="350" y2="734" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
-
-  <!-- ── 输出层 ── -->
-  <rect x="20" y="734" width="660" height="130" rx="6" fill="#f8f8f8" stroke="#808080" stroke-width="1.5"/>
-  <rect x="20" y="734" width="660" height="24" rx="6" fill="#606060"/>
-  <rect x="20" y="752" width="660" height="6" fill="#606060"/>
-  <text x="350" y="751" text-anchor="middle" fill="white" font-weight="bold" font-size="13">📦 输出层</text>
-  <text x="36" y="774" fill="#555" font-size="11">编译期：verification_report.json + SEM-10x 语义门禁报告</text>
-  <text x="36" y="790" fill="#555" font-size="11">仿真期：trace.jsonl + wave.vcd + sim_report.json + alarm_events.ndjson</text>
-  <text x="36" y="806" fill="#555" font-size="11">诊断期：diagnosis_report.json + component_diagnosis.json + io_snapshot.json</text>
-  <text x="36" y="822" fill="#555" font-size="11">部署期：firmware.uf2 + io_map.toml</text>
-  <text x="36" y="838" fill="#555" font-size="11">门禁期：diff_report.json + timing_report.json + gate_summary.json</text>
-  <text x="36" y="854" fill="#555" font-size="11">交付期：release-bundle/（manifest.json + SHA256 清单 + git 元数据 + 所有工件）</text>
-</svg>
-</p>
+    RUST <-->|"extern 调用 / 合约校验"| VERIFY
+    RUST <-->|"每 tick 执行"| RUNTIME
+```
 
 ---
 
