@@ -1177,3 +1177,63 @@ fn parses_analog_pressure_demo_example_into_verified_ir_json() {
         Value::String("通过".to_string())
     );
 }
+
+#[test]
+fn parses_three_station_assembly_example_into_verified_ir_json() {
+    let source = read_example("three_station_assembly.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("three_station_assembly example should compile");
+    let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
+    assert!(matches!(safety_level, "完备证明" | "有界验证"));
+    assert_eq!(ir_json["verification"]["liveness"]["level"], Value::String("通过".to_string()));
+    assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
+    assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
+}
+
+#[test]
+fn parses_hydraulic_bender_example_into_verified_ir_json() {
+    let source = read_example("hydraulic_bender.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("hydraulic_bender example should compile");
+    let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
+    assert!(matches!(safety_level, "完备证明" | "有界验证"));
+    assert_eq!(ir_json["verification"]["liveness"]["level"], Value::String("通过".to_string()));
+    assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
+    assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
+}
+
+#[test]
+fn parses_dual_axis_platform_example_into_verified_ir_json() {
+    let source = read_example("dual_axis_platform.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("dual_axis_platform example should compile");
+    let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
+    assert!(matches!(safety_level, "完备证明" | "有界验证"));
+    assert_eq!(ir_json["verification"]["liveness"]["level"], Value::String("通过".to_string()));
+    assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
+    assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
+}
+
+#[test]
+fn parses_thermal_oven_example_into_verified_ir_json() {
+    let source = read_example("thermal_oven.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("thermal_oven example should compile");
+    let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
+    assert!(matches!(safety_level, "完备证明" | "有界验证"));
+    assert_eq!(ir_json["verification"]["liveness"]["level"], Value::String("通过".to_string()));
+    assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
+    assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
+}
+
+#[test]
+fn parses_welding_station_example_into_verified_ir_json() {
+    let source = read_example("welding_station.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("welding_station example should compile");
+    let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
+    assert!(matches!(safety_level, "完备证明" | "有界验证"));
+    assert_eq!(ir_json["verification"]["liveness"]["level"], Value::String("通过".to_string()));
+    assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
+    assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
+}
