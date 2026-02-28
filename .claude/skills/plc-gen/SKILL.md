@@ -137,6 +137,7 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 - 使用 `pid` 设备类型，声明 `pv`（过程变量）、`sp`（设定值）、`kp/ki/kd`、`out`（输出）、`period_ms`、`limit`。
 - PID 设备自动关联 `analog_input`（pv）和 `analog_output`（out）。
 - 参考 fixture：`13_analog_pid_loop.plc`。
+- **⚠️ `pv`/`out` 必须与 `analog_input`/`analog_output` 设备名完全一致**，且这些设备名必须与 `plc_main.ports` 中的端口名匹配（如 `AI0`、`AO0`）。不能用描述性名称（如 `AI_pressure`）——编译器按名称解析 PID 的 pv/out 绑定。参考 `pid_loop.plc` 的命名方式。
 
 ### Extern Rust 函数指引
 
@@ -445,7 +446,7 @@ action: call <name>(<arg>, ...) -> (out_a, out_b, out_c)
 | `plc` | PLC 控制器本体 | `purpose`(必填), `ports` | — |
 | `solenoid_valve` | 电磁阀 | `purpose`(必填), `response_time`, `states`(可选) | 默认 `on`, `off`（可用 `states: [...]` 自定义） |
 | `cylinder` | 气缸 | `purpose`(必填), `stroke_time`, `retract_time`, `states`(可选) | 默认 `extended`, `retracted`（可用 `states: [...]` 自定义） |
-| `motor` | 电机 | `purpose`(必填), `rated_speed`, `ramp_time` | `on`, `off` |
+| `motor` | 电机 | `purpose`(必填), `rated_speed`, `ramp_time` | `run.on`, `run.off`（safety 约束中用 `motor_x.run.on`；task 中用 `action: set motor_x on/off`） |
 | `sensor` | 离散传感器 | `purpose`(必填), `subtype`(标准做法), `debounce` | `on`, `off` |
 | `analog_input` | 模拟量输入 | `purpose`(必填), `range`(必填), `unit`(必填), `external` | 数值比较 |
 | `analog_output` | 模拟量输出 | `purpose`(必填), `range`(必填), `unit` | 数值设定 |
@@ -604,12 +605,15 @@ step detect:
 - 声明了 `conflicts_with` 的两个状态不能在任何可达路径中同时为真
 - `parallel` 块中不能同时触发冲突状态
 - 顺序执行天然安全（前一个缩回后下一个才伸出）
+- **⚠️ 跨循环 BMC 陷阱**：两个状态若分别出现在同一 task 的不同分支（如 `eject_good` 路径 vs `eject_bad` 路径），BMC 会跨循环探测，误认为它们可以同时为真。此时不要用 `conflicts_with`，顺序控制已保证互斥。
+- **⚠️ `external: true` 模拟量不能用于 `conflicts_with`**：BMC 把外部输入视为每步自由变量，`safety: AI0 > 90 conflicts_with ...` 永远无法证明安全。超压/超温保护应通过任务逻辑（`wait: AI0 < 阈值` + `timeout -> goto fault_handler`）实现，而非 `conflicts_with` 约束。
 
 ### Liveness（活性）
 - 每个 `wait` 必须有 `timeout`，除非标记了 `allow_indefinite_wait: true`
 - `allow_indefinite_wait` 仅用于人工触发的等待（如启动按钮）
 - 每个 task 需要 `on_complete`。若最后一步的所有路径都通过 goto 离开（if/else 两分支都 goto、race 所有分支都有 then: goto 且有 timeout -> goto），可省略。
 - 不能有孤立的死胡同状态
+- **⚠️ `parallel` 后必须跟至少一个 step**：`parallel` 块的 join node 需要后续 step 才有出边。如果 `parallel` 是 task 的最后一个 step，直接跟 `on_complete` 会导致 Liveness 失败。正确做法：在 `parallel` 之后加一个日志或确认 step，再写 `on_complete`。
 
 ### Timing（时序）
 - `must_complete_within`：基于动作/延时的关键路径估计（忽略 timeout 上界），更贴近"设备实际动作时间 + 固定 delay"。并行动作取最大值。
@@ -623,6 +627,7 @@ step detect:
 - `wait: sensor == false` 与 `== true` 的因果检查完全相同
 - AND/OR wait 中的每个传感器都会被独立检查
 - parallel 块中跨分支的无关因果配对会被自动跳过（不会误报）
+- **⚠️ 同一 step 多个 action 导致因果误配**：因果引擎将 step 中**最后一个** action 与后续 `wait` 配对。如果一个 step 同时包含 `set_analog` 和 `set <valve> on`，引擎会用 `set_analog` 的目标（AO 设备）去匹配 `wait: sensor == true`，找不到拓扑路径就报错。**修复**：将不同类型的 action 拆分到独立 step，确保每个 step 只有一个"驱动动作"紧跟其对应的 `wait`。
 
 **race 块注意事项：**
 - 每个 branch 需要 `wait:` + `then: goto`，step 级需要 `timeout:`
@@ -839,9 +844,14 @@ task done:
 | `two_cylinder.plc` | 双气缸顺序动作 | 基础顺序、conflicts_with、plc_main + relation |
 | `assembly_station.plc` | 双传送带+推缸+压装+出料 | 多设备顺序、requires vs conflicts_with、timing |
 | `analog_pressure_demo.plc` | 液压站比例阀压力控制 | analog_input/output、set_analog、external、阈值 wait |
-| `pid_loop.plc` | PID 闭环压力控制 | pid 设备、analog I/O |
+| `pid_loop.plc` | PID 闭环压力控制 | pid 设备、analog I/O、AI0/AO0 命名规范 |
 | `nuclear_coolant_isolation.plc` | 核电站隔离阀控制 | SIL3 双冗余传感器、OR 容错、parallel 并行关阀、严格时序硬限 |
 | `quadratic_fit.plc` | 二次函数拟合（DSL compute 版） | variable 声明、action: compute、复杂算术展开 |
+| `three_station_assembly.plc` | 三工位装配线（推料→压装→检测→出料） | parallel、requires、timing、if-else 质检分流 |
+| `hydraulic_bender.plc` | 液压折弯机（压力闭环+行程控制） | pid、analog_input、must_complete_within_worst_case、set_analog 分 step |
+| `dual_axis_platform.plc` | 双轴运动平台（X/Y 轴+碰撞防护） | motor.run.on 语法、parallel 内 conflicts_with、race |
+| `thermal_oven.plc` | 温控烘箱（PID 温控+超温保护） | pid、if-else 分支、external 模拟量任务逻辑保护 |
+| `welding_station.plc` | 焊接工作站（夹紧→焊接→冷却→松开） | parallel、repeat、allow_indefinite_wait、parallel 后补 step |
 
 `.system.md` 参考样板：
 
@@ -875,3 +885,9 @@ task done:
 - [ ] extern function 调用是否使用 `action: call ... -> ...` 语法（不在表达式中）？
 - [ ] 如果需要 extern 错误处理，是否声明了 `variable last_error: int = 0`？
 - [ ] 复杂计算是否优先考虑 extern function 而非冗长的 `action: compute` 链？
+- [ ] `parallel` 块之后是否跟了至少一个 step（而非直接 `on_complete`）？
+- [ ] 同一 step 中是否只有一个"驱动动作"紧跟其对应的 `wait`（避免多 action 导致因果误配）？
+- [ ] `motor` 设备在 `safety:` 约束中是否使用 `motor_x.run.on` 而非 `motor_x.on`？
+- [ ] PID 的 `pv`/`out` 名称是否与 `analog_input`/`analog_output` 设备名及 `plc_main.ports` 端口名完全一致？
+- [ ] `external: true` 的模拟量是否避免了 `conflicts_with` 约束（改用任务逻辑保护）？
+- [ ] 两个状态若只在不同分支路径中出现（顺序互斥），是否避免了 `conflicts_with`（防止 BMC 跨循环误报）？

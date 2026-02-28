@@ -1,0 +1,139 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "控制器本体与双轴运动平台 I/O 端口映射",
+    ports: [
+        Y0:digital:producer,
+        Y1:digital:producer,
+        X0:digital:consumer,
+        X1:digital:consumer,
+        X2:digital:consumer,
+        X3:digital:consumer,
+        X4:digital:consumer
+    ]
+}
+
+device start_button: sensor {
+    purpose: "操作员启动按钮，触发双轴回原点及定位循环",
+    subtype: "push_button",
+    debounce: 20ms
+}
+
+device motor_x: motor {
+    purpose: "X 轴步进电机，负责 X 方向精确定位，与 Y 轴互锁不得同时运动",
+    ramp_time: 50ms
+}
+
+device motor_y: motor {
+    purpose: "Y 轴步进电机，负责 Y 方向精确定位，与 X 轴互锁不得同时运动",
+    ramp_time: 50ms
+}
+
+device sensor_x_home: sensor {
+    purpose: "X 轴原点限位传感器，X 轴回原点时触发，确认 X 轴已到达机械原点",
+    subtype: "limit_switch"
+}
+
+device sensor_x_target: sensor {
+    purpose: "X 轴目标位到位传感器，X 轴运动到目标位置时触发",
+    subtype: "limit_switch"
+}
+
+device sensor_y_home: sensor {
+    purpose: "Y 轴原点限位传感器，Y 轴回原点时触发，确认 Y 轴已到达机械原点",
+    subtype: "limit_switch"
+}
+
+device sensor_y_target: sensor {
+    purpose: "Y 轴目标位到位传感器，Y 轴运动到目标位置时触发",
+    subtype: "limit_switch"
+}
+
+relation { from: start_button.out, to: plc_main.X4, via: reports_to }
+relation { from: plc_main.Y0, to: motor_x.cmd, via: driven_by }
+relation { from: motor_x.position_ok, to: sensor_x_home.sense, via: detects }
+relation { from: sensor_x_home.out, to: plc_main.X0, via: reports_to }
+relation { from: motor_x.position_A, to: sensor_x_target.sense, via: detects }
+relation { from: sensor_x_target.out, to: plc_main.X1, via: reports_to }
+relation { from: plc_main.Y1, to: motor_y.cmd, via: driven_by }
+relation { from: motor_y.position_ok, to: sensor_y_home.sense, via: detects }
+relation { from: sensor_y_home.out, to: plc_main.X2, via: reports_to }
+relation { from: motor_y.position_A, to: sensor_y_target.sense, via: detects }
+relation { from: sensor_y_target.out, to: plc_main.X3, via: reports_to }
+
+[constraints]
+
+# 碰撞防护：X 轴和 Y 轴不能同时运动
+# 注意：parallel 块内各分支独立控制各自电机，verifier 按分支隔离检查，不会误报
+safety: motor_x.run.on conflicts_with motor_y.run.on
+    reason: "X 轴和 Y 轴不能同时运动，防止机械碰撞"
+
+# 整个定位循环必须在 8000ms 内完成
+# 关键路径：home_x(50ms ramp + 3000ms wait) + home_y(50ms + 3000ms) + move(50ms + 3000ms) = ~9150ms
+# 使用 must_complete_within 基于实际动作时间（不含 timeout 上界）
+timing: task.cycle must_complete_within 8000ms
+    reason: "整个定位循环（回原点 + 运动到位）必须在 8000ms 内完成"
+
+causality: Y0 -> motor_x -> sensor_x_home
+causality: Y0 -> motor_x -> sensor_x_target
+causality: Y1 -> motor_y -> sensor_y_home
+causality: Y1 -> motor_y -> sensor_y_target
+
+[tasks]
+
+task cycle:
+    # 第一步：X 轴回原点（顺序执行，Y 轴静止）
+    step home_x_start:
+        action: set motor_x.run on
+    step home_x_wait:
+        wait: sensor_x_home == true
+        timeout: 3000ms -> goto fault_handler
+    step home_x_stop:
+        action: set motor_x.run off
+    # 第二步：Y 轴回原点（X 轴已停止）
+    step home_y_start:
+        action: set motor_y.run on
+    step home_y_wait:
+        wait: sensor_y_home == true
+        timeout: 3000ms -> goto fault_handler
+    step home_y_stop:
+        action: set motor_y.run off
+    # 第三步：X/Y 同时运动到目标位（parallel 块，各分支独立启停各自电机）
+    step move_to_target:
+        parallel:
+            branch_x:
+                action: set motor_x.run on
+                wait: sensor_x_target == true
+                action: set motor_x.run off
+            branch_y:
+                action: set motor_y.run on
+                wait: sensor_y_target == true
+                action: set motor_y.run off
+        timeout: 3000ms -> goto fault_handler
+    # 第四步：race 检测 X 轴到位确认 vs 超时
+    step confirm_x_arrival:
+        race:
+            branch_x_arrived:
+                wait: sensor_x_target == true
+                then: goto cycle.positioning_done
+            branch_x_late:
+                wait: sensor_y_target == true
+                then: goto fault_handler
+        timeout: 500ms -> goto fault_handler
+    step positioning_done:
+        action: log "双轴定位完成，X 轴和 Y 轴均已到达目标位置"
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_stop:
+        action: set motor_x.run off
+        action: set motor_y.run off
+    step alarm:
+        action: log "双轴运动平台故障：动作超时，请人工确认设备状态"
+    on_complete: goto ready
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle

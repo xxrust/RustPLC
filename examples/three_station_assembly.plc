@@ -1,0 +1,297 @@
+# ============================================================
+# 三工位装配线控制系统
+# 工艺：推料 → 压装 → 检测+出料
+# 详见 three_station_assembly.system.md
+# ============================================================
+
+[topology]
+
+device plc_main: plc {
+    purpose: "控制器本体与三工位装配线 I/O 端口映射",
+    ports: [
+        Y0:digital:producer,
+        Y1:digital:producer,
+        Y2:digital:producer,
+        Y3:digital:producer,
+        X0:digital:consumer,
+        X1:digital:consumer,
+        X2:digital:consumer,
+        X3:digital:consumer,
+        X4:digital:consumer,
+        X5:digital:consumer,
+        X6:digital:consumer,
+        X7:digital:consumer,
+        X8:digital:consumer,
+        X9:digital:consumer,
+        X10:digital:consumer,
+        X11:digital:consumer
+    ]
+}
+
+# ===== 操作员接口 =====
+
+device start_button: sensor {
+    purpose: "操作员启动按钮，触发三工位装配线一个完整节拍",
+    subtype: "push_button",
+    debounce: 20ms
+}
+
+# ===== 工位1：推料缸 =====
+
+device valve_push: solenoid_valve {
+    purpose: "驱动推料缸将工件从料仓推入压装工位的电磁阀",
+    response_time: 20ms
+}
+
+device cyl_push: cylinder {
+    purpose: "工位1推料气缸，将工件从料仓推入压装工位，压装期间须保持伸出",
+    stroke_time: 500ms,
+    retract_time: 500ms
+}
+
+device sensor_push_ext: sensor {
+    purpose: "检测推料缸已完全伸出到位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_push_ret: sensor {
+    purpose: "检测推料缸已完全缩回到位的限位开关",
+    subtype: "limit_switch"
+}
+
+# ===== 工位2：压装缸 =====
+
+device valve_press: solenoid_valve {
+    purpose: "驱动压装缸下压完成零件压入的电磁阀，动作前须确认推料缸已到位",
+    response_time: 20ms
+}
+
+device cyl_press: cylinder {
+    purpose: "工位2压装气缸，执行零件压入动作，必须在推料缸到位后才能动作",
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device sensor_press_ext: sensor {
+    purpose: "检测压装缸已完全下压到位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_press_ret: sensor {
+    purpose: "检测压装缸已完全抬起复位的限位开关",
+    subtype: "limit_switch"
+}
+
+# ===== 工位3：检测传感器 =====
+
+device sensor_quality_ok: sensor {
+    purpose: "工位3压装质量检测传感器，检测压装是否合格（到位即合格）",
+    subtype: "proximity_sensor"
+}
+
+device sensor_quality_ng: sensor {
+    purpose: "工位3压装质量不合格检测传感器，检测压装高度超差（废品信号）",
+    subtype: "proximity_sensor"
+}
+
+# ===== 工位3：出料缸（成品） =====
+
+device valve_eject: solenoid_valve {
+    purpose: "驱动出料缸将合格成品推出工位的电磁阀",
+    response_time: 20ms
+}
+
+device cyl_eject: cylinder {
+    purpose: "工位3出料气缸，将检测合格的成品推出装配工位",
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device sensor_eject_ext: sensor {
+    purpose: "检测出料缸已完全伸出推料到位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_eject_ret: sensor {
+    purpose: "检测出料缸已完全缩回复位的限位开关",
+    subtype: "limit_switch"
+}
+
+# ===== 工位3：废品缸 =====
+
+device valve_reject: solenoid_valve {
+    purpose: "驱动废品缸将不合格工件推入废品通道的电磁阀",
+    response_time: 20ms
+}
+
+device cyl_reject: cylinder {
+    purpose: "工位3废品缸，将检测不合格的工件推入废品通道",
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device sensor_reject_ext: sensor {
+    purpose: "检测废品缸已完全伸出到位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_reject_ret: sensor {
+    purpose: "检测废品缸已完全缩回到位的限位开关",
+    subtype: "limit_switch"
+}
+
+# ===== 拓扑关系 =====
+
+# 启动按钮 → PLC
+relation { from: start_button.out, to: plc_main.X11, via: reports_to }
+
+# PLC → 推料阀 → 推料缸
+relation { from: plc_main.Y0, to: valve_push.coil, via: driven_by }
+relation { from: valve_push.out, to: cyl_push.cmd, via: driven_by }
+relation { from: cyl_push.extended, to: sensor_push_ext.sense, via: detects }
+relation { from: sensor_push_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_push.retracted, to: sensor_push_ret.sense, via: detects }
+relation { from: sensor_push_ret.out, to: plc_main.X1, via: reports_to }
+
+# PLC → 压装阀 → 压装缸
+relation { from: plc_main.Y1, to: valve_press.coil, via: driven_by }
+relation { from: valve_press.out, to: cyl_press.cmd, via: driven_by }
+relation { from: cyl_press.extended, to: sensor_press_ext.sense, via: detects }
+relation { from: sensor_press_ext.out, to: plc_main.X2, via: reports_to }
+relation { from: cyl_press.retracted, to: sensor_press_ret.sense, via: detects }
+relation { from: sensor_press_ret.out, to: plc_main.X3, via: reports_to }
+
+# 质量检测传感器 → PLC
+relation { from: sensor_quality_ok.out, to: plc_main.X4, via: reports_to }
+relation { from: sensor_quality_ng.out, to: plc_main.X5, via: reports_to }
+
+# PLC → 出料阀 → 出料缸
+relation { from: plc_main.Y2, to: valve_eject.coil, via: driven_by }
+relation { from: valve_eject.out, to: cyl_eject.cmd, via: driven_by }
+relation { from: cyl_eject.extended, to: sensor_eject_ext.sense, via: detects }
+relation { from: sensor_eject_ext.out, to: plc_main.X6, via: reports_to }
+relation { from: cyl_eject.retracted, to: sensor_eject_ret.sense, via: detects }
+relation { from: sensor_eject_ret.out, to: plc_main.X7, via: reports_to }
+
+# PLC → 废品阀 → 废品缸
+relation { from: plc_main.Y3, to: valve_reject.coil, via: driven_by }
+relation { from: valve_reject.out, to: cyl_reject.cmd, via: driven_by }
+relation { from: cyl_reject.extended, to: sensor_reject_ext.sense, via: detects }
+relation { from: sensor_reject_ext.out, to: plc_main.X8, via: reports_to }
+relation { from: cyl_reject.retracted, to: sensor_reject_ret.sense, via: detects }
+relation { from: sensor_reject_ret.out, to: plc_main.X9, via: reports_to }
+
+[constraints]
+
+# 压装时推料缸必须保持伸出（工件定位）
+safety: cyl_press.extended requires cyl_push.extended
+    reason: "压装时推料缸必须保持伸出以固定工件位置，防止压装偏移"
+
+# 整个节拍循环必须在 10000ms 内完成
+timing: task.cycle must_complete_within 10000ms
+    reason: "三工位装配线节拍要求：完整循环（推料+压装+检测+出料）必须在 10 秒内完成"
+
+# 因果链（文档可读性）
+causality: Y0 -> valve_push -> cyl_push -> sensor_push_ext
+    reason: "推料缸伸出应能被传感器检测"
+
+causality: Y0 -> valve_push -> cyl_push -> sensor_push_ret
+    reason: "推料缸缩回应能被传感器检测"
+
+causality: Y1 -> valve_press -> cyl_press -> sensor_press_ext
+    reason: "压装缸伸出应能被传感器检测"
+
+causality: Y1 -> valve_press -> cyl_press -> sensor_press_ret
+    reason: "压装缸缩回应能被传感器检测"
+
+causality: Y2 -> valve_eject -> cyl_eject -> sensor_eject_ext
+    reason: "出料缸伸出应能被传感器检测"
+
+causality: Y2 -> valve_eject -> cyl_eject -> sensor_eject_ret
+    reason: "出料缸缩回应能被传感器检测"
+
+causality: Y3 -> valve_reject -> cyl_reject -> sensor_reject_ext
+    reason: "废品缸伸出应能被传感器检测"
+
+causality: Y3 -> valve_reject -> cyl_reject -> sensor_reject_ret
+    reason: "废品缸缩回应能被传感器检测"
+
+[tasks]
+
+# ===== 主循环 =====
+
+task cycle:
+    step push_out:
+        action: extend cyl_push
+        wait: sensor_push_ext == true
+        timeout: 800ms -> goto fault_handler
+    step press_down:
+        action: extend cyl_press
+        wait: sensor_press_ext == true
+        timeout: 500ms -> goto fault_handler
+    step press_up:
+        action: retract cyl_press
+        wait: sensor_press_ret == true
+        timeout: 500ms -> goto fault_handler
+    step check_quality:
+        wait: sensor_quality_ok == true OR sensor_quality_ng == true
+        timeout: 1000ms -> goto fault_handler
+    step route_part:
+        if: sensor_quality_ok == true goto eject_good else: goto eject_bad
+    on_complete: goto ready
+
+task eject_good:
+    step eject_out:
+        action: extend cyl_eject
+        wait: sensor_eject_ext == true
+        timeout: 500ms -> goto fault_handler
+    step retract_all_good:
+        parallel:
+            branch_eject:
+                action: retract cyl_eject
+                wait: sensor_eject_ret == true
+            branch_push:
+                action: retract cyl_push
+                wait: sensor_push_ret == true
+        timeout: 800ms -> goto fault_handler
+    step good_done:
+        action: log "合格品出料完成，准备下一节拍"
+    on_complete: goto ready
+
+task eject_bad:
+    step reject_out:
+        action: extend cyl_reject
+        wait: sensor_reject_ext == true
+        timeout: 500ms -> goto fault_handler
+    step retract_all_bad:
+        parallel:
+            branch_reject:
+                action: retract cyl_reject
+                wait: sensor_reject_ret == true
+            branch_push:
+                action: retract cyl_push
+                wait: sensor_push_ret == true
+        timeout: 800ms -> goto fault_handler
+    step bad_done:
+        action: log "废品出料完成，准备下一节拍"
+    on_complete: goto ready
+
+# ===== 故障处理 =====
+
+task fault_handler:
+    step safe_retract:
+        action: retract cyl_press
+        action: retract cyl_push
+        action: retract cyl_eject
+        action: retract cyl_reject
+    step alarm:
+        action: log "三工位装配线故障：动作超时，请人工确认设备状态"
+    on_complete: goto ready
+
+# ===== 待机等待启动 =====
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle

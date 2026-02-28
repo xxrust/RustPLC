@@ -1,0 +1,139 @@
+# ============================================================
+# 温控烘箱控制系统
+# PID 温控 + 超温保护 + 保温延时 + 条件分支 + 冷却阶段
+# ============================================================
+
+[topology]
+
+# ===== 控制器 =====
+device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
+    ports: [Y0:digital:producer, X0:digital:consumer, AI0:analog:consumer, AO0:analog:producer]
+}
+
+# ===== 模拟量 I/O =====
+device AI0: analog_input {
+    purpose: "腔体温度传感器（PT100），量程 0-300°C，用于 PID 反馈和超温检测",
+    range: 0..300,
+    unit: "°C",
+    external: true
+}
+
+device AO0: analog_output {
+    purpose: "加热器功率指令输出，0-100% 对应 SSR 占空比全关到全开",
+    range: 0..100,
+    unit: "%"
+}
+
+# ===== PID 控制器 =====
+device pid_temp: pid {
+    purpose: "腔体温度闭环 PID 控制器，设定值 150°C，控制加热器功率",
+    pv: AI0,
+    sp: 150,
+    kp: 3.0,
+    ki: 0.8,
+    kd: 0.1,
+    out: AO0,
+    period_ms: 200,
+    limit: 0..100
+}
+
+# ===== 数字量 I/O =====
+device heater: digital_output {
+    purpose: "加热器使能信号，通过固态继电器（SSR）控制加热器通断"
+}
+
+device start_button: sensor {
+    purpose: "操作员启动按钮，触发烘箱加热工艺流程",
+    subtype: "push_button",
+    debounce: 20ms
+}
+
+# ===== 拓扑关系 =====
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+
+[constraints]
+
+# 时序约束：升温+保温阶段应在 15 秒内完成
+timing: task.heat must_complete_within 15000ms
+    reason: "升温阶段（含保温）应在 15 秒内完成"
+
+[tasks]
+
+# ===== 加热主流程 =====
+task heat:
+    step check_safe_temp:
+        wait: AI0 < 180
+        timeout: 5000ms -> goto fault_handler
+
+    step enable_heater:
+        action: set heater on
+        action: log "加热器已开启，PID 开始升温至 150°C"
+
+    step wait_temp_stable:
+        wait: AI0 >= 145
+        timeout: 10000ms -> goto fault_handler
+
+    step hold_temp:
+        action: log "温度已稳定，开始保温 5000ms"
+        delay: 5000ms
+
+    step check_temp:
+        if: AI0 >= 145 goto complete.finish else: goto reheat.start
+
+# ===== 正常完成流程 =====
+task complete:
+    step finish:
+        action: log "保温完成，温度合格，关闭加热器进入冷却"
+        action: set heater off
+    on_complete: goto cool
+
+# ===== 重新加热流程（温度跌落时） =====
+task reheat:
+    step check_safe_temp:
+        wait: AI0 < 180
+        timeout: 5000ms -> goto fault_handler
+
+    step start:
+        action: log "温度跌落，重新加热至目标温度"
+        action: set heater on
+
+    step wait_reheat_stable:
+        wait: AI0 >= 145
+        timeout: 10000ms -> goto fault_handler
+
+    step reheat_hold:
+        action: log "重新加热稳定，保温 5000ms"
+        delay: 5000ms
+
+    step reheat_done:
+        action: log "重新加热完成，关闭加热器"
+        action: set heater off
+    on_complete: goto cool
+
+# ===== 冷却阶段 =====
+task cool:
+    step wait_cool:
+        action: log "等待腔体冷却至 50°C 以下"
+        wait: AI0 < 50
+        timeout: 120000ms -> goto fault_handler
+
+    step cool_done:
+        action: log "冷却完成，系统回到就绪状态"
+    on_complete: goto ready
+
+# ===== 故障处理 =====
+task fault_handler:
+    step safe_stop:
+        action: set heater off
+        action: set_analog AO0 0
+    step alarm:
+        action: log "故障报警：超温或等待超时，加热器已关闭，请人工检查"
+    on_complete: goto ready
+
+# ===== 就绪等待 =====
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto heat

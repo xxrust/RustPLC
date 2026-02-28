@@ -1,0 +1,195 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "焊接工作站控制器本体与工艺 I/O 端口映射",
+    ports: [
+        Y0:digital:producer,
+        Y1:digital:producer,
+        Y2:digital:producer,
+        Y3:digital:producer,
+        X0:digital:consumer,
+        X1:digital:consumer,
+        X2:digital:consumer,
+        X3:digital:consumer,
+        X4:digital:consumer,
+        X5:digital:consumer,
+        X6:digital:consumer
+    ]
+}
+
+device confirm_button: sensor {
+    purpose: "操作员放置工件后按下的确认按钮，触发自动焊接节拍",
+    subtype: "push_button",
+    debounce: 20ms
+}
+
+device valve_clamp_A: solenoid_valve {
+    purpose: "驱动夹紧缸A夹紧/松开工件的气动电磁阀",
+    response_time: 20ms
+}
+
+device cyl_clamp_A: cylinder {
+    purpose: "左侧夹紧气缸，焊接期间须保持夹紧状态，与焊枪下降互锁",
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device sensor_clamp_A_ext: sensor {
+    purpose: "检测夹紧缸A已完全夹紧到位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_clamp_A_ret: sensor {
+    purpose: "检测夹紧缸A已完全松开复位的限位开关",
+    subtype: "limit_switch"
+}
+
+device valve_clamp_B: solenoid_valve {
+    purpose: "驱动夹紧缸B夹紧/松开工件的气动电磁阀",
+    response_time: 20ms
+}
+
+device cyl_clamp_B: cylinder {
+    purpose: "右侧夹紧气缸，焊接期间须保持夹紧状态，与焊枪下降互锁",
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device sensor_clamp_B_ext: sensor {
+    purpose: "检测夹紧缸B已完全夹紧到位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_clamp_B_ret: sensor {
+    purpose: "检测夹紧缸B已完全松开复位的限位开关",
+    subtype: "limit_switch"
+}
+
+device valve_weld: solenoid_valve {
+    purpose: "驱动焊枪升降缸下降/抬起的气动电磁阀，动作前须确认双侧夹紧缸已到位",
+    response_time: 20ms
+}
+
+device cyl_weld: cylinder {
+    purpose: "焊枪升降气缸，伸出时焊枪下降至焊接位，夹紧缸必须保持夹紧",
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device sensor_weld_ext: sensor {
+    purpose: "检测焊枪已下降到焊接位的限位开关",
+    subtype: "limit_switch"
+}
+
+device sensor_weld_ret: sensor {
+    purpose: "检测焊枪已抬起复位的限位开关",
+    subtype: "limit_switch"
+}
+
+device motor_fan: motor {
+    purpose: "焊后冷却风扇电机，焊枪抬起后开启固定延时冷却",
+    rated_speed: 1450rpm,
+    ramp_time: 50ms
+}
+
+relation { from: confirm_button.out, to: plc_main.X6, via: reports_to }
+
+relation { from: plc_main.Y0, to: valve_clamp_A.coil, via: driven_by }
+relation { from: valve_clamp_A.out, to: cyl_clamp_A.cmd, via: driven_by }
+relation { from: cyl_clamp_A.extended, to: sensor_clamp_A_ext.sense, via: detects }
+relation { from: sensor_clamp_A_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_clamp_A.retracted, to: sensor_clamp_A_ret.sense, via: detects }
+relation { from: sensor_clamp_A_ret.out, to: plc_main.X1, via: reports_to }
+
+relation { from: plc_main.Y1, to: valve_clamp_B.coil, via: driven_by }
+relation { from: valve_clamp_B.out, to: cyl_clamp_B.cmd, via: driven_by }
+relation { from: cyl_clamp_B.extended, to: sensor_clamp_B_ext.sense, via: detects }
+relation { from: sensor_clamp_B_ext.out, to: plc_main.X2, via: reports_to }
+relation { from: cyl_clamp_B.retracted, to: sensor_clamp_B_ret.sense, via: detects }
+relation { from: sensor_clamp_B_ret.out, to: plc_main.X3, via: reports_to }
+
+relation { from: plc_main.Y2, to: valve_weld.coil, via: driven_by }
+relation { from: valve_weld.out, to: cyl_weld.cmd, via: driven_by }
+relation { from: cyl_weld.extended, to: sensor_weld_ext.sense, via: detects }
+relation { from: sensor_weld_ext.out, to: plc_main.X4, via: reports_to }
+relation { from: cyl_weld.retracted, to: sensor_weld_ret.sense, via: detects }
+relation { from: sensor_weld_ret.out, to: plc_main.X5, via: reports_to }
+
+relation { from: plc_main.Y3, to: motor_fan.cmd, via: driven_by }
+
+[constraints]
+
+# 焊枪下降时，夹紧缸A必须保持夹紧（顺序控制保证先夹紧再焊接）
+safety: cyl_weld.extended requires cyl_clamp_A.extended
+    reason: "焊枪下降时夹紧缸A必须保持夹紧，防止工件移位"
+
+# 焊枪下降时，夹紧缸B必须保持夹紧
+safety: cyl_weld.extended requires cyl_clamp_B.extended
+    reason: "焊枪下降时夹紧缸B必须保持夹紧，防止工件移位"
+
+causality: Y0 -> valve_clamp_A -> cyl_clamp_A -> sensor_clamp_A_ext
+    reason: "夹紧缸A伸出应能被传感器检测"
+
+causality: Y1 -> valve_clamp_B -> cyl_clamp_B -> sensor_clamp_B_ext
+    reason: "夹紧缸B伸出应能被传感器检测"
+
+causality: Y2 -> valve_weld -> cyl_weld -> sensor_weld_ext
+    reason: "焊枪下降应能被传感器检测"
+
+timing: task.cycle must_complete_within 30000ms
+    reason: "三次焊接节拍（夹紧+3×(焊接+冷却)+松开）应在30秒内完成"
+
+[tasks]
+
+# cycle 任务：先并行夹紧，再重复3次焊接+冷却，最后并行松开
+# 注意：repeat 不能嵌套在 parallel 内，parallel 的 wait 必须在独立 step 中
+task cycle:
+    step clamp_start:
+        parallel:
+            branch_A:
+                action: extend cyl_clamp_A
+            branch_B:
+                action: extend cyl_clamp_B
+    step clamp_wait:
+        wait: sensor_clamp_A_ext == true AND sensor_clamp_B_ext == true
+        timeout: 600ms -> goto fault_handler
+    step weld_cycles:
+        repeat 3:
+            action: extend cyl_weld
+            wait: sensor_weld_ext == true
+            timeout: 600ms -> goto fault_handler
+            delay: 3000ms
+            action: retract cyl_weld
+            wait: sensor_weld_ret == true
+            timeout: 600ms -> goto fault_handler
+    step cool_cycles:
+        repeat 3:
+            action: set motor_fan.run on
+            delay: 5000ms
+            action: set motor_fan.run off
+    step release_start:
+        parallel:
+            branch_A:
+                action: retract cyl_clamp_A
+            branch_B:
+                action: retract cyl_clamp_B
+    step release_wait:
+        wait: sensor_clamp_A_ret == true AND sensor_clamp_B_ret == true
+        timeout: 600ms -> goto fault_handler
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_retract:
+        action: retract cyl_weld
+        action: retract cyl_clamp_A
+        action: retract cyl_clamp_B
+        action: set motor_fan.run off
+    step alarm:
+        action: log "焊接工作站故障：动作超时，请人工确认设备状态后重新启动"
+    on_complete: goto ready
+
+task ready:
+    step wait_confirm:
+        wait: confirm_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle
