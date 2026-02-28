@@ -137,8 +137,8 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added registry bootstrapped built-in math externs (add/multiply/quadratic_fit) with quadratic singular-matrix runtime error path and unit coverage for happy path + invalid arg counts"
     },
     {
       "id": "US-010",

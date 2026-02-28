@@ -156,13 +156,17 @@ impl Default for ExternFunctionRegistry {
 impl ExternFunctionRegistry {
     pub fn new() -> Self {
         let start = Instant::now();
-        Self {
+        let mut registry = Self {
             functions: HashMap::new(),
             time_source: Arc::new(move || {
                 let elapsed = start.elapsed().as_micros();
                 elapsed.min(u128::from(u64::MAX)) as u64
             }),
-        }
+        };
+        registry
+            .register_builtin_math_functions()
+            .expect("built-in extern functions should register");
+        registry
     }
 
     pub fn with_time_source(time_source: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
@@ -170,6 +174,13 @@ impl ExternFunctionRegistry {
             functions: HashMap::new(),
             time_source: Arc::new(time_source),
         }
+    }
+
+    pub fn register_builtin_math_functions(&mut self) -> Result<(), ExternRuntimeError> {
+        self.register(builtin_add_info())?;
+        self.register(builtin_multiply_info())?;
+        self.register(builtin_quadratic_fit_info())?;
+        Ok(())
     }
 
     pub fn register(&mut self, info: ExternFunctionInfo) -> Result<(), ExternRuntimeError> {
@@ -312,6 +323,140 @@ impl ExternFunctionRegistry {
 
         Ok(())
     }
+}
+
+const BUILTIN_ADD: &str = "add";
+const BUILTIN_MULTIPLY: &str = "multiply";
+const BUILTIN_QUADRATIC_FIT: &str = "quadratic_fit";
+const QUADRATIC_FIT_POINT_COUNT: usize = 5;
+const QUADRATIC_FIT_ARG_COUNT: usize = QUADRATIC_FIT_POINT_COUNT * 2;
+const BUILTIN_TIME_BOUND_US: u64 = 1_000_000;
+
+fn builtin_add_info() -> ExternFunctionInfo {
+    ExternFunctionInfo::new(
+        BUILTIN_ADD,
+        vec![VariableType::Float, VariableType::Float],
+        vec![VariableType::Float],
+        ExternFunctionContract {
+            rust_module: "math::basic".to_string(),
+            pure: true,
+            time_bound_us: BUILTIN_TIME_BOUND_US,
+        },
+        builtin_add,
+    )
+}
+
+fn builtin_multiply_info() -> ExternFunctionInfo {
+    ExternFunctionInfo::new(
+        BUILTIN_MULTIPLY,
+        vec![VariableType::Float, VariableType::Float],
+        vec![VariableType::Float],
+        ExternFunctionContract {
+            rust_module: "math::basic".to_string(),
+            pure: true,
+            time_bound_us: BUILTIN_TIME_BOUND_US,
+        },
+        builtin_multiply,
+    )
+}
+
+fn builtin_quadratic_fit_info() -> ExternFunctionInfo {
+    ExternFunctionInfo::new(
+        BUILTIN_QUADRATIC_FIT,
+        vec![VariableType::Float; QUADRATIC_FIT_ARG_COUNT],
+        vec![
+            VariableType::Float,
+            VariableType::Float,
+            VariableType::Float,
+        ],
+        ExternFunctionContract {
+            rust_module: "math::fitting".to_string(),
+            pure: true,
+            time_bound_us: BUILTIN_TIME_BOUND_US,
+        },
+        builtin_quadratic_fit,
+    )
+}
+
+fn builtin_add(args: &[f32]) -> Result<Vec<f32>, String> {
+    Ok(vec![args[0] + args[1]])
+}
+
+fn builtin_multiply(args: &[f32]) -> Result<Vec<f32>, String> {
+    Ok(vec![args[0] * args[1]])
+}
+
+fn builtin_quadratic_fit(args: &[f32]) -> Result<Vec<f32>, String> {
+    let x_values: Vec<f64> = args
+        .iter()
+        .take(QUADRATIC_FIT_POINT_COUNT)
+        .map(|v| f64::from(*v))
+        .collect();
+    let y_values: Vec<f64> = args
+        .iter()
+        .skip(QUADRATIC_FIT_POINT_COUNT)
+        .take(QUADRATIC_FIT_POINT_COUNT)
+        .map(|v| f64::from(*v))
+        .collect();
+    let [a, b, c] = solve_quadratic_fit_coefficients(&x_values, &y_values)?;
+    Ok(vec![a as f32, b as f32, c as f32])
+}
+
+fn solve_quadratic_fit_coefficients(
+    x_values: &[f64],
+    y_values: &[f64],
+) -> Result<[f64; 3], String> {
+    let n = x_values.len() as f64;
+    let (sum_x, sum_x2, sum_x3, sum_x4) =
+        x_values
+            .iter()
+            .fold((0.0, 0.0, 0.0, 0.0), |(sx, sx2, sx3, sx4), &x| {
+                let x2 = x * x;
+                (sx + x, sx2 + x2, sx3 + x2 * x, sx4 + x2 * x2)
+            });
+
+    let sum_y = y_values.iter().sum::<f64>();
+    let sum_xy = x_values
+        .iter()
+        .zip(y_values.iter())
+        .map(|(x, y)| x * y)
+        .sum::<f64>();
+    let sum_x2y = x_values
+        .iter()
+        .zip(y_values.iter())
+        .map(|(x, y)| x * x * y)
+        .sum::<f64>();
+
+    let det = n * sum_x2 * sum_x4 + sum_x * sum_x3 * sum_x2 + sum_x2 * sum_x * sum_x3
+        - sum_x2 * sum_x2 * sum_x2
+        - sum_x * sum_x * sum_x4
+        - n * sum_x3 * sum_x3;
+    if det.abs() < 1e-10 {
+        return Err("singular matrix: determinant too small".to_string());
+    }
+
+    let det_a = sum_y * sum_x2 * sum_x4 + sum_xy * sum_x3 * sum_x2 + sum_x2y * sum_x * sum_x3
+        - sum_x2y * sum_x2 * sum_x2
+        - sum_xy * sum_x * sum_x4
+        - sum_y * sum_x3 * sum_x3;
+    let det_b = n * sum_xy * sum_x4 + sum_x * sum_x2y * sum_x2 + sum_x2 * sum_y * sum_x3
+        - sum_x2 * sum_xy * sum_x2
+        - sum_x * sum_y * sum_x4
+        - n * sum_x2y * sum_x3;
+    let det_c = n * sum_x2 * sum_x2y + sum_x * sum_x3 * sum_y + sum_x2 * sum_x * sum_xy
+        - sum_x2 * sum_x2 * sum_y
+        - sum_x * sum_x * sum_x2y
+        - n * sum_x3 * sum_xy;
+
+    let a = det_a / det;
+    let b = det_b / det;
+    let c = det_c / det;
+
+    if !a.is_finite() || !b.is_finite() || !c.is_finite() {
+        return Err("quadratic fit produced non-finite coefficients".to_string());
+    }
+
+    Ok([a, b, c])
 }
 
 #[cfg(test)]
@@ -546,6 +691,114 @@ mod tests {
                 index: 0,
                 min: 2.0,
                 max: 1.0,
+            }
+        );
+    }
+
+    #[test]
+    fn registry_bootstrap_registers_builtin_math_functions() {
+        let registry = ExternFunctionRegistry::new();
+        assert!(registry.get(BUILTIN_ADD).is_some());
+        assert!(registry.get(BUILTIN_MULTIPLY).is_some());
+        assert!(registry.get(BUILTIN_QUADRATIC_FIT).is_some());
+    }
+
+    #[test]
+    fn builtin_add_and_multiply_execute_successfully() {
+        let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+        registry
+            .register_builtin_math_functions()
+            .expect("builtin registration should pass");
+
+        let add = registry
+            .call(BUILTIN_ADD, &[1.5, 2.0])
+            .expect("add should pass");
+        assert_eq!(add, vec![3.5]);
+
+        let multiply = registry
+            .call(BUILTIN_MULTIPLY, &[3.0, 4.0])
+            .expect("multiply should pass");
+        assert_eq!(multiply, vec![12.0]);
+    }
+
+    #[test]
+    fn builtin_quadratic_fit_returns_coefficients_and_reports_singular_matrix() {
+        let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+        registry
+            .register_builtin_math_functions()
+            .expect("builtin registration should pass");
+
+        let fit = registry
+            .call(
+                BUILTIN_QUADRATIC_FIT,
+                &[0.0, 1.0, 2.0, 3.0, 4.0, 1.0, 6.0, 15.0, 28.0, 45.0],
+            )
+            .expect("quadratic fit should pass");
+        assert!(
+            (fit[0] - 1.0).abs() < 1e-4
+                && (fit[1] - 3.0).abs() < 1e-4
+                && (fit[2] - 2.0).abs() < 1e-4,
+            "unexpected coefficients: {fit:?}"
+        );
+
+        let singular = registry
+            .call(
+                BUILTIN_QUADRATIC_FIT,
+                &[1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            )
+            .expect_err("repeated x values should be singular");
+        match singular {
+            ExternRuntimeError::RuntimeError { function, message } => {
+                assert_eq!(function, BUILTIN_QUADRATIC_FIT);
+                assert!(
+                    message.contains("singular matrix"),
+                    "unexpected singular message: {message}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn builtin_math_functions_reject_invalid_argument_counts() {
+        let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+        registry
+            .register_builtin_math_functions()
+            .expect("builtin registration should pass");
+
+        let add_err = registry
+            .call(BUILTIN_ADD, &[1.0])
+            .expect_err("add arity mismatch should fail");
+        assert_eq!(
+            add_err,
+            ExternRuntimeError::InvalidArgCount {
+                function: BUILTIN_ADD.to_string(),
+                expected: 2,
+                got: 1,
+            }
+        );
+
+        let multiply_err = registry
+            .call(BUILTIN_MULTIPLY, &[1.0])
+            .expect_err("multiply arity mismatch should fail");
+        assert_eq!(
+            multiply_err,
+            ExternRuntimeError::InvalidArgCount {
+                function: BUILTIN_MULTIPLY.to_string(),
+                expected: 2,
+                got: 1,
+            }
+        );
+
+        let fit_err = registry
+            .call(BUILTIN_QUADRATIC_FIT, &[0.0; 9])
+            .expect_err("quadratic_fit arity mismatch should fail");
+        assert_eq!(
+            fit_err,
+            ExternRuntimeError::InvalidArgCount {
+                function: BUILTIN_QUADRATIC_FIT.to_string(),
+                expected: QUADRATIC_FIT_ARG_COUNT,
+                got: 9,
             }
         );
     }

@@ -10,6 +10,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - Keep extern declaration contract validation in semantic signature collection (`collect_extern_function_signatures`) so declaration-level diagnostics fire before per-step call-site checks.
 - Keep extern runtime contract checks centralized in `src/extern_functions.rs`; use `ExternFunctionRegistry::with_time_source` in tests so timeout assertions stay deterministic.
 - `Action::CallExtern` executes only through runtime extern-aware APIs (`tick_with_extern` / `tick_with_trace_and_logs_and_extern`); plain `tick*` methods intentionally return `ExternCallRequiresHandler`.
+- `ExternFunctionRegistry::new()` bootstraps built-in math externs (`add`, `multiply`, `quadratic_fit`); deterministic tests built with `with_time_source` must call `register_builtin_math_functions()` explicitly.
 
 ---
 ## [2026-02-28 00:01:57] - US-002
@@ -187,4 +188,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Introducing a new runtime-core `Action` variant requires updating action-match scanners in CLI/reporting paths (`src/main.rs`, `src/sim_regress.rs`) and offline codegen formatting (`crates/codegen/src/lib.rs`) to keep workspace builds green.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `ExternFunctionRegistry::call` returns `Vec<f32>`, so runtime callback adapters must copy returned values into the mutable output slice provided by runtime-core tick APIs.
+---
+## [2026-02-28 10:02:54] - US-009
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added built-in math extern registration to registry bootstrap: `ExternFunctionRegistry::new()` now auto-registers `add`, `multiply`, and `quadratic_fit`.
+  - Implemented built-in extern handlers for `add` and `multiply`, plus least-squares `quadratic_fit` with a deterministic singular-matrix runtime error path.
+  - Added unit coverage for bootstrap registration, happy-path calls (including coefficient checks), and invalid argument-count failures for all three built-ins.
+  - Updated AGENTS guidance and marked US-009 as completed (`passes: true`) in `prd.json`.
+  - Ran `cargo check --workspace` and `cargo test --workspace` successfully.
+- Files changed
+  - AGENTS.md
+  - src/extern_functions.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Built-in extern bootstrap should live in `ExternFunctionRegistry` construction so runtime callers get standard math externs without per-callsite wiring.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - `with_time_source` intentionally constructs an empty registry; tests expecting built-ins must call `register_builtin_math_functions()` before invoking `call`.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `quadratic_fit` currently models `y = a + b*x + c*x^2` and reports singular inputs through `ExternRuntimeError::RuntimeError` message text.
 ---
