@@ -93,13 +93,13 @@ fi
 echo "[2/3] board-parse"
 (
   cd "$REPO_ROOT"
-  cargo run --release -- board-parse --in "$BOARD_LOG" --out-dir "$OUT_DIR"
+  cargo run --release --bin rust_plc -- board-parse --in "$BOARD_LOG" --out-dir "$OUT_DIR"
 )
 
 echo "[3/3] trace-diff --fail-on-mismatch"
 (
   cd "$REPO_ROOT"
-  cargo run --release -- trace-diff \
+  cargo run --release --bin rust_plc -- trace-diff \
     --sil "$SIL" \
     --board "$BOARD_TRACE" \
     --out "$DIFF_REPORT" \

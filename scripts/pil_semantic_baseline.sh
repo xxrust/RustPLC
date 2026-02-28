@@ -58,10 +58,10 @@ for case_dir in "$CASES_DIR"/*; do
   echo "[semantic-baseline] case=$case_name"
   (
     cd "$REPO_ROOT"
-    cargo run --release -- sim-plc "$plc" --scenario "$scenario" --out "$sil"
+    cargo run --release --bin rust_plc -- sim-plc "$plc" --scenario "$scenario" --out "$sil"
   )
 
-  runner_cmd="cargo run --release -- pil-run '$plc' --scenario '$scenario'"
+  runner_cmd="cargo run --release --bin rust_plc -- pil-run '$plc' --scenario '$scenario'"
   "$REPO_ROOT/scripts/pil_trace_gate.sh" \
     --sil "$sil" \
     --out-dir "$case_out/gate" \

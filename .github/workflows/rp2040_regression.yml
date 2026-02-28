@@ -60,7 +60,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Golden gate should pass
         run: |
-          cargo run --release -- trace-diff \
+          cargo run --release --bin rust_plc -- trace-diff \
             --sil examples/trace_golden/sil_trace.jsonl \
             --board examples/trace_golden/board_trace_match.jsonl \
             --out out/ci_trace_match_report.json \

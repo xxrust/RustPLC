@@ -73,7 +73,7 @@ fi
 
 mkdir -p "$PROFILE_DIR"
 
-BUILD_CMD=(cargo run --release -- build-rp2040 "$PLC" --out "$BUILD_OUT")
+BUILD_CMD=(cargo run --release --bin rust_plc -- build-rp2040 "$PLC" --out "$BUILD_OUT")
 if [[ -n "$CAL" ]]; then
   BUILD_CMD+=(--analog-calibration "$CAL")
 fi

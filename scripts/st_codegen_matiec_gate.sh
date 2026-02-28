@@ -21,7 +21,7 @@ generate_and_compile() {
   echo "[ST-MATIEC] Generate ST: $plc_path -> $st_file"
   (
     cd "$REPO_ROOT"
-    cargo run --release -- gen-st "$plc_path" --out "$st_file" --program-name Main
+    cargo run --release --bin rust_plc -- gen-st "$plc_path" --out "$st_file" --program-name Main
   )
 
   echo "[ST-MATIEC] Compile ST with iec2c: ${stem}.st"

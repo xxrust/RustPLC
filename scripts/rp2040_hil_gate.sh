@@ -84,7 +84,7 @@ TIMING_VERDICT="$OUT_DIR_ABS/timing_gate_verdict.json"
 echo "[0/3] SIL trace (sim-plc)"
 (
   cd "$REPO_ROOT"
-  cargo run --release -- sim-plc "$PLC" --scenario "$SCENARIO" --out "$SIL_TRACE"
+  cargo run --release --bin rust_plc -- sim-plc "$PLC" --scenario "$SCENARIO" --out "$SIL_TRACE"
 )
 
 echo "[meta] write $META_JSON"

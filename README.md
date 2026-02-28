@@ -1,8 +1,14 @@
 <p align="center">
   <h1 align="center">RustPLC</h1>
   <p align="center">
-    <strong>形式化验证的工业控制编译器</strong><br>
-    声明物理拓扑与安全约束，编译器数学证明其正确性。
+    <strong>形式化验证的工业控制编译器 / Formally Verified Industrial Control Compiler</strong><br>
+    <em>声明物理拓扑与安全约束，编译器数学证明其正确性。</em>
+  </p>
+  <p align="center">
+    <a href="https://github.com/xxrust/RustPLC/actions"><img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/xxrust/RustPLC/ci.yml?branch=main&style=flat-square"></a>
+    <a href="https://crates.io/crates/rust-plc"><img alt="Crates.io" src="https://img.shields.io/crates/v/rust-plc.svg?style=flat-square"></a>
+    <a href="https://github.com/xxrust/RustPLC/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square"></a>
+    <a href="https://rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg?logo=rust&style=flat-square"></a>
   </p>
   <p align="center">
     <a href="README_EN.md">English</a> | <strong>中文</strong>
@@ -11,30 +17,42 @@
 
 ---
 
-**传统方式**：工程师手写梯形图 → 人工审查安全性 → 现场调试发现碰撞/死锁/超时
+## 🌟 为什么选择 RustPLC？
 
-**RustPLC 方式**：工程师描述工艺 → AI 生成声明式 DSL → 编译器数学证明安全性 → 问题在编译期全部暴露
+**传统方式**：工程师手写梯形图 ➔ 人工审查安全性 ➔ 现场调试发现碰撞、死锁或超时风险。
 
-| 维度 | 传统 PLC | RustPLC |
+**RustPLC 方式**：工程师描述工艺 ➔ AI 生成声明式 DSL ➔ 编译期引擎进行**数学证明安全性** ➔ 问题在编译期**全部暴露**！
+
+| 维度 | 🏭 传统 PLC | 🦀 RustPLC |
 |------|----------|---------|
-| 安全校验 | 规则校验 + 人工审查 | 编译期四引擎形式化验证 |
-| 问题暴露 | 现场联调期 | 编译/仿真阶段前置 |
-| 变更审计 | 图形 diff，成本高 | DSL 文本 diff + release bundle |
-| 仿真回归 | 依赖厂商工具链 | SIL/virtual-board 可脚本化批量回归 |
-| 硬件绑定 | 与厂商生态耦合 | 拓扑与 I/O 映射解耦，支持 RP2040 |
+| 🛡️ **安全校验** | 规则校验 + 人工审查 | 编译期**四引擎**形式化验证 |
+| 🐛 **问题暴露** | 现场联调期（成本极高） | 编译 / 仿真阶段提前拦截 |
+| 📝 **变更审计** | 图形 Diff，难以追溯 | DSL 纯文本 Diff + Release Bundle |
+| 🔄 **仿真回归** | 严重依赖特定厂商工具链 | SIL/Virtual-board 可脚本化批量回归 |
+| 🔌 **硬件绑定** | 与独家厂商生态强耦合 | 拓扑与 I/O 映射解耦，原生支持 RP2040 等 |
 
 ---
 
-## 快速开始
+## 🚀 快速开始
+
+### 1. 安装与运行
 
 ```bash
+# 克隆仓库
 git clone https://github.com/xxrust/RustPLC.git
 cd RustPLC
+
+# 编译项目
 cargo build --release
+
+# 运行基础示例
 cargo run --release -- examples/two_cylinder.plc --no-print-ir
 ```
 
-```
+<details>
+<summary><strong>✅ 查看验证通过的输出示例 (点击展开)</strong></summary>
+
+```text
 验证通过：
   - Safety:    完备证明（深度 4）— conflicts_with 全部满足
   - Liveness:  通过 — 无死锁风险
@@ -42,19 +60,24 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
   - Causality: 通过 — 所有信号链路连通
 ```
 
-推荐示例入口：
-- `examples/two_cylinder.plc` — 最小可运行
-- `examples/assembly_station.plc` — 大型拓扑
-- `examples/recovery_templates/estop_recovery.plc` — 急停恢复
-- `examples/force_override_demo.plc` — 在线强制与调试
+</details>
 
-> **强制审核规则（自 2026-02-24 起）**：每个 `device` 必须声明 `purpose`，缺失直接 semantic gate 失败。
+### 2. 推荐示例入口
+您可以从以下示例开始探索：
+- 🟢 `examples/two_cylinder.plc` — 最小可运行示例，适合初学者。
+- 🏭 `examples/assembly_station.plc` — 大型拓扑，展示复杂逻辑。
+- 🚨 `examples/recovery_templates/estop_recovery.plc` — 紧急停止与恢复模板。
+- 🛠️ `examples/force_override_demo.plc` — 在线强制信号与调试演示。
+
+> ⚠️ **强制审核规则（自 2026-02-24 起）**：每个 `device` 必须声明 `purpose`，缺失将直接导致 Semantic Gate 校验失败。
 >
-> **兼容说明（~ 2026-06-30）**：旧版 `connected_to` / 端口当设备写法仍可运行，但会给出 WARN 级迁移提示。
+> 🔄 **兼容说明（~ 2026-06-30）**：旧版 `connected_to` 或端口作为设备的写法仍可运行，但会给出 `WARN` 级迁移提示。
 
 ---
 
-## 系统架构
+## 🏗️ 系统架构
+
+RustPLC 提供从编译、验证到仿真的全链路支持。
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
@@ -134,39 +157,33 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 
 ---
 
-## 核心能力
+## ⚙️ 核心能力概览
 
-| 能力 | 说明 |
+| 功能领域 | 核心能力说明 |
 |------|------|
-| **📝 ST 代码生成** | `gen-st` 将验证后的 IR 编译为 IEC 61131-3 ST 代码；vendored `iec2c` 在 CI 中验证语法 |
-| **🔬 形式化验证** | Safety / Liveness / Timing / Causality 四引擎，编译期数学证明 |
-| **🔐 语义门禁** | SEM-101~107 端口/类型/角色/subtype 校验，`purpose` 强制审核 |
-| **🤖 AI 辅助生成** | 自然语言 → AI 多轮对话生成 `.plc` → 自动验证 |
-| **🧪 SIL 仿真** | 场景驱动确定性仿真，故障注入、波形导出、批量回归 |
-| **🧩 元件库仿真** | ComponentLibrary + 元件拓扑/场景/仿真/诊断完整链路 |
-| **🩺 诊断与告警** | 五类诊断引擎，证据锚点排序，AlarmDispatcher WebSocket 推送 |
-| **🔧 调试运行** | `commissioning-run` nominal+fault 双场景，`pil-run` PIL 仿真 |
-| **🌐 在线控制** | 在线强制通道、在线变量注入、保持变量，全程审计输出 |
-| **🎛️ PID / 运动** | PID 回路 KPI 回归，步进 + AB 编码器，PIO 高速脉冲，碰撞防护 |
-| **📦 RP2040 部署** | 交叉编译到 Pico，I/O 映射，trace 对比门禁 |
-| **🚫 无板交付** | virtual-board Runner，SIL vs board 对比，release-bundle |
-| **⏱️ 实时门禁** | p50/p95/p99 统计，`--max-p99-exec-us` / `--max-overrun-count` |
-| **🏷️ 标签拓扑** | 多维标签，规则引擎，语义 Diff，性能门禁（500 节点/2000 边） |
-| **📦 设备库** | `devices/*.toml` 声明端口状态与安全约束，编译期自动注入 |
+| **🛠 代码生成** | `gen-st` 将验证后的 IR 完美编译为 IEC 61131-3 ST 代码；内置 `iec2c` 在 CI 闭环验证语法。 |
+| **🛡 数学证明** | Safety / Liveness / Timing / Causality 四大引擎，实现**编译期形式化严密证明**。 |
+| **🚧 严格门禁** | SEM-101~107 涵盖端口/类型/角色/subtype 校验，且强制审核 `purpose`。 |
+| **🤖 AI 与自动化** | 支持自然语言 ➔ AI 多轮对话生成 `.plc` ➔ 自动编译验证的现代工作流。 |
+| **🧪 深度仿真** | 提供场景驱动的确定性 SIL 仿真，支持故障注入、VCD 波形导出、批量回归测试。 |
+| **🧩 拓展生态** | ComponentLibrary 支持元件维度的拓扑、场景、仿真、诊断全链路。 |
+| **🩺 智能诊断** | 内置五类诊断引擎与证据锚点排序，并通过 WebSocket 推送告警 (AlarmDispatcher)。 |
+| **🚀 硬件部署** | 交叉编译直出 RP2040 `.uf2` 固件，支持 I/O 映射与物理 Trace 门禁比对。 |
+| **🎛 高阶控制** | 支持 PID 闭环稳定回归、步进+AB编码器运动控制、PIO 高速脉冲及碰撞安全防护。 |
 
 ---
 
-## 典型工作流
+## 🔄 典型工作流
 
-### 1. 编写 / 生成 .plc
+这里展示了一个标准自动化开发周期：
 
-**AI 对话生成（推荐）**
+### 1. 编写或生成逻辑
+你可以通过 **AI 对话生成**（推荐）：
+> *"帮我写个 PLC 程序。我有两个气缸，不能同时伸出，先伸 A 再伸 B..."*
 
-```
-> 帮我写个 PLC 程序。我有两个气缸，不能同时伸出，先伸 A 再伸 B...
-```
-
-**手写 DSL**
+或者 **纯手写 DSL**：
+<details>
+<summary><strong>点击查看 DSL 示例代码</strong></summary>
 
 ```plc
 [topology]
@@ -201,28 +218,17 @@ task cycle:
         wait: sensor_A_ext == true
         timeout: 500ms -> goto fault_handler
 ```
+</details>
 
-### 2. 编译验证
+<br>
 
+### 2. 仿真与验证
 ```bash
-cargo run --release -- your_file.plc --no-print-ir
-```
-
-### 3. 场景仿真
-
-```bash
-cargo run --release -- scenario-init examples/assembly_station.plc \
-  --out scenarios/normal.yaml --preset normal
-
+# 场景仿真：录制波形并生成回归 Trace
 cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
 
-cargo run --release -- sim-regress --plc-dir examples --scenario-dir scenarios
-```
-
-### 4. 无板门禁
-
-```bash
+# 无板交付门禁：校验实时性能与时序表现
 cargo run --release -- no-board-gate examples/assembly_station.plc \
   --scenario scenarios/normal.yaml \
   --out-dir out/gate \
@@ -230,70 +236,57 @@ cargo run --release -- no-board-gate examples/assembly_station.plc \
   --max-overrun-count 0
 ```
 
-### 5. RP2040 部署
+<br>
 
+### 3. 硬件部署与发布交付
 ```bash
+# 一键编译 RP2040 固件并烧录
 cargo run --release -- build-rp2040 examples/assembly_station.plc \
   --out out/rp2040 --io-map io_map.toml --emit-uf2 out/firmware.uf2
 
-cargo run --release -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP2
-```
-
-### 6. 发布交付
-
-```bash
+# 自动化发行包生成
 cargo run --release -- release-bundle examples/assembly_station.plc \
-  --scenario scenarios/normal.yaml \
-  --out-dir out/release \
-  --max-p99-exec-us 500 \
-  --max-overrun-count 0
+  --scenario scenarios/normal.yaml --out-dir out/release
 ```
 
 ---
 
-## 📚 文档
+## 📚 开发文档与资源
 
-**GitHub Wiki：**
+欢迎访问我们的 **[GitHub Wiki](https://github.com/xxrust/RustPLC/wiki)** 获取详尽指南：
 
-| 页面 | 内容 |
-|------|------|
-| [Quick Start](https://github.com/xxrust/RustPLC/wiki/Quick-Start) | 5 分钟上手 |
-| [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) | 完整语法参考 |
-| [Architecture](https://github.com/xxrust/RustPLC/wiki/Architecture) | 编译流水线与模块结构 |
-| [Verification Engines](https://github.com/xxrust/RustPLC/wiki/Verification-Engines) | 四大引擎原理 |
-| [SIL Simulation](https://github.com/xxrust/RustPLC/wiki/SIL-Simulation) | 仿真闭环 |
-| [Scenario System](https://github.com/xxrust/RustPLC/wiki/Scenario-System) | 场景工程化 |
-| [Device Library](https://github.com/xxrust/RustPLC/wiki/Device-Library) | 设备库与端口模型 |
-| [No-Board Gate](https://github.com/xxrust/RustPLC/wiki/No-Board-Gate) | 无板交付门禁 |
-| [RP2040 Deployment](https://github.com/xxrust/RustPLC/wiki/RP2040-Deployment) | 板级部署 |
-| [Recovery Templates](https://github.com/xxrust/RustPLC/wiki/Recovery-Templates) | 异常恢复模板 |
-| [PID Control](https://github.com/xxrust/RustPLC/wiki/PID-Control) | PID 回路 |
-| [Motion Control](https://github.com/xxrust/RustPLC/wiki/Motion-Control) | 步进 + AB 编码器 |
-| [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) | AI 生成流程 |
-| [Examples Gallery](https://github.com/xxrust/RustPLC/wiki/Examples-Gallery) | 示例详解 |
-| [Contributing](https://github.com/xxrust/RustPLC/wiki/Contributing) | 开发指南 |
+- 🚀 [Quick Start](https://github.com/xxrust/RustPLC/wiki/Quick-Start) - 5 分钟上手指南
+- 📖 [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) - 完整语法参考
+- 🏗️ [Architecture](https://github.com/xxrust/RustPLC/wiki/Architecture) - 编译流水线与模块架构
+- 🔬 [Verification Engines](https://github.com/xxrust/RustPLC/wiki/Verification-Engines) - 深入了解四大形式化引擎
+- 🤖 [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) - AI 辅助编码流程
 
-**本地文档（`docs/已实现/`）：** 场景系统、无板交付、运动控制、恢复模板、拓扑语义门禁、诊断引擎、调试运行、保持变量、在线变量控制、元件库、Subtype 规范等详细设计文档均在此目录。
+> **📎 进阶开发者提示**：在本地 `docs/已实现/` 目录中，可查阅场景系统、在线变量控制、元件库以及 Subtype 规范等数十份详细的底层设计白皮书。
 
 ---
 
-## 路线图
+## 🗺️ 路线图 (Roadmap)
 
-**已完成：** DSL 编译器 + 四引擎验证 · SIL/virtual-board/RP2040 运行时 · 场景工程 · PID/运动控制 · 无板门禁 + release-bundle · 拓扑语义门禁（SEM-101~107）· 设备库 + 端口模型 · 元件库仿真链路 · 诊断引擎 + 告警运行时 · commissioning-run / pil-run · 在线强制/变量/保持变量 · 标签驱动拓扑 + 语义 Diff + 性能门禁 · **ST 代码生成 + matiec 闭环验证**（`gen-st` 命令生成 IEC 61131-3 ST 代码，vendored `iec2c` 编译验证，跨平台测试闭环）
+### ✅ 已完成
+- [x] 基于 Rust 的 DSL 编译器与数学引擎验证
+- [x] SIL / Virtual-board / RP2040 全环境统运行时
+- [x] PLC 拓扑语义严格门禁体系 (SEM-101~107)
+- [x] 智能故障诊断、告警、及在线信号强制推流
+- [x] **ST 代码生成引擎** 与针对性的 matiec 闭环编译验证
 
-**计划中：**
-- ⏳ 硬件抽象层扩展（EtherCAT / Modbus / 更多 GPIO 板卡）
-- ⏳ 多控制器协同
-- ⏳ LSP 编辑器集成（语法高亮、补全、跳转定义）
+### 🚧 进行中 / 计划内
+- [ ] 🔌 **硬件抽象层扩展**：接入 EtherCAT / Modbus 与工业级 GPIO 扩展板。
+- [ ] 🕸️ **多控制器协同**：支持分布式的拓扑定义与时间同步验证。
+- [ ] 💻 **LSP 编辑器支持**：提供基于 VSCode/Neovim 的全自动语法高亮与智能提示插件。
 
 ---
 
-## License
+## 📜 许可协议
 
-MIT
+本项目采用 [MIT License](LICENSE) 许可，你可以自由地在闭源商业系统中使用。
 
----
+<br>
 
 <p align="center">
-  <sub>Written in Rust, so it won't panic. Well, at least not on the production line.</sub>
+  <sub><strong>Written in Rust 🦀, so it won't panic.</strong><br><em>Well, at least not on your production line.</em></sub>
 </p>

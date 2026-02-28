@@ -1,0 +1,73 @@
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│  输入层                                                                          │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│  .plc DSL 文件                         场景 YAML (scenario.yaml)                 │
+│  - topology / constraints / tasks      - digital_inputs / analog_inputs          │
+│  - extern fn 声明 + 调用               - tick_ms / fault injection               │
+└────────────────┬─────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│  编译器核心 (src/)                                                               │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│  Parser (pest PEG) ──▶ AST ──▶ 语义分析 + 预处理 ──▶ IR                          │
+│  (repeat/delay 展开)   (TopologyGraph + StateMachine)                            │
+│                                                                                  │
+│  DSL 编译链：parser/plc.pest → ast/ → semantic/ → ir/                            │
+│  设备模型：  device_library.rs (devices/*.toml)  device_subtype.rs               │
+│  语义门禁：  topology_semantic_gate.rs (SEM-101~107)  sequence_lint.rs           │
+│  I/O 模型：  iec_address.rs  plc_port.rs                                         │
+│  元件链路：  component_{library,topology,scenario,sim,faults,diagnostics}.rs     │
+│  Extern 解析：extern_functions.rs — 签名校验 / 合约注入 / tick 预算检查          │
+│  运行时支撑：diagnostics.rs  alarm_runtime.rs                                    │
+└────────────────┬─────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌───────────────────────────────────────────────────┐  ┌───────────────────────────┐
+│  验证引擎（并行执行）(src/verification/)       │  │  Rust 计算平面          │
+├───────────────────────────────────────────────────┤  │  (extern functions)       │
+│  Safety    (BMC + k-归纳)   conflicts_with        │  ├─────────────────────────── │
+│  Liveness  (SCC + 可达性)   死锁 / 活锁检测    │  │  ┌──────────────────┐   │
+│  Timing    (关键路径)       response_time 上界    │◀─┤  │  数值算法          │  │
+│  Causality (BFS)            connected_to 链路  │  │                         │
+│  Extern    non-pure 冲突 / tick 预算超限检查   │  │  └──────────────────┘   │
+│  ▼                                             │  │  ┌──────────────────┐   │
+│  verification_report.json                      │  │                         │
+│  (结构化报告 + warnings 分级)                  │  │                         │
+└────────────────┬──────────────────────────────────┘  │  └──────────────────┘     │
+│                                                │  │                         │
+│                                                │  │                         │
+┌───────────────────────────────────────────────────┐  │  │  (PID / MPC)       │     │
+│  运行时层 (crates/)                            │  │  └──────────────────┘   │
+├───────────────────────────────────────────────────┤  │                           │
+│  runtime-core (no_std 确定性状态机执行器)      │  │  注册：                 │
+│  │              │             │      │         ◀─┤  ExternFunctionRegistry  │
+│  SimIO (sim)    Virtual Board   RP2040 HAL     │  │  合约：                 │
+│  SIL 仿真 I/O   虚拟板级 Runner  GPIO/PWM      │  │  deterministic / pure   │
+│  Plant/故障注入  tick_timing采样 PIO/RTT       │  │  range / timeout        │
+│                                                │  │                         │
+│  sil_trace.jsonl  board_trace.jsonl firmware   │  │  单元测试 + perf bench  │
+│  alarm_events     tick_timing.jsonl board.log  │  │  + 数值稳定性分析       │
+└────────────────┬──────────────────────────────────┘  └───────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│  分析与门禁 (src/)                                                               │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│  trace-diff        timing-report        no-board-gate       release-bundle       │
+│  trace-doctor      sequence-lint        commissioning-run   pil-run              │
+│  extern-perf-gate  component-topology-validate/diff         component-sim        │
+│  component-scenario-validate            io-map-normalize                         │
+└────────────────┬─────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│  输出层                                                                          │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│  编译期：verification_report.json + SEM-10x 语义门禁门禁结构                     │
+│  仿真期：trace.jsonl + wave.vcd + sim_report.json + alarm_events.ndjson          │
+│  诊断期：diagnosis_report.json + component_diagnosis.json + io_snapshot.json     │
+│  部署期：firmware.uf2 + io_map.toml                                              │
+│  门禁期：diff_report.json + timing_report.json + gate_summary.json               │
+│  交付期：release-bundle/ (manifest.json + SHA256 清单 + git 元数据)              │
+└──────────────────────────────────────────────────────────────────────────────────┘

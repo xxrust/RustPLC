@@ -16,7 +16,7 @@ cargo test --test developer_bootstrap_pack_doc
 cargo test --test no_board_playbook_doc
 
 echo "[stage3-gate] Checking scenario-gen summary contract"
-cargo run -- scenario-gen \
+cargo run --bin rust_plc -- scenario-gen \
   --plc examples/assembly_station.plc \
   --config examples/scenario_gen/basic.yaml \
   --out-dir "$TMP_DIR/scenario_gen" \
@@ -103,7 +103,7 @@ tick_ms: 10
 duration_ms: 200
 YAML
 
-cargo run -- sim-regress \
+cargo run --bin rust_plc -- sim-regress \
   --plc-dir "$TMP_DIR/plcs" \
   --scenario-dir "$TMP_DIR/scenarios" \
   --artifacts-dir "$TMP_DIR/sim_regress" \

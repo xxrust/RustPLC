@@ -29,7 +29,7 @@ function Invoke-GenerateAndCompile {
     Write-Host "[ST-MATIEC] Generate ST: $PlcPath -> $stFile"
     Push-Location $repoRoot
     try {
-        & cargo run --release -- gen-st $PlcPath --out $stFile --program-name Main
+        & cargo run --release --bin rust_plc -- gen-st $PlcPath --out $stFile --program-name Main
         if ($LASTEXITCODE -ne 0) {
             throw "cargo gen-st failed for $PlcPath"
         }

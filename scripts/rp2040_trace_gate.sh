@@ -94,7 +94,7 @@ fi
 echo "[1/4] build-rp2040 + emit UF2"
 (
   cd "$REPO_ROOT"
-  cargo run --release -- build-rp2040 "$PLC" \
+  cargo run --release --bin rust_plc -- build-rp2040 "$PLC" \
     --out "$RP2040_OUT" \
     --io-map "$IO_MAP" \
     --emit-uf2 "$UF2"
@@ -104,12 +104,12 @@ if [[ -n "$MOUNT" ]]; then
   echo "[2/4] flash-rp2040 dry-run"
   (
     cd "$REPO_ROOT"
-    cargo run --release -- flash-rp2040 --uf2 "$UF2" --mount "$MOUNT" --dry-run
+    cargo run --release --bin rust_plc -- flash-rp2040 --uf2 "$UF2" --mount "$MOUNT" --dry-run
   )
   echo "[2/4] flash-rp2040 actual copy"
   (
     cd "$REPO_ROOT"
-    cargo run --release -- flash-rp2040 --uf2 "$UF2" --mount "$MOUNT"
+    cargo run --release --bin rust_plc -- flash-rp2040 --uf2 "$UF2" --mount "$MOUNT"
   )
 else
   echo "[2/4] skip flash (no --mount provided)"
@@ -159,13 +159,13 @@ fi
 echo "[4/4] board-parse + trace-diff --fail-on-mismatch"
 (
   cd "$REPO_ROOT"
-  cargo run --release -- board-parse --in "$BOARD_LOG" --out-dir "$OUT_DIR_ABS"
+  cargo run --release --bin rust_plc -- board-parse --in "$BOARD_LOG" --out-dir "$OUT_DIR_ABS"
   if [[ -s "$TICK_TIMING" ]]; then
-    cargo run --release -- timing-report --in "$TICK_TIMING" --out "$TIMING_REPORT"
+    cargo run --release --bin rust_plc -- timing-report --in "$TICK_TIMING" --out "$TIMING_REPORT"
   else
     echo "WARN: tick_timing.jsonl is empty; skip timing-report (no TIMING records in board log?)" >&2
   fi
-  cargo run --release -- trace-diff \
+  cargo run --release --bin rust_plc -- trace-diff \
     --sil "$SIL_TRACE" \
     --board "$BOARD_TRACE" \
     --out "$DIFF_REPORT" \
