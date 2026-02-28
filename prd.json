@@ -183,8 +183,8 @@
         "Tests pass"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added semantic non-pure extern concurrency checks for parallel/race branches and runtime-bridge tick-budget enforcement that rejects programs when worst-case per-tick extern `time_bound_us` exceeds configured `tick_ms` budget."
     },
     {
       "id": "US-013",

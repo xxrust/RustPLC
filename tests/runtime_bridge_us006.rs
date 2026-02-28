@@ -5,7 +5,7 @@ use rust_plc::extern_functions::{
 };
 use rust_plc::ir::{ExternFunctionContract, VariableType};
 use rust_plc::parser::parse_plc;
-use rust_plc::runtime_bridge::state_machine_to_runtime_program;
+use rust_plc::runtime_bridge::{state_machine_to_runtime_program, BridgeError};
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -17,6 +17,17 @@ fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'
     let topology = build_topology_graph(&expanded).expect("topology");
     let sm = build_state_machine(&expanded).expect("state machine");
     state_machine_to_runtime_program(&topology, &sm, tick_ms).expect("bridge")
+}
+
+fn compile_to_runtime_result(
+    plc_source: &str,
+    tick_ms: u64,
+) -> Result<runtime_core::Program<'static>, BridgeError> {
+    let program = parse_plc(plc_source).expect("parse plc");
+    let expanded = preprocess_program(&program).expect("preprocess");
+    let topology = build_topology_graph(&expanded).expect("topology");
+    let sm = build_state_machine(&expanded).expect("state machine");
+    state_machine_to_runtime_program(&topology, &sm, tick_ms)
 }
 
 const PLC_FIXTURE: &str = r#"
@@ -692,5 +703,56 @@ fn runtime_tick_with_extern_propagates_timeout_details() {
             );
         }
         other => panic!("unexpected error variant: {other:?}"),
+    }
+}
+
+const PLC_EXTERN_TICK_BUDGET_FIXTURE: &str = r#"
+[topology]
+
+extern function slow_a(v: float) -> float {
+    rust_module: "math::slow_a",
+    pure: true,
+    time_bound_us: 700
+}
+extern function slow_b(v: float) -> float {
+    rust_module: "math::slow_b",
+    pure: true,
+    time_bound_us: 500
+}
+
+variable x: float = 1.0
+variable y: float = 0.0
+variable z: float = 0.0
+
+[constraints]
+
+[tasks]
+
+task main:
+    step compute:
+        action: call slow_a(x) -> y
+        action: call slow_b(y) -> z
+    on_complete: goto done
+
+task done:
+    step halt:
+"#;
+
+#[test]
+fn bridge_rejects_program_when_extern_worst_case_exceeds_tick_budget() {
+    let err = compile_to_runtime_result(PLC_EXTERN_TICK_BUDGET_FIXTURE, 1)
+        .expect_err("extern tick budget overflow should fail at compile/bridge stage");
+
+    match err {
+        BridgeError::ExternTickBudgetExceeded {
+            tick_ms,
+            tick_budget_us,
+            worst_case_us,
+        } => {
+            assert_eq!(tick_ms, 1);
+            assert_eq!(tick_budget_us, 1_000);
+            assert_eq!(worst_case_us, 1_200);
+        }
+        other => panic!("unexpected bridge error: {other:?}"),
     }
 }

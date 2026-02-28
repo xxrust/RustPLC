@@ -12,6 +12,7 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - `Action::CallExtern` executes only through runtime extern-aware APIs (`tick_with_extern` / `tick_with_trace_and_logs_and_extern`); plain `tick*` methods intentionally return `ExternCallRequiresHandler`.
 - Integration tests for extern contract guardrails should assert `RuntimeTickError::ExternCallFailed` plus nested `ExternRuntimeError` payload details (function context and offending index/value).
 - `ExternFunctionRegistry::new()` bootstraps built-ins (`add`, `multiply`, `quadratic_fit`, `pid_update`); deterministic tests built with `with_time_source` must register needed built-ins explicitly and use `reset_builtin_pid_state()` before PID assertions that require a fresh integrator.
+- Extern scheduler guardrails are stage-split: detect non-pure cross-branch conflicts during semantic task validation, and enforce per-tick `time_bound_us` budget against configured `tick_ms` in runtime bridging.
 
 ---
 ## [2026-02-28 00:01:57] - US-002
@@ -253,4 +254,27 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Runtime callback adapters can hide contract failures if they swallow registry errors; keep tests asserting exact nested `ExternRuntimeError` payloads.
   - Useful context (e.g., "the evaluation panel is in component X")
     - The shared `call_registry` adapter in `tests/runtime_bridge_us006.rs` is the canonical path for wiring `ExternFunctionRegistry::call` into runtime-core extern callbacks.
+---
+## [2026-02-28 10:47:28] - US-012
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added semantic validation to detect unsafe concurrent usage of `pure: false` externs when the same function is called across `parallel`/`race` branches.
+  - Added runtime-bridge compile-time tick budget enforcement that computes worst-case per-tick extern `time_bound_us` cost and fails when it exceeds `tick_ms * 1000`.
+  - Added semantic tests for non-pure conflict rejection and pure extern parallel allowance.
+  - Added runtime-bridge integration test asserting `BridgeError::ExternTickBudgetExceeded` payload details.
+  - Updated AGENTS notes, marked US-012 as complete in `prd.json`, and ran `cargo check --workspace` + `cargo test --workspace`.
+- Files changed
+  - AGENTS.md
+  - src/semantic/mod.rs
+  - src/runtime_bridge.rs
+  - tests/runtime_bridge_us006.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Scheduler-level extern validation is strongest when semantic and bridge stages each own deterministic checks aligned to available context (`pure` usage vs `tick_ms` budget).
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Single-step tasks without `on_complete` may lower to no action transition; budget-overflow fixtures should include an explicit completion target.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Runtime bridge budget analysis currently caps path exploration at runtime-core’s per-tick transition guardrail (`64`) for conservative worst-case estimation.
 ---

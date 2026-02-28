@@ -975,6 +975,11 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
         &variable_types,
         &mut expr_errors,
     );
+    validate_non_pure_extern_concurrency_in_tasks(
+        &expanded.tasks,
+        &extern_signatures,
+        &mut expr_errors,
+    );
     let device_kinds = collect_device_kinds(&expanded.topology);
     let cam_table_names = expanded
         .topology
@@ -1000,6 +1005,7 @@ struct ExternFunctionSignature {
     line: usize,
     param_types: Vec<AstVariableType>,
     return_types: Vec<AstVariableType>,
+    pure: bool,
 }
 
 fn collect_variable_types(topology: &TopologySection) -> HashMap<String, AstVariableType> {
@@ -1043,6 +1049,7 @@ fn collect_extern_function_signatures(
                     .map(|param| param.var_type.clone())
                     .collect(),
                 return_types: decl.return_types.clone(),
+                pure: decl.contract.pure,
             },
         );
     }
@@ -3151,6 +3158,166 @@ fn validate_extern_calls_in_tasks(
                 variable_types,
                 errors,
             );
+        }
+    }
+}
+
+fn validate_non_pure_extern_concurrency_in_tasks(
+    tasks: &TasksSection,
+    extern_signatures: &HashMap<String, ExternFunctionSignature>,
+    errors: &mut Vec<PlcError>,
+) {
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            validate_non_pure_extern_concurrency_in_statements(
+                &step.statements,
+                step.line.max(1),
+                extern_signatures,
+                errors,
+            );
+        }
+    }
+}
+
+fn validate_non_pure_extern_concurrency_in_statements(
+    statements: &[StepStatement],
+    line: usize,
+    extern_signatures: &HashMap<String, ExternFunctionSignature>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Parallel(block) => {
+                let branch_statements = block
+                    .branches
+                    .iter()
+                    .map(|branch| branch.statements.as_slice())
+                    .collect::<Vec<_>>();
+                validate_non_pure_extern_concurrency_in_branches(
+                    &branch_statements,
+                    "parallel",
+                    line,
+                    extern_signatures,
+                    errors,
+                );
+
+                for branch in &block.branches {
+                    validate_non_pure_extern_concurrency_in_statements(
+                        &branch.statements,
+                        line,
+                        extern_signatures,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                let branch_statements = block
+                    .branches
+                    .iter()
+                    .map(|branch| branch.statements.as_slice())
+                    .collect::<Vec<_>>();
+                validate_non_pure_extern_concurrency_in_branches(
+                    &branch_statements,
+                    "race",
+                    line,
+                    extern_signatures,
+                    errors,
+                );
+
+                for branch in &block.branches {
+                    validate_non_pure_extern_concurrency_in_statements(
+                        &branch.statements,
+                        line,
+                        extern_signatures,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                validate_non_pure_extern_concurrency_in_statements(
+                    body,
+                    line,
+                    extern_signatures,
+                    errors,
+                );
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn validate_non_pure_extern_concurrency_in_branches(
+    branches: &[&[StepStatement]],
+    block_kind: &str,
+    line: usize,
+    extern_signatures: &HashMap<String, ExternFunctionSignature>,
+    errors: &mut Vec<PlcError>,
+) {
+    let mut first_seen_by_function: HashMap<String, usize> = HashMap::new();
+
+    for (branch_index, statements) in branches.iter().enumerate() {
+        let mut calls = HashSet::new();
+        collect_non_pure_extern_calls(statements, extern_signatures, &mut calls);
+        for function in calls {
+            if let Some(first_branch) = first_seen_by_function.get(&function).copied() {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "non-pure extern 函数 {function} 在 {block_kind} 分支 #{} 与 #{} 中并发调用",
+                        first_branch + 1,
+                        branch_index + 1
+                    ),
+                    "请将 pure: false 的 extern 调用改为串行执行，避免在 parallel/race 多分支中重复调用同一函数",
+                ));
+            } else {
+                first_seen_by_function.insert(function, branch_index);
+            }
+        }
+    }
+}
+
+fn collect_non_pure_extern_calls(
+    statements: &[StepStatement],
+    extern_signatures: &HashMap<String, ExternFunctionSignature>,
+    out: &mut HashSet<String>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::Call { function, .. }) => {
+                if extern_signatures
+                    .get(function)
+                    .map(|signature| !signature.pure)
+                    .unwrap_or(false)
+                {
+                    out.insert(function.clone());
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                collect_non_pure_extern_calls(body, extern_signatures, out);
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    collect_non_pure_extern_calls(&branch.statements, extern_signatures, out);
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    collect_non_pure_extern_calls(&branch.statements, extern_signatures, out);
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
         }
     }
 }
@@ -7650,6 +7817,78 @@ task main:
             errors.iter().any(|err| err.line() == 2),
             "错误应定位到 extern 声明所在行"
         );
+    }
+
+    #[test]
+    fn rejects_non_pure_extern_used_in_parallel_branches() {
+        let input = "[topology]
+variable e1: float = 0.1
+variable e2: float = 0.2
+variable kp: float = 1.0
+variable ki: float = 0.1
+variable kd: float = 0.01
+variable dt: float = 0.1
+variable out1: float = 0.0
+variable out2: float = 0.0
+extern function pid_update(error: float, kp: float, ki: float, kd: float, dt: float) -> float {
+    rust_module: \"control::pid\"
+    pure: false
+    time_bound_us: 200
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        parallel:
+            branch_a:
+                action: call pid_update(e1, kp, ki, kd, dt) -> out1
+            branch_b:
+                action: call pid_update(e2, kp, ki, kd, dt) -> out2
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors =
+            build_state_machine(&program).expect_err("parallel 多分支 non-pure extern 应报错");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("non-pure extern 函数 pid_update"),
+            "应报告 non-pure extern 并发调用风险，实际: {joined}"
+        );
+    }
+
+    #[test]
+    fn allows_pure_extern_used_in_parallel_branches() {
+        let input = "[topology]
+variable x: float = 1.0
+variable y: float = 2.0
+variable out1: float = 0.0
+variable out2: float = 0.0
+extern function add(a: float, b: float) -> float {
+    rust_module: \"math::add\"
+    pure: true
+    time_bound_us: 50
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        parallel:
+            branch_a:
+                action: call add(x, y) -> out1
+            branch_b:
+                action: call add(y, x) -> out2
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        build_state_machine(&program).expect("pure extern 在并行分支中应允许");
     }
 
     #[test]

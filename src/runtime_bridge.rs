@@ -13,6 +13,8 @@ use runtime_core::{
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
+const MAX_TRANSITIONS_PER_TICK: usize = 64;
+
 #[derive(Debug, thiserror::Error)]
 pub enum BridgeError {
     #[error("tick_ms must be > 0")]
@@ -90,6 +92,15 @@ pub enum BridgeError {
 
     #[error("cam_coupling {cam} references unknown cam table {table}")]
     UnknownCamTableReference { cam: String, table: String },
+
+    #[error(
+        "extern worst-case execution budget exceeded: {worst_case_us}us > tick budget {tick_budget_us}us (tick_ms={tick_ms})"
+    )]
+    ExternTickBudgetExceeded {
+        tick_ms: u64,
+        tick_budget_us: u64,
+        worst_case_us: u64,
+    },
 }
 
 /// Convert a compiler/semantic `StateMachine` IR into a minimal `runtime-core` `Program`.
@@ -114,6 +125,7 @@ pub fn state_machine_to_runtime_program(
     if tick_ms == 0 {
         return Err(BridgeError::InvalidTickMs);
     }
+    validate_extern_tick_budget(topology, sm, tick_ms)?;
 
     let resolver = TopologyResolver::new(topology);
     let variable_indices = topology
@@ -237,6 +249,110 @@ pub fn state_machine_to_runtime_program(
         var_init: leaked_var_init,
         cam_configs: leaked_cam_configs,
         cam_tables: leaked_cam_tables,
+    })
+}
+
+fn validate_extern_tick_budget(
+    topology: &TopologyGraph,
+    sm: &StateMachine,
+    tick_ms: u64,
+) -> Result<(), BridgeError> {
+    let tick_budget_us = tick_ms.saturating_mul(1_000);
+    if tick_budget_us == 0 {
+        return Ok(());
+    }
+
+    let extern_bound_us = topology
+        .extern_functions
+        .iter()
+        .map(|function| (function.name.as_str(), function.contract.time_bound_us))
+        .collect::<HashMap<_, _>>();
+    if extern_bound_us.is_empty() {
+        return Ok(());
+    }
+
+    let mut outgoing: HashMap<(String, String), Vec<&Transition>> = HashMap::new();
+    for transition in &sm.transitions {
+        outgoing
+            .entry((
+                transition.from.task_name.clone(),
+                transition.from.step_name.clone(),
+            ))
+            .or_default()
+            .push(transition);
+    }
+
+    let mut memo = HashMap::<((String, String), usize), u64>::new();
+    let mut worst_case_us = 0u64;
+    for state in &sm.states {
+        let state_key = (state.task_name.clone(), state.step_name.clone());
+        let state_cost = worst_case_extern_cost_from_state(
+            &state_key,
+            MAX_TRANSITIONS_PER_TICK,
+            &outgoing,
+            &extern_bound_us,
+            &mut memo,
+        );
+        worst_case_us = worst_case_us.max(state_cost);
+    }
+
+    if worst_case_us > tick_budget_us {
+        return Err(BridgeError::ExternTickBudgetExceeded {
+            tick_ms,
+            tick_budget_us,
+            worst_case_us,
+        });
+    }
+
+    Ok(())
+}
+
+fn worst_case_extern_cost_from_state(
+    state: &(String, String),
+    remaining_transitions: usize,
+    outgoing: &HashMap<(String, String), Vec<&Transition>>,
+    extern_bound_us: &HashMap<&str, u64>,
+    memo: &mut HashMap<((String, String), usize), u64>,
+) -> u64 {
+    if remaining_transitions == 0 {
+        return 0;
+    }
+    let cache_key = (state.clone(), remaining_transitions);
+    if let Some(cached) = memo.get(&cache_key).copied() {
+        return cached;
+    }
+
+    let mut best = 0u64;
+    if let Some(transitions) = outgoing.get(state) {
+        for transition in transitions {
+            let action_cost = extern_action_cost_us(&transition.actions, extern_bound_us);
+            let next_state = (
+                transition.to.task_name.clone(),
+                transition.to.step_name.clone(),
+            );
+            let tail = worst_case_extern_cost_from_state(
+                &next_state,
+                remaining_transitions.saturating_sub(1),
+                outgoing,
+                extern_bound_us,
+                memo,
+            );
+            best = best.max(action_cost.saturating_add(tail));
+        }
+    }
+
+    memo.insert(cache_key, best);
+    best
+}
+
+fn extern_action_cost_us(actions: &[TransitionAction], extern_bound_us: &HashMap<&str, u64>) -> u64 {
+    actions.iter().fold(0u64, |total, action| {
+        if let TransitionAction::CallExtern { function, .. } = action {
+            let bound = extern_bound_us.get(function.as_str()).copied().unwrap_or(0);
+            total.saturating_add(bound)
+        } else {
+            total
+        }
     })
 }
 
