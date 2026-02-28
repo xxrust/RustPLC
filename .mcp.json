@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "rustplc": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "server"],
+      "cwd": "${workspaceFolder}/rustplc-mcp",
+      "env": {
+        "RUSTPLC_PATH": "${workspaceFolder}/target/release/rust_plc"
+      }
+    }
+  }
+}

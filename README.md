@@ -178,8 +178,21 @@ RustPLC 提供从编译、验证到仿真的全链路支持。
 这里展示了一个标准自动化开发周期：
 
 ### 1. 编写或生成逻辑
-你可以通过 **AI 对话生成**（推荐）：
-> *"帮我写个 PLC 程序。我有两个气缸，不能同时伸出，先伸 A 再伸 B..."*
+你可以通过 **MCP 服务器 + AI 对话生成**（推荐，零配置）：
+
+```bash
+# 1. 安装 MCP 依赖
+pip install mcp
+
+# 2. 构建编译器
+cargo build --release
+
+# 3. 在 Claude Code 中直接对话（.mcp.json 已预配置）
+# "帮我生成一个双缸顺序动作的 PLC 程序"
+# Claude Code 会自动调用 MCP 服务器，执行四阶段生成流程，并验证结果
+```
+
+> 详见 [rustplc-mcp/QUICKSTART.md](rustplc-mcp/QUICKSTART.md)
 
 或者 **纯手写 DSL**：
 <details>

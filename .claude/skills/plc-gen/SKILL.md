@@ -138,6 +138,114 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 - PID 设备自动关联 `analog_input`（pv）和 `analog_output`（out）。
 - 参考 fixture：`13_analog_pid_loop.plc`。
 
+### Extern Rust 函数指引
+
+当工艺需要复杂数值计算（拟合、矩阵、非线性控制、统计等）时，使用 `extern function` 将计算卸载到 Rust，保持 DSL 控制平面的可验证性。
+
+**何时使用 extern function：**
+- 需要最小二乘拟合、矩阵运算、复杂滤波等算法
+- 需要有状态的数值控制器（如自定义 PID 变体）
+- 需要平台相关的读取操作（启动模式、硬件种子等）
+- 计算逻辑复杂到用 `action: compute` 展开会导致 DSL 臃肿
+
+**核心原则：**
+- 控制平面（`wait`、`timeout`、`goto`、安全约束）留在 DSL
+- 数值内核（计算实现）移到 Rust extern
+- `pure: true` 尽量优先，保持验证确定性
+- `time_bound_us` 必须填写实测最坏情况加余量
+
+**声明语法（在 `[topology]` 中）：**
+```plc
+extern function <name>(<param>: <type>, ...) -> <return_type> {
+    rust_module: "<module_path>"
+    pure: <true|false>
+    time_bound_us: <正整数>
+}
+```
+
+标量类型：`bool` / `int` / `float`
+多返回值：`-> (float, float, float)`（元组形式）
+
+**调用语法（在 task step 中，仅限 action）：**
+```plc
+action: call <name>(<arg>, ...) -> out_var
+action: call <name>(<arg>, ...) -> (out_a, out_b, out_c)
+```
+
+**变量声明（在 `[topology]` 中）：**
+```plc
+variable x: float = 0.0
+variable n: int = 0
+variable flag: bool = false
+```
+
+**错误处理模式（需要时）：**
+声明 `variable last_error: int = 0`，用 `tick_with_extern_error_code` 运行时 API 捕获错误码：
+- `0` = 成功，`1` = 函数未找到，`2` = 参数数量错误，`3` = 输入越界，`4` = 输出越界，`5` = 超时，`6` = 运行时错误
+
+**不支持（MVP 限制）：**
+- 函数重载（同名不同签名）
+- 可变参数、泛型、回调
+- 数组/结构体参数或返回值
+- 表达式上下文调用（`x = add(a, b)` 不合法）
+- 单变量绑定元组返回值
+
+**完整示例（纯函数 + 元组返回）：**
+```plc
+[topology]
+variable x0: float = 0.0
+variable x1: float = 1.0
+variable y0: float = 1.0
+variable y1: float = 3.5
+variable coef_a: float = 0.0
+variable coef_b: float = 0.0
+variable coef_c: float = 0.0
+
+extern function quadratic_fit(
+    x0: float, x1: float,
+    y0: float, y1: float
+) -> (float, float, float) {
+    rust_module: "math::fit"
+    pure: true
+    time_bound_us: 80
+}
+
+[tasks]
+task fit:
+    step compute:
+        action: call quadratic_fit(x0, x1, y0, y1) -> (coef_a, coef_b, coef_c)
+        action: log "拟合完成"
+    on_complete: goto done
+```
+
+**错误回退示例：**
+```plc
+[topology]
+variable last_error: int = 0
+variable measurement: float = 0.0
+variable filtered: float = 0.0
+
+extern function filter(meas: float) -> float {
+    rust_module: "control::filter"
+    pure: false
+    time_bound_us: 30
+}
+
+[tasks]
+task main:
+    step invoke:
+        action: call filter(measurement) -> filtered
+    on_complete: goto check
+
+task check:
+    step branch:
+        wait: last_error == 0
+        timeout: 1ms -> goto use_fallback
+    on_complete: goto done
+```
+
+参考示例文件：`examples/quadratic_fit.plc`（DSL compute 版本，可对比 extern 版本的简洁度）
+
 ### 阶段二：推理设备拓扑
 
 根据确认后的动作序列，推理出完整的设备清单。展示给工程师：
@@ -275,9 +383,59 @@ step glue_cycle:
 ### 文件结构
 
 ```plc
-[topology]          # 物理设备、PLC 端口与 relation 连接
+[topology]          # 物理设备、PLC 端口、relation 连接、变量声明、extern 函数声明
 [constraints]       # 安全、时序、因果约束
 [tasks]             # 控制逻辑（状态机）
+```
+
+### 变量声明（topology 中）
+
+用于 extern function 的输入/输出绑定，或需要在 DSL 中保存中间计算结果时：
+
+```plc
+variable <name>: <type> = <初始值>
+```
+
+类型：`bool` / `int` / `float`
+
+```plc
+variable x: float = 0.0
+variable count: int = 0
+variable flag: bool = false
+variable last_error: int = 0   # extern 错误码捕获（固定名称）
+```
+
+变量可在 `wait`、`if`、`action: compute` 中使用，也可作为 extern 调用的参数和返回绑定。
+
+### Extern 函数声明（topology 中）
+
+将复杂数值计算卸载到 Rust，保持 DSL 控制平面可验证性：
+
+```plc
+extern function <name>(<param>: <type>, ...) -> <return_type> {
+    rust_module: "<module_path>"
+    pure: <true|false>
+    time_bound_us: <正整数>
+}
+```
+
+多返回值用元组：`-> (float, float, float)`
+
+可选范围约束（安全关键场景）：
+```plc
+extern function normalize(raw: float) -> float {
+    rust_module: "io::normalize"
+    pure: true
+    time_bound_us: 12
+    input_range: [0.0, 4095.0]
+    output_range: [0.0, 16.0]
+}
+```
+
+**调用语法（仅限 task step 的 action）：**
+```plc
+action: call <name>(<arg>, ...) -> out_var
+action: call <name>(<arg>, ...) -> (out_a, out_b, out_c)
 ```
 
 ### 设备类型与可用状态
@@ -398,9 +556,12 @@ task <名称>:
         action: retract <气缸>         # 缩回
         action: set <设备> on/off      # 开关
         action: set_analog <AO> <值>   # 模拟量输出
+        action: compute <var> = <expr> # 变量计算（简单算术）
+        action: call <extern>(<args>) -> <var>  # 调用 extern 函数
         action: log "<消息>"           # 日志
         delay: 2000ms                  # 固定延时（有界等待）
         wait: <传感器> == true          # 等待条件
+        wait: <变量> >= <值>           # 变量条件等待
         wait: A == true AND B == true  # AND 条件（不可与 OR 混用）
         wait: A == true OR B == true   # OR 条件（不可与 AND 混用）
         wait: AI0 >= 60               # 模拟量阈值等待
@@ -643,6 +804,8 @@ task done:
 | 输入口 | `X0`, `X1`, ... | 在 plc_main.ports 中声明 |
 | 模拟输入 | `AI0`, `AI1`, ... | 独立设备或 plc_main.ports |
 | 模拟输出 | `AO0`, `AO1`, ... | 独立设备或 plc_main.ports |
+| 变量 | 蛇形命名 | `x_val`, `sum_x`, `coef_a`, `last_error` |
+| Extern 函数 | 蛇形命名 | `add`, `quadratic_fit`, `pid_update`, `normalize_pressure` |
 | 任务 | 动作导向 | `cycle`, `init`, `fault_handler`, `ready` |
 | 步骤 | 动词_名词 | `extend_push`, `wait_clamp`, `retract_all` |
 
@@ -678,6 +841,7 @@ task done:
 | `analog_pressure_demo.plc` | 液压站比例阀压力控制 | analog_input/output、set_analog、external、阈值 wait |
 | `pid_loop.plc` | PID 闭环压力控制 | pid 设备、analog I/O |
 | `nuclear_coolant_isolation.plc` | 核电站隔离阀控制 | SIL3 双冗余传感器、OR 容错、parallel 并行关阀、严格时序硬限 |
+| `quadratic_fit.plc` | 二次函数拟合（DSL compute 版） | variable 声明、action: compute、复杂算术展开 |
 
 `.system.md` 参考样板：
 
@@ -706,3 +870,8 @@ task done:
 - [ ] 是否需要 `race`/`parallel`/`repeat`/`if-else`/`goto task.step`？
 - [ ] 是否有时序约束？
 - [ ] 模拟量设备是否声明了 `range` 和 `unit`？
+- [ ] 如果使用 extern function，是否声明了 `rust_module`、`pure`、`time_bound_us`？
+- [ ] extern function 的参数和返回值是否都是标量类型（`bool`/`int`/`float`）？
+- [ ] extern function 调用是否使用 `action: call ... -> ...` 语法（不在表达式中）？
+- [ ] 如果需要 extern 错误处理，是否声明了 `variable last_error: int = 0`？
+- [ ] 复杂计算是否优先考虑 extern function 而非冗长的 `action: compute` 链？
