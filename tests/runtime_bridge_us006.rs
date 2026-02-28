@@ -1,9 +1,10 @@
 use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
-use runtime_core::{Runtime, RuntimeTickError};
+use runtime_core::{Runtime, RuntimeError, RuntimeTickError};
 use rust_plc::extern_functions::{
-    ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError, ValueRange,
+    extern_runtime_error_code, ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError,
+    ValueRange, EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR,
 };
-use rust_plc::ir::{ExternFunctionContract, VariableType};
+use rust_plc::ir::{ExternFunctionContract, TopologyGraph, VariableType};
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::{state_machine_to_runtime_program, BridgeError};
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
@@ -28,6 +29,37 @@ fn compile_to_runtime_result(
     let topology = build_topology_graph(&expanded).expect("topology");
     let sm = build_state_machine(&expanded).expect("state machine");
     state_machine_to_runtime_program(&topology, &sm, tick_ms)
+}
+
+fn compile_runtime_and_topology(
+    plc_source: &str,
+    tick_ms: u64,
+) -> (runtime_core::Program<'static>, TopologyGraph) {
+    let program = parse_plc(plc_source).expect("parse plc");
+    let expanded = preprocess_program(&program).expect("preprocess");
+    let topology = build_topology_graph(&expanded).expect("topology");
+    let sm = build_state_machine(&expanded).expect("state machine");
+    let runtime_program = state_machine_to_runtime_program(&topology, &sm, tick_ms).expect("bridge");
+    (runtime_program, topology)
+}
+
+fn variable_index(topology: &TopologyGraph, name: &str) -> u16 {
+    topology
+        .variables
+        .iter()
+        .find(|var| var.name == name)
+        .map(|var| var.index)
+        .expect("variable should exist")
+}
+
+fn current_step_name<'a>(rt: &Runtime<'a>, program: &'a runtime_core::Program<'a>) -> &'a str {
+    let loc = rt.location();
+    program
+        .task(loc.task)
+        .expect("task exists")
+        .step(loc.step)
+        .expect("step exists")
+        .name
 }
 
 const PLC_FIXTURE: &str = r#"
@@ -704,6 +736,221 @@ fn runtime_tick_with_extern_propagates_timeout_details() {
         }
         other => panic!("unexpected error variant: {other:?}"),
     }
+}
+
+const PLC_EXTERN_ERROR_FLOW_FIXTURE: &str = r#"
+[topology]
+
+extern function risky(v: float) -> float {
+    rust_module: "math::risky",
+    pure: true,
+    time_bound_us: 1000
+}
+
+variable input: float = 2.0
+variable output: float = 0.0
+variable last_error: int = 0
+
+[constraints]
+
+[tasks]
+
+task main:
+    step invoke:
+        action: call risky(input) -> output
+    on_complete: goto check
+
+task check:
+    step branch:
+        wait: last_error == 0
+        timeout: 1ms -> goto fallback
+    on_complete: goto success
+
+task success:
+    step halt:
+
+task fallback:
+    step halt:
+"#;
+
+#[test]
+fn runtime_tick_with_error_code_variable_routes_to_fallback_branch() {
+    let (program, topology) = compile_runtime_and_topology(PLC_EXTERN_ERROR_FLOW_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let last_error_var = variable_index(&topology, "last_error");
+
+    let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
+    registry
+        .register(
+            ExternFunctionInfo::new(
+                "risky",
+                vec![VariableType::Float],
+                vec![VariableType::Float],
+                ExternFunctionContract {
+                    rust_module: "math::risky".to_string(),
+                    pure: true,
+                    time_bound_us: 1000,
+                },
+                |args| Ok(vec![args[0]]),
+            )
+            .with_input_ranges(vec![ValueRange::new(-1.0, 1.0)]),
+        )
+        .expect("register risky");
+
+    rt.tick_with_extern_error_code(
+        &mut io,
+        last_error_var,
+        |function, args, outputs| call_registry(&registry, function, args, outputs),
+        |_function, error| extern_runtime_error_code(error) as f32,
+    )
+    .expect("extern failure should be captured into last_error");
+
+    assert_eq!(
+        rt.variables()[last_error_var as usize],
+        EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE as f32
+    );
+    assert_eq!(rt.variables()[1], 0.0, "failed call must not overwrite outputs");
+    assert_eq!(current_step_name(&rt, &program), "check.branch");
+
+    rt.tick_with_extern_error_code(
+        &mut io,
+        last_error_var,
+        |function, args, outputs| call_registry(&registry, function, args, outputs),
+        |_function, error| extern_runtime_error_code(error) as f32,
+    )
+    .expect("timeout branch should execute normally");
+
+    assert_eq!(current_step_name(&rt, &program), "fallback.halt");
+}
+
+const PLC_EXTERN_RETRY_FLOW_FIXTURE: &str = r#"
+[topology]
+
+extern function flaky(v: float) -> float {
+    rust_module: "math::flaky",
+    pure: true,
+    time_bound_us: 400
+}
+
+variable input: float = 2.0
+variable output: float = 0.0
+variable last_error: int = 0
+
+[constraints]
+
+[tasks]
+
+task main:
+    step invoke:
+        action: call flaky(input) -> output
+    on_complete: goto check_first
+
+task check_first:
+    step branch:
+        wait: last_error == 0
+        timeout: 1ms -> goto retry
+    on_complete: goto success
+
+task retry:
+    step invoke_retry:
+        action: call flaky(input) -> output
+    on_complete: goto check_second
+
+task check_second:
+    step branch:
+        wait: last_error == 0
+        timeout: 1ms -> goto error
+    on_complete: goto success
+
+task success:
+    step halt:
+
+task error:
+    step halt:
+"#;
+
+#[test]
+fn runtime_tick_with_error_code_supports_retry_then_success_flow() {
+    let (program, topology) = compile_runtime_and_topology(PLC_EXTERN_RETRY_FLOW_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let last_error_var = variable_index(&topology, "last_error");
+    let mut attempts = 0usize;
+
+    rt.tick_with_extern_error_code(
+        &mut io,
+        last_error_var,
+        |function, args, outputs| {
+            assert_eq!(function, "flaky");
+            attempts += 1;
+            if attempts == 1 {
+                Err(ExternRuntimeError::RuntimeError {
+                    function: function.to_string(),
+                    message: "simulated failure".to_string(),
+                })
+            } else {
+                outputs[0] = args[0] * 2.0;
+                Ok(1)
+            }
+        },
+        |_function, error| extern_runtime_error_code(error) as f32,
+    )
+    .expect("first failure should be captured");
+    assert_eq!(
+        rt.variables()[last_error_var as usize],
+        EXTERN_ERROR_CODE_RUNTIME_ERROR as f32
+    );
+    assert_eq!(current_step_name(&rt, &program), "check_first.branch");
+
+    rt.tick_with_extern_error_code(
+        &mut io,
+        last_error_var,
+        |function, args, outputs| {
+            assert_eq!(function, "flaky");
+            attempts += 1;
+            if attempts == 1 {
+                Err(ExternRuntimeError::RuntimeError {
+                    function: function.to_string(),
+                    message: "simulated failure".to_string(),
+                })
+            } else {
+                outputs[0] = args[0] * 2.0;
+                Ok(1)
+            }
+        },
+        |_function, error| extern_runtime_error_code(error) as f32,
+    )
+    .expect("retry path should succeed");
+
+    assert_eq!(attempts, 2, "retry branch should execute one extra call");
+    assert_eq!(rt.variables()[last_error_var as usize], 0.0);
+    assert!((rt.variables()[1] - 4.0).abs() < f32::EPSILON);
+    assert_eq!(current_step_name(&rt, &program), "success.halt");
+}
+
+#[test]
+fn runtime_tick_with_error_code_rejects_out_of_range_variable_slot() {
+    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let registry = make_add_registry();
+
+    let err = rt
+        .tick_with_extern_error_code(
+            &mut io,
+            999,
+            |function, args, outputs| call_registry(&registry, function, args, outputs),
+            |_function, _error| 1.0,
+        )
+        .expect_err("invalid variable slot should fail fast");
+    assert_eq!(
+        err,
+        RuntimeTickError::Core(RuntimeError::ExternErrorCodeVariableOutOfRange {
+            function: "add",
+            variable: 999
+        })
+    );
 }
 
 const PLC_EXTERN_TICK_BUDGET_FIXTURE: &str = r#"

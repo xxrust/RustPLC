@@ -143,6 +143,31 @@ pub enum ExternRuntimeError {
     },
 }
 
+pub const EXTERN_ERROR_CODE_OK: u16 = 0;
+pub const EXTERN_ERROR_CODE_FUNCTION_NOT_FOUND: u16 = 1;
+pub const EXTERN_ERROR_CODE_INVALID_ARG_COUNT: u16 = 2;
+pub const EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE: u16 = 3;
+pub const EXTERN_ERROR_CODE_OUTPUT_OUT_OF_RANGE: u16 = 4;
+pub const EXTERN_ERROR_CODE_TIMEOUT_EXCEEDED: u16 = 5;
+pub const EXTERN_ERROR_CODE_RUNTIME_ERROR: u16 = 6;
+pub const EXTERN_ERROR_CODE_DUPLICATE_FUNCTION: u16 = 7;
+pub const EXTERN_ERROR_CODE_INVALID_RANGE_COUNT: u16 = 8;
+pub const EXTERN_ERROR_CODE_INVALID_RANGE_BOUNDS: u16 = 9;
+
+pub fn extern_runtime_error_code(error: &ExternRuntimeError) -> u16 {
+    match error {
+        ExternRuntimeError::FunctionNotFound { .. } => EXTERN_ERROR_CODE_FUNCTION_NOT_FOUND,
+        ExternRuntimeError::InvalidArgCount { .. } => EXTERN_ERROR_CODE_INVALID_ARG_COUNT,
+        ExternRuntimeError::InputOutOfRange { .. } => EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE,
+        ExternRuntimeError::OutputOutOfRange { .. } => EXTERN_ERROR_CODE_OUTPUT_OUT_OF_RANGE,
+        ExternRuntimeError::TimeoutExceeded { .. } => EXTERN_ERROR_CODE_TIMEOUT_EXCEEDED,
+        ExternRuntimeError::RuntimeError { .. } => EXTERN_ERROR_CODE_RUNTIME_ERROR,
+        ExternRuntimeError::DuplicateFunction { .. } => EXTERN_ERROR_CODE_DUPLICATE_FUNCTION,
+        ExternRuntimeError::InvalidRangeCount { .. } => EXTERN_ERROR_CODE_INVALID_RANGE_COUNT,
+        ExternRuntimeError::InvalidRangeBounds { .. } => EXTERN_ERROR_CODE_INVALID_RANGE_BOUNDS,
+    }
+}
+
 pub struct ExternFunctionRegistry {
     functions: HashMap<String, ExternFunctionInfo>,
     time_source: Arc<dyn Fn() -> u64 + Send + Sync>,
@@ -536,8 +561,8 @@ fn solve_quadratic_fit_coefficients(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     fn contract(time_bound_us: u64) -> ExternFunctionContract {
         ExternFunctionContract {
@@ -703,6 +728,59 @@ mod tests {
                 function: "boom".to_string(),
                 message: "panic from extern".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn runtime_error_codes_are_stable_for_dsl_error_variables() {
+        assert_eq!(
+            extern_runtime_error_code(&ExternRuntimeError::FunctionNotFound {
+                name: "missing".to_string(),
+            }),
+            EXTERN_ERROR_CODE_FUNCTION_NOT_FOUND
+        );
+        assert_eq!(
+            extern_runtime_error_code(&ExternRuntimeError::InvalidArgCount {
+                function: "f".to_string(),
+                expected: 2,
+                got: 1,
+            }),
+            EXTERN_ERROR_CODE_INVALID_ARG_COUNT
+        );
+        assert_eq!(
+            extern_runtime_error_code(&ExternRuntimeError::InputOutOfRange {
+                function: "f".to_string(),
+                arg_index: 0,
+                value: 2.0,
+                min: -1.0,
+                max: 1.0,
+            }),
+            EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE
+        );
+        assert_eq!(
+            extern_runtime_error_code(&ExternRuntimeError::OutputOutOfRange {
+                function: "f".to_string(),
+                result_index: 0,
+                value: 2.0,
+                min: -1.0,
+                max: 1.0,
+            }),
+            EXTERN_ERROR_CODE_OUTPUT_OUT_OF_RANGE
+        );
+        assert_eq!(
+            extern_runtime_error_code(&ExternRuntimeError::TimeoutExceeded {
+                function: "f".to_string(),
+                elapsed_us: 20,
+                limit_us: 10,
+            }),
+            EXTERN_ERROR_CODE_TIMEOUT_EXCEEDED
+        );
+        assert_eq!(
+            extern_runtime_error_code(&ExternRuntimeError::RuntimeError {
+                function: "f".to_string(),
+                message: "boom".to_string(),
+            }),
+            EXTERN_ERROR_CODE_RUNTIME_ERROR
         );
     }
 

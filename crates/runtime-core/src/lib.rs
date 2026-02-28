@@ -42,14 +42,33 @@ pub struct LogEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeError {
     ProgramHasNoTasks,
-    InvalidTaskIndex { task: usize },
-    InvalidStepId { task: usize, step: StepId },
+    InvalidTaskIndex {
+        task: usize,
+    },
+    InvalidStepId {
+        task: usize,
+        step: StepId,
+    },
     TooManyTransitionsInOneTick,
-    TooManyPidLoops { configured: usize, max: usize },
-    TooManyVariables { configured: usize, max: usize },
-    TooManyCamCouplings { configured: usize, max: usize },
-    InvalidCamTableIndex { cam_index: usize, table_index: u16 },
-    InvalidCamIndex { cam_index: u16 },
+    TooManyPidLoops {
+        configured: usize,
+        max: usize,
+    },
+    TooManyVariables {
+        configured: usize,
+        max: usize,
+    },
+    TooManyCamCouplings {
+        configured: usize,
+        max: usize,
+    },
+    InvalidCamTableIndex {
+        cam_index: usize,
+        table_index: u16,
+    },
+    InvalidCamIndex {
+        cam_index: u16,
+    },
     ExternCallRequiresHandler {
         function: &'static str,
     },
@@ -72,6 +91,10 @@ pub enum RuntimeError {
         max: usize,
     },
     ExternBindingVariableOutOfRange {
+        function: &'static str,
+        variable: u16,
+    },
+    ExternErrorCodeVariableOutOfRange {
         function: &'static str,
         variable: u16,
     },
@@ -393,6 +416,12 @@ pub struct Runtime<'a> {
     cam_states: [CamState; MAX_CAM_COUPLINGS],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExternActionResult {
+    Completed,
+    HandledFailure,
+}
+
 impl<'a> Runtime<'a> {
     pub fn new(program: &'a Program<'a>) -> Result<Self, RuntimeError> {
         if program.tasks.is_empty() {
@@ -485,22 +514,30 @@ impl<'a> Runtime<'a> {
              _args: &[f32],
              _results: &mut [f32]|
              -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
-        self.tick_with_trace_and_logs_impl(io, &mut on_event, &mut on_log, &mut missing_extern)
-            .map_err(|err| match err {
-                RuntimeTickError::Core(err) => err,
-                RuntimeTickError::ExternCallFailed { function, .. } => {
-                    RuntimeError::ExternCallRequiresHandler { function }
-                }
-                RuntimeTickError::ExternReturnArityMismatch {
-                    function,
-                    expected,
-                    got,
-                } => RuntimeError::ExternReturnArityMismatch {
-                    function,
-                    expected,
-                    got,
-                },
-            })
+        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
+        self.tick_with_trace_and_logs_impl(
+            io,
+            &mut on_event,
+            &mut on_log,
+            &mut missing_extern,
+            None,
+            &mut ignore_error_code,
+        )
+        .map_err(|err| match err {
+            RuntimeTickError::Core(err) => err,
+            RuntimeTickError::ExternCallFailed { function, .. } => {
+                RuntimeError::ExternCallRequiresHandler { function }
+            }
+            RuntimeTickError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            } => RuntimeError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            },
+        })
     }
 
     pub fn tick_with_extern<IO: Io, E>(
@@ -508,9 +545,36 @@ impl<'a> Runtime<'a> {
         io: &mut IO,
         mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
     ) -> Result<(), RuntimeTickError<E>> {
-        self.tick_with_trace_and_logs_and_extern(io, |_| {}, |_| {}, move |f, a, o| {
-            on_extern_call(f, a, o)
-        })
+        let mut on_event = |_| {};
+        let mut on_log = |_| {};
+        let mut ignore_error_code = |_function: &'static str, _error: &E| 0.0;
+        self.tick_with_trace_and_logs_impl(
+            io,
+            &mut on_event,
+            &mut on_log,
+            &mut on_extern_call,
+            None,
+            &mut ignore_error_code,
+        )
+    }
+
+    pub fn tick_with_extern_error_code<IO: Io, E>(
+        &mut self,
+        io: &mut IO,
+        error_code_var: u16,
+        mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
+        mut map_error_code: impl FnMut(&'static str, &E) -> f32,
+    ) -> Result<(), RuntimeTickError<E>> {
+        let mut on_event = |_| {};
+        let mut on_log = |_| {};
+        self.tick_with_trace_and_logs_impl(
+            io,
+            &mut on_event,
+            &mut on_log,
+            &mut on_extern_call,
+            Some(error_code_var),
+            &mut map_error_code,
+        )
     }
 
     pub fn tick_with_trace_and_extern<IO: Io, E>(
@@ -519,9 +583,16 @@ impl<'a> Runtime<'a> {
         mut on_event: impl FnMut(TraceEvent),
         mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
     ) -> Result<(), RuntimeTickError<E>> {
-        self.tick_with_trace_and_logs_and_extern(io, &mut on_event, |_| {}, move |f, a, o| {
-            on_extern_call(f, a, o)
-        })
+        let mut on_log = |_| {};
+        let mut ignore_error_code = |_function: &'static str, _error: &E| 0.0;
+        self.tick_with_trace_and_logs_impl(
+            io,
+            &mut on_event,
+            &mut on_log,
+            &mut on_extern_call,
+            None,
+            &mut ignore_error_code,
+        )
     }
 
     pub fn tick_with_trace_and_logs_and_extern<IO: Io, E>(
@@ -531,7 +602,15 @@ impl<'a> Runtime<'a> {
         mut on_log: impl FnMut(LogEvent),
         mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
     ) -> Result<(), RuntimeTickError<E>> {
-        self.tick_with_trace_and_logs_impl(io, &mut on_event, &mut on_log, &mut on_extern_call)
+        let mut ignore_error_code = |_function: &'static str, _error: &E| 0.0;
+        self.tick_with_trace_and_logs_impl(
+            io,
+            &mut on_event,
+            &mut on_log,
+            &mut on_extern_call,
+            None,
+            &mut ignore_error_code,
+        )
     }
 
     fn tick_with_trace_and_logs_impl<IO: Io, E>(
@@ -540,6 +619,8 @@ impl<'a> Runtime<'a> {
         on_event: &mut impl FnMut(TraceEvent),
         on_log: &mut impl FnMut(LogEvent),
         on_extern_call: &mut impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
+        extern_error_code_var: Option<u16>,
+        map_extern_error_code: &mut impl FnMut(&'static str, &E) -> f32,
     ) -> Result<(), RuntimeTickError<E>> {
         let now = io.tick();
         if self.step_entered_at.is_none() {
@@ -555,7 +636,9 @@ impl<'a> Runtime<'a> {
         loop {
             transitions += 1;
             if transitions > 64 {
-                return Err(RuntimeTickError::Core(RuntimeError::TooManyTransitionsInOneTick));
+                return Err(RuntimeTickError::Core(
+                    RuntimeError::TooManyTransitionsInOneTick,
+                ));
             }
 
             let task = self
@@ -592,12 +675,19 @@ impl<'a> Runtime<'a> {
                                 function,
                                 arg_exprs,
                                 binding_vars,
-                            } => self.execute_extern_action(
-                                function,
-                                arg_exprs,
-                                binding_vars,
-                                on_extern_call,
-                            )?,
+                            } => {
+                                let result = self.execute_extern_action(
+                                    function,
+                                    arg_exprs,
+                                    binding_vars,
+                                    on_extern_call,
+                                    extern_error_code_var,
+                                    map_extern_error_code,
+                                )?;
+                                if result == ExternActionResult::HandledFailure {
+                                    break;
+                                }
+                            }
                             Action::CamEngage { cam_index } => {
                                 self.cam_engage(cam_index).map_err(RuntimeTickError::Core)?;
                             }
@@ -665,13 +755,8 @@ impl<'a> Runtime<'a> {
                     }
                     if let Some(tmo) = timeout {
                         if elapsed >= tmo.after_ticks {
-                            self.transition(
-                                now,
-                                tmo.target,
-                                TransitionReason::Timeout,
-                                on_event,
-                            )
-                            .map_err(RuntimeTickError::Core)?;
+                            self.transition(now, tmo.target, TransitionReason::Timeout, on_event)
+                                .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
                     }
@@ -691,13 +776,8 @@ impl<'a> Runtime<'a> {
                     }
                     if let Some(tmo) = timeout {
                         if elapsed >= tmo.after_ticks {
-                            self.transition(
-                                now,
-                                tmo.target,
-                                TransitionReason::Timeout,
-                                on_event,
-                            )
-                            .map_err(RuntimeTickError::Core)?;
+                            self.transition(now, tmo.target, TransitionReason::Timeout, on_event)
+                                .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
                     }
@@ -719,13 +799,8 @@ impl<'a> Runtime<'a> {
                     }
                     if let Some(tmo) = timeout {
                         if elapsed >= tmo.after_ticks {
-                            self.transition(
-                                now,
-                                tmo.target,
-                                TransitionReason::Timeout,
-                                on_event,
-                            )
-                            .map_err(RuntimeTickError::Core)?;
+                            self.transition(now, tmo.target, TransitionReason::Timeout, on_event)
+                                .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
                     }
@@ -748,13 +823,8 @@ impl<'a> Runtime<'a> {
                     }
                     if let Some(tmo) = timeout {
                         if elapsed >= tmo.after_ticks {
-                            self.transition(
-                                now,
-                                tmo.target,
-                                TransitionReason::Timeout,
-                                on_event,
-                            )
-                            .map_err(RuntimeTickError::Core)?;
+                            self.transition(now, tmo.target, TransitionReason::Timeout, on_event)
+                                .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
                     }
@@ -778,13 +848,8 @@ impl<'a> Runtime<'a> {
                     }
                     if let Some(tmo) = timeout {
                         if elapsed >= tmo.after_ticks {
-                            self.transition(
-                                now,
-                                tmo.target,
-                                TransitionReason::Timeout,
-                                on_event,
-                            )
-                            .map_err(RuntimeTickError::Core)?;
+                            self.transition(now, tmo.target, TransitionReason::Timeout, on_event)
+                                .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
                     }
@@ -804,7 +869,9 @@ impl<'a> Runtime<'a> {
         arg_exprs: &'static [ExprProgram],
         binding_vars: &'static [u16],
         on_extern_call: &mut impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
-    ) -> Result<(), RuntimeTickError<E>> {
+        extern_error_code_var: Option<u16>,
+        map_extern_error_code: &mut impl FnMut(&'static str, &E) -> f32,
+    ) -> Result<ExternActionResult, RuntimeTickError<E>> {
         if arg_exprs.len() > MAX_EXTERN_ARGS {
             return Err(RuntimeTickError::Core(
                 RuntimeError::ExternArgumentLimitExceeded {
@@ -829,13 +896,35 @@ impl<'a> Runtime<'a> {
             args[idx] = eval_expr(expr, &self.variables);
         }
 
+        if let Some(error_var) = extern_error_code_var {
+            let error_idx = error_var as usize;
+            if error_idx >= MAX_VARIABLES {
+                return Err(RuntimeTickError::Core(
+                    RuntimeError::ExternErrorCodeVariableOutOfRange {
+                        function,
+                        variable: error_var,
+                    },
+                ));
+            }
+            self.variables[error_idx] = 0.0;
+        }
+
         let mut results = [0.0_f32; MAX_EXTERN_RETURNS];
-        let produced = on_extern_call(
+        let produced = match on_extern_call(
             function,
             &args[..arg_exprs.len()],
             &mut results[..binding_vars.len()],
-        )
-        .map_err(|error| RuntimeTickError::ExternCallFailed { function, error })?;
+        ) {
+            Ok(produced) => produced,
+            Err(error) => {
+                if let Some(error_var) = extern_error_code_var {
+                    let code = map_extern_error_code(function, &error);
+                    self.variables[error_var as usize] = code;
+                    return Ok(ExternActionResult::HandledFailure);
+                }
+                return Err(RuntimeTickError::ExternCallFailed { function, error });
+            }
+        };
 
         if produced != binding_vars.len() {
             return Err(RuntimeTickError::ExternReturnArityMismatch {
@@ -857,7 +946,7 @@ impl<'a> Runtime<'a> {
             }
             self.variables[idx] = results[result_idx];
         }
-        Ok(())
+        Ok(ExternActionResult::Completed)
     }
 
     fn cam_engage(&mut self, cam_index: u16) -> Result<(), RuntimeError> {

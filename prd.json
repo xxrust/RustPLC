@@ -213,8 +213,8 @@
         "Tests pass"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added extern error-code capture flow via runtime-core tick_with_extern_error_code + stable ExternRuntimeError code mapping for last_error branching/retry/fallback patterns"
     },
     {
       "id": "US-015",

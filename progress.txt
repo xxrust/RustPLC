@@ -10,12 +10,12 @@ Started: Fri Feb 27 23:19:22 CST 2026
 - Keep extern declaration contract validation in semantic signature collection (`collect_extern_function_signatures`) so declaration-level diagnostics fire before per-step call-site checks.
 - Keep extern runtime contract checks centralized in `src/extern_functions.rs`; use `ExternFunctionRegistry::with_time_source` in tests so timeout assertions stay deterministic.
 - `Action::CallExtern` executes only through runtime extern-aware APIs (`tick_with_extern` / `tick_with_trace_and_logs_and_extern`); plain `tick*` methods intentionally return `ExternCallRequiresHandler`.
+- For DSL retry/fallback/error handling, map extern failures into a declared `[topology] variable last_error: int` via `Runtime::tick_with_extern_error_code` + `extern_runtime_error_code`, then branch in tasks using normal `wait`/`timeout` transitions.
 - Integration tests for extern contract guardrails should assert `RuntimeTickError::ExternCallFailed` plus nested `ExternRuntimeError` payload details (function context and offending index/value).
 - `ExternFunctionRegistry::new()` bootstraps built-ins (`add`, `multiply`, `quadratic_fit`, `pid_update`); deterministic tests built with `with_time_source` must register needed built-ins explicitly and use `reset_builtin_pid_state()` before PID assertions that require a fresh integrator.
 - Extern scheduler guardrails are stage-split: detect non-pure cross-branch conflicts during semantic task validation, and enforce per-tick `time_bound_us` budget against configured `tick_ms` in runtime bridging.
 - Causality extern chains are modeled across semantic + verifier: allow causality nodes to reference devices/variables/extern names, wire call-site `arg -> function` edges, and only propagate `function -> binding` for `pure: true` externs.
 
----
 ## [2026-02-28 00:01:57] - US-002
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - What was implemented
@@ -301,4 +301,28 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - If causality chains start referencing extern/variable nodes, `build_constraint_set` must stop using device-only validation or checker tests will fail before verification runs.
   - Useful context (e.g., "the evaluation panel is in component X")
     - Extern call graph augmentation currently comes from task action collection in `src/verification/causality.rs`; pure/non-pure behavior is controlled exclusively by `[topology] extern function` contract metadata.
+---
+## [2026-02-28 11:30:25] - US-014
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added runtime-core extern error-code capture API `Runtime::tick_with_extern_error_code`, which maps extern call failures into a configured variable slot instead of hard-failing the tick.
+  - Added stable extern runtime error-code mapping helpers in `src/extern_functions.rs` (`extern_runtime_error_code` + constants) for deterministic `last_error` handling.
+  - Added integration tests covering fallback branching, retry-then-success branching, and invalid error-variable slot guardrails for extern-enabled runtime flow.
+  - Documented the standard `last_error` branching pattern (retry/fallback/error tasks) in `docs/extern_function_mvp_spec.md` without introducing new DSL keywords.
+  - Marked US-014 as completed (`passes: true`) in `prd.json`.
+- Files changed
+  - crates/runtime-core/src/lib.rs
+  - src/extern_functions.rs
+  - tests/runtime_bridge_us006.rs
+  - docs/extern_function_mvp_spec.md
+  - AGENTS.md
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Extern failure recovery can stay DSL-backward-compatible by surfacing runtime errors into a normal topology variable and reusing existing `wait` + `timeout` branching.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Retry/error-flow tests with multiple extern calls must respect compile-time extern tick budget checks (`tick_ms` vs summed `time_bound_us`), or runtime bridging fails before execution.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `tick_with_extern_error_code` intentionally stops executing remaining actions in a step after a handled extern failure, then transitions so the next step can branch on `last_error` deterministically.
 ---

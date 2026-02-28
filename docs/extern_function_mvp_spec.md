@@ -194,3 +194,51 @@ steps:
 
 - This spec is intentionally narrow to unblock parser/semantic/runtime increments.
 - Any syntax beyond this file must be treated as future extension work and requires a new RFC/PRD update.
+
+## 5) Runtime Extern Error Handling Pattern (US-014)
+
+Extern runtime failures can be surfaced into a normal DSL variable flow by declaring a topology variable
+named `last_error` (type `int`) and running the tick with runtime-core's error-code capture API:
+
+- Host runtime API: `Runtime::tick_with_extern_error_code(...)`
+- Recommended mapping helper: `rust_plc::extern_functions::extern_runtime_error_code(...)`
+- `last_error == 0` means success; non-zero means extern failure code.
+
+Stable code mapping (Phase 1):
+- `0`: success (`EXTERN_ERROR_CODE_OK`)
+- `1`: function not found
+- `2`: invalid arg count
+- `3`: input out of range
+- `4`: output out of range
+- `5`: timeout
+- `6`: runtime error
+
+Example branching pattern (retry/fallback/error tasks) without new DSL keywords:
+
+```dsl
+[topology]
+variable last_error: int = 0
+
+[tasks]
+task main:
+    step invoke:
+        action: call flaky_fn(x) -> y
+    on_complete: goto check_first
+
+task check_first:
+    step branch:
+        wait: last_error == 0
+        timeout: 1ms -> goto retry
+    on_complete: goto success
+
+task retry:
+    step invoke_retry:
+        action: call flaky_fn(x) -> y
+    on_complete: goto check_second
+
+task check_second:
+    step branch:
+        wait: last_error == 0
+        timeout: 1ms -> goto error
+    on_complete: goto success
+```
