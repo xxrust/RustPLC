@@ -14,7 +14,20 @@ jobs:
       - name: Install MATIEC (iec2c)
         run: |
           sudo apt-get update
-          sudo apt-get install -y matiec
+          if sudo apt-get install -y matiec; then
+            echo "[ST-MATIEC] Installed MATIEC from apt."
+          else
+            echo "[ST-MATIEC] apt package unavailable, building MATIEC from source."
+            sudo apt-get install -y autoconf automake bison build-essential flex git libtool
+            workdir="$(mktemp -d)"
+            git clone --depth 1 https://github.com/beremiz/matiec.git "$workdir/matiec"
+            cd "$workdir/matiec"
+            ./autogen.sh
+            ./configure
+            make -j"$(nproc)"
+            sudo make install
+            sudo ldconfig
+          fi
       - name: Verify iec2c availability
         run: |
           iec2c --version || iec2c --help
