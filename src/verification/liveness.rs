@@ -222,6 +222,16 @@ fn check_strongly_connected_components(
             continue;
         }
 
+        let component_set = component.iter().copied().collect::<HashSet<_>>();
+        let has_exit_edge = component.iter().any(|node| {
+            graph
+                .edges(*node)
+                .any(|edge| !component_set.contains(&edge.target()))
+        });
+        if has_exit_edge {
+            continue;
+        }
+
         let mut has_bounded_wait_or_allow = false;
         for node in &component {
             for edge in graph.edges(*node) {
@@ -512,8 +522,10 @@ fn literal_to_text(literal: &LiteralValue) -> String {
 fn render_expression(expr: &crate::ast::Expression) -> String {
     match expr {
         crate::ast::Expression::Literal(value) => value.to_string(),
+        crate::ast::Expression::Boolean(value) => value.to_string(),
         crate::ast::Expression::Variable(name) => name.clone(),
         crate::ast::Expression::UnaryNeg(inner) => format!("-({})", render_expression(inner)),
+        crate::ast::Expression::UnaryNot(inner) => format!("NOT({})", render_expression(inner)),
         crate::ast::Expression::BinaryOp { op, left, right } => format!(
             "({}{}{})",
             render_expression(left),
@@ -523,6 +535,14 @@ fn render_expression(expr: &crate::ast::Expression) -> String {
                 crate::ast::BinaryOperator::Mul => "*",
                 crate::ast::BinaryOperator::Div => "/",
                 crate::ast::BinaryOperator::Mod => "%",
+                crate::ast::BinaryOperator::Eq => "==",
+                crate::ast::BinaryOperator::Neq => "!=",
+                crate::ast::BinaryOperator::Gt => ">",
+                crate::ast::BinaryOperator::Lt => "<",
+                crate::ast::BinaryOperator::Gte => ">=",
+                crate::ast::BinaryOperator::Lte => "<=",
+                crate::ast::BinaryOperator::And => "AND",
+                crate::ast::BinaryOperator::Or => "OR",
             },
             render_expression(right)
         ),
@@ -721,6 +741,64 @@ task ready:
 
         verify_liveness(&program, &state_machine)
             .expect("on_complete: goto 构成的循环不应被视为死锁");
+    }
+
+    #[test]
+    fn accepts_terminal_parallel_step_with_on_complete_goto() {
+        let source = r#"
+[topology]
+device start_button: digital_input
+
+[constraints]
+
+[tasks]
+
+task cycle:
+    step do_parallel:
+        parallel:
+            branch_A:
+                delay: 10ms
+            branch_B:
+                delay: 20ms
+    on_complete: goto ready
+
+task ready:
+    step idle:
+        wait: start_button == true
+        allow_indefinite_wait: true
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        verify_liveness(&program, &state_machine)
+            .expect("并行末尾 step + on_complete: goto 不应触发 join 无出边误报");
+    }
+
+    #[test]
+    fn accepts_conditional_self_loop_when_scc_has_exit_edge() {
+        let source = r#"
+[topology]
+device sensor_alarm: digital_input
+
+[constraints]
+
+[tasks]
+
+task monitor:
+    step check:
+        if: sensor_alarm == true goto fault_handler else: goto monitor.check
+
+task fault_handler:
+    step alarm:
+        action: log "fault"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        verify_liveness(&program, &state_machine)
+            .expect("条件轮询循环存在逃逸边时不应被误判为死锁");
     }
 
     #[test]

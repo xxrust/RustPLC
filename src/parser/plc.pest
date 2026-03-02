@@ -192,15 +192,23 @@ action_extend    = { "extend" ~ action_target }
 action_retract   = { "retract" ~ action_target }
 binary_output_value = { "on" | "off" }
 state_value      = @{ identifier }
-expr_literal = @{ number | integer }
+expr_literal = @{ number | integer | boolean_value }
 expr_variable = @{ identifier }
 expr_func_call = { identifier ~ "(" ~ expression ~ ("," ~ expression)* ~ ")" }
 expr_atom = { expr_func_call | expr_literal | expr_variable | "(" ~ expression ~ ")" }
-expr_unary = { "-" ~ expr_unary | expr_atom }
+expr_not_op = { "NOT" | "not" | "!" }
+expr_unary = { "-" ~ expr_unary | expr_not_op* ~ expr_atom }
 expr_mul_op = { "*" | "/" | "%" }
 expr_mul = { expr_unary ~ (expr_mul_op ~ expr_unary)* }
 expr_add_op = { "+" | "-" }
-expression = { expr_mul ~ (expr_add_op ~ expr_mul)* }
+expr_add = { expr_mul ~ (expr_add_op ~ expr_mul)* }
+expr_cmp_op = { "==" | "!=" | ">=" | "<=" | ">" | "<" }
+expr_cmp = { expr_add ~ (expr_cmp_op ~ expr_add)? }
+expr_and_op = { "AND" | "and" | "&&" }
+expr_and = { expr_cmp ~ (expr_and_op ~ expr_cmp)* }
+expr_or_op = { "OR" | "or" | "||" }
+expr_or = { expr_and ~ (expr_or_op ~ expr_and)* }
+expression = { expr_or }
 action_set_analog = { "set_analog" ~ action_target ~ number }
 action_set_analog_expr = { "set_analog" ~ action_target ~ expression }
 compute_statement = { "compute" ~ identifier ~ "=" ~ expression }
@@ -240,7 +248,7 @@ condition_value = {
 }
 
 action_statement = { "action" ~ ":" ~ action_command }
-condition_expr = { expression ~ comparison_operator ~ expression }
+condition_expr = { expr_add ~ comparison_operator ~ expr_add }
 simple_condition = { condition_operand ~ comparison_operator ~ condition_value | condition_expr }
 logical_operator = { "AND" | "OR" }
 wait_condition = { simple_condition ~ (logical_operator ~ simple_condition)* }
@@ -266,7 +274,7 @@ parallel_branch_statement = {
     | if_else_statement
     | repeat_block
 }
-parallel_branch = { identifier ~ ":" ~ parallel_branch_statement+ }
+parallel_branch = { !("on_complete" ~ ":") ~ identifier ~ ":" ~ parallel_branch_statement+ }
 parallel_statement = { "parallel" ~ ":" ~ parallel_branch+ }
 
 race_branch_statement = {
@@ -279,7 +287,7 @@ race_branch_statement = {
     | if_else_statement
     | repeat_block
 }
-race_branch = { identifier ~ ":" ~ race_branch_statement+ ~ then_goto_statement }
+race_branch = { !("on_complete" ~ ":") ~ identifier ~ ":" ~ race_branch_statement+ ~ then_goto_statement }
 race_statement = { "race" ~ ":" ~ race_branch+ }
 
 step_statement = {

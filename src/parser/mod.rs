@@ -252,8 +252,11 @@ fn reject_extern_calls_in_expression(
     step_name: &str,
 ) -> Result<(), PlcError> {
     match expr {
-        Expression::Literal(_) | Expression::Variable(_) => Ok(()),
+        Expression::Literal(_) | Expression::Boolean(_) | Expression::Variable(_) => Ok(()),
         Expression::UnaryNeg(inner) => {
+            reject_extern_calls_in_expression(inner, extern_names, line, task_name, step_name)
+        }
+        Expression::UnaryNot(inner) => {
             reject_extern_calls_in_expression(inner, extern_names, line, task_name, step_name)
         }
         Expression::BinaryOp { left, right, .. } => {
@@ -1629,7 +1632,7 @@ fn parse_condition_value(pair: Pair<Rule>) -> Result<LiteralValue, PlcError> {
 fn parse_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
     let line = line_of(&pair);
     match pair.as_rule() {
-        Rule::expression => {
+        Rule::expression | Rule::expr_or | Rule::expr_and | Rule::expr_add | Rule::expr_mul => {
             let mut inner = pair.into_inner();
             let first = inner
                 .next()
@@ -1648,16 +1651,16 @@ fn parse_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
             }
             Ok(expr)
         }
-        Rule::expr_mul => {
+        Rule::expr_cmp => {
             let mut inner = pair.into_inner();
             let first = inner
                 .next()
-                .ok_or_else(|| PlcError::parse(line, "乘除表达式为空"))?;
+                .ok_or_else(|| PlcError::parse(line, "比较表达式为空"))?;
             let mut expr = parse_expression(first)?;
-            while let Some(op) = inner.next() {
+            if let Some(op) = inner.next() {
                 let rhs_pair = inner
                     .next()
-                    .ok_or_else(|| PlcError::parse(line, "乘除表达式缺少右操作数"))?;
+                    .ok_or_else(|| PlcError::parse(line, "比较表达式缺少右操作数"))?;
                 let rhs = parse_expression(rhs_pair)?;
                 expr = Expression::BinaryOp {
                     op: parse_binary_operator(op)?,
@@ -1670,10 +1673,22 @@ fn parse_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
         Rule::expr_unary => {
             let raw = pair.as_str().trim_start();
             let mut inner = pair.into_inner();
+            let mut not_count = 0usize;
+            while let Some(next) = inner.peek() {
+                if next.as_rule() == Rule::expr_not_op {
+                    not_count += 1;
+                    inner.next();
+                } else {
+                    break;
+                }
+            }
             let inner_pair = inner
                 .next()
                 .ok_or_else(|| PlcError::parse(line, "一元表达式为空"))?;
-            let expr = parse_expression(inner_pair)?;
+            let mut expr = parse_expression(inner_pair)?;
+            for _ in 0..not_count {
+                expr = Expression::UnaryNot(Box::new(expr));
+            }
             if raw.starts_with('-') {
                 Ok(Expression::UnaryNeg(Box::new(expr)))
             } else {
@@ -1688,13 +1703,16 @@ fn parse_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
             parse_expression(inner)
         }
         Rule::expr_func_call => parse_function_call_expression(pair),
-        Rule::expr_literal => {
-            let parsed = pair
-                .as_str()
-                .parse::<f64>()
-                .map_err(|_| PlcError::parse(line, "数字字面量解析失败"))?;
-            Ok(Expression::Literal(parsed))
-        }
+        Rule::expr_literal => match pair.as_str() {
+            "true" => Ok(Expression::Boolean(true)),
+            "false" => Ok(Expression::Boolean(false)),
+            raw => {
+                let parsed = raw
+                    .parse::<f64>()
+                    .map_err(|_| PlcError::parse(line, "数字字面量解析失败"))?;
+                Ok(Expression::Literal(parsed))
+            }
+        },
         Rule::expr_variable => Ok(Expression::Variable(pair.as_str().to_string())),
         rule => Err(PlcError::parse(
             line,
@@ -1728,6 +1746,14 @@ fn parse_binary_operator(pair: Pair<Rule>) -> Result<BinaryOperator, PlcError> {
         "*" => Ok(BinaryOperator::Mul),
         "/" => Ok(BinaryOperator::Div),
         "%" => Ok(BinaryOperator::Mod),
+        "==" => Ok(BinaryOperator::Eq),
+        "!=" => Ok(BinaryOperator::Neq),
+        ">" => Ok(BinaryOperator::Gt),
+        "<" => Ok(BinaryOperator::Lt),
+        ">=" => Ok(BinaryOperator::Gte),
+        "<=" => Ok(BinaryOperator::Lte),
+        "AND" | "and" | "&&" => Ok(BinaryOperator::And),
+        "OR" | "or" | "||" => Ok(BinaryOperator::Or),
         other => Err(PlcError::parse(
             line,
             format!("不支持的二元运算符: {other}"),
@@ -1738,10 +1764,12 @@ fn parse_binary_operator(pair: Pair<Rule>) -> Result<BinaryOperator, PlcError> {
 fn expression_to_raw(expr: &Expression) -> String {
     match expr {
         Expression::Literal(value) => value.to_string(),
+        Expression::Boolean(value) => value.to_string(),
         Expression::Variable(name) => name.clone(),
         Expression::UnaryNeg(inner) => format!("-({})", expression_to_raw(inner)),
+        Expression::UnaryNot(inner) => format!("NOT({})", expression_to_raw(inner)),
         Expression::BinaryOp { op, left, right } => format!(
-            "({}{}{})",
+            "({} {} {})",
             expression_to_raw(left),
             match op {
                 BinaryOperator::Add => "+",
@@ -1749,6 +1777,14 @@ fn expression_to_raw(expr: &Expression) -> String {
                 BinaryOperator::Mul => "*",
                 BinaryOperator::Div => "/",
                 BinaryOperator::Mod => "%",
+                BinaryOperator::Eq => "==",
+                BinaryOperator::Neq => "!=",
+                BinaryOperator::Gt => ">",
+                BinaryOperator::Lt => "<",
+                BinaryOperator::Gte => ">=",
+                BinaryOperator::Lte => "<=",
+                BinaryOperator::And => "AND",
+                BinaryOperator::Or => "OR",
             },
             expression_to_raw(right)
         ),
@@ -3460,6 +3496,47 @@ task parallel_demo:
     }
 
     #[test]
+    fn keeps_task_on_complete_after_terminal_parallel_step() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task cycle:
+    step do_parallel:
+        parallel:
+            branch_A:
+                delay: 10ms
+            branch_B:
+                delay: 20ms
+    on_complete: goto ready
+
+task ready:
+    step idle:
+        action: log "idle"
+"#;
+
+        let ast = parse_plc(input).expect("并行末尾 step 后的 on_complete 应可解析");
+        let cycle = ast
+            .tasks
+            .tasks
+            .iter()
+            .find(|task| task.name == "cycle")
+            .expect("应存在 cycle task");
+        assert!(
+            matches!(cycle.on_complete, Some(OnCompleteDirective::Goto { .. })),
+            "on_complete: goto 不应被并行分支吞掉"
+        );
+
+        let StepStatement::Parallel(block) = &cycle.steps[0].statements[0] else {
+            panic!("cycle.do_parallel 首条语句应为 parallel");
+        };
+        assert_eq!(block.branches.len(), 2, "parallel 分支数量应保持为 2");
+    }
+
+    #[test]
     fn parses_prd_5_5_5_race_tasks_example() {
         let input = r#"
 [tasks]
@@ -3980,6 +4057,90 @@ task main:
             }
             other => panic!("期望 compute(clamp) action，实际: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_compute_boolean_literals_into_expression_literals() {
+        let input = r#"
+[topology]
+variable flag: bool = false
+
+[constraints]
+
+[tasks]
+task main:
+    step calc:
+        action: compute flag = true
+        action: compute flag = false
+"#;
+
+        let ast = parse_plc(input).expect("boolean compute literals should parse");
+        let step = &ast.tasks.tasks[0].steps[0];
+        assert_eq!(step.statements.len(), 2);
+
+        match &step.statements[0] {
+            StepStatement::Action(ActionStatement::Compute { target, expr }) => {
+                assert_eq!(target, "flag");
+                assert!(matches!(expr, Expression::Boolean(true)));
+            }
+            other => panic!("expected compute action, got {other:?}"),
+        }
+
+        match &step.statements[1] {
+            StepStatement::Action(ActionStatement::Compute { target, expr }) => {
+                assert_eq!(target, "flag");
+                assert!(matches!(expr, Expression::Boolean(false)));
+            }
+            other => panic!("expected compute action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_compute_boolean_expression_with_logical_and_comparison_ops() {
+        let input = r#"
+[topology]
+variable flag: bool = false
+variable a: bool = false
+variable b: bool = true
+variable x: float = 0.0
+
+[constraints]
+
+[tasks]
+task main:
+    step calc:
+        action: compute flag = NOT a OR (b AND x > 0)
+"#;
+
+        let ast = parse_plc(input).expect("boolean expression compute should parse");
+        let step = &ast.tasks.tasks[0].steps[0];
+        let StepStatement::Action(ActionStatement::Compute { expr, .. }) = &step.statements[0]
+        else {
+            panic!("expected compute action");
+        };
+
+        let Expression::BinaryOp { op, left, right } = expr else {
+            panic!("top-level expression should be binary OR");
+        };
+        assert!(matches!(op, BinaryOperator::Or));
+        assert!(matches!(left.as_ref(), Expression::UnaryNot(_)));
+        let Expression::BinaryOp {
+            op: right_op,
+            left: and_left,
+            right: and_right,
+        } = right.as_ref()
+        else {
+            panic!("right side should be binary AND");
+        };
+        assert!(matches!(right_op, BinaryOperator::And));
+        assert!(matches!(and_left.as_ref(), Expression::Variable(name) if name == "b"));
+        assert!(matches!(
+            and_right.as_ref(),
+            Expression::BinaryOp {
+                op: BinaryOperator::Gt,
+                ..
+            }
+        ));
     }
 
     #[test]

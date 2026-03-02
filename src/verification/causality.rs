@@ -334,11 +334,14 @@ fn expression_variables(expr: &crate::ast::Expression) -> HashSet<String> {
 
 fn collect_expression_variables(expr: &crate::ast::Expression, vars: &mut HashSet<String>) {
     match expr {
-        crate::ast::Expression::Literal(_) => {}
+        crate::ast::Expression::Literal(_) | crate::ast::Expression::Boolean(_) => {}
         crate::ast::Expression::Variable(name) => {
             vars.insert(name.clone());
         }
         crate::ast::Expression::UnaryNeg(inner) => {
+            collect_expression_variables(inner, vars);
+        }
+        crate::ast::Expression::UnaryNot(inner) => {
             collect_expression_variables(inner, vars);
         }
         crate::ast::Expression::BinaryOp { left, right, .. } => {
@@ -717,8 +720,10 @@ fn literal_to_text(literal: &LiteralValue) -> String {
 fn render_expression(expr: &crate::ast::Expression) -> String {
     match expr {
         crate::ast::Expression::Literal(value) => value.to_string(),
+        crate::ast::Expression::Boolean(value) => value.to_string(),
         crate::ast::Expression::Variable(name) => name.clone(),
         crate::ast::Expression::UnaryNeg(inner) => format!("-({})", render_expression(inner)),
+        crate::ast::Expression::UnaryNot(inner) => format!("NOT({})", render_expression(inner)),
         crate::ast::Expression::BinaryOp { op, left, right } => format!(
             "({}{}{})",
             render_expression(left),
@@ -728,6 +733,14 @@ fn render_expression(expr: &crate::ast::Expression) -> String {
                 crate::ast::BinaryOperator::Mul => "*",
                 crate::ast::BinaryOperator::Div => "/",
                 crate::ast::BinaryOperator::Mod => "%",
+                crate::ast::BinaryOperator::Eq => "==",
+                crate::ast::BinaryOperator::Neq => "!=",
+                crate::ast::BinaryOperator::Gt => ">",
+                crate::ast::BinaryOperator::Lt => "<",
+                crate::ast::BinaryOperator::Gte => ">=",
+                crate::ast::BinaryOperator::Lte => "<=",
+                crate::ast::BinaryOperator::And => "AND",
+                crate::ast::BinaryOperator::Or => "OR",
             },
             render_expression(right)
         ),

@@ -964,9 +964,8 @@ pub fn build_topology_graph(program: &PlcProgram) -> Result<TopologyGraph, Vec<P
 pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
     let variable_types = collect_variable_types(&expanded.topology);
-    let variable_names = variable_types.keys().cloned().collect::<HashSet<_>>();
     let mut expr_errors = Vec::new();
-    validate_expression_actions_in_tasks(&expanded.tasks, &variable_names, &mut expr_errors);
+    validate_expression_actions_in_tasks(&expanded.tasks, &variable_types, &mut expr_errors);
     let extern_signatures =
         collect_extern_function_signatures(&expanded.topology, &mut expr_errors);
     validate_extern_calls_in_tasks(
@@ -3162,7 +3161,7 @@ fn validate_set_enum_values(statements: &[StepStatement], line: usize, errors: &
 
 fn validate_expression_actions_in_tasks(
     tasks: &TasksSection,
-    variables: &HashSet<String>,
+    variable_types: &HashMap<String, AstVariableType>,
     errors: &mut Vec<PlcError>,
 ) {
     for task in &tasks.tasks {
@@ -3170,7 +3169,7 @@ fn validate_expression_actions_in_tasks(
             validate_expression_actions_in_statements(
                 &step.statements,
                 step.line.max(1),
-                variables,
+                variable_types,
                 errors,
             );
         }
@@ -3517,19 +3516,51 @@ fn infer_expression_type(
 ) -> Option<AstVariableType> {
     match expr {
         AstExpression::Literal(_) => Some(AstVariableType::Float),
+        AstExpression::Boolean(_) => Some(AstVariableType::Bool),
         AstExpression::Variable(name) => variable_types.get(name).cloned(),
-        AstExpression::UnaryNeg(inner) => infer_expression_type(inner, variable_types),
-        AstExpression::BinaryOp { left, right, .. } => {
+        AstExpression::UnaryNeg(inner) => match infer_expression_type(inner, variable_types)? {
+            AstVariableType::Bool => None,
+            AstVariableType::Int => Some(AstVariableType::Int),
+            AstVariableType::Float => Some(AstVariableType::Float),
+        },
+        AstExpression::UnaryNot(inner) => match infer_expression_type(inner, variable_types)? {
+            AstVariableType::Bool => Some(AstVariableType::Bool),
+            _ => None,
+        },
+        AstExpression::BinaryOp { op, left, right } => {
             let left_type = infer_expression_type(left, variable_types)?;
             let right_type = infer_expression_type(right, variable_types)?;
-            match (left_type, right_type) {
-                (AstVariableType::Bool, _) | (_, AstVariableType::Bool) => {
-                    Some(AstVariableType::Bool)
+            match op {
+                AstBinaryOperator::Add
+                | AstBinaryOperator::Sub
+                | AstBinaryOperator::Mul
+                | AstBinaryOperator::Div
+                | AstBinaryOperator::Mod => match (left_type, right_type) {
+                    (AstVariableType::Bool, _) | (_, AstVariableType::Bool) => None,
+                    (AstVariableType::Float, _) | (_, AstVariableType::Float) => {
+                        Some(AstVariableType::Float)
+                    }
+                    (AstVariableType::Int, AstVariableType::Int) => Some(AstVariableType::Int),
+                },
+                AstBinaryOperator::Eq | AstBinaryOperator::Neq => match (left_type, right_type) {
+                    (AstVariableType::Bool, AstVariableType::Bool) => Some(AstVariableType::Bool),
+                    (AstVariableType::Bool, _) | (_, AstVariableType::Bool) => None,
+                    _ => Some(AstVariableType::Bool),
+                },
+                AstBinaryOperator::Gt
+                | AstBinaryOperator::Lt
+                | AstBinaryOperator::Gte
+                | AstBinaryOperator::Lte => match (left_type, right_type) {
+                    (AstVariableType::Bool, _) | (_, AstVariableType::Bool) => None,
+                    _ => Some(AstVariableType::Bool),
+                },
+                AstBinaryOperator::And | AstBinaryOperator::Or => {
+                    if left_type == AstVariableType::Bool && right_type == AstVariableType::Bool {
+                        Some(AstVariableType::Bool)
+                    } else {
+                        None
+                    }
                 }
-                (AstVariableType::Float, _) | (_, AstVariableType::Float) => {
-                    Some(AstVariableType::Float)
-                }
-                (AstVariableType::Int, AstVariableType::Int) => Some(AstVariableType::Int),
             }
         }
         AstExpression::FunctionCall { .. } => Some(AstVariableType::Float),
@@ -3539,9 +3570,10 @@ fn infer_expression_type(
 fn validate_expression_actions_in_statements(
     statements: &[StepStatement],
     line: usize,
-    variables: &HashSet<String>,
+    variable_types: &HashMap<String, AstVariableType>,
     errors: &mut Vec<PlcError>,
 ) {
+    let variables = variable_types.keys().cloned().collect::<HashSet<_>>();
     for statement in statements {
         match statement {
             StepStatement::Action(ActionStatement::Compute { target, expr }) => {
@@ -3553,42 +3585,97 @@ fn validate_expression_actions_in_statements(
                         "compute 目标变量必须先在 [topology] 中使用 variable 声明".to_string(),
                     ));
                 }
-                validate_expression_variables(expr, line, variables, errors);
+                validate_expression_variables(expr, line, &variables, errors);
+                if let Some(target_type) = variable_types.get(target) {
+                    match infer_expression_type(expr, variable_types) {
+                        Some(actual_type)
+                            if !expression_type_assignable_to(&actual_type, target_type) =>
+                        {
+                            errors.push(PlcError::type_mismatch_with_reason(
+                                line,
+                                ast_variable_type_name(target_type),
+                                ast_variable_type_name(&actual_type),
+                                format!("compute {target}"),
+                                "compute 表达式类型必须与目标变量类型一致".to_string(),
+                            ));
+                        }
+                        None => errors.push(PlcError::semantic_with_reason(
+                            line,
+                            format!("compute {target} 表达式类型不合法"),
+                            "请检查布尔/比较/算术表达式是否符合类型规则".to_string(),
+                        )),
+                        _ => {}
+                    }
+                }
             }
             StepStatement::Action(ActionStatement::SetAnalogExpr { expr, .. }) => {
-                validate_expression_variables(expr, line, variables, errors);
+                validate_expression_variables(expr, line, &variables, errors);
+                match infer_expression_type(expr, variable_types) {
+                    Some(AstVariableType::Bool) => {
+                        errors.push(PlcError::type_mismatch_with_reason(
+                            line,
+                            "float/int",
+                            "bool",
+                            "set_analog expression".to_string(),
+                            "set_analog 表达式必须是数值类型".to_string(),
+                        ))
+                    }
+                    None => errors.push(PlcError::semantic_with_reason(
+                        line,
+                        "set_analog 表达式类型不合法".to_string(),
+                        "请检查布尔/比较/算术表达式是否符合类型规则".to_string(),
+                    )),
+                    _ => {}
+                }
             }
             StepStatement::Action(ActionStatement::Call { args, .. }) => {
                 for arg in args {
-                    validate_expression_variables(arg, line, variables, errors);
+                    validate_expression_variables(arg, line, &variables, errors);
                 }
             }
             StepStatement::Action(ActionStatement::CamPhase { offset, .. }) => {
-                validate_expression_variables(offset, line, variables, errors);
+                validate_expression_variables(offset, line, &variables, errors);
+                match infer_expression_type(offset, variable_types) {
+                    Some(AstVariableType::Bool) => {
+                        errors.push(PlcError::type_mismatch_with_reason(
+                            line,
+                            "float/int",
+                            "bool",
+                            "cam_phase offset".to_string(),
+                            "cam_phase 偏移表达式必须是数值类型".to_string(),
+                        ))
+                    }
+                    None => errors.push(PlcError::semantic_with_reason(
+                        line,
+                        "cam_phase 偏移表达式类型不合法".to_string(),
+                        "请检查布尔/比较/算术表达式是否符合类型规则".to_string(),
+                    )),
+                    _ => {}
+                }
             }
             StepStatement::Wait(wait) => {
                 for condition in wait_condition_terms(&wait.condition) {
                     if let Some((left, right)) = condition.expression_pair() {
-                        validate_expression_variables(left, line, variables, errors);
-                        validate_expression_variables(right, line, variables, errors);
+                        validate_expression_variables(left, line, &variables, errors);
+                        validate_expression_variables(right, line, &variables, errors);
                     }
                 }
             }
             StepStatement::IfElse { condition, .. } => {
                 if let Some((left, right)) = condition.expression_pair() {
-                    validate_expression_variables(left, line, variables, errors);
-                    validate_expression_variables(right, line, variables, errors);
+                    validate_expression_variables(left, line, &variables, errors);
+                    validate_expression_variables(right, line, &variables, errors);
                 }
             }
             StepStatement::Repeat { body, .. } => {
-                validate_expression_actions_in_statements(body, line, variables, errors);
+                validate_expression_actions_in_statements(body, line, variable_types, errors);
             }
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
                     validate_expression_actions_in_statements(
                         &branch.statements,
                         line,
-                        variables,
+                        variable_types,
                         errors,
                     );
                 }
@@ -3598,7 +3685,7 @@ fn validate_expression_actions_in_statements(
                     validate_expression_actions_in_statements(
                         &branch.statements,
                         line,
-                        variables,
+                        variable_types,
                         errors,
                     );
                 }
@@ -3734,6 +3821,7 @@ fn validate_expression_variables(
 ) {
     match expr {
         AstExpression::Literal(_) => {}
+        AstExpression::Boolean(_) => {}
         AstExpression::Variable(name) => {
             if !variables.contains(name) {
                 errors.push(PlcError::undefined_reference_with_reason(
@@ -3745,6 +3833,9 @@ fn validate_expression_variables(
             }
         }
         AstExpression::UnaryNeg(inner) => {
+            validate_expression_variables(inner, line, variables, errors)
+        }
+        AstExpression::UnaryNot(inner) => {
             validate_expression_variables(inner, line, variables, errors)
         }
         AstExpression::BinaryOp { left, right, .. } => {
@@ -3789,6 +3880,19 @@ fn validate_builtin_function_call(expr: &AstExpression, line: usize, errors: &mu
             "请检查函数调用参数数量".to_string(),
         ));
     }
+}
+
+fn expression_type_assignable_to(
+    expression_type: &AstVariableType,
+    target_type: &AstVariableType,
+) -> bool {
+    matches!(
+        (expression_type, target_type),
+        (AstVariableType::Bool, AstVariableType::Bool)
+            | (AstVariableType::Int, AstVariableType::Int)
+            | (AstVariableType::Int, AstVariableType::Float)
+            | (AstVariableType::Float, AstVariableType::Float)
+    )
 }
 
 fn validate_motor_legacy_set_actions(
@@ -5084,10 +5188,12 @@ fn lower_extern_call_binding(binding: &AstExternCallBinding) -> IrExternCallBind
 fn expression_to_raw(expr: &AstExpression) -> String {
     match expr {
         AstExpression::Literal(v) => v.to_string(),
+        AstExpression::Boolean(v) => v.to_string(),
         AstExpression::Variable(name) => name.clone(),
         AstExpression::UnaryNeg(inner) => format!("-({})", expression_to_raw(inner)),
+        AstExpression::UnaryNot(inner) => format!("NOT({})", expression_to_raw(inner)),
         AstExpression::BinaryOp { op, left, right } => format!(
-            "({}{}{})",
+            "({} {} {})",
             expression_to_raw(left),
             binary_operator_to_raw(*op),
             expression_to_raw(right)
@@ -5110,6 +5216,14 @@ fn binary_operator_to_raw(op: AstBinaryOperator) -> &'static str {
         AstBinaryOperator::Mul => "*",
         AstBinaryOperator::Div => "/",
         AstBinaryOperator::Mod => "%",
+        AstBinaryOperator::Eq => "==",
+        AstBinaryOperator::Neq => "!=",
+        AstBinaryOperator::Gt => ">",
+        AstBinaryOperator::Lt => "<",
+        AstBinaryOperator::Gte => ">=",
+        AstBinaryOperator::Lte => "<=",
+        AstBinaryOperator::And => "AND",
+        AstBinaryOperator::Or => "OR",
     }
 }
 
@@ -7645,6 +7759,118 @@ task done:
             crate::ir::ExternCallBinding::Tuple(names)
                 if names == &vec!["lo".to_string(), "hi".to_string()]
         ));
+    }
+
+    #[test]
+    fn lowers_compute_boolean_literals_to_numeric_ir_expression() {
+        let input = r#"
+[topology]
+variable flag: bool = false
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: compute flag = true
+        action: compute flag = false
+    on_complete: goto done
+
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("bool compute 示例应能解析");
+        let sm = build_state_machine(&program).expect("bool compute 应能 lowering 到 IR");
+
+        let compute_exprs = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .filter_map(|action| match action {
+                crate::ir::TransitionAction::Compute { target, expr_raw } if target == "flag" => {
+                    Some(expr_raw.clone())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            compute_exprs.iter().any(|expr| expr == "true"),
+            "true 应保留为布尔表达式字面量 true，实际: {compute_exprs:?}"
+        );
+        assert!(
+            compute_exprs.iter().any(|expr| expr == "false"),
+            "false 应保留为布尔表达式字面量 false，实际: {compute_exprs:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_compute_type_mismatch_between_bool_target_and_numeric_expression() {
+        let input = r#"
+[topology]
+variable flag: bool = false
+variable x: float = 1.0
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: compute flag = x + 1
+"#;
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors = build_state_machine(&program).expect_err("bool 目标 + 数值表达式应报错");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("compute 表达式类型必须与目标变量类型一致"),
+            "应报告 compute 目标/表达式类型不匹配"
+        );
+    }
+
+    #[test]
+    fn lowers_compute_boolean_logical_expression() {
+        let input = r#"
+[topology]
+variable flag: bool = false
+variable a: bool = false
+variable b: bool = true
+variable x: float = 0.0
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: compute flag = NOT a OR (b AND x > 0)
+    on_complete: goto done
+
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let sm = build_state_machine(&program).expect("合法布尔表达式应能 lowering");
+        let compute_expr = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::Compute { target, expr_raw } if target == "flag" => {
+                    Some(expr_raw.clone())
+                }
+                _ => None,
+            })
+            .expect("应包含 compute flag 动作");
+        assert!(compute_expr.contains("NOT"), "应保留 NOT");
+        assert!(compute_expr.contains("OR"), "应保留 OR");
+        assert!(compute_expr.contains("AND"), "应保留 AND");
+        assert!(compute_expr.contains(">"), "应保留比较运算");
     }
 
     #[test]

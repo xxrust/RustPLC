@@ -1,15 +1,15 @@
 use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use runtime_core::{Runtime, RuntimeError, RuntimeTickError};
 use rust_plc::extern_functions::{
-    extern_runtime_error_code, ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError,
-    ValueRange, EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR,
+    EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR, ExternFunctionInfo,
+    ExternFunctionRegistry, ExternRuntimeError, ValueRange, extern_runtime_error_code,
 };
 use rust_plc::ir::{ExternFunctionContract, TopologyGraph, VariableType};
 use rust_plc::parser::parse_plc;
-use rust_plc::runtime_bridge::{state_machine_to_runtime_program, BridgeError};
+use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'static> {
     let program = parse_plc(plc_source).expect("parse plc");
@@ -39,7 +39,8 @@ fn compile_runtime_and_topology(
     let expanded = preprocess_program(&program).expect("preprocess");
     let topology = build_topology_graph(&expanded).expect("topology");
     let sm = build_state_machine(&expanded).expect("state machine");
-    let runtime_program = state_machine_to_runtime_program(&topology, &sm, tick_ms).expect("bridge");
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &sm, tick_ms).expect("bridge");
     (runtime_program, topology)
 }
 
@@ -475,6 +476,38 @@ fn bridge_waits_on_cam_runtime_state_and_drives_output() {
     );
 }
 
+const PLC_BOOL_EXPR_FIXTURE: &str = r#"
+[topology]
+variable a: bool = false
+variable b: bool = true
+variable x: float = 0.0
+variable flag: bool = false
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: compute flag = NOT a OR (b AND x > 0)
+    on_complete: goto done
+
+task done:
+    step halt:
+"#;
+
+#[test]
+fn bridge_executes_compute_boolean_expression_into_bool_slot() {
+    let (program, topology) = compile_runtime_and_topology(PLC_BOOL_EXPR_FIXTURE, 1);
+    let flag_var = variable_index(&topology, "flag");
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(0, 0, 0, 0);
+
+    rt.tick(&mut io).expect("tick");
+
+    assert_eq!(rt.variables()[flag_var as usize], 1.0);
+    assert_eq!(current_step_name(&rt, &program), "done.halt");
+}
+
 const PLC_EXTERN_FIXTURE: &str = r#"
 [topology]
 
@@ -556,7 +589,9 @@ fn runtime_tick_without_handler_reports_extern_handler_requirement() {
     let mut rt = Runtime::new(&program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
 
-    let err = rt.tick(&mut io).expect_err("extern action requires handler");
+    let err = rt
+        .tick(&mut io)
+        .expect_err("extern action requires handler");
     assert_eq!(
         err,
         runtime_core::RuntimeError::ExternCallRequiresHandler { function: "add" }
@@ -604,7 +639,10 @@ fn make_range_checked_registry() -> ExternFunctionRegistry {
                 },
                 |args| Ok(vec![args[0] + args[1]]),
             )
-            .with_input_ranges(vec![ValueRange::new(-10.0, 10.0), ValueRange::new(-1.0, 1.0)])
+            .with_input_ranges(vec![
+                ValueRange::new(-10.0, 10.0),
+                ValueRange::new(-1.0, 1.0),
+            ])
             .with_output_ranges(vec![ValueRange::new(-10.0, 10.0)]),
         )
         .expect("register add with ranges");
@@ -810,7 +848,11 @@ fn runtime_tick_with_error_code_variable_routes_to_fallback_branch() {
         rt.variables()[last_error_var as usize],
         EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE as f32
     );
-    assert_eq!(rt.variables()[1], 0.0, "failed call must not overwrite outputs");
+    assert_eq!(
+        rt.variables()[1],
+        0.0,
+        "failed call must not overwrite outputs"
+    );
     assert_eq!(current_step_name(&rt, &program), "check.branch");
 
     rt.tick_with_extern_error_code(

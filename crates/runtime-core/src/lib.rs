@@ -182,6 +182,15 @@ pub enum ExprOp {
     CallPow,
     CallFmod,
     CallClamp,
+    CmpEq,
+    CmpNe,
+    CmpGt,
+    CmpLt,
+    CmpGe,
+    CmpLe,
+    BoolAnd,
+    BoolOr,
+    BoolNot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1200,6 +1209,97 @@ fn eval_expr(program: &ExprProgram, vars: &[f32; MAX_VARIABLES]) -> f32 {
                 sp -= 2;
                 stack[sp - 1] = clamp_f32(value, lo, hi);
             }
+            ExprOp::CmpEq => {
+                if sp < 2 {
+                    return 0.0;
+                }
+                sp -= 1;
+                stack[sp - 1] = if compare_f32(stack[sp - 1], CompareOp::Eq, stack[sp]) {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+            ExprOp::CmpNe => {
+                if sp < 2 {
+                    return 0.0;
+                }
+                sp -= 1;
+                stack[sp - 1] = if compare_f32(stack[sp - 1], CompareOp::Ne, stack[sp]) {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+            ExprOp::CmpGt => {
+                if sp < 2 {
+                    return 0.0;
+                }
+                sp -= 1;
+                stack[sp - 1] = if compare_f32(stack[sp - 1], CompareOp::Gt, stack[sp]) {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+            ExprOp::CmpLt => {
+                if sp < 2 {
+                    return 0.0;
+                }
+                sp -= 1;
+                stack[sp - 1] = if compare_f32(stack[sp - 1], CompareOp::Lt, stack[sp]) {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+            ExprOp::CmpGe => {
+                if sp < 2 {
+                    return 0.0;
+                }
+                sp -= 1;
+                stack[sp - 1] = if compare_f32(stack[sp - 1], CompareOp::Ge, stack[sp]) {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+            ExprOp::CmpLe => {
+                if sp < 2 {
+                    return 0.0;
+                }
+                sp -= 1;
+                stack[sp - 1] = if compare_f32(stack[sp - 1], CompareOp::Le, stack[sp]) {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+            ExprOp::BoolAnd => {
+                if sp < 2 {
+                    return 0.0;
+                }
+                sp -= 1;
+                let lhs = stack[sp - 1] != 0.0;
+                let rhs = stack[sp] != 0.0;
+                stack[sp - 1] = if lhs && rhs { 1.0 } else { 0.0 };
+            }
+            ExprOp::BoolOr => {
+                if sp < 2 {
+                    return 0.0;
+                }
+                sp -= 1;
+                let lhs = stack[sp - 1] != 0.0;
+                let rhs = stack[sp] != 0.0;
+                stack[sp - 1] = if lhs || rhs { 1.0 } else { 0.0 };
+            }
+            ExprOp::BoolNot => {
+                if sp < 1 {
+                    return 0.0;
+                }
+                let value = stack[sp - 1] != 0.0;
+                stack[sp - 1] = if value { 0.0 } else { 1.0 };
+            }
         }
     }
 
@@ -2107,6 +2207,40 @@ mod tests {
         assert!(
             (out2 - 1.0).abs() < 1e-6,
             "max(fmod(3,2), cos(sin(0))) 应为 1"
+        );
+    }
+
+    #[test]
+    fn eval_expr_supports_boolean_and_comparison_operators() {
+        // NOT(a) OR (b AND x > 0)
+        let mut vars = [0.0f32; MAX_VARIABLES];
+        vars[0] = 0.0; // a = false
+        vars[1] = 1.0; // b = true
+        vars[2] = 0.5; // x = 0.5
+
+        let mut ops = [ExprOp::PushLiteral(0.0); MAX_EXPR_OPS];
+        ops[0] = ExprOp::PushVariable(0);
+        ops[1] = ExprOp::BoolNot;
+        ops[2] = ExprOp::PushVariable(1);
+        ops[3] = ExprOp::PushVariable(2);
+        ops[4] = ExprOp::PushLiteral(0.0);
+        ops[5] = ExprOp::CmpGt;
+        ops[6] = ExprOp::BoolAnd;
+        ops[7] = ExprOp::BoolOr;
+        let expr = ExprProgram { ops, len: 8 };
+        let out = eval_expr(&expr, &vars);
+        assert!(
+            (out - 1.0).abs() < 1e-6,
+            "NOT(false) OR (true AND 0.5 > 0) 应为 true"
+        );
+
+        vars[0] = 1.0; // a = true
+        vars[1] = 0.0; // b = false
+        vars[2] = -0.5; // x = -0.5
+        let out2 = eval_expr(&expr, &vars);
+        assert!(
+            (out2 - 0.0).abs() < 1e-6,
+            "NOT(true) OR (false AND -0.5 > 0) 应为 false"
         );
     }
 

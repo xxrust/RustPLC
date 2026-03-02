@@ -473,8 +473,10 @@ pub enum ExternCallBinding {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expression {
     Literal(f64),
+    Boolean(bool),
     Variable(String),
     UnaryNeg(Box<Expression>),
+    UnaryNot(Box<Expression>),
     BinaryOp {
         op: BinaryOperator,
         left: Box<Expression>,
@@ -494,6 +496,14 @@ pub enum BinaryOperator {
     Mul,
     Div,
     Mod,
+    Eq,
+    Neq,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

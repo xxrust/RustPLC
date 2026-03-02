@@ -114,6 +114,11 @@ impl ResolvedVariables {
             .cloned()
             .unwrap_or_else(|| normalize_identifier_for_st(raw))
     }
+
+    fn var_type_for(&self, raw: &str) -> Option<StVarType> {
+        let normalized = self.resolve_identifier(raw);
+        self.declarations.get(&normalized).copied()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,12 +305,22 @@ fn collect_variable_candidates_from_transitions(
                     });
                 }
                 TransitionAction::SetAnalog { target, .. }
-                | TransitionAction::SetAnalogExpr { target, .. }
-                | TransitionAction::Compute { target, .. } => {
+                | TransitionAction::SetAnalogExpr { target, .. } => {
                     candidates.push(VariableCandidate {
                         original: target.clone(),
                         var_type: StVarType::Real,
                     });
+                }
+                TransitionAction::Compute { target, .. } => {
+                    let already_declared = candidates
+                        .iter()
+                        .any(|candidate| candidate.original == *target);
+                    if !already_declared {
+                        candidates.push(VariableCandidate {
+                            original: target.clone(),
+                            var_type: StVarType::Real,
+                        });
+                    }
                 }
                 TransitionAction::CallExtern { binding, .. } => match binding {
                     ExternCallBinding::Single(name) => {
@@ -649,16 +664,22 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             format!(
                 "{} := {};",
                 resolved_variables.resolve_identifier(target),
-                expr_raw.trim()
+                render_expression_for_st(expr_raw)
             )
         }
         TransitionAction::Compute {
             target, expr_raw, ..
         } => {
+            let rendered_expr = if resolved_variables.var_type_for(target) == Some(StVarType::Bool)
+            {
+                render_bool_assignment_expr(expr_raw)
+            } else {
+                render_expression_for_st(expr_raw)
+            };
             format!(
                 "{} := {};",
                 resolved_variables.resolve_identifier(target),
-                expr_raw.trim()
+                rendered_expr
             )
         }
         TransitionAction::CallExtern {
@@ -707,6 +728,69 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             offset_expr_raw.trim()
         ),
     }
+}
+
+fn render_bool_assignment_expr(expr_raw: &str) -> String {
+    let rendered = render_expression_for_st(expr_raw);
+    match rendered.trim().to_ascii_uppercase().as_str() {
+        "1" | "1.0" | "TRUE" => "TRUE".to_string(),
+        "0" | "0.0" | "FALSE" => "FALSE".to_string(),
+        _ => rendered,
+    }
+}
+
+fn render_expression_for_st(expr_raw: &str) -> String {
+    let mut out = String::with_capacity(expr_raw.len() + 8);
+    let chars = expr_raw.chars().collect::<Vec<_>>();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let ch = chars[i];
+        if i + 1 < chars.len() {
+            match (chars[i], chars[i + 1]) {
+                ('=', '=') => {
+                    out.push('=');
+                    i += 2;
+                    continue;
+                }
+                ('!', '=') => {
+                    out.push_str("<>");
+                    i += 2;
+                    continue;
+                }
+                ('&', '&') => {
+                    out.push_str("AND");
+                    i += 2;
+                    continue;
+                }
+                ('|', '|') => {
+                    out.push_str("OR");
+                    i += 2;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let start = i;
+            i += 1;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let word = chars[start..i].iter().collect::<String>();
+            match word.to_ascii_lowercase().as_str() {
+                "true" => out.push_str("TRUE"),
+                "false" => out.push_str("FALSE"),
+                "and" => out.push_str("AND"),
+                "or" => out.push_str("OR"),
+                "not" => out.push_str("NOT"),
+                _ => out.push_str(&word),
+            }
+            continue;
+        }
+        out.push(ch);
+        i += 1;
+    }
+    out
 }
 
 fn emit_guard_branches(
@@ -1159,6 +1243,90 @@ mod tests {
             errors
                 .iter()
                 .any(|e| matches!(e, StCodegenError::TypeConflict { name } if name == "mix"))
+        );
+    }
+
+    #[test]
+    fn compute_target_uses_declared_bool_type_from_topology() {
+        let s0 = state("main", "idle");
+        let sm = StateMachine {
+            states: vec![s0.clone()],
+            transitions: vec![Transition {
+                from: s0.clone(),
+                to: s0,
+                guard: TransitionGuard::Always,
+                actions: vec![TransitionAction::Compute {
+                    target: "flag".to_string(),
+                    expr_raw: "1".to_string(),
+                }],
+                timers: vec![],
+            }],
+            initial: state("main", "idle"),
+            analog_regions: BTreeMap::new(),
+        };
+
+        let mut topology = empty_topology();
+        topology.variables.push(crate::ir::VariableDef {
+            name: "flag".to_string(),
+            var_type: VariableType::Bool,
+            initial_value: 0.0,
+            index: 0,
+        });
+
+        let st = generate_st(&topology, &sm, &StCodegenConfig::default())
+            .expect("codegen should succeed");
+        assert!(st.contains("flag: BOOL := FALSE;"));
+        assert!(st.contains("flag := TRUE;"));
+    }
+
+    #[test]
+    fn compute_bool_expression_is_rendered_with_st_boolean_operators() {
+        let s0 = state("main", "idle");
+        let sm = StateMachine {
+            states: vec![s0.clone()],
+            transitions: vec![Transition {
+                from: s0.clone(),
+                to: s0,
+                guard: TransitionGuard::Always,
+                actions: vec![TransitionAction::Compute {
+                    target: "flag".to_string(),
+                    expr_raw: "NOT(a) OR (b==1)".to_string(),
+                }],
+                timers: vec![],
+            }],
+            initial: state("main", "idle"),
+            analog_regions: BTreeMap::new(),
+        };
+
+        let mut topology = empty_topology();
+        topology.variables.push(crate::ir::VariableDef {
+            name: "flag".to_string(),
+            var_type: VariableType::Bool,
+            initial_value: 0.0,
+            index: 0,
+        });
+        topology.variables.push(crate::ir::VariableDef {
+            name: "a".to_string(),
+            var_type: VariableType::Bool,
+            initial_value: 0.0,
+            index: 1,
+        });
+        topology.variables.push(crate::ir::VariableDef {
+            name: "b".to_string(),
+            var_type: VariableType::Float,
+            initial_value: 0.0,
+            index: 2,
+        });
+
+        let st = generate_st(&topology, &sm, &StCodegenConfig::default())
+            .expect("codegen should succeed");
+        assert!(
+            st.contains("flag := NOT(a) OR (b=1);")
+                || st.contains("flag := (NOT(a) OR (b=1));")
+        );
+        assert!(
+            !st.contains("=="),
+            "ST should not contain C-style comparison operator"
         );
     }
 

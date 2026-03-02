@@ -326,6 +326,15 @@ fn format_expr_op(op: &ExprOp) -> String {
         ExprOp::CallPow => "ExprOp::CallPow".to_string(),
         ExprOp::CallFmod => "ExprOp::CallFmod".to_string(),
         ExprOp::CallClamp => "ExprOp::CallClamp".to_string(),
+        ExprOp::CmpEq => "ExprOp::CmpEq".to_string(),
+        ExprOp::CmpNe => "ExprOp::CmpNe".to_string(),
+        ExprOp::CmpGt => "ExprOp::CmpGt".to_string(),
+        ExprOp::CmpLt => "ExprOp::CmpLt".to_string(),
+        ExprOp::CmpGe => "ExprOp::CmpGe".to_string(),
+        ExprOp::CmpLe => "ExprOp::CmpLe".to_string(),
+        ExprOp::BoolAnd => "ExprOp::BoolAnd".to_string(),
+        ExprOp::BoolOr => "ExprOp::BoolOr".to_string(),
+        ExprOp::BoolNot => "ExprOp::BoolNot".to_string(),
     }
 }
 

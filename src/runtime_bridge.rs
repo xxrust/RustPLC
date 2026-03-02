@@ -345,7 +345,10 @@ fn worst_case_extern_cost_from_state(
     best
 }
 
-fn extern_action_cost_us(actions: &[TransitionAction], extern_bound_us: &HashMap<&str, u64>) -> u64 {
+fn extern_action_cost_us(
+    actions: &[TransitionAction],
+    extern_bound_us: &HashMap<&str, u64>,
+) -> u64 {
     actions.iter().fold(0u64, |total, action| {
         if let TransitionAction::CallExtern { function, .. } = action {
             let bound = extern_bound_us.get(function.as_str()).copied().unwrap_or(0);
@@ -1360,8 +1363,7 @@ fn convert_action(
 
             let leaked_function: &'static str = Box::leak(function.clone().into_boxed_str());
             let leaked_arg_exprs: &'static [ExprProgram] = Box::leak(arg_exprs.into_boxed_slice());
-            let leaked_binding_vars: &'static [u16] =
-                Box::leak(binding_vars.into_boxed_slice());
+            let leaked_binding_vars: &'static [u16] = Box::leak(binding_vars.into_boxed_slice());
             Ok(Action::CallExtern {
                 function: leaked_function,
                 arg_exprs: leaked_arg_exprs,
@@ -1433,12 +1435,22 @@ fn convert_action(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExprToken<'a> {
     Number(&'a str),
+    Bool(bool),
     Ident(&'a str),
     Plus,
     Minus,
     Star,
     Slash,
     Percent,
+    EqEq,
+    NotEq,
+    Gt,
+    Lt,
+    Ge,
+    Le,
+    And,
+    Or,
+    Not,
     LParen,
     RParen,
     Comma,
@@ -1514,8 +1526,59 @@ fn tokenize_expr(raw: &str) -> Result<Vec<ExprToken<'_>>, ()> {
                     break;
                 }
             }
-            out.push(ExprToken::Ident(&raw[start..i]));
+            let word = &raw[start..i];
+            let lowered = word.to_ascii_lowercase();
+            match lowered.as_str() {
+                "true" => out.push(ExprToken::Bool(true)),
+                "false" => out.push(ExprToken::Bool(false)),
+                "and" => out.push(ExprToken::And),
+                "or" => out.push(ExprToken::Or),
+                "not" => out.push(ExprToken::Not),
+                _ => out.push(ExprToken::Ident(word)),
+            }
             continue;
+        }
+
+        if i + 1 < bytes.len() {
+            let two = &raw[i..i + 2];
+            match two {
+                "==" => {
+                    out.push(ExprToken::EqEq);
+                    i += 2;
+                    continue;
+                }
+                "!=" => {
+                    out.push(ExprToken::NotEq);
+                    i += 2;
+                    continue;
+                }
+                ">=" => {
+                    out.push(ExprToken::Ge);
+                    i += 2;
+                    continue;
+                }
+                "<=" => {
+                    out.push(ExprToken::Le);
+                    i += 2;
+                    continue;
+                }
+                "&&" => {
+                    out.push(ExprToken::And);
+                    i += 2;
+                    continue;
+                }
+                "||" => {
+                    out.push(ExprToken::Or);
+                    i += 2;
+                    continue;
+                }
+                "<>" => {
+                    out.push(ExprToken::NotEq);
+                    i += 2;
+                    continue;
+                }
+                _ => {}
+            }
         }
 
         match ch {
@@ -1547,6 +1610,22 @@ fn tokenize_expr(raw: &str) -> Result<Vec<ExprToken<'_>>, ()> {
                 out.push(ExprToken::Percent);
                 i += 1;
             }
+            '>' => {
+                out.push(ExprToken::Gt);
+                i += 1;
+            }
+            '<' => {
+                out.push(ExprToken::Lt);
+                i += 1;
+            }
+            '=' => {
+                out.push(ExprToken::EqEq);
+                i += 1;
+            }
+            '!' => {
+                out.push(ExprToken::Not);
+                i += 1;
+            }
             ',' => {
                 out.push(ExprToken::Comma);
                 i += 1;
@@ -1570,7 +1649,49 @@ struct ExprCompiler<'a> {
 
 impl<'a> ExprCompiler<'a> {
     fn parse_expression(&mut self) -> Result<(), BridgeError> {
-        self.parse_additive()
+        self.parse_or()
+    }
+
+    fn parse_or(&mut self) -> Result<(), BridgeError> {
+        self.parse_and()?;
+        while self.consume_if(ExprToken::Or) {
+            self.parse_and()?;
+            self.push_op(ExprOp::BoolOr)?;
+        }
+        Ok(())
+    }
+
+    fn parse_and(&mut self) -> Result<(), BridgeError> {
+        self.parse_comparison()?;
+        while self.consume_if(ExprToken::And) {
+            self.parse_comparison()?;
+            self.push_op(ExprOp::BoolAnd)?;
+        }
+        Ok(())
+    }
+
+    fn parse_comparison(&mut self) -> Result<(), BridgeError> {
+        self.parse_additive()?;
+        let cmp_op = if self.consume_if(ExprToken::EqEq) {
+            Some(ExprOp::CmpEq)
+        } else if self.consume_if(ExprToken::NotEq) {
+            Some(ExprOp::CmpNe)
+        } else if self.consume_if(ExprToken::Ge) {
+            Some(ExprOp::CmpGe)
+        } else if self.consume_if(ExprToken::Le) {
+            Some(ExprOp::CmpLe)
+        } else if self.consume_if(ExprToken::Gt) {
+            Some(ExprOp::CmpGt)
+        } else if self.consume_if(ExprToken::Lt) {
+            Some(ExprOp::CmpLt)
+        } else {
+            None
+        };
+        if let Some(op) = cmp_op {
+            self.parse_additive()?;
+            self.push_op(op)?;
+        }
+        Ok(())
     }
 
     fn parse_additive(&mut self) -> Result<(), BridgeError> {
@@ -1615,6 +1736,11 @@ impl<'a> ExprCompiler<'a> {
             self.push_op(ExprOp::Neg)?;
             return Ok(());
         }
+        if self.consume_if(ExprToken::Not) {
+            self.parse_unary()?;
+            self.push_op(ExprOp::BoolNot)?;
+            return Ok(());
+        }
         self.parse_primary()
     }
 
@@ -1634,6 +1760,10 @@ impl<'a> ExprCompiler<'a> {
                             action: format!("invalid number in expr: {}", self.raw),
                         })?;
                 self.push_op(ExprOp::PushLiteral(parsed))
+            }
+            ExprToken::Bool(value) => {
+                self.pos += 1;
+                self.push_op(ExprOp::PushLiteral(if value { 1.0 } else { 0.0 }))
             }
             ExprToken::Ident(name) => {
                 self.pos += 1;
