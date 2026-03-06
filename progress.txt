@@ -596,3 +596,41 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - Axis fault `error_code` fields are now part of IR payload contract and are ready for runtime/bridge propagation in follow-up stories.
 ---
+## [2026-03-06 13:59:53] - US-007
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Extended runtime-core `Action` with `Action::AxisMove { command: AxisMotionCommand }`.
+  - Added axis runtime data contracts:
+    - `AxisMoveKind` (`Relative` / `Absolute`)
+    - `AxisMotionCommand` (`target`, `port`, `kind`, `value`, `speed`)
+    - `AxisMotionResult` (`Done`, `Reject`, `MotionFault`, `SafetyFault`)
+  - Added runtime error surfaces:
+    - `RuntimeError::AxisMotionRequiresHandler`
+    - `RuntimeError::AxisMotionRejected`
+    - `RuntimeError::AxisMotionFault`
+    - `RuntimeError::AxisSafetyFault`
+  - Added runtime execution API `Runtime::tick_with_axis(...)` and wired axis dispatch through the tick loop.
+  - Default `tick*` and `tick_with_extern*` paths now deterministically fail with `AxisMotionRequiresHandler` when axis action is present but no axis handler is provided.
+  - Updated cross-crate action match/render paths (`crates/codegen/src/lib.rs`, `src/main.rs`, `src/sim_regress.rs`) for new runtime action variant compatibility.
+  - Added runtime-core unit tests covering:
+    - no-handler failure path
+    - handler success (`Done`)
+    - `Reject` fault path
+    - `MotionFault` path
+    - `SafetyFault` path
+  - Ran `cargo test -p runtime-core axis_move`, `cargo test --workspace axis_move`, and `cargo test --workspace` successfully.
+- Files changed
+  - crates/runtime-core/src/lib.rs
+  - crates/codegen/src/lib.rs
+  - src/main.rs
+  - src/sim_regress.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For new runtime action handlers, keep `tick_with_trace_and_logs_impl` as the single execution hub and adapt all public `tick*` wrappers with deterministic default-handler behavior.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Adding a runtime-core `Action` variant requires synchronized updates in helper crates and CLI action scanners, not just runtime-core itself.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis motion classification now exists at runtime-core level; bridge wiring of IR axis payloads into this API remains the next iteration scope.
+---

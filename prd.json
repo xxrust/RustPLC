@@ -109,8 +109,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "runtime-core now supports Action::AxisMove with AxisMotionCommand and classified AxisMotionResult (Done/Reject/MotionFault/SafetyFault), adds deterministic AxisMotionRequiresHandler fallback when no handler is provided, and includes unit tests for success and all three fault categories."
     },
     {
       "id": "US-008",
