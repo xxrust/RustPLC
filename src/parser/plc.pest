@@ -303,10 +303,10 @@ axis_move_statement = {
     "action"
     ~ ":"
     ~ (axis_move_relative_action | axis_move_absolute_action)
-    ~ axis_timeout_branch
-    ~ axis_on_reject_branch
-    ~ axis_on_motion_fault_branch
-    ~ axis_on_safety_fault_branch
+    ~ axis_timeout_branch?
+    ~ axis_on_reject_branch?
+    ~ axis_on_motion_fault_branch?
+    ~ axis_on_safety_fault_branch?
 }
 
 repeat_block = { "repeat" ~ integer ~ ":" ~ step_statement+ }

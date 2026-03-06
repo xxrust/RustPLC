@@ -1,4 +1,4 @@
-use crate::ast::{
+﻿use crate::ast::{
     ActionStatement, ActionTarget, BinaryOperator, Branch, CamPoint, CamTableDeclaration,
     CamTableMode, CausalityConstraint, ComparisonOperator, ConditionExpression, ConstraintsSection,
     DeviceAttributes, DeviceDeclaration, DevicePort, DeviceTags, DeviceType, DurationValue,
@@ -1511,13 +1511,6 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
 
     let target = target.ok_or_else(|| PlcError::parse(line, "axis.move 缺少目标设备"))?;
     let speed = speed.ok_or_else(|| PlcError::parse(line, "axis.move 缺少 speed 参数"))?;
-    let timeout = timeout.ok_or_else(|| PlcError::parse(line, "axis.move 缺少 timeout 分支"))?;
-    let on_reject =
-        on_reject.ok_or_else(|| PlcError::parse(line, "axis.move 缺少 on_reject 分支"))?;
-    let on_motion_fault = on_motion_fault
-        .ok_or_else(|| PlcError::parse(line, "axis.move 缺少 on_motion_fault 分支"))?;
-    let on_safety_fault = on_safety_fault
-        .ok_or_else(|| PlcError::parse(line, "axis.move 缺少 on_safety_fault 分支"))?;
 
     match is_relative {
         Some(true) => Ok(ActionStatement::AxisMoveRelative {
@@ -4300,13 +4293,30 @@ task fault:
                 assert_eq!(target.device, "axis_x");
                 assert!((*distance - 10.0).abs() < f64::EPSILON);
                 assert!((*speed - 2.0).abs() < f64::EPSILON);
-                assert_eq!(timeout.duration.value, 500);
-                assert_eq!(timeout.target.task, "fault");
-                assert_eq!(timeout.target.step.as_deref(), Some("timeout"));
-                assert_eq!(on_reject.task, "fault");
-                assert_eq!(on_reject.step.as_deref(), Some("reject"));
-                assert_eq!(on_motion_fault.step.as_deref(), Some("motion_fault"));
-                assert_eq!(on_safety_fault.step.as_deref(), Some("safety_fault"));
+                assert_eq!(timeout.as_ref().map(|v| v.duration.value), Some(500));
+                assert_eq!(
+                    timeout.as_ref().map(|v| v.target.task.as_str()),
+                    Some("fault")
+                );
+                assert_eq!(
+                    timeout
+                        .as_ref()
+                        .and_then(|v| v.target.step.as_deref()),
+                    Some("timeout")
+                );
+                assert_eq!(on_reject.as_ref().map(|v| v.task.as_str()), Some("fault"));
+                assert_eq!(
+                    on_reject.as_ref().and_then(|v| v.step.as_deref()),
+                    Some("reject")
+                );
+                assert_eq!(
+                    on_motion_fault.as_ref().and_then(|v| v.step.as_deref()),
+                    Some("motion_fault")
+                );
+                assert_eq!(
+                    on_safety_fault.as_ref().and_then(|v| v.step.as_deref()),
+                    Some("safety_fault")
+                );
             }
             other => panic!("期望 AxisMoveRelative，实际: {other:?}"),
         }
@@ -4318,7 +4328,7 @@ task fault:
     }
 
     #[test]
-    fn rejects_axis_move_when_fault_branch_is_missing() {
+    fn parses_axis_move_when_fault_branch_is_missing() {
         let input = r#"
 [topology]
 device axis_x: stepper_motor
@@ -4338,14 +4348,23 @@ task fault:
     step motion_fault:
 "#;
 
-        let err = parse_plc(input).expect_err("缺少 on_safety_fault 分支应被拒绝");
-        let rendered = err.to_string();
-        assert!(
-            rendered.contains("axis_on_safety_fault_branch")
-                || rendered.contains("axis.move")
-                || rendered.contains("语法错误"),
-            "应报告 axis fault 分支缺失，实际: {rendered}"
-        );
+        let ast = parse_plc(input).expect("缺失分支应在语义阶段校验，不应在 parser 阶段失败");
+        let step = &ast.tasks.tasks[0].steps[0];
+        match &step.statements[0] {
+            StepStatement::Action(ActionStatement::AxisMoveRelative {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            }) => {
+                assert!(timeout.is_some());
+                assert!(on_reject.is_some());
+                assert!(on_motion_fault.is_some());
+                assert!(on_safety_fault.is_none());
+            }
+            other => panic!("期望 AxisMoveRelative，实际: {other:?}"),
+        }
     }
 
     #[test]

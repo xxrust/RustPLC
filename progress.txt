@@ -533,3 +533,31 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - US-004 delivery is parser/AST scoped; semantic lowering currently drops axis actions intentionally until US-006 introduces dedicated IR action variants.
 ---
+## [2026-03-06 13:37:12] - US-005
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Relaxed `axis_move_statement` grammar so fault branches are parser-optional, then moved completeness enforcement to semantic validation.
+  - Updated AST axis action payloads to carry optional `timeout/on_reject/on_motion_fault/on_safety_fault` branches.
+  - Added semantic axis validation gate in `build_state_machine` with stable diagnostics:
+    - `[AXIS-001]` missing `timeout`
+    - `[AXIS-002]` missing `on_reject`
+    - `[AXIS-003]` missing `on_motion_fault`
+    - `[AXIS-004]` missing `on_safety_fault`
+    - `[AXIS-005]` axis target must be `stepper_motor` or `servo_drive`
+  - Added parser regression update (missing branch now parses and defers to semantic) and semantic tests for AXIS-001~005 positive/negative paths.
+  - Ran `cargo test --workspace axis_move` and `cargo test --workspace` successfully.
+- Files changed
+  - src/ast/mod.rs
+  - src/parser/plc.pest
+  - src/parser/mod.rs
+  - src/semantic/mod.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Rule-coded diagnostics are more stable at semantic stage than grammar stage, because semantic has access to `step` context for actionable messages.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - If grammar enforces branch presence directly, parser errors become generic `expected rule` outputs and cannot guarantee AXIS rule-id formatting.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis motion actions are still AST-only in lowering (`TransitionAction` remains unchanged); this story intentionally focuses on compile-time guardrails and diagnostics.
+---

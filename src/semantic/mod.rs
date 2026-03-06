@@ -992,6 +992,7 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
         &cam_table_names,
         &mut expr_errors,
     );
+    validate_axis_motion_actions_in_tasks(&expanded.tasks, &device_kinds, &mut expr_errors);
     if !expr_errors.is_empty() {
         return Err(expr_errors);
     }
@@ -3810,6 +3811,174 @@ fn validate_cam_actions_in_statements(
             | StepStatement::Goto(_)
             | StepStatement::AllowIndefiniteWait(_) => {}
         }
+    }
+}
+
+fn validate_axis_motion_actions_in_tasks(
+    tasks: &TasksSection,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            validate_axis_motion_actions_in_statements(
+                &step.statements,
+                &step.name,
+                step.line.max(1),
+                device_kinds,
+                errors,
+            );
+        }
+    }
+}
+
+fn validate_axis_motion_actions_in_statements(
+    statements: &[StepStatement],
+    step_name: &str,
+    line: usize,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::AxisMoveRelative {
+                target,
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            })
+            | StepStatement::Action(ActionStatement::AxisMoveAbsolute {
+                target,
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            }) => {
+                if timeout.is_none() {
+                    errors.push(axis_motion_branch_error(
+                        line,
+                        "AXIS-001",
+                        step_name,
+                        "timeout",
+                        "添加 timeout: <duration> -> <task.step> 分支。",
+                    ));
+                }
+                if on_reject.is_none() {
+                    errors.push(axis_motion_branch_error(
+                        line,
+                        "AXIS-002",
+                        step_name,
+                        "on_reject",
+                        "添加 on_reject -> <task.step> 分支。",
+                    ));
+                }
+                if on_motion_fault.is_none() {
+                    errors.push(axis_motion_branch_error(
+                        line,
+                        "AXIS-003",
+                        step_name,
+                        "on_motion_fault",
+                        "添加 on_motion_fault -> <task.step> 分支。",
+                    ));
+                }
+                if on_safety_fault.is_none() {
+                    errors.push(axis_motion_branch_error(
+                        line,
+                        "AXIS-004",
+                        step_name,
+                        "on_safety_fault",
+                        "添加 on_safety_fault -> <task.step> 分支。",
+                    ));
+                }
+                validate_axis_motion_target_kind(
+                    line,
+                    step_name,
+                    &target.device,
+                    device_kinds,
+                    errors,
+                );
+            }
+            StepStatement::Repeat { body, .. } => validate_axis_motion_actions_in_statements(
+                body,
+                step_name,
+                line,
+                device_kinds,
+                errors,
+            ),
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_axis_motion_actions_in_statements(
+                        &branch.statements,
+                        step_name,
+                        line,
+                        device_kinds,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_axis_motion_actions_in_statements(
+                        &branch.statements,
+                        step_name,
+                        line,
+                        device_kinds,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn axis_motion_branch_error(
+    line: usize,
+    rule_id: &str,
+    step_name: &str,
+    branch_name: &str,
+    fix: &str,
+) -> PlcError {
+    PlcError::semantic_with_reason(
+        line,
+        format!("[{rule_id}] step '{step_name}' is missing {branch_name} branch."),
+        fix,
+    )
+}
+
+fn validate_axis_motion_target_kind(
+    line: usize,
+    step_name: &str,
+    target: &str,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    match device_kinds.get(target) {
+        Some(DeviceKind::StepperMotor) | Some(DeviceKind::ServoDrive) => {}
+        Some(kind) => errors.push(PlcError::semantic_with_reason(
+            line,
+            format!("[AXIS-005] axis target '{target}' must be stepper_motor or servo_drive."),
+            format!(
+                "step '{step_name}' 当前目标类型为 {}。请改用 stepper_motor/servo_drive 设备。",
+                device_kind_name(kind)
+            ),
+        )),
+        None => errors.push(PlcError::semantic_with_reason(
+            line,
+            format!("[AXIS-005] axis target '{target}' must be stepper_motor or servo_drive."),
+            format!(
+                "step '{step_name}' 引用了未定义设备。请先在 [topology] 声明该轴设备，且类型为 stepper_motor 或 servo_drive。"
+            ),
+        )),
     }
 }
 
@@ -8284,6 +8453,98 @@ task main:
 
         let program = parse_plc(input).expect("示例语法应可解析");
         build_state_machine(&program).expect("pure extern 在并行分支中应允许");
+    }
+
+    #[test]
+    fn rejects_axis_move_missing_branches_with_axis_rule_codes() {
+        let input = "[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors = build_state_machine(&program).expect_err("缺失分支应触发 AXIS 语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("[AXIS-001]"));
+        assert!(joined.contains("[AXIS-002]"));
+        assert!(joined.contains("[AXIS-003]"));
+        assert!(joined.contains("[AXIS-004]"));
+        assert!(joined.contains("step 'move'"));
+        assert!(joined.contains("timeout: <duration> -> <task.step>"));
+        assert!(errors.iter().all(|err| err.line() > 0));
+    }
+
+    #[test]
+    fn rejects_axis_move_target_that_is_not_stepper_or_servo() {
+        let input = "[topology]
+device conveyor_motor: motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_absolute(conveyor_motor, position: 120, speed: 5)
+            timeout: 800ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors = build_state_machine(&program).expect_err("非法轴目标应触发 AXIS-005");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("[AXIS-005]"));
+        assert!(joined.contains("axis target 'conveyor_motor'"));
+        assert!(joined.contains("step 'run'"));
+        assert!(errors.iter().any(|err| err.line() > 0));
+    }
+
+    #[test]
+    fn accepts_axis_move_with_complete_branches_on_stepper_target() {
+        let input = "[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        build_state_machine(&program).expect("完整 axis move 分支 + 合法目标应通过语义校验");
     }
 
     #[test]

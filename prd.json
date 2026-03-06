@@ -77,8 +77,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Moved axis branch completeness checks to semantic stage with stable diagnostics [AXIS-001..AXIS-004], added axis target-kind guardrail [AXIS-005], and added parser/semantic regression tests for missing branches and invalid motor/sensor-like targets."
     },
     {
       "id": "US-006",
