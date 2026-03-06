@@ -155,8 +155,8 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Safety verifier now classifies AxisMove actions with explicit branch metadata and maps axis motion into pulse-port interlock effects; causality verifier now tracks on_reject/on_motion_fault/on_safety_fault branch-target waits to avoid diagnostic blind spots. Added safety+causality positive/negative regression tests and verified with cargo test --workspace."
     },
     {
       "id": "US-011",

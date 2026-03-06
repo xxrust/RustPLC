@@ -688,3 +688,29 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - Axis ST output currently encodes branch semantics as explicit comments; later iterations can convert these into executable branch constructs once full axis runtime/state mapping is finalized.
 ---
+## [2026-03-06 14:38:35] - US-010
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Extended src/verification/safety.rs for Axis Motion verification semantics:
+    - TransitionAction::AxisMoveRelative/AxisMoveAbsolute now contribute pulse-port effects (pulse.active) so axis actions participate in port-level interlock checks.
+    - Axis action labels now render timeout/reject/motion_fault/safety_fault branch metadata (including optional fault error codes) for deterministic safety diagnostics/counterexample traces.
+  - Extended src/verification/causality.rs to cover axis fault-routing diagnostics:
+    - Added branch-aware pair extraction that links axis.move_* actions to waits inside on_reject / on_motion_fault / on_safety_fault target steps.
+    - Added goto-target resolution for branch steps and branch-tagged action text so diagnostics identify which fault route is missing causality.
+  - Added verification regressions:
+    - Safety: axis interlock violation and satisfied-path tests for enable/pulse guardrail.
+    - Causality: positive and negative tests for motion-fault branch wait-chain reachability.
+  - Ran cargo test -p rust_plc axis_move_, cargo test -p rust_plc axis_fault_branch, and cargo test --workspace successfully.
+- Files changed
+  - src/verification/safety.rs
+  - src/verification/causality.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Safety transition effects are only evaluated on outgoing edges; action-level safety tests must place the action step before at least one successor step.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Axis timeout branch grammar requires timeout: <duration> -> ... (with :); missing colon causes parser failures even if branch keywords are correct.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Branch-aware causality checks can be added without changing IR by deriving action→wait pairs from AST goto targets during verifier preprocessing.
+---
