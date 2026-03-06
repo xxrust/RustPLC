@@ -140,8 +140,8 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "ST codegen now renders AxisMoveRelative/AxisMoveAbsolute with timeout/reject/motion_fault/safety_fault branch targets (including optional fault error_code markers), and added codegen tests to cover axis action rendering + inference path stability."
     },
     {
       "id": "US-010",

@@ -660,3 +660,31 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - Axis fault branch task targets are still preserved in IR and validated semantically; runtime branch-routing consumption can be expanded in later stories as needed.
 ---
+## [2026-03-06 14:15:44] - US-009
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Enhanced ST action rendering for axis motions in `src/codegen/st.rs`:
+    - `AxisMoveRelative` and `AxisMoveAbsolute` comments now include:
+      - core motion parameters (`distance/position`, `speed`)
+      - timeout branch destination and duration
+      - `on_reject` / `on_motion_fault` / `on_safety_fault` branch destinations
+      - optional fault `error_code` markers
+  - Added helper renderers for axis branch target formatting to keep output deterministic:
+    - `render_axis_target(...)`
+    - `render_axis_fault_target(...)`
+  - Added codegen test coverage:
+    - `generate_st_renders_axis_move_branches_and_fault_targets` validates emitted ST includes all branch routes and fault code markers.
+  - Kept variable collection/inference path stable for axis actions while extending rendering.
+  - Ran `cargo test -p rust_plc generate_st_renders_axis_move_branches_and_fault_targets`, `cargo test --workspace axis_move`, and `cargo test --workspace` successfully.
+- Files changed
+  - src/codegen/st.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For phase-limited targets, deterministic ST comments are an effective way to preserve semantics/traceability for not-yet-native runtime constructs.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - When expanding enum payload fields, `render_action` pattern matches must explicitly consume/ignore all fields (e.g., `port`) to avoid compile-time omissions.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis ST output currently encodes branch semantics as explicit comments; later iterations can convert these into executable branch constructs once full axis runtime/state mapping is finalized.
+---

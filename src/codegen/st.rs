@@ -733,24 +733,57 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             target,
             distance_raw,
             speed_raw,
-            ..
+            port: _,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
         } => format!(
-            "(* AXIS_MOVE_RELATIVE {} distance={} speed={} *)",
+            "(* AXIS_MOVE_RELATIVE {} distance={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} *)",
             normalize_identifier_for_st(target),
             distance_raw.trim(),
-            speed_raw.trim()
+            speed_raw.trim(),
+            timeout.duration_ms,
+            render_axis_target(&timeout.target_task, timeout.target_step.as_deref()),
+            render_axis_fault_target(on_reject),
+            render_axis_fault_target(on_motion_fault),
+            render_axis_fault_target(on_safety_fault),
         ),
         TransitionAction::AxisMoveAbsolute {
             target,
             position_raw,
             speed_raw,
-            ..
+            port: _,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
         } => format!(
-            "(* AXIS_MOVE_ABSOLUTE {} position={} speed={} *)",
+            "(* AXIS_MOVE_ABSOLUTE {} position={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} *)",
             normalize_identifier_for_st(target),
             position_raw.trim(),
-            speed_raw.trim()
+            speed_raw.trim(),
+            timeout.duration_ms,
+            render_axis_target(&timeout.target_task, timeout.target_step.as_deref()),
+            render_axis_fault_target(on_reject),
+            render_axis_fault_target(on_motion_fault),
+            render_axis_fault_target(on_safety_fault),
         ),
+    }
+}
+
+fn render_axis_target(task: &str, step: Option<&str>) -> String {
+    match step {
+        Some(step) => format!("{task}.{step}"),
+        None => task.to_string(),
+    }
+}
+
+fn render_axis_fault_target(branch: &crate::ir::AxisFaultBranch) -> String {
+    let target = render_axis_target(&branch.target_task, branch.target_step.as_deref());
+    match branch.error_code.as_deref() {
+        Some(code) => format!("{target}[{code}]"),
+        None => target,
     }
 }
 
@@ -1107,7 +1140,10 @@ fn state_id_of(state: &State, state_ids: &HashMap<(String, String), i32>) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{StateMachine, TimerOperation, Transition, TransitionAction, TransitionGuard};
+    use crate::ir::{
+        AxisFaultBranch, AxisTimeoutBranch, StateMachine, TimerOperation, Transition,
+        TransitionAction, TransitionGuard,
+    };
     use std::collections::BTreeMap;
 
     fn state(task: &str, step: &str) -> State {
@@ -1539,5 +1575,57 @@ mod tests {
         assert!(st.contains("(* LOG: trip *)"));
         assert!(st.contains("valve_a := TRUE;"));
         assert!(st.contains("_state := 20;"));
+    }
+
+    #[test]
+    fn generate_st_renders_axis_move_branches_and_fault_targets() {
+        let s0 = state("motion", "run");
+        let s1 = state("done", "halt");
+
+        let sm = StateMachine {
+            states: vec![s0.clone(), s1.clone()],
+            transitions: vec![Transition {
+                from: s0.clone(),
+                to: s1.clone(),
+                guard: TransitionGuard::Always,
+                actions: vec![TransitionAction::AxisMoveRelative {
+                    target: "axis_x".to_string(),
+                    port: "self".to_string(),
+                    distance_raw: "10".to_string(),
+                    speed_raw: "2".to_string(),
+                    timeout: AxisTimeoutBranch {
+                        duration_ms: 500,
+                        target_task: "fault".to_string(),
+                        target_step: Some("timeout".to_string()),
+                    },
+                    on_reject: AxisFaultBranch {
+                        target_task: "fault".to_string(),
+                        target_step: Some("reject".to_string()),
+                        error_code: Some("AXIS_REJECT".to_string()),
+                    },
+                    on_motion_fault: AxisFaultBranch {
+                        target_task: "fault".to_string(),
+                        target_step: Some("motion_fault".to_string()),
+                        error_code: Some("AXIS_MOTION".to_string()),
+                    },
+                    on_safety_fault: AxisFaultBranch {
+                        target_task: "fault".to_string(),
+                        target_step: Some("safety_fault".to_string()),
+                        error_code: Some("AXIS_SAFETY".to_string()),
+                    },
+                }],
+                timers: vec![],
+            }],
+            initial: s0,
+            analog_regions: BTreeMap::new(),
+        };
+
+        let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
+            .expect("axis move codegen should succeed");
+        assert!(st.contains("AXIS_MOVE_RELATIVE axis_x distance=10 speed=2"));
+        assert!(st.contains("timeout=500ms->fault.timeout"));
+        assert!(st.contains("on_reject->fault.reject[AXIS_REJECT]"));
+        assert!(st.contains("on_motion_fault->fault.motion_fault[AXIS_MOTION]"));
+        assert!(st.contains("on_safety_fault->fault.safety_fault[AXIS_SAFETY]"));
     }
 }
