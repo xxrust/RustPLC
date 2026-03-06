@@ -59,8 +59,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented axis.move_relative/axis.move_absolute compound step parsing with timeout/on_reject/on_motion_fault/on_safety_fault branches; added parser+AST regression tests and updated cross-layer match handling to keep workspace typecheck/tests green."
     },
     {
       "id": "US-005",

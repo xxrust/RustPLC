@@ -193,6 +193,8 @@ fn reject_extern_calls_in_action(
         | ActionStatement::Retract { .. }
         | ActionStatement::Set { .. }
         | ActionStatement::SetAnalog { .. }
+        | ActionStatement::AxisMoveRelative { .. }
+        | ActionStatement::AxisMoveAbsolute { .. }
         | ActionStatement::CamEngage { .. }
         | ActionStatement::CamDisengage { .. }
         | ActionStatement::CamSwitch { .. }
@@ -1203,6 +1205,7 @@ fn parse_step_statement_wrapper(pair: Pair<Rule>) -> Result<StepStatement, PlcEr
 
 fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
     match pair.as_rule() {
+        Rule::axis_move_statement => Ok(StepStatement::Action(parse_axis_move_statement(pair)?)),
         Rule::action_statement => Ok(StepStatement::Action(parse_action_statement(pair)?)),
         Rule::wait_statement => Ok(StepStatement::Wait(parse_wait_statement(pair)?)),
         Rule::if_else_statement => Ok(parse_if_else_statement(pair)?),
@@ -1458,6 +1461,201 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
             format!("不支持的 action 命令: {rule:?}"),
         )),
     }
+}
+
+fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError> {
+    let line = line_of(&pair);
+    let mut target = None::<ActionTarget>;
+    let mut distance = None::<f64>;
+    let mut position = None::<f64>;
+    let mut speed = None::<f64>;
+    let mut timeout = None::<TimeoutDirective>;
+    let mut on_reject = None::<GotoDirective>;
+    let mut on_motion_fault = None::<GotoDirective>;
+    let mut on_safety_fault = None::<GotoDirective>;
+    let mut is_relative = None::<bool>;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::axis_move_relative_action => {
+                let (parsed_target, parsed_distance, parsed_speed) =
+                    parse_axis_move_relative_action(part)?;
+                target = Some(parsed_target);
+                distance = Some(parsed_distance);
+                speed = Some(parsed_speed);
+                is_relative = Some(true);
+            }
+            Rule::axis_move_absolute_action => {
+                let (parsed_target, parsed_position, parsed_speed) =
+                    parse_axis_move_absolute_action(part)?;
+                target = Some(parsed_target);
+                position = Some(parsed_position);
+                speed = Some(parsed_speed);
+                is_relative = Some(false);
+            }
+            Rule::axis_timeout_branch => {
+                timeout = Some(parse_axis_timeout_branch(part)?);
+            }
+            Rule::axis_on_reject_branch => {
+                on_reject = Some(parse_axis_fault_branch(part, "on_reject")?);
+            }
+            Rule::axis_on_motion_fault_branch => {
+                on_motion_fault = Some(parse_axis_fault_branch(part, "on_motion_fault")?);
+            }
+            Rule::axis_on_safety_fault_branch => {
+                on_safety_fault = Some(parse_axis_fault_branch(part, "on_safety_fault")?);
+            }
+            _ => {}
+        }
+    }
+
+    let target = target.ok_or_else(|| PlcError::parse(line, "axis.move 缺少目标设备"))?;
+    let speed = speed.ok_or_else(|| PlcError::parse(line, "axis.move 缺少 speed 参数"))?;
+    let timeout = timeout.ok_or_else(|| PlcError::parse(line, "axis.move 缺少 timeout 分支"))?;
+    let on_reject =
+        on_reject.ok_or_else(|| PlcError::parse(line, "axis.move 缺少 on_reject 分支"))?;
+    let on_motion_fault = on_motion_fault
+        .ok_or_else(|| PlcError::parse(line, "axis.move 缺少 on_motion_fault 分支"))?;
+    let on_safety_fault = on_safety_fault
+        .ok_or_else(|| PlcError::parse(line, "axis.move 缺少 on_safety_fault 分支"))?;
+
+    match is_relative {
+        Some(true) => Ok(ActionStatement::AxisMoveRelative {
+            target,
+            distance: distance
+                .ok_or_else(|| PlcError::parse(line, "axis.move_relative 缺少 distance 参数"))?,
+            speed,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+        }),
+        Some(false) => Ok(ActionStatement::AxisMoveAbsolute {
+            target,
+            position: position
+                .ok_or_else(|| PlcError::parse(line, "axis.move_absolute 缺少 position 参数"))?,
+            speed,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+        }),
+        None => Err(PlcError::parse(
+            line,
+            "axis.move 语句必须是 axis.move_relative 或 axis.move_absolute",
+        )),
+    }
+}
+
+fn parse_axis_move_relative_action(
+    pair: Pair<Rule>,
+) -> Result<(ActionTarget, f64, f64), PlcError> {
+    let line = line_of(&pair);
+    let mut target = None;
+    let mut numbers = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::action_target => target = Some(parse_action_target(part)?),
+            Rule::number => {
+                numbers.push(part.as_str().parse::<f64>().map_err(|_| {
+                    PlcError::parse(line, "axis.move_relative 参数数值解析失败")
+                })?);
+            }
+            _ => {}
+        }
+    }
+
+    if numbers.len() != 2 {
+        return Err(PlcError::parse(
+            line,
+            "axis.move_relative 需要 distance 和 speed 两个数值参数",
+        ));
+    }
+
+    Ok((
+        target.ok_or_else(|| PlcError::parse(line, "axis.move_relative 缺少目标设备"))?,
+        numbers[0],
+        numbers[1],
+    ))
+}
+
+fn parse_axis_move_absolute_action(
+    pair: Pair<Rule>,
+) -> Result<(ActionTarget, f64, f64), PlcError> {
+    let line = line_of(&pair);
+    let mut target = None;
+    let mut numbers = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::action_target => target = Some(parse_action_target(part)?),
+            Rule::number => {
+                numbers.push(part.as_str().parse::<f64>().map_err(|_| {
+                    PlcError::parse(line, "axis.move_absolute 参数数值解析失败")
+                })?);
+            }
+            _ => {}
+        }
+    }
+
+    if numbers.len() != 2 {
+        return Err(PlcError::parse(
+            line,
+            "axis.move_absolute 需要 position 和 speed 两个数值参数",
+        ));
+    }
+
+    Ok((
+        target.ok_or_else(|| PlcError::parse(line, "axis.move_absolute 缺少目标设备"))?,
+        numbers[0],
+        numbers[1],
+    ))
+}
+
+fn parse_axis_timeout_branch(pair: Pair<Rule>) -> Result<TimeoutDirective, PlcError> {
+    let line = line_of(&pair);
+    let mut duration = None;
+    let mut target = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::duration_value => duration = Some(parse_duration_value(part)?),
+            Rule::axis_branch_target => target = Some(parse_axis_branch_target(part, "timeout")?),
+            _ => {}
+        }
+    }
+
+    Ok(TimeoutDirective {
+        duration: duration.ok_or_else(|| PlcError::parse(line, "axis timeout 缺少时长"))?,
+        target: target.ok_or_else(|| PlcError::parse(line, "axis timeout 缺少跳转目标"))?,
+    })
+}
+
+fn parse_axis_fault_branch(pair: Pair<Rule>, branch_name: &str) -> Result<GotoDirective, PlcError> {
+    let line = line_of(&pair);
+    let target = pair
+        .into_inner()
+        .find(|part| part.as_rule() == Rule::axis_branch_target)
+        .ok_or_else(|| PlcError::parse(line, format!("{branch_name} 缺少跳转目标")))?;
+
+    parse_axis_branch_target(target, branch_name)
+}
+
+fn parse_axis_branch_target(pair: Pair<Rule>, branch_name: &str) -> Result<GotoDirective, PlcError> {
+    let line = line_of(&pair);
+    let mut identifiers = pair
+        .into_inner()
+        .filter(|part| matches!(part.as_rule(), Rule::identifier));
+
+    let task = identifiers
+        .next()
+        .ok_or_else(|| PlcError::parse(line, format!("{branch_name} 缺少目标 task")))?
+        .as_str()
+        .to_string();
+    let step = identifiers.next().map(|part| part.as_str().to_string());
+
+    Ok(GotoDirective { line, task, step })
 }
 
 fn parse_extern_call_binding(pair: Pair<Rule>) -> Result<ExternCallBinding, PlcError> {
@@ -4055,6 +4253,99 @@ task main:
             step.statements[3],
             StepStatement::Action(ActionStatement::CamDisengage { .. })
         ));
+    }
+
+    #[test]
+    fn parses_axis_move_actions_with_fault_branches_into_ast() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step start:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+        action: axis.move_absolute(axis_x, position: 120, speed: 5)
+            timeout: 800ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+"#;
+
+        let ast = parse_plc(input).expect("axis move 语句应能解析");
+        let step = &ast.tasks.tasks[0].steps[0];
+        assert_eq!(step.statements.len(), 2);
+
+        match &step.statements[0] {
+            StepStatement::Action(ActionStatement::AxisMoveRelative {
+                target,
+                distance,
+                speed,
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+            }) => {
+                assert_eq!(target.device, "axis_x");
+                assert!((*distance - 10.0).abs() < f64::EPSILON);
+                assert!((*speed - 2.0).abs() < f64::EPSILON);
+                assert_eq!(timeout.duration.value, 500);
+                assert_eq!(timeout.target.task, "fault");
+                assert_eq!(timeout.target.step.as_deref(), Some("timeout"));
+                assert_eq!(on_reject.task, "fault");
+                assert_eq!(on_reject.step.as_deref(), Some("reject"));
+                assert_eq!(on_motion_fault.step.as_deref(), Some("motion_fault"));
+                assert_eq!(on_safety_fault.step.as_deref(), Some("safety_fault"));
+            }
+            other => panic!("期望 AxisMoveRelative，实际: {other:?}"),
+        }
+
+        assert!(matches!(
+            &step.statements[1],
+            StepStatement::Action(ActionStatement::AxisMoveAbsolute { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_axis_move_when_fault_branch_is_missing() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step start:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+"#;
+
+        let err = parse_plc(input).expect_err("缺少 on_safety_fault 分支应被拒绝");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("axis_on_safety_fault_branch")
+                || rendered.contains("axis.move")
+                || rendered.contains("语法错误"),
+            "应报告 axis fault 分支缺失，实际: {rendered}"
+        );
     }
 
     #[test]

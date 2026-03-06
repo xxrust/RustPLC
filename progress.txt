@@ -507,3 +507,29 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - Device extra-parameter diagnostics are emitted at device declaration line, so tests can assert non-zero line context directly.
 ---
+## [2026-03-06 13:21:56] - US-004
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Added AST action variants for `axis.move_relative` and `axis.move_absolute`, carrying same-step branch targets for `timeout`, `on_reject`, `on_motion_fault`, and `on_safety_fault`.
+  - Extended grammar with dedicated axis move statement + branch clauses, and wired parser lowering through a new `axis_move_statement` path in `step_statement`.
+  - Added parser regression tests for valid axis move parsing and missing-fault-branch rejection.
+  - Updated diagnostics/semantic/timing/causality action matchers so new AST variants compile cleanly while downstream IR lowering remains intentionally deferred.
+  - Ran `cargo test --workspace` successfully and marked US-004 as completed in `prd.json`.
+- Files changed
+  - src/ast/mod.rs
+  - src/parser/plc.pest
+  - src/parser/mod.rs
+  - src/diagnostics.rs
+  - src/semantic/mod.rs
+  - src/verification/causality.rs
+  - src/verification/timing.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For compound DSL step syntax, introducing a dedicated wrapper rule (`axis_move_statement`) keeps parser readability and avoids overloading generic `action` production.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - New `ActionStatement` variants require exhaustive matcher updates across diagnostics, semantic lowering helpers, and verification engines even before IR/runtime support lands.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - US-004 delivery is parser/AST scoped; semantic lowering currently drops axis actions intentionally until US-006 introduces dedicated IR action variants.
+---

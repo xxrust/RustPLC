@@ -4400,6 +4400,12 @@ fn action_to_timing(
         ActionStatement::SetAnalogExpr { target, .. } => {
             (ActionKind::SetAnalogExpr, Some(target.device.as_str()))
         }
+        ActionStatement::AxisMoveRelative { target, .. } => {
+            (ActionKind::Set, Some(target.device.as_str()))
+        }
+        ActionStatement::AxisMoveAbsolute { target, .. } => {
+            (ActionKind::Set, Some(target.device.as_str()))
+        }
         ActionStatement::Compute { .. } => (ActionKind::Compute, None),
         ActionStatement::Call { .. } => return None,
         ActionStatement::CamEngage { target } => (ActionKind::CamEngage, Some(target.as_str())),
@@ -5172,6 +5178,7 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             target: target.clone(),
             offset_expr_raw: expression_to_raw(offset),
         }),
+        ActionStatement::AxisMoveRelative { .. } | ActionStatement::AxisMoveAbsolute { .. } => None,
         ActionStatement::Log { message } => Some(TransitionAction::Log {
             message: message.clone(),
         }),
