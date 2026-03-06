@@ -423,3 +423,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context (e.g., "the evaluation panel is in component X")
     - The new extern guide intentionally includes migration and known-limitations sections so Phase-1 users can adopt externs without changing DSL control-plane structure.
 ---
+## [2026-03-06 12:41:33] - US-001
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Added frozen Axis Motion MVP spec: docs/axis_motion_mvp_spec.md.
+  - Spec defines axis.move_relative/axis.move_absolute syntax, mandatory timeout/reject/motion_fault/safety_fault branches, and MVP parameter semantics.
+  - Documented op.motor.move_to as disabled in MVP with historical coupling rationale.
+  - Added AXIS-001~AXIS-005 diagnostic IDs with trigger conditions, diagnostic templates, and fix suggestions.
+  - Marked US-001 as completed in ord.json.
+- Files changed
+  - docs/axis_motion_mvp_spec.md
+  - ord.json
+  - prompt.md
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep PRD filename and prompt instruction synchronized (ord.json vs prd.json) to avoid running the wrong backlog.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - When exporting JSON via PowerShell redirection, use UTF-8-safe output (cmd /c with git show) or downstream patching tools may fail on encoding.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis motion PRD for this stream is tracked in ord.json and starts from US-001.
+---
