@@ -415,6 +415,8 @@ action: call <name>(<arg>, ...) -> (out_a, out_b, out_c)
 | `solenoid_valve` | 电磁阀 | `purpose`(必填), `response_time`, `states`(可选) | 默认 `on`, `off`（可用 `states: [...]` 自定义） |
 | `cylinder` | 气缸 | `purpose`(必填), `stroke_time`, `retract_time`, `states`(可选) | 默认 `extended`, `retracted`（可用 `states: [...]` 自定义） |
 | `motor` | 电机 | `purpose`(必填), `rated_speed`, `ramp_time` | `run.on`, `run.off`（safety 约束中用 `motor_x.run.on`；task 中用 `action: set motor_x.run on/off`） |
+| `stepper_motor` | 步进轴驱动 | `purpose`(必填), `steps_per_rev`, `max_rpm` | `enable.on/off`, `pulse.active`, `fault.on/off` |
+| `servo_drive` | 伺服轴驱动 | `purpose`(必填), `rated_power_kw`, `bus` | `enable.on/off`, `pulse.active`, `fault.on/off` |
 | `sensor` | 离散传感器 | `purpose`(必填), `subtype`(标准做法), `debounce` | `on`, `off` |
 | `analog_input` | 模拟量输入 | `purpose`(必填), `range`(必填), `unit`(必填), `external` | 数值比较 |
 | `analog_output` | 模拟量输出 | `purpose`(必填), `range`(必填), `unit` | 数值设定 |
@@ -427,7 +429,10 @@ action: call <name>(<arg>, ...) -> (out_a, out_b, out_c)
 - `subtype:` — 传感器的标准做法（`push_button`、`e_stop_button`、`limit_switch`、`proximity_sensor`、`selector_switch`）。`e_stop_button` 必须同时声明 `inverted: true`。
 - `external: true` — 标记来自外部系统的输入（操作员设定值、上位系统），避免因果性误报。
 - `motor` 动作使用显式端口：`set motor_x.run on/off`（`set motor_x on/off` 属于旧写法）。
-- 电机位置运动按显式流程建模：`set motor_x.run` + `wait/delay` + `timeout`（当前示例不使用 `contract motor_position` / `op.motor.move_to(...)`）。
+- 传送/风扇等普通启停电机继续使用 `set motor_x.run on/off`。
+- 轴定位运动（步进/伺服）使用 `axis.move_relative` / `axis.move_absolute`，不得再用 `set motor_x.run + delay` 组合做定位。
+- `axis.move_*` 必须显式给出 4 条分支：`timeout`、`on_reject`、`on_motion_fault`、`on_safety_fault`。
+- `axis.move_*` 目标设备必须是 `stepper_motor` 或 `servo_drive`；`op.motor.move_to(...)` 在当前阶段禁用。
 
 状态在 `safety:` 约束中使用时格式为 `device.state`，例如：
 - `cyl_A.extended` — 气缸伸出状态
@@ -486,6 +491,8 @@ relation { from: start_button.out, to: plc_main.X6, via: reports_to }
 - `cylinder`：`cmd`(consumer) + `extended`(producer) + `retracted`(producer)
 - `sensor`：`sense`(consumer) + `out`(producer)
 - `motor`：拓扑驱动端通常连 `cmd`（`relation ... -> motor_x.cmd`）；任务里请显式写 `set motor_x.run on/off`
+- `stepper_motor`：常用端口 `enable`(consumer), `direction`(consumer), `pulse`(producer), `fault`(producer)
+- `servo_drive`：常用端口 `enable`(consumer), `direction`(consumer), `pulse`(producer), `fault`(producer)
 
 **模拟量 I/O 不需要放在 plc_main 中，可以独立声明：**
 
@@ -531,6 +538,16 @@ task <名称>:
         action: retract <气缸>         # 缩回
         action: set <设备> on/off      # 开关（阀/普通数字设备）
         action: set <设备>.<端口> on/off # 显式端口开关（电机请用 set motor_x.run on/off）
+        action: axis.move_relative(<axis_device>, distance: <real>, speed: <real>)
+            timeout: 800ms -> <任务>.<step>
+            on_reject -> <任务>.<step>
+            on_motion_fault -> <任务>.<step>
+            on_safety_fault -> <任务>.<step>
+        action: axis.move_absolute(<axis_device>, position: <real>, speed: <real>)
+            timeout: 800ms -> <任务>.<step>
+            on_reject -> <任务>.<step>
+            on_motion_fault -> <任务>.<step>
+            on_safety_fault -> <任务>.<step>
         action: set_analog <AO> <值>   # 模拟量输出
         action: compute <var> = <expr> # 变量计算（简单算术）
         action: call <extern>(<args>) -> <var>  # 调用 extern 函数
@@ -571,6 +588,14 @@ step detect:
             then: goto process_B
     timeout: 800ms -> goto fail_detect_timeout
 ```
+
+### Axis Motion 电机最新写法（优先级高于旧定位模板）
+
+- 需要“走到位置/角度”的运动任务，优先使用 `stepper_motor` 或 `servo_drive` + `axis.move_relative/axis.move_absolute`。
+- `axis.move_*` 必须带完整异常分流：`timeout`、`on_reject`、`on_motion_fault`、`on_safety_fault`，缺失会触发 `AXIS-001`~`AXIS-004`。
+- `axis.move_*` 的目标设备必须是 `stepper_motor` 或 `servo_drive`，否则触发 `AXIS-005`。
+- `op.motor.move_to(...)` 在当前 MVP 中禁用，不作为替代写法。
+- `motor.run` 仍用于普通启停类设备（传送带、风扇、泵），但不再作为定位动作模板。
 
 ---
 
@@ -815,6 +840,7 @@ task done:
 9. **工程师确认的所有安全约束** — 不能遗漏
 10. **完整的 relation 连接链** — 每个设备的 relation 和传感器的 detects 必须正确声明（编译器据此自动推断因果性）
 11. **每个气缸都应有 _ext 和 _ret 两个传感器** — 即使当前流程中某个方向没有 `wait` 确认
+12. **轴定位动作使用 Axis Motion 写法** — `axis.move_*` + 四类故障分流，不使用 `run+delay` 做定位
 
 ---
 
@@ -829,7 +855,9 @@ task done:
 | `nuclear_coolant_isolation.plc` | 核电站隔离阀控制 | SIL3 双冗余传感器、OR 容错、parallel 并行关阀、严格时序硬限 |
 | `three_station_assembly.plc` | 三工位装配线（推料→压装→检测→出料） | parallel、requires、timing、if-else 质检分流 |
 | `hydraulic_bender.plc` | 液压折弯机（压力闭环+行程控制） | pid、analog_input、must_complete_within_worst_case、set_analog 分 step |
-| `dual_axis_platform.plc` | 双轴运动平台（X/Y 轴+碰撞防护） | motor.run.on 语法、parallel 内 conflicts_with、race |
+| `axis_stepper_fault_routing.plc` | 步进轴故障分流模板 | `axis.move_relative`、四类故障分流、`AXIS-001~005` 约束 |
+| `axis_servo_fault_routing.plc` | 伺服轴故障分流模板 | `axis.move_absolute`、四类故障分流、`AXIS-001~005` 约束 |
+| `dual_axis_platform.plc` | 双轴运动平台（X/Y 轴+碰撞防护） | parallel 内互锁、race、失败任务分流（历史旧写法参考） |
 | `thermal_oven.plc` | 温控烘箱（PID 温控+超温保护） | pid、if-else 分支、external 模拟量任务逻辑保护 |
 | `welding_station.plc` | 焊接工作站（夹紧→焊接→冷却→松开） | parallel、repeat、allow_indefinite_wait、parallel 后补 step |
 
@@ -863,7 +891,9 @@ task done:
 - [ ] `parallel` 块之后是否跟了至少一个 step（而非直接 `on_complete`）？
 - [ ] 同一 step 中是否只有一个"驱动动作"紧跟其对应的 `wait`（避免多 action 导致因果误配）？
 - [ ] `motor` 设备在 `safety:` 约束中是否使用 `motor_x.run.on` 而非 `motor_x.on`？
-- [ ] 电机位置动作是否采用显式流程（`set motor_x.run` + `wait/delay/timeout`）？
+- [ ] 位置/角度运动是否改用 `axis.move_relative` / `axis.move_absolute`（而非 `set motor_x.run + delay`）？
+- [ ] 每个 `axis.move_*` 是否都包含 `timeout` + `on_reject` + `on_motion_fault` + `on_safety_fault`？
+- [ ] `axis.move_*` 目标是否是 `stepper_motor`/`servo_drive`（避免触发 `AXIS-005`）？
 - [ ] PID 的 `pv`/`out` 名称是否与 `analog_input`/`analog_output` 设备名及 `plc_main.ports` 端口名完全一致？
 - [ ] `external: true` 的模拟量是否避免了 `conflicts_with` 约束（改用任务逻辑保护）？
 - [ ] 两个状态若只在不同分支路径中出现（顺序互斥），是否避免了 `conflicts_with`（防止 BMC 跨循环误报）？
