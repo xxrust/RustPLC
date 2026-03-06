@@ -342,6 +342,8 @@ fn collect_variable_candidates_from_transitions(
                 | TransitionAction::CamDisengage { .. }
                 | TransitionAction::CamSwitch { .. }
                 | TransitionAction::CamPhase { .. }
+                | TransitionAction::AxisMoveRelative { .. }
+                | TransitionAction::AxisMoveAbsolute { .. }
                 | TransitionAction::Log { .. } => {}
             }
         }
@@ -726,6 +728,28 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             "(* CAM_PHASE {} := {} *)",
             normalize_identifier_for_st(target),
             offset_expr_raw.trim()
+        ),
+        TransitionAction::AxisMoveRelative {
+            target,
+            distance_raw,
+            speed_raw,
+            ..
+        } => format!(
+            "(* AXIS_MOVE_RELATIVE {} distance={} speed={} *)",
+            normalize_identifier_for_st(target),
+            distance_raw.trim(),
+            speed_raw.trim()
+        ),
+        TransitionAction::AxisMoveAbsolute {
+            target,
+            position_raw,
+            speed_raw,
+            ..
+        } => format!(
+            "(* AXIS_MOVE_ABSOLUTE {} position={} speed={} *)",
+            normalize_identifier_for_st(target),
+            position_raw.trim(),
+            speed_raw.trim()
         ),
     }
 }

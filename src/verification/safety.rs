@@ -848,7 +848,9 @@ fn collect_device_domains(
                 TransitionAction::CamEngage { .. }
                 | TransitionAction::CamDisengage { .. }
                 | TransitionAction::CamSwitch { .. }
-                | TransitionAction::CamPhase { .. } => continue,
+                | TransitionAction::CamPhase { .. }
+                | TransitionAction::AxisMoveRelative { .. }
+                | TransitionAction::AxisMoveAbsolute { .. } => continue,
                 TransitionAction::Compute { .. }
                 | TransitionAction::CallExtern { .. }
                 | TransitionAction::Log { .. } => continue,
@@ -1092,7 +1094,9 @@ fn transition_effects(
             TransitionAction::CamEngage { .. }
             | TransitionAction::CamDisengage { .. }
             | TransitionAction::CamSwitch { .. }
-            | TransitionAction::CamPhase { .. } => {}
+            | TransitionAction::CamPhase { .. }
+            | TransitionAction::AxisMoveRelative { .. }
+            | TransitionAction::AxisMoveAbsolute { .. } => {}
             TransitionAction::Extend { target, port } => {
                 let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
                 else {
@@ -1284,6 +1288,22 @@ fn action_name(action: &TransitionAction) -> Option<String> {
             target,
             offset_expr_raw,
         } => Some(format!("cam_phase {target} {offset_expr_raw}")),
+        TransitionAction::AxisMoveRelative {
+            target,
+            distance_raw,
+            speed_raw,
+            ..
+        } => Some(format!(
+            "axis_move_relative {target} distance={distance_raw} speed={speed_raw}"
+        )),
+        TransitionAction::AxisMoveAbsolute {
+            target,
+            position_raw,
+            speed_raw,
+            ..
+        } => Some(format!(
+            "axis_move_absolute {target} position={position_raw} speed={speed_raw}"
+        )),
         TransitionAction::Log { message } => Some(format!("log \"{message}\"")),
     }
 }

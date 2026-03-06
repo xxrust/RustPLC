@@ -1422,6 +1422,24 @@ fn convert_action(
                 offset_expr,
             })
         }
+        TransitionAction::AxisMoveRelative {
+            target,
+            distance_raw,
+            speed_raw,
+            ..
+        } => Err(BridgeError::UnsupportedAction {
+            state: state_name.to_string(),
+            action: format!("axis.move_relative {target} distance:{distance_raw} speed:{speed_raw}"),
+        }),
+        TransitionAction::AxisMoveAbsolute {
+            target,
+            position_raw,
+            speed_raw,
+            ..
+        } => Err(BridgeError::UnsupportedAction {
+            state: state_name.to_string(),
+            action: format!("axis.move_absolute {target} position:{position_raw} speed:{speed_raw}"),
+        }),
         TransitionAction::Log { message } => {
             let leaked_message: &'static str = Box::leak(message.clone().into_boxed_str());
             Ok(Action::Log {

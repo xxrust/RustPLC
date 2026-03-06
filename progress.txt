@@ -561,3 +561,38 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - Axis motion actions are still AST-only in lowering (`TransitionAction` remains unchanged); this story intentionally focuses on compile-time guardrails and diagnostics.
 ---
+## [2026-03-06 13:48:36] - US-006
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Extended IR with dedicated axis actions:
+    - `TransitionAction::AxisMoveRelative`
+    - `TransitionAction::AxisMoveAbsolute`
+  - Added explicit branch payload structs in IR:
+    - `AxisTimeoutBranch` (`duration_ms`, `target_task`, `target_step`)
+    - `AxisFaultBranch` (`target_task`, `target_step`, `error_code`)
+  - Added `ActionKind::AxisMoveRelative/AxisMoveAbsolute` and updated timing/action-kind mapping paths.
+  - Semantic lowering now maps `action: axis.move_*` into the new IR actions (including timeout + reject/motion/safety branch payloads).
+  - Updated downstream matchers for compilation continuity:
+    - runtime bridge currently returns deterministic `UnsupportedAction` for new axis IR actions.
+    - ST codegen emits explicit marker comments for axis actions.
+    - safety verifier treats axis move actions as non-state-writing action classes in current phase.
+  - Added/updated tests:
+    - IR serialization test now includes `axis_move_relative` with `error_code` payload fields.
+    - Semantic lowering test asserts both relative/absolute axis actions lower into new IR payloads.
+  - Ran `cargo test --workspace axis_move` and `cargo test --workspace` successfully.
+- Files changed
+  - src/ir/mod.rs
+  - src/semantic/mod.rs
+  - src/runtime_bridge.rs
+  - src/codegen/st.rs
+  - src/verification/safety.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - New IR `TransitionAction` variants require same-iteration propagation into bridge/codegen/verification match arms, even when execution support is deferred.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - If action completeness checks depend on semantic context (step name, target type), keep parser permissive and enforce at semantic gate to preserve rule-coded diagnostics.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis fault `error_code` fields are now part of IR payload contract and are ready for runtime/bridge propagation in follow-up stories.
+---

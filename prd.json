@@ -93,8 +93,8 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added IR action variants AxisMoveRelative/AxisMoveAbsolute with explicit timeout/reject/motion_fault/safety_fault payload branches and optional error_code fields; semantic lowering now maps axis.move_* into these IR actions with new serialization + lowering tests."
     },
     {
       "id": "US-007",

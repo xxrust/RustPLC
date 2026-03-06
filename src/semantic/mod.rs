@@ -12,9 +12,9 @@ use crate::ast::{
 };
 use crate::error::PlcError;
 use crate::ir::{
-    ActionKind, ActionRef, ActionTiming, BinaryValue as IrBinaryValue, CamCouplingDef,
-    CamInterpolation, CamTableIr, CausalityChain, ConnectionType, ConstraintSet, Device,
-    DeviceKind, ExternCallBinding as IrExternCallBinding,
+    ActionKind, ActionRef, ActionTiming, AxisFaultBranch, AxisTimeoutBranch,
+    BinaryValue as IrBinaryValue, CamCouplingDef, CamInterpolation, CamTableIr, CausalityChain,
+    ConnectionType, ConstraintSet, Device, DeviceKind, ExternCallBinding as IrExternCallBinding,
     ExternFunctionContract as IrExternContract, ExternFunctionDef as IrExternFunctionDef,
     ExternFunctionParam as IrExternFunctionParam, MAX_CAM_POINTS, PidLoop as IrPidLoop, SafetyExpr,
     SafetyRelation as IrSafetyRelation, SafetyRule, SplineCoeff, State, StateExpr, StateMachine,
@@ -4570,10 +4570,10 @@ fn action_to_timing(
             (ActionKind::SetAnalogExpr, Some(target.device.as_str()))
         }
         ActionStatement::AxisMoveRelative { target, .. } => {
-            (ActionKind::Set, Some(target.device.as_str()))
+            (ActionKind::AxisMoveRelative, Some(target.device.as_str()))
         }
         ActionStatement::AxisMoveAbsolute { target, .. } => {
-            (ActionKind::Set, Some(target.device.as_str()))
+            (ActionKind::AxisMoveAbsolute, Some(target.device.as_str()))
         }
         ActionStatement::Compute { .. } => (ActionKind::Compute, None),
         ActionStatement::Call { .. } => return None,
@@ -4616,6 +4616,8 @@ fn action_to_timing(
         | ActionKind::CamDisengage
         | ActionKind::CamSwitch
         | ActionKind::CamPhase
+        | ActionKind::AxisMoveRelative
+        | ActionKind::AxisMoveAbsolute
         | ActionKind::CallExtern
         | ActionKind::Compute
         | ActionKind::Log => None,
@@ -4672,6 +4674,8 @@ fn action_kind_name(action_kind: &ActionKind) -> &'static str {
         ActionKind::CamDisengage => "cam_disengage",
         ActionKind::CamSwitch => "cam_switch",
         ActionKind::CamPhase => "cam_phase",
+        ActionKind::AxisMoveRelative => "axis_move_relative",
+        ActionKind::AxisMoveAbsolute => "axis_move_absolute",
         ActionKind::Log => "log",
     }
 }
@@ -5347,10 +5351,61 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             target: target.clone(),
             offset_expr_raw: expression_to_raw(offset),
         }),
-        ActionStatement::AxisMoveRelative { .. } | ActionStatement::AxisMoveAbsolute { .. } => None,
+        ActionStatement::AxisMoveRelative {
+            target,
+            distance,
+            speed,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+        } => Some(TransitionAction::AxisMoveRelative {
+            target: target.device.clone(),
+            port: target.port.clone(),
+            distance_raw: distance.to_string(),
+            speed_raw: speed.to_string(),
+            timeout: lower_axis_timeout_branch(timeout.as_ref()?),
+            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, None),
+            on_motion_fault: lower_axis_fault_branch(on_motion_fault.as_ref()?, None),
+            on_safety_fault: lower_axis_fault_branch(on_safety_fault.as_ref()?, None),
+        }),
+        ActionStatement::AxisMoveAbsolute {
+            target,
+            position,
+            speed,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+        } => Some(TransitionAction::AxisMoveAbsolute {
+            target: target.device.clone(),
+            port: target.port.clone(),
+            position_raw: position.to_string(),
+            speed_raw: speed.to_string(),
+            timeout: lower_axis_timeout_branch(timeout.as_ref()?),
+            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, None),
+            on_motion_fault: lower_axis_fault_branch(on_motion_fault.as_ref()?, None),
+            on_safety_fault: lower_axis_fault_branch(on_safety_fault.as_ref()?, None),
+        }),
         ActionStatement::Log { message } => Some(TransitionAction::Log {
             message: message.clone(),
         }),
+    }
+}
+
+fn lower_axis_timeout_branch(timeout: &TimeoutDirective) -> AxisTimeoutBranch {
+    AxisTimeoutBranch {
+        duration_ms: duration_to_ms(timeout),
+        target_task: timeout.target.task.clone(),
+        target_step: timeout.target.step.clone(),
+    }
+}
+
+fn lower_axis_fault_branch(goto: &GotoDirective, error_code: Option<&str>) -> AxisFaultBranch {
+    AxisFaultBranch {
+        target_task: goto.task.clone(),
+        target_step: goto.step.clone(),
+        error_code: error_code.map(ToString::to_string),
     }
 }
 
@@ -8028,6 +8083,104 @@ task done:
             crate::ir::ExternCallBinding::Tuple(names)
                 if names == &vec!["lo".to_string(), "hi".to_string()]
         ));
+    }
+
+    #[test]
+    fn lowers_axis_move_actions_into_ir_transition_actions() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+        action: axis.move_absolute(axis_x, position: 120, speed: 5)
+            timeout: 800ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("axis move 示例应能解析");
+        let sm = build_state_machine(&program).expect("axis move 应能 lowering 到 IR");
+
+        let actions = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .collect::<Vec<_>>();
+
+        let relative = actions
+            .iter()
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveRelative {
+                    target,
+                    distance_raw,
+                    speed_raw,
+                    timeout,
+                    on_reject,
+                    on_motion_fault,
+                    on_safety_fault,
+                    ..
+                } => Some((
+                    target,
+                    distance_raw,
+                    speed_raw,
+                    timeout,
+                    on_reject,
+                    on_motion_fault,
+                    on_safety_fault,
+                )),
+                _ => None,
+            })
+            .expect("应包含 axis_move_relative 动作");
+        assert_eq!(relative.0, "axis_x");
+        assert_eq!(relative.1, "10");
+        assert_eq!(relative.2, "2");
+        assert_eq!(relative.3.duration_ms, 500);
+        assert_eq!(relative.3.target_task, "fault");
+        assert_eq!(relative.3.target_step.as_deref(), Some("timeout"));
+        assert_eq!(relative.4.target_task, "fault");
+        assert_eq!(relative.4.target_step.as_deref(), Some("reject"));
+        assert!(relative.4.error_code.is_none());
+        assert_eq!(relative.5.target_step.as_deref(), Some("motion_fault"));
+        assert_eq!(relative.6.target_step.as_deref(), Some("safety_fault"));
+
+        let absolute = actions
+            .iter()
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveAbsolute {
+                    target,
+                    position_raw,
+                    speed_raw,
+                    timeout,
+                    ..
+                } => Some((target, position_raw, speed_raw, timeout)),
+                _ => None,
+            })
+            .expect("应包含 axis_move_absolute 动作");
+        assert_eq!(absolute.0, "axis_x");
+        assert_eq!(absolute.1, "120");
+        assert_eq!(absolute.2, "5");
+        assert_eq!(absolute.3.duration_ms, 800);
+        assert_eq!(absolute.3.target_step.as_deref(), Some("timeout"));
     }
 
     #[test]
