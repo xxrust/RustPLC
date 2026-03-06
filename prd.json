@@ -185,8 +185,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Reintroduced docs/wafer_loader.plc with migrated rotary-arm motion steps using axis.move_relative (replacing run+delay+off fragments), each with explicit timeout/on_reject/on_motion_fault/on_safety_fault routing. Fault routes now land on business-named tasks (`arm_motion_abort`, `wafer_loader_fault`) instead of generic handler naming. Verified via `cargo run --bin rust_plc -- docs/wafer_loader.plc --no-print-ir` (verify_all passed)."
     }
   ]
 }

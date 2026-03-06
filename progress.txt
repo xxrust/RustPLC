@@ -748,3 +748,35 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - `tests/runtime_bridge_us006.rs` already contains reusable compile helpers for parse+semantic+bridge pipelines, making it the best place to attach fixture-based runtime E2E checks.
 ---
+## [2026-03-06 15:15:15] - US-012
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Added `docs/wafer_loader.plc` back into the current branch and migrated rotary-arm motion fragments to Axis Motion DSL.
+  - Replaced legacy run+delay+off arm movement snippets with explicit `axis.move_relative` actions:
+    - `arm_move_pick`
+    - `arm_move_orient`
+    - `arm_move_to_ir_box`
+  - Each axis action now declares all required branch routes in-place:
+    - `timeout`
+    - `on_reject`
+    - `on_motion_fault`
+    - `on_safety_fault`
+  - Reworked fault-routing naming to business-specific tasks instead of generic handler naming:
+    - `arm_motion_abort`
+    - `wafer_loader_fault`
+  - Added safe-stop pulse reset (`set axis_arm.pulse idle`) before disabling enable to satisfy injected stepper interlock checks.
+  - Verified end-to-end compile + verify flow using:
+    - `cargo run --quiet --bin rust_plc -- docs/wafer_loader.plc --no-print-ir`
+    - Result: Safety/Liveness/Timing/Causality all pass, verification report emitted.
+- Files changed
+  - docs/wafer_loader.plc
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Stepper device-library safety constraints are injected automatically and remain active even when no explicit `[constraints] safety:` rule is declared.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - After `axis.move_*`, pulse state can remain active in verifier state; safe-stop sequences should reset `pulse` before forcing `enable off` to avoid interlock violations.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `cargo run --bin rust_plc -- <file> --no-print-ir` is the quickest acceptance check for single-fixture DSL migrations requiring `verify_all` success.
+---

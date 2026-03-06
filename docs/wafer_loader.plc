@@ -1,0 +1,68 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "Wafer loader PLC I/O"
+    ports: [
+        Y0:digital:producer
+    ]
+}
+
+device axis_arm: stepper_motor {
+    purpose: "Wafer loader rotary arm axis"
+}
+
+relation { from: plc_main.Y0, to: axis_arm.enable, via: driven_by }
+
+[constraints]
+
+[tasks]
+
+task cycle:
+    step enable_axis:
+        action: set axis_arm.enable on
+    step arm_move_pick:
+        action: axis.move_relative(axis_arm, distance: 170, speed: 20)
+            timeout: 500ms -> arm_motion_abort.arm_motion_timeout
+            on_reject -> arm_motion_abort.arm_motion_reject
+            on_motion_fault -> arm_motion_abort.arm_motion_drive_fault
+            on_safety_fault -> arm_motion_abort.arm_motion_safety_trip
+    step arm_move_orient:
+        action: axis.move_relative(axis_arm, distance: 220, speed: 20)
+            timeout: 500ms -> arm_motion_abort.arm_motion_timeout
+            on_reject -> arm_motion_abort.arm_motion_reject
+            on_motion_fault -> arm_motion_abort.arm_motion_drive_fault
+            on_safety_fault -> arm_motion_abort.arm_motion_safety_trip
+    step arm_move_to_ir_box:
+        action: axis.move_relative(axis_arm, distance: 180, speed: 20)
+            timeout: 500ms -> arm_motion_abort.arm_motion_timeout
+            on_reject -> arm_motion_abort.arm_motion_reject
+            on_motion_fault -> arm_motion_abort.arm_motion_drive_fault
+            on_safety_fault -> arm_motion_abort.arm_motion_safety_trip
+    step cycle_gate:
+        wait: axis_arm.enable == on
+        timeout: 20ms -> goto wafer_loader_fault.safe_stop
+    step cycle_done:
+        action: log "wafer loader cycle finished"
+    on_complete: goto cycle
+
+task arm_motion_abort:
+    step arm_motion_timeout:
+        action: log "arm motion timeout"
+        goto wafer_loader_fault.safe_stop
+    step arm_motion_reject:
+        action: log "arm motion reject"
+        goto wafer_loader_fault.safe_stop
+    step arm_motion_drive_fault:
+        action: log "arm motion drive fault"
+        goto wafer_loader_fault.safe_stop
+    step arm_motion_safety_trip:
+        action: log "arm motion safety trip"
+        goto wafer_loader_fault.safe_stop
+
+task wafer_loader_fault:
+    step safe_stop:
+        action: set axis_arm.pulse idle
+        action: set axis_arm.enable off
+    step fault_report:
+        action: log "wafer loader entered safe stop"
+    on_complete: goto cycle
