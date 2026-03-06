@@ -125,8 +125,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "runtime_bridge now lowers IR AxisMoveRelative/AxisMoveAbsolute into runtime_core::Action::AxisMove (instead of UnsupportedAction), runtime-core axis handler path is exercised through bridged integration tests, and CLI/sim action scanners were updated for AxisMove compatibility."
     },
     {
       "id": "US-009",

@@ -7,9 +7,10 @@ use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
 use petgraph::Direction;
 use petgraph::graph::NodeIndex;
 use runtime_core::{
-    Action, AnalogRange, AntiWindup, CamAnalogField, CamCouplingConfig, CamDigitalField,
-    CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, ExprOp, ExprProgram, Instr,
-    MAX_CAM_POINTS, PidConfig, Program, SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
+    Action, AnalogRange, AntiWindup, AxisMotionCommand, AxisMoveKind, CamAnalogField,
+    CamCouplingConfig, CamDigitalField, CamInterpolation as RtCamInterpolation, CamTableData,
+    CompareOp, ExprOp, ExprProgram, Instr, MAX_CAM_POINTS, PidConfig, Program,
+    SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -67,6 +68,14 @@ pub enum BridgeError {
     InvalidAnalogLiteral {
         state: String,
         target: String,
+        value_raw: String,
+    },
+
+    #[error("invalid axis literal in {state}: {field} of {target} = {value_raw}")]
+    InvalidAxisLiteral {
+        state: String,
+        target: String,
+        field: String,
         value_raw: String,
     },
 
@@ -1424,22 +1433,74 @@ fn convert_action(
         }
         TransitionAction::AxisMoveRelative {
             target,
+            port,
             distance_raw,
             speed_raw,
             ..
-        } => Err(BridgeError::UnsupportedAction {
-            state: state_name.to_string(),
-            action: format!("axis.move_relative {target} distance:{distance_raw} speed:{speed_raw}"),
-        }),
+        } => {
+            let distance = distance_raw
+                .parse::<f32>()
+                .map_err(|_| BridgeError::InvalidAxisLiteral {
+                    state: state_name.to_string(),
+                    target: target.clone(),
+                    field: "distance".to_string(),
+                    value_raw: distance_raw.clone(),
+                })?;
+            let speed = speed_raw
+                .parse::<f32>()
+                .map_err(|_| BridgeError::InvalidAxisLiteral {
+                    state: state_name.to_string(),
+                    target: target.clone(),
+                    field: "speed".to_string(),
+                    value_raw: speed_raw.clone(),
+                })?;
+            let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
+            let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
+            Ok(Action::AxisMove {
+                command: AxisMotionCommand {
+                    target: leaked_target,
+                    port: leaked_port,
+                    kind: AxisMoveKind::Relative,
+                    value: distance,
+                    speed,
+                },
+            })
+        }
         TransitionAction::AxisMoveAbsolute {
             target,
+            port,
             position_raw,
             speed_raw,
             ..
-        } => Err(BridgeError::UnsupportedAction {
-            state: state_name.to_string(),
-            action: format!("axis.move_absolute {target} position:{position_raw} speed:{speed_raw}"),
-        }),
+        } => {
+            let position = position_raw
+                .parse::<f32>()
+                .map_err(|_| BridgeError::InvalidAxisLiteral {
+                    state: state_name.to_string(),
+                    target: target.clone(),
+                    field: "position".to_string(),
+                    value_raw: position_raw.clone(),
+                })?;
+            let speed = speed_raw
+                .parse::<f32>()
+                .map_err(|_| BridgeError::InvalidAxisLiteral {
+                    state: state_name.to_string(),
+                    target: target.clone(),
+                    field: "speed".to_string(),
+                    value_raw: speed_raw.clone(),
+                })?;
+            let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
+            let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
+            Ok(Action::AxisMove {
+                command: AxisMotionCommand {
+                    target: leaked_target,
+                    port: leaked_port,
+                    kind: AxisMoveKind::Absolute,
+                    value: position,
+                    speed,
+                },
+            })
+        }
         TransitionAction::Log { message } => {
             let leaked_message: &'static str = Box::leak(message.clone().into_boxed_str());
             Ok(Action::Log {

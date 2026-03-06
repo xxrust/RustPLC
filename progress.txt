@@ -634,3 +634,29 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - Axis motion classification now exists at runtime-core level; bridge wiring of IR axis payloads into this API remains the next iteration scope.
 ---
+## [2026-03-06 14:08:01] - US-008
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Updated runtime bridge action conversion to lower IR axis actions into runtime-core action instead of `UnsupportedAction`:
+    - `TransitionAction::AxisMoveRelative` -> `Action::AxisMove { kind: Relative, ... }`
+    - `TransitionAction::AxisMoveAbsolute` -> `Action::AxisMove { kind: Absolute, ... }`
+  - Added bridge-side axis numeric payload validation with structured diagnostics:
+    - `BridgeError::InvalidAxisLiteral { state, target, field, value_raw }`
+  - Added runtime-bridge integration fixtures/tests for axis pipeline:
+    - Axis actions can be compiled through bridge without `UnsupportedAction`.
+    - Bridged runtime can execute axis action with `tick_with_axis` handler.
+    - Bridged runtime propagates classified `Reject` / `MotionFault` / `SafetyFault` with error codes end-to-end.
+  - Ran `cargo test --test runtime_bridge_us006 axis`, `cargo test --workspace axis_move`, and `cargo test --workspace` successfully.
+- Files changed
+  - src/runtime_bridge.rs
+  - tests/runtime_bridge_us006.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Bridge integration tests are most robust when they validate both compile-time lowering (action presence) and runtime execution behavior in the same fixture chain.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - New IR action payload fields should fail fast in bridge conversion with dedicated literal diagnostics, instead of surfacing later as generic runtime unsupported errors.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis fault branch task targets are still preserved in IR and validated semantically; runtime branch-routing consumption can be expanded in later stories as needed.
+---
