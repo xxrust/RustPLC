@@ -5,7 +5,7 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 
 # RustPLC DSL Generator
 
-从工程师的自然语言工艺描述，经过多轮对话确认，先生成项目顶层语义描述（`.system.md`），再生成可通过 RustPLC 编译器四大验证引擎的 `.plc` 文件。
+本 skill 专注于生成 `.plc`。项目顶层语义描述（`.system.md`）由 `plc-system` skill 负责，本 skill 以**已确认的 `.system.md`** 为输入继续完成 DSL 生成与验证。
 
 ## 维护说明（自测）
 
@@ -26,7 +26,7 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 > "推料缸把工件推到位，传感器检测到后，压紧缸下压，压紧到位后冲压缸动作，完成后全部缩回。"
 
 你的工作是从这段工艺描述中：
-1. **建立语义空间** — 先搞清楚这是什么项目、部署在哪、安全等级多高，生成 `.system.md`
+1. **读取语义锚点** — 基于已确认 `.system.md` 理解项目定位、安全等级与约束边界
 2. **提取动作流程** — 谁先动、谁后动、什么条件触发下一步
 3. **推理出完整设备拓扑** — 每个动作背后需要哪些物理设备
 4. **推导安全约束** — 哪些动作存在物理干涉
@@ -38,58 +38,18 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 
 ## 工作流程（严格按阶段执行）
 
-### 阶段零：生成系统描述（.system.md）
+### 阶段零：读取并确认 system 输入（来自 plc-system）
 
-**这是整个流程的第一步，必须在写任何 .plc 代码之前完成。**
+**这是写任何 `.plc` 代码前的前置条件。**
 
-收到工程师的描述后，首先生成一份 `.system.md` 文件。这份文件是项目的顶层语义描述，定义了"这是什么系统、为谁服务、安全等级多高、核心工艺意图是什么"。它不包含任何 DSL 语法，纯自然语言，工程师和 AI 都能读写。
+输入应为已确认的 `.system.md`（由 `plc-system` 生成），定义了系统身份、安全等级、运行环境、工艺意图和关键约束。
 
-**`.system.md` 的作用：**
-- 为后续所有阶段提供语义锚点 — AI 的每一个决策（冗余策略、超时值、约束严格程度）都从这里推导
-- 同一套"两个阀门开关"的工艺，写在核电站 system.md 里就会产生双冗余传感器和 10 秒硬限，写在教学台 system.md 里就只需要简单超时保护
+进入 DSL 生成前，仅做以下确认：
+- `.system.md` 是否存在且已被工程师确认
+- 安全等级/关键约束是否完整（会直接影响 timeout、冗余和互锁策略）
+- 命名偏好是否明确（中文/英文、风格等）
 
-**`.system.md` 必须包含以下段落：**
-
-```markdown
-## 项目身份
-- 项目名称、所属行业、部署场所、最终用户、监管要求（如有）
-
-## 系统使命
-用 2~3 句话说清楚这套系统要干什么，以及它的失效会导致什么后果。
-
-## 安全与可靠性定位
-- 安全等级（SIL 等级 / 行业标准 / 常规工业防护）
-- 故障后果（人身伤害 / 财产损失 / 演示失败）
-- 容错策略（冗余传感器 / 双通道互锁 / 单一超时保护）
-
-## 运行环境
-- 介质、气源、电源、控制器、通信、环境条件
-
-## 核心工艺意图
-用自然语言描述完整的工艺流程，包括正常流程、异常处理、特殊工况。
-
-## 关键约束
-用自然语言列出安全规则、时序要求、互锁关系。
-
-## 设计偏好
-- 命名语言、代码风格、时序参数策略、扩展预期
-
-## 对 AI 的指引
-基于以上背景，明确告诉 AI 在本项目中应该遵循的决策倾向。
-```
-
-**文件命名：** 与 `.plc` 文件同名，后缀为 `.system.md`，放在同一目录。例如 `examples/two_cylinder.system.md` 对应 `examples/two_cylinder.plc`。
-
-**参考样板：**
-- `examples/two_cylinder.system.md` — 教学演示台（低安全等级）
-- `examples/nuclear_coolant_isolation.system.md` — 核电站隔离阀（SIL3 高安全等级）
-
-生成后展示给工程师确认：
-- "项目定位和安全等级对吗？"
-- "系统使命的描述准确吗？"
-- "有没有遗漏的工况或约束？"
-
-**等待工程师确认 `.system.md` 后再进入阶段一。**
+若用户尚未提供 `.system.md`，应先切换到 `plc-system` 流程，不在本 skill 内重复生成 system 文档。
 
 ### 阶段一：理解工艺
 
@@ -137,6 +97,115 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 - 使用 `pid` 设备类型，声明 `pv`（过程变量）、`sp`（设定值）、`kp/ki/kd`、`out`（输出）、`period_ms`、`limit`。
 - PID 设备自动关联 `analog_input`（pv）和 `analog_output`（out）。
 - 参考 fixture：`13_analog_pid_loop.plc`。
+- **⚠️ `pv`/`out` 必须与 `analog_input`/`analog_output` 设备名完全一致**，且这些设备名必须与 `plc_main.ports` 中的端口名匹配（如 `AI0`、`AO0`）。不能用描述性名称（如 `AI_pressure`）——编译器按名称解析 PID 的 pv/out 绑定。参考 `pid_loop.plc` 的命名方式。
+
+### Extern Rust 函数指引
+
+当工艺需要复杂数值计算（拟合、矩阵、非线性控制、统计等）时，使用 `extern function` 将计算卸载到 Rust，保持 DSL 控制平面的可验证性。
+
+**何时使用 extern function：**
+- 需要最小二乘拟合、矩阵运算、复杂滤波等算法
+- 需要有状态的数值控制器（如自定义 PID 变体）
+- 需要平台相关的读取操作（启动模式、硬件种子等）
+- 计算逻辑复杂到用 `action: compute` 展开会导致 DSL 臃肿
+
+**核心原则：**
+- 控制平面（`wait`、`timeout`、`goto`、安全约束）留在 DSL
+- 数值内核（计算实现）移到 Rust extern
+- `pure: true` 尽量优先，保持验证确定性
+- `time_bound_us` 必须填写实测最坏情况加余量
+
+**声明语法（在 `[topology]` 中）：**
+```plc
+extern function <name>(<param>: <type>, ...) -> <return_type> {
+    rust_module: "<module_path>"
+    pure: <true|false>
+    time_bound_us: <正整数>
+}
+```
+
+标量类型：`bool` / `int` / `float`
+多返回值：`-> (float, float, float)`（元组形式）
+
+**调用语法（在 task step 中，仅限 action）：**
+```plc
+action: call <name>(<arg>, ...) -> out_var
+action: call <name>(<arg>, ...) -> (out_a, out_b, out_c)
+```
+
+**变量声明（在 `[topology]` 中）：**
+```plc
+variable x: float = 0.0
+variable n: int = 0
+variable flag: bool = false
+```
+
+**错误处理模式（需要时）：**
+声明 `variable last_error: int = 0`，用 `tick_with_extern_error_code` 运行时 API 捕获错误码：
+- `0` = 成功，`1` = 函数未找到，`2` = 参数数量错误，`3` = 输入越界，`4` = 输出越界，`5` = 超时，`6` = 运行时错误
+
+**不支持（MVP 限制）：**
+- 函数重载（同名不同签名）
+- 可变参数、泛型、回调
+- 数组/结构体参数或返回值
+- 表达式上下文调用（`x = add(a, b)` 不合法）
+- 单变量绑定元组返回值
+
+**完整示例（纯函数 + 元组返回）：**
+```plc
+[topology]
+variable x0: float = 0.0
+variable x1: float = 1.0
+variable y0: float = 1.0
+variable y1: float = 3.5
+variable coef_a: float = 0.0
+variable coef_b: float = 0.0
+variable coef_c: float = 0.0
+
+extern function quadratic_fit(
+    x0: float, x1: float,
+    y0: float, y1: float
+) -> (float, float, float) {
+    rust_module: "math::fit"
+    pure: true
+    time_bound_us: 80
+}
+
+[tasks]
+task fit:
+    step compute:
+        action: call quadratic_fit(x0, x1, y0, y1) -> (coef_a, coef_b, coef_c)
+        action: log "拟合完成"
+    on_complete: goto done
+```
+
+**错误回退示例：**
+```plc
+[topology]
+variable last_error: int = 0
+variable measurement: float = 0.0
+variable filtered: float = 0.0
+
+extern function filter(meas: float) -> float {
+    rust_module: "control::filter"
+    pure: false
+    time_bound_us: 30
+}
+
+[tasks]
+task main:
+    step invoke:
+        action: call filter(measurement) -> filtered
+    on_complete: goto check
+
+task check:
+    step branch:
+        wait: last_error == 0
+        timeout: 1ms -> goto use_fallback
+    on_complete: goto done
+```
+
+参考示例文件：请优先参考下方“更多参考示例”中的工业级工艺案例。
 
 ### 阶段二：推理设备拓扑
 
@@ -247,8 +316,16 @@ DSL 支持固定延时：
 - `delay: 2000ms` —— 编译为内部有界等待，Liveness 不会报死锁，Timing 会计入关键路径。
 
 常见组合：
-- `timeout: 500ms -> goto fault_handler` —— 保护性上界逃生分支
+- `timeout: 500ms -> goto fail_eject_vac_timeout` —— 保护性上界逃生分支（失败路径名称要体现具体故障语义）
 - 同一 step 中 `delay` + `timeout` 可以共存：timeout 作为保护性上界（例如 delay 300ms + timeout 1200ms）。
+
+**Operation Contract 动作的超时写法（工业严谨约束）：**
+- 对 `op.cylinder.*` / `op.vacuum.*`，必须显式提供超时跳转；缺失会触发编译错误（`EXOP-009`）。
+- 新生成代码统一使用**同一行 inline timeout**，避免把一个原子动作拆成多行导致语义漂移。
+- 推荐写法：
+  - `action: op.cylinder.extend_and_confirm(loader_axis) timeout: 500ms -> goto fail_loader_extend_timeout`
+  - `action: op.vacuum.on_and_confirm(pick_vac) timeout: 300ms -> goto fail_pick_vac_timeout`
+  - `action: op.vacuum.off(pick_vac) timeout: 200ms -> goto fail_pick_vac_off_timeout`
 
 **DSL repeat N 原语：**
 
@@ -262,10 +339,10 @@ step glue_cycle:
     repeat 3:
         action: extend cyl_glue
         wait: sensor_glue_ext == true
-        timeout: 300ms -> goto fault_handler
+        timeout: 300ms -> goto fail_glue_extend_timeout
         action: retract cyl_glue
         wait: sensor_glue_ret == true
-        timeout: 300ms -> goto fault_handler
+        timeout: 300ms -> goto fail_glue_retract_timeout
 ```
 
 ---
@@ -275,9 +352,59 @@ step glue_cycle:
 ### 文件结构
 
 ```plc
-[topology]          # 物理设备、PLC 端口与 relation 连接
+[topology]          # 物理设备、PLC 端口、relation 连接、变量声明、extern 函数声明
 [constraints]       # 安全、时序、因果约束
 [tasks]             # 控制逻辑（状态机）
+```
+
+### 变量声明（topology 中）
+
+用于 extern function 的输入/输出绑定，或需要在 DSL 中保存中间计算结果时：
+
+```plc
+variable <name>: <type> = <初始值>
+```
+
+类型：`bool` / `int` / `float`
+
+```plc
+variable x: float = 0.0
+variable count: int = 0
+variable flag: bool = false
+variable last_error: int = 0   # extern 错误码捕获（固定名称）
+```
+
+变量可在 `wait`、`if`、`action: compute` 中使用，也可作为 extern 调用的参数和返回绑定。
+
+### Extern 函数声明（topology 中）
+
+将复杂数值计算卸载到 Rust，保持 DSL 控制平面可验证性：
+
+```plc
+extern function <name>(<param>: <type>, ...) -> <return_type> {
+    rust_module: "<module_path>"
+    pure: <true|false>
+    time_bound_us: <正整数>
+}
+```
+
+多返回值用元组：`-> (float, float, float)`
+
+可选范围约束（安全关键场景）：
+```plc
+extern function normalize(raw: float) -> float {
+    rust_module: "io::normalize"
+    pure: true
+    time_bound_us: 12
+    input_range: [0.0, 4095.0]
+    output_range: [0.0, 16.0]
+}
+```
+
+**调用语法（仅限 task step 的 action）：**
+```plc
+action: call <name>(<arg>, ...) -> out_var
+action: call <name>(<arg>, ...) -> (out_a, out_b, out_c)
 ```
 
 ### 设备类型与可用状态
@@ -287,7 +414,7 @@ step glue_cycle:
 | `plc` | PLC 控制器本体 | `purpose`(必填), `ports` | — |
 | `solenoid_valve` | 电磁阀 | `purpose`(必填), `response_time`, `states`(可选) | 默认 `on`, `off`（可用 `states: [...]` 自定义） |
 | `cylinder` | 气缸 | `purpose`(必填), `stroke_time`, `retract_time`, `states`(可选) | 默认 `extended`, `retracted`（可用 `states: [...]` 自定义） |
-| `motor` | 电机 | `purpose`(必填), `rated_speed`, `ramp_time` | `on`, `off` |
+| `motor` | 电机 | `purpose`(必填), `rated_speed`, `ramp_time` | `run.on`, `run.off`（safety 约束中用 `motor_x.run.on`；task 中用 `action: set motor_x.run on/off`） |
 | `sensor` | 离散传感器 | `purpose`(必填), `subtype`(标准做法), `debounce` | `on`, `off` |
 | `analog_input` | 模拟量输入 | `purpose`(必填), `range`(必填), `unit`(必填), `external` | 数值比较 |
 | `analog_output` | 模拟量输出 | `purpose`(必填), `range`(必填), `unit` | 数值设定 |
@@ -299,10 +426,12 @@ step glue_cycle:
 - `purpose:` — 所有设备必填，描述该设备在工艺中的职责。编译器会做门禁检查。
 - `subtype:` — 传感器的标准做法（`push_button`、`e_stop_button`、`limit_switch`、`proximity_sensor`、`selector_switch`）。`e_stop_button` 必须同时声明 `inverted: true`。
 - `external: true` — 标记来自外部系统的输入（操作员设定值、上位系统），避免因果性误报。
+- `motor` 动作使用显式端口：`set motor_x.run on/off`（`set motor_x on/off` 属于旧写法）。
+- 电机位置运动按显式流程建模：`set motor_x.run` + `wait/delay` + `timeout`（当前示例不使用 `contract motor_position` / `op.motor.move_to(...)`）。
 
 状态在 `safety:` 约束中使用时格式为 `device.state`，例如：
 - `cyl_A.extended` — 气缸伸出状态
-- `motor_conveyor.on` — 电机运转状态
+- `motor_conveyor.run.on` — 电机运转状态
 - 不同类型设备的状态可以混合使用在 `conflicts_with` / `requires` 中
 
 当需要建模超过 2 个状态的设备（如三位电磁阀），在设备属性中声明自定义状态集：
@@ -356,7 +485,7 @@ relation { from: start_button.out, to: plc_main.X6, via: reports_to }
 - `solenoid_valve`：`coil`(consumer) + `out`(producer)
 - `cylinder`：`cmd`(consumer) + `extended`(producer) + `retracted`(producer)
 - `sensor`：`sense`(consumer) + `out`(producer)
-- `motor`：`cmd`(consumer) + `on`(producer)
+- `motor`：拓扑驱动端通常连 `cmd`（`relation ... -> motor_x.cmd`）；任务里请显式写 `set motor_x.run on/off`
 
 **模拟量 I/O 不需要放在 plc_main 中，可以独立声明：**
 
@@ -394,13 +523,21 @@ causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
 ```plc
 task <名称>:
     step <步骤名>:
+        action: op.cylinder.extend_and_confirm(<contract>) timeout: 500ms -> goto <任务>.<step>  # op 动作同一行显式 timeout
+        action: op.cylinder.retract_and_confirm(<contract>) timeout: 500ms -> goto <任务>.<step>
+        action: op.vacuum.on_and_confirm(<contract>) timeout: 300ms -> goto <任务>.<step>
+        action: op.vacuum.off(<contract>) timeout: 200ms -> goto <任务>.<step>
         action: extend <气缸>          # 伸出
         action: retract <气缸>         # 缩回
-        action: set <设备> on/off      # 开关
+        action: set <设备> on/off      # 开关（阀/普通数字设备）
+        action: set <设备>.<端口> on/off # 显式端口开关（电机请用 set motor_x.run on/off）
         action: set_analog <AO> <值>   # 模拟量输出
+        action: compute <var> = <expr> # 变量计算（简单算术）
+        action: call <extern>(<args>) -> <var>  # 调用 extern 函数
         action: log "<消息>"           # 日志
         delay: 2000ms                  # 固定延时（有界等待）
         wait: <传感器> == true          # 等待条件
+        wait: <变量> >= <值>           # 变量条件等待
         wait: A == true AND B == true  # AND 条件（不可与 OR 混用）
         wait: A == true OR B == true   # OR 条件（不可与 AND 混用）
         wait: AI0 >= 60               # 模拟量阈值等待
@@ -421,7 +558,7 @@ step do_both:
         branch_B:
             action: extend cyl_B
     wait: sensor_A_ext == true
-    timeout: 600ms -> goto fault
+    timeout: 600ms -> goto fail_parallel_sync_timeout
 
 # 竞争（所有分支同时执行，第一个满足条件的胜出）
 step detect:
@@ -432,7 +569,7 @@ step detect:
         branch_B:
             wait: sensor_B == true
             then: goto process_B
-    timeout: 800ms -> goto fault
+    timeout: 800ms -> goto fail_detect_timeout
 ```
 
 ---
@@ -443,12 +580,15 @@ step detect:
 - 声明了 `conflicts_with` 的两个状态不能在任何可达路径中同时为真
 - `parallel` 块中不能同时触发冲突状态
 - 顺序执行天然安全（前一个缩回后下一个才伸出）
+- **⚠️ 跨循环 BMC 陷阱**：两个状态若分别出现在同一 task 的不同分支（如 `eject_good` 路径 vs `eject_bad` 路径），BMC 会跨循环探测，误认为它们可以同时为真。此时不要用 `conflicts_with`，顺序控制已保证互斥。
+- **⚠️ `external: true` 模拟量不能用于 `conflicts_with`**：BMC 把外部输入视为每步自由变量，`safety: AI0 > 90 conflicts_with ...` 永远无法证明安全。超压/超温保护应通过任务逻辑（`wait: AI0 < 阈值` + `timeout -> goto fail_temp_protect_timeout`）实现，而非 `conflicts_with` 约束。
 
 ### Liveness（活性）
 - 每个 `wait` 必须有 `timeout`，除非标记了 `allow_indefinite_wait: true`
 - `allow_indefinite_wait` 仅用于人工触发的等待（如启动按钮）
 - 每个 task 需要 `on_complete`。若最后一步的所有路径都通过 goto 离开（if/else 两分支都 goto、race 所有分支都有 then: goto 且有 timeout -> goto），可省略。
 - 不能有孤立的死胡同状态
+- **⚠️ `parallel` 后必须跟至少一个 step**：`parallel` 块的 join node 需要后续 step 才有出边。如果 `parallel` 是 task 的最后一个 step，直接跟 `on_complete` 会导致 Liveness 失败。正确做法：在 `parallel` 之后加一个日志或确认 step，再写 `on_complete`。
 
 ### Timing（时序）
 - `must_complete_within`：基于动作/延时的关键路径估计（忽略 timeout 上界），更贴近"设备实际动作时间 + 固定 delay"。并行动作取最大值。
@@ -462,6 +602,7 @@ step detect:
 - `wait: sensor == false` 与 `== true` 的因果检查完全相同
 - AND/OR wait 中的每个传感器都会被独立检查
 - parallel 块中跨分支的无关因果配对会被自动跳过（不会误报）
+- **⚠️ 同一 step 多个 action 导致因果误配**：因果引擎将 step 中**最后一个** action 与后续 `wait` 配对。如果一个 step 同时包含 `set_analog` 和 `set <valve> on`，引擎会用 `set_analog` 的目标（AO 设备）去匹配 `wait: sensor == true`，找不到拓扑路径就报错。**修复**：将不同类型的 action 拆分到独立 step，确保每个 step 只有一个"驱动动作"紧跟其对应的 `wait`。
 
 **race 块注意事项：**
 - 每个 branch 需要 `wait:` + `then: goto`，step 级需要 `timeout:`
@@ -477,7 +618,7 @@ step detect:
 
 - `ready`：只做人工启动等待（`allow_indefinite_wait: true`）
 - `cycle`：完整自动流程，每个 `wait` 必带 `timeout`
-- `fault_handler`：收回到安全位 + 报警日志 + 回到 `ready`
+- `fail_<具体故障名>`：收回到安全位 + 上下文化报警日志 + 回到 `ready`
 
 示例结构（仅示意，不要原样照抄，按你的设备名替换）：
 ```plc
@@ -487,11 +628,11 @@ task cycle:
         # action + wait + timeout
     on_complete: goto ready
 
-task fault_handler:
+task fail_action_timeout:
     step safe:
         # retract / stop motor
     step alarm:
-        action: log "fault"
+        action: log "出料动作超时：请检查气源、阀体与到位传感器"
     on_complete: goto ready
 
 task ready:
@@ -560,18 +701,25 @@ task cycle:
     step extend_A:
         action: extend cyl_A
         wait: sensor_A_ext == true
-        timeout: 500ms -> goto fault_handler
+        timeout: 500ms -> goto fail_cyl_a_extend_timeout
     step retract_A:
         action: retract cyl_A
         wait: sensor_A_ret == true
-        timeout: 500ms -> goto fault_handler
+        timeout: 500ms -> goto fail_cyl_a_retract_timeout
     on_complete: goto ready
 
-task fault_handler:
+task fail_cyl_a_extend_timeout:
     step safe:
         action: retract cyl_A
     step alarm:
-        action: log "动作超时报警"
+        action: log "A缸伸出到位超时：请检查阀体、气路与伸出限位"
+    on_complete: goto ready
+
+task fail_cyl_a_retract_timeout:
+    step safe:
+        action: retract cyl_A
+    step alarm:
+        action: log "A缸缩回到位超时：请检查阀体、气路与缩回限位"
     on_complete: goto ready
 
 task ready:
@@ -643,7 +791,9 @@ task done:
 | 输入口 | `X0`, `X1`, ... | 在 plc_main.ports 中声明 |
 | 模拟输入 | `AI0`, `AI1`, ... | 独立设备或 plc_main.ports |
 | 模拟输出 | `AO0`, `AO1`, ... | 独立设备或 plc_main.ports |
-| 任务 | 动作导向 | `cycle`, `init`, `fault_handler`, `ready` |
+| 变量 | 蛇形命名 | `x_val`, `sum_x`, `coef_a`, `last_error` |
+| Extern 函数 | 蛇形命名 | `add`, `quadratic_fit`, `pid_update`, `normalize_pressure` |
+| 任务 | 动作导向 | `cycle`, `init`, `fail_eject_vac_timeout`, `ready` |
 | 步骤 | 动词_名词 | `extend_push`, `wait_clamp`, `retract_all` |
 
 工程师可以在阶段二要求使用自己的命名习惯，以上仅为默认值。
@@ -654,47 +804,45 @@ task done:
 
 每个生成的 `.plc` 文件都必须包含：
 
-1. **对应的 `.system.md` 文件** — 在阶段零生成并经工程师确认，作为所有决策的语义锚点
+1. **对应的 `.system.md` 文件** — 由 `plc-system` 生成并经工程师确认，作为所有决策的语义锚点
 2. **plc_main 设备** — 声明所有 I/O 端口，必须有 `purpose:`
 3. **所有设备必须有 `purpose:`** — 编译器门禁会拒绝缺少 purpose 的设备
 4. **传感器必须有 `subtype:`** — 标准做法，明确传感器类型
-5. **fault_handler 任务** — 缩回所有气缸 / 关闭所有电机，输出报警日志
+5. **显式失败处理任务** — 例如 `fail_eject_vac_timeout`，缩回所有气缸 / 关闭所有电机，输出上下文化报警日志
 6. **ready 任务** — 等待启动按钮，标记 `allow_indefinite_wait: true`
-7. **所有 wait 都有 timeout** — 指向 fault_handler（人工等待除外）
-8. **工程师确认的所有安全约束** — 不能遗漏
-9. **完整的 relation 连接链** — 每个设备的 relation 和传感器的 detects 必须正确声明（编译器据此自动推断因果性）
-10. **每个气缸都应有 _ext 和 _ret 两个传感器** — 即使当前流程中某个方向没有 `wait` 确认
+7. **所有 wait 都有 timeout** — 指向明确失败处理任务（人工等待除外）
+8. **所有 `op.*` 动作都在同一 action 行显式 timeout** — 不依赖隐式默认超时
+9. **工程师确认的所有安全约束** — 不能遗漏
+10. **完整的 relation 连接链** — 每个设备的 relation 和传感器的 detects 必须正确声明（编译器据此自动推断因果性）
+11. **每个气缸都应有 _ext 和 _ret 两个传感器** — 即使当前流程中某个方向没有 `wait` 确认
 
 ---
 
 ## 更多参考示例
 
-`examples/` 目录下有多个已通过验证的 `.plc` 文件，生成前务必参考：
+`examples/` 目录下有多个 `.plc` 文件；以下清单仅保留**工业级推荐样例**（生成前优先参考）：
 
 | 文件 | 场景 | 涉及模式 |
 |------|------|----------|
-| `two_cylinder.plc` | 双气缸顺序动作 | 基础顺序、conflicts_with、plc_main + relation |
 | `assembly_station.plc` | 双传送带+推缸+压装+出料 | 多设备顺序、requires vs conflicts_with、timing |
-| `analog_pressure_demo.plc` | 液压站比例阀压力控制 | analog_input/output、set_analog、external、阈值 wait |
-| `pid_loop.plc` | PID 闭环压力控制 | pid 设备、analog I/O |
+| `pid_loop.plc` | PID 闭环压力控制 | pid 设备、analog I/O、AI0/AO0 命名规范 |
 | `nuclear_coolant_isolation.plc` | 核电站隔离阀控制 | SIL3 双冗余传感器、OR 容错、parallel 并行关阀、严格时序硬限 |
+| `three_station_assembly.plc` | 三工位装配线（推料→压装→检测→出料） | parallel、requires、timing、if-else 质检分流 |
+| `hydraulic_bender.plc` | 液压折弯机（压力闭环+行程控制） | pid、analog_input、must_complete_within_worst_case、set_analog 分 step |
+| `dual_axis_platform.plc` | 双轴运动平台（X/Y 轴+碰撞防护） | motor.run.on 语法、parallel 内 conflicts_with、race |
+| `thermal_oven.plc` | 温控烘箱（PID 温控+超温保护） | pid、if-else 分支、external 模拟量任务逻辑保护 |
+| `welding_station.plc` | 焊接工作站（夹紧→焊接→冷却→松开） | parallel、repeat、allow_indefinite_wait、parallel 后补 step |
 
-`.system.md` 参考样板：
-
-| 文件 | 场景 | 安全等级 |
-|------|------|----------|
-| `two_cylinder.system.md` | 教学演示台 | 常规工业防护 |
-| `nuclear_coolant_isolation.system.md` | 核电站一回路隔离阀 | SIL3 / 核安全 1E 级 |
-
-遇到类似场景时，先读取对应示例文件及其 `.system.md` 了解已验证的模式，再生成新文件。
+`.system.md` 模板与问题清单由 `plc-system` skill 维护。  
+本 skill 只消费已确认的 `.system.md` 输入，并负责产出可验证的 `.plc`。
 
 ---
 
 ## 生成覆盖度自检
 
-生成 `.system.md` + `.plc` 文件后，对照以下清单确认：
+在 `.system.md`（来自 plc-system）与 `.plc` 准备完成后，对照以下清单确认：
 
-- [ ] 是否先生成了 `.system.md` 并经工程师确认？
+- [ ] 是否已提供 `.system.md`（来自 `plc-system`）并经工程师确认？
 - [ ] `.system.md` 中的安全等级是否与 `.plc` 中的约束严格程度匹配？
 - [ ] 所有设备是否都有 `purpose:` 字段？
 - [ ] 所有传感器是否都有 `subtype:` 字段？
@@ -702,7 +850,20 @@ task done:
 - [ ] 所有设备间连接是否使用 `relation { from, to, via }` 声明？
 - [ ] 所有气缸是否都有 _ext 和 _ret 传感器，且 `detects` 关系正确？
 - [ ] 所有 wait 是否都有 timeout？（人工等待除外）
-- [ ] fault_handler 是否覆盖了所有执行器的安全复位？
+- [ ] 每条 timeout 路径是否都映射到明确命名的失败处理任务（如 `fail_xxx_timeout`），且覆盖执行器安全复位？
+- [ ] 所有 `op.cylinder.*` / `op.vacuum.*` 是否都使用了同一行 inline timeout（`action: op... timeout: ... -> goto ...`）？
 - [ ] 是否需要 `race`/`parallel`/`repeat`/`if-else`/`goto task.step`？
 - [ ] 是否有时序约束？
 - [ ] 模拟量设备是否声明了 `range` 和 `unit`？
+- [ ] 如果使用 extern function，是否声明了 `rust_module`、`pure`、`time_bound_us`？
+- [ ] extern function 的参数和返回值是否都是标量类型（`bool`/`int`/`float`）？
+- [ ] extern function 调用是否使用 `action: call ... -> ...` 语法（不在表达式中）？
+- [ ] 如果需要 extern 错误处理，是否声明了 `variable last_error: int = 0`？
+- [ ] 复杂计算是否优先考虑 extern function 而非冗长的 `action: compute` 链？
+- [ ] `parallel` 块之后是否跟了至少一个 step（而非直接 `on_complete`）？
+- [ ] 同一 step 中是否只有一个"驱动动作"紧跟其对应的 `wait`（避免多 action 导致因果误配）？
+- [ ] `motor` 设备在 `safety:` 约束中是否使用 `motor_x.run.on` 而非 `motor_x.on`？
+- [ ] 电机位置动作是否采用显式流程（`set motor_x.run` + `wait/delay/timeout`）？
+- [ ] PID 的 `pv`/`out` 名称是否与 `analog_input`/`analog_output` 设备名及 `plc_main.ports` 端口名完全一致？
+- [ ] `external: true` 的模拟量是否避免了 `conflicts_with` 约束（改用任务逻辑保护）？
+- [ ] 两个状态若只在不同分支路径中出现（顺序互斥），是否避免了 `conflicts_with`（防止 BMC 跨循环误报）？
