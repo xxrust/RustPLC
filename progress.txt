@@ -444,3 +444,22 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - Axis motion PRD for this stream is tracked in ord.json and starts from US-001.
 ---
+## [2026-03-06 12:48:03] - US-001
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Finalized Axis Motion MVP frozen spec in docs/axis_motion_mvp_spec.md as the implementation contract.
+  - Confirmed the spec includes axis.move_relative/axis.move_absolute syntax and mandatory timeout/reject/motion_fault/safety_fault branching semantics.
+  - Confirmed op.motor.move_to remains explicitly disabled in MVP with historical rationale.
+  - Confirmed AXIS-001~AXIS-005 diagnostic IDs with trigger conditions and fix templates.
+  - Marked US-001 as completed in prd.json.
+- Files changed
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For Ralph runs in this repo, story completion is finalized by syncing docs artifacts + prd.json status + progress.txt entry in the same iteration flow.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Branch-level checkpoint commits may already contain the implementation files; still update PRD status explicitly in the story commit.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis Motion backlog source is prd.json on branch alph/axis-motion-dsl-mvp.
+---

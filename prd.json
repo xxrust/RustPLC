@@ -15,8 +15,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "MVP 规范冻结于 docs/axis_motion_mvp_spec.md，已明确 axis.move_relative/axis.move_absolute 语法、4 类固定结果、op.motor.move_to 禁用及 AXIS-001~AXIS-005 诊断模板。"
     },
     {
       "id": "US-002",
