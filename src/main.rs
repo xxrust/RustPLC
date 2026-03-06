@@ -6438,6 +6438,7 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                             }
                             Action::Compute { .. }
                             | Action::CallExtern { .. }
+                            | Action::AxisMove { .. }
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }
@@ -6612,6 +6613,7 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                             }
                             Action::Compute { .. }
                             | Action::CallExtern { .. }
+                            | Action::AxisMove { .. }
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }
@@ -9627,6 +9629,7 @@ fn io_sizes_for_program_and_scenario(
                             }
                             Action::Compute { .. }
                             | Action::CallExtern { .. }
+                            | Action::AxisMove { .. }
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }

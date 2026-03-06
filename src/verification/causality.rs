@@ -1,6 +1,7 @@
 use crate::ast::{
     ActionStatement, ComparisonOperator, ConditionExpression, DeviceType, ExternCallBinding,
-    LiteralValue, PlcProgram, StepStatement, WaitCondition, WaitStatement,
+    GotoDirective, LiteralValue, PlcProgram, StepDeclaration, StepStatement, WaitCondition,
+    WaitStatement,
 };
 use crate::ir::{ConstraintSet, DeviceKind, TopologyGraph};
 use petgraph::algo::has_path_connecting;
@@ -461,6 +462,7 @@ fn collect_action_wait_pairs(
                 sensor_names,
                 &mut next_parallel_block_id,
                 &mut pairs,
+                program,
             );
         }
     }
@@ -474,6 +476,7 @@ fn collect_pairs_from_statements(
     sensor_names: &HashSet<String>,
     next_parallel_block_id: &mut usize,
     pairs: &mut Vec<ActionWaitPair>,
+    program: &PlcProgram,
 ) {
     let mut actions = Vec::new();
     let mut waits = Vec::new();
@@ -487,6 +490,7 @@ fn collect_pairs_from_statements(
         &mut actions,
         &mut waits,
         pairs,
+        program,
     );
 
     for action in &actions {
@@ -513,6 +517,7 @@ fn collect_items_from_statements(
     actions: &mut Vec<CollectedAction>,
     waits: &mut Vec<CollectedWait>,
     pairs: &mut Vec<ActionWaitPair>,
+    program: &PlcProgram,
 ) {
     for statement in statements {
         match statement {
@@ -524,6 +529,14 @@ fn collect_items_from_statements(
                         origin: origin.clone(),
                     });
                 }
+                collect_axis_fault_branch_pairs(
+                    program,
+                    action,
+                    sensor_names,
+                    &origin,
+                    next_parallel_block_id,
+                    pairs,
+                );
             }
             StepStatement::Wait(wait) => {
                 let wait_text = wait_to_text(wait);
@@ -546,6 +559,7 @@ fn collect_items_from_statements(
                     actions,
                     waits,
                     pairs,
+                    program,
                 );
             }
             StepStatement::Parallel(block) => {
@@ -565,6 +579,7 @@ fn collect_items_from_statements(
                         actions,
                         waits,
                         pairs,
+                        program,
                     );
                 }
             }
@@ -576,6 +591,189 @@ fn collect_items_from_statements(
                         sensor_names,
                         next_parallel_block_id,
                         pairs,
+                        program,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_axis_fault_branch_pairs(
+    program: &PlcProgram,
+    action: &ActionStatement,
+    sensor_names: &HashSet<String>,
+    action_origin: &StatementOrigin,
+    next_parallel_block_id: &mut usize,
+    pairs: &mut Vec<ActionWaitPair>,
+) {
+    let Some((action_text, action_target, branches)) = axis_fault_branches(action) else {
+        return;
+    };
+
+    for (fault_kind, target) in branches {
+        let Some(step) = resolve_goto_step(program, target) else {
+            continue;
+        };
+
+        let mut waits = Vec::new();
+        collect_wait_items_from_statements(
+            &step.statements,
+            sensor_names,
+            StatementOrigin::StepLevel,
+            next_parallel_block_id,
+            &mut waits,
+        );
+        if waits.is_empty() {
+            continue;
+        }
+
+        let action_text = format!(
+            "{action_text} [{fault_kind} -> {}]",
+            format_branch_target(target)
+        );
+        let line = step.line.max(1);
+        for wait in waits {
+            pairs.push(ActionWaitPair {
+                line,
+                action: action_text.clone(),
+                action_target: action_target.clone(),
+                wait: wait.text,
+                wait_sensor: wait.sensor,
+                action_origin: action_origin.clone(),
+                wait_origin: wait.origin,
+            });
+        }
+    }
+}
+
+fn axis_fault_branches(
+    action: &ActionStatement,
+) -> Option<(String, String, Vec<(&'static str, &GotoDirective)>)> {
+    match action {
+        ActionStatement::AxisMoveRelative {
+            target,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+            ..
+        } => {
+            let mut branches = Vec::new();
+            if let Some(branch) = on_reject.as_ref() {
+                branches.push(("on_reject", branch));
+            }
+            if let Some(branch) = on_motion_fault.as_ref() {
+                branches.push(("on_motion_fault", branch));
+            }
+            if let Some(branch) = on_safety_fault.as_ref() {
+                branches.push(("on_safety_fault", branch));
+            }
+            Some((
+                format!("axis.move_relative {}", target.device),
+                target.device.clone(),
+                branches,
+            ))
+        }
+        ActionStatement::AxisMoveAbsolute {
+            target,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+            ..
+        } => {
+            let mut branches = Vec::new();
+            if let Some(branch) = on_reject.as_ref() {
+                branches.push(("on_reject", branch));
+            }
+            if let Some(branch) = on_motion_fault.as_ref() {
+                branches.push(("on_motion_fault", branch));
+            }
+            if let Some(branch) = on_safety_fault.as_ref() {
+                branches.push(("on_safety_fault", branch));
+            }
+            Some((
+                format!("axis.move_absolute {}", target.device),
+                target.device.clone(),
+                branches,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn resolve_goto_step<'a>(program: &'a PlcProgram, target: &GotoDirective) -> Option<&'a StepDeclaration> {
+    let task = program.tasks.tasks.iter().find(|task| task.name == target.task)?;
+    match target.step.as_deref() {
+        Some(step_name) => task.steps.iter().find(|step| step.name == step_name),
+        None => task.steps.first(),
+    }
+}
+
+fn format_branch_target(target: &GotoDirective) -> String {
+    match target.step.as_deref() {
+        Some(step) => format!("{}.{}", target.task, step),
+        None => target.task.clone(),
+    }
+}
+
+fn collect_wait_items_from_statements(
+    statements: &[StepStatement],
+    sensor_names: &HashSet<String>,
+    origin: StatementOrigin,
+    next_parallel_block_id: &mut usize,
+    waits: &mut Vec<CollectedWait>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Wait(wait) => {
+                let wait_text = wait_to_text(wait);
+                for sensor in infer_wait_sensors(wait, sensor_names) {
+                    waits.push(CollectedWait {
+                        text: wait_text.clone(),
+                        sensor,
+                        origin: origin.clone(),
+                    });
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                collect_wait_items_from_statements(
+                    body,
+                    sensor_names,
+                    origin.clone(),
+                    next_parallel_block_id,
+                    waits,
+                );
+            }
+            StepStatement::Parallel(block) => {
+                let block_id = *next_parallel_block_id;
+                *next_parallel_block_id += 1;
+                for (branch_index, branch) in block.branches.iter().enumerate() {
+                    collect_wait_items_from_statements(
+                        &branch.statements,
+                        sensor_names,
+                        StatementOrigin::ParallelBranch {
+                            block_id,
+                            branch_index,
+                        },
+                        next_parallel_block_id,
+                        waits,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                let block_id = *next_parallel_block_id;
+                *next_parallel_block_id += 1;
+                for (branch_index, branch) in block.branches.iter().enumerate() {
+                    collect_wait_items_from_statements(
+                        &branch.statements,
+                        sensor_names,
+                        StatementOrigin::ParallelBranch {
+                            block_id,
+                            branch_index,
+                        },
+                        next_parallel_block_id,
+                        waits,
                     );
                 }
             }
@@ -602,6 +800,14 @@ fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String
         )),
         ActionStatement::SetAnalogExpr { target, .. } => Some((
             format!("set_analog {} <expr>", target.device),
+            target.device.clone(),
+        )),
+        ActionStatement::AxisMoveRelative { target, .. } => Some((
+            format!("axis.move_relative {}", target.device),
+            target.device.clone(),
+        )),
+        ActionStatement::AxisMoveAbsolute { target, .. } => Some((
+            format!("axis.move_absolute {}", target.device),
             target.device.clone(),
         )),
         ActionStatement::Compute { .. } | ActionStatement::Call { .. } => None,
@@ -1416,6 +1622,104 @@ task main:
                 .iter()
                 .any(|error| error.broken_link == "encoder_main -> cam_xy"),
             "错误应定位 encoder -> cam 断链"
+        );
+    }
+
+    #[test]
+    fn verifies_axis_fault_branch_wait_causality_when_links_exist() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device axis_x: stepper_motor
+device sensor_fault: sensor
+
+relation { from: Y0.out, to: axis_x.enable, via: driven_by }
+relation { from: axis_x.fault, to: sensor_fault.sense, via: detects }
+relation { from: sensor_fault.out, to: X0.in, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+        action: log "timeout"
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        wait: sensor_fault == true
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        verify_causality(&program, &topology, &constraints)
+            .expect("axis motion 故障分支等待应参与因果验证并通过");
+    }
+
+    #[test]
+    fn reports_missing_axis_fault_branch_causality_path() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device axis_x: stepper_motor
+device sensor_fault: sensor
+
+relation { from: Y0.out, to: axis_x.enable, via: driven_by }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+        action: log "timeout"
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        wait: sensor_fault == true
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        let errors = verify_causality(&program, &topology, &constraints)
+            .expect_err("axis motion 故障分支缺失因果链应报错");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.action.as_deref().unwrap_or_default().contains("on_motion_fault")),
+            "诊断动作文本应标注 on_motion_fault 分支"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.broken_link == "axis_x -> sensor_fault"),
+            "应定位轴故障分支缺失的 axis->sensor 链路"
         );
     }
 

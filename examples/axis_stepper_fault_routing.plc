@@ -1,0 +1,34 @@
+[topology]
+
+device plc_main: plc { ports: [Y0:digital:producer] }
+device axis_stepper: stepper_motor
+
+relation { from: plc_main.Y0, to: axis_stepper.enable, via: driven_by }
+
+[constraints]
+
+safety: axis_stepper.enable.off conflicts_with axis_stepper.pulse.active
+
+[tasks]
+
+task main:
+    step enable_axis:
+        action: set axis_stepper.enable on
+    step move_axis:
+        action: axis.move_relative(axis_stepper, distance: 25, speed: 5)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step done:
+        action: log "stepper axis move completed"
+
+task fault:
+    step timeout:
+        action: log "stepper axis timeout"
+    step reject:
+        action: log "stepper axis reject"
+    step motion_fault:
+        action: log "stepper axis motion fault"
+    step safety_fault:
+        action: log "stepper axis safety fault"

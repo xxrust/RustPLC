@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use runtime_core::{
-    Action, CamAnalogField, CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr, Program,
-    StepId, Timeout,
+    Action, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr,
+    Program, StepId, Timeout,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,7 +118,7 @@ pub fn generate_program_module(
     out.push_str(
         "  use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, AnalogOutputId};\n",
     );
-    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, CamAnalogField, CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr, PidConfig, Program, Step, StepId, Task, Timeout};\n\n");
+    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, AxisMotionCommand, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr, PidConfig, Program, Step, StepId, Task, Timeout};\n\n");
 
     // Emit actions arrays, then steps, then tasks, then program.
     for (tidx, task) in program.tasks.iter().enumerate() {
@@ -252,6 +252,17 @@ fn format_action(a: &Action) -> String {
             "Action::CamPhase {{ cam_index: {}, offset_expr: {} }}",
             cam_index,
             format_expr_program(&offset_expr)
+        ),
+        Action::AxisMove { command } => format!(
+            "Action::AxisMove {{ command: AxisMotionCommand {{ target: {:?}, port: {:?}, kind: AxisMoveKind::{}, value: {}, speed: {} }} }}",
+            command.target,
+            command.port,
+            match command.kind {
+                AxisMoveKind::Relative => "Relative",
+                AxisMoveKind::Absolute => "Absolute",
+            },
+            format_f32(command.value),
+            format_f32(command.speed)
         ),
         Action::Extend { output } => {
             format!("Action::Extend {{ output: DigitalOutputId({}) }}", output.0)

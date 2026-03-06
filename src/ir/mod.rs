@@ -252,9 +252,46 @@ pub enum TransitionAction {
         target: String,
         offset_expr_raw: String,
     },
+    AxisMoveRelative {
+        target: String,
+        port: String,
+        distance_raw: String,
+        speed_raw: String,
+        timeout: AxisTimeoutBranch,
+        on_reject: AxisFaultBranch,
+        on_motion_fault: AxisFaultBranch,
+        on_safety_fault: AxisFaultBranch,
+    },
+    AxisMoveAbsolute {
+        target: String,
+        port: String,
+        position_raw: String,
+        speed_raw: String,
+        timeout: AxisTimeoutBranch,
+        on_reject: AxisFaultBranch,
+        on_motion_fault: AxisFaultBranch,
+        on_safety_fault: AxisFaultBranch,
+    },
     Log {
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AxisTimeoutBranch {
+    pub duration_ms: u64,
+    pub target_task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_step: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AxisFaultBranch {
+    pub target_task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_step: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -394,6 +431,8 @@ pub enum ActionKind {
     CamDisengage,
     CamSwitch,
     CamPhase,
+    AxisMoveRelative,
+    AxisMoveAbsolute,
     Log,
 }
 
@@ -519,6 +558,32 @@ mod tests {
                         target: "cyl_A".to_string(),
                         port: "self".to_string(),
                     },
+                    TransitionAction::AxisMoveRelative {
+                        target: "axis_x".to_string(),
+                        port: "self".to_string(),
+                        distance_raw: "10".to_string(),
+                        speed_raw: "2".to_string(),
+                        timeout: AxisTimeoutBranch {
+                            duration_ms: 500,
+                            target_task: "fault".to_string(),
+                            target_step: Some("timeout".to_string()),
+                        },
+                        on_reject: AxisFaultBranch {
+                            target_task: "fault".to_string(),
+                            target_step: Some("reject".to_string()),
+                            error_code: Some("AXIS_REJECT".to_string()),
+                        },
+                        on_motion_fault: AxisFaultBranch {
+                            target_task: "fault".to_string(),
+                            target_step: Some("motion_fault".to_string()),
+                            error_code: Some("AXIS_MOTION_FAULT".to_string()),
+                        },
+                        on_safety_fault: AxisFaultBranch {
+                            target_task: "fault".to_string(),
+                            target_step: Some("safety_fault".to_string()),
+                            error_code: Some("AXIS_SAFETY_FAULT".to_string()),
+                        },
+                    },
                     TransitionAction::CallExtern {
                         function: "add".to_string(),
                         args_raw: vec!["left".to_string(), "right".to_string()],
@@ -594,6 +659,8 @@ mod tests {
         assert!(topology_json.contains("extern_functions"));
         assert!(sm_json.contains("transitions"));
         assert!(sm_json.contains("call_extern"));
+        assert!(sm_json.contains("axis_move_relative"));
+        assert!(sm_json.contains("error_code"));
         assert!(constraints_json.contains("conflicts_with"));
         assert!(timing_json.contains("intervals"));
 

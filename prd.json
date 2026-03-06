@@ -1,279 +1,192 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/dsl-control-rust-compute",
-  "description": "Implement the hybrid architecture where DSL keeps deterministic control logic and complex numerical computation is executed by Rust extern functions with contract checks.",
+  "branchName": "ralph/axis-motion-dsl-mvp",
+  "description": "为 stepper_motor/servo_drive 引入统一 axis.move DSL，并以编译期规则强制 timeout/reject/motion_fault/safety_fault 显式分流，替代 run+delay 与旧 op.motor.move_to 模板。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Freeze extern-function MVP syntax and scope",
-      "description": "As a language designer, I want a finalized MVP syntax spec so that parser/runtime work can proceed without ambiguity.",
+      "title": "冻结 Axis Motion MVP 规范与异常分层边界",
+      "description": "As a DSL architect, I want a frozen MVP spec with explicit fault classes so that parser, semantic, runtime, and verification implement against one consistent contract.",
       "acceptanceCriteria": [
-        "Document supported MVP syntax for `extern function` declaration and `action: call` invocation",
-        "Mark unsupported items explicitly (for example: overloads, variadic args, generics, callbacks)",
-        "Provide at least 10 valid/invalid DSL examples in docs",
+        "新增 docs/axis_motion_mvp_spec.md，定义 axis.move_relative/axis.move_absolute 的语法、参数、分支语义",
+        "规范中固定 4 类动作结果：timeout、reject、motion_fault、safety_fault",
+        "规范中明确 op.motor.move_to 保持禁用，并写明其历史问题是将运动目标耦合为传感器目标",
+        "定义 AXIS-001~AXIS-005 诊断编号与修复建议模板",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "MVP syntax spec frozen in docs/extern_function_mvp_spec.md"
+      "notes": "MVP 规范冻结于 docs/axis_motion_mvp_spec.md，已明确 axis.move_relative/axis.move_absolute 语法、4 类固定结果、op.motor.move_to 禁用及 AXIS-001~AXIS-005 诊断模板。"
     },
     {
       "id": "US-002",
-      "title": "Parser support for extern function declarations",
-      "description": "As a compiler engineer, I want the DSL parser to read extern declarations so that contract metadata is available in the AST.",
+      "title": "扩展轴参数关键字解析",
+      "description": "As a controls engineer, I want axis configuration fields parsed so that stepper and servo can declare consistent mechanical and unit metadata.",
       "acceptanceCriteria": [
-        "Extend `plc.pest` to parse `extern function <name>(...) -> ... { ... }` inside `[topology]`",
-        "Parse required contract fields: `rust_module`, `pure`, `time_bound_us`",
-        "Reject missing required fields with line-aware parse errors",
+        "语法层支持 microstep、gear_num、gear_den、lead_screw、position_unit、max_acceleration 参数名",
+        "新增 parser 测试覆盖新参数可解析与非法拼写报错",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Parser now supports extern function declarations with required contract field validation and AST capture"
+      "notes": "Parser 已支持 microstep/gear_num/gear_den/lead_screw/position_unit/max_acceleration，并新增非法拼写回归测试。"
     },
     {
       "id": "US-003",
-      "title": "Parser support for extern call actions",
-      "description": "As a DSL user, I want to call extern functions in task steps so that complex math can execute outside expression grammar.",
+      "title": "补齐 stepper/servo 设备库参数类型校验",
+      "description": "As a compiler maintainer, I want typed validation for new axis parameters so that invalid configs fail at compile time.",
       "acceptanceCriteria": [
-        "Parse `action: call func(a, b) -> out_var`",
-        "Parse tuple return binding form `-> (a, b, c)`",
-        "Restrict extern calls to action context and reject expression-context usage",
+        "更新 devices/stepper_motor.toml 与 devices/servo_drive.toml（若存在）声明新增参数",
+        "语义预处理对参数类型和单位做校验并产出行级诊断",
+        "新增正反例测试覆盖参数合法与非法场景",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Parser now supports action: call extern invocations (single/tuple bindings) and rejects extern use in expression context"
+      "notes": "已在 stepper/servo 设备库补充 microstep/gear_num/gear_den/lead_screw/position_unit/max_acceleration 参数 schema，并在语义层用设备库参数类型/单位规则做行级诊断校验。"
     },
     {
       "id": "US-004",
-      "title": "AST and IR extensions for extern metadata and call actions",
-      "description": "As a compiler maintainer, I want explicit AST/IR nodes for extern functions and calls so that semantic checks and runtime lowering are type-safe.",
+      "title": "新增 axis.move_relative/axis.move_absolute 语法与异常分支语法",
+      "description": "As a DSL user, I want axis motion actions with explicit fault branches so that motion intent and failure routing are both encoded in step code.",
       "acceptanceCriteria": [
-        "Add `ExternFunctionDeclaration` and related param/return/constraint types to AST",
-        "Add runtime action variant for extern invocation with argument and return-variable bindings",
-        "Serde roundtrip for new AST nodes succeeds",
+        "支持 axis.move_relative 与 axis.move_absolute 两个动作语法",
+        "支持同一步内声明 timeout、on_reject、on_motion_fault、on_safety_fault 分支",
+        "新增 parser/AST 测试覆盖两类动作和四类分支",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "IR now carries extern function metadata and call_extern actions with binding info; AST/IR serde+lowering coverage added"
+      "notes": "Implemented axis.move_relative/axis.move_absolute compound step parsing with timeout/on_reject/on_motion_fault/on_safety_fault branches; added parser+AST regression tests and updated cross-layer match handling to keep workspace typecheck/tests green."
     },
     {
       "id": "US-005",
-      "title": "Semantic validation for function declaration and call signatures",
-      "description": "As a verification engineer, I want compile-time signature checks so that invalid extern calls fail before runtime.",
+      "title": "实现 Axis Motion 语义完备性校验规则",
+      "description": "As a safety-focused engineer, I want compile-time completeness checks for axis motion branches so that no unsafe implicit default path remains.",
       "acceptanceCriteria": [
-        "Collect extern function symbols with unique names during semantic analysis",
-        "Validate call argument count and argument types against declaration",
-        "Validate return binding arity/types for single and tuple returns",
-        "Emit diagnostics with function name and source line",
+        "AXIS-001: axis.move_* 缺失 timeout 编译失败",
+        "AXIS-002: axis.move_* 缺失 on_reject 编译失败",
+        "AXIS-003: axis.move_* 缺失 on_motion_fault 编译失败",
+        "AXIS-004: axis.move_* 缺失 on_safety_fault 编译失败",
+        "AXIS-005: 目标必须是 stepper_motor 或 servo_drive，禁止传感器与普通 motor 作为运动目标",
+        "错误信息包含规则编号、step 名称、行号与修复建议",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "Semantic analysis now builds an extern signature table and validates call arg count/types plus return binding arity/types with line-aware diagnostics"
+      "notes": "Moved axis branch completeness checks to semantic stage with stable diagnostics [AXIS-001..AXIS-004], added axis target-kind guardrail [AXIS-005], and added parser/semantic regression tests for missing branches and invalid motor/sensor-like targets."
     },
     {
       "id": "US-006",
-      "title": "Compile-time contract checks for determinism constraints",
-      "description": "As a safety engineer, I want static contract checks so that nondeterministic or unsafe extern declarations are rejected early.",
+      "title": "新增 IR Axis Motion 动作与故障结果载荷",
+      "description": "As a runtime integrator, I want dedicated IR actions and fault payloads for axis motion so that downstream bridge/codegen/verification process deterministic semantics.",
       "acceptanceCriteria": [
-        "Reject non-positive `time_bound_us` values",
-        "Reject missing or empty `rust_module`",
-        "Reject unsupported type usage in extern signatures for Phase 1 scalar-only scope",
-        "Add diagnostics for duplicate function names (no overloads)",
+        "IR 新增 AxisMoveRelative 与 AxisMoveAbsolute 动作载荷",
+        "IR 可表达 reject/motion_fault/safety_fault 分类与错误码字段",
+        "语义层将 axis.move_* 降级到新 IR 动作",
+        "更新 IR 序列化与语义降级测试",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "Semantic analysis now enforces extern contract constraints (non-empty rust_module, positive time_bound_us, Phase-1 scalar signature guard) with line-aware diagnostics"
+      "notes": "Added IR action variants AxisMoveRelative/AxisMoveAbsolute with explicit timeout/reject/motion_fault/safety_fault payload branches and optional error_code fields; semantic lowering now maps axis.move_* into these IR actions with new serialization + lowering tests."
     },
     {
       "id": "US-007",
-      "title": "Implement ExternFunctionRegistry core",
-      "description": "As a runtime engineer, I want a registry abstraction so that extern calls resolve to Rust implementations with metadata.",
+      "title": "Runtime Core 支持 Axis Motion 结果分类执行入口",
+      "description": "As a runtime developer, I want runtime-core to execute axis motion via handler and return classified results so that step branching has stable behavior.",
       "acceptanceCriteria": [
-        "Add registry API: register/get/call for extern functions",
-        "Define structured runtime errors (`InvalidArgCount`, range errors, timeout, runtime error)",
-        "Ensure missing-function lookup returns deterministic error",
+        "runtime-core Action 增加轴运动动作",
+        "handler 返回结果至少区分 done/reject/motion_fault/safety_fault",
+        "无 handler 时返回确定性错误（例如 AxisMotionRequiresHandler）",
+        "新增 runtime-core 单元测试覆盖成功和三类故障路径",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 7,
       "passes": true,
-      "notes": "Added ExternFunctionRegistry core API (register/get/call) with deterministic missing-function behavior and structured runtime errors for arg count, range, timeout, and runtime failures"
+      "notes": "runtime-core now supports Action::AxisMove with AxisMotionCommand and classified AxisMotionResult (Done/Reject/MotionFault/SafetyFault), adds deterministic AxisMotionRequiresHandler fallback when no handler is provided, and includes unit tests for success and all three fault categories."
     },
     {
       "id": "US-008",
-      "title": "Integrate extern call execution into runtime tick",
-      "description": "As a controls runtime user, I want extern calls to execute within step actions so that results can drive subsequent control logic.",
+      "title": "Runtime Bridge 与 CLI 仿真链路接入 Axis Motion",
+      "description": "As a platform maintainer, I want bridge and CLI simulators to carry axis motion actions and fault categories end-to-end so that integration tests exercise full compile-to-tick flow.",
       "acceptanceCriteria": [
-        "Handle `Action::CallExtern` in runtime execution path",
-        "Map variable indices to argument list and write returned values back to bound variables",
-        "Propagate registry errors as runtime errors with function context",
+        "runtime_bridge 完成新 IR 动作到 runtime-core 动作转换",
+        "main/sim_regress 等 action 匹配逻辑补齐 axis motion 分支",
+        "桥接链路可传递 reject/motion_fault/safety_fault 分类与错误码",
+        "新增 bridge 集成测试确保 axis motion 不触发 UnsupportedAction",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 8,
       "passes": true,
-      "notes": "Runtime bridge now lowers call_extern into runtime-core Action::CallExtern; runtime tick executes externs via tick_with_extern APIs and propagates registry errors with function context"
+      "notes": "runtime_bridge now lowers IR AxisMoveRelative/AxisMoveAbsolute into runtime_core::Action::AxisMove (instead of UnsupportedAction), runtime-core axis handler path is exercised through bridged integration tests, and CLI/sim action scanners were updated for AxisMove compatibility."
     },
     {
       "id": "US-009",
-      "title": "Deliver built-in math externs (add/multiply/quadratic_fit)",
-      "description": "As an application engineer, I want baseline math externs available so that the hybrid architecture can be validated with real workloads.",
+      "title": "ST 代码生成支持 Axis Motion 与故障分流",
+      "description": "As an IEC-61131 target user, I want ST codegen to emit deterministic axis motion and branch handling so that ST behavior aligns with runtime semantics.",
       "acceptanceCriteria": [
-        "Implement `add` and `multiply` extern functions",
-        "Implement `quadratic_fit` extern function and singular-matrix error path",
-        "Register these built-ins in registry bootstrap",
-        "Add unit tests for happy path and invalid argument counts",
+        "src/codegen/st.rs 增加 AxisMoveRelative/AxisMoveAbsolute 渲染分支",
+        "ST 侧能表达 reject/motion_fault/safety_fault 分支去向",
+        "变量推断与动作渲染测试覆盖新动作",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 9,
       "passes": true,
-      "notes": "Added registry bootstrapped built-in math externs (add/multiply/quadratic_fit) with quadratic singular-matrix runtime error path and unit coverage for happy path + invalid arg counts"
+      "notes": "ST codegen now renders AxisMoveRelative/AxisMoveAbsolute with timeout/reject/motion_fault/safety_fault branch targets (including optional fault error_code markers), and added codegen tests to cover axis action rendering + inference path stability."
     },
     {
       "id": "US-010",
-      "title": "Deliver stateful PID extern function",
-      "description": "As a controls engineer, I want a non-pure PID extern implementation so that closed-loop control scenarios can run through the new call path.",
+      "title": "安全与因果验证器接入 Axis Motion 故障语义",
+      "description": "As a verification engineer, I want safety and causality checks to understand classified axis faults so that new syntax does not bypass formal guardrails.",
       "acceptanceCriteria": [
-        "Implement `pid_update(error, kp, ki, kd, dt) -> output` with internal state",
-        "Provide a deterministic reset path for tests",
-        "Add unit tests covering first-step response and multi-step accumulation",
+        "safety 验证器补齐 AxisMove 动作分类与互锁匹配",
+        "causality/diagnostic 路径对 reject/motion_fault/safety_fault 不漏检",
+        "新增验证测试覆盖正常与违例场景",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 10,
       "passes": true,
-      "notes": "Added built-in non-pure `pid_update(error, kp, ki, kd, dt)` with registry-local state and `reset_builtin_pid_state()` for deterministic tests"
+      "notes": "Safety verifier now classifies AxisMove actions with explicit branch metadata and maps axis motion into pulse-port interlock effects; causality verifier now tracks on_reject/on_motion_fault/on_safety_fault branch-target waits to avoid diagnostic blind spots. Added safety+causality positive/negative regression tests and verified with cargo test --workspace."
     },
     {
       "id": "US-011",
-      "title": "Runtime contract enforcement for range and timeout",
-      "description": "As a reliability engineer, I want runtime guardrails so that extern function violations are caught and reported deterministically.",
+      "title": "新增步进与伺服 Axis Motion 示例与回归夹具",
+      "description": "As a release owner, I want concrete fixtures for stepper open-loop and servo closed-loop style faults so that future changes remain stable.",
       "acceptanceCriteria": [
-        "Validate input ranges before function invocation when `input_range` is configured",
-        "Validate output ranges after function invocation when `output_range` is configured",
-        "Measure call duration via host timing hook and enforce `time_bound_us`",
-        "Return explicit timeout/range errors with offending index and value",
+        "新增 examples 中 stepper/servo 各 1 个 axis.move_* 示例",
+        "示例覆盖 timeout/reject/motion_fault/safety_fault 四类分支",
+        "新增 tests 覆盖 parse -> semantic -> runtime bridge 端到端路径",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 11,
       "passes": true,
-      "notes": "Extern runtime contract errors now covered end-to-end: runtime tick extern path propagates input/output range and timeout violations with explicit offending index/value details."
+      "notes": "Added two new Axis Motion fixtures in examples (stepper relative move and servo absolute move), both explicitly covering timeout/reject/motion_fault/safety_fault branches. Added integration coverage for parse->semantic->verification on both examples and runtime-bridge end-to-end execution tests (done path + classified fault path) based on those fixtures. Verified with cargo test --workspace."
     },
     {
       "id": "US-012",
-      "title": "Compile-time tick budget and non-pure conflict checks",
-      "description": "As a system verifier, I want scheduler-level checks so that total extern cost and non-pure call conflicts are detected before deployment.",
+      "title": "按新语法迁移 wafer_loader 旋臂动作",
+      "description": "As a production engineer, I want wafer_loader arm motion to use axis.move syntax with explicit fault routing so that PLC code reflects motion intent and industrial fault handling.",
       "acceptanceCriteria": [
-        "Compute per-tick worst-case sum of extern `time_bound_us` values",
-        "Fail compilation when extern budget exceeds configured tick budget",
-        "Detect and report unsafe concurrent usage patterns for non-pure externs",
-        "Typecheck passes",
-        "Tests pass"
+        "将 docs/wafer_loader.plc 中旋臂 run+delay+off 片段迁移为 axis.move_*",
+        "迁移后显式声明 timeout/on_reject/on_motion_fault/on_safety_fault",
+        "故障跳转任务使用明确业务命名，不使用泛化 fault_handler 命名",
+        "rust_plc 对 wafer_loader.plc 编译与 verify_all 通过",
+        "Typecheck passes"
       ],
       "priority": 12,
       "passes": true,
-      "notes": "Added semantic non-pure extern concurrency checks for parallel/race branches and runtime-bridge tick-budget enforcement that rejects programs when worst-case per-tick extern `time_bound_us` exceeds configured `tick_ms` budget."
-    },
-    {
-      "id": "US-013",
-      "title": "Extend causality verification to include extern calls",
-      "description": "As a formal verification user, I want extern call edges in causality analysis so that control-plane safety guarantees remain intact.",
-      "acceptanceCriteria": [
-        "Model extern call nodes in causality graph",
-        "Treat `pure` extern functions as deterministic transforms in propagation checks",
-        "Add positive and negative causality tests covering extern call chains",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": "Causality now models extern call nodes by wiring call-site argument dependencies into the graph, propagates only through `pure: true` extern transforms, and includes positive/negative verification tests for extern call chains."
-    },
-    {
-      "id": "US-014",
-      "title": "Standardize extern error handling in DSL flow",
-      "description": "As a PLC developer, I want a clear error reporting pattern so that call failures can be handled with explicit control logic.",
-      "acceptanceCriteria": [
-        "Implement runtime error code surface for extern failures (for example `last_error` mapping)",
-        "Document and test explicit branching pattern for retry/fallback/error tasks",
-        "Keep syntax backward-compatible without introducing mandatory new control keywords",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 14,
-      "passes": true,
-      "notes": "Added extern error-code capture flow via runtime-core tick_with_extern_error_code + stable ExternRuntimeError code mapping for last_error branching/retry/fallback patterns"
-    },
-    {
-      "id": "US-015",
-      "title": "End-to-end integration tests for compile-to-runtime extern flow",
-      "description": "As a release owner, I want full integration coverage so that extern features are verified from DSL source to runtime state updates.",
-      "acceptanceCriteria": [
-        "Add integration test for quadratic fitting DSL program with tuple return binding",
-        "Add integration test for PID control loop using extern output in subsequent actions",
-        "Add integration test for at least one runtime error path (range/timeout/runtime failure)",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 15,
-      "passes": true,
-      "notes": "Added end-to-end runtime-bridge integration tests for quadratic_fit tuple binding success, pid_update->add follow-up action chaining, and quadratic_fit runtime-error propagation."
-    },
-    {
-      "id": "US-016",
-      "title": "Performance benchmark and regression gate for extern calls",
-      "description": "As a performance owner, I want benchmark gates so that extern integration remains within real-time overhead limits.",
-      "acceptanceCriteria": [
-        "Add benchmark for simple extern call overhead and complex extern call overhead",
-        "Record baseline and compare against regression branch in CI or script gate",
-        "Fail gate when overhead exceeds documented thresholds",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 16,
-      "passes": true,
-      "notes": "Added release-mode extern benchmark binary (`extern_perf_bench`) for simple add and complex quadratic_fit call overhead, plus `scripts/extern_perf_gate.py` that compares measured p95 against documented thresholds and baseline regression limits."
-    },
-    {
-      "id": "US-017",
-      "title": "Developer tooling for extern registration and declaration generation",
-      "description": "As a library author, I want helper tooling so that new extern functions can be added quickly and consistently.",
-      "acceptanceCriteria": [
-        "Provide `register_extern_function!`-style macro or equivalent helper API",
-        "Generate DSL extern declaration stubs from Rust registration metadata",
-        "Add tests for generated declaration consistency with runtime signatures",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 17,
-      "passes": true,
-      "notes": "Added register_extern_function! macro plus registry signature export/DSL declaration stub generation with parser-roundtrip consistency tests."
-    },
-    {
-      "id": "US-018",
-      "title": "Documentation and examples for hybrid architecture rollout",
-      "description": "As a user adopting the feature, I want complete docs and examples so that I can safely implement extern-based control programs.",
-      "acceptanceCriteria": [
-        "Publish extern function development guide and contract design best practices",
-        "Add at least 10 practical DSL examples including PID and fitting scenarios",
-        "Document migration guidance and known limitations for current phase",
-        "Typecheck passes"
-      ],
-      "priority": 18,
-      "passes": true,
-      "notes": "Published extern function development guide with contract best practices, 10 practical DSL examples (including PID/quadratic_fit), and Phase-1 migration + limitations documentation"
+      "notes": "Reintroduced docs/wafer_loader.plc with migrated rotary-arm motion steps using axis.move_relative (replacing run+delay+off fragments), each with explicit timeout/on_reject/on_motion_fault/on_safety_fault routing. Fault routes now land on business-named tasks (`arm_motion_abort`, `wafer_loader_fault`) instead of generic handler naming. Verified via `cargo run --bin rust_plc -- docs/wafer_loader.plc --no-print-ir` (verify_all passed)."
     }
   ]
 }

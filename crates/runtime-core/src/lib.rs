@@ -72,6 +72,9 @@ pub enum RuntimeError {
     ExternCallRequiresHandler {
         function: &'static str,
     },
+    AxisMotionRequiresHandler {
+        target: &'static str,
+    },
     ExternCallFailed {
         function: &'static str,
     },
@@ -97,6 +100,18 @@ pub enum RuntimeError {
     ExternErrorCodeVariableOutOfRange {
         function: &'static str,
         variable: u16,
+    },
+    AxisMotionRejected {
+        target: &'static str,
+        error_code: i32,
+    },
+    AxisMotionFault {
+        target: &'static str,
+        error_code: i32,
+    },
+    AxisSafetyFault {
+        target: &'static str,
+        error_code: i32,
     },
 }
 
@@ -151,6 +166,9 @@ pub enum Action {
         cam_index: u16,
         offset_expr: ExprProgram,
     },
+    AxisMove {
+        command: AxisMotionCommand,
+    },
     Extend {
         output: DigitalOutputId,
     },
@@ -161,6 +179,29 @@ pub enum Action {
         message_id: u16,
         message: &'static str,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisMoveKind {
+    Relative,
+    Absolute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AxisMotionCommand {
+    pub target: &'static str,
+    pub port: &'static str,
+    pub kind: AxisMoveKind,
+    pub value: f32,
+    pub speed: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisMotionResult {
+    Done,
+    Reject { error_code: i32 },
+    MotionFault { error_code: i32 },
+    SafetyFault { error_code: i32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -524,6 +565,11 @@ impl<'a> Runtime<'a> {
              _results: &mut [f32]|
              -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
         let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
+        let mut missing_axis = |command: AxisMotionCommand| {
+            Err(RuntimeError::AxisMotionRequiresHandler {
+                target: command.target,
+            })
+        };
         self.tick_with_trace_and_logs_impl(
             io,
             &mut on_event,
@@ -531,6 +577,51 @@ impl<'a> Runtime<'a> {
             &mut missing_extern,
             None,
             &mut ignore_error_code,
+            &mut missing_axis,
+        )
+        .map_err(|err| match err {
+            RuntimeTickError::Core(err) => err,
+            RuntimeTickError::ExternCallFailed { function, .. } => {
+                RuntimeError::ExternCallRequiresHandler { function }
+            }
+            RuntimeTickError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            } => RuntimeError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            },
+        })
+    }
+
+    pub fn tick_with_axis<IO: Io>(
+        &mut self,
+        io: &mut IO,
+        mut on_axis_motion: impl FnMut(AxisMotionCommand) -> AxisMotionResult,
+    ) -> Result<(), RuntimeError> {
+        #[derive(Debug)]
+        struct MissingExternHandler;
+
+        let mut on_event = |_| {};
+        let mut on_log = |_| {};
+        let mut missing_extern =
+            |_function: &'static str,
+             _args: &[f32],
+             _results: &mut [f32]|
+             -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
+        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
+        let mut axis_adapter = |command: AxisMotionCommand| Ok(on_axis_motion(command));
+
+        self.tick_with_trace_and_logs_impl(
+            io,
+            &mut on_event,
+            &mut on_log,
+            &mut missing_extern,
+            None,
+            &mut ignore_error_code,
+            &mut axis_adapter,
         )
         .map_err(|err| match err {
             RuntimeTickError::Core(err) => err,
@@ -557,6 +648,11 @@ impl<'a> Runtime<'a> {
         let mut on_event = |_| {};
         let mut on_log = |_| {};
         let mut ignore_error_code = |_function: &'static str, _error: &E| 0.0;
+        let mut missing_axis = |command: AxisMotionCommand| {
+            Err(RuntimeError::AxisMotionRequiresHandler {
+                target: command.target,
+            })
+        };
         self.tick_with_trace_and_logs_impl(
             io,
             &mut on_event,
@@ -564,6 +660,7 @@ impl<'a> Runtime<'a> {
             &mut on_extern_call,
             None,
             &mut ignore_error_code,
+            &mut missing_axis,
         )
     }
 
@@ -576,6 +673,11 @@ impl<'a> Runtime<'a> {
     ) -> Result<(), RuntimeTickError<E>> {
         let mut on_event = |_| {};
         let mut on_log = |_| {};
+        let mut missing_axis = |command: AxisMotionCommand| {
+            Err(RuntimeError::AxisMotionRequiresHandler {
+                target: command.target,
+            })
+        };
         self.tick_with_trace_and_logs_impl(
             io,
             &mut on_event,
@@ -583,6 +685,7 @@ impl<'a> Runtime<'a> {
             &mut on_extern_call,
             Some(error_code_var),
             &mut map_error_code,
+            &mut missing_axis,
         )
     }
 
@@ -594,6 +697,11 @@ impl<'a> Runtime<'a> {
     ) -> Result<(), RuntimeTickError<E>> {
         let mut on_log = |_| {};
         let mut ignore_error_code = |_function: &'static str, _error: &E| 0.0;
+        let mut missing_axis = |command: AxisMotionCommand| {
+            Err(RuntimeError::AxisMotionRequiresHandler {
+                target: command.target,
+            })
+        };
         self.tick_with_trace_and_logs_impl(
             io,
             &mut on_event,
@@ -601,6 +709,7 @@ impl<'a> Runtime<'a> {
             &mut on_extern_call,
             None,
             &mut ignore_error_code,
+            &mut missing_axis,
         )
     }
 
@@ -612,6 +721,11 @@ impl<'a> Runtime<'a> {
         mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
     ) -> Result<(), RuntimeTickError<E>> {
         let mut ignore_error_code = |_function: &'static str, _error: &E| 0.0;
+        let mut missing_axis = |command: AxisMotionCommand| {
+            Err(RuntimeError::AxisMotionRequiresHandler {
+                target: command.target,
+            })
+        };
         self.tick_with_trace_and_logs_impl(
             io,
             &mut on_event,
@@ -619,6 +733,7 @@ impl<'a> Runtime<'a> {
             &mut on_extern_call,
             None,
             &mut ignore_error_code,
+            &mut missing_axis,
         )
     }
 
@@ -630,6 +745,9 @@ impl<'a> Runtime<'a> {
         on_extern_call: &mut impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
         extern_error_code_var: Option<u16>,
         map_extern_error_code: &mut impl FnMut(&'static str, &E) -> f32,
+        on_axis_motion: &mut impl FnMut(
+            AxisMotionCommand,
+        ) -> Result<AxisMotionResult, RuntimeError>,
     ) -> Result<(), RuntimeTickError<E>> {
         let now = io.tick();
         if self.step_entered_at.is_none() {
@@ -718,6 +836,36 @@ impl<'a> Runtime<'a> {
                                 let offset = eval_expr(&offset_expr, &self.variables);
                                 self.cam_phase(cam_index, offset)
                                     .map_err(RuntimeTickError::Core)?;
+                            }
+                            Action::AxisMove { command } => {
+                                let result = on_axis_motion(command).map_err(RuntimeTickError::Core)?;
+                                match result {
+                                    AxisMotionResult::Done => {}
+                                    AxisMotionResult::Reject { error_code } => {
+                                        return Err(RuntimeTickError::Core(
+                                            RuntimeError::AxisMotionRejected {
+                                                target: command.target,
+                                                error_code,
+                                            },
+                                        ));
+                                    }
+                                    AxisMotionResult::MotionFault { error_code } => {
+                                        return Err(RuntimeTickError::Core(
+                                            RuntimeError::AxisMotionFault {
+                                                target: command.target,
+                                                error_code,
+                                            },
+                                        ));
+                                    }
+                                    AxisMotionResult::SafetyFault { error_code } => {
+                                        return Err(RuntimeTickError::Core(
+                                            RuntimeError::AxisSafetyFault {
+                                                target: command.target,
+                                                error_code,
+                                            },
+                                        ));
+                                    }
+                                }
                             }
                             Action::Extend { output } => io.write_digital_output(output, true),
                             Action::Retract { output } => io.write_digital_output(output, false),
@@ -2111,6 +2259,254 @@ mod tests {
         assert_eq!(logs[0].message, "fault timeout");
         assert_eq!(traces.len(), 1);
         assert_eq!(traces[0].reason, TransitionReason::Action);
+    }
+
+    #[test]
+    fn axis_move_requires_handler_when_using_plain_tick() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 10.0,
+                speed: 2.0,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        let err = rt.tick(&mut io).expect_err("未提供 axis handler 应报错");
+        assert_eq!(
+            err,
+            RuntimeError::AxisMotionRequiresHandler { target: "axis_x" }
+        );
+    }
+
+    #[test]
+    fn axis_move_handler_done_transitions_successfully() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Absolute,
+                value: 120.0,
+                speed: 5.0,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        rt.tick_with_axis(&mut io, |command| {
+            assert_eq!(command.target, "axis_x");
+            assert_eq!(command.kind, AxisMoveKind::Absolute);
+            AxisMotionResult::Done
+        })
+        .expect("axis handler 返回 done 应继续执行");
+        assert_eq!(rt.location().step, StepId(1));
+        assert_eq!(io.tick(), Tick(1));
+    }
+
+    #[test]
+    fn axis_move_handler_reject_returns_classified_error() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        let err = rt
+            .tick_with_axis(&mut io, |_| AxisMotionResult::Reject { error_code: 11 })
+            .expect_err("reject 应返回分类错误");
+        assert_eq!(
+            err,
+            RuntimeError::AxisMotionRejected {
+                target: "axis_x",
+                error_code: 11
+            }
+        );
+    }
+
+    #[test]
+    fn axis_move_handler_motion_fault_returns_classified_error() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        let err = rt
+            .tick_with_axis(&mut io, |_| AxisMotionResult::MotionFault { error_code: 21 })
+            .expect_err("motion_fault 应返回分类错误");
+        assert_eq!(
+            err,
+            RuntimeError::AxisMotionFault {
+                target: "axis_x",
+                error_code: 21
+            }
+        );
+    }
+
+    #[test]
+    fn axis_move_handler_safety_fault_returns_classified_error() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        let err = rt
+            .tick_with_axis(&mut io, |_| AxisMotionResult::SafetyFault { error_code: 31 })
+            .expect_err("safety_fault 应返回分类错误");
+        assert_eq!(
+            err,
+            RuntimeError::AxisSafetyFault {
+                target: "axis_x",
+                error_code: 31
+            }
+        );
     }
 
     #[test]

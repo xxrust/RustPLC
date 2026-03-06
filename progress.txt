@@ -1,4 +1,4 @@
-# Ralph Progress Log
+﻿# Ralph Progress Log
 Started: Fri Feb 27 23:19:22 CST 2026
 ## Codebase Patterns
 - Run `cargo check --workspace` for typecheck and `cargo test --workspace` for regression gate before committing.
@@ -422,4 +422,361 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - Story completion in this repo is not done until documentation updates, `prd.json` status, and `progress.txt` log entries land together in one commit.
   - Useful context (e.g., "the evaluation panel is in component X")
     - The new extern guide intentionally includes migration and known-limitations sections so Phase-1 users can adopt externs without changing DSL control-plane structure.
+---
+## [2026-03-06 12:41:33] - US-001
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Added frozen Axis Motion MVP spec: docs/axis_motion_mvp_spec.md.
+  - Spec defines axis.move_relative/axis.move_absolute syntax, mandatory timeout/reject/motion_fault/safety_fault branches, and MVP parameter semantics.
+  - Documented op.motor.move_to as disabled in MVP with historical coupling rationale.
+  - Added AXIS-001~AXIS-005 diagnostic IDs with trigger conditions, diagnostic templates, and fix suggestions.
+  - Marked US-001 as completed in ord.json.
+- Files changed
+  - docs/axis_motion_mvp_spec.md
+  - ord.json
+  - prompt.md
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Keep PRD filename and prompt instruction synchronized (ord.json vs prd.json) to avoid running the wrong backlog.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - When exporting JSON via PowerShell redirection, use UTF-8-safe output (cmd /c with git show) or downstream patching tools may fail on encoding.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis motion PRD for this stream is tracked in ord.json and starts from US-001.
+---
+## [2026-03-06 12:48:03] - US-001
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Finalized Axis Motion MVP frozen spec in docs/axis_motion_mvp_spec.md as the implementation contract.
+  - Confirmed the spec includes axis.move_relative/axis.move_absolute syntax and mandatory timeout/reject/motion_fault/safety_fault branching semantics.
+  - Confirmed op.motor.move_to remains explicitly disabled in MVP with historical rationale.
+  - Confirmed AXIS-001~AXIS-005 diagnostic IDs with trigger conditions and fix templates.
+  - Marked US-001 as completed in prd.json.
+- Files changed
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For Ralph runs in this repo, story completion is finalized by syncing docs artifacts + prd.json status + progress.txt entry in the same iteration flow.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Branch-level checkpoint commits may already contain the implementation files; still update PRD status explicitly in the story commit.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis Motion backlog source is prd.json on branch alph/axis-motion-dsl-mvp.
+---
+## [2026-03-06 13:00:15] - US-002
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Extended parser grammar whitelist to support axis parameter keys: microstep, gear_num, gear_den, lead_screw, position_unit, max_acceleration.
+  - Updated parser attribute lowering so the new keys are captured into DeviceAttributes.extra_params.
+  - Extended parser unit coverage to assert new keys are parsed and persisted in extra_params.
+  - Added parser regression test for misspelled key (microstepp) to ensure invalid spelling is rejected.
+  - Marked US-002 as completed in prd.json.
+- Files changed
+  - src/parser/plc.pest
+  - src/parser/mod.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For topology attributes, changes must stay synchronized between `attribute_name` in `plc.pest` and `apply_attribute` in `parser/mod.rs`.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Misspelled attribute names may fail at grammar layer with `expected attribute` instead of semantic-layer custom errors, so parser tests should match both forms conservatively.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis mechanical metadata currently flows through DeviceAttributes.extra_params; typed/unit checks are deferred to semantic preprocessing stories.
+---
+
+## [2026-03-06 13:07:53] - US-003
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Updated devices/stepper_motor.toml and devices/servo_drive.toml with new axis parameter schemas: microstep, gear_num, gear_den, lead_screw, position_unit, max_acceleration.
+  - Reused semantic device-library validation path to enforce typed checks and unit/enum constraints for these new parameters.
+  - Added positive semantic test covering valid stepper + servo axis parameter configurations.
+  - Added negative semantic tests covering invalid integer type, unit mismatch, and invalid enum value, with line-aware diagnostics asserted.
+  - Marked US-003 as completed in prd.json.
+- Files changed
+  - devices/stepper_motor.toml
+  - devices/servo_drive.toml
+  - src/semantic/mod.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Axis/mechanical extension validation is schema-driven: add parameter definitions in devices/*.toml and semantic validation will enforce types/units through validate_device_extra_params.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - For strict unit enforcement, use length/pressure parameter types; number type with unit allows values without explicit unit suffix.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Device extra-parameter diagnostics are emitted at device declaration line, so tests can assert non-zero line context directly.
+---
+## [2026-03-06 13:21:56] - US-004
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Added AST action variants for `axis.move_relative` and `axis.move_absolute`, carrying same-step branch targets for `timeout`, `on_reject`, `on_motion_fault`, and `on_safety_fault`.
+  - Extended grammar with dedicated axis move statement + branch clauses, and wired parser lowering through a new `axis_move_statement` path in `step_statement`.
+  - Added parser regression tests for valid axis move parsing and missing-fault-branch rejection.
+  - Updated diagnostics/semantic/timing/causality action matchers so new AST variants compile cleanly while downstream IR lowering remains intentionally deferred.
+  - Ran `cargo test --workspace` successfully and marked US-004 as completed in `prd.json`.
+- Files changed
+  - src/ast/mod.rs
+  - src/parser/plc.pest
+  - src/parser/mod.rs
+  - src/diagnostics.rs
+  - src/semantic/mod.rs
+  - src/verification/causality.rs
+  - src/verification/timing.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For compound DSL step syntax, introducing a dedicated wrapper rule (`axis_move_statement`) keeps parser readability and avoids overloading generic `action` production.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - New `ActionStatement` variants require exhaustive matcher updates across diagnostics, semantic lowering helpers, and verification engines even before IR/runtime support lands.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - US-004 delivery is parser/AST scoped; semantic lowering currently drops axis actions intentionally until US-006 introduces dedicated IR action variants.
+---
+## [2026-03-06 13:37:12] - US-005
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Relaxed `axis_move_statement` grammar so fault branches are parser-optional, then moved completeness enforcement to semantic validation.
+  - Updated AST axis action payloads to carry optional `timeout/on_reject/on_motion_fault/on_safety_fault` branches.
+  - Added semantic axis validation gate in `build_state_machine` with stable diagnostics:
+    - `[AXIS-001]` missing `timeout`
+    - `[AXIS-002]` missing `on_reject`
+    - `[AXIS-003]` missing `on_motion_fault`
+    - `[AXIS-004]` missing `on_safety_fault`
+    - `[AXIS-005]` axis target must be `stepper_motor` or `servo_drive`
+  - Added parser regression update (missing branch now parses and defers to semantic) and semantic tests for AXIS-001~005 positive/negative paths.
+  - Ran `cargo test --workspace axis_move` and `cargo test --workspace` successfully.
+- Files changed
+  - src/ast/mod.rs
+  - src/parser/plc.pest
+  - src/parser/mod.rs
+  - src/semantic/mod.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Rule-coded diagnostics are more stable at semantic stage than grammar stage, because semantic has access to `step` context for actionable messages.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - If grammar enforces branch presence directly, parser errors become generic `expected rule` outputs and cannot guarantee AXIS rule-id formatting.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis motion actions are still AST-only in lowering (`TransitionAction` remains unchanged); this story intentionally focuses on compile-time guardrails and diagnostics.
+---
+## [2026-03-06 13:48:36] - US-006
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Extended IR with dedicated axis actions:
+    - `TransitionAction::AxisMoveRelative`
+    - `TransitionAction::AxisMoveAbsolute`
+  - Added explicit branch payload structs in IR:
+    - `AxisTimeoutBranch` (`duration_ms`, `target_task`, `target_step`)
+    - `AxisFaultBranch` (`target_task`, `target_step`, `error_code`)
+  - Added `ActionKind::AxisMoveRelative/AxisMoveAbsolute` and updated timing/action-kind mapping paths.
+  - Semantic lowering now maps `action: axis.move_*` into the new IR actions (including timeout + reject/motion/safety branch payloads).
+  - Updated downstream matchers for compilation continuity:
+    - runtime bridge currently returns deterministic `UnsupportedAction` for new axis IR actions.
+    - ST codegen emits explicit marker comments for axis actions.
+    - safety verifier treats axis move actions as non-state-writing action classes in current phase.
+  - Added/updated tests:
+    - IR serialization test now includes `axis_move_relative` with `error_code` payload fields.
+    - Semantic lowering test asserts both relative/absolute axis actions lower into new IR payloads.
+  - Ran `cargo test --workspace axis_move` and `cargo test --workspace` successfully.
+- Files changed
+  - src/ir/mod.rs
+  - src/semantic/mod.rs
+  - src/runtime_bridge.rs
+  - src/codegen/st.rs
+  - src/verification/safety.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - New IR `TransitionAction` variants require same-iteration propagation into bridge/codegen/verification match arms, even when execution support is deferred.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - If action completeness checks depend on semantic context (step name, target type), keep parser permissive and enforce at semantic gate to preserve rule-coded diagnostics.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis fault `error_code` fields are now part of IR payload contract and are ready for runtime/bridge propagation in follow-up stories.
+---
+## [2026-03-06 13:59:53] - US-007
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Extended runtime-core `Action` with `Action::AxisMove { command: AxisMotionCommand }`.
+  - Added axis runtime data contracts:
+    - `AxisMoveKind` (`Relative` / `Absolute`)
+    - `AxisMotionCommand` (`target`, `port`, `kind`, `value`, `speed`)
+    - `AxisMotionResult` (`Done`, `Reject`, `MotionFault`, `SafetyFault`)
+  - Added runtime error surfaces:
+    - `RuntimeError::AxisMotionRequiresHandler`
+    - `RuntimeError::AxisMotionRejected`
+    - `RuntimeError::AxisMotionFault`
+    - `RuntimeError::AxisSafetyFault`
+  - Added runtime execution API `Runtime::tick_with_axis(...)` and wired axis dispatch through the tick loop.
+  - Default `tick*` and `tick_with_extern*` paths now deterministically fail with `AxisMotionRequiresHandler` when axis action is present but no axis handler is provided.
+  - Updated cross-crate action match/render paths (`crates/codegen/src/lib.rs`, `src/main.rs`, `src/sim_regress.rs`) for new runtime action variant compatibility.
+  - Added runtime-core unit tests covering:
+    - no-handler failure path
+    - handler success (`Done`)
+    - `Reject` fault path
+    - `MotionFault` path
+    - `SafetyFault` path
+  - Ran `cargo test -p runtime-core axis_move`, `cargo test --workspace axis_move`, and `cargo test --workspace` successfully.
+- Files changed
+  - crates/runtime-core/src/lib.rs
+  - crates/codegen/src/lib.rs
+  - src/main.rs
+  - src/sim_regress.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For new runtime action handlers, keep `tick_with_trace_and_logs_impl` as the single execution hub and adapt all public `tick*` wrappers with deterministic default-handler behavior.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Adding a runtime-core `Action` variant requires synchronized updates in helper crates and CLI action scanners, not just runtime-core itself.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis motion classification now exists at runtime-core level; bridge wiring of IR axis payloads into this API remains the next iteration scope.
+---
+## [2026-03-06 14:08:01] - US-008
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Updated runtime bridge action conversion to lower IR axis actions into runtime-core action instead of `UnsupportedAction`:
+    - `TransitionAction::AxisMoveRelative` -> `Action::AxisMove { kind: Relative, ... }`
+    - `TransitionAction::AxisMoveAbsolute` -> `Action::AxisMove { kind: Absolute, ... }`
+  - Added bridge-side axis numeric payload validation with structured diagnostics:
+    - `BridgeError::InvalidAxisLiteral { state, target, field, value_raw }`
+  - Added runtime-bridge integration fixtures/tests for axis pipeline:
+    - Axis actions can be compiled through bridge without `UnsupportedAction`.
+    - Bridged runtime can execute axis action with `tick_with_axis` handler.
+    - Bridged runtime propagates classified `Reject` / `MotionFault` / `SafetyFault` with error codes end-to-end.
+  - Ran `cargo test --test runtime_bridge_us006 axis`, `cargo test --workspace axis_move`, and `cargo test --workspace` successfully.
+- Files changed
+  - src/runtime_bridge.rs
+  - tests/runtime_bridge_us006.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Bridge integration tests are most robust when they validate both compile-time lowering (action presence) and runtime execution behavior in the same fixture chain.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - New IR action payload fields should fail fast in bridge conversion with dedicated literal diagnostics, instead of surfacing later as generic runtime unsupported errors.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis fault branch task targets are still preserved in IR and validated semantically; runtime branch-routing consumption can be expanded in later stories as needed.
+---
+## [2026-03-06 14:15:44] - US-009
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Enhanced ST action rendering for axis motions in `src/codegen/st.rs`:
+    - `AxisMoveRelative` and `AxisMoveAbsolute` comments now include:
+      - core motion parameters (`distance/position`, `speed`)
+      - timeout branch destination and duration
+      - `on_reject` / `on_motion_fault` / `on_safety_fault` branch destinations
+      - optional fault `error_code` markers
+  - Added helper renderers for axis branch target formatting to keep output deterministic:
+    - `render_axis_target(...)`
+    - `render_axis_fault_target(...)`
+  - Added codegen test coverage:
+    - `generate_st_renders_axis_move_branches_and_fault_targets` validates emitted ST includes all branch routes and fault code markers.
+  - Kept variable collection/inference path stable for axis actions while extending rendering.
+  - Ran `cargo test -p rust_plc generate_st_renders_axis_move_branches_and_fault_targets`, `cargo test --workspace axis_move`, and `cargo test --workspace` successfully.
+- Files changed
+  - src/codegen/st.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For phase-limited targets, deterministic ST comments are an effective way to preserve semantics/traceability for not-yet-native runtime constructs.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - When expanding enum payload fields, `render_action` pattern matches must explicitly consume/ignore all fields (e.g., `port`) to avoid compile-time omissions.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis ST output currently encodes branch semantics as explicit comments; later iterations can convert these into executable branch constructs once full axis runtime/state mapping is finalized.
+---
+## [2026-03-06 14:38:35] - US-010
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Extended src/verification/safety.rs for Axis Motion verification semantics:
+    - TransitionAction::AxisMoveRelative/AxisMoveAbsolute now contribute pulse-port effects (pulse.active) so axis actions participate in port-level interlock checks.
+    - Axis action labels now render timeout/reject/motion_fault/safety_fault branch metadata (including optional fault error codes) for deterministic safety diagnostics/counterexample traces.
+  - Extended src/verification/causality.rs to cover axis fault-routing diagnostics:
+    - Added branch-aware pair extraction that links axis.move_* actions to waits inside on_reject / on_motion_fault / on_safety_fault target steps.
+    - Added goto-target resolution for branch steps and branch-tagged action text so diagnostics identify which fault route is missing causality.
+  - Added verification regressions:
+    - Safety: axis interlock violation and satisfied-path tests for enable/pulse guardrail.
+    - Causality: positive and negative tests for motion-fault branch wait-chain reachability.
+  - Ran cargo test -p rust_plc axis_move_, cargo test -p rust_plc axis_fault_branch, and cargo test --workspace successfully.
+- Files changed
+  - src/verification/safety.rs
+  - src/verification/causality.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Safety transition effects are only evaluated on outgoing edges; action-level safety tests must place the action step before at least one successor step.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Axis timeout branch grammar requires timeout: <duration> -> ... (with :); missing colon causes parser failures even if branch keywords are correct.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Branch-aware causality checks can be added without changing IR by deriving action→wait pairs from AST goto targets during verifier preprocessing.
+---
+## [2026-03-06 15:04:17] - US-011
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Added two new Axis Motion example fixtures under `examples/`:
+    - `axis_stepper_fault_routing.plc` (stepper + `axis.move_relative`)
+    - `axis_servo_fault_routing.plc` (servo + `axis.move_absolute`)
+  - Both fixtures now explicitly include all four required branch outcomes in one step:
+    - `timeout`
+    - `on_reject`
+    - `on_motion_fault`
+    - `on_safety_fault`
+  - Added/updated integration coverage for fixture-level pipelines:
+    - `tests/examples_integration.rs` now validates both new examples through parse -> preprocess/semantic -> IR/verification JSON generation.
+    - Assertions confirm axis action lowering is present and safety rules are bound for both fixtures.
+  - Added runtime-bridge end-to-end coverage based on the new fixtures in `tests/runtime_bridge_us006.rs`:
+    - `bridge_executes_axis_stepper_example_done_path_end_to_end`
+    - `bridge_executes_axis_servo_example_fault_path_end_to_end`
+    - These tests execute parse -> semantic -> runtime bridge -> runtime tick paths with axis handler classification checks.
+  - Ran `cargo test --test examples_integration axis_`, `cargo test --test runtime_bridge_us006 axis_`, and `cargo test --workspace` successfully.
+- Files changed
+  - examples/axis_stepper_fault_routing.plc
+  - examples/axis_servo_fault_routing.plc
+  - tests/examples_integration.rs
+  - tests/runtime_bridge_us006.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Example fixtures are most stable when they include explicit safety interlock rules and at least one pre-move enable step for axis devices.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Runtime may execute multiple sequential action steps in one tick; axis runtime tests should not assume one-step-per-tick progression.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `tests/runtime_bridge_us006.rs` already contains reusable compile helpers for parse+semantic+bridge pipelines, making it the best place to attach fixture-based runtime E2E checks.
+---
+## [2026-03-06 15:15:15] - US-012
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Added `docs/wafer_loader.plc` back into the current branch and migrated rotary-arm motion fragments to Axis Motion DSL.
+  - Replaced legacy run+delay+off arm movement snippets with explicit `axis.move_relative` actions:
+    - `arm_move_pick`
+    - `arm_move_orient`
+    - `arm_move_to_ir_box`
+  - Each axis action now declares all required branch routes in-place:
+    - `timeout`
+    - `on_reject`
+    - `on_motion_fault`
+    - `on_safety_fault`
+  - Reworked fault-routing naming to business-specific tasks instead of generic handler naming:
+    - `arm_motion_abort`
+    - `wafer_loader_fault`
+  - Added safe-stop pulse reset (`set axis_arm.pulse idle`) before disabling enable to satisfy injected stepper interlock checks.
+  - Verified end-to-end compile + verify flow using:
+    - `cargo run --quiet --bin rust_plc -- docs/wafer_loader.plc --no-print-ir`
+    - Result: Safety/Liveness/Timing/Causality all pass, verification report emitted.
+- Files changed
+  - docs/wafer_loader.plc
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Stepper device-library safety constraints are injected automatically and remain active even when no explicit `[constraints] safety:` rule is declared.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - After `axis.move_*`, pulse state can remain active in verifier state; safe-stop sequences should reset `pulse` before forcing `enable off` to avoid interlock violations.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `cargo run --bin rust_plc -- <file> --no-print-ir` is the quickest acceptance check for single-fixture DSL migrations requiring `verify_all` success.
 ---

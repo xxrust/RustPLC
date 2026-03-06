@@ -12,9 +12,9 @@ use crate::ast::{
 };
 use crate::error::PlcError;
 use crate::ir::{
-    ActionKind, ActionRef, ActionTiming, BinaryValue as IrBinaryValue, CamCouplingDef,
-    CamInterpolation, CamTableIr, CausalityChain, ConnectionType, ConstraintSet, Device,
-    DeviceKind, ExternCallBinding as IrExternCallBinding,
+    ActionKind, ActionRef, ActionTiming, AxisFaultBranch, AxisTimeoutBranch,
+    BinaryValue as IrBinaryValue, CamCouplingDef, CamInterpolation, CamTableIr, CausalityChain,
+    ConnectionType, ConstraintSet, Device, DeviceKind, ExternCallBinding as IrExternCallBinding,
     ExternFunctionContract as IrExternContract, ExternFunctionDef as IrExternFunctionDef,
     ExternFunctionParam as IrExternFunctionParam, MAX_CAM_POINTS, PidLoop as IrPidLoop, SafetyExpr,
     SafetyRelation as IrSafetyRelation, SafetyRule, SplineCoeff, State, StateExpr, StateMachine,
@@ -992,6 +992,7 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
         &cam_table_names,
         &mut expr_errors,
     );
+    validate_axis_motion_actions_in_tasks(&expanded.tasks, &device_kinds, &mut expr_errors);
     if !expr_errors.is_empty() {
         return Err(expr_errors);
     }
@@ -3813,6 +3814,174 @@ fn validate_cam_actions_in_statements(
     }
 }
 
+fn validate_axis_motion_actions_in_tasks(
+    tasks: &TasksSection,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            validate_axis_motion_actions_in_statements(
+                &step.statements,
+                &step.name,
+                step.line.max(1),
+                device_kinds,
+                errors,
+            );
+        }
+    }
+}
+
+fn validate_axis_motion_actions_in_statements(
+    statements: &[StepStatement],
+    step_name: &str,
+    line: usize,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::AxisMoveRelative {
+                target,
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            })
+            | StepStatement::Action(ActionStatement::AxisMoveAbsolute {
+                target,
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            }) => {
+                if timeout.is_none() {
+                    errors.push(axis_motion_branch_error(
+                        line,
+                        "AXIS-001",
+                        step_name,
+                        "timeout",
+                        "添加 timeout: <duration> -> <task.step> 分支。",
+                    ));
+                }
+                if on_reject.is_none() {
+                    errors.push(axis_motion_branch_error(
+                        line,
+                        "AXIS-002",
+                        step_name,
+                        "on_reject",
+                        "添加 on_reject -> <task.step> 分支。",
+                    ));
+                }
+                if on_motion_fault.is_none() {
+                    errors.push(axis_motion_branch_error(
+                        line,
+                        "AXIS-003",
+                        step_name,
+                        "on_motion_fault",
+                        "添加 on_motion_fault -> <task.step> 分支。",
+                    ));
+                }
+                if on_safety_fault.is_none() {
+                    errors.push(axis_motion_branch_error(
+                        line,
+                        "AXIS-004",
+                        step_name,
+                        "on_safety_fault",
+                        "添加 on_safety_fault -> <task.step> 分支。",
+                    ));
+                }
+                validate_axis_motion_target_kind(
+                    line,
+                    step_name,
+                    &target.device,
+                    device_kinds,
+                    errors,
+                );
+            }
+            StepStatement::Repeat { body, .. } => validate_axis_motion_actions_in_statements(
+                body,
+                step_name,
+                line,
+                device_kinds,
+                errors,
+            ),
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_axis_motion_actions_in_statements(
+                        &branch.statements,
+                        step_name,
+                        line,
+                        device_kinds,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_axis_motion_actions_in_statements(
+                        &branch.statements,
+                        step_name,
+                        line,
+                        device_kinds,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn axis_motion_branch_error(
+    line: usize,
+    rule_id: &str,
+    step_name: &str,
+    branch_name: &str,
+    fix: &str,
+) -> PlcError {
+    PlcError::semantic_with_reason(
+        line,
+        format!("[{rule_id}] step '{step_name}' is missing {branch_name} branch."),
+        fix,
+    )
+}
+
+fn validate_axis_motion_target_kind(
+    line: usize,
+    step_name: &str,
+    target: &str,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    match device_kinds.get(target) {
+        Some(DeviceKind::StepperMotor) | Some(DeviceKind::ServoDrive) => {}
+        Some(kind) => errors.push(PlcError::semantic_with_reason(
+            line,
+            format!("[AXIS-005] axis target '{target}' must be stepper_motor or servo_drive."),
+            format!(
+                "step '{step_name}' 当前目标类型为 {}。请改用 stepper_motor/servo_drive 设备。",
+                device_kind_name(kind)
+            ),
+        )),
+        None => errors.push(PlcError::semantic_with_reason(
+            line,
+            format!("[AXIS-005] axis target '{target}' must be stepper_motor or servo_drive."),
+            format!(
+                "step '{step_name}' 引用了未定义设备。请先在 [topology] 声明该轴设备，且类型为 stepper_motor 或 servo_drive。"
+            ),
+        )),
+    }
+}
+
 fn validate_expression_variables(
     expr: &AstExpression,
     line: usize,
@@ -4400,6 +4569,12 @@ fn action_to_timing(
         ActionStatement::SetAnalogExpr { target, .. } => {
             (ActionKind::SetAnalogExpr, Some(target.device.as_str()))
         }
+        ActionStatement::AxisMoveRelative { target, .. } => {
+            (ActionKind::AxisMoveRelative, Some(target.device.as_str()))
+        }
+        ActionStatement::AxisMoveAbsolute { target, .. } => {
+            (ActionKind::AxisMoveAbsolute, Some(target.device.as_str()))
+        }
         ActionStatement::Compute { .. } => (ActionKind::Compute, None),
         ActionStatement::Call { .. } => return None,
         ActionStatement::CamEngage { target } => (ActionKind::CamEngage, Some(target.as_str())),
@@ -4441,6 +4616,8 @@ fn action_to_timing(
         | ActionKind::CamDisengage
         | ActionKind::CamSwitch
         | ActionKind::CamPhase
+        | ActionKind::AxisMoveRelative
+        | ActionKind::AxisMoveAbsolute
         | ActionKind::CallExtern
         | ActionKind::Compute
         | ActionKind::Log => None,
@@ -4497,6 +4674,8 @@ fn action_kind_name(action_kind: &ActionKind) -> &'static str {
         ActionKind::CamDisengage => "cam_disengage",
         ActionKind::CamSwitch => "cam_switch",
         ActionKind::CamPhase => "cam_phase",
+        ActionKind::AxisMoveRelative => "axis_move_relative",
+        ActionKind::AxisMoveAbsolute => "axis_move_absolute",
         ActionKind::Log => "log",
     }
 }
@@ -5172,9 +5351,61 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             target: target.clone(),
             offset_expr_raw: expression_to_raw(offset),
         }),
+        ActionStatement::AxisMoveRelative {
+            target,
+            distance,
+            speed,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+        } => Some(TransitionAction::AxisMoveRelative {
+            target: target.device.clone(),
+            port: target.port.clone(),
+            distance_raw: distance.to_string(),
+            speed_raw: speed.to_string(),
+            timeout: lower_axis_timeout_branch(timeout.as_ref()?),
+            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, None),
+            on_motion_fault: lower_axis_fault_branch(on_motion_fault.as_ref()?, None),
+            on_safety_fault: lower_axis_fault_branch(on_safety_fault.as_ref()?, None),
+        }),
+        ActionStatement::AxisMoveAbsolute {
+            target,
+            position,
+            speed,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+        } => Some(TransitionAction::AxisMoveAbsolute {
+            target: target.device.clone(),
+            port: target.port.clone(),
+            position_raw: position.to_string(),
+            speed_raw: speed.to_string(),
+            timeout: lower_axis_timeout_branch(timeout.as_ref()?),
+            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, None),
+            on_motion_fault: lower_axis_fault_branch(on_motion_fault.as_ref()?, None),
+            on_safety_fault: lower_axis_fault_branch(on_safety_fault.as_ref()?, None),
+        }),
         ActionStatement::Log { message } => Some(TransitionAction::Log {
             message: message.clone(),
         }),
+    }
+}
+
+fn lower_axis_timeout_branch(timeout: &TimeoutDirective) -> AxisTimeoutBranch {
+    AxisTimeoutBranch {
+        duration_ms: duration_to_ms(timeout),
+        target_task: timeout.target.task.clone(),
+        target_step: timeout.target.step.clone(),
+    }
+}
+
+fn lower_axis_fault_branch(goto: &GotoDirective, error_code: Option<&str>) -> AxisFaultBranch {
+    AxisFaultBranch {
+        target_task: goto.task.clone(),
+        target_step: goto.step.clone(),
+        error_code: error_code.map(ToString::to_string),
     }
 }
 
@@ -5623,7 +5854,22 @@ device axis_x: stepper_motor {
     steps_per_rev: 200,
     max_speed: 5000,
     accel_time: 120ms,
-    decel_time: 120ms
+    decel_time: 120ms,
+    microstep: 16,
+    gear_num: 5,
+    gear_den: 2,
+    lead_screw: 5mm,
+    position_unit: mm,
+    max_acceleration: 12000pps
+}
+
+device servo_x: servo_drive {
+    microstep: 8,
+    gear_num: 10,
+    gear_den: 1,
+    lead_screw: 2mm,
+    position_unit: mm,
+    max_acceleration: 3000rpm
 }
 
 [constraints]
@@ -5637,6 +5883,84 @@ task main:
         let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
         preprocess_program_with_library(&program, Some(&library))
             .expect("合法参数应通过设备库类型校验");
+    }
+
+    #[test]
+    fn preprocess_with_library_rejects_invalid_axis_param_type_with_line_context() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    microstep: 1.5,
+    lead_screw: 5mm
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        let errors = preprocess_program_with_library(&program, Some(&library))
+            .expect_err("microstep 应是 integer");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("microstep") && rendered.contains("integer"),
+            "应报告 axis 参数类型错误，实际: {rendered}"
+        );
+        assert!(
+            errors.iter().any(|e| e.line() > 0),
+            "参数诊断应携带有效行号，实际: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_with_library_rejects_invalid_axis_param_unit_and_enum() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    lead_screw: 5inch,
+    position_unit: turns
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        let errors = preprocess_program_with_library(&program, Some(&library))
+            .expect_err("lead_screw 单位和 position_unit 枚举值均应被拒绝");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("lead_screw") && rendered.contains("参数单位不匹配"),
+            "应报告 axis 参数单位错误，实际: {rendered}"
+        );
+        assert!(
+            rendered.contains("position_unit") && rendered.contains("参数类型要求 enum"),
+            "应报告 axis 参数枚举错误，实际: {rendered}"
+        );
+        assert!(
+            errors.iter().any(|e| e.line() > 0),
+            "参数诊断应携带有效行号，实际: {rendered}"
+        );
     }
 
     #[test]
@@ -7762,6 +8086,104 @@ task done:
     }
 
     #[test]
+    fn lowers_axis_move_actions_into_ir_transition_actions() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+        action: axis.move_absolute(axis_x, position: 120, speed: 5)
+            timeout: 800ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("axis move 示例应能解析");
+        let sm = build_state_machine(&program).expect("axis move 应能 lowering 到 IR");
+
+        let actions = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .collect::<Vec<_>>();
+
+        let relative = actions
+            .iter()
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveRelative {
+                    target,
+                    distance_raw,
+                    speed_raw,
+                    timeout,
+                    on_reject,
+                    on_motion_fault,
+                    on_safety_fault,
+                    ..
+                } => Some((
+                    target,
+                    distance_raw,
+                    speed_raw,
+                    timeout,
+                    on_reject,
+                    on_motion_fault,
+                    on_safety_fault,
+                )),
+                _ => None,
+            })
+            .expect("应包含 axis_move_relative 动作");
+        assert_eq!(relative.0, "axis_x");
+        assert_eq!(relative.1, "10");
+        assert_eq!(relative.2, "2");
+        assert_eq!(relative.3.duration_ms, 500);
+        assert_eq!(relative.3.target_task, "fault");
+        assert_eq!(relative.3.target_step.as_deref(), Some("timeout"));
+        assert_eq!(relative.4.target_task, "fault");
+        assert_eq!(relative.4.target_step.as_deref(), Some("reject"));
+        assert!(relative.4.error_code.is_none());
+        assert_eq!(relative.5.target_step.as_deref(), Some("motion_fault"));
+        assert_eq!(relative.6.target_step.as_deref(), Some("safety_fault"));
+
+        let absolute = actions
+            .iter()
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveAbsolute {
+                    target,
+                    position_raw,
+                    speed_raw,
+                    timeout,
+                    ..
+                } => Some((target, position_raw, speed_raw, timeout)),
+                _ => None,
+            })
+            .expect("应包含 axis_move_absolute 动作");
+        assert_eq!(absolute.0, "axis_x");
+        assert_eq!(absolute.1, "120");
+        assert_eq!(absolute.2, "5");
+        assert_eq!(absolute.3.duration_ms, 800);
+        assert_eq!(absolute.3.target_step.as_deref(), Some("timeout"));
+    }
+
+    #[test]
     fn lowers_compute_boolean_literals_to_numeric_ir_expression() {
         let input = r#"
 [topology]
@@ -8184,6 +8606,98 @@ task main:
 
         let program = parse_plc(input).expect("示例语法应可解析");
         build_state_machine(&program).expect("pure extern 在并行分支中应允许");
+    }
+
+    #[test]
+    fn rejects_axis_move_missing_branches_with_axis_rule_codes() {
+        let input = "[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors = build_state_machine(&program).expect_err("缺失分支应触发 AXIS 语义错误");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("[AXIS-001]"));
+        assert!(joined.contains("[AXIS-002]"));
+        assert!(joined.contains("[AXIS-003]"));
+        assert!(joined.contains("[AXIS-004]"));
+        assert!(joined.contains("step 'move'"));
+        assert!(joined.contains("timeout: <duration> -> <task.step>"));
+        assert!(errors.iter().all(|err| err.line() > 0));
+    }
+
+    #[test]
+    fn rejects_axis_move_target_that_is_not_stepper_or_servo() {
+        let input = "[topology]
+device conveyor_motor: motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_absolute(conveyor_motor, position: 120, speed: 5)
+            timeout: 800ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors = build_state_machine(&program).expect_err("非法轴目标应触发 AXIS-005");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("[AXIS-005]"));
+        assert!(joined.contains("axis target 'conveyor_motor'"));
+        assert!(joined.contains("step 'run'"));
+        assert!(errors.iter().any(|err| err.line() > 0));
+    }
+
+    #[test]
+    fn accepts_axis_move_with_complete_branches_on_stepper_target() {
+        let input = "[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        build_state_machine(&program).expect("完整 axis move 分支 + 合法目标应通过语义校验");
     }
 
     #[test]

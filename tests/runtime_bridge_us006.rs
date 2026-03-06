@@ -1,5 +1,5 @@
 use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
-use runtime_core::{Runtime, RuntimeError, RuntimeTickError};
+use runtime_core::{AxisMotionResult, AxisMoveKind, Runtime, RuntimeError, RuntimeTickError};
 use rust_plc::extern_functions::{
     EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR, ExternFunctionInfo,
     ExternFunctionRegistry, ExternRuntimeError, ValueRange, extern_runtime_error_code,
@@ -8,6 +8,8 @@ use rust_plc::ir::{ExternFunctionContract, TopologyGraph, VariableType};
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -42,6 +44,15 @@ fn compile_runtime_and_topology(
     let runtime_program =
         state_machine_to_runtime_program(&topology, &sm, tick_ms).expect("bridge");
     (runtime_program, topology)
+}
+
+fn compile_example_to_runtime(file_name: &str, tick_ms: u64) -> runtime_core::Program<'static> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join(file_name);
+    let source =
+        fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {} failed: {err}", path.display()));
+    compile_to_runtime(&source, tick_ms)
 }
 
 fn variable_index(topology: &TopologyGraph, name: &str) -> u16 {
@@ -422,6 +433,32 @@ task done:
     step halt:
 "#;
 
+const PLC_AXIS_BRIDGE_FIXTURE: &str = r#"
+[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+
+task done:
+    step halt:
+"#;
+
 #[test]
 fn bridge_maps_cam_tables_configs_and_actions() {
     let program = compile_to_runtime(PLC_CAM_FIXTURE, 1);
@@ -452,6 +489,117 @@ fn bridge_maps_cam_tables_configs_and_actions() {
         "cam_switch should be lowered into runtime action"
     );
     assert!(saw_phase, "cam_phase should be lowered into runtime action");
+}
+
+#[test]
+fn bridge_maps_axis_move_actions_without_unsupported_action() {
+    let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+    let mut saw_axis = false;
+    for task in program.tasks {
+        for step in task.steps {
+            if let runtime_core::Instr::Action { actions, .. } = step.instr {
+                for action in actions {
+                    if let runtime_core::Action::AxisMove { command } = action {
+                        saw_axis = true;
+                        assert_eq!(command.target, "axis_x");
+                        assert_eq!(command.kind, AxisMoveKind::Relative);
+                    }
+                }
+            }
+        }
+    }
+    assert!(saw_axis, "axis_move should be lowered into runtime action");
+}
+
+#[test]
+fn runtime_tick_with_axis_handler_done_for_bridged_axis_action() {
+    let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+
+    rt.tick_with_axis(&mut io, |command| {
+        assert_eq!(command.target, "axis_x");
+        AxisMotionResult::Done
+    })
+    .expect("bridged axis action should run with handler");
+}
+
+#[test]
+fn runtime_tick_with_axis_handler_propagates_classified_faults_for_bridged_axis_action() {
+    let cases = [
+        (
+            AxisMotionResult::Reject { error_code: 41 },
+            RuntimeError::AxisMotionRejected {
+                target: "axis_x",
+                error_code: 41,
+            },
+        ),
+        (
+            AxisMotionResult::MotionFault { error_code: 42 },
+            RuntimeError::AxisMotionFault {
+                target: "axis_x",
+                error_code: 42,
+            },
+        ),
+        (
+            AxisMotionResult::SafetyFault { error_code: 43 },
+            RuntimeError::AxisSafetyFault {
+                target: "axis_x",
+                error_code: 43,
+            },
+        ),
+    ];
+
+    for (result, expected) in cases {
+        let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+        let mut rt = Runtime::new(&program).expect("runtime init");
+        let mut io = sim::SimIo::new(1, 1, 0, 0);
+        let err = rt
+            .tick_with_axis(&mut io, |_| result)
+            .expect_err("fault result should be surfaced");
+        assert_eq!(err, expected);
+    }
+}
+
+#[test]
+fn bridge_executes_axis_stepper_example_done_path_end_to_end() {
+    let program = compile_example_to_runtime("axis_stepper_fault_routing.plc", 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let mut saw_axis = false;
+
+    rt.tick_with_axis(&mut io, |command| {
+        saw_axis = true;
+        assert_eq!(command.target, "axis_stepper");
+        assert_eq!(command.kind, AxisMoveKind::Relative);
+        AxisMotionResult::Done
+    })
+    .expect("axis stepper example should execute done path");
+
+    assert!(saw_axis, "axis handler should be invoked for stepper example");
+    assert_eq!(current_step_name(&rt, &program), "main.done");
+}
+
+#[test]
+fn bridge_executes_axis_servo_example_fault_path_end_to_end() {
+    let program = compile_example_to_runtime("axis_servo_fault_routing.plc", 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+
+    let err = rt
+        .tick_with_axis(&mut io, |command| {
+            assert_eq!(command.target, "axis_servo");
+            assert_eq!(command.kind, AxisMoveKind::Absolute);
+            AxisMotionResult::MotionFault { error_code: 88 }
+        })
+        .expect_err("servo axis motion fault should be surfaced");
+    assert_eq!(
+        err,
+        RuntimeError::AxisMotionFault {
+            target: "axis_servo",
+            error_code: 88,
+        }
+    );
 }
 
 #[test]

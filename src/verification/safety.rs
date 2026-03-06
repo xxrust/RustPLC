@@ -3,8 +3,8 @@ use crate::ast::{
     StepStatement, WaitCondition, WaitStatement,
 };
 use crate::ir::{
-    ConstraintSet, SafetyExpr, SafetyRelation, State, StateMachine, Transition, TransitionAction,
-    TransitionGuard,
+    AxisFaultBranch, AxisTimeoutBranch, ConstraintSet, SafetyExpr, SafetyRelation, State,
+    StateMachine, Transition, TransitionAction, TransitionGuard,
 };
 use petgraph::algo::kosaraju_scc;
 use petgraph::graph::DiGraph;
@@ -845,6 +845,14 @@ fn collect_device_domains(
                 | TransitionAction::Set { target, port, .. }
                 | TransitionAction::SetAnalog { target, port, .. }
                 | TransitionAction::SetAnalogExpr { target, port, .. } => (target, port),
+                TransitionAction::AxisMoveRelative { target, .. }
+                | TransitionAction::AxisMoveAbsolute { target, .. } => {
+                    referenced_ports
+                        .entry(target.clone())
+                        .or_default()
+                        .push("pulse".to_string());
+                    continue;
+                }
                 TransitionAction::CamEngage { .. }
                 | TransitionAction::CamDisengage { .. }
                 | TransitionAction::CamSwitch { .. }
@@ -1089,6 +1097,22 @@ fn transition_effects(
             }
             TransitionAction::Compute { .. } => {}
             TransitionAction::CallExtern { .. } => {}
+            TransitionAction::AxisMoveRelative { target, .. }
+            | TransitionAction::AxisMoveAbsolute { target, .. } => {
+                let Some(device_id) =
+                    lookup_device_domain_id(device_index, target, "pulse", false)
+                else {
+                    continue;
+                };
+                let Some(state_id) = device_state_index[device_id]
+                    .get("active")
+                    .or_else(|| device_state_index[device_id].get("on"))
+                    .copied()
+                else {
+                    continue;
+                };
+                effects.insert(device_id, state_id);
+            }
             TransitionAction::CamEngage { .. }
             | TransitionAction::CamDisengage { .. }
             | TransitionAction::CamSwitch { .. }
@@ -1284,7 +1308,67 @@ fn action_name(action: &TransitionAction) -> Option<String> {
             target,
             offset_expr_raw,
         } => Some(format!("cam_phase {target} {offset_expr_raw}")),
+        TransitionAction::AxisMoveRelative {
+            target,
+            distance_raw,
+            speed_raw,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+            ..
+        } => Some(format!(
+            "axis_move_relative {target} distance={distance_raw} speed={speed_raw} {} {} {} {}",
+            render_axis_timeout_branch(timeout),
+            render_axis_fault_branch("on_reject", on_reject),
+            render_axis_fault_branch("on_motion_fault", on_motion_fault),
+            render_axis_fault_branch("on_safety_fault", on_safety_fault),
+        )),
+        TransitionAction::AxisMoveAbsolute {
+            target,
+            position_raw,
+            speed_raw,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+            ..
+        } => Some(format!(
+            "axis_move_absolute {target} position={position_raw} speed={speed_raw} {} {} {} {}",
+            render_axis_timeout_branch(timeout),
+            render_axis_fault_branch("on_reject", on_reject),
+            render_axis_fault_branch("on_motion_fault", on_motion_fault),
+            render_axis_fault_branch("on_safety_fault", on_safety_fault),
+        )),
         TransitionAction::Log { message } => Some(format!("log \"{message}\"")),
+    }
+}
+
+fn render_axis_timeout_branch(branch: &AxisTimeoutBranch) -> String {
+    format!(
+        "timeout={}ms->{}",
+        branch.duration_ms,
+        render_axis_target(branch.target_task.as_str(), branch.target_step.as_deref())
+    )
+}
+
+fn render_axis_fault_branch(label: &str, branch: &AxisFaultBranch) -> String {
+    let mut rendered = format!(
+        "{label}->{}",
+        render_axis_target(branch.target_task.as_str(), branch.target_step.as_deref())
+    );
+    if let Some(error_code) = branch.error_code.as_deref() {
+        rendered.push('[');
+        rendered.push_str(error_code);
+        rendered.push(']');
+    }
+    rendered
+}
+
+fn render_axis_target(task: &str, step: Option<&str>) -> String {
+    match step {
+        Some(step_name) => format!("{task}.{step_name}"),
+        None => task.to_string(),
     }
 }
 
@@ -2648,6 +2732,111 @@ task main:
                 .iter()
                 .any(|error| error.constraint.contains("axis_x.pulse.active")),
             "错误应包含 pulse 端口状态"
+        );
+    }
+
+    #[test]
+    fn axis_move_matches_stepper_enable_pulse_interlock() {
+        let source = r#"
+[topology]
+
+device axis_x: stepper_motor
+
+[constraints]
+
+safety: axis_x.enable.off conflicts_with axis_x.pulse.active
+
+[tasks]
+
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step done:
+        action: log "done"
+task fault:
+    step timeout:
+        action: log "timeout"
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let errors =
+            verify_safety(&program, &constraints, &state_machine).expect_err("axis move 应命中互锁约束");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.constraint.contains("axis_x.enable.off")),
+            "错误应包含 enable 端口约束"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.constraint.contains("axis_x.pulse.active")),
+            "错误应包含 pulse.active 端口约束"
+        );
+    }
+
+    #[test]
+    fn axis_move_passes_enable_pulse_interlock_after_enable_on() {
+        let source = r#"
+[topology]
+
+device axis_x: stepper_motor
+
+[constraints]
+
+safety: axis_x.enable.off conflicts_with axis_x.pulse.active
+
+[tasks]
+
+task main:
+    step enable_axis:
+        action: set axis_x.enable on
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step done:
+        action: log "done"
+task fault:
+    step timeout:
+        action: log "timeout"
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("先 enable 再 axis move 应满足互锁约束");
+        assert!(
+            report
+                .rule_statuses
+                .iter()
+                .any(|status| status.rule.contains("axis_x.enable.off")
+                    && status.rule.contains("axis_x.pulse.active")),
+            "规则状态应包含 axis 互锁约束"
         );
     }
 

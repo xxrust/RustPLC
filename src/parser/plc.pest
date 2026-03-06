@@ -84,6 +84,13 @@ attribute_name = {
     | "positioning_window"
     | "rated_power"
     | "rated_freq"
+    // Axis motion MVP params
+    | "microstep"
+    | "gear_num"
+    | "gear_den"
+    | "lead_screw"
+    | "position_unit"
+    | "max_acceleration"
 }
 
 range_value = @{ number ~ ".." ~ number }
@@ -221,6 +228,34 @@ action_cam_switch = { "cam_switch" ~ identifier ~ identifier }
 action_cam_phase = { "cam_phase" ~ identifier ~ expression }
 action_set       = { "set" ~ action_target ~ state_value }
 action_log = { "log" ~ string_literal }
+axis_move_relative_action = {
+    "axis.move_relative"
+    ~ "("
+    ~ action_target
+    ~ ","
+    ~ "distance"
+    ~ ":"
+    ~ number
+    ~ ","
+    ~ "speed"
+    ~ ":"
+    ~ number
+    ~ ")"
+}
+axis_move_absolute_action = {
+    "axis.move_absolute"
+    ~ "("
+    ~ action_target
+    ~ ","
+    ~ "position"
+    ~ ":"
+    ~ number
+    ~ ","
+    ~ "speed"
+    ~ ":"
+    ~ number
+    ~ ")"
+}
 action_command = {
     action_extend
     | action_retract
@@ -259,6 +294,20 @@ goto_statement = { "goto" ~ goto_target }
 timeout_statement = { "timeout" ~ ":" ~ duration_value ~ "->" ~ goto_statement }
 allow_indefinite_wait_statement = { "allow_indefinite_wait" ~ ":" ~ boolean_value }
 then_goto_statement = { "then" ~ ":" ~ goto_statement }
+axis_branch_target = { identifier ~ ("." ~ identifier)? }
+axis_timeout_branch = { "timeout" ~ ":" ~ duration_value ~ "->" ~ axis_branch_target }
+axis_on_reject_branch = { "on_reject" ~ "->" ~ axis_branch_target }
+axis_on_motion_fault_branch = { "on_motion_fault" ~ "->" ~ axis_branch_target }
+axis_on_safety_fault_branch = { "on_safety_fault" ~ "->" ~ axis_branch_target }
+axis_move_statement = {
+    "action"
+    ~ ":"
+    ~ (axis_move_relative_action | axis_move_absolute_action)
+    ~ axis_timeout_branch?
+    ~ axis_on_reject_branch?
+    ~ axis_on_motion_fault_branch?
+    ~ axis_on_safety_fault_branch?
+}
 
 repeat_block = { "repeat" ~ integer ~ ":" ~ step_statement+ }
 
@@ -291,7 +340,8 @@ race_branch = { !("on_complete" ~ ":") ~ identifier ~ ":" ~ race_branch_statemen
 race_statement = { "race" ~ ":" ~ race_branch+ }
 
 step_statement = {
-    action_statement
+    axis_move_statement
+    | action_statement
     | wait_statement
     | delay_statement
     | timeout_statement

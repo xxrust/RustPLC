@@ -1237,3 +1237,57 @@ fn parses_welding_station_example_into_verified_ir_json() {
     assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
     assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
 }
+
+#[test]
+fn parses_axis_stepper_fault_routing_example_into_verified_ir_json() {
+    let source = read_example("axis_stepper_fault_routing.plc");
+    let ir_json = compile_source_to_json(&source)
+        .expect("axis_stepper_fault_routing example should compile");
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+    assert!(
+        transitions.iter().any(|transition| {
+            transition["actions"].as_array().is_some_and(|actions| {
+                actions
+                    .iter()
+                    .any(|action| action["action"] == Value::String("axis_move_relative".to_string()))
+            })
+        }),
+        "stepper example should include axis_move_relative action in transitions"
+    );
+    assert!(
+        ir_json["verification"]["safety"]["rule_statuses"]
+            .as_array()
+            .is_some_and(|rules| !rules.is_empty()),
+        "stepper example should bind at least one safety rule"
+    );
+}
+
+#[test]
+fn parses_axis_servo_fault_routing_example_into_verified_ir_json() {
+    let source = read_example("axis_servo_fault_routing.plc");
+    let ir_json = compile_source_to_json(&source)
+        .expect("axis_servo_fault_routing example should compile");
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+    assert!(
+        transitions.iter().any(|transition| {
+            transition["actions"].as_array().is_some_and(|actions| {
+                actions
+                    .iter()
+                    .any(|action| action["action"] == Value::String("axis_move_absolute".to_string()))
+            })
+        }),
+        "servo example should include axis_move_absolute action in transitions"
+    );
+    assert!(
+        ir_json["verification"]["safety"]["rule_statuses"]
+            .as_array()
+            .is_some_and(|rules| !rules.is_empty()),
+        "servo example should bind at least one safety rule"
+    );
+}
