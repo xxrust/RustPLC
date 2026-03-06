@@ -72,6 +72,51 @@ required = false
 default = "120ms"
 description = "减速时间"
 
+[[parameters]]
+name = "microstep"
+type = "integer"
+required = false
+default = "1"
+description = "细分倍数（1/2/4/8/16 ...）"
+
+[[parameters]]
+name = "gear_num"
+type = "integer"
+required = false
+default = "1"
+description = "减速比/电子齿轮比分子"
+
+[[parameters]]
+name = "gear_den"
+type = "integer"
+required = false
+default = "1"
+description = "减速比/电子齿轮比分母"
+
+[[parameters]]
+name = "lead_screw"
+type = "length"
+required = false
+default = "1mm"
+unit = "mm"
+description = "丝杆导程（每转对应线性位移）"
+
+[[parameters]]
+name = "position_unit"
+type = "enum"
+required = false
+default = "pulse"
+options = ["pulse", "mm", "deg"]
+description = "位置指令/反馈使用的工程单位"
+
+[[parameters]]
+name = "max_acceleration"
+type = "number"
+required = false
+default = "10000"
+unit = "pps"
+description = "最大加速度（脉冲频率变化率）"
+
 [[device_constraints.safety]]
 left = "enable.off"
 right = "pulse.active"

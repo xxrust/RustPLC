@@ -44,8 +44,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已在 stepper/servo 设备库补充 microstep/gear_num/gear_den/lead_screw/position_unit/max_acceleration 参数 schema，并在语义层用设备库参数类型/单位规则做行级诊断校验。"
     },
     {
       "id": "US-004",

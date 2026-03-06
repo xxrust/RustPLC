@@ -485,3 +485,25 @@ Thread: https://ampcode.com/threads/
     - Axis mechanical metadata currently flows through DeviceAttributes.extra_params; typed/unit checks are deferred to semantic preprocessing stories.
 ---
 
+## [2026-03-06 13:07:53] - US-003
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Updated devices/stepper_motor.toml and devices/servo_drive.toml with new axis parameter schemas: microstep, gear_num, gear_den, lead_screw, position_unit, max_acceleration.
+  - Reused semantic device-library validation path to enforce typed checks and unit/enum constraints for these new parameters.
+  - Added positive semantic test covering valid stepper + servo axis parameter configurations.
+  - Added negative semantic tests covering invalid integer type, unit mismatch, and invalid enum value, with line-aware diagnostics asserted.
+  - Marked US-003 as completed in prd.json.
+- Files changed
+  - devices/stepper_motor.toml
+  - devices/servo_drive.toml
+  - src/semantic/mod.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Axis/mechanical extension validation is schema-driven: add parameter definitions in devices/*.toml and semantic validation will enforce types/units through validate_device_extra_params.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - For strict unit enforcement, use length/pressure parameter types; number type with unit allows values without explicit unit suffix.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Device extra-parameter diagnostics are emitted at device declaration line, so tests can assert non-zero line context directly.
+---

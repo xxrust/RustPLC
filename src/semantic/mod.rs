@@ -5623,7 +5623,22 @@ device axis_x: stepper_motor {
     steps_per_rev: 200,
     max_speed: 5000,
     accel_time: 120ms,
-    decel_time: 120ms
+    decel_time: 120ms,
+    microstep: 16,
+    gear_num: 5,
+    gear_den: 2,
+    lead_screw: 5mm,
+    position_unit: mm,
+    max_acceleration: 12000pps
+}
+
+device servo_x: servo_drive {
+    microstep: 8,
+    gear_num: 10,
+    gear_den: 1,
+    lead_screw: 2mm,
+    position_unit: mm,
+    max_acceleration: 3000rpm
 }
 
 [constraints]
@@ -5637,6 +5652,84 @@ task main:
         let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
         preprocess_program_with_library(&program, Some(&library))
             .expect("合法参数应通过设备库类型校验");
+    }
+
+    #[test]
+    fn preprocess_with_library_rejects_invalid_axis_param_type_with_line_context() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    microstep: 1.5,
+    lead_screw: 5mm
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        let errors = preprocess_program_with_library(&program, Some(&library))
+            .expect_err("microstep 应是 integer");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("microstep") && rendered.contains("integer"),
+            "应报告 axis 参数类型错误，实际: {rendered}"
+        );
+        assert!(
+            errors.iter().any(|e| e.line() > 0),
+            "参数诊断应携带有效行号，实际: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_with_library_rejects_invalid_axis_param_unit_and_enum() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    lead_screw: 5inch,
+    position_unit: turns
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        let errors = preprocess_program_with_library(&program, Some(&library))
+            .expect_err("lead_screw 单位和 position_unit 枚举值均应被拒绝");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("lead_screw") && rendered.contains("参数单位不匹配"),
+            "应报告 axis 参数单位错误，实际: {rendered}"
+        );
+        assert!(
+            rendered.contains("position_unit") && rendered.contains("参数类型要求 enum"),
+            "应报告 axis 参数枚举错误，实际: {rendered}"
+        );
+        assert!(
+            errors.iter().any(|e| e.line() > 0),
+            "参数诊断应携带有效行号，实际: {rendered}"
+        );
     }
 
     #[test]
