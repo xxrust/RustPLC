@@ -1,4 +1,4 @@
-# Ralph Progress Log
+﻿# Ralph Progress Log
 Started: Fri Feb 27 23:19:22 CST 2026
 ## Codebase Patterns
 - Run `cargo check --workspace` for typecheck and `cargo test --workspace` for regression gate before committing.
@@ -463,3 +463,25 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - Axis Motion backlog source is prd.json on branch alph/axis-motion-dsl-mvp.
 ---
+## [2026-03-06 13:00:15] - US-002
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Extended parser grammar whitelist to support axis parameter keys: microstep, gear_num, gear_den, lead_screw, position_unit, max_acceleration.
+  - Updated parser attribute lowering so the new keys are captured into DeviceAttributes.extra_params.
+  - Extended parser unit coverage to assert new keys are parsed and persisted in extra_params.
+  - Added parser regression test for misspelled key (microstepp) to ensure invalid spelling is rejected.
+  - Marked US-002 as completed in prd.json.
+- Files changed
+  - src/parser/plc.pest
+  - src/parser/mod.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - For topology attributes, changes must stay synchronized between `attribute_name` in `plc.pest` and `apply_attribute` in `parser/mod.rs`.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Misspelled attribute names may fail at grammar layer with `expected attribute` instead of semantic-layer custom errors, so parser tests should match both forms conservatively.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Axis mechanical metadata currently flows through DeviceAttributes.extra_params; typed/unit checks are deferred to semantic preprocessing stories.
+---
+

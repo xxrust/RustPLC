@@ -890,7 +890,13 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         | "electronic_gear_den"
         | "positioning_window"
         | "rated_power"
-        | "rated_freq" => {
+        | "rated_freq"
+        | "microstep"
+        | "gear_num"
+        | "gear_den"
+        | "lead_screw"
+        | "position_unit"
+        | "max_acceleration" => {
             attributes
                 .extra_params
                 .insert(attr_name.to_string(), value.as_str().to_string());
@@ -3226,7 +3232,13 @@ device pick_servo: servo_drive {
 device axis: stepper_motor {
     steps_per_rev: 200,
     max_speed: 1200,
-    accel_time: 80ms
+    accel_time: 80ms,
+    microstep: 16,
+    gear_num: 5,
+    gear_den: 2,
+    lead_screw: 5.0,
+    position_unit: mm,
+    max_acceleration: 2500
 }
 
 [constraints]
@@ -3256,6 +3268,57 @@ task main:
         assert_eq!(
             axis.attributes.extra_params.get("accel_time"),
             Some(&"80ms".to_string())
+        );
+        assert_eq!(
+            axis.attributes.extra_params.get("microstep"),
+            Some(&"16".to_string())
+        );
+        assert_eq!(
+            axis.attributes.extra_params.get("gear_num"),
+            Some(&"5".to_string())
+        );
+        assert_eq!(
+            axis.attributes.extra_params.get("gear_den"),
+            Some(&"2".to_string())
+        );
+        assert_eq!(
+            axis.attributes.extra_params.get("lead_screw"),
+            Some(&"5.0".to_string())
+        );
+        assert_eq!(
+            axis.attributes.extra_params.get("position_unit"),
+            Some(&"mm".to_string())
+        );
+        assert_eq!(
+            axis.attributes.extra_params.get("max_acceleration"),
+            Some(&"2500".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_misspelled_axis_parameter_name() {
+        let input = r#"
+[topology]
+
+device axis: stepper_motor {
+    microstepp: 16
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step idle:
+"#;
+
+        let err = parse_plc(input).expect_err("非法参数名应被解析器拒绝");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("expected attribute")
+                || msg.contains("attribute_name")
+                || msg.contains("不支持的属性名"),
+            "应提示 attribute/attribute_name/属性名错误，实际: {msg}"
         );
     }
 

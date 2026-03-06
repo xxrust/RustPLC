@@ -29,8 +29,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Parser 已支持 microstep/gear_num/gear_den/lead_screw/position_unit/max_acceleration，并新增非法拼写回归测试。"
     },
     {
       "id": "US-003",

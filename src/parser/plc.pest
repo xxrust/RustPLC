@@ -84,6 +84,13 @@ attribute_name = {
     | "positioning_window"
     | "rated_power"
     | "rated_freq"
+    // Axis motion MVP params
+    | "microstep"
+    | "gear_num"
+    | "gear_den"
+    | "lead_screw"
+    | "position_unit"
+    | "max_acceleration"
 }
 
 range_value = @{ number ~ ".." ~ number }
