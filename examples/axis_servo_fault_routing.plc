@@ -1,0 +1,34 @@
+[topology]
+
+device plc_main: plc { ports: [Y0:digital:producer] }
+device axis_servo: servo_drive
+
+relation { from: plc_main.Y0, to: axis_servo.enable, via: driven_by }
+
+[constraints]
+
+safety: axis_servo.enable.off conflicts_with axis_servo.pulse.active
+
+[tasks]
+
+task main:
+    step enable_axis:
+        action: set axis_servo.enable on
+    step move_axis:
+        action: axis.move_absolute(axis_servo, position: 120, speed: 15)
+            timeout: 800ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step done:
+        action: log "servo axis move completed"
+
+task fault:
+    step timeout:
+        action: log "servo axis timeout"
+    step reject:
+        action: log "servo axis reject"
+    step motion_fault:
+        action: log "servo axis motion fault"
+    step safety_fault:
+        action: log "servo axis safety fault"

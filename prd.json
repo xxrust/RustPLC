@@ -170,8 +170,8 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added two new Axis Motion fixtures in examples (stepper relative move and servo absolute move), both explicitly covering timeout/reject/motion_fault/safety_fault branches. Added integration coverage for parse->semantic->verification on both examples and runtime-bridge end-to-end execution tests (done path + classified fault path) based on those fixtures. Verified with cargo test --workspace."
     },
     {
       "id": "US-012",

@@ -714,3 +714,37 @@ Thread: https://ampcode.com/threads/
   - Useful context (e.g., "the evaluation panel is in component X")
     - Branch-aware causality checks can be added without changing IR by deriving action→wait pairs from AST goto targets during verifier preprocessing.
 ---
+## [2026-03-06 15:04:17] - US-011
+Thread: https://ampcode.com/threads/
+- What was implemented
+  - Added two new Axis Motion example fixtures under `examples/`:
+    - `axis_stepper_fault_routing.plc` (stepper + `axis.move_relative`)
+    - `axis_servo_fault_routing.plc` (servo + `axis.move_absolute`)
+  - Both fixtures now explicitly include all four required branch outcomes in one step:
+    - `timeout`
+    - `on_reject`
+    - `on_motion_fault`
+    - `on_safety_fault`
+  - Added/updated integration coverage for fixture-level pipelines:
+    - `tests/examples_integration.rs` now validates both new examples through parse -> preprocess/semantic -> IR/verification JSON generation.
+    - Assertions confirm axis action lowering is present and safety rules are bound for both fixtures.
+  - Added runtime-bridge end-to-end coverage based on the new fixtures in `tests/runtime_bridge_us006.rs`:
+    - `bridge_executes_axis_stepper_example_done_path_end_to_end`
+    - `bridge_executes_axis_servo_example_fault_path_end_to_end`
+    - These tests execute parse -> semantic -> runtime bridge -> runtime tick paths with axis handler classification checks.
+  - Ran `cargo test --test examples_integration axis_`, `cargo test --test runtime_bridge_us006 axis_`, and `cargo test --workspace` successfully.
+- Files changed
+  - examples/axis_stepper_fault_routing.plc
+  - examples/axis_servo_fault_routing.plc
+  - tests/examples_integration.rs
+  - tests/runtime_bridge_us006.rs
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Example fixtures are most stable when they include explicit safety interlock rules and at least one pre-move enable step for axis devices.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - Runtime may execute multiple sequential action steps in one tick; axis runtime tests should not assume one-step-per-tick progression.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - `tests/runtime_bridge_us006.rs` already contains reusable compile helpers for parse+semantic+bridge pipelines, making it the best place to attach fixture-based runtime E2E checks.
+---

@@ -8,6 +8,8 @@ use rust_plc::ir::{ExternFunctionContract, TopologyGraph, VariableType};
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -42,6 +44,15 @@ fn compile_runtime_and_topology(
     let runtime_program =
         state_machine_to_runtime_program(&topology, &sm, tick_ms).expect("bridge");
     (runtime_program, topology)
+}
+
+fn compile_example_to_runtime(file_name: &str, tick_ms: u64) -> runtime_core::Program<'static> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join(file_name);
+    let source =
+        fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {} failed: {err}", path.display()));
+    compile_to_runtime(&source, tick_ms)
 }
 
 fn variable_index(topology: &TopologyGraph, name: &str) -> u16 {
@@ -548,6 +559,47 @@ fn runtime_tick_with_axis_handler_propagates_classified_faults_for_bridged_axis_
             .expect_err("fault result should be surfaced");
         assert_eq!(err, expected);
     }
+}
+
+#[test]
+fn bridge_executes_axis_stepper_example_done_path_end_to_end() {
+    let program = compile_example_to_runtime("axis_stepper_fault_routing.plc", 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let mut saw_axis = false;
+
+    rt.tick_with_axis(&mut io, |command| {
+        saw_axis = true;
+        assert_eq!(command.target, "axis_stepper");
+        assert_eq!(command.kind, AxisMoveKind::Relative);
+        AxisMotionResult::Done
+    })
+    .expect("axis stepper example should execute done path");
+
+    assert!(saw_axis, "axis handler should be invoked for stepper example");
+    assert_eq!(current_step_name(&rt, &program), "main.done");
+}
+
+#[test]
+fn bridge_executes_axis_servo_example_fault_path_end_to_end() {
+    let program = compile_example_to_runtime("axis_servo_fault_routing.plc", 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+
+    let err = rt
+        .tick_with_axis(&mut io, |command| {
+            assert_eq!(command.target, "axis_servo");
+            assert_eq!(command.kind, AxisMoveKind::Absolute);
+            AxisMotionResult::MotionFault { error_code: 88 }
+        })
+        .expect_err("servo axis motion fault should be surfaced");
+    assert_eq!(
+        err,
+        RuntimeError::AxisMotionFault {
+            target: "axis_servo",
+            error_code: 88,
+        }
+    );
 }
 
 #[test]
