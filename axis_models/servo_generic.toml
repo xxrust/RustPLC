@@ -1,0 +1,5 @@
+name = "servo_generic"
+device_type = "servo_drive"
+position_unit = "pulse"
+max_speed = 8000.0
+max_acceleration = 25000.0

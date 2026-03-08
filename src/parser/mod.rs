@@ -820,6 +820,12 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         "ramp_time" => {
             attributes.ramp_time = Some(expect_duration(value, "ramp_time")?);
         }
+        "model_ref" => {
+            attributes.model_ref = Some(expect_identifier_or_string(value, "model_ref")?);
+        }
+        "config_ref" => {
+            attributes.config_ref = Some(expect_identifier_or_string(value, "config_ref")?);
+        }
         "states" => {
             attributes.custom_states = Some(expect_identifier_list(value, "states")?);
         }

@@ -73,6 +73,8 @@ attribute_name = {
     | "gear_ratio"
     | "phase_offset"
     | "following_error_limit"
+    | "model_ref"
+    | "config_ref"
     // Motor enhancement params
     | "steps_per_rev"
     | "max_speed"

@@ -1,0 +1,4 @@
+name = "servo_default"
+position_unit = "pulse"
+speed_limit = 4000.0
+acceleration_limit = 12000.0

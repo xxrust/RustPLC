@@ -79,6 +79,19 @@ pub enum BridgeError {
         value_raw: String,
     },
 
+    #[error("axis profile for {target} is missing in topology (state {state})")]
+    MissingAxisProfile { state: String, target: String },
+
+    #[error(
+        "axis speed {speed} exceeds configured max_speed={max_speed} for {target} (state {state})"
+    )]
+    AxisSpeedOutOfRange {
+        state: String,
+        target: String,
+        speed: f32,
+        max_speed: f32,
+    },
+
     #[error("unsupported analog wait guard in {state}: {expression}")]
     UnsupportedAnalogWait { state: String, expression: String },
 
@@ -1438,14 +1451,22 @@ fn convert_action(
             speed_raw,
             ..
         } => {
-            let distance = distance_raw
-                .parse::<f32>()
-                .map_err(|_| BridgeError::InvalidAxisLiteral {
-                    state: state_name.to_string(),
-                    target: target.clone(),
-                    field: "distance".to_string(),
-                    value_raw: distance_raw.clone(),
-                })?;
+            let profile =
+                resolver
+                    .axis_profile(target)
+                    .ok_or_else(|| BridgeError::MissingAxisProfile {
+                        state: state_name.to_string(),
+                        target: target.clone(),
+                    })?;
+            let distance =
+                distance_raw
+                    .parse::<f32>()
+                    .map_err(|_| BridgeError::InvalidAxisLiteral {
+                        state: state_name.to_string(),
+                        target: target.clone(),
+                        field: "distance".to_string(),
+                        value_raw: distance_raw.clone(),
+                    })?;
             let speed = speed_raw
                 .parse::<f32>()
                 .map_err(|_| BridgeError::InvalidAxisLiteral {
@@ -1454,6 +1475,14 @@ fn convert_action(
                     field: "speed".to_string(),
                     value_raw: speed_raw.clone(),
                 })?;
+            if speed <= 0.0 || speed > profile.max_speed {
+                return Err(BridgeError::AxisSpeedOutOfRange {
+                    state: state_name.to_string(),
+                    target: target.clone(),
+                    speed,
+                    max_speed: profile.max_speed,
+                });
+            }
             let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
             let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
             Ok(Action::AxisMove {
@@ -1473,14 +1502,22 @@ fn convert_action(
             speed_raw,
             ..
         } => {
-            let position = position_raw
-                .parse::<f32>()
-                .map_err(|_| BridgeError::InvalidAxisLiteral {
-                    state: state_name.to_string(),
-                    target: target.clone(),
-                    field: "position".to_string(),
-                    value_raw: position_raw.clone(),
-                })?;
+            let profile =
+                resolver
+                    .axis_profile(target)
+                    .ok_or_else(|| BridgeError::MissingAxisProfile {
+                        state: state_name.to_string(),
+                        target: target.clone(),
+                    })?;
+            let position =
+                position_raw
+                    .parse::<f32>()
+                    .map_err(|_| BridgeError::InvalidAxisLiteral {
+                        state: state_name.to_string(),
+                        target: target.clone(),
+                        field: "position".to_string(),
+                        value_raw: position_raw.clone(),
+                    })?;
             let speed = speed_raw
                 .parse::<f32>()
                 .map_err(|_| BridgeError::InvalidAxisLiteral {
@@ -1489,6 +1526,14 @@ fn convert_action(
                     field: "speed".to_string(),
                     value_raw: speed_raw.clone(),
                 })?;
+            if speed <= 0.0 || speed > profile.max_speed {
+                return Err(BridgeError::AxisSpeedOutOfRange {
+                    state: state_name.to_string(),
+                    target: target.clone(),
+                    speed,
+                    max_speed: profile.max_speed,
+                });
+            }
             let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
             let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
             Ok(Action::AxisMove {
@@ -2058,6 +2103,10 @@ impl<'a> TopologyResolver<'a> {
                 device: device.to_string(),
             }
         })
+    }
+
+    fn axis_profile(&self, device: &str) -> Option<&crate::ir::AxisProfile> {
+        self.topology.axis_profiles.get(device)
     }
 
     fn collect_physical_ids(

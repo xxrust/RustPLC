@@ -9,6 +9,8 @@ device plc_main: plc {
 
 device axis_arm: stepper_motor {
     purpose: "Wafer loader rotary arm axis"
+    model_ref: stepper_generic
+    config_ref: stepper_default
 }
 
 relation { from: plc_main.Y0, to: axis_arm.enable, via: driven_by }

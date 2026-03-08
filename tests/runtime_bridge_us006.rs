@@ -50,8 +50,8 @@ fn compile_example_to_runtime(file_name: &str, tick_ms: u64) -> runtime_core::Pr
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join(file_name);
-    let source =
-        fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {} failed: {err}", path.display()));
+    let source = fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("read {} failed: {err}", path.display()));
     compile_to_runtime(&source, tick_ms)
 }
 
@@ -282,7 +282,7 @@ const PLC_STEPPER_PORT_FIXTURE: &str = r#"
 [topology]
 
 device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer] }
-device axis_x: stepper_motor
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
 
 relation { from: plc_main.Y0, to: axis_x.enable, via: driven_by }
 relation { from: plc_main.Y1, to: axis_x.direction, via: driven_by }
@@ -435,7 +435,7 @@ task done:
 
 const PLC_AXIS_BRIDGE_FIXTURE: &str = r#"
 [topology]
-device axis_x: stepper_motor
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
 
 [constraints]
 
@@ -443,6 +443,32 @@ device axis_x: stepper_motor
 task motion:
     step run:
         action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+
+task done:
+    step halt:
+"#;
+
+const PLC_AXIS_OVERSPEED_FIXTURE: &str = r#"
+[topology]
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 3500)
             timeout: 500ms -> fault.timeout
             on_reject -> fault.reject
             on_motion_fault -> fault.motion_fault
@@ -512,6 +538,41 @@ fn bridge_maps_axis_move_actions_without_unsupported_action() {
 }
 
 #[test]
+fn bridge_rejects_axis_move_when_axis_profile_is_missing() {
+    let program = parse_plc(PLC_AXIS_BRIDGE_FIXTURE).expect("parse plc");
+    let expanded = preprocess_program(&program).expect("preprocess");
+    let mut topology = build_topology_graph(&expanded).expect("topology");
+    let sm = build_state_machine(&expanded).expect("state machine");
+    topology.axis_profiles.clear();
+
+    let err = state_machine_to_runtime_program(&topology, &sm, 10)
+        .expect_err("missing axis profile should fail at bridge");
+    assert!(matches!(
+        err,
+        BridgeError::MissingAxisProfile { ref target, .. } if target == "axis_x"
+    ));
+}
+
+#[test]
+fn bridge_rejects_axis_move_speed_exceeding_profile_limit() {
+    let err = compile_to_runtime_result(PLC_AXIS_OVERSPEED_FIXTURE, 10)
+        .expect_err("overspeed should fail at bridge");
+    match err {
+        BridgeError::AxisSpeedOutOfRange {
+            target,
+            speed,
+            max_speed,
+            ..
+        } => {
+            assert_eq!(target, "axis_x");
+            assert!((speed - 3500.0).abs() < f32::EPSILON);
+            assert!((max_speed - 3000.0).abs() < f32::EPSILON);
+        }
+        other => panic!("expected AxisSpeedOutOfRange, got {other:?}"),
+    }
+}
+
+#[test]
 fn runtime_tick_with_axis_handler_done_for_bridged_axis_action() {
     let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
     let mut rt = Runtime::new(&program).expect("runtime init");
@@ -576,7 +637,10 @@ fn bridge_executes_axis_stepper_example_done_path_end_to_end() {
     })
     .expect("axis stepper example should execute done path");
 
-    assert!(saw_axis, "axis handler should be invoked for stepper example");
+    assert!(
+        saw_axis,
+        "axis handler should be invoked for stepper example"
+    );
     assert_eq!(current_step_name(&rt, &program), "main.done");
 }
 

@@ -1,0 +1,4 @@
+name = "stepper_default"
+position_unit = "pulse"
+speed_limit = 3000.0
+acceleration_limit = 10000.0

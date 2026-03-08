@@ -10,6 +10,7 @@ use crate::ast::{
     TopologySection, VariableDeclaration, VariableType as AstVariableType, WaitCondition,
     WaitStatement,
 };
+use crate::axis_profile::resolve_axis_profiles;
 use crate::error::PlcError;
 use crate::ir::{
     ActionKind, ActionRef, ActionTiming, AxisFaultBranch, AxisTimeoutBranch,
@@ -1300,6 +1301,13 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
                 "请添加 range: min..max 属性，例如 range: 0..100",
             ));
         }
+    }
+
+    match resolve_axis_profiles(&topology.devices) {
+        Ok(profiles) => {
+            topology_graph.axis_profiles = profiles;
+        }
+        Err(mut axis_errors) => errors.append(&mut axis_errors),
     }
 
     for connection in semantic_topology_connections(topology) {
@@ -7020,9 +7028,9 @@ task main:
         let input = r#"
 [topology]
 
-device stepper_x: stepper_motor
+device stepper_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
 device vfd_main: vfd
-device servo_y: servo_drive
+device servo_y: servo_drive { model_ref: servo_generic, config_ref: servo_default }
 
 [constraints]
 

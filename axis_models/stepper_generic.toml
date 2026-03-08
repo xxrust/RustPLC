@@ -1,0 +1,5 @@
+name = "stepper_generic"
+device_type = "stepper_motor"
+position_unit = "pulse"
+max_speed = 6000.0
+max_acceleration = 20000.0

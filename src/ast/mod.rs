@@ -209,6 +209,10 @@ pub struct DeviceAttributes {
     pub phase_offset: Option<f64>,
     pub following_error_limit: Option<f64>,
     pub slave_feedback: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_ref: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub extra_params: HashMap<String, String>,
 }

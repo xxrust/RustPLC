@@ -29,6 +29,23 @@ pub enum DeviceKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum AxisDeviceType {
+    StepperMotor,
+    ServoDrive,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AxisProfile {
+    pub device_type: AxisDeviceType,
+    pub position_unit: String,
+    pub max_speed: f32,
+    pub max_acceleration: f32,
+    pub model_ref: String,
+    pub config_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum VariableType {
     Float,
     Int,
@@ -156,6 +173,8 @@ pub struct TopologyGraph {
     pub cam_couplings: Vec<CamCouplingDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extern_functions: Vec<ExternFunctionDef>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub axis_profiles: BTreeMap<String, AxisProfile>,
 }
 
 impl TopologyGraph {
@@ -168,6 +187,7 @@ impl TopologyGraph {
             cam_tables: Vec::new(),
             cam_couplings: Vec::new(),
             extern_functions: Vec::new(),
+            axis_profiles: BTreeMap::new(),
         }
     }
 

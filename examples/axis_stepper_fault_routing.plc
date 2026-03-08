@@ -1,7 +1,10 @@
 [topology]
 
 device plc_main: plc { ports: [Y0:digital:producer] }
-device axis_stepper: stepper_motor
+device axis_stepper: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
 
 relation { from: plc_main.Y0, to: axis_stepper.enable, via: driven_by }
 
