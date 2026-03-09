@@ -37,11 +37,14 @@ pub enum AxisDeviceType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AxisProfile {
     pub device_type: AxisDeviceType,
+    pub motor_class_id: String,
+    pub family_id: String,
     pub position_unit: String,
     pub max_speed: f32,
     pub max_acceleration: f32,
     pub model_ref: String,
     pub config_ref: String,
+    pub motion_param_set: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

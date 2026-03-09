@@ -371,6 +371,13 @@ ST 代码生成（`src/codegen/st.rs`）从 IR 生成 IEC 61131-3 ST 代码。
 4. 在 `tests/` 中添加回归测试
 5. 更新 AGENTS.md 和相关文档
 
+### 修改轴参数层级资源
+
+1. 轴资源链按 5 层维护：`axis_motor_classes` → `axis_families` → `axis_models` → `axis_configs` → `axis_motion_param_sets`
+2. `axis_models/*.toml` 必须声明 `family_id`，`axis_configs/*.toml` 必须声明 `model_id`，`axis_motion_param_sets/*.toml` 必须声明 `config_id`
+3. 设备声明只允许通过 `model_ref/config_ref/motion_param_set` 引用，禁止恢复旧的内联轴参数（会触发 `AXP-006`）
+4. 层级 ID 一致性在 `src/axis_profile.rs` 集中校验（`AXP-007~AXP-010`）；新增字段时同步更新该模块与其单元测试
+
 ### 修改 I/O 映射
 
 1. 在 `src/plc_port.rs` 中更新端口解析

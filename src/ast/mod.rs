@@ -213,6 +213,8 @@ pub struct DeviceAttributes {
     pub model_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_param_set: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub extra_params: HashMap<String, String>,
 }

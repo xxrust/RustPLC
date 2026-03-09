@@ -1,4 +1,4 @@
-﻿use crate::ast::{
+use crate::ast::{
     ActionStatement, ActionTarget, BinaryOperator, Branch, CamPoint, CamTableDeclaration,
     CamTableMode, CausalityConstraint, ComparisonOperator, ConditionExpression, ConstraintsSection,
     DeviceAttributes, DeviceDeclaration, DevicePort, DeviceTags, DeviceType, DurationValue,
@@ -826,6 +826,10 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
         "config_ref" => {
             attributes.config_ref = Some(expect_identifier_or_string(value, "config_ref")?);
         }
+        "motion_param_set" => {
+            attributes.motion_param_set =
+                Some(expect_identifier_or_string(value, "motion_param_set")?);
+        }
         "states" => {
             attributes.custom_states = Some(expect_identifier_list(value, "states")?);
         }
@@ -1546,9 +1550,7 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
     }
 }
 
-fn parse_axis_move_relative_action(
-    pair: Pair<Rule>,
-) -> Result<(ActionTarget, f64, f64), PlcError> {
+fn parse_axis_move_relative_action(pair: Pair<Rule>) -> Result<(ActionTarget, f64, f64), PlcError> {
     let line = line_of(&pair);
     let mut target = None;
     let mut numbers = Vec::new();
@@ -1557,9 +1559,11 @@ fn parse_axis_move_relative_action(
         match part.as_rule() {
             Rule::action_target => target = Some(parse_action_target(part)?),
             Rule::number => {
-                numbers.push(part.as_str().parse::<f64>().map_err(|_| {
-                    PlcError::parse(line, "axis.move_relative 参数数值解析失败")
-                })?);
+                numbers.push(
+                    part.as_str().parse::<f64>().map_err(|_| {
+                        PlcError::parse(line, "axis.move_relative 参数数值解析失败")
+                    })?,
+                );
             }
             _ => {}
         }
@@ -1579,9 +1583,7 @@ fn parse_axis_move_relative_action(
     ))
 }
 
-fn parse_axis_move_absolute_action(
-    pair: Pair<Rule>,
-) -> Result<(ActionTarget, f64, f64), PlcError> {
+fn parse_axis_move_absolute_action(pair: Pair<Rule>) -> Result<(ActionTarget, f64, f64), PlcError> {
     let line = line_of(&pair);
     let mut target = None;
     let mut numbers = Vec::new();
@@ -1590,9 +1592,11 @@ fn parse_axis_move_absolute_action(
         match part.as_rule() {
             Rule::action_target => target = Some(parse_action_target(part)?),
             Rule::number => {
-                numbers.push(part.as_str().parse::<f64>().map_err(|_| {
-                    PlcError::parse(line, "axis.move_absolute 参数数值解析失败")
-                })?);
+                numbers.push(
+                    part.as_str().parse::<f64>().map_err(|_| {
+                        PlcError::parse(line, "axis.move_absolute 参数数值解析失败")
+                    })?,
+                );
             }
             _ => {}
         }
@@ -1641,7 +1645,10 @@ fn parse_axis_fault_branch(pair: Pair<Rule>, branch_name: &str) -> Result<GotoDi
     parse_axis_branch_target(target, branch_name)
 }
 
-fn parse_axis_branch_target(pair: Pair<Rule>, branch_name: &str) -> Result<GotoDirective, PlcError> {
+fn parse_axis_branch_target(
+    pair: Pair<Rule>,
+    branch_name: &str,
+) -> Result<GotoDirective, PlcError> {
     let line = line_of(&pair);
     let mut identifiers = pair
         .into_inner()
@@ -3493,6 +3500,47 @@ task main:
     }
 
     #[test]
+    fn parses_axis_motion_param_set_reference() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    model_ref: stepper_generic,
+    config_ref: stepper_default,
+    motion_param_set: stepper_pick
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("应能解析 motion_param_set 引用");
+        let axis = program
+            .topology
+            .devices
+            .iter()
+            .find(|device| device.name == "axis_x")
+            .expect("应包含 axis_x 设备");
+
+        assert_eq!(
+            axis.attributes.model_ref.as_deref(),
+            Some("stepper_generic")
+        );
+        assert_eq!(
+            axis.attributes.config_ref.as_deref(),
+            Some("stepper_default")
+        );
+        assert_eq!(
+            axis.attributes.motion_param_set.as_deref(),
+            Some("stepper_pick")
+        );
+    }
+
+    #[test]
     fn rejects_misspelled_axis_parameter_name() {
         let input = r#"
 [topology]
@@ -4305,9 +4353,7 @@ task fault:
                     Some("fault")
                 );
                 assert_eq!(
-                    timeout
-                        .as_ref()
-                        .and_then(|v| v.target.step.as_deref()),
+                    timeout.as_ref().and_then(|v| v.target.step.as_deref()),
                     Some("timeout")
                 );
                 assert_eq!(on_reject.as_ref().map(|v| v.task.as_str()), Some("fault"));

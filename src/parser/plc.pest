@@ -75,6 +75,7 @@ attribute_name = {
     | "following_error_limit"
     | "model_ref"
     | "config_ref"
+    | "motion_param_set"
     // Motor enhancement params
     | "steps_per_rev"
     | "max_speed"

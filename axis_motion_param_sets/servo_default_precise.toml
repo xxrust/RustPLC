@@ -1,0 +1,5 @@
+name = "servo_default_precise"
+config_id = "servo_default"
+speed = 1500.0
+acceleration = 4000.0
+deceleration = 4000.0

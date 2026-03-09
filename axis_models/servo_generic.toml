@@ -1,5 +1,6 @@
 name = "servo_generic"
 device_type = "servo_drive"
+family_id = "servo_pulse_train"
 position_unit = "pulse"
 max_speed = 8000.0
 max_acceleration = 25000.0

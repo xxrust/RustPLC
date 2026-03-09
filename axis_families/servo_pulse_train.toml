@@ -1,0 +1,2 @@
+name = "servo_pulse_train"
+motor_class_id = "servo_class_standard"

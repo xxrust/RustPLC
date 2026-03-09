@@ -1,6 +1,7 @@
 ﻿# Ralph Progress Log
 Started: Fri Feb 27 23:19:22 CST 2026
 ## Codebase Patterns
+- Axis 5-layer resources must keep `axis_motor_classes -> axis_families -> axis_models -> axis_configs -> axis_motion_param_sets` ID链一致，且设备仅引用 `model_ref/config_ref/motion_param_set`。
 - Run `cargo check --workspace` for typecheck and `cargo test --workspace` for regression gate before committing.
 - Keep DSL syntax decisions in dedicated docs under `docs/` and link story completion back to `prd.json` + `progress.txt`.
 - For new `[topology]` DSL entries, keep grammar (`src/parser/plc.pest`), parser wiring (`src/parser/mod.rs`), and semantic topology cloning (`src/semantic/mod.rs`) in sync.
@@ -779,4 +780,40 @@ Thread: https://ampcode.com/threads/
     - After `axis.move_*`, pulse state can remain active in verifier state; safe-stop sequences should reset `pulse` before forcing `enable off` to avoid interlock violations.
   - Useful context (e.g., "the evaluation panel is in component X")
     - `cargo run --bin rust_plc -- <file> --no-print-ir` is the quickest acceptance check for single-fixture DSL migrations requiring `verify_all` success.
+---
+## [2026-03-09 15:04:33 CST] - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Implemented axis hierarchy from compiler semantics with 5 layers: motor_class -> family -> model -> config -> motion_param_set in `src/axis_profile.rs`.
+  - Added strict hierarchy validation: `model.family_id` resolution, `family.motor_class_id` resolution, `config.model_id == device.model_ref`, and optional `motion_param_set` compatibility/range checks.
+  - Extended DSL topology schema to accept `motion_param_set` on axis devices and propagate it through AST/IR.
+  - Updated built-in axis resources under `axis_models/` and `axis_configs/`, and added new default resource directories/files for families/classes/param-sets.
+  - Added parser + axis profile regression coverage, including >=4 new hierarchy mismatch/out-of-range failure cases.
+  - Marked `US-001` as passing in `prd.json`.
+- Files changed
+  - src/parser/plc.pest
+  - src/parser/mod.rs
+  - src/ast/mod.rs
+  - src/ir/mod.rs
+  - src/axis_profile.rs
+  - axis_models/stepper_generic.toml
+  - axis_models/servo_generic.toml
+  - axis_configs/stepper_default.toml
+  - axis_configs/servo_default.toml
+  - axis_motor_classes/stepper_class_basic.toml
+  - axis_motor_classes/servo_class_standard.toml
+  - axis_families/stepper_nema.toml
+  - axis_families/servo_pulse_train.toml
+  - axis_motion_param_sets/stepper_default_fast.toml
+  - axis_motion_param_sets/servo_default_precise.toml
+  - AGENTS.md
+  - prd.json
+  - progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    - Axis capability boundary now belongs to model/class files; project-specific limits belong to config files, and compile-time chain checks should stay in `src/axis_profile.rs` to keep diagnostics consistent.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    - New hierarchy fields in TOML should use `#[serde(deny_unknown_fields)]` to prevent silent drift and enforce whitelist schema behavior.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    - Fast validation path for this area is `cargo test axis_profile::tests --lib` plus `cargo test parses_axis_motion_param_set_reference --lib` before broader regression runs.
 ---
