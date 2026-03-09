@@ -12,6 +12,7 @@ Started: 2026-03-09 00:00:00 CST
 - `axis.move_*` 异常分流使用“主桶 + 细分 routes”模式：主桶分支永远必填且作为回退，细分 `kind/code` 路由按声明顺序首条命中。
 - runtime-core 在一个 tick 内会连续执行非阻塞状态（`Action/Goto/已满足 wait`）；写回归时若要精确逐 tick 断言，需在步骤间加入 `delay` 或未满足 `wait` 做节流。
 - `axis.move_*` 参数值语法中的 `number` 不接受带符号前缀；负值会在 parser 阶段先报错，语义层的非正数校验应使用 `0` 场景覆盖。
+- 垂直轴制动顺序检查应仅对“出现 `set <axis>.enable off` 且轴设备具备 `model_ref/config_ref`”的目标轴生效，避免把 legacy 无 profile 轴用例误判为配置错误。
 
 ---
 
@@ -224,4 +225,27 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: 软限位建议在 `axis_config` 层成对声明并在 `AxisProfile` 固化，便于语义层做静态越界裁剪。
   - Gotchas encountered: `axis.move_*` 数值参数目前语法不接受负号，负值测试会在 parser 先失败而不是语义层。
   - Useful context: 绝对位置越界的编译期失败路径已在 `semantic::tests::rejects_axis_move_absolute_when_position_exceeds_soft_limits` 固化。
+---
+
+## [2026-03-09 23:16:37 CST] - US-011
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 为 `axis_config` 增加垂直轴制动声明能力：支持 `orientation = "vertical"` 与 `[brake]`（`engage_port/engage_value/engage_confirm_port/engage_confirm_value`），并在 `axis_profile` 解析阶段加入 `AXP-012` 校验。
+  - 扩展 IR `AxisProfile`：新增 `orientation` 与 `brake` 结构化字段，支持在语义/验证层复用同一配置语义。
+  - 在语义阶段新增 `AXIS-012` 约束：垂直轴执行 `set <axis>.enable off` 前，必须先看到制动命令并等待 `brake_engage_confirmed`（`wait: <axis>.<confirm_port> == <bool>`），否则给出带修复建议的可定位错误。
+  - 在 safety 验证器新增同语义预检，违规时输出 `SafetyDiagnostic`（`[AXIS-012]` + violation path + suggestion）。
+  - 新增回归测试覆盖 axis profile/semantic/safety 三层成功与失败路径，并补充 `axis_configs/stepper_vertical_brake.toml` 夹具。
+- Files changed
+  - `AGENTS.md`
+  - `src/ir/mod.rs`
+  - `src/axis_profile.rs`
+  - `src/semantic/mod.rs`
+  - `src/verification/safety.rs`
+  - `axis_configs/stepper_vertical_brake.toml`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: 垂直轴规则适合走“axis_profile 配置解析 + 语义硬约束 + safety 预检”三层同构，避免运行时才暴露顺序风险。
+  - Gotchas encountered: 若无条件对全部轴设备解析 profile，会把 legacy（无 model_ref/config_ref）用例误升级成 `AXP-001` 失败；应先按 `enable off` 目标轴做最小化过滤。
+  - Useful context: 规则当前按步骤内顺序判定（先 `set brake`、再 `wait confirm`、再 `disable`），并在 `parallel/race` 分支内按分支独立校验。
 ---

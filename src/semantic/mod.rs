@@ -1011,6 +1011,11 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
         &expanded.topology,
         &mut expr_errors,
     );
+    validate_vertical_axis_brake_sequence_in_tasks(
+        &expanded.tasks,
+        &expanded.topology,
+        &mut expr_errors,
+    );
     if !expr_errors.is_empty() {
         return Err(expr_errors);
     }
@@ -1147,7 +1152,21 @@ fn is_phase1_supported_extern_type(var_type: &AstVariableType) -> bool {
 
 pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
-    build_constraint_set_from_ast(&expanded.topology, &expanded.constraints, &expanded.tasks)
+    let mut errors = Vec::new();
+    validate_vertical_axis_brake_sequence_in_tasks(
+        &expanded.tasks,
+        &expanded.topology,
+        &mut errors,
+    );
+    match build_constraint_set_from_ast(&expanded.topology, &expanded.constraints, &expanded.tasks)
+    {
+        Ok(constraints) if errors.is_empty() => Ok(constraints),
+        Ok(_) => Err(errors),
+        Err(mut constraint_errors) => {
+            errors.append(&mut constraint_errors);
+            Err(errors)
+        }
+    }
 }
 
 pub fn build_timing_model(program: &PlcProgram) -> Result<TimingModel, Vec<PlcError>> {
@@ -4535,6 +4554,300 @@ fn resolve_axis_motion_parameters_on_action(
     *speed = Some(resolved_speed);
     *acceleration = Some(resolved_acc);
     *deceleration = Some(resolved_dec);
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct BrakeSequenceProgress {
+    engage_seen: bool,
+    confirm_seen: bool,
+}
+
+fn validate_vertical_axis_brake_sequence_in_tasks(
+    tasks: &TasksSection,
+    topology: &TopologySection,
+    errors: &mut Vec<PlcError>,
+) {
+    let disable_targets = collect_axis_disable_targets_from_tasks(tasks);
+    if disable_targets.is_empty() {
+        return;
+    }
+
+    let profile_devices = topology
+        .devices
+        .iter()
+        .filter(|device| {
+            disable_targets.contains(&device.name)
+                && matches!(
+                    device.device_type,
+                    DeviceType::StepperMotor | DeviceType::ServoDrive
+                )
+                && device
+                    .attributes
+                    .model_ref
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+                && device
+                    .attributes
+                    .config_ref
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if profile_devices.is_empty() {
+        return;
+    }
+
+    let axis_profiles = match resolve_axis_profiles(&profile_devices) {
+        Ok(profiles) => profiles,
+        Err(mut profile_errors) => {
+            errors.append(&mut profile_errors);
+            return;
+        }
+    };
+
+    let brake_requirements = axis_profiles
+        .iter()
+        .filter_map(|(axis, profile)| {
+            if matches!(profile.orientation, crate::ir::AxisOrientation::Vertical) {
+                profile.brake.clone().map(|brake| (axis.clone(), brake))
+            } else {
+                None
+            }
+        })
+        .collect::<HashMap<_, _>>();
+
+    if brake_requirements.is_empty() {
+        return;
+    }
+
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            let mut progress = brake_requirements
+                .keys()
+                .map(|axis| (axis.clone(), BrakeSequenceProgress::default()))
+                .collect::<HashMap<_, _>>();
+            validate_vertical_axis_brake_sequence_in_statements(
+                &step.statements,
+                step.line.max(1),
+                &task.name,
+                &step.name,
+                &brake_requirements,
+                &mut progress,
+                errors,
+            );
+        }
+    }
+}
+
+fn collect_axis_disable_targets_from_tasks(tasks: &TasksSection) -> HashSet<String> {
+    let mut targets = HashSet::new();
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            collect_axis_disable_targets_from_statements(&step.statements, &mut targets);
+        }
+    }
+    targets
+}
+
+fn collect_axis_disable_targets_from_statements(
+    statements: &[StepStatement],
+    targets: &mut HashSet<String>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::Set { target, value }) => {
+                if target.port == "enable"
+                    && set_enum_to_binary(value.as_str()) == Some(IrBinaryValue::Off)
+                {
+                    targets.insert(target.device.clone());
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                collect_axis_disable_targets_from_statements(body, targets)
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    collect_axis_disable_targets_from_statements(&branch.statements, targets);
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    collect_axis_disable_targets_from_statements(&branch.statements, targets);
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_vertical_axis_brake_sequence_in_statements(
+    statements: &[StepStatement],
+    line: usize,
+    task_name: &str,
+    step_name: &str,
+    brake_requirements: &HashMap<String, crate::ir::AxisBrakeConfig>,
+    progress: &mut HashMap<String, BrakeSequenceProgress>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::Set { target, value }) => {
+                let Some(brake) = brake_requirements.get(&target.device) else {
+                    continue;
+                };
+
+                if target.port == brake.engage_port
+                    && set_enum_to_binary(value.as_str()) == Some(brake.engage_value.clone())
+                {
+                    if let Some(state) = progress.get_mut(&target.device) {
+                        state.engage_seen = true;
+                        state.confirm_seen = false;
+                    }
+                    continue;
+                }
+
+                if target.port == "enable"
+                    && set_enum_to_binary(value.as_str()) == Some(IrBinaryValue::Off)
+                {
+                    let state = progress.get(&target.device).copied().unwrap_or_default();
+                    if !(state.engage_seen && state.confirm_seen) {
+                        errors.push(PlcError::semantic_with_reason(
+                            line,
+                            format!(
+                                "[AXIS-012] vertical axis '{}' disables enable before brake_engage_confirmed.",
+                                target.device
+                            ),
+                            format!(
+                                "task '{}', step '{}' 中请先执行 `set {}.{} {}`，再 `wait: {}.{} == {}`，最后再 `set {}.enable off`。",
+                                task_name,
+                                step_name,
+                                target.device,
+                                brake.engage_port,
+                                binary_value_text(&brake.engage_value),
+                                target.device,
+                                brake.engage_confirm_port,
+                                bool_text(brake.engage_confirm_value),
+                                target.device
+                            ),
+                        ));
+                    }
+                }
+            }
+            StepStatement::Wait(wait) => {
+                for (axis, brake) in brake_requirements {
+                    let Some(state) = progress.get(axis).copied() else {
+                        continue;
+                    };
+                    if !state.engage_seen {
+                        continue;
+                    }
+                    if wait_asserts_brake_confirmed(wait, axis, brake) {
+                        if let Some(state_mut) = progress.get_mut(axis) {
+                            state_mut.confirm_seen = true;
+                        }
+                    }
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                validate_vertical_axis_brake_sequence_in_statements(
+                    body,
+                    line,
+                    task_name,
+                    step_name,
+                    brake_requirements,
+                    progress,
+                    errors,
+                );
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    let mut branch_progress = progress.clone();
+                    validate_vertical_axis_brake_sequence_in_statements(
+                        &branch.statements,
+                        line,
+                        task_name,
+                        step_name,
+                        brake_requirements,
+                        &mut branch_progress,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    let mut branch_progress = progress.clone();
+                    validate_vertical_axis_brake_sequence_in_statements(
+                        &branch.statements,
+                        line,
+                        task_name,
+                        step_name,
+                        brake_requirements,
+                        &mut branch_progress,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn wait_asserts_brake_confirmed(
+    wait: &WaitStatement,
+    axis: &str,
+    brake: &crate::ir::AxisBrakeConfig,
+) -> bool {
+    let expected_left = format!("{axis}.{}", brake.engage_confirm_port);
+    let expected_right = brake.engage_confirm_value;
+
+    let terms = match &wait.condition {
+        WaitCondition::Single(term) => vec![term],
+        WaitCondition::And(terms) => terms.iter().collect(),
+        WaitCondition::Or(_) => return false,
+    };
+
+    terms.into_iter().any(|term| {
+        !term.is_expression_compare()
+            && matches!(term.operator, ComparisonOperator::Eq)
+            && term.left == expected_left
+            && literal_matches_bool(&term.right, expected_right)
+    })
+}
+
+fn literal_matches_bool(literal: &LiteralValue, expected: bool) -> bool {
+    match literal {
+        LiteralValue::Boolean(value) => *value == expected,
+        LiteralValue::String(value) => {
+            let normalized = value.trim();
+            (normalized == "true" && expected) || (normalized == "false" && !expected)
+        }
+        _ => false,
+    }
+}
+
+fn binary_value_text(value: &IrBinaryValue) -> &'static str {
+    match value {
+        IrBinaryValue::On => "on",
+        IrBinaryValue::Off => "off",
+    }
+}
+
+fn bool_text(value: bool) -> &'static str {
+    if value { "true" } else { "false" }
 }
 
 fn load_axis_motion_param_sets() -> Result<HashMap<String, AxisMotionParamSetDef>, Vec<PlcError>> {
@@ -10025,6 +10338,56 @@ task fault:
             .collect::<Vec<_>>()
             .join("\n");
         assert!(joined.contains("[AXIS-011]"));
+    }
+
+    #[test]
+    fn rejects_vertical_axis_disable_without_brake_confirmation() {
+        let input = "[topology]
+device axis_z: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_vertical_brake
+}
+
+[constraints]
+
+[tasks]
+task fault:
+    step stop_now:
+        action: set axis_z.enable off
+";
+
+        let program = parse_plc(input).expect("垂直轴示例语法应可解析");
+        let errors =
+            build_state_machine(&program).expect_err("未确认抱闸直接 disable 应触发 AXIS-012");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-012]"));
+        assert!(joined.contains("brake_engage_confirmed"));
+    }
+
+    #[test]
+    fn accepts_vertical_axis_disable_after_brake_confirmation() {
+        let input = "[topology]
+device axis_z: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_vertical_brake
+}
+
+[constraints]
+
+[tasks]
+task fault:
+    step safe_stop:
+        action: set axis_z.brake_cmd on
+        wait: axis_z.brake_engaged == true
+        action: set axis_z.enable off
+";
+
+        let program = parse_plc(input).expect("垂直轴示例语法应可解析");
+        build_state_machine(&program).expect("先抱闸确认再 disable 应通过语义校验");
     }
 
     #[test]

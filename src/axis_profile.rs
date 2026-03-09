@@ -1,6 +1,6 @@
 use crate::ast::{DeviceDeclaration, DeviceType};
 use crate::error::PlcError;
-use crate::ir::{AxisDeviceType, AxisProfile};
+use crate::ir::{AxisBrakeConfig, AxisDeviceType, AxisOrientation, AxisProfile, BinaryValue};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -46,9 +46,22 @@ struct AxisConfigDef {
     speed_limit: f64,
     acceleration_limit: f64,
     #[serde(default)]
+    orientation: Option<String>,
+    #[serde(default)]
+    brake: Option<AxisBrakeConfigDef>,
+    #[serde(default)]
     soft_limit_min: Option<f64>,
     #[serde(default)]
     soft_limit_max: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AxisBrakeConfigDef {
+    engage_port: String,
+    engage_value: String,
+    engage_confirm_port: String,
+    engage_confirm_value: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -352,6 +365,49 @@ fn resolve_axis_profiles_with_dirs(
             continue;
         }
 
+        let orientation = match parse_axis_orientation(config.orientation.as_deref()) {
+            Ok(value) => value,
+            Err(reason) => {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXP-012] axis config '{}' has invalid orientation for '{}'.",
+                        config_ref, device.name
+                    ),
+                    reason,
+                ));
+                continue;
+            }
+        };
+
+        let brake = match parse_axis_brake_config(config.brake.as_ref()) {
+            Ok(value) => value,
+            Err(reason) => {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXP-012] axis config '{}' has invalid brake config for '{}'.",
+                        config_ref, device.name
+                    ),
+                    reason,
+                ));
+                continue;
+            }
+        };
+
+        if matches!(orientation, AxisOrientation::Vertical) && brake.is_none() {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!(
+                    "[AXP-012] axis config '{}' for '{}' declares orientation=vertical but no brake config.",
+                    config_ref, device.name
+                ),
+                "请在 axis_config 中补充 brake.engage_port / brake.engage_value / brake.engage_confirm_port / brake.engage_confirm_value。"
+                    .to_string(),
+            ));
+            continue;
+        }
+
         let soft_limits = match (config.soft_limit_min, config.soft_limit_max) {
             (Some(min), Some(max)) => {
                 if !min.is_finite() || !max.is_finite() {
@@ -470,6 +526,8 @@ fn resolve_axis_profiles_with_dirs(
                 device_type: axis_type,
                 motor_class_id: motor_class.name.clone(),
                 family_id: family.name.clone(),
+                orientation,
+                brake,
                 position_unit: model.position_unit.clone(),
                 max_speed: config.speed_limit as f32,
                 max_acceleration: config.acceleration_limit as f32,
@@ -493,6 +551,56 @@ fn axis_type_name(axis_type: &AxisDeviceType) -> &'static str {
     match axis_type {
         AxisDeviceType::StepperMotor => "stepper_motor",
         AxisDeviceType::ServoDrive => "servo_drive",
+    }
+}
+
+fn parse_axis_orientation(raw: Option<&str>) -> Result<AxisOrientation, String> {
+    match raw.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(AxisOrientation::Horizontal),
+        Some("horizontal") => Ok(AxisOrientation::Horizontal),
+        Some("vertical") => Ok(AxisOrientation::Vertical),
+        Some(other) => Err(format!(
+            "orientation 仅支持 horizontal/vertical，当前为 `{other}`。"
+        )),
+    }
+}
+
+fn parse_axis_brake_config(
+    raw: Option<&AxisBrakeConfigDef>,
+) -> Result<Option<AxisBrakeConfig>, String> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+
+    let engage_port = raw.engage_port.trim();
+    if engage_port.is_empty() {
+        return Err("brake.engage_port 不能为空，请填写轴设备上的制动命令端口。".to_string());
+    }
+
+    let engage_confirm_port = raw.engage_confirm_port.trim();
+    if engage_confirm_port.is_empty() {
+        return Err(
+            "brake.engage_confirm_port 不能为空，请填写轴设备上的制动确认端口。".to_string(),
+        );
+    }
+
+    let engage_value = parse_binary_value(raw.engage_value.trim())?;
+
+    Ok(Some(AxisBrakeConfig {
+        engage_port: engage_port.to_string(),
+        engage_value,
+        engage_confirm_port: engage_confirm_port.to_string(),
+        engage_confirm_value: raw.engage_confirm_value,
+    }))
+}
+
+fn parse_binary_value(raw: &str) -> Result<BinaryValue, String> {
+    match raw {
+        "on" => Ok(BinaryValue::On),
+        "off" => Ok(BinaryValue::Off),
+        other => Err(format!(
+            "brake.engage_value 仅支持 on/off，当前为 `{other}`。"
+        )),
     }
 }
 
@@ -1209,6 +1317,76 @@ soft_limit_max = -100.0
         let errors =
             resolve_with_fixture(&devices, &dirs).expect_err("inverted soft limits should fail");
         assert_error_contains(&errors, "[AXP-011]");
+
+        fs::remove_dir_all(dirs.root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn resolves_vertical_axis_brake_config() {
+        let dirs = mk_temp_axis_dirs("vertical_brake_ok");
+        seed_default_axis_defs(&dirs);
+        fs::write(
+            dirs.configs.join("vertical_brake.toml"),
+            r#"
+name = "vertical_brake"
+model_id = "stepper_generic"
+position_unit = "pulse"
+speed_limit = 3000.0
+acceleration_limit = 10000.0
+orientation = "vertical"
+
+[brake]
+engage_port = "brake_cmd"
+engage_value = "off"
+engage_confirm_port = "brake_engaged"
+engage_confirm_value = true
+"#,
+        )
+        .expect("write vertical brake config");
+
+        let devices = parse_devices(
+            "device axis_z: stepper_motor { model_ref: stepper_generic, config_ref: vertical_brake }",
+        );
+        let profiles =
+            resolve_with_fixture(&devices, &dirs).expect("vertical brake config should resolve");
+        let profile = profiles.get("axis_z").expect("axis_z profile should exist");
+        assert_eq!(profile.orientation, AxisOrientation::Vertical);
+        let brake = profile
+            .brake
+            .as_ref()
+            .expect("vertical axis should carry brake");
+        assert_eq!(brake.engage_port, "brake_cmd");
+        assert_eq!(brake.engage_value, BinaryValue::Off);
+        assert_eq!(brake.engage_confirm_port, "brake_engaged");
+        assert!(brake.engage_confirm_value);
+
+        fs::remove_dir_all(dirs.root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn rejects_vertical_axis_config_without_brake() {
+        let dirs = mk_temp_axis_dirs("vertical_missing_brake");
+        seed_default_axis_defs(&dirs);
+        fs::write(
+            dirs.configs.join("vertical_missing_brake.toml"),
+            r#"
+name = "vertical_missing_brake"
+model_id = "stepper_generic"
+position_unit = "pulse"
+speed_limit = 3000.0
+acceleration_limit = 10000.0
+orientation = "vertical"
+"#,
+        )
+        .expect("write invalid vertical config");
+
+        let devices = parse_devices(
+            "device axis_z: stepper_motor { model_ref: stepper_generic, config_ref: vertical_missing_brake }",
+        );
+        let errors = resolve_with_fixture(&devices, &dirs)
+            .expect_err("vertical axis without brake should fail");
+        assert_error_contains(&errors, "[AXP-012]");
+        assert_error_contains(&errors, "orientation=vertical");
 
         fs::remove_dir_all(dirs.root).expect("cleanup temp dir");
     }

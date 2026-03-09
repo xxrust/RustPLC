@@ -173,8 +173,8 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented vertical-axis brake sequencing contract by extending axis_config with orientation+brake schema, adding semantic AXIS-012 enforcement (disable requires prior brake engage + confirm), and adding safety preflight diagnostics plus regression tests for pass/fail paths."
     },
     {
       "id": "US-012",

@@ -392,6 +392,7 @@ ST 代码生成（`src/codegen/st.rs`）从 IR 生成 IEC 61131-3 ST 代码。
 5. `axis.move_relative/absolute` 支持 `params` 参数集引用 + 动作内 `speed/acc/dec` 覆盖；解析规则在 `src/parser/plc.pest`，降级逻辑在 `src/parser/mod.rs`
 6. 语义阶段会按优先级 `inline overrides > params 引用 > device.motion_param_set` 解析最终参数；缺失 `speed/acc/dec` 报 `AXIS-007`，`acc/dec` 超过 profile 上限报 `AXIS-009`
 7. 软限位仅在 `axis_configs/*.toml` 通过 `soft_limit_min/soft_limit_max` 成对声明；缺失任一侧或范围反转在 `src/axis_profile.rs` 报 `AXP-011`，`axis.move_absolute` 静态越界在 `src/semantic/mod.rs` 报 `AXIS-011`
+8. 垂直轴制动顺序通过 `axis_config.orientation = "vertical"` + `[brake]` 配置启用；语义/安全预检仅在任务里出现 `set <axis>.enable off` 且该轴具备 `model_ref/config_ref` 时触发，违规报 `AXIS-012`
 
 ### 修改 I/O 映射
 

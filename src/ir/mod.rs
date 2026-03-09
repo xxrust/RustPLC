@@ -34,11 +34,34 @@ pub enum AxisDeviceType {
     ServoDrive,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisOrientation {
+    Horizontal,
+    Vertical,
+}
+
+fn default_axis_orientation() -> AxisOrientation {
+    AxisOrientation::Horizontal
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AxisBrakeConfig {
+    pub engage_port: String,
+    pub engage_value: BinaryValue,
+    pub engage_confirm_port: String,
+    pub engage_confirm_value: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AxisProfile {
     pub device_type: AxisDeviceType,
     pub motor_class_id: String,
     pub family_id: String,
+    #[serde(default = "default_axis_orientation")]
+    pub orientation: AxisOrientation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brake: Option<AxisBrakeConfig>,
     pub position_unit: String,
     pub max_speed: f32,
     pub max_acceleration: f32,
