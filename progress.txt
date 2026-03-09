@@ -19,6 +19,7 @@ Started: 2026-03-09 00:00:00 CST
 - `must_complete_within_worst_case` 的 timeout 预算不能只看 `StepStatement::Timeout`；`axis.move_*` 的内联 `timeout` 也必须在时序估算里显式计入。
 - 轴异常因果链校验需覆盖 `timeout` 与 `on_reject/on_motion_fault/on_safety_fault` 全分支；只校验 fault 桶会漏掉 timeout 恢复链断裂。
 - `trace-doctor` 诊断码演进采用“双码并存”模式：`issue_code` 使用新主码（如 `AXF-*`），同时保留 `legacy_issue_code`（`DIAG-*`）以保证向后可解析；新增诊断字段优先做可选增量（如 `source_location`）。
+- DSL 合约变更后要同步更新 `.codex/skills/plc-gen/SKILL.md` 与 `.codex/skills/plc-system/SKILL.md`，确保生成流程不会输出已被编译器白名单拒绝的字段。
 
 ---
 
@@ -372,4 +373,31 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: 轴故障路由“主桶 + 细分 matcher”的行为回归，使用状态机层快照比 runtime tick 路径更稳定、更直观。
   - Gotchas encountered: `kind: vendor` 路由若排在 `code` 路由前，vendor 故障会优先命中该路由；`code` 断言应用非 vendor kind 才能验证“按码命中”。
   - Useful context: 新增样例可直接复用为后续 US-017 文档中的“正常/可恢复/不可恢复/安全”操作手册示例输入。
+---
+
+## [2026-03-10 01:43:45 CST] - US-017
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 交付四份文档：
+    - 架构文档 `docs/architecture/axis-fault-formal-v1.md`
+    - DSL 合同文档 `docs/axis_fault_dsl_contract_spec.md`
+    - 故障策略手册 `docs/axis_fault_policy_operations_manual.md`
+    - 参数分层说明 `docs/axis_parameter_hierarchy_guide.md`
+  - 在手册中补齐“调试命令清单 + 常见故障诊断路径”，并只保留仓库内已验证可运行的命令。
+  - 同步更新技能说明：`plc-gen` 增加 axis 参数白名单/细分故障路由/传播范围规则，`plc-system` 增加轴参数层级与 fault policy 采集清单。
+  - 更新 `AGENTS.md`：新增“DSL 合约变更需同步 skill 文档”的可复用协作模式。
+- Files changed
+  - `AGENTS.md`
+  - `.codex/skills/plc-gen/SKILL.md`
+  - `.codex/skills/plc-system/SKILL.md`
+  - `docs/architecture/axis-fault-formal-v1.md`
+  - `docs/axis_fault_dsl_contract_spec.md`
+  - `docs/axis_fault_policy_operations_manual.md`
+  - `docs/axis_parameter_hierarchy_guide.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: 交付型故事中的文档命令应优先选择“已本地执行成功”的最小命令集合，避免把历史命令漂移带进操作手册。
+  - Gotchas encountered: 当前仓库 `cargo run` 需显式指定 `--bin rust_plc -- <file>`；直接 `cargo run -- <file>` 会因多二进制目标失败。
+  - Useful context: 轴异常文档已拆为“架构/合同/手册/参数分层”四层，可分别承接后续规范冻结与实施演进。
 ---

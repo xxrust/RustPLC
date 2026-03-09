@@ -355,6 +355,7 @@ ST 代码生成（`src/codegen/st.rs`）从 IR 生成 IEC 61131-3 ST 代码。
 - **规范文档**（`docs/*_spec.md`）：冻结的语法合约（extern, operation-contract）
 - **开发指南**（`docs/*_development_guide.md`）：推出指导、实际示例、迁移说明
 - **AGENTS.md**（本文件）：面向 Agent 的实现模式和架构决策
+- 若 DSL 合约/轴语义有新增字段或白名单收敛，需同步更新 `.codex/skills/plc-gen/SKILL.md` 与 `.codex/skills/plc-system/SKILL.md`，避免生成器提示与编译器契约漂移
 
 ---
 

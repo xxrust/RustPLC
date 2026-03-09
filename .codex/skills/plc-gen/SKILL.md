@@ -431,7 +431,9 @@ action: call <name>(<arg>, ...) -> (out_a, out_b, out_c)
 - `motor` 动作使用显式端口：`set motor_x.run on/off`（`set motor_x on/off` 属于旧写法）。
 - 传送/风扇等普通启停电机继续使用 `set motor_x.run on/off`。
 - 轴定位运动（步进/伺服）使用 `axis.move_relative` / `axis.move_absolute`，不得再用 `set motor_x.run + delay` 组合做定位。
+- 轴设备参数必须走分层引用：`model_ref` + `config_ref`（可选 `motion_param_set`）；禁止恢复内联轴参数，违例会触发 `AXP-006`。
 - `axis.move_*` 必须显式给出 4 条分支：`timeout`、`on_reject`、`on_motion_fault`、`on_safety_fault`。
+- `axis.move_*` 参数白名单仅包含 `distance/position/params/speed/acc/dec`；未知字段（如 `vel`）会触发 `AXIS-013`。
 - `axis.move_*` 目标设备必须是 `stepper_motor` 或 `servo_drive`；`op.motor.move_to(...)` 在当前阶段禁用。
 
 状态在 `safety:` 约束中使用时格式为 `device.state`，例如：
@@ -538,14 +540,18 @@ task <名称>:
         action: retract <气缸>         # 缩回
         action: set <设备> on/off      # 开关（阀/普通数字设备）
         action: set <设备>.<端口> on/off # 显式端口开关（电机请用 set motor_x.run on/off）
-        action: axis.move_relative(<axis_device>, distance: <real>, speed: <real>)
+        action: axis.move_relative(<axis_device>, distance: <real>, params: <param_set>, speed: <real>, acc: <real>, dec: <real>)
             timeout: 800ms -> <任务>.<step>
             on_reject -> <任务>.<step>
+            on_reject(kind: vendor) -> <任务>.<step>
+            on_reject(code: 1201) -> <任务>.<step>
             on_motion_fault -> <任务>.<step>
             on_safety_fault -> <任务>.<step>
-        action: axis.move_absolute(<axis_device>, position: <real>, speed: <real>)
+        action: axis.move_absolute(<axis_device>, position: <real>, params: <param_set>, speed: <real>, acc: <real>, dec: <real>)
             timeout: 800ms -> <任务>.<step>
             on_reject -> <任务>.<step>
+            on_reject(kind: vendor) -> <任务>.<step>
+            on_reject(code: 1201) -> <任务>.<step>
             on_motion_fault -> <任务>.<step>
             on_safety_fault -> <任务>.<step>
         action: set_analog <AO> <值>   # 模拟量输出
@@ -593,7 +599,10 @@ step detect:
 
 - 需要“走到位置/角度”的运动任务，优先使用 `stepper_motor` 或 `servo_drive` + `axis.move_relative/axis.move_absolute`。
 - `axis.move_*` 必须带完整异常分流：`timeout`、`on_reject`、`on_motion_fault`、`on_safety_fault`，缺失会触发 `AXIS-001`~`AXIS-004`。
+- 细分 fault route 可叠加在主桶分支上：`on_reject(kind: vendor)` / `on_reject(code: 1201)` 等；按声明顺序首条命中，未命中回退主桶。
 - `axis.move_*` 的目标设备必须是 `stepper_motor` 或 `servo_drive`，否则触发 `AXIS-005`。
+- 运动参数解析优先级固定：`inline overrides (speed/acc/dec)` > `params` 引用 > 设备 `motion_param_set`。
+- `axis_fault_contract` 的传播字段严格白名单：`propagation_scope` 仅支持 `self/group/all/followers/custom`，仅 `custom` 允许 `propagation_targets`。
 - `op.motor.move_to(...)` 在当前 MVP 中禁用，不作为替代写法。
 - `motor.run` 仍用于普通启停类设备（传送带、风扇、泵），但不再作为定位动作模板。
 
@@ -841,6 +850,7 @@ task done:
 10. **完整的 relation 连接链** — 每个设备的 relation 和传感器的 detects 必须正确声明（编译器据此自动推断因果性）
 11. **每个气缸都应有 _ext 和 _ret 两个传感器** — 即使当前流程中某个方向没有 `wait` 确认
 12. **轴定位动作使用 Axis Motion 写法** — `axis.move_*` + 四类故障分流，不使用 `run+delay` 做定位
+13. **轴故障策略通过 `axis_fault_contract` 声明** — 明确 stop_mode / severity / propagation_scope，避免在任务中隐式散落
 
 ---
 
@@ -893,7 +903,10 @@ task done:
 - [ ] `motor` 设备在 `safety:` 约束中是否使用 `motor_x.run.on` 而非 `motor_x.on`？
 - [ ] 位置/角度运动是否改用 `axis.move_relative` / `axis.move_absolute`（而非 `set motor_x.run + delay`）？
 - [ ] 每个 `axis.move_*` 是否都包含 `timeout` + `on_reject` + `on_motion_fault` + `on_safety_fault`？
+- [ ] 是否只使用 `axis.move_*` 参数白名单字段（`distance/position/params/speed/acc/dec`）？
 - [ ] `axis.move_*` 目标是否是 `stepper_motor`/`servo_drive`（避免触发 `AXIS-005`）？
+- [ ] 轴设备是否使用 `model_ref/config_ref`（可选 `motion_param_set`）而非内联参数？
+- [ ] 若定义 `axis_fault_contract`，`propagation_scope` 是否在 `self/group/all/followers/custom` 中，且仅 `custom` 使用 `propagation_targets`？
 - [ ] PID 的 `pv`/`out` 名称是否与 `analog_input`/`analog_output` 设备名及 `plc_main.ports` 端口名完全一致？
 - [ ] `external: true` 的模拟量是否避免了 `conflicts_with` 约束（改用任务逻辑保护）？
 - [ ] 两个状态若只在不同分支路径中出现（顺序互斥），是否避免了 `conflicts_with`（防止 BMC 跨循环误报）？

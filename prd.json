@@ -264,8 +264,8 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Delivered four operator-facing documents for axis fault formalization: architecture overview (`docs/architecture/axis-fault-formal-v1.md`), frozen DSL contract (`docs/axis_fault_dsl_contract_spec.md`), fault policy operations manual (`docs/axis_fault_policy_operations_manual.md`), and axis parameter hierarchy guide (`docs/axis_parameter_hierarchy_guide.md`). Updated `.codex/skills/plc-gen/SKILL.md` and `.codex/skills/plc-system/SKILL.md` to include new axis whitelist, fault-routing, propagation, and hierarchy requirements. Validation run: `cargo check`, `cargo test --test axis_fault_routing_trace_snapshot_us016`, `cargo test --test runtime_bridge_us006`, `cargo test --test examples_integration`, and `cargo run --bin rust_plc -- examples/two_cylinder.plc`."
     }
   ]
 }

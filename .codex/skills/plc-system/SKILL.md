@@ -144,6 +144,25 @@ description: "Generate system semantic description (.system.md) from natural lan
 - "哪些传感器必须同时满足才能继续？"
 - "哪些状态是互斥的？"
 
+### 第五步补充：轴运动与故障策略（有 axis 时必问）
+
+当项目包含 `stepper_motor` / `servo_drive` 或需要定位控制时，追加以下问题：
+
+**参数分层：**
+- "轴型号、配置和默认参数集分别是什么？（`model_ref/config_ref/motion_param_set`）"
+- "现场是否允许动作内覆盖 speed/acc/dec？覆盖边界由谁维护？"
+- "是否需要软限位（min/max）和垂直轴制动约束？"
+
+**故障策略矩阵：**
+- "轴故障严重级别是什么（recoverable/non_recoverable/safety_critical）？"
+- "停机策略采用 controlled / quick / immediate 哪一种？"
+- "是否需要人工确认（manual_ack_required）和自动复位策略（auto_reset_policy）？"
+
+**传播范围：**
+- "故障传播范围是 self/group/all/followers/custom 哪一种？"
+- "若是 custom，目标轴名单是什么？"
+- "若是 followers，主从轴 cam coupling 链是否明确？"
+
 ### 第六步：生成 .system.md 文件
 
 基于以上确认的信息，生成 `.system.md` 文件，包含以下章节：
@@ -221,6 +240,13 @@ description: "Generate system semantic description (.system.md) from natural lan
 ### 互锁关系
 [列出传感器组合条件、互斥状态]
 
+## 轴运动补充（如适用）
+- **参数层级**：`model_ref/config_ref/motion_param_set` 选择依据
+- **动作覆盖策略**：是否允许 `speed/acc/dec` inline 覆盖与审批规则
+- **故障策略矩阵**：severity / stop_mode / auto_reset_policy / manual_ack_required
+- **传播策略**：`propagation_scope` 与（若 custom）`propagation_targets`
+- **回零与软限位**：是否要求 homing 前置、软限位范围与越界处理
+
 ## 设计偏好
 - **命名语言**：[中文 / 英文 / 拼音]
 - **代码风格**：[简洁 / 详细注释]
@@ -288,6 +314,9 @@ description: "Generate system semantic description (.system.md) from natural lan
 - [ ] 启动停机流程是否清晰？（初始化步骤、正常停止、急停）
 - [ ] 测试策略是否明确？（手动测试、自动测试、单步模式、维护模式）
 - [ ] 关键约束是否列出？（安全规则、时序要求、互锁关系）
+- [ ] 若包含轴运动，是否明确参数层级（`model_ref/config_ref/motion_param_set`）？
+- [ ] 若包含轴运动，是否明确 fault policy（severity/stop_mode/ack/auto_reset）？
+- [ ] 若包含轴运动，是否明确传播范围（`self/group/all/followers/custom`）及 custom 目标？
 - [ ] 是否有"对 AI 的指引"章节？（指导后续代码生成）
 - [ ] 文件命名是否符合规则？（与未来的 .plc 文件同名）
 - [ ] 是否已经过工程师确认？
@@ -335,5 +364,7 @@ description: "Generate system semantic description (.system.md) from natural lan
 - 启动停机 → 决定 init/stop 任务的实现
 - 测试策略 → 决定是否生成 manual_test/auto_test 任务
 - 设计偏好 → 决定命名风格、注释详细程度
+- 轴参数层级 → 决定 `axis.move_*` 的 params 引用与覆盖策略
+- 轴故障策略 → 决定 `axis_fault_contract` 与 `on_reject/on_motion_fault/on_safety_fault` 路由设计
 
 确保 `.system.md` 中的"对 AI 的指引"章节清晰明确，这将直接影响后续代码生成的质量。
