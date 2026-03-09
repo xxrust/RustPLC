@@ -700,8 +700,11 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             on_reject,
             on_motion_fault,
             on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         } => format!(
-            "(* AXIS_MOVE_RELATIVE {} distance={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} *)",
+            "(* AXIS_MOVE_RELATIVE {} distance={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
             normalize_identifier_for_st(target),
             distance_raw.trim(),
             speed_raw.trim(),
@@ -710,6 +713,9 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             render_axis_fault_target(on_reject),
             render_axis_fault_target(on_motion_fault),
             render_axis_fault_target(on_safety_fault),
+            render_axis_fault_routes(on_reject_routes),
+            render_axis_fault_routes(on_motion_fault_routes),
+            render_axis_fault_routes(on_safety_fault_routes),
         ),
         TransitionAction::AxisMoveAbsolute {
             target,
@@ -720,8 +726,11 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             on_reject,
             on_motion_fault,
             on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         } => format!(
-            "(* AXIS_MOVE_ABSOLUTE {} position={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} *)",
+            "(* AXIS_MOVE_ABSOLUTE {} position={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
             normalize_identifier_for_st(target),
             position_raw.trim(),
             speed_raw.trim(),
@@ -730,6 +739,9 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             render_axis_fault_target(on_reject),
             render_axis_fault_target(on_motion_fault),
             render_axis_fault_target(on_safety_fault),
+            render_axis_fault_routes(on_reject_routes),
+            render_axis_fault_routes(on_motion_fault_routes),
+            render_axis_fault_routes(on_safety_fault_routes),
         ),
     }
 }
@@ -747,6 +759,28 @@ fn render_axis_fault_target(branch: &crate::ir::AxisFaultBranch) -> String {
         Some(code) => format!("{target}[{code}]"),
         None => target,
     }
+}
+
+fn render_axis_fault_routes(routes: &[crate::ir::AxisFaultRouteBranch]) -> String {
+    if routes.is_empty() {
+        return "-".to_string();
+    }
+    routes
+        .iter()
+        .map(|route| {
+            let target = render_axis_target(&route.target_task, route.target_step.as_deref());
+            let kind = route
+                .kind
+                .map(|value| format!("{:?}", value).to_lowercase())
+                .unwrap_or_else(|| "*".to_string());
+            let code = route
+                .code
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "*".to_string());
+            format!("{kind}:{code}->{target}")
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn render_bool_assignment_expr(expr_raw: &str) -> String {
@@ -1579,6 +1613,9 @@ mod tests {
                         vendor_code: None,
                         error_code: Some("AXIS_SAFETY".to_string()),
                     },
+                    on_reject_routes: vec![],
+                    on_motion_fault_routes: vec![],
+                    on_safety_fault_routes: vec![],
                 }],
                 timers: vec![],
             }],
@@ -1593,5 +1630,6 @@ mod tests {
         assert!(st.contains("on_reject->fault.reject[AXIS_REJECT]"));
         assert!(st.contains("on_motion_fault->fault.motion_fault[AXIS_MOTION]"));
         assert!(st.contains("on_safety_fault->fault.safety_fault[AXIS_SAFETY]"));
+        assert!(st.contains("routes:-|-|-"));
     }
 }

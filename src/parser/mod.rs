@@ -1,15 +1,15 @@
 use crate::ast::{
     ActionStatement, ActionTarget, AxisAutoResetPolicy, AxisFaultContractDeclaration,
-    AxisFaultSeverity, AxisStopMode, BinaryOperator, Branch, CamPoint, CamTableDeclaration,
-    CamTableMode, CausalityConstraint, ComparisonOperator, ConditionExpression, ConstraintsSection,
-    DeviceAttributes, DeviceDeclaration, DevicePort, DeviceTags, DeviceType, DurationValue,
-    Expression, ExternCallBinding, ExternFunctionContract, ExternFunctionDeclaration,
-    ExternFunctionParameter, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective,
-    ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch, SafetyConstraint,
-    SafetyOperand, SafetyRelation, StateReference, StepDeclaration, StepStatement, TaskDeclaration,
-    TasksSection, TimeUnit, TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget,
-    TopologyConnection, TopologyRelation, TopologySection, VariableDeclaration, VariableType,
-    WaitCondition, WaitStatement,
+    AxisFaultRouteDirective, AxisFaultRouteKind, AxisFaultSeverity, AxisStopMode, BinaryOperator,
+    Branch, CamPoint, CamTableDeclaration, CamTableMode, CausalityConstraint, ComparisonOperator,
+    ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DevicePort,
+    DeviceTags, DeviceType, DurationValue, Expression, ExternCallBinding, ExternFunctionContract,
+    ExternFunctionDeclaration, ExternFunctionParameter, GotoDirective, LiteralValue, MeasuredValue,
+    OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch,
+    SafetyConstraint, SafetyOperand, SafetyRelation, StateReference, StepDeclaration,
+    StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective, TimingConstraint,
+    TimingRelation, TimingTarget, TopologyConnection, TopologyRelation, TopologySection,
+    VariableDeclaration, VariableType, WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use pest::Parser;
@@ -1738,6 +1738,9 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
     let mut on_reject = None::<GotoDirective>;
     let mut on_motion_fault = None::<GotoDirective>;
     let mut on_safety_fault = None::<GotoDirective>;
+    let mut on_reject_routes = Vec::<AxisFaultRouteDirective>::new();
+    let mut on_motion_fault_routes = Vec::<AxisFaultRouteDirective>::new();
+    let mut on_safety_fault_routes = Vec::<AxisFaultRouteDirective>::new();
     let mut is_relative = None::<bool>;
 
     for part in pair.into_inner() {
@@ -1766,13 +1769,31 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
                 timeout = Some(parse_axis_timeout_branch(part)?);
             }
             Rule::axis_on_reject_branch => {
-                on_reject = Some(parse_axis_fault_branch(part, "on_reject")?);
+                push_axis_fault_branch(
+                    parse_axis_fault_branch(part, "on_reject")?,
+                    line,
+                    "on_reject",
+                    &mut on_reject,
+                    &mut on_reject_routes,
+                )?;
             }
             Rule::axis_on_motion_fault_branch => {
-                on_motion_fault = Some(parse_axis_fault_branch(part, "on_motion_fault")?);
+                push_axis_fault_branch(
+                    parse_axis_fault_branch(part, "on_motion_fault")?,
+                    line,
+                    "on_motion_fault",
+                    &mut on_motion_fault,
+                    &mut on_motion_fault_routes,
+                )?;
             }
             Rule::axis_on_safety_fault_branch => {
-                on_safety_fault = Some(parse_axis_fault_branch(part, "on_safety_fault")?);
+                push_axis_fault_branch(
+                    parse_axis_fault_branch(part, "on_safety_fault")?,
+                    line,
+                    "on_safety_fault",
+                    &mut on_safety_fault,
+                    &mut on_safety_fault_routes,
+                )?;
             }
             _ => {}
         }
@@ -1793,6 +1814,9 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
             on_reject,
             on_motion_fault,
             on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         }),
         Some(false) => Ok(ActionStatement::AxisMoveAbsolute {
             target,
@@ -1806,12 +1830,43 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
             on_reject,
             on_motion_fault,
             on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         }),
         None => Err(PlcError::parse(
             line,
             "axis.move 语句必须是 axis.move_relative 或 axis.move_absolute",
         )),
     }
+}
+
+fn push_axis_fault_branch(
+    branch: ParsedAxisFaultBranch,
+    line: usize,
+    branch_name: &str,
+    primary: &mut Option<GotoDirective>,
+    routes: &mut Vec<AxisFaultRouteDirective>,
+) -> Result<(), PlcError> {
+    let ParsedAxisFaultBranch { target, kind, code } = branch;
+    if kind.is_none() && code.is_none() {
+        if primary.is_some() {
+            return Err(PlcError::parse(
+                line,
+                format!("{branch_name} 主桶分支重复声明"),
+            ));
+        }
+        *primary = Some(target);
+        return Ok(());
+    }
+
+    routes.push(AxisFaultRouteDirective {
+        line: target.line,
+        kind,
+        code,
+        target,
+    });
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -2121,14 +2176,105 @@ fn parse_axis_timeout_branch(pair: Pair<Rule>) -> Result<TimeoutDirective, PlcEr
     })
 }
 
-fn parse_axis_fault_branch(pair: Pair<Rule>, branch_name: &str) -> Result<GotoDirective, PlcError> {
-    let line = line_of(&pair);
-    let target = pair
-        .into_inner()
-        .find(|part| part.as_rule() == Rule::axis_branch_target)
-        .ok_or_else(|| PlcError::parse(line, format!("{branch_name} 缺少跳转目标")))?;
+#[derive(Debug)]
+struct ParsedAxisFaultBranch {
+    target: GotoDirective,
+    kind: Option<AxisFaultRouteKind>,
+    code: Option<i32>,
+}
 
-    parse_axis_branch_target(target, branch_name)
+fn parse_axis_fault_branch(
+    pair: Pair<Rule>,
+    branch_name: &str,
+) -> Result<ParsedAxisFaultBranch, PlcError> {
+    let line = line_of(&pair);
+    let mut target = None::<GotoDirective>;
+    let mut kind = None::<AxisFaultRouteKind>;
+    let mut code = None::<i32>;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::axis_fault_route_matcher => {
+                for matcher in part.into_inner() {
+                    let matcher = if matcher.as_rule() == Rule::axis_fault_route_matcher_entry {
+                        first_inner(matcher, line, "axis fault route matcher")?
+                    } else {
+                        matcher
+                    };
+                    match matcher.as_rule() {
+                        Rule::axis_fault_route_kind_entry => {
+                            if kind.is_some() {
+                                return Err(PlcError::parse(
+                                    line,
+                                    format!("{branch_name} matcher kind 重复声明"),
+                                ));
+                            }
+                            kind = Some(parse_axis_fault_route_kind_entry(matcher, branch_name)?);
+                        }
+                        Rule::axis_fault_route_code_entry => {
+                            if code.is_some() {
+                                return Err(PlcError::parse(
+                                    line,
+                                    format!("{branch_name} matcher code 重复声明"),
+                                ));
+                            }
+                            code = Some(parse_axis_fault_route_code_entry(matcher, branch_name)?);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Rule::axis_branch_target => {
+                target = Some(parse_axis_branch_target(part, branch_name)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ParsedAxisFaultBranch {
+        target: target
+            .ok_or_else(|| PlcError::parse(line, format!("{branch_name} 缺少跳转目标")))?,
+        kind,
+        code,
+    })
+}
+
+fn parse_axis_fault_route_kind_entry(
+    pair: Pair<Rule>,
+    branch_name: &str,
+) -> Result<AxisFaultRouteKind, PlcError> {
+    let line = line_of(&pair);
+    let value = pair
+        .into_inner()
+        .find(|part| part.as_rule() == Rule::axis_fault_route_kind)
+        .ok_or_else(|| PlcError::parse(line, format!("{branch_name} matcher kind 缺少值")))?;
+
+    match value.as_str() {
+        "reject" => Ok(AxisFaultRouteKind::Reject),
+        "motion" => Ok(AxisFaultRouteKind::Motion),
+        "safety" => Ok(AxisFaultRouteKind::Safety),
+        "vendor" => Ok(AxisFaultRouteKind::Vendor),
+        other => Err(PlcError::parse(
+            line,
+            format!("{branch_name} matcher kind 不支持值: {other}"),
+        )),
+    }
+}
+
+fn parse_axis_fault_route_code_entry(pair: Pair<Rule>, branch_name: &str) -> Result<i32, PlcError> {
+    let line = line_of(&pair);
+    let raw = pair
+        .into_inner()
+        .find(|part| part.as_rule() == Rule::integer)
+        .ok_or_else(|| PlcError::parse(line, format!("{branch_name} matcher code 缺少值")))?
+        .as_str();
+
+    raw.parse::<i32>().map_err(|_| {
+        PlcError::parse(
+            line,
+            format!("{branch_name} matcher code 无法解析为 32 位整数: {raw}"),
+        )
+    })
 }
 
 fn parse_axis_branch_target(
@@ -4894,6 +5040,9 @@ task fault:
                 on_reject,
                 on_motion_fault,
                 on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
             }) => {
                 assert_eq!(target.device, "axis_x");
                 assert_eq!(params.as_deref(), Some("stepper_default_fast"));
@@ -4923,6 +5072,9 @@ task fault:
                     on_safety_fault.as_ref().and_then(|v| v.step.as_deref()),
                     Some("safety_fault")
                 );
+                assert!(on_reject_routes.is_empty());
+                assert!(on_motion_fault_routes.is_empty());
+                assert!(on_safety_fault_routes.is_empty());
             }
             other => panic!("期望 AxisMoveRelative，实际: {other:?}"),
         }
@@ -4971,6 +5123,107 @@ task fault:
             }
             other => panic!("期望 AxisMoveRelative，实际: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_axis_move_with_refined_fault_routes() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step start:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_default
+            on_motion_fault(kind: vendor) -> fault.motion_vendor
+            on_motion_fault(code: 17) -> fault.motion_code_17
+            on_safety_fault -> fault.safety_default
+task fault:
+    step timeout:
+    step reject:
+    step motion_default:
+    step motion_vendor:
+    step motion_code_17:
+    step safety_default:
+"#;
+
+        let ast = parse_plc(input).expect("细分 axis fault routes 应能解析");
+        let step = &ast.tasks.tasks[0].steps[0];
+        match &step.statements[0] {
+            StepStatement::Action(ActionStatement::AxisMoveRelative {
+                on_reject,
+                on_motion_fault,
+                on_motion_fault_routes,
+                on_safety_fault,
+                ..
+            }) => {
+                assert_eq!(
+                    on_reject.as_ref().and_then(|v| v.step.as_deref()),
+                    Some("reject")
+                );
+                assert_eq!(
+                    on_motion_fault.as_ref().and_then(|v| v.step.as_deref()),
+                    Some("motion_default")
+                );
+                assert_eq!(
+                    on_safety_fault.as_ref().and_then(|v| v.step.as_deref()),
+                    Some("safety_default")
+                );
+                assert_eq!(on_motion_fault_routes.len(), 2);
+
+                assert_eq!(
+                    on_motion_fault_routes[0].kind,
+                    Some(crate::ast::AxisFaultRouteKind::Vendor)
+                );
+                assert_eq!(on_motion_fault_routes[0].code, None);
+                assert_eq!(
+                    on_motion_fault_routes[0].target.step.as_deref(),
+                    Some("motion_vendor")
+                );
+
+                assert_eq!(on_motion_fault_routes[1].kind, None);
+                assert_eq!(on_motion_fault_routes[1].code, Some(17));
+                assert_eq!(
+                    on_motion_fault_routes[1].target.step.as_deref(),
+                    Some("motion_code_17")
+                );
+            }
+            other => panic!("期望 AxisMoveRelative，实际: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_axis_move_duplicate_primary_fault_bucket_branch() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step start:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_default
+            on_motion_fault -> fault.motion_other
+            on_safety_fault -> fault.safety_default
+task fault:
+    step timeout:
+    step reject:
+    step motion_default:
+    step motion_other:
+    step safety_default:
+"#;
+
+        let err = parse_plc(input).expect_err("重复主桶分支应在 parser 阶段失败");
+        assert!(err.to_string().contains("on_motion_fault 主桶分支重复声明"));
     }
 
     #[test]

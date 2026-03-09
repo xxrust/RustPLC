@@ -31,6 +31,7 @@
 
 - `AxisFaultKind` / `AxisFaultCategory` 需在 **IR**（`src/ir/mod.rs`）与 **runtime-core**（`crates/runtime-core/src/lib.rs`）保持同名同语义（`reject/motion/safety/vendor`）。
 - 语义降级必须通过 `lower_axis_fault_branch` 从 `kind` 推导 `category/vendor_code`，避免手工写死导致不一致。
+- `axis.move_*` fault 路由采用“主桶 + 细分 routes”双层结构：主桶 `on_reject/on_motion_fault/on_safety_fault` 仍是必填回退路径，细分 `kind/code` matcher 仅作为优先匹配，不可替代主桶。
 - 运行时轴回调统一返回 `AxisMotionResult::Fault(AxisFault)`；测试优先使用 `AxisMotionResult::reject/motion_fault/safety_fault` 构造器保持语义稳定。
 - `axis_fault_contract` 策略矩阵通过 **runtime bridge**（`src/runtime_bridge.rs`）降级到 `runtime_core::Program.axis_fault_policies`；调整策略枚举时需同步 IR/runtime-core/bridge 三层。
 - 运行时策略审计日志通过 `runtime_core::axis_fault_policy_log_message_id` + `AXIS_FAULT_POLICY_LOG_MESSAGE` 生成；修改编码规则时必须同步 `tests/runtime_bridge_us006.rs` 回归断言。

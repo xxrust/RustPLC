@@ -1,10 +1,12 @@
 use crate::ast::{
     ActionStatement, AxisAutoResetPolicy as AstAxisAutoResetPolicy,
     AxisFaultContractDeclaration as AstAxisFaultContractDeclaration,
-    AxisFaultSeverity as AstAxisFaultSeverity, AxisStopMode as AstAxisStopMode,
-    BinaryOperator as AstBinaryOperator, CamTableMode, ComparisonOperator, ConditionExpression,
-    ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType, DurationValue,
-    Expression as AstExpression, ExternCallBinding as AstExternCallBinding,
+    AxisFaultRouteDirective as AstAxisFaultRouteDirective,
+    AxisFaultRouteKind as AstAxisFaultRouteKind, AxisFaultSeverity as AstAxisFaultSeverity,
+    AxisStopMode as AstAxisStopMode, BinaryOperator as AstBinaryOperator, CamTableMode,
+    ComparisonOperator, ConditionExpression, ConstraintsSection, DeviceAttributes,
+    DeviceDeclaration, DeviceType, DurationValue, Expression as AstExpression,
+    ExternCallBinding as AstExternCallBinding,
     ExternFunctionDeclaration as AstExternFunctionDeclaration, GotoDirective, LiteralValue,
     OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock,
     SafetyConstraint, SafetyOperand, SafetyRelation as AstSafetyRelation, StateReference,
@@ -18,6 +20,7 @@ use crate::error::PlcError;
 use crate::ir::{
     ActionKind, ActionRef, ActionTiming, AxisAutoResetPolicy as IrAxisAutoResetPolicy,
     AxisFaultBranch, AxisFaultContractDef as IrAxisFaultContractDef, AxisFaultKind,
+    AxisFaultRouteBranch as IrAxisFaultRouteBranch, AxisFaultRouteKind as IrAxisFaultRouteKind,
     AxisFaultSeverity as IrAxisFaultSeverity, AxisStopMode as IrAxisStopMode, AxisTimeoutBranch,
     BinaryValue as IrBinaryValue, CamCouplingDef, CamInterpolation, CamTableIr, CausalityChain,
     ConnectionType, ConstraintSet, Device, DeviceKind, ExternCallBinding as IrExternCallBinding,
@@ -3978,6 +3981,9 @@ fn validate_axis_motion_actions_in_statements(
                 on_reject,
                 on_motion_fault,
                 on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
                 ..
             })
             | StepStatement::Action(ActionStatement::AxisMoveAbsolute {
@@ -3986,6 +3992,9 @@ fn validate_axis_motion_actions_in_statements(
                 on_reject,
                 on_motion_fault,
                 on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
                 ..
             }) => {
                 if timeout.is_none() {
@@ -4024,6 +4033,30 @@ fn validate_axis_motion_actions_in_statements(
                         "添加 on_safety_fault -> <task.step> 分支。",
                     ));
                 }
+                validate_axis_fault_routes(
+                    line,
+                    step_name,
+                    "on_reject",
+                    on_reject_routes,
+                    &[AstAxisFaultRouteKind::Reject, AstAxisFaultRouteKind::Vendor],
+                    errors,
+                );
+                validate_axis_fault_routes(
+                    line,
+                    step_name,
+                    "on_motion_fault",
+                    on_motion_fault_routes,
+                    &[AstAxisFaultRouteKind::Motion, AstAxisFaultRouteKind::Vendor],
+                    errors,
+                );
+                validate_axis_fault_routes(
+                    line,
+                    step_name,
+                    "on_safety_fault",
+                    on_safety_fault_routes,
+                    &[AstAxisFaultRouteKind::Safety, AstAxisFaultRouteKind::Vendor],
+                    errors,
+                );
                 validate_axis_motion_target_kind(
                     line,
                     step_name,
@@ -4084,6 +4117,36 @@ fn axis_motion_branch_error(
         format!("[{rule_id}] step '{step_name}' is missing {branch_name} branch."),
         fix,
     )
+}
+
+fn validate_axis_fault_routes(
+    line: usize,
+    step_name: &str,
+    branch_name: &str,
+    routes: &[AstAxisFaultRouteDirective],
+    allowed_kinds: &[AstAxisFaultRouteKind],
+    errors: &mut Vec<PlcError>,
+) {
+    for route in routes {
+        if let Some(kind) = route.kind {
+            if !allowed_kinds.contains(&kind) {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXIS-010] step '{step_name}' has incompatible {branch_name} route kind '{kind:?}'."
+                    ),
+                    format!(
+                        "{branch_name} 仅允许 kind 为 {}，请调整 matcher。",
+                        allowed_kinds
+                            .iter()
+                            .map(|v| format!("{:?}", v).to_lowercase())
+                            .collect::<Vec<_>>()
+                            .join("/")
+                    ),
+                ));
+            }
+        }
+    }
 }
 
 fn validate_axis_motion_target_kind(
@@ -5931,6 +5994,9 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             on_reject,
             on_motion_fault,
             on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         } => Some(TransitionAction::AxisMoveRelative {
             target: target.device.clone(),
             port: target.port.clone(),
@@ -5950,6 +6016,9 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
                 AxisFaultKind::Safety,
                 None,
             ),
+            on_reject_routes: lower_axis_fault_routes(on_reject_routes),
+            on_motion_fault_routes: lower_axis_fault_routes(on_motion_fault_routes),
+            on_safety_fault_routes: lower_axis_fault_routes(on_safety_fault_routes),
         }),
         ActionStatement::AxisMoveAbsolute {
             target,
@@ -5962,6 +6031,9 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             on_reject,
             on_motion_fault,
             on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         } => Some(TransitionAction::AxisMoveAbsolute {
             target: target.device.clone(),
             port: target.port.clone(),
@@ -5981,6 +6053,9 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
                 AxisFaultKind::Safety,
                 None,
             ),
+            on_reject_routes: lower_axis_fault_routes(on_reject_routes),
+            on_motion_fault_routes: lower_axis_fault_routes(on_motion_fault_routes),
+            on_safety_fault_routes: lower_axis_fault_routes(on_safety_fault_routes),
         }),
         ActionStatement::Log { message } => Some(TransitionAction::Log {
             message: message.clone(),
@@ -6008,6 +6083,27 @@ fn lower_axis_fault_branch(
         vendor_code: kind.vendor_code(),
         kind,
         error_code: error_code.map(ToString::to_string),
+    }
+}
+
+fn lower_axis_fault_routes(routes: &[AstAxisFaultRouteDirective]) -> Vec<IrAxisFaultRouteBranch> {
+    routes
+        .iter()
+        .map(|route| IrAxisFaultRouteBranch {
+            target_task: route.target.task.clone(),
+            target_step: route.target.step.clone(),
+            kind: route.kind.map(lower_axis_fault_route_kind),
+            code: route.code,
+        })
+        .collect()
+}
+
+fn lower_axis_fault_route_kind(kind: AstAxisFaultRouteKind) -> IrAxisFaultRouteKind {
+    match kind {
+        AstAxisFaultRouteKind::Reject => IrAxisFaultRouteKind::Reject,
+        AstAxisFaultRouteKind::Motion => IrAxisFaultRouteKind::Motion,
+        AstAxisFaultRouteKind::Safety => IrAxisFaultRouteKind::Safety,
+        AstAxisFaultRouteKind::Vendor => IrAxisFaultRouteKind::Vendor,
     }
 }
 
@@ -8790,6 +8886,73 @@ task done:
     }
 
     #[test]
+    fn lowers_axis_move_refined_fault_routes_into_ir_transition_actions() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_default
+            on_motion_fault(kind: vendor) -> fault.motion_vendor
+            on_motion_fault(code: 17) -> fault.motion_code_17
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_default:
+    step motion_vendor:
+    step motion_code_17:
+    step safety_fault:
+
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("axis refined routes 示例应能解析");
+        let sm = build_state_machine(&program).expect("axis refined routes 应能 lowering 到 IR");
+
+        let action = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveRelative {
+                    on_motion_fault,
+                    on_motion_fault_routes,
+                    ..
+                } => Some((on_motion_fault, on_motion_fault_routes)),
+                _ => None,
+            })
+            .expect("应包含 axis_move_relative 动作");
+
+        assert_eq!(action.0.target_step.as_deref(), Some("motion_default"));
+        assert_eq!(action.1.len(), 2);
+        assert_eq!(
+            action.1[0].kind,
+            Some(crate::ir::AxisFaultRouteKind::Vendor)
+        );
+        assert_eq!(action.1[0].code, None);
+        assert_eq!(action.1[0].target_step.as_deref(), Some("motion_vendor"));
+
+        assert_eq!(action.1[1].kind, None);
+        assert_eq!(action.1[1].code, Some(17));
+        assert_eq!(action.1[1].target_step.as_deref(), Some("motion_code_17"));
+    }
+
+    #[test]
     fn lowers_compute_boolean_literals_to_numeric_ir_expression() {
         let input = r#"
 [topology]
@@ -9246,6 +9409,80 @@ task main:
         assert!(joined.contains("step 'move'"));
         assert!(joined.contains("timeout: <duration> -> <task.step>"));
         assert!(errors.iter().all(|err| err.line() > 0));
+    }
+
+    #[test]
+    fn rejects_axis_move_refined_route_without_primary_bucket() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault(kind: vendor) -> fault.motion_vendor
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_vendor:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("语法应可解析");
+        let errors = build_state_machine(&program).expect_err("缺失主桶分支应触发 AXIS-003");
+        let joined = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-003]"));
+    }
+
+    #[test]
+    fn rejects_axis_move_refined_route_with_incompatible_bucket_kind() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_reject(kind: safety) -> fault.bad_reject_route
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step bad_reject_route:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("语法应可解析");
+        let errors = build_state_machine(&program).expect_err("不兼容 kind 应触发 AXIS-010");
+        let joined = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-010]"));
     }
 
     #[test]

@@ -517,6 +517,12 @@ pub enum ActionStatement {
         on_reject: Option<GotoDirective>,
         on_motion_fault: Option<GotoDirective>,
         on_safety_fault: Option<GotoDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_reject_routes: Vec<AxisFaultRouteDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_motion_fault_routes: Vec<AxisFaultRouteDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_safety_fault_routes: Vec<AxisFaultRouteDirective>,
     },
     AxisMoveAbsolute {
         target: ActionTarget,
@@ -533,6 +539,12 @@ pub enum ActionStatement {
         on_reject: Option<GotoDirective>,
         on_motion_fault: Option<GotoDirective>,
         on_safety_fault: Option<GotoDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_reject_routes: Vec<AxisFaultRouteDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_motion_fault_routes: Vec<AxisFaultRouteDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_safety_fault_routes: Vec<AxisFaultRouteDirective>,
     },
     Log {
         message: String,
@@ -673,6 +685,26 @@ pub struct GotoDirective {
     pub line: usize,
     pub task: String,
     pub step: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisFaultRouteKind {
+    Reject,
+    Motion,
+    Safety,
+    Vendor,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AxisFaultRouteDirective {
+    #[serde(default)]
+    pub line: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AxisFaultRouteKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<i32>,
+    pub target: GotoDirective,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

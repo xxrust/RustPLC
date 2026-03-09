@@ -319,17 +319,27 @@ allow_indefinite_wait_statement = { "allow_indefinite_wait" ~ ":" ~ boolean_valu
 then_goto_statement = { "then" ~ ":" ~ goto_statement }
 axis_branch_target = { identifier ~ ("." ~ identifier)? }
 axis_timeout_branch = { "timeout" ~ ":" ~ duration_value ~ "->" ~ axis_branch_target }
-axis_on_reject_branch = { "on_reject" ~ "->" ~ axis_branch_target }
-axis_on_motion_fault_branch = { "on_motion_fault" ~ "->" ~ axis_branch_target }
-axis_on_safety_fault_branch = { "on_safety_fault" ~ "->" ~ axis_branch_target }
+axis_fault_route_kind = { "reject" | "motion" | "safety" | "vendor" }
+axis_fault_route_kind_entry = { "kind" ~ ":" ~ axis_fault_route_kind }
+axis_fault_route_code_entry = { "code" ~ ":" ~ integer }
+axis_fault_route_matcher_entry = {
+    axis_fault_route_kind_entry
+    | axis_fault_route_code_entry
+}
+axis_fault_route_matcher = {
+    "(" ~ axis_fault_route_matcher_entry ~ ("," ~ axis_fault_route_matcher_entry)* ~ ")"
+}
+axis_on_reject_branch = { "on_reject" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
+axis_on_motion_fault_branch = { "on_motion_fault" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
+axis_on_safety_fault_branch = { "on_safety_fault" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
 axis_move_statement = {
     "action"
     ~ ":"
     ~ (axis_move_relative_action | axis_move_absolute_action)
     ~ axis_timeout_branch?
-    ~ axis_on_reject_branch?
-    ~ axis_on_motion_fault_branch?
-    ~ axis_on_safety_fault_branch?
+    ~ axis_on_reject_branch*
+    ~ axis_on_motion_fault_branch*
+    ~ axis_on_safety_fault_branch*
 }
 
 repeat_block = { "repeat" ~ integer ~ ":" ~ step_statement+ }

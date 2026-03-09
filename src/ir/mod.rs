@@ -321,6 +321,12 @@ pub enum TransitionAction {
         on_reject: AxisFaultBranch,
         on_motion_fault: AxisFaultBranch,
         on_safety_fault: AxisFaultBranch,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_reject_routes: Vec<AxisFaultRouteBranch>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_motion_fault_routes: Vec<AxisFaultRouteBranch>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_safety_fault_routes: Vec<AxisFaultRouteBranch>,
     },
     AxisMoveAbsolute {
         target: String,
@@ -331,6 +337,12 @@ pub enum TransitionAction {
         on_reject: AxisFaultBranch,
         on_motion_fault: AxisFaultBranch,
         on_safety_fault: AxisFaultBranch,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_reject_routes: Vec<AxisFaultRouteBranch>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_motion_fault_routes: Vec<AxisFaultRouteBranch>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_safety_fault_routes: Vec<AxisFaultRouteBranch>,
     },
     Log {
         message: String,
@@ -394,6 +406,68 @@ pub struct AxisFaultBranch {
     pub vendor_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisFaultRouteKind {
+    Reject,
+    Motion,
+    Safety,
+    Vendor,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AxisFaultRouteBranch {
+    pub target_task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_step: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AxisFaultRouteKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<i32>,
+}
+
+impl AxisFaultRouteKind {
+    pub const fn from_fault_kind(kind: &AxisFaultKind) -> Self {
+        match kind {
+            AxisFaultKind::Reject => AxisFaultRouteKind::Reject,
+            AxisFaultKind::Motion => AxisFaultRouteKind::Motion,
+            AxisFaultKind::Safety => AxisFaultRouteKind::Safety,
+            AxisFaultKind::Vendor { .. } => AxisFaultRouteKind::Vendor,
+        }
+    }
+}
+
+impl AxisFaultRouteBranch {
+    pub fn matches(&self, kind: AxisFaultRouteKind, code: i32) -> bool {
+        let kind_match = match self.kind {
+            Some(expected) => expected == kind,
+            None => true,
+        };
+        let code_match = match self.code {
+            Some(expected) => expected == code,
+            None => true,
+        };
+        kind_match && code_match
+    }
+}
+
+pub fn resolve_axis_fault_route_target<'a>(
+    primary: &'a AxisFaultBranch,
+    routes: &'a [AxisFaultRouteBranch],
+    fault_kind: &AxisFaultKind,
+    error_code: i32,
+) -> (&'a str, Option<&'a str>) {
+    let route_kind = AxisFaultRouteKind::from_fault_kind(fault_kind);
+    if let Some(route) = routes
+        .iter()
+        .find(|route| route.matches(route_kind, error_code))
+    {
+        return (&route.target_task, route.target_step.as_deref());
+    }
+
+    (&primary.target_task, primary.target_step.as_deref())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -702,6 +776,9 @@ mod tests {
                             vendor_code: None,
                             error_code: Some("AXIS_SAFETY_FAULT".to_string()),
                         },
+                        on_reject_routes: vec![],
+                        on_motion_fault_routes: vec![],
+                        on_safety_fault_routes: vec![],
                     },
                     TransitionAction::CallExtern {
                         function: "add".to_string(),
@@ -803,5 +880,53 @@ mod tests {
 
         assert_eq!(kind.category(), AxisFaultCategory::NonRecoverable);
         assert_eq!(kind.vendor_code(), Some(1201));
+    }
+
+    #[test]
+    fn resolve_axis_fault_route_target_prefers_first_matching_route_then_fallback() {
+        let primary = AxisFaultBranch {
+            target_task: "fault".to_string(),
+            target_step: Some("motion_default".to_string()),
+            kind: AxisFaultKind::Motion,
+            category: AxisFaultCategory::NonRecoverable,
+            vendor_code: None,
+            error_code: None,
+        };
+        let routes = vec![
+            AxisFaultRouteBranch {
+                target_task: "fault".to_string(),
+                target_step: Some("motion_vendor".to_string()),
+                kind: Some(AxisFaultRouteKind::Vendor),
+                code: None,
+            },
+            AxisFaultRouteBranch {
+                target_task: "fault".to_string(),
+                target_step: Some("motion_code_17".to_string()),
+                kind: None,
+                code: Some(17),
+            },
+        ];
+
+        let (vendor_task, vendor_step) = resolve_axis_fault_route_target(
+            &primary,
+            &routes,
+            &AxisFaultKind::Vendor {
+                category: AxisFaultCategory::NonRecoverable,
+                vendor_code: 9901,
+            },
+            9901,
+        );
+        assert_eq!(vendor_task, "fault");
+        assert_eq!(vendor_step, Some("motion_vendor"));
+
+        let (code_task, code_step) =
+            resolve_axis_fault_route_target(&primary, &routes, &AxisFaultKind::Motion, 17);
+        assert_eq!(code_task, "fault");
+        assert_eq!(code_step, Some("motion_code_17"));
+
+        let (fallback_task, fallback_step) =
+            resolve_axis_fault_route_target(&primary, &routes, &AxisFaultKind::Motion, 99);
+        assert_eq!(fallback_task, "fault");
+        assert_eq!(fallback_step, Some("motion_default"));
     }
 }

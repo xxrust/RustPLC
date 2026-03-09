@@ -128,8 +128,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented axis fault routing refinement with primary bucket + optional kind/code matcher routes across parser/AST/semantic/IR, added route compatibility validation (AXIS-010), documented deterministic mapping rules, and added parser/semantic/IR/codegen regression tests."
     },
     {
       "id": "US-009",
