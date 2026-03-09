@@ -280,8 +280,9 @@ impl TimingContext {
             | ActionStatement::CamDisengage { .. }
             | ActionStatement::CamSwitch { .. }
             | ActionStatement::CamPhase { .. } => return None,
-            ActionStatement::AxisMoveRelative { .. }
-            | ActionStatement::AxisMoveAbsolute { .. } => return None,
+            ActionStatement::AxisMoveRelative { .. } | ActionStatement::AxisMoveAbsolute { .. } => {
+                return None;
+            }
             ActionStatement::Compute { .. } | ActionStatement::Call { .. } => return None,
             ActionStatement::Log { .. } => return None,
         };

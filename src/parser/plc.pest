@@ -144,6 +144,19 @@ extern_contract_block = { "{" ~ extern_contract_entry ~ ((","? ~ extern_contract
 extern_function_declaration = {
     "extern" ~ "function" ~ identifier ~ "(" ~ extern_param_list? ~ ")" ~ "->" ~ extern_return_spec ~ extern_contract_block
 }
+axis_fault_contract_field = {
+    "axis"
+    | "severity"
+    | "stop_mode"
+    | "auto_reset_policy"
+    | "manual_ack_required"
+}
+axis_fault_contract_value = { boolean_value | identifier }
+axis_fault_contract_entry = { axis_fault_contract_field ~ ":" ~ axis_fault_contract_value }
+axis_fault_contract_block = { "{" ~ axis_fault_contract_entry ~ ((","? ~ axis_fault_contract_entry))* ~ ","? ~ "}" }
+axis_fault_contract_declaration = {
+    "axis_fault_contract" ~ identifier ~ axis_fault_contract_block
+}
 cam_table_mode = { "periodic" | "oneshot" }
 cam_point = { "(" ~ number ~ "," ~ number ~ ")" }
 cam_point_list = { "[" ~ cam_point ~ ("," ~ cam_point)* ~ ","? ~ "]" }
@@ -164,6 +177,7 @@ topology_entry = _{
     | variable_declaration
     | cam_table_declaration
     | extern_function_declaration
+    | axis_fault_contract_declaration
 }
 
 topology_section = { section_topology ~ topology_entry* }

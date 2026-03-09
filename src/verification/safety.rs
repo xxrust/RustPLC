@@ -1099,8 +1099,7 @@ fn transition_effects(
             TransitionAction::CallExtern { .. } => {}
             TransitionAction::AxisMoveRelative { target, .. }
             | TransitionAction::AxisMoveAbsolute { target, .. } => {
-                let Some(device_id) =
-                    lookup_device_domain_id(device_index, target, "pulse", false)
+                let Some(device_id) = lookup_device_domain_id(device_index, target, "pulse", false)
                 else {
                     continue;
                 };
@@ -2772,8 +2771,8 @@ task fault:
         let constraints = build_constraint_set(&program).expect("约束应能构建");
         let state_machine = build_state_machine(&program).expect("状态机应能构建");
 
-        let errors =
-            verify_safety(&program, &constraints, &state_machine).expect_err("axis move 应命中互锁约束");
+        let errors = verify_safety(&program, &constraints, &state_machine)
+            .expect_err("axis move 应命中互锁约束");
 
         assert!(
             errors

@@ -3,17 +3,17 @@ use runtime_core::{
     AxisFault, AxisMotionResult, AxisMoveKind, Runtime, RuntimeError, RuntimeTickError,
 };
 use rust_plc::extern_functions::{
-    extern_runtime_error_code, ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError,
-    ValueRange, EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR,
+    EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR, ExternFunctionInfo,
+    ExternFunctionRegistry, ExternRuntimeError, ValueRange, extern_runtime_error_code,
 };
 use rust_plc::ir::{ExternFunctionContract, TopologyGraph, VariableType};
 use rust_plc::parser::parse_plc;
-use rust_plc::runtime_bridge::{state_machine_to_runtime_program, BridgeError};
+use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'static> {
     let program = parse_plc(plc_source).expect("parse plc");

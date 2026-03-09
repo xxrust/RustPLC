@@ -1,5 +1,6 @@
 use crate::ast::{
-    ActionStatement, ActionTarget, BinaryOperator, Branch, CamPoint, CamTableDeclaration,
+    ActionStatement, ActionTarget, AxisAutoResetPolicy, AxisFaultContractDeclaration,
+    AxisFaultSeverity, AxisStopMode, BinaryOperator, Branch, CamPoint, CamTableDeclaration,
     CamTableMode, CausalityConstraint, ComparisonOperator, ConditionExpression, ConstraintsSection,
     DeviceAttributes, DeviceDeclaration, DevicePort, DeviceTags, DeviceType, DurationValue,
     Expression, ExternCallBinding, ExternFunctionContract, ExternFunctionDeclaration,
@@ -11,9 +12,9 @@ use crate::ast::{
     WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
+use pest::Parser;
 use pest::error::LineColLocation;
 use pest::iterators::Pair;
-use pest::Parser;
 use std::collections::HashSet;
 
 #[derive(pest_derive::Parser)]
@@ -289,6 +290,7 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
     let mut variables = Vec::new();
     let mut cam_tables = Vec::new();
     let mut extern_functions = Vec::new();
+    let mut axis_fault_contracts = Vec::new();
 
     for entry in pair.into_inner() {
         match entry.as_rule() {
@@ -301,6 +303,9 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
             Rule::extern_function_declaration => {
                 extern_functions.push(parse_extern_function_declaration(entry)?);
             }
+            Rule::axis_fault_contract_declaration => {
+                axis_fault_contracts.push(parse_axis_fault_contract_declaration(entry)?);
+            }
             _ => {}
         }
     }
@@ -311,7 +316,254 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
         variables,
         cam_tables,
         extern_functions,
+        axis_fault_contracts,
     })
+}
+
+fn parse_axis_fault_contract_declaration(
+    pair: Pair<Rule>,
+) -> Result<AxisFaultContractDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let col = col_of(&pair);
+    let mut name = None;
+    let mut axis = None;
+    let mut severity = None;
+    let mut stop_mode = None;
+    let mut auto_reset_policy = None;
+    let mut manual_ack_required = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::axis_fault_contract_block => {
+                let parsed = parse_axis_fault_contract_block(
+                    part,
+                    name.as_deref().unwrap_or("<unknown>"),
+                    line,
+                    col,
+                )?;
+                axis = Some(parsed.axis);
+                severity = Some(parsed.severity);
+                stop_mode = Some(parsed.stop_mode);
+                auto_reset_policy = Some(parsed.auto_reset_policy);
+                manual_ack_required = Some(parsed.manual_ack_required);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(AxisFaultContractDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "axis_fault_contract 声明缺少名称"))?,
+        axis: axis.ok_or_else(|| PlcError::parse(line, "axis_fault_contract 缺少 axis 字段"))?,
+        severity: severity
+            .ok_or_else(|| PlcError::parse(line, "axis_fault_contract 缺少 severity 字段"))?,
+        stop_mode: stop_mode
+            .ok_or_else(|| PlcError::parse(line, "axis_fault_contract 缺少 stop_mode 字段"))?,
+        auto_reset_policy: auto_reset_policy.ok_or_else(|| {
+            PlcError::parse(line, "axis_fault_contract 缺少 auto_reset_policy 字段")
+        })?,
+        manual_ack_required: manual_ack_required.ok_or_else(|| {
+            PlcError::parse(line, "axis_fault_contract 缺少 manual_ack_required 字段")
+        })?,
+    })
+}
+
+struct ParsedAxisFaultContract {
+    axis: String,
+    severity: AxisFaultSeverity,
+    stop_mode: AxisStopMode,
+    auto_reset_policy: AxisAutoResetPolicy,
+    manual_ack_required: bool,
+}
+
+fn parse_axis_fault_contract_block(
+    pair: Pair<Rule>,
+    contract_name: &str,
+    declaration_line: usize,
+    declaration_col: usize,
+) -> Result<ParsedAxisFaultContract, PlcError> {
+    let mut axis = None;
+    let mut severity = None;
+    let mut stop_mode = None;
+    let mut auto_reset_policy = None;
+    let mut manual_ack_required = None;
+
+    for entry in pair.into_inner() {
+        if entry.as_rule() != Rule::axis_fault_contract_entry {
+            continue;
+        }
+
+        let line = line_of(&entry);
+        let col = col_of(&entry);
+        let mut inner = entry.into_inner();
+        let field = inner
+            .next()
+            .ok_or_else(|| PlcError::parse(line, "axis_fault_contract 字段缺少名称"))?
+            .as_str()
+            .to_string();
+        let value_wrapper = inner.next().ok_or_else(|| {
+            PlcError::parse(line, format!("axis_fault_contract 字段 {field} 缺少值"))
+        })?;
+        let value = first_inner(value_wrapper, line, "axis_fault_contract 字段值")?;
+
+        match field.as_str() {
+            "axis" => {
+                if axis.is_some() {
+                    return Err(PlcError::parse_at(
+                        "<input>",
+                        line,
+                        col,
+                        "axis_fault_contract 字段 axis 重复声明",
+                    ));
+                }
+                axis = Some(expect_identifier(value, "axis")?);
+            }
+            "severity" => {
+                if severity.is_some() {
+                    return Err(PlcError::parse_at(
+                        "<input>",
+                        line,
+                        col,
+                        "axis_fault_contract 字段 severity 重复声明",
+                    ));
+                }
+                severity = Some(parse_axis_fault_severity(value)?);
+            }
+            "stop_mode" => {
+                if stop_mode.is_some() {
+                    return Err(PlcError::parse_at(
+                        "<input>",
+                        line,
+                        col,
+                        "axis_fault_contract 字段 stop_mode 重复声明",
+                    ));
+                }
+                stop_mode = Some(parse_axis_stop_mode(value)?);
+            }
+            "auto_reset_policy" => {
+                if auto_reset_policy.is_some() {
+                    return Err(PlcError::parse_at(
+                        "<input>",
+                        line,
+                        col,
+                        "axis_fault_contract 字段 auto_reset_policy 重复声明",
+                    ));
+                }
+                auto_reset_policy = Some(parse_axis_auto_reset_policy(value)?);
+            }
+            "manual_ack_required" => {
+                if manual_ack_required.is_some() {
+                    return Err(PlcError::parse_at(
+                        "<input>",
+                        line,
+                        col,
+                        "axis_fault_contract 字段 manual_ack_required 重复声明",
+                    ));
+                }
+                manual_ack_required = Some(expect_boolean(value, "manual_ack_required")?);
+            }
+            _ => {
+                return Err(PlcError::parse_at(
+                    "<input>",
+                    line,
+                    col,
+                    format!("不支持的 axis_fault_contract 字段: {field}"),
+                ));
+            }
+        }
+    }
+
+    Ok(ParsedAxisFaultContract {
+        axis: axis.ok_or_else(|| {
+            PlcError::parse_at(
+                "<input>",
+                declaration_line,
+                declaration_col,
+                format!("axis_fault_contract {contract_name} 缺少必填字段 axis"),
+            )
+        })?,
+        severity: severity.ok_or_else(|| {
+            PlcError::parse_at(
+                "<input>",
+                declaration_line,
+                declaration_col,
+                format!("axis_fault_contract {contract_name} 缺少必填字段 severity"),
+            )
+        })?,
+        stop_mode: stop_mode.ok_or_else(|| {
+            PlcError::parse_at(
+                "<input>",
+                declaration_line,
+                declaration_col,
+                format!("axis_fault_contract {contract_name} 缺少必填字段 stop_mode"),
+            )
+        })?,
+        auto_reset_policy: auto_reset_policy.ok_or_else(|| {
+            PlcError::parse_at(
+                "<input>",
+                declaration_line,
+                declaration_col,
+                format!("axis_fault_contract {contract_name} 缺少必填字段 auto_reset_policy"),
+            )
+        })?,
+        manual_ack_required: manual_ack_required.ok_or_else(|| {
+            PlcError::parse_at(
+                "<input>",
+                declaration_line,
+                declaration_col,
+                format!("axis_fault_contract {contract_name} 缺少必填字段 manual_ack_required"),
+            )
+        })?,
+    })
+}
+
+fn parse_axis_fault_severity(pair: Pair<Rule>) -> Result<AxisFaultSeverity, PlcError> {
+    let line = line_of(&pair);
+    let raw = expect_identifier(pair, "severity")?;
+    match raw.as_str() {
+        "recoverable" => Ok(AxisFaultSeverity::Recoverable),
+        "non_recoverable" => Ok(AxisFaultSeverity::NonRecoverable),
+        "safety" => Ok(AxisFaultSeverity::Safety),
+        _ => Err(PlcError::parse(
+            line,
+            format!(
+                "axis_fault_contract.severity 不支持 `{raw}`，仅支持 recoverable/non_recoverable/safety"
+            ),
+        )),
+    }
+}
+
+fn parse_axis_stop_mode(pair: Pair<Rule>) -> Result<AxisStopMode, PlcError> {
+    let line = line_of(&pair);
+    let raw = expect_identifier(pair, "stop_mode")?;
+    match raw.as_str() {
+        "controlled" => Ok(AxisStopMode::Controlled),
+        "quick" => Ok(AxisStopMode::Quick),
+        "immediate" => Ok(AxisStopMode::Immediate),
+        _ => Err(PlcError::parse(
+            line,
+            format!(
+                "axis_fault_contract.stop_mode 不支持 `{raw}`，仅支持 controlled/quick/immediate"
+            ),
+        )),
+    }
+}
+
+fn parse_axis_auto_reset_policy(pair: Pair<Rule>) -> Result<AxisAutoResetPolicy, PlcError> {
+    let line = line_of(&pair);
+    let raw = expect_identifier(pair, "auto_reset_policy")?;
+    match raw.as_str() {
+        "never" => Ok(AxisAutoResetPolicy::Never),
+        "on_clear" => Ok(AxisAutoResetPolicy::OnClear),
+        "immediate" => Ok(AxisAutoResetPolicy::Immediate),
+        _ => Err(PlcError::parse(
+            line,
+            format!(
+                "axis_fault_contract.auto_reset_policy 不支持 `{raw}`，仅支持 never/on_clear/immediate"
+            ),
+        )),
+    }
 }
 
 fn parse_relation_declaration(pair: Pair<Rule>) -> Result<TopologyConnection, PlcError> {
@@ -2911,8 +3163,9 @@ fn map_parse_error(err: pest::error::Error<Rule>) -> PlcError {
 mod tests {
     use super::{parse_constraints, parse_plc, parse_tasks, parse_topology};
     use crate::ast::{
-        ActionStatement, BinaryOperator, DeviceType, Expression, ExternCallBinding, LiteralValue,
-        OnCompleteDirective, PortRole, PortType, StepStatement, VariableType, WaitCondition,
+        ActionStatement, AxisAutoResetPolicy, AxisFaultSeverity, AxisStopMode, BinaryOperator,
+        DeviceType, Expression, ExternCallBinding, LiteralValue, OnCompleteDirective, PortRole,
+        PortType, StepStatement, VariableType, WaitCondition,
     };
 
     #[test]
@@ -3459,6 +3712,67 @@ task main:
         assert!(
             err.to_string()
                 .contains("缺少必填 contract 字段 rust_module"),
+            "错误信息应明确缺失字段，实际: {err}"
+        );
+    }
+
+    #[test]
+    fn parses_axis_fault_contract_declaration_into_ast() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    purpose: "transport"
+}
+axis_fault_contract axis_x_fault {
+    axis: axis_x
+    severity: safety
+    stop_mode: immediate
+    auto_reset_policy: never
+    manual_ack_required: true
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("axis_fault_contract 声明应能解析到 AST");
+        assert_eq!(program.topology.axis_fault_contracts.len(), 1);
+        let contract = &program.topology.axis_fault_contracts[0];
+        assert_eq!(contract.name, "axis_x_fault");
+        assert_eq!(contract.axis, "axis_x");
+        assert_eq!(contract.severity, AxisFaultSeverity::Safety);
+        assert_eq!(contract.stop_mode, AxisStopMode::Immediate);
+        assert_eq!(contract.auto_reset_policy, AxisAutoResetPolicy::Never);
+        assert!(contract.manual_ack_required);
+    }
+
+    #[test]
+    fn rejects_axis_fault_contract_missing_required_fields() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    purpose: "transport"
+}
+axis_fault_contract axis_x_fault {
+    axis: axis_x
+    stop_mode: quick
+    auto_reset_policy: on_clear
+    manual_ack_required: false
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let err = parse_plc(input).expect_err("缺少 severity 字段时应返回错误");
+        assert!(
+            err.to_string().contains("缺少必填字段 severity"),
             "错误信息应明确缺失字段，实际: {err}"
         );
     }
@@ -4325,14 +4639,18 @@ task ready:
             .find(|step| step.name == "detect")
             .expect("search 任务应包含 detect step");
 
-        assert!(detect_step
-            .statements
-            .iter()
-            .any(|stmt| matches!(stmt, StepStatement::Race(_))));
-        assert!(detect_step
-            .statements
-            .iter()
-            .any(|stmt| matches!(stmt, StepStatement::Timeout(_))));
+        assert!(
+            detect_step
+                .statements
+                .iter()
+                .any(|stmt| matches!(stmt, StepStatement::Race(_)))
+        );
+        assert!(
+            detect_step
+                .statements
+                .iter()
+                .any(|stmt| matches!(stmt, StepStatement::Timeout(_)))
+        );
 
         let ready_task = ast
             .tasks

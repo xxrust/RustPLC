@@ -1505,11 +1505,7 @@ fn eval_expr(program: &ExprProgram, vars: &[f32; MAX_VARIABLES]) -> f32 {
         }
     }
 
-    if sp == 0 {
-        0.0
-    } else {
-        stack[0]
-    }
+    if sp == 0 { 0.0 } else { stack[0] }
 }
 
 const MAX_PID_LOOPS: usize = 8;

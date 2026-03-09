@@ -1,7 +1,10 @@
 use crate::ast::{
-    ActionStatement, BinaryOperator as AstBinaryOperator, CamTableMode, ComparisonOperator,
-    ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType,
-    DurationValue, Expression as AstExpression, ExternCallBinding as AstExternCallBinding,
+    ActionStatement, AxisAutoResetPolicy as AstAxisAutoResetPolicy,
+    AxisFaultContractDeclaration as AstAxisFaultContractDeclaration,
+    AxisFaultSeverity as AstAxisFaultSeverity, AxisStopMode as AstAxisStopMode,
+    BinaryOperator as AstBinaryOperator, CamTableMode, ComparisonOperator, ConditionExpression,
+    ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType, DurationValue,
+    Expression as AstExpression, ExternCallBinding as AstExternCallBinding,
     ExternFunctionDeclaration as AstExternFunctionDeclaration, GotoDirective, LiteralValue,
     OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock,
     SafetyConstraint, SafetyOperand, SafetyRelation as AstSafetyRelation, StateReference,
@@ -13,18 +16,19 @@ use crate::ast::{
 use crate::axis_profile::resolve_axis_profiles;
 use crate::error::PlcError;
 use crate::ir::{
-    ActionKind, ActionRef, ActionTiming, AxisFaultBranch, AxisFaultKind, AxisTimeoutBranch,
+    ActionKind, ActionRef, ActionTiming, AxisAutoResetPolicy as IrAxisAutoResetPolicy,
+    AxisFaultBranch, AxisFaultContractDef as IrAxisFaultContractDef, AxisFaultKind,
+    AxisFaultSeverity as IrAxisFaultSeverity, AxisStopMode as IrAxisStopMode, AxisTimeoutBranch,
     BinaryValue as IrBinaryValue, CamCouplingDef, CamInterpolation, CamTableIr, CausalityChain,
     ConnectionType, ConstraintSet, Device, DeviceKind, ExternCallBinding as IrExternCallBinding,
     ExternFunctionContract as IrExternContract, ExternFunctionDef as IrExternFunctionDef,
-    ExternFunctionParam as IrExternFunctionParam, PidLoop as IrPidLoop, SafetyExpr,
+    ExternFunctionParam as IrExternFunctionParam, MAX_CAM_POINTS, PidLoop as IrPidLoop, SafetyExpr,
     SafetyRelation as IrSafetyRelation, SafetyRule, SplineCoeff, State, StateExpr, StateMachine,
     TimeInterval, TimerOperation, TimerOperationKind, TimingModel,
     TimingRelation as IrTimingRelation, TimingRule, TimingScope, TopologyGraph, TopologyLink,
     Transition, TransitionAction, TransitionGuard, VariableDef, VariableType as IrVariableType,
-    MAX_CAM_POINTS,
 };
-use crate::plc_port::{canonical_physical_device_name, parse_plc_port_ref, PlcPortKind};
+use crate::plc_port::{PlcPortKind, canonical_physical_device_name, parse_plc_port_ref};
 use petgraph::graph::NodeIndex;
 use runtime_core::MAX_VARIABLES as RUNTIME_MAX_VARIABLES;
 use serde::Deserialize;
@@ -635,6 +639,7 @@ fn expand_plc_controller_devices(
         variables: topology.variables.clone(),
         cam_tables: topology.cam_tables.clone(),
         extern_functions: topology.extern_functions.clone(),
+        axis_fault_contracts: topology.axis_fault_contracts.clone(),
     })
 }
 
@@ -1319,6 +1324,9 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
         Err(mut axis_errors) => errors.append(&mut axis_errors),
     }
 
+    let axis_fault_contract_defs =
+        extract_axis_fault_contract_defs(topology, &device_nodes, &mut errors);
+
     for connection in semantic_topology_connections(topology) {
         let line = topology_connection_line(topology, &connection);
         let context = topology_connection_context(&connection);
@@ -1409,6 +1417,7 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
     topology_graph.cam_tables = cam_table_defs;
     topology_graph.cam_couplings = cam_couplings;
     topology_graph.extern_functions = extern_function_defs;
+    topology_graph.axis_fault_contracts = axis_fault_contract_defs;
 
     if errors.is_empty() {
         Ok(topology_graph)
@@ -2044,6 +2053,111 @@ fn lower_extern_function_def(decl: &AstExternFunctionDeclaration) -> IrExternFun
             pure: decl.contract.pure,
             time_bound_us: decl.contract.time_bound_us,
         },
+    }
+}
+
+fn extract_axis_fault_contract_defs(
+    topology: &TopologySection,
+    device_nodes: &HashMap<String, DeviceNode>,
+    errors: &mut Vec<PlcError>,
+) -> Vec<IrAxisFaultContractDef> {
+    let mut defs = Vec::new();
+    let mut seen_names = HashSet::<String>::new();
+    let mut seen_axis = HashMap::<String, String>::new();
+
+    for contract in &topology.axis_fault_contracts {
+        let line = contract.line.max(1);
+        if !seen_names.insert(contract.name.clone()) {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                line,
+                "axis_fault_contract",
+                &contract.name,
+                "axis_fault_contract 名称必须唯一，请重命名重复声明",
+            ));
+            continue;
+        }
+
+        let Some(axis_node) = device_nodes.get(&contract.axis) else {
+            errors.push(PlcError::undefined_reference_with_reason(
+                line,
+                "轴设备",
+                &contract.axis,
+                format!(
+                    "axis_fault_contract {} 的 axis 字段引用了未定义设备",
+                    contract.name
+                ),
+            ));
+            continue;
+        };
+
+        if !matches!(
+            axis_node.kind,
+            DeviceKind::StepperMotor | DeviceKind::ServoDrive
+        ) {
+            errors.push(PlcError::type_mismatch_with_reason(
+                line,
+                "stepper_motor 或 servo_drive",
+                device_kind_name(&axis_node.kind),
+                format!("axis_fault_contract {}.axis", contract.name),
+                "axis_fault_contract 只能绑定到轴设备（stepper_motor/servo_drive）",
+            ));
+            continue;
+        }
+
+        if let Some(previous_contract) = seen_axis.get(&contract.axis) {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                line,
+                "axis_fault_contract",
+                &contract.name,
+                format!(
+                    "轴设备 {} 已被 axis_fault_contract {} 绑定，同一轴仅允许一个 contract",
+                    contract.axis, previous_contract
+                ),
+            ));
+            continue;
+        }
+
+        seen_axis.insert(contract.axis.clone(), contract.name.clone());
+        defs.push(lower_axis_fault_contract_def(contract));
+    }
+
+    defs
+}
+
+fn lower_axis_fault_contract_def(
+    contract: &AstAxisFaultContractDeclaration,
+) -> IrAxisFaultContractDef {
+    IrAxisFaultContractDef {
+        name: contract.name.clone(),
+        axis: contract.axis.clone(),
+        severity: lower_axis_fault_severity(&contract.severity),
+        stop_mode: lower_axis_stop_mode(&contract.stop_mode),
+        auto_reset_policy: lower_axis_auto_reset_policy(&contract.auto_reset_policy),
+        manual_ack_required: contract.manual_ack_required,
+    }
+}
+
+fn lower_axis_fault_severity(severity: &AstAxisFaultSeverity) -> IrAxisFaultSeverity {
+    match severity {
+        AstAxisFaultSeverity::Recoverable => IrAxisFaultSeverity::Recoverable,
+        AstAxisFaultSeverity::NonRecoverable => IrAxisFaultSeverity::NonRecoverable,
+        AstAxisFaultSeverity::Safety => IrAxisFaultSeverity::Safety,
+    }
+}
+
+fn lower_axis_stop_mode(stop_mode: &AstAxisStopMode) -> IrAxisStopMode {
+    match stop_mode {
+        AstAxisStopMode::Controlled => IrAxisStopMode::Controlled,
+        AstAxisStopMode::Quick => IrAxisStopMode::Quick,
+        AstAxisStopMode::Immediate => IrAxisStopMode::Immediate,
+    }
+}
+
+fn lower_axis_auto_reset_policy(policy: &AstAxisAutoResetPolicy) -> IrAxisAutoResetPolicy {
+    match policy {
+        AstAxisAutoResetPolicy::Never => IrAxisAutoResetPolicy::Never,
+        AstAxisAutoResetPolicy::OnClear => IrAxisAutoResetPolicy::OnClear,
+        AstAxisAutoResetPolicy::Immediate => IrAxisAutoResetPolicy::Immediate,
     }
 }
 
@@ -7600,14 +7714,18 @@ task ready:
         let program = parse_plc(input).expect("PRD 5.5.1 示例应能成功解析为 AST");
         let state_machine = build_state_machine(&program).expect("应能从 5.5.1 示例构建状态机");
 
-        assert!(state_machine
-            .states
-            .iter()
-            .any(|state| state.task_name == "init" && state.step_name == "extend_A"));
-        assert!(state_machine
-            .states
-            .iter()
-            .any(|state| state.task_name == "init" && state.step_name == "retract_B"));
+        assert!(
+            state_machine
+                .states
+                .iter()
+                .any(|state| state.task_name == "init" && state.step_name == "extend_A")
+        );
+        assert!(
+            state_machine
+                .states
+                .iter()
+                .any(|state| state.task_name == "init" && state.step_name == "retract_B")
+        );
 
         let has_wait_transition = state_machine.transitions.iter().any(|transition| {
             transition.from.task_name == "init"
@@ -9285,5 +9403,78 @@ task main:
 
         let program = parse_plc(input).expect("示例语法应可解析");
         build_state_machine(&program).expect("Phase 1 标量类型签名应通过语义检查");
+    }
+
+    #[test]
+    fn lowers_axis_fault_contracts_into_topology_ir() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+axis_fault_contract axis_x_fault {
+    axis: axis_x
+    severity: safety
+    stop_mode: immediate
+    auto_reset_policy: never
+    manual_ack_required: true
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+";
+
+        let program = parse_plc(input).expect("axis_fault_contract 语法应可解析");
+        let topology = build_topology_graph(&program).expect("axis_fault_contract 应能降级到 IR");
+        assert_eq!(topology.axis_fault_contracts.len(), 1);
+        let contract = &topology.axis_fault_contracts[0];
+        assert_eq!(contract.name, "axis_x_fault");
+        assert_eq!(contract.axis, "axis_x");
+        assert!(matches!(
+            contract.severity,
+            crate::ir::AxisFaultSeverity::Safety
+        ));
+        assert!(matches!(
+            contract.stop_mode,
+            crate::ir::AxisStopMode::Immediate
+        ));
+        assert!(matches!(
+            contract.auto_reset_policy,
+            crate::ir::AxisAutoResetPolicy::Never
+        ));
+        assert!(contract.manual_ack_required);
+    }
+
+    #[test]
+    fn rejects_axis_fault_contract_when_axis_is_not_motion_device() {
+        let input = "[topology]
+device valve_a: solenoid_valve
+axis_fault_contract valve_fault {
+    axis: valve_a
+    severity: recoverable
+    stop_mode: quick
+    auto_reset_policy: on_clear
+    manual_ack_required: false
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors =
+            build_topology_graph(&program).expect_err("非轴设备绑定 axis_fault_contract 应报错");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("axis_fault_contract 只能绑定到轴设备"));
     }
 }

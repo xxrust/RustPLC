@@ -1185,21 +1185,38 @@ fn parses_three_station_assembly_example_into_verified_ir_json() {
         compile_source_to_json(&source).expect("three_station_assembly example should compile");
     let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
     assert!(matches!(safety_level, "完备证明" | "有界验证"));
-    assert_eq!(ir_json["verification"]["liveness"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
 }
 
 #[test]
 fn parses_hydraulic_bender_example_into_verified_ir_json() {
     let source = read_example("hydraulic_bender.plc");
-    let ir_json =
-        compile_source_to_json(&source).expect("hydraulic_bender example should compile");
+    let ir_json = compile_source_to_json(&source).expect("hydraulic_bender example should compile");
     let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
     assert!(matches!(safety_level, "完备证明" | "有界验证"));
-    assert_eq!(ir_json["verification"]["liveness"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
 }
 
 #[test]
@@ -1209,40 +1226,65 @@ fn parses_dual_axis_platform_example_into_verified_ir_json() {
         compile_source_to_json(&source).expect("dual_axis_platform example should compile");
     let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
     assert!(matches!(safety_level, "完备证明" | "有界验证"));
-    assert_eq!(ir_json["verification"]["liveness"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
 }
 
 #[test]
 fn parses_thermal_oven_example_into_verified_ir_json() {
     let source = read_example("thermal_oven.plc");
-    let ir_json =
-        compile_source_to_json(&source).expect("thermal_oven example should compile");
+    let ir_json = compile_source_to_json(&source).expect("thermal_oven example should compile");
     let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
     assert!(matches!(safety_level, "完备证明" | "有界验证"));
-    assert_eq!(ir_json["verification"]["liveness"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
 }
 
 #[test]
 fn parses_welding_station_example_into_verified_ir_json() {
     let source = read_example("welding_station.plc");
-    let ir_json =
-        compile_source_to_json(&source).expect("welding_station example should compile");
+    let ir_json = compile_source_to_json(&source).expect("welding_station example should compile");
     let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
     assert!(matches!(safety_level, "完备证明" | "有界验证"));
-    assert_eq!(ir_json["verification"]["liveness"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir_json["verification"]["timing"]["level"], Value::String("通过".to_string()));
-    assert_eq!(ir_json["verification"]["causality"]["level"], Value::String("通过".to_string()));
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
 }
 
 #[test]
 fn parses_axis_stepper_fault_routing_example_into_verified_ir_json() {
     let source = read_example("axis_stepper_fault_routing.plc");
-    let ir_json = compile_source_to_json(&source)
-        .expect("axis_stepper_fault_routing example should compile");
+    let ir_json =
+        compile_source_to_json(&source).expect("axis_stepper_fault_routing example should compile");
 
     let transitions = ir_json["state_machine"]["transitions"]
         .as_array()
@@ -1250,9 +1292,9 @@ fn parses_axis_stepper_fault_routing_example_into_verified_ir_json() {
     assert!(
         transitions.iter().any(|transition| {
             transition["actions"].as_array().is_some_and(|actions| {
-                actions
-                    .iter()
-                    .any(|action| action["action"] == Value::String("axis_move_relative".to_string()))
+                actions.iter().any(|action| {
+                    action["action"] == Value::String("axis_move_relative".to_string())
+                })
             })
         }),
         "stepper example should include axis_move_relative action in transitions"
@@ -1268,8 +1310,8 @@ fn parses_axis_stepper_fault_routing_example_into_verified_ir_json() {
 #[test]
 fn parses_axis_servo_fault_routing_example_into_verified_ir_json() {
     let source = read_example("axis_servo_fault_routing.plc");
-    let ir_json = compile_source_to_json(&source)
-        .expect("axis_servo_fault_routing example should compile");
+    let ir_json =
+        compile_source_to_json(&source).expect("axis_servo_fault_routing example should compile");
 
     let transitions = ir_json["state_machine"]["transitions"]
         .as_array()
@@ -1277,9 +1319,9 @@ fn parses_axis_servo_fault_routing_example_into_verified_ir_json() {
     assert!(
         transitions.iter().any(|transition| {
             transition["actions"].as_array().is_some_and(|actions| {
-                actions
-                    .iter()
-                    .any(|action| action["action"] == Value::String("axis_move_absolute".to_string()))
+                actions.iter().any(|action| {
+                    action["action"] == Value::String("axis_move_absolute".to_string())
+                })
             })
         }),
         "servo example should include axis_move_absolute action in transitions"

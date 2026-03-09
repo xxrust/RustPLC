@@ -127,6 +127,40 @@ pub struct ExternFunctionContract {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AxisFaultContractDef {
+    pub name: String,
+    pub axis: String,
+    pub severity: AxisFaultSeverity,
+    pub stop_mode: AxisStopMode,
+    pub auto_reset_policy: AxisAutoResetPolicy,
+    pub manual_ack_required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisFaultSeverity {
+    Recoverable,
+    NonRecoverable,
+    Safety,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisStopMode {
+    Controlled,
+    Quick,
+    Immediate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisAutoResetPolicy {
+    Never,
+    OnClear,
+    Immediate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PidLoop {
     pub name: String,
     pub pv: String,
@@ -176,6 +210,8 @@ pub struct TopologyGraph {
     pub cam_couplings: Vec<CamCouplingDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extern_functions: Vec<ExternFunctionDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub axis_fault_contracts: Vec<AxisFaultContractDef>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub axis_profiles: BTreeMap<String, AxisProfile>,
 }
@@ -190,6 +226,7 @@ impl TopologyGraph {
             cam_tables: Vec::new(),
             cam_couplings: Vec::new(),
             extern_functions: Vec::new(),
+            axis_fault_contracts: Vec::new(),
             axis_profiles: BTreeMap::new(),
         }
     }
@@ -594,6 +631,14 @@ mod tests {
                 time_bound_us: 50,
             },
         });
+        topology.axis_fault_contracts.push(AxisFaultContractDef {
+            name: "axis_x_fault".to_string(),
+            axis: "axis_x".to_string(),
+            severity: AxisFaultSeverity::Safety,
+            stop_mode: AxisStopMode::Immediate,
+            auto_reset_policy: AxisAutoResetPolicy::Never,
+            manual_ack_required: true,
+        });
 
         let state_machine = StateMachine {
             states: vec![
@@ -731,6 +776,7 @@ mod tests {
 
         assert!(topology_json.contains("graph"));
         assert!(topology_json.contains("extern_functions"));
+        assert!(topology_json.contains("axis_fault_contracts"));
         assert!(sm_json.contains("transitions"));
         assert!(sm_json.contains("call_extern"));
         assert!(sm_json.contains("axis_move_relative"));
@@ -745,6 +791,7 @@ mod tests {
         assert_eq!(decoded_topology.graph.node_count(), 2);
         assert_eq!(decoded_topology.graph.edge_count(), 1);
         assert_eq!(decoded_topology.extern_functions.len(), 1);
+        assert_eq!(decoded_topology.axis_fault_contracts.len(), 1);
     }
 
     #[test]

@@ -702,8 +702,15 @@ fn axis_fault_branches(
     }
 }
 
-fn resolve_goto_step<'a>(program: &'a PlcProgram, target: &GotoDirective) -> Option<&'a StepDeclaration> {
-    let task = program.tasks.tasks.iter().find(|task| task.name == target.task)?;
+fn resolve_goto_step<'a>(
+    program: &'a PlcProgram,
+    target: &GotoDirective,
+) -> Option<&'a StepDeclaration> {
+    let task = program
+        .tasks
+        .tasks
+        .iter()
+        .find(|task| task.name == target.task)?;
     match target.step.as_deref() {
         Some(step_name) => task.steps.iter().find(|step| step.name == step_name),
         None => task.steps.first(),
@@ -1710,9 +1717,11 @@ task fault:
             .expect_err("axis motion 故障分支缺失因果链应报错");
 
         assert!(
-            errors
-                .iter()
-                .any(|error| error.action.as_deref().unwrap_or_default().contains("on_motion_fault")),
+            errors.iter().any(|error| error
+                .action
+                .as_deref()
+                .unwrap_or_default()
+                .contains("on_motion_fault")),
             "诊断动作文本应标注 on_motion_fault 分支"
         );
         assert!(

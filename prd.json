@@ -65,8 +65,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented topology-level axis_fault_contract declaration across parser/AST/semantic/IR, enforced required-field parsing without implicit defaults, added semantic validation for axis-target compatibility/uniqueness, and added parser+semantic regression tests for both success and failure paths."
     },
     {
       "id": "US-005",

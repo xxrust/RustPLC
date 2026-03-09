@@ -5,6 +5,7 @@ Started: 2026-03-09 00:00:00 CST
 - `axis.move_relative/absolute` 参数解析走四层：`src/parser/plc.pest` → `src/parser/mod.rs` → `src/ast/mod.rs` → `src/semantic/mod.rs`，改动必须同步。
 - 轴动作参数的语义优先级固定为 `inline overrides > action params 引用 > device.motion_param_set`，并在语义阶段写回最终值再降级到 IR。
 - 轴故障语义需跨层同构：`src/ir/mod.rs` 与 `crates/runtime-core/src/lib.rs` 的 `AxisFaultKind/AxisFaultCategory` 必须同名同语义，并通过语义降级统一填充 `category/vendor_code`。
+- `pest` 规则存在 `boolean_value` 与 `identifier` 二选一时，必须把 `boolean_value` 放在前面，否则 `true/false` 会被吞成标识符并触发类型误报。
 
 ---
 
@@ -67,4 +68,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: 轴故障语义字段一旦升级，最容易漏掉的是 runtime-core 测试和 bridge 集成测试的断言类型，建议优先同步这两处。
   - Gotchas encountered: 若 `AxisFaultBranch` 只改 `kind` 不同步 `category/vendor_code`，会造成 IR 与 runtime 语义漂移；应在语义层集中推导。
   - Useful context: `AxisMotionResult::reject/motion_fault/safety_fault` 构造器能减少测试样板并稳定分类语义。
+---
+
+## [2026-03-09 17:02:17 CST] - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added new topology declaration `axis_fault_contract <name> { ... }` with parser grammar, AST schema, and IR lowering.
+  - Introduced strict required-field parsing (no implicit defaults) for `axis/severity/stop_mode/auto_reset_policy/manual_ack_required` with duplicate-field diagnostics.
+  - Added semantic validation to ensure contract axis targets an existing motion axis device (`stepper_motor`/`servo_drive`) and prevents duplicate contract bindings per axis.
+  - Added parser/semantic/IR roundtrip regression tests for both success and failure paths.
+- Files changed
+  - `AGENTS.md`
+  - `src/ast/mod.rs`
+  - `src/parser/plc.pest`
+  - `src/parser/mod.rs`
+  - `src/ir/mod.rs`
+  - `src/semantic/mod.rs`
+- **Learnings for future iterations:**
+  - Patterns discovered: 拓扑级新声明（如 `axis_fault_contract`）应沿 `plc.pest -> parser -> ast -> semantic -> ir` 一次性贯通，否则会出现“解析成功但降级丢失”的层间断裂。
+  - Gotchas encountered: `manual_ack_required: true/false` 这类字段若 grammar 中 `identifier` 排在 `boolean_value` 前，会被错误识别为标识符并产生误导性类型报错。
+  - Useful context: 当前语义层已将“axis 合同仅可绑定轴设备”前置校验，后续 US-006 可直接在 IR `TopologyGraph.axis_fault_contracts` 上扩展策略矩阵执行。
 ---
