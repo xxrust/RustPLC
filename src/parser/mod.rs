@@ -13,9 +13,9 @@ use crate::ast::{
     WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
-use pest::Parser;
 use pest::error::LineColLocation;
 use pest::iterators::Pair;
+use pest::Parser;
 use std::collections::HashSet;
 
 #[derive(pest_derive::Parser)]
@@ -2041,6 +2041,9 @@ fn parse_axis_move_relative_action(pair: Pair<Rule>) -> Result<ParsedAxisMoveRel
                         }
                         params = Some(parse_axis_move_params_arg(arg)?);
                     }
+                    Rule::axis_move_unknown_arg => {
+                        return Err(axis_move_unknown_arg_error(arg, "axis.move_relative"));
+                    }
                     _ => {}
                 }
             }
@@ -2088,6 +2091,9 @@ fn parse_axis_move_relative_action(pair: Pair<Rule>) -> Result<ParsedAxisMoveRel
                     ));
                 }
                 params = Some(parse_axis_move_params_arg(part)?);
+            }
+            Rule::axis_move_unknown_arg => {
+                return Err(axis_move_unknown_arg_error(part, "axis.move_relative"));
             }
             _ => {}
         }
@@ -2164,6 +2170,9 @@ fn parse_axis_move_absolute_action(pair: Pair<Rule>) -> Result<ParsedAxisMoveAbs
                         }
                         params = Some(parse_axis_move_params_arg(arg)?);
                     }
+                    Rule::axis_move_unknown_arg => {
+                        return Err(axis_move_unknown_arg_error(arg, "axis.move_absolute"));
+                    }
                     _ => {}
                 }
             }
@@ -2212,6 +2221,9 @@ fn parse_axis_move_absolute_action(pair: Pair<Rule>) -> Result<ParsedAxisMoveAbs
                 }
                 params = Some(parse_axis_move_params_arg(part)?);
             }
+            Rule::axis_move_unknown_arg => {
+                return Err(axis_move_unknown_arg_error(part, "axis.move_absolute"));
+            }
             _ => {}
         }
     }
@@ -2238,6 +2250,27 @@ fn parse_axis_move_numeric_arg(pair: Pair<Rule>, field_name: &str) -> Result<f64
         .as_str()
         .parse::<f64>()
         .map_err(|_| PlcError::parse(line, format!("axis.move 参数 {field_name} 数值解析失败")))
+}
+
+fn axis_move_unknown_arg_error(pair: Pair<Rule>, action_name: &str) -> PlcError {
+    let line = line_of(&pair);
+    let field_name = pair
+        .into_inner()
+        .find(|part| part.as_rule() == Rule::identifier)
+        .map(|part| part.as_str().to_string())
+        .unwrap_or_else(|| "<unknown>".to_string());
+
+    let whitelist = match action_name {
+        "axis.move_relative" => "distance/speed/acc/dec/params",
+        "axis.move_absolute" => "position/speed/acc/dec/params",
+        _ => "",
+    };
+
+    PlcError::parse_with_reason(
+        line,
+        format!("[AXIS-013] {action_name} 参数字段 '{field_name}' 不在白名单中。"),
+        format!("请仅使用 {action_name} 允许字段: {whitelist}；不支持别名（如 vel/jerk）。"),
+    )
 }
 
 fn parse_axis_move_params_arg(pair: Pair<Rule>) -> Result<String, PlcError> {
@@ -4985,18 +5018,14 @@ task ready:
             .find(|step| step.name == "detect")
             .expect("search 任务应包含 detect step");
 
-        assert!(
-            detect_step
-                .statements
-                .iter()
-                .any(|stmt| matches!(stmt, StepStatement::Race(_)))
-        );
-        assert!(
-            detect_step
-                .statements
-                .iter()
-                .any(|stmt| matches!(stmt, StepStatement::Timeout(_)))
-        );
+        assert!(detect_step
+            .statements
+            .iter()
+            .any(|stmt| matches!(stmt, StepStatement::Race(_))));
+        assert!(detect_step
+            .statements
+            .iter()
+            .any(|stmt| matches!(stmt, StepStatement::Timeout(_))));
 
         let ready_task = ast
             .tasks
@@ -5491,7 +5520,45 @@ task fault:
     step safety_fault:
 "#;
 
-        parse_plc(input).expect_err("未知 axis.move 字段应在 parser 阶段失败");
+        let err = parse_plc(input).expect_err("未知 axis.move 字段应在 parser 阶段失败");
+        let message = err.to_string();
+        assert!(
+            message.contains("[AXIS-013]"),
+            "应包含稳定错误码 [AXIS-013]，实际: {message}"
+        );
+        assert!(
+            message.contains("jerk"),
+            "应包含未知字段名 jerk，实际: {message}"
+        );
+    }
+
+    #[test]
+    fn rejects_axis_move_with_alias_argument_field_using_stable_code() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step start:
+        action: axis.move_absolute(axis_x, position: 100, vel: 5)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+"#;
+
+        let err = parse_plc(input).expect_err("别名字段 vel 应在 parser 阶段失败");
+        let message = err.to_string();
+        assert!(message.contains("[AXIS-013]"));
+        assert!(message.contains("vel"));
     }
 
     #[test]

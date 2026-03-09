@@ -7,6 +7,7 @@
 编译流水线严格分层，每层职责清晰：
 
 - **Parser** (`src/parser/plc.pest` + `src/parser/mod.rs`): PEG 语法 → AST。长关键字必须在短前缀之前（如 `must_complete_within_worst_case` 在 `must_complete_within` 之前）。Wrapper 规则必须先解包再匹配具体规则。布尔字面量与 `identifier` 并存时，`boolean_value` 必须放在 `identifier` 之前，避免 `true/false` 被误解析成标识符。
+  - `axis.move_*` 参数白名单通过 `axis_move_unknown_arg` 兜底规则实现，且该规则必须放在已知参数规则之后；未知字段统一在 parser 报 `AXIS-013`，不要回退为 pest 原生 `expected ...` 文案。
 - **AST** (`src/ast/mod.rs`): 源语法的忠实表示。不进行语义验证或展开。
 - **Semantic** (`src/semantic/mod.rs`): 预处理（repeat/delay/operation-template 展开）+ IR 降级。所有语法糖在 IR 生成前展开。设备库约束在降级前注入 AST。
 - **IR** (`src/ir/mod.rs`): 规范中间形式（TopologyGraph + StateMachine + ConstraintSet + TimingModel）。验证引擎和运行时桥接消费 IR，不消费 AST。

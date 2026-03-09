@@ -203,8 +203,8 @@
         "Tests pass"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented syntax convergence gate for axis fields and axis.move args: parser now emits stable [AXIS-013] for non-whitelist axis.move_* argument keys (e.g. vel/jerk), axis non-whitelist inline params continue to fail with [AXP-006], added CI integration gate tests in tests/axis_syntax_convergence_us013.rs, and updated axis motion spec to keep a single canonical syntax without aliases."
     },
     {
       "id": "US-014",

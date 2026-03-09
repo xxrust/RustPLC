@@ -253,12 +253,16 @@ axis_move_speed_arg = { "speed" ~ ":" ~ number }
 axis_move_acc_arg = { "acc" ~ ":" ~ number }
 axis_move_dec_arg = { "dec" ~ ":" ~ number }
 axis_move_params_arg = { "params" ~ ":" ~ identifier }
+axis_move_unknown_arg = {
+    identifier ~ ":" ~ (number | boolean_value | string_literal | identifier)
+}
 axis_move_relative_arg = {
     axis_move_distance_arg
     | axis_move_speed_arg
     | axis_move_acc_arg
     | axis_move_dec_arg
     | axis_move_params_arg
+    | axis_move_unknown_arg
 }
 axis_move_absolute_arg = {
     axis_move_position_arg
@@ -266,6 +270,7 @@ axis_move_absolute_arg = {
     | axis_move_acc_arg
     | axis_move_dec_arg
     | axis_move_params_arg
+    | axis_move_unknown_arg
 }
 axis_move_relative_action = {
     "axis.move_relative"
