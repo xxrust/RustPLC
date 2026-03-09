@@ -83,8 +83,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented scan-cycle parallel/race regression baseline: parallel synthetic state naming standardized to fork/branch_active/branch_done/join, added runtime regressions for same-tick dual-branch start, deterministic race winner selection, and slower-branch join behavior; ST codegen test compile path fixed and quality checks passed."
     },
     {
       "id": "US-006",

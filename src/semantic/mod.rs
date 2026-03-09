@@ -5308,7 +5308,7 @@ fn build_parallel_block(
 
     for (branch_index, branch) in block.branches.iter().enumerate() {
         let branch_state_name = format!(
-            "{step_name}__parallel_{}_branch_{}",
+            "{step_name}__parallel_{}_branch_{}_active",
             block_index + 1,
             branch_index + 1
         );
@@ -5459,7 +5459,7 @@ fn build_parallel_block(
                 builder,
                 task,
                 &format!(
-                    "{step_name}__parallel_{}_branch_{}",
+                    "{step_name}__parallel_{}_branch_{}_active",
                     block_index + 1,
                     branch_index + 1
                 ),
@@ -5480,7 +5480,7 @@ fn build_parallel_block(
                 builder,
                 task,
                 &format!(
-                    "{step_name}__parallel_{}_branch_{}",
+                    "{step_name}__parallel_{}_branch_{}_active",
                     block_index + 1,
                     branch_index + 1
                 ),

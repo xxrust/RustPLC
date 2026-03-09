@@ -1461,7 +1461,7 @@ mod tests {
         let parallel = state("task", "step__parallel_1_fork");
         let race = state("task", "step__race_1_decision");
         let sm = StateMachine {
-            states: vec![parallel.clone(), race],
+            states: vec![parallel.clone(), race.clone()],
             transitions: vec![Transition {
                 from: parallel.clone(),
                 to: race.clone(),

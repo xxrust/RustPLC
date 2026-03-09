@@ -201,6 +201,7 @@
 
 - 拓扑降级：构建 `TopologyGraph`，包含设备、连接、外部函数、操作合约
 - 任务降级：构建 `StateMachine`，包含状态、转换、守卫、动作
+- `parallel` 合成状态命名约定固定为：`__parallel_<idx>_fork` → `__parallel_<idx>_branch_<n>_active` → `__parallel_<idx>_branch_<n>_done` → `__parallel_<idx>_join`（验证器/回归测试依赖该命名模式）
 - 约束降级：构建 `ConstraintSet`，包含安全/时序/因果规则
 - 所有降级对语义规则验证；错误聚合并一起暴露
 

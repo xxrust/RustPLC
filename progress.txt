@@ -6,6 +6,7 @@ Started: 2026-03-09 00:00:00 CST
 - 轴动作参数的语义优先级固定为 `inline overrides > action params 引用 > device.motion_param_set`，并在语义阶段写回最终值再降级到 IR。
 - 轴故障语义需跨层同构：`src/ir/mod.rs` 与 `crates/runtime-core/src/lib.rs` 的 `AxisFaultKind/AxisFaultCategory` 必须同名同语义，并通过语义降级统一填充 `category/vendor_code`。
 - `pest` 规则存在 `boolean_value` 与 `identifier` 二选一时，必须把 `boolean_value` 放在前面，否则 `true/false` 会被吞成标识符并触发类型误报。
+- `parallel` 合成状态命名约定固定：`__parallel_<n>_fork` → `__parallel_<n>_branch_<m>_active` → `__parallel_<n>_branch_<m>_done` → `__parallel_<n>_join`，回归测试与验证逻辑依赖该模式。
 
 ---
 
@@ -88,4 +89,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: 拓扑级新声明（如 `axis_fault_contract`）应沿 `plc.pest -> parser -> ast -> semantic -> ir` 一次性贯通，否则会出现“解析成功但降级丢失”的层间断裂。
   - Gotchas encountered: `manual_ack_required: true/false` 这类字段若 grammar 中 `identifier` 排在 `boolean_value` 前，会被错误识别为标识符并产生误导性类型报错。
   - Useful context: 当前语义层已将“axis 合同仅可绑定轴设备”前置校验，后续 US-006 可直接在 IR `TopologyGraph.axis_fault_contracts` 上扩展策略矩阵执行。
+---
+
+## [2026-03-09 18:59:54 CST] - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 将 `parallel` 合成分支状态统一命名为 `branch_<n>_active`，并保留 `branch_<n>_done`，使 fork/join 状态图语义更清晰且可稳定回归。
+  - 新增 US-005 集成回归：覆盖并行同 tick 双分支启动、race 同时满足时首分支确定性胜出、以及 A 先完成/B 后完成的 join 行为。
+  - 修复一个阻塞测试的现有问题：`src/codegen/st.rs` 中并行/竞速合成状态单测的 `State` move 后复用导致编译失败（改为 clone）。
+- Files changed
+  - `AGENTS.md`
+  - `src/semantic/mod.rs`
+  - `src/codegen/st.rs`
+  - `tests/parallel_race_us005.rs`
+  - `prd.json`
+- **Learnings for future iterations:**
+  - Patterns discovered: 并行语义相关改动要优先做 runtime 集成回归（trace/step 断言），仅看语义层状态图容易漏掉桥接行为偏差。
+  - Gotchas encountered: Rust 单测里把 `State` move 进 `Vec` 后再复用会触发 E0382，类似构造器样例建议统一 `clone()`。
+  - Useful context: 现有 bridge 已支持 `condition+always` 形状（按 `after_ticks=0` 处理），可用于 race 分支的确定性优先级判定测试。
 ---
