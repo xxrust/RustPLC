@@ -113,8 +113,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented runtime stop semantics for axis fault handling by introducing AxisStopState transitions (Running -> mode-specific Stopping -> Stopped), emitting deterministic stop transition logs (`axis_stop_transition_enter`/`axis_stop_transition_completed`) keyed by stop mode, and extending runtime/runtime-bridge regressions to verify controlled/quick/immediate paths remain aligned with policy matrix and AxisFault classification."
     },
     {
       "id": "US-008",

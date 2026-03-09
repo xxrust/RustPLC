@@ -34,6 +34,7 @@
 - 运行时轴回调统一返回 `AxisMotionResult::Fault(AxisFault)`；测试优先使用 `AxisMotionResult::reject/motion_fault/safety_fault` 构造器保持语义稳定。
 - `axis_fault_contract` 策略矩阵通过 **runtime bridge**（`src/runtime_bridge.rs`）降级到 `runtime_core::Program.axis_fault_policies`；调整策略枚举时需同步 IR/runtime-core/bridge 三层。
 - 运行时策略审计日志通过 `runtime_core::axis_fault_policy_log_message_id` + `AXIS_FAULT_POLICY_LOG_MESSAGE` 生成；修改编码规则时必须同步 `tests/runtime_bridge_us006.rs` 回归断言。
+- 停机模式语义在 runtime-core 中固定迁移为 `Running -> {ControlledStopping|QuickStopping|ImmediateStopping} -> Stopped`，并通过 `axis_stop_transition_log_message_id` + `AXIS_STOP_TRANSITION_{ENTER,COMPLETED}_LOG_MESSAGE` 输出可观测日志；修改 stop 编码或阶段名时需同步 `tests/runtime_bridge_us006.rs` 与 `crates/runtime-core/src/lib.rs` 单测。
 
 ## 外部函数架构
 

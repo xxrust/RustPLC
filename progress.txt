@@ -8,6 +8,7 @@ Started: 2026-03-09 00:00:00 CST
 - `pest` 规则存在 `boolean_value` 与 `identifier` 二选一时，必须把 `boolean_value` 放在前面，否则 `true/false` 会被吞成标识符并触发类型误报。
 - `parallel` 合成状态命名约定固定：`__parallel_<n>_fork` → `__parallel_<n>_branch_<m>_active` → `__parallel_<n>_branch_<m>_done` → `__parallel_<n>_join`，回归测试与验证逻辑依赖该模式。
 - `runtime_core::Program` 结构字段变更需同步四处：`src/runtime_bridge.rs`（桥接填充）、`src/main.rs`（内置 `SIM_PROGRAM`）、`crates/codegen/src/lib.rs`（生成器模板）、`crates/board-rp2040/build.rs`（默认固件程序模板）。
+- 轴故障停机可观测性采用双日志阶段：先 `axis_stop_transition_enter` 再 `axis_stop_transition_completed`，并用 `axis_stop_transition_log_message_id(stop_mode, phase)` 做稳定断言，避免硬编码 message_id。
 
 ---
 
@@ -130,4 +131,23 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: 轴故障策略矩阵应在 bridge 阶段一次性降级到 runtime Program，运行时仅做执行与日志，不重复解析 DSL/IR 结构。
   - Gotchas encountered: 给 `runtime_core::Program` 增字段时，除桥接外还需同步更新代码生成模板和默认固件 Program 字符串，否则会在下游 crate 出现结构体字面量编译错误。
   - Useful context: `axis_fault_policy_log_message_id(...)` 是策略日志断言的稳定入口，集成测试可直接以该函数构造期望值避免硬编码位编码细节。
+---
+
+## [2026-03-09 19:44:04 CST] - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 在 `runtime-core` 引入轴停机状态机：`AxisStopState`，并提供 `Runtime::axis_stop_state()` 用于观测停机结果。
+  - 将策略矩阵中的 `stop_mode` 落地为确定性停机迁移：`Running -> {ControlledStopping|QuickStopping|ImmediateStopping} -> Stopped`。
+  - 新增停机迁移审计日志：`axis_stop_transition_enter` / `axis_stop_transition_completed`，并通过 `axis_stop_transition_log_message_id(stop_mode, phase)` 编码。
+  - 扩展回归测试覆盖 controlled/quick/immediate 三条停机路径，验证 AxisFault 分类、策略日志与停机迁移日志一致。
+- Files changed
+  - `AGENTS.md`
+  - `crates/runtime-core/src/lib.rs`
+  - `tests/runtime_bridge_us006.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: 停机语义建议统一通过“策略日志 + 停机迁移日志”双轨审计，既保留策略矩阵上下文，也保留执行阶段信息。
+  - Gotchas encountered: `runtime_core::Program` 结构体扩展后，`crates/runtime-core/src/lib.rs` 单测中所有 `Program` 字面量都需要同步字段，否则 `cargo test -p runtime-core` 会批量报 `E0063`。
+  - Useful context: `Runtime::tick_with_axis_and_logs` 已可一次性采集策略日志和停机迁移日志，适合作为 axis fault 行为回归的统一入口。
 ---

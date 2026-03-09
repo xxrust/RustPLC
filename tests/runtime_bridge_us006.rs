@@ -1,8 +1,10 @@
 use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use runtime_core::{
-    axis_fault_policy_log_message_id, AxisAutoResetPolicy, AxisFault, AxisFaultKind,
-    AxisFaultSeverity, AxisMotionResult, AxisMoveKind, AxisStopMode, Runtime, RuntimeError,
-    RuntimeTickError, AXIS_FAULT_POLICY_LOG_MESSAGE,
+    axis_fault_policy_log_message_id, axis_stop_transition_log_message_id, AxisAutoResetPolicy,
+    AxisFault, AxisFaultKind, AxisFaultSeverity, AxisMotionResult, AxisMoveKind, AxisStopMode,
+    AxisStopState, AxisStopTransitionPhase, Runtime, RuntimeError, RuntimeTickError,
+    AXIS_FAULT_POLICY_LOG_MESSAGE, AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE,
+    AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE,
 };
 use rust_plc::extern_functions::{
     extern_runtime_error_code, ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError,
@@ -756,7 +758,12 @@ fn runtime_bridge_applies_axis_fault_policy_matrix_and_emits_policy_logs() {
             .tick_with_axis_and_logs(&mut io, |event| logs.push(event), |_| axis_result)
             .expect_err("axis fault should be surfaced");
         assert_eq!(err, expected_error);
-        assert_eq!(logs.len(), 1, "axis fault policy should emit one log");
+        assert_eq!(rt.axis_stop_state(), AxisStopState::Stopped);
+        assert_eq!(
+            logs.len(),
+            3,
+            "axis fault policy should emit policy+stop logs"
+        );
         assert_eq!(logs[0].message, AXIS_FAULT_POLICY_LOG_MESSAGE);
         assert_eq!(
             logs[0].message_id,
@@ -766,6 +773,19 @@ fn runtime_bridge_applies_axis_fault_policy_matrix_and_emits_policy_logs() {
                 expected_auto_reset,
                 manual_ack_required,
                 expected_fault_kind,
+            )
+        );
+        assert_eq!(logs[1].message, AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE);
+        assert_eq!(
+            logs[1].message_id,
+            axis_stop_transition_log_message_id(expected_stop_mode, AxisStopTransitionPhase::Enter,)
+        );
+        assert_eq!(logs[2].message, AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE);
+        assert_eq!(
+            logs[2].message_id,
+            axis_stop_transition_log_message_id(
+                expected_stop_mode,
+                AxisStopTransitionPhase::Completed,
             )
         );
     }

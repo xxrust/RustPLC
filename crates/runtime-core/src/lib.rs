@@ -94,6 +94,15 @@ pub enum AxisStopMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisStopState {
+    Running,
+    ControlledStopping,
+    QuickStopping,
+    ImmediateStopping,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxisAutoResetPolicy {
     Never,
     OnClear,
@@ -111,6 +120,15 @@ pub struct AxisFaultPolicy<'a> {
 
 pub const AXIS_FAULT_POLICY_LOG_MESSAGE: &str = "axis_fault_policy_applied";
 const AXIS_FAULT_POLICY_LOG_BASE_ID: u16 = 50_000;
+pub const AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE: &str = "axis_stop_transition_enter";
+pub const AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE: &str = "axis_stop_transition_completed";
+const AXIS_STOP_TRANSITION_LOG_BASE_ID: u16 = 51_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisStopTransitionPhase {
+    Enter,
+    Completed,
+}
 
 pub const fn axis_fault_policy_log_message_id(
     severity: AxisFaultSeverity,
@@ -148,6 +166,23 @@ pub const fn axis_fault_policy_log_message_id(
         + (auto_reset_bits << 4)
         + (ack_bits << 6)
         + (fault_kind_bits << 7)
+}
+
+pub const fn axis_stop_transition_log_message_id(
+    stop_mode: AxisStopMode,
+    phase: AxisStopTransitionPhase,
+) -> u16 {
+    let stop_mode_bits = match stop_mode {
+        AxisStopMode::Controlled => 0,
+        AxisStopMode::Quick => 1,
+        AxisStopMode::Immediate => 2,
+    };
+    let phase_bits = match phase {
+        AxisStopTransitionPhase::Enter => 0,
+        AxisStopTransitionPhase::Completed => 1,
+    };
+
+    AXIS_STOP_TRANSITION_LOG_BASE_ID + stop_mode_bits + (phase_bits << 2)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -604,6 +639,7 @@ pub struct Runtime<'a> {
     program: &'a Program<'a>,
     loc: Location,
     step_entered_at: Option<Tick>,
+    axis_stop_state: AxisStopState,
     pid_states: [PidState; MAX_PID_LOOPS],
     variables: [f32; MAX_VARIABLES],
     cam_states: [CamState; MAX_CAM_COUPLINGS],
@@ -664,6 +700,7 @@ impl<'a> Runtime<'a> {
                 step: entry,
             },
             step_entered_at: None,
+            axis_stop_state: AxisStopState::Running,
             pid_states: [PidState::default(); MAX_PID_LOOPS],
             variables,
             cam_states,
@@ -672,6 +709,10 @@ impl<'a> Runtime<'a> {
 
     pub fn location(&self) -> Location {
         self.loc
+    }
+
+    pub fn axis_stop_state(&self) -> AxisStopState {
+        self.axis_stop_state
     }
 
     pub fn variables(&self) -> &[f32; MAX_VARIABLES] {
@@ -1052,6 +1093,11 @@ impl<'a> Runtime<'a> {
                                                 ),
                                                 message: AXIS_FAULT_POLICY_LOG_MESSAGE,
                                             });
+                                            self.apply_axis_stop_transition(
+                                                policy.stop_mode,
+                                                now,
+                                                on_log,
+                                            );
                                             on_axis_fault_policy(command, fault);
                                         }
                                         return Err(RuntimeTickError::Core(
@@ -1398,6 +1444,43 @@ impl<'a> Runtime<'a> {
             .axis_fault_policies
             .iter()
             .find(|policy| policy.axis == target)
+    }
+
+    fn apply_axis_stop_transition(
+        &mut self,
+        stop_mode: AxisStopMode,
+        tick: Tick,
+        on_log: &mut impl FnMut(LogEvent),
+    ) {
+        let transition_state = match stop_mode {
+            AxisStopMode::Controlled => AxisStopState::ControlledStopping,
+            AxisStopMode::Quick => AxisStopState::QuickStopping,
+            AxisStopMode::Immediate => AxisStopState::ImmediateStopping,
+        };
+
+        self.axis_stop_state = transition_state;
+        on_log(LogEvent {
+            tick,
+            task: self.loc.task,
+            step: self.loc.step,
+            message_id: axis_stop_transition_log_message_id(
+                stop_mode,
+                AxisStopTransitionPhase::Enter,
+            ),
+            message: AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE,
+        });
+
+        self.axis_stop_state = AxisStopState::Stopped;
+        on_log(LogEvent {
+            tick,
+            task: self.loc.task,
+            step: self.loc.step,
+            message_id: axis_stop_transition_log_message_id(
+                stop_mode,
+                AxisStopTransitionPhase::Completed,
+            ),
+            message: AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE,
+        });
     }
 
     fn transition(
@@ -2049,6 +2132,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2115,6 +2199,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2168,6 +2253,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2220,6 +2306,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2400,6 +2487,7 @@ mod tests {
             var_init: &VARS,
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2448,6 +2536,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2503,6 +2592,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2549,6 +2639,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2598,6 +2689,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2649,6 +2741,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2700,6 +2793,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2714,6 +2808,118 @@ mod tests {
                 fault: AxisFault::safety(31),
             }
         );
+    }
+
+    #[test]
+    fn axis_fault_policy_applies_mode_specific_stop_transitions() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+
+        let cases = [
+            (
+                AxisFaultSeverity::Recoverable,
+                AxisStopMode::Controlled,
+                AxisMotionResult::reject(101),
+            ),
+            (
+                AxisFaultSeverity::NonRecoverable,
+                AxisStopMode::Quick,
+                AxisMotionResult::motion_fault(102),
+            ),
+            (
+                AxisFaultSeverity::Safety,
+                AxisStopMode::Immediate,
+                AxisMotionResult::safety_fault(103),
+            ),
+        ];
+
+        for (severity, stop_mode, axis_result) in cases {
+            let policies = [AxisFaultPolicy {
+                axis: "axis_x",
+                severity,
+                stop_mode,
+                auto_reset_policy: AxisAutoResetPolicy::Never,
+                manual_ack_required: true,
+            }];
+            let program = Program {
+                tasks: &TASKS,
+                pid_loops: &[],
+                var_init: &[],
+                cam_configs: &[],
+                cam_tables: &[],
+                axis_fault_policies: &policies,
+            };
+
+            let expected_fault = match axis_result {
+                AxisMotionResult::Fault(fault) => fault,
+                AxisMotionResult::Done => panic!("test case must carry fault result"),
+            };
+
+            let mut io = MemIo::new();
+            let mut rt = Runtime::new(&program).expect("runtime init");
+            assert_eq!(rt.axis_stop_state(), AxisStopState::Running);
+
+            let mut logs = std::vec::Vec::new();
+            let err = rt
+                .tick_with_axis_and_logs(&mut io, |event| logs.push(event), |_| axis_result)
+                .expect_err("fault result should be surfaced");
+
+            assert_eq!(
+                err,
+                RuntimeError::AxisFault {
+                    target: "axis_x",
+                    fault: expected_fault,
+                }
+            );
+            assert_eq!(rt.axis_stop_state(), AxisStopState::Stopped);
+            assert_eq!(logs.len(), 3);
+            assert_eq!(logs[0].message, AXIS_FAULT_POLICY_LOG_MESSAGE);
+            assert_eq!(
+                logs[0].message_id,
+                axis_fault_policy_log_message_id(
+                    severity,
+                    stop_mode,
+                    AxisAutoResetPolicy::Never,
+                    true,
+                    expected_fault.kind,
+                )
+            );
+            assert_eq!(logs[1].message, AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE);
+            assert_eq!(
+                logs[1].message_id,
+                axis_stop_transition_log_message_id(stop_mode, AxisStopTransitionPhase::Enter)
+            );
+            assert_eq!(logs[2].message, AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE);
+            assert_eq!(
+                logs[2].message_id,
+                axis_stop_transition_log_message_id(stop_mode, AxisStopTransitionPhase::Completed)
+            );
+        }
     }
 
     #[test]
@@ -2761,6 +2967,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2880,6 +3087,7 @@ mod tests {
             var_init: &VARS,
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let rt = Runtime::new(&PROGRAM).expect("runtime 创建应成功");
@@ -2907,6 +3115,7 @@ mod tests {
             var_init: &VARS,
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let err = match Runtime::new(&PROGRAM) {
@@ -2959,6 +3168,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let err = match Runtime::new(&program) {
@@ -3008,6 +3218,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let err = match Runtime::new(&program) {
@@ -3091,6 +3302,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -3144,6 +3356,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -3193,6 +3406,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -3273,6 +3487,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -3391,6 +3606,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -3454,6 +3670,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
