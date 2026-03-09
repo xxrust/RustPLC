@@ -80,6 +80,77 @@ impl AxisFault {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisFaultSeverity {
+    Recoverable,
+    NonRecoverable,
+    Safety,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisStopMode {
+    Controlled,
+    Quick,
+    Immediate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisAutoResetPolicy {
+    Never,
+    OnClear,
+    Immediate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisFaultPolicy<'a> {
+    pub axis: &'a str,
+    pub severity: AxisFaultSeverity,
+    pub stop_mode: AxisStopMode,
+    pub auto_reset_policy: AxisAutoResetPolicy,
+    pub manual_ack_required: bool,
+}
+
+pub const AXIS_FAULT_POLICY_LOG_MESSAGE: &str = "axis_fault_policy_applied";
+const AXIS_FAULT_POLICY_LOG_BASE_ID: u16 = 50_000;
+
+pub const fn axis_fault_policy_log_message_id(
+    severity: AxisFaultSeverity,
+    stop_mode: AxisStopMode,
+    auto_reset_policy: AxisAutoResetPolicy,
+    manual_ack_required: bool,
+    fault_kind: AxisFaultKind,
+) -> u16 {
+    let severity_bits = match severity {
+        AxisFaultSeverity::Recoverable => 0,
+        AxisFaultSeverity::NonRecoverable => 1,
+        AxisFaultSeverity::Safety => 2,
+    };
+    let stop_mode_bits = match stop_mode {
+        AxisStopMode::Controlled => 0,
+        AxisStopMode::Quick => 1,
+        AxisStopMode::Immediate => 2,
+    };
+    let auto_reset_bits = match auto_reset_policy {
+        AxisAutoResetPolicy::Never => 0,
+        AxisAutoResetPolicy::OnClear => 1,
+        AxisAutoResetPolicy::Immediate => 2,
+    };
+    let ack_bits = if manual_ack_required { 1 } else { 0 };
+    let fault_kind_bits = match fault_kind {
+        AxisFaultKind::Reject => 0,
+        AxisFaultKind::Motion => 1,
+        AxisFaultKind::Safety => 2,
+        AxisFaultKind::Vendor { .. } => 3,
+    };
+
+    AXIS_FAULT_POLICY_LOG_BASE_ID
+        + severity_bits
+        + (stop_mode_bits << 2)
+        + (auto_reset_bits << 4)
+        + (ack_bits << 6)
+        + (fault_kind_bits << 7)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransitionReason {
     Action,
     DelayElapsed,
@@ -502,6 +573,7 @@ pub struct Program<'a> {
     pub var_init: &'a [f32],
     pub cam_configs: &'a [CamCouplingConfig],
     pub cam_tables: &'a [CamTableData],
+    pub axis_fault_policies: &'a [AxisFaultPolicy<'a>],
 }
 
 impl<'a> Program<'a> {
@@ -649,6 +721,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
         .map_err(|err| match err {
             RuntimeTickError::Core(err) => err,
@@ -693,6 +766,52 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut axis_adapter,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
+        )
+        .map_err(|err| match err {
+            RuntimeTickError::Core(err) => err,
+            RuntimeTickError::ExternCallFailed { function, .. } => {
+                RuntimeError::ExternCallRequiresHandler { function }
+            }
+            RuntimeTickError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            } => RuntimeError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            },
+        })
+    }
+
+    pub fn tick_with_axis_and_logs<IO: Io>(
+        &mut self,
+        io: &mut IO,
+        mut on_log: impl FnMut(LogEvent),
+        mut on_axis_motion: impl FnMut(AxisMotionCommand) -> AxisMotionResult,
+    ) -> Result<(), RuntimeError> {
+        #[derive(Debug)]
+        struct MissingExternHandler;
+
+        let mut on_event = |_| {};
+        let mut missing_extern =
+            |_function: &'static str,
+             _args: &[f32],
+             _results: &mut [f32]|
+             -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
+        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
+        let mut axis_adapter = |command: AxisMotionCommand| Ok(on_axis_motion(command));
+
+        self.tick_with_trace_and_logs_impl(
+            io,
+            &mut on_event,
+            &mut on_log,
+            &mut missing_extern,
+            None,
+            &mut ignore_error_code,
+            &mut axis_adapter,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
         .map_err(|err| match err {
             RuntimeTickError::Core(err) => err,
@@ -732,6 +851,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
     }
 
@@ -757,6 +877,7 @@ impl<'a> Runtime<'a> {
             Some(error_code_var),
             &mut map_error_code,
             &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
     }
 
@@ -781,6 +902,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
     }
 
@@ -805,6 +927,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
     }
 
@@ -817,6 +940,7 @@ impl<'a> Runtime<'a> {
         extern_error_code_var: Option<u16>,
         map_extern_error_code: &mut impl FnMut(&'static str, &E) -> f32,
         on_axis_motion: &mut impl FnMut(AxisMotionCommand) -> Result<AxisMotionResult, RuntimeError>,
+        on_axis_fault_policy: &mut impl FnMut(AxisMotionCommand, AxisFault),
     ) -> Result<(), RuntimeTickError<E>> {
         let now = io.tick();
         if self.step_entered_at.is_none() {
@@ -912,6 +1036,24 @@ impl<'a> Runtime<'a> {
                                 match result {
                                     AxisMotionResult::Done => {}
                                     AxisMotionResult::Fault(fault) => {
+                                        if let Some(policy) =
+                                            self.axis_fault_policy_for(command.target)
+                                        {
+                                            on_log(LogEvent {
+                                                tick: now,
+                                                task: self.loc.task,
+                                                step: self.loc.step,
+                                                message_id: axis_fault_policy_log_message_id(
+                                                    policy.severity,
+                                                    policy.stop_mode,
+                                                    policy.auto_reset_policy,
+                                                    policy.manual_ack_required,
+                                                    fault.kind,
+                                                ),
+                                                message: AXIS_FAULT_POLICY_LOG_MESSAGE,
+                                            });
+                                            on_axis_fault_policy(command, fault);
+                                        }
                                         return Err(RuntimeTickError::Core(
                                             RuntimeError::AxisFault {
                                                 target: command.target,
@@ -1251,6 +1393,13 @@ impl<'a> Runtime<'a> {
         })
     }
 
+    fn axis_fault_policy_for(&self, target: &str) -> Option<&AxisFaultPolicy<'a>> {
+        self.program
+            .axis_fault_policies
+            .iter()
+            .find(|policy| policy.axis == target)
+    }
+
     fn transition(
         &mut self,
         tick: Tick,
@@ -1505,7 +1654,11 @@ fn eval_expr(program: &ExprProgram, vars: &[f32; MAX_VARIABLES]) -> f32 {
         }
     }
 
-    if sp == 0 { 0.0 } else { stack[0] }
+    if sp == 0 {
+        0.0
+    } else {
+        stack[0]
+    }
 }
 
 const MAX_PID_LOOPS: usize = 8;

@@ -181,7 +181,7 @@ pub fn generate_program_module(
 
     if program.pid_loops.is_empty() {
         out.push_str(
-            "  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[], var_init: &[], cam_configs: &[], cam_tables: &[] };\n",
+            "  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[], var_init: &[], cam_configs: &[], cam_tables: &[], axis_fault_policies: &[] };\n",
         );
     } else {
         out.push_str(&format!(
@@ -194,7 +194,7 @@ pub fn generate_program_module(
             out.push_str(",\n");
         }
         out.push_str("  ];\n\n");
-        out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &PID_LOOPS, var_init: &[], cam_configs: &[], cam_tables: &[] };\n");
+        out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &PID_LOOPS, var_init: &[], cam_configs: &[], cam_tables: &[], axis_fault_policies: &[] };\n");
     }
     out.push_str("}\n");
 

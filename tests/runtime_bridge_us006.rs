@@ -1,19 +1,21 @@
 use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use runtime_core::{
-    AxisFault, AxisMotionResult, AxisMoveKind, Runtime, RuntimeError, RuntimeTickError,
+    axis_fault_policy_log_message_id, AxisAutoResetPolicy, AxisFault, AxisFaultKind,
+    AxisFaultSeverity, AxisMotionResult, AxisMoveKind, AxisStopMode, Runtime, RuntimeError,
+    RuntimeTickError, AXIS_FAULT_POLICY_LOG_MESSAGE,
 };
 use rust_plc::extern_functions::{
-    EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR, ExternFunctionInfo,
-    ExternFunctionRegistry, ExternRuntimeError, ValueRange, extern_runtime_error_code,
+    extern_runtime_error_code, ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError,
+    ValueRange, EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR,
 };
 use rust_plc::ir::{ExternFunctionContract, TopologyGraph, VariableType};
 use rust_plc::parser::parse_plc;
-use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
+use rust_plc::runtime_bridge::{state_machine_to_runtime_program, BridgeError};
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'static> {
     let program = parse_plc(plc_source).expect("parse plc");
@@ -487,6 +489,49 @@ task done:
     step halt:
 "#;
 
+fn axis_fault_policy_fixture(
+    severity: &str,
+    stop_mode: &str,
+    auto_reset_policy: &str,
+    manual_ack_required: bool,
+) -> String {
+    format!(
+        r#"
+[topology]
+device axis_x: stepper_motor {{ model_ref: stepper_generic, config_ref: stepper_default }}
+
+axis_fault_contract axis_x_fault {{
+    axis: axis_x
+    severity: {severity}
+    stop_mode: {stop_mode}
+    auto_reset_policy: {auto_reset_policy}
+    manual_ack_required: {manual_ack_required}
+}}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+
+task done:
+    step halt:
+"#
+    )
+}
+
 #[test]
 fn bridge_maps_cam_tables_configs_and_actions() {
     let program = compile_to_runtime(PLC_CAM_FIXTURE, 1);
@@ -621,6 +666,108 @@ fn runtime_tick_with_axis_handler_propagates_classified_faults_for_bridged_axis_
             .tick_with_axis(&mut io, |_| result)
             .expect_err("fault result should be surfaced");
         assert_eq!(err, expected);
+    }
+}
+
+#[test]
+fn runtime_bridge_applies_axis_fault_policy_matrix_and_emits_policy_logs() {
+    let cases = [
+        (
+            "recoverable",
+            "controlled",
+            "never",
+            true,
+            AxisFaultSeverity::Recoverable,
+            AxisStopMode::Controlled,
+            AxisAutoResetPolicy::Never,
+            AxisMotionResult::reject(101),
+            RuntimeError::AxisFault {
+                target: "axis_x",
+                fault: AxisFault::reject(101),
+            },
+            AxisFaultKind::Reject,
+        ),
+        (
+            "non_recoverable",
+            "quick",
+            "on_clear",
+            false,
+            AxisFaultSeverity::NonRecoverable,
+            AxisStopMode::Quick,
+            AxisAutoResetPolicy::OnClear,
+            AxisMotionResult::motion_fault(102),
+            RuntimeError::AxisFault {
+                target: "axis_x",
+                fault: AxisFault::motion(102),
+            },
+            AxisFaultKind::Motion,
+        ),
+        (
+            "safety",
+            "immediate",
+            "immediate",
+            true,
+            AxisFaultSeverity::Safety,
+            AxisStopMode::Immediate,
+            AxisAutoResetPolicy::Immediate,
+            AxisMotionResult::safety_fault(103),
+            RuntimeError::AxisFault {
+                target: "axis_x",
+                fault: AxisFault::safety(103),
+            },
+            AxisFaultKind::Safety,
+        ),
+    ];
+
+    for (
+        severity_src,
+        stop_mode_src,
+        auto_reset_src,
+        manual_ack_required,
+        expected_severity,
+        expected_stop_mode,
+        expected_auto_reset,
+        axis_result,
+        expected_error,
+        expected_fault_kind,
+    ) in cases
+    {
+        let source = axis_fault_policy_fixture(
+            severity_src,
+            stop_mode_src,
+            auto_reset_src,
+            manual_ack_required,
+        );
+        let program = compile_to_runtime(&source, 10);
+
+        assert_eq!(program.axis_fault_policies.len(), 1);
+        let policy = &program.axis_fault_policies[0];
+        assert_eq!(policy.axis, "axis_x");
+        assert_eq!(policy.severity, expected_severity);
+        assert_eq!(policy.stop_mode, expected_stop_mode);
+        assert_eq!(policy.auto_reset_policy, expected_auto_reset);
+        assert_eq!(policy.manual_ack_required, manual_ack_required);
+
+        let mut rt = Runtime::new(&program).expect("runtime init");
+        let mut io = sim::SimIo::new(1, 1, 0, 0);
+        let mut logs = Vec::new();
+
+        let err = rt
+            .tick_with_axis_and_logs(&mut io, |event| logs.push(event), |_| axis_result)
+            .expect_err("axis fault should be surfaced");
+        assert_eq!(err, expected_error);
+        assert_eq!(logs.len(), 1, "axis fault policy should emit one log");
+        assert_eq!(logs[0].message, AXIS_FAULT_POLICY_LOG_MESSAGE);
+        assert_eq!(
+            logs[0].message_id,
+            axis_fault_policy_log_message_id(
+                expected_severity,
+                expected_stop_mode,
+                expected_auto_reset,
+                manual_ack_required,
+                expected_fault_kind,
+            )
+        );
     }
 }
 

@@ -220,6 +220,7 @@ static SIM_PROGRAM: Program<'static> = Program {
     var_init: &[],
     cam_configs: &[],
     cam_tables: &[],
+    axis_fault_policies: &[],
 };
 
 const SCENARIO_YAML_MINIMAL_TEMPLATE: &str = r#"tick_ms: 10

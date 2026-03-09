@@ -1,16 +1,19 @@
 use crate::ir::{
-    BinaryValue as IrBinaryValue, CamInterpolation as IrCamInterpolation, DeviceKind, State,
-    StateMachine, TopologyGraph, Transition, TransitionAction, TransitionGuard,
+    AxisAutoResetPolicy as IrAxisAutoResetPolicy, AxisFaultSeverity as IrAxisFaultSeverity,
+    AxisStopMode as IrAxisStopMode, BinaryValue as IrBinaryValue,
+    CamInterpolation as IrCamInterpolation, DeviceKind, State, StateMachine, TopologyGraph,
+    Transition, TransitionAction, TransitionGuard,
 };
-use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
+use crate::plc_port::{parse_physical_plc_port_ref, PlcPortKind};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
-use petgraph::Direction;
 use petgraph::graph::NodeIndex;
+use petgraph::Direction;
 use runtime_core::{
-    Action, AnalogRange, AntiWindup, AxisMotionCommand, AxisMoveKind, CamAnalogField,
-    CamCouplingConfig, CamDigitalField, CamInterpolation as RtCamInterpolation, CamTableData,
-    CompareOp, ExprOp, ExprProgram, Instr, MAX_CAM_POINTS, PidConfig, Program,
-    SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
+    Action, AnalogRange, AntiWindup, AxisAutoResetPolicy as RtAxisAutoResetPolicy, AxisFaultPolicy,
+    AxisFaultSeverity as RtAxisFaultSeverity, AxisMotionCommand, AxisMoveKind,
+    AxisStopMode as RtAxisStopMode, CamAnalogField, CamCouplingConfig, CamDigitalField,
+    CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, ExprOp, ExprProgram, Instr,
+    PidConfig, Program, SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout, MAX_CAM_POINTS,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -56,7 +59,9 @@ pub enum BridgeError {
     )]
     UnresolvableDigitalOutput { state: String, device: String },
 
-    #[error("unable to resolve a unique physical analog input for device {device} (state {state})")]
+    #[error(
+        "unable to resolve a unique physical analog input for device {device} (state {state})"
+    )]
     UnresolvableAnalogInput { state: String, device: String },
 
     #[error(
@@ -265,13 +270,54 @@ pub fn state_machine_to_runtime_program(
             .collect::<Vec<_>>()
             .into_boxed_slice(),
     );
+    let leaked_axis_fault_policies: &'static [AxisFaultPolicy<'static>] =
+        Box::leak(build_axis_fault_policies(topology).into_boxed_slice());
     Ok(Program {
         tasks: leaked_tasks,
         pid_loops: leaked_pid_loops,
         var_init: leaked_var_init,
         cam_configs: leaked_cam_configs,
         cam_tables: leaked_cam_tables,
+        axis_fault_policies: leaked_axis_fault_policies,
     })
+}
+
+fn build_axis_fault_policies(topology: &TopologyGraph) -> Vec<AxisFaultPolicy<'static>> {
+    topology
+        .axis_fault_contracts
+        .iter()
+        .map(|contract| AxisFaultPolicy {
+            axis: Box::leak(contract.axis.clone().into_boxed_str()),
+            severity: lower_axis_fault_severity(contract.severity.clone()),
+            stop_mode: lower_axis_stop_mode(contract.stop_mode.clone()),
+            auto_reset_policy: lower_axis_auto_reset_policy(contract.auto_reset_policy.clone()),
+            manual_ack_required: contract.manual_ack_required,
+        })
+        .collect()
+}
+
+fn lower_axis_fault_severity(severity: IrAxisFaultSeverity) -> RtAxisFaultSeverity {
+    match severity {
+        IrAxisFaultSeverity::Recoverable => RtAxisFaultSeverity::Recoverable,
+        IrAxisFaultSeverity::NonRecoverable => RtAxisFaultSeverity::NonRecoverable,
+        IrAxisFaultSeverity::Safety => RtAxisFaultSeverity::Safety,
+    }
+}
+
+fn lower_axis_stop_mode(stop_mode: IrAxisStopMode) -> RtAxisStopMode {
+    match stop_mode {
+        IrAxisStopMode::Controlled => RtAxisStopMode::Controlled,
+        IrAxisStopMode::Quick => RtAxisStopMode::Quick,
+        IrAxisStopMode::Immediate => RtAxisStopMode::Immediate,
+    }
+}
+
+fn lower_axis_auto_reset_policy(policy: IrAxisAutoResetPolicy) -> RtAxisAutoResetPolicy {
+    match policy {
+        IrAxisAutoResetPolicy::Never => RtAxisAutoResetPolicy::Never,
+        IrAxisAutoResetPolicy::OnClear => RtAxisAutoResetPolicy::OnClear,
+        IrAxisAutoResetPolicy::Immediate => RtAxisAutoResetPolicy::Immediate,
+    }
 }
 
 fn validate_extern_tick_budget(

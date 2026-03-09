@@ -1099,7 +1099,7 @@ pub mod generated {
     Task { name: "main", steps: &STEPS, entry: StepId(0) },
   ];
 
-  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[], var_init: &[], cam_configs: &[], cam_tables: &[] };
+  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[], var_init: &[], cam_configs: &[], cam_tables: &[], axis_fault_policies: &[] };
 }
 "#
 }
