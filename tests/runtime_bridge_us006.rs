@@ -1,5 +1,7 @@
 use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
-use runtime_core::{AxisMotionResult, AxisMoveKind, Runtime, RuntimeError, RuntimeTickError};
+use runtime_core::{
+    AxisFault, AxisMotionResult, AxisMoveKind, Runtime, RuntimeError, RuntimeTickError,
+};
 use rust_plc::extern_functions::{
     extern_runtime_error_code, ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError,
     ValueRange, EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR,
@@ -589,24 +591,24 @@ fn runtime_tick_with_axis_handler_done_for_bridged_axis_action() {
 fn runtime_tick_with_axis_handler_propagates_classified_faults_for_bridged_axis_action() {
     let cases = [
         (
-            AxisMotionResult::Reject { error_code: 41 },
-            RuntimeError::AxisMotionRejected {
+            AxisMotionResult::reject(41),
+            RuntimeError::AxisFault {
                 target: "axis_x",
-                error_code: 41,
+                fault: AxisFault::reject(41),
             },
         ),
         (
-            AxisMotionResult::MotionFault { error_code: 42 },
-            RuntimeError::AxisMotionFault {
+            AxisMotionResult::motion_fault(42),
+            RuntimeError::AxisFault {
                 target: "axis_x",
-                error_code: 42,
+                fault: AxisFault::motion(42),
             },
         ),
         (
-            AxisMotionResult::SafetyFault { error_code: 43 },
-            RuntimeError::AxisSafetyFault {
+            AxisMotionResult::safety_fault(43),
+            RuntimeError::AxisFault {
                 target: "axis_x",
-                error_code: 43,
+                fault: AxisFault::safety(43),
             },
         ),
     ];
@@ -654,14 +656,14 @@ fn bridge_executes_axis_servo_example_fault_path_end_to_end() {
         .tick_with_axis(&mut io, |command| {
             assert_eq!(command.target, "axis_servo");
             assert_eq!(command.kind, AxisMoveKind::Absolute);
-            AxisMotionResult::MotionFault { error_code: 88 }
+            AxisMotionResult::motion_fault(88)
         })
         .expect_err("servo axis motion fault should be surfaced");
     assert_eq!(
         err,
-        RuntimeError::AxisMotionFault {
+        RuntimeError::AxisFault {
             target: "axis_servo",
-            error_code: 88,
+            fault: AxisFault::motion(88),
         }
     );
 }

@@ -1141,8 +1141,8 @@ fn state_id_of(state: &State, state_ids: &HashMap<(String, String), i32>) -> Opt
 mod tests {
     use super::*;
     use crate::ir::{
-        AxisFaultBranch, AxisTimeoutBranch, StateMachine, TimerOperation, Transition,
-        TransitionAction, TransitionGuard,
+        AxisFaultBranch, AxisFaultCategory, AxisFaultKind, AxisTimeoutBranch, StateMachine,
+        TimerOperation, Transition, TransitionAction, TransitionGuard,
     };
     use std::collections::BTreeMap;
 
@@ -1179,10 +1179,9 @@ mod tests {
         assert_eq!(state_id_of(&s0, &ids), Some(0));
         assert_eq!(state_id_of(&s1, &ids), Some(10));
         assert_eq!(state_id_of(&s2, &ids), Some(20));
-        assert!(
-            ids.values()
-                .all(|id| *id != RESERVED_INTERNAL_ERROR_STATE_ID)
-        );
+        assert!(ids
+            .values()
+            .all(|id| *id != RESERVED_INTERNAL_ERROR_STATE_ID));
 
         let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
             .expect("codegen should succeed");
@@ -1299,11 +1298,9 @@ mod tests {
 
         let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
             .expect_err("must fail");
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, StCodegenError::TypeConflict { name } if name == "mix"))
-        );
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, StCodegenError::TypeConflict { name } if name == "mix")));
     }
 
     #[test]
@@ -1381,8 +1378,7 @@ mod tests {
         let st = generate_st(&topology, &sm, &StCodegenConfig::default())
             .expect("codegen should succeed");
         assert!(
-            st.contains("flag := NOT(a) OR (b=1);")
-                || st.contains("flag := (NOT(a) OR (b=1));")
+            st.contains("flag := NOT(a) OR (b=1);") || st.contains("flag := (NOT(a) OR (b=1));")
         );
         assert!(
             !st.contains("=="),
@@ -1509,16 +1505,12 @@ mod tests {
         let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
             .expect_err("must fail");
 
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, StCodegenError::ParallelNotSupported { .. }))
-        );
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, StCodegenError::RaceNotSupported { .. }))
-        );
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, StCodegenError::ParallelNotSupported { .. })));
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, StCodegenError::RaceNotSupported { .. })));
     }
 
     #[test]
@@ -1601,16 +1593,25 @@ mod tests {
                     on_reject: AxisFaultBranch {
                         target_task: "fault".to_string(),
                         target_step: Some("reject".to_string()),
+                        kind: AxisFaultKind::Reject,
+                        category: AxisFaultCategory::Recoverable,
+                        vendor_code: None,
                         error_code: Some("AXIS_REJECT".to_string()),
                     },
                     on_motion_fault: AxisFaultBranch {
                         target_task: "fault".to_string(),
                         target_step: Some("motion_fault".to_string()),
+                        kind: AxisFaultKind::Motion,
+                        category: AxisFaultCategory::NonRecoverable,
+                        vendor_code: None,
                         error_code: Some("AXIS_MOTION".to_string()),
                     },
                     on_safety_fault: AxisFaultBranch {
                         target_task: "fault".to_string(),
                         target_step: Some("safety_fault".to_string()),
+                        kind: AxisFaultKind::Safety,
+                        category: AxisFaultCategory::Safety,
+                        vendor_code: None,
                         error_code: Some("AXIS_SAFETY".to_string()),
                     },
                 }],

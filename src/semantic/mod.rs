@@ -13,7 +13,7 @@ use crate::ast::{
 use crate::axis_profile::resolve_axis_profiles;
 use crate::error::PlcError;
 use crate::ir::{
-    ActionKind, ActionRef, ActionTiming, AxisFaultBranch, AxisTimeoutBranch,
+    ActionKind, ActionRef, ActionTiming, AxisFaultBranch, AxisFaultKind, AxisTimeoutBranch,
     BinaryValue as IrBinaryValue, CamCouplingDef, CamInterpolation, CamTableIr, CausalityChain,
     ConnectionType, ConstraintSet, Device, DeviceKind, ExternCallBinding as IrExternCallBinding,
     ExternFunctionContract as IrExternContract, ExternFunctionDef as IrExternFunctionDef,
@@ -5776,9 +5776,17 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
                 .expect("axis.move_relative speed must be resolved in semantic pass")
                 .to_string(),
             timeout: lower_axis_timeout_branch(timeout.as_ref()?),
-            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, None),
-            on_motion_fault: lower_axis_fault_branch(on_motion_fault.as_ref()?, None),
-            on_safety_fault: lower_axis_fault_branch(on_safety_fault.as_ref()?, None),
+            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, AxisFaultKind::Reject, None),
+            on_motion_fault: lower_axis_fault_branch(
+                on_motion_fault.as_ref()?,
+                AxisFaultKind::Motion,
+                None,
+            ),
+            on_safety_fault: lower_axis_fault_branch(
+                on_safety_fault.as_ref()?,
+                AxisFaultKind::Safety,
+                None,
+            ),
         }),
         ActionStatement::AxisMoveAbsolute {
             target,
@@ -5799,9 +5807,17 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
                 .expect("axis.move_absolute speed must be resolved in semantic pass")
                 .to_string(),
             timeout: lower_axis_timeout_branch(timeout.as_ref()?),
-            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, None),
-            on_motion_fault: lower_axis_fault_branch(on_motion_fault.as_ref()?, None),
-            on_safety_fault: lower_axis_fault_branch(on_safety_fault.as_ref()?, None),
+            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, AxisFaultKind::Reject, None),
+            on_motion_fault: lower_axis_fault_branch(
+                on_motion_fault.as_ref()?,
+                AxisFaultKind::Motion,
+                None,
+            ),
+            on_safety_fault: lower_axis_fault_branch(
+                on_safety_fault.as_ref()?,
+                AxisFaultKind::Safety,
+                None,
+            ),
         }),
         ActionStatement::Log { message } => Some(TransitionAction::Log {
             message: message.clone(),
@@ -5817,10 +5833,17 @@ fn lower_axis_timeout_branch(timeout: &TimeoutDirective) -> AxisTimeoutBranch {
     }
 }
 
-fn lower_axis_fault_branch(goto: &GotoDirective, error_code: Option<&str>) -> AxisFaultBranch {
+fn lower_axis_fault_branch(
+    goto: &GotoDirective,
+    kind: AxisFaultKind,
+    error_code: Option<&str>,
+) -> AxisFaultBranch {
     AxisFaultBranch {
         target_task: goto.task.clone(),
         target_step: goto.step.clone(),
+        category: kind.category(),
+        vendor_code: kind.vendor_code(),
+        kind,
         error_code: error_code.map(ToString::to_string),
     }
 }

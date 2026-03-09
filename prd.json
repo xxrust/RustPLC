@@ -50,8 +50,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Unified AxisFault semantics across IR and runtime-core by introducing aligned AxisFaultKind/AxisFaultCategory (+ vendor_code extension slot), migrated runtime axis callback/result/error path to AxisFault, and added regression tests for category/vendor semantics and bridged runtime behavior."
     },
     {
       "id": "US-004",

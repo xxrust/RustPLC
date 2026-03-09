@@ -27,6 +27,12 @@
 7. **Codegen** (`src/codegen/st.rs`): 添加 ST 代码生成（或用 `StCodegenError` 拒绝）
 8. **Tests**: 在 `tests/examples_integration.rs` 和各模块中添加集成测试和单元测试
 
+### AxisFault 语义对齐（US-003 起）
+
+- `AxisFaultKind` / `AxisFaultCategory` 需在 **IR**（`src/ir/mod.rs`）与 **runtime-core**（`crates/runtime-core/src/lib.rs`）保持同名同语义（`reject/motion/safety/vendor`）。
+- 语义降级必须通过 `lower_axis_fault_branch` 从 `kind` 推导 `category/vendor_code`，避免手工写死导致不一致。
+- 运行时轴回调统一返回 `AxisMotionResult::Fault(AxisFault)`；测试优先使用 `AxisMotionResult::reject/motion_fault/safety_fault` 构造器保持语义稳定。
+
 ## 外部函数架构
 
 外部函数跨越**四层**：AST 声明 → IR 签名 → 语义验证 → 运行时执行。

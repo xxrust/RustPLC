@@ -308,11 +308,53 @@ pub struct AxisTimeoutBranch {
     pub target_step: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisFaultCategory {
+    Recoverable,
+    NonRecoverable,
+    Safety,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AxisFaultKind {
+    Reject,
+    Motion,
+    Safety,
+    Vendor {
+        category: AxisFaultCategory,
+        vendor_code: i32,
+    },
+}
+
+impl AxisFaultKind {
+    pub const fn category(&self) -> AxisFaultCategory {
+        match self {
+            AxisFaultKind::Reject => AxisFaultCategory::Recoverable,
+            AxisFaultKind::Motion => AxisFaultCategory::NonRecoverable,
+            AxisFaultKind::Safety => AxisFaultCategory::Safety,
+            AxisFaultKind::Vendor { category, .. } => *category,
+        }
+    }
+
+    pub const fn vendor_code(&self) -> Option<i32> {
+        match self {
+            AxisFaultKind::Vendor { vendor_code, .. } => Some(*vendor_code),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AxisFaultBranch {
     pub target_task: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_step: Option<String>,
+    pub kind: AxisFaultKind,
+    pub category: AxisFaultCategory,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
 }
@@ -594,16 +636,25 @@ mod tests {
                         on_reject: AxisFaultBranch {
                             target_task: "fault".to_string(),
                             target_step: Some("reject".to_string()),
+                            kind: AxisFaultKind::Reject,
+                            category: AxisFaultCategory::Recoverable,
+                            vendor_code: None,
                             error_code: Some("AXIS_REJECT".to_string()),
                         },
                         on_motion_fault: AxisFaultBranch {
                             target_task: "fault".to_string(),
                             target_step: Some("motion_fault".to_string()),
+                            kind: AxisFaultKind::Motion,
+                            category: AxisFaultCategory::NonRecoverable,
+                            vendor_code: None,
                             error_code: Some("AXIS_MOTION_FAULT".to_string()),
                         },
                         on_safety_fault: AxisFaultBranch {
                             target_task: "fault".to_string(),
                             target_step: Some("safety_fault".to_string()),
+                            kind: AxisFaultKind::Safety,
+                            category: AxisFaultCategory::Safety,
+                            vendor_code: None,
                             error_code: Some("AXIS_SAFETY_FAULT".to_string()),
                         },
                     },
@@ -683,6 +734,8 @@ mod tests {
         assert!(sm_json.contains("transitions"));
         assert!(sm_json.contains("call_extern"));
         assert!(sm_json.contains("axis_move_relative"));
+        assert!(sm_json.contains("\"kind\": \"reject\""));
+        assert!(sm_json.contains("\"category\": \"recoverable\""));
         assert!(sm_json.contains("error_code"));
         assert!(constraints_json.contains("conflicts_with"));
         assert!(timing_json.contains("intervals"));
@@ -692,5 +745,16 @@ mod tests {
         assert_eq!(decoded_topology.graph.node_count(), 2);
         assert_eq!(decoded_topology.graph.edge_count(), 1);
         assert_eq!(decoded_topology.extern_functions.len(), 1);
+    }
+
+    #[test]
+    fn axis_fault_kind_keeps_vendor_extension_slot() {
+        let kind = AxisFaultKind::Vendor {
+            category: AxisFaultCategory::NonRecoverable,
+            vendor_code: 1201,
+        };
+
+        assert_eq!(kind.category(), AxisFaultCategory::NonRecoverable);
+        assert_eq!(kind.vendor_code(), Some(1201));
     }
 }

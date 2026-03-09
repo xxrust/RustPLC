@@ -4,6 +4,7 @@ Started: 2026-03-09 00:00:00 CST
 ## Codebase Patterns
 - `axis.move_relative/absolute` 参数解析走四层：`src/parser/plc.pest` → `src/parser/mod.rs` → `src/ast/mod.rs` → `src/semantic/mod.rs`，改动必须同步。
 - 轴动作参数的语义优先级固定为 `inline overrides > action params 引用 > device.motion_param_set`，并在语义阶段写回最终值再降级到 IR。
+- 轴故障语义需跨层同构：`src/ir/mod.rs` 与 `crates/runtime-core/src/lib.rs` 的 `AxisFaultKind/AxisFaultCategory` 必须同名同语义，并通过语义降级统一填充 `category/vendor_code`。
 
 ---
 
@@ -45,4 +46,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: axis action参数解析必须在语义阶段先“收敛”为完整参数，再做 IR 降级，避免桥接层丢失上下文。
   - Gotchas encountered: `pest` 的 wrapper 规则（如 `axis_move_relative_arg`）若不先解包，会导致字段丢失并触发误报“缺少参数”。
   - Useful context: 旧有 `bridge_rejects_axis_move_speed_exceeding_profile_limit` 回归依赖“速度上限由 bridge 报错”，语义层不应抢先拦截该路径。
+---
+
+## [2026-03-09 16:28:00 CST] - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Introduced unified axis fault model in **runtime-core**: `AxisFaultCategory` (`Recoverable/NonRecoverable/Safety`) + `AxisFaultKind` (`Reject/Motion/Safety/Vendor`) + `AxisFault` payload.
+  - Migrated runtime axis callback contract from split variants (`Reject/MotionFault/SafetyFault`) to `AxisMotionResult::Fault(AxisFault)` and unified surfaced runtime error as `RuntimeError::AxisFault`.
+  - Introduced matching axis fault taxonomy in **IR** (`src/ir/mod.rs`) and made semantic lowering (`lower_axis_fault_branch`) derive `category/vendor_code` from `kind` to keep cross-layer consistency.
+  - Updated codegen/IR/runtime bridge tests and added vendor-slot regression assertions for both IR and runtime-core.
+- Files changed
+  - `AGENTS.md`
+  - `crates/runtime-core/src/lib.rs`
+  - `src/ir/mod.rs`
+  - `src/semantic/mod.rs`
+  - `src/codegen/st.rs`
+  - `tests/runtime_bridge_us006.rs`
+  - `prd.json`
+- **Learnings for future iterations:**
+  - Patterns discovered: 轴故障语义字段一旦升级，最容易漏掉的是 runtime-core 测试和 bridge 集成测试的断言类型，建议优先同步这两处。
+  - Gotchas encountered: 若 `AxisFaultBranch` 只改 `kind` 不同步 `category/vendor_code`，会造成 IR 与 runtime 语义漂移；应在语义层集中推导。
+  - Useful context: `AxisMotionResult::reject/motion_fault/safety_fault` 构造器能减少测试样板并稳定分类语义。
 ---

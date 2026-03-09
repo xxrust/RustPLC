@@ -13,6 +13,73 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct StepId(pub u16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisFaultCategory {
+    Recoverable,
+    NonRecoverable,
+    Safety,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisFaultKind {
+    Reject,
+    Motion,
+    Safety,
+    Vendor {
+        category: AxisFaultCategory,
+        vendor_code: i32,
+    },
+}
+
+impl AxisFaultKind {
+    pub const fn category(self) -> AxisFaultCategory {
+        match self {
+            AxisFaultKind::Reject => AxisFaultCategory::Recoverable,
+            AxisFaultKind::Motion => AxisFaultCategory::NonRecoverable,
+            AxisFaultKind::Safety => AxisFaultCategory::Safety,
+            AxisFaultKind::Vendor { category, .. } => category,
+        }
+    }
+
+    pub const fn vendor_code(self) -> Option<i32> {
+        match self {
+            AxisFaultKind::Vendor { vendor_code, .. } => Some(vendor_code),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisFault {
+    pub kind: AxisFaultKind,
+    pub category: AxisFaultCategory,
+    pub error_code: i32,
+    pub vendor_code: Option<i32>,
+}
+
+impl AxisFault {
+    pub const fn new(kind: AxisFaultKind, error_code: i32) -> Self {
+        Self {
+            category: kind.category(),
+            vendor_code: kind.vendor_code(),
+            kind,
+            error_code,
+        }
+    }
+
+    pub const fn reject(error_code: i32) -> Self {
+        Self::new(AxisFaultKind::Reject, error_code)
+    }
+
+    pub const fn motion(error_code: i32) -> Self {
+        Self::new(AxisFaultKind::Motion, error_code)
+    }
+
+    pub const fn safety(error_code: i32) -> Self {
+        Self::new(AxisFaultKind::Safety, error_code)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransitionReason {
     Action,
     DelayElapsed,
@@ -101,17 +168,9 @@ pub enum RuntimeError {
         function: &'static str,
         variable: u16,
     },
-    AxisMotionRejected {
+    AxisFault {
         target: &'static str,
-        error_code: i32,
-    },
-    AxisMotionFault {
-        target: &'static str,
-        error_code: i32,
-    },
-    AxisSafetyFault {
-        target: &'static str,
-        error_code: i32,
+        fault: AxisFault,
     },
 }
 
@@ -199,9 +258,21 @@ pub struct AxisMotionCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxisMotionResult {
     Done,
-    Reject { error_code: i32 },
-    MotionFault { error_code: i32 },
-    SafetyFault { error_code: i32 },
+    Fault(AxisFault),
+}
+
+impl AxisMotionResult {
+    pub const fn reject(error_code: i32) -> Self {
+        Self::Fault(AxisFault::reject(error_code))
+    }
+
+    pub const fn motion_fault(error_code: i32) -> Self {
+        Self::Fault(AxisFault::motion(error_code))
+    }
+
+    pub const fn safety_fault(error_code: i32) -> Self {
+        Self::Fault(AxisFault::safety(error_code))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -745,9 +816,7 @@ impl<'a> Runtime<'a> {
         on_extern_call: &mut impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
         extern_error_code_var: Option<u16>,
         map_extern_error_code: &mut impl FnMut(&'static str, &E) -> f32,
-        on_axis_motion: &mut impl FnMut(
-            AxisMotionCommand,
-        ) -> Result<AxisMotionResult, RuntimeError>,
+        on_axis_motion: &mut impl FnMut(AxisMotionCommand) -> Result<AxisMotionResult, RuntimeError>,
     ) -> Result<(), RuntimeTickError<E>> {
         let now = io.tick();
         if self.step_entered_at.is_none() {
@@ -838,30 +907,15 @@ impl<'a> Runtime<'a> {
                                     .map_err(RuntimeTickError::Core)?;
                             }
                             Action::AxisMove { command } => {
-                                let result = on_axis_motion(command).map_err(RuntimeTickError::Core)?;
+                                let result =
+                                    on_axis_motion(command).map_err(RuntimeTickError::Core)?;
                                 match result {
                                     AxisMotionResult::Done => {}
-                                    AxisMotionResult::Reject { error_code } => {
+                                    AxisMotionResult::Fault(fault) => {
                                         return Err(RuntimeTickError::Core(
-                                            RuntimeError::AxisMotionRejected {
+                                            RuntimeError::AxisFault {
                                                 target: command.target,
-                                                error_code,
-                                            },
-                                        ));
-                                    }
-                                    AxisMotionResult::MotionFault { error_code } => {
-                                        return Err(RuntimeTickError::Core(
-                                            RuntimeError::AxisMotionFault {
-                                                target: command.target,
-                                                error_code,
-                                            },
-                                        ));
-                                    }
-                                    AxisMotionResult::SafetyFault { error_code } => {
-                                        return Err(RuntimeTickError::Core(
-                                            RuntimeError::AxisSafetyFault {
-                                                target: command.target,
-                                                error_code,
+                                                fault,
                                             },
                                         ));
                                     }
@@ -1451,7 +1505,11 @@ fn eval_expr(program: &ExprProgram, vars: &[f32; MAX_VARIABLES]) -> f32 {
         }
     }
 
-    if sp == 0 { 0.0 } else { stack[0] }
+    if sp == 0 {
+        0.0
+    } else {
+        stack[0]
+    }
 }
 
 const MAX_PID_LOOPS: usize = 8;
@@ -2396,13 +2454,13 @@ mod tests {
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
-            .tick_with_axis(&mut io, |_| AxisMotionResult::Reject { error_code: 11 })
+            .tick_with_axis(&mut io, |_| AxisMotionResult::reject(11))
             .expect_err("reject 应返回分类错误");
         assert_eq!(
             err,
-            RuntimeError::AxisMotionRejected {
+            RuntimeError::AxisFault {
                 target: "axis_x",
-                error_code: 11
+                fault: AxisFault::reject(11),
             }
         );
     }
@@ -2447,13 +2505,13 @@ mod tests {
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
-            .tick_with_axis(&mut io, |_| AxisMotionResult::MotionFault { error_code: 21 })
+            .tick_with_axis(&mut io, |_| AxisMotionResult::motion_fault(21))
             .expect_err("motion_fault 应返回分类错误");
         assert_eq!(
             err,
-            RuntimeError::AxisMotionFault {
+            RuntimeError::AxisFault {
                 target: "axis_x",
-                error_code: 21
+                fault: AxisFault::motion(21),
             }
         );
     }
@@ -2498,15 +2556,30 @@ mod tests {
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
-            .tick_with_axis(&mut io, |_| AxisMotionResult::SafetyFault { error_code: 31 })
+            .tick_with_axis(&mut io, |_| AxisMotionResult::safety_fault(31))
             .expect_err("safety_fault 应返回分类错误");
         assert_eq!(
             err,
-            RuntimeError::AxisSafetyFault {
+            RuntimeError::AxisFault {
                 target: "axis_x",
-                error_code: 31
+                fault: AxisFault::safety(31),
             }
         );
+    }
+
+    #[test]
+    fn axis_fault_vendor_slot_preserves_category_and_vendor_code() {
+        let fault = AxisFault::new(
+            AxisFaultKind::Vendor {
+                category: AxisFaultCategory::NonRecoverable,
+                vendor_code: 9001,
+            },
+            77,
+        );
+
+        assert_eq!(fault.category, AxisFaultCategory::NonRecoverable);
+        assert_eq!(fault.vendor_code, Some(9001));
+        assert_eq!(fault.error_code, 77);
     }
 
     #[test]
