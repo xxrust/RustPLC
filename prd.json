@@ -35,8 +35,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented params reference + inline override for axis.move actions, semantic resolution precedence (inline > params > device default), required speed/acc/dec enforcement, and regression tests/examples updates."
     },
     {
       "id": "US-003",

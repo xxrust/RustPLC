@@ -377,6 +377,8 @@ ST 代码生成（`src/codegen/st.rs`）从 IR 生成 IEC 61131-3 ST 代码。
 2. `axis_models/*.toml` 必须声明 `family_id`，`axis_configs/*.toml` 必须声明 `model_id`，`axis_motion_param_sets/*.toml` 必须声明 `config_id`
 3. 设备声明只允许通过 `model_ref/config_ref/motion_param_set` 引用，禁止恢复旧的内联轴参数（会触发 `AXP-006`）
 4. 层级 ID 一致性在 `src/axis_profile.rs` 集中校验（`AXP-007~AXP-010`）；新增字段时同步更新该模块与其单元测试
+5. `axis.move_relative/absolute` 支持 `params` 参数集引用 + 动作内 `speed/acc/dec` 覆盖；解析规则在 `src/parser/plc.pest`，降级逻辑在 `src/parser/mod.rs`
+6. 语义阶段会按优先级 `inline overrides > params 引用 > device.motion_param_set` 解析最终参数；缺失 `speed/acc/dec` 报 `AXIS-007`，`acc/dec` 超过 profile 上限报 `AXIS-009`
 
 ### 修改 I/O 映射
 

@@ -1,5 +1,10 @@
 # Ralph Progress Log
 Started: 2026-03-09 00:00:00 CST
+
+## Codebase Patterns
+- `axis.move_relative/absolute` 参数解析走四层：`src/parser/plc.pest` → `src/parser/mod.rs` → `src/ast/mod.rs` → `src/semantic/mod.rs`，改动必须同步。
+- 轴动作参数的语义优先级固定为 `inline overrides > action params 引用 > device.motion_param_set`，并在语义阶段写回最终值再降级到 IR。
+
 ---
 
 ## [2026-03-09 15:04:33 CST] - US-001
@@ -14,4 +19,30 @@ Started: 2026-03-09 00:00:00 CST
   - Added parser + axis profile regression tests for mismatch/out-of-range failures.
 - Commit
   - `4f55ad1 feat: [US-001] - 轴参数层级模型完整化（class -> family -> model -> config -> motion_param_set）`
+---
+
+## [2026-03-09 15:56:01 CST] - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Added `axis.move_*` DSL support for `params` reference plus inline `speed/acc/dec` overrides.
+  - Enforced semantic resolution priority: inline overrides > action `params` > device `motion_param_set`.
+  - Enforced no-default contract for motion actions: missing `speed/acc/dec` now fails with `AXIS-007`.
+  - Kept model/config limit enforcement by checking effective `acc/dec` in semantic (`AXIS-009`) and speed upper bound in runtime bridge.
+  - Updated axis examples and regression tests across parser/semantic/verification/runtime bridge flows.
+- Files changed
+  - `AGENTS.md`
+  - `src/parser/plc.pest`
+  - `src/parser/mod.rs`
+  - `src/ast/mod.rs`
+  - `src/semantic/mod.rs`
+  - `src/verification/safety.rs`
+  - `src/verification/causality.rs`
+  - `tests/runtime_bridge_us006.rs`
+  - `examples/axis_stepper_fault_routing.plc`
+  - `examples/axis_servo_fault_routing.plc`
+  - `prd.json`
+- **Learnings for future iterations:**
+  - Patterns discovered: axis action参数解析必须在语义阶段先“收敛”为完整参数，再做 IR 降级，避免桥接层丢失上下文。
+  - Gotchas encountered: `pest` 的 wrapper 规则（如 `axis_move_relative_arg`）若不先解包，会导致字段丢失并触发误报“缺少参数”。
+  - Useful context: 旧有 `bridge_rejects_axis_move_speed_exceeding_profile_limit` 回归依赖“速度上限由 bridge 报错”，语义层不应抢先拦截该路径。
 ---

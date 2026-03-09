@@ -1632,7 +1632,7 @@ task main:
 
 device Y0: digital_output
 device X0: digital_input
-device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
 device sensor_fault: sensor
 
 relation { from: Y0.out, to: axis_x.enable, via: driven_by }
@@ -1675,7 +1675,7 @@ task fault:
 [topology]
 
 device Y0: digital_output
-device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
 device sensor_fault: sensor
 
 relation { from: Y0.out, to: axis_x.enable, via: driven_by }

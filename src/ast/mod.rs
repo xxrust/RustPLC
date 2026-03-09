@@ -466,8 +466,15 @@ pub enum ActionStatement {
     },
     AxisMoveRelative {
         target: ActionTarget,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<String>,
         distance: f64,
-        speed: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        speed: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        acceleration: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deceleration: Option<f64>,
         timeout: Option<TimeoutDirective>,
         on_reject: Option<GotoDirective>,
         on_motion_fault: Option<GotoDirective>,
@@ -475,8 +482,15 @@ pub enum ActionStatement {
     },
     AxisMoveAbsolute {
         target: ActionTarget,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<String>,
         position: f64,
-        speed: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        speed: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        acceleration: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deceleration: Option<f64>,
         timeout: Option<TimeoutDirective>,
         on_reject: Option<GotoDirective>,
         on_motion_fault: Option<GotoDirective>,

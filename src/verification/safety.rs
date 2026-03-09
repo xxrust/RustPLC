@@ -2740,7 +2740,7 @@ task main:
         let source = r#"
 [topology]
 
-device axis_x: stepper_motor
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
 
 [constraints]
 
@@ -2794,7 +2794,7 @@ task fault:
         let source = r#"
 [topology]
 
-device axis_x: stepper_motor
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
 
 [constraints]
 

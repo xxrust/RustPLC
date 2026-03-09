@@ -11,9 +11,9 @@ use crate::ast::{
     WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
-use pest::Parser;
 use pest::error::LineColLocation;
 use pest::iterators::Pair;
+use pest::Parser;
 use std::collections::HashSet;
 
 #[derive(pest_derive::Parser)]
@@ -1479,6 +1479,9 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
     let mut distance = None::<f64>;
     let mut position = None::<f64>;
     let mut speed = None::<f64>;
+    let mut acceleration = None::<f64>;
+    let mut deceleration = None::<f64>;
+    let mut params = None::<String>;
     let mut timeout = None::<TimeoutDirective>;
     let mut on_reject = None::<GotoDirective>;
     let mut on_motion_fault = None::<GotoDirective>;
@@ -1488,19 +1491,23 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
     for part in pair.into_inner() {
         match part.as_rule() {
             Rule::axis_move_relative_action => {
-                let (parsed_target, parsed_distance, parsed_speed) =
-                    parse_axis_move_relative_action(part)?;
-                target = Some(parsed_target);
-                distance = Some(parsed_distance);
-                speed = Some(parsed_speed);
+                let parsed = parse_axis_move_relative_action(part)?;
+                target = Some(parsed.target);
+                distance = Some(parsed.distance);
+                speed = parsed.speed;
+                acceleration = parsed.acceleration;
+                deceleration = parsed.deceleration;
+                params = parsed.params;
                 is_relative = Some(true);
             }
             Rule::axis_move_absolute_action => {
-                let (parsed_target, parsed_position, parsed_speed) =
-                    parse_axis_move_absolute_action(part)?;
-                target = Some(parsed_target);
-                position = Some(parsed_position);
-                speed = Some(parsed_speed);
+                let parsed = parse_axis_move_absolute_action(part)?;
+                target = Some(parsed.target);
+                position = Some(parsed.position);
+                speed = parsed.speed;
+                acceleration = parsed.acceleration;
+                deceleration = parsed.deceleration;
+                params = parsed.params;
                 is_relative = Some(false);
             }
             Rule::axis_timeout_branch => {
@@ -1520,14 +1527,16 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
     }
 
     let target = target.ok_or_else(|| PlcError::parse(line, "axis.move 缺少目标设备"))?;
-    let speed = speed.ok_or_else(|| PlcError::parse(line, "axis.move 缺少 speed 参数"))?;
 
     match is_relative {
         Some(true) => Ok(ActionStatement::AxisMoveRelative {
             target,
+            params,
             distance: distance
                 .ok_or_else(|| PlcError::parse(line, "axis.move_relative 缺少 distance 参数"))?,
             speed,
+            acceleration,
+            deceleration,
             timeout,
             on_reject,
             on_motion_fault,
@@ -1535,9 +1544,12 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
         }),
         Some(false) => Ok(ActionStatement::AxisMoveAbsolute {
             target,
+            params,
             position: position
                 .ok_or_else(|| PlcError::parse(line, "axis.move_absolute 缺少 position 参数"))?,
             speed,
+            acceleration,
+            deceleration,
             timeout,
             on_reject,
             on_motion_fault,
@@ -1550,70 +1562,292 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
     }
 }
 
-fn parse_axis_move_relative_action(pair: Pair<Rule>) -> Result<(ActionTarget, f64, f64), PlcError> {
-    let line = line_of(&pair);
-    let mut target = None;
-    let mut numbers = Vec::new();
-
-    for part in pair.into_inner() {
-        match part.as_rule() {
-            Rule::action_target => target = Some(parse_action_target(part)?),
-            Rule::number => {
-                numbers.push(
-                    part.as_str().parse::<f64>().map_err(|_| {
-                        PlcError::parse(line, "axis.move_relative 参数数值解析失败")
-                    })?,
-                );
-            }
-            _ => {}
-        }
-    }
-
-    if numbers.len() != 2 {
-        return Err(PlcError::parse(
-            line,
-            "axis.move_relative 需要 distance 和 speed 两个数值参数",
-        ));
-    }
-
-    Ok((
-        target.ok_or_else(|| PlcError::parse(line, "axis.move_relative 缺少目标设备"))?,
-        numbers[0],
-        numbers[1],
-    ))
+#[derive(Debug)]
+struct ParsedAxisMoveRelative {
+    target: ActionTarget,
+    distance: f64,
+    speed: Option<f64>,
+    acceleration: Option<f64>,
+    deceleration: Option<f64>,
+    params: Option<String>,
 }
 
-fn parse_axis_move_absolute_action(pair: Pair<Rule>) -> Result<(ActionTarget, f64, f64), PlcError> {
+#[derive(Debug)]
+struct ParsedAxisMoveAbsolute {
+    target: ActionTarget,
+    position: f64,
+    speed: Option<f64>,
+    acceleration: Option<f64>,
+    deceleration: Option<f64>,
+    params: Option<String>,
+}
+
+fn parse_axis_move_relative_action(pair: Pair<Rule>) -> Result<ParsedAxisMoveRelative, PlcError> {
     let line = line_of(&pair);
     let mut target = None;
-    let mut numbers = Vec::new();
+    let mut distance = None::<f64>;
+    let mut speed = None::<f64>;
+    let mut acceleration = None::<f64>;
+    let mut deceleration = None::<f64>;
+    let mut params = None::<String>;
 
     for part in pair.into_inner() {
         match part.as_rule() {
             Rule::action_target => target = Some(parse_action_target(part)?),
-            Rule::number => {
-                numbers.push(
-                    part.as_str().parse::<f64>().map_err(|_| {
-                        PlcError::parse(line, "axis.move_absolute 参数数值解析失败")
-                    })?,
-                );
+            Rule::axis_move_relative_arg => {
+                let arg = first_inner(part, line, "axis.move_relative 参数")?;
+                match arg.as_rule() {
+                    Rule::axis_move_distance_arg => {
+                        if distance.is_some() {
+                            return Err(PlcError::parse(
+                                line,
+                                "axis.move_relative 参数 distance 重复声明",
+                            ));
+                        }
+                        distance = Some(parse_axis_move_numeric_arg(arg, "distance")?);
+                    }
+                    Rule::axis_move_speed_arg => {
+                        if speed.is_some() {
+                            return Err(PlcError::parse(
+                                line,
+                                "axis.move_relative 参数 speed 重复声明",
+                            ));
+                        }
+                        speed = Some(parse_axis_move_numeric_arg(arg, "speed")?);
+                    }
+                    Rule::axis_move_acc_arg => {
+                        if acceleration.is_some() {
+                            return Err(PlcError::parse(
+                                line,
+                                "axis.move_relative 参数 acc 重复声明",
+                            ));
+                        }
+                        acceleration = Some(parse_axis_move_numeric_arg(arg, "acc")?);
+                    }
+                    Rule::axis_move_dec_arg => {
+                        if deceleration.is_some() {
+                            return Err(PlcError::parse(
+                                line,
+                                "axis.move_relative 参数 dec 重复声明",
+                            ));
+                        }
+                        deceleration = Some(parse_axis_move_numeric_arg(arg, "dec")?);
+                    }
+                    Rule::axis_move_params_arg => {
+                        if params.is_some() {
+                            return Err(PlcError::parse(
+                                line,
+                                "axis.move_relative 参数 params 重复声明",
+                            ));
+                        }
+                        params = Some(parse_axis_move_params_arg(arg)?);
+                    }
+                    _ => {}
+                }
+            }
+            Rule::axis_move_distance_arg => {
+                if distance.is_some() {
+                    return Err(PlcError::parse(
+                        line,
+                        "axis.move_relative 参数 distance 重复声明",
+                    ));
+                }
+                distance = Some(parse_axis_move_numeric_arg(part, "distance")?);
+            }
+            Rule::axis_move_speed_arg => {
+                if speed.is_some() {
+                    return Err(PlcError::parse(
+                        line,
+                        "axis.move_relative 参数 speed 重复声明",
+                    ));
+                }
+                speed = Some(parse_axis_move_numeric_arg(part, "speed")?);
+            }
+            Rule::axis_move_acc_arg => {
+                if acceleration.is_some() {
+                    return Err(PlcError::parse(
+                        line,
+                        "axis.move_relative 参数 acc 重复声明",
+                    ));
+                }
+                acceleration = Some(parse_axis_move_numeric_arg(part, "acc")?);
+            }
+            Rule::axis_move_dec_arg => {
+                if deceleration.is_some() {
+                    return Err(PlcError::parse(
+                        line,
+                        "axis.move_relative 参数 dec 重复声明",
+                    ));
+                }
+                deceleration = Some(parse_axis_move_numeric_arg(part, "dec")?);
+            }
+            Rule::axis_move_params_arg => {
+                if params.is_some() {
+                    return Err(PlcError::parse(
+                        line,
+                        "axis.move_relative 参数 params 重复声明",
+                    ));
+                }
+                params = Some(parse_axis_move_params_arg(part)?);
             }
             _ => {}
         }
     }
 
-    if numbers.len() != 2 {
-        return Err(PlcError::parse(
-            line,
-            "axis.move_absolute 需要 position 和 speed 两个数值参数",
-        ));
+    Ok(ParsedAxisMoveRelative {
+        target: target.ok_or_else(|| PlcError::parse(line, "axis.move_relative 缺少目标设备"))?,
+        distance: distance
+            .ok_or_else(|| PlcError::parse(line, "axis.move_relative 缺少 distance 参数"))?,
+        speed,
+        acceleration,
+        deceleration,
+        params,
+    })
+}
+
+fn parse_axis_move_absolute_action(pair: Pair<Rule>) -> Result<ParsedAxisMoveAbsolute, PlcError> {
+    let line = line_of(&pair);
+    let mut target = None;
+    let mut position = None::<f64>;
+    let mut speed = None::<f64>;
+    let mut acceleration = None::<f64>;
+    let mut deceleration = None::<f64>;
+    let mut params = None::<String>;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::action_target => target = Some(parse_action_target(part)?),
+            Rule::axis_move_absolute_arg => {
+                let arg = first_inner(part, line, "axis.move_absolute 参数")?;
+                match arg.as_rule() {
+                    Rule::axis_move_position_arg => {
+                        if position.is_some() {
+                            return Err(PlcError::parse(
+                                line,
+                                "axis.move_absolute 参数 position 重复声明",
+                            ));
+                        }
+                        position = Some(parse_axis_move_numeric_arg(arg, "position")?);
+                    }
+                    Rule::axis_move_speed_arg => {
+                        if speed.is_some() {
+                            return Err(PlcError::parse(
+                                line,
+                                "axis.move_absolute 参数 speed 重复声明",
+                            ));
+                        }
+                        speed = Some(parse_axis_move_numeric_arg(arg, "speed")?);
+                    }
+                    Rule::axis_move_acc_arg => {
+                        if acceleration.is_some() {
+                            return Err(PlcError::parse(
+                                line,
+                                "axis.move_absolute 参数 acc 重复声明",
+                            ));
+                        }
+                        acceleration = Some(parse_axis_move_numeric_arg(arg, "acc")?);
+                    }
+                    Rule::axis_move_dec_arg => {
+                        if deceleration.is_some() {
+                            return Err(PlcError::parse(
+                                line,
+                                "axis.move_absolute 参数 dec 重复声明",
+                            ));
+                        }
+                        deceleration = Some(parse_axis_move_numeric_arg(arg, "dec")?);
+                    }
+                    Rule::axis_move_params_arg => {
+                        if params.is_some() {
+                            return Err(PlcError::parse(
+                                line,
+                                "axis.move_absolute 参数 params 重复声明",
+                            ));
+                        }
+                        params = Some(parse_axis_move_params_arg(arg)?);
+                    }
+                    _ => {}
+                }
+            }
+            Rule::axis_move_position_arg => {
+                if position.is_some() {
+                    return Err(PlcError::parse(
+                        line,
+                        "axis.move_absolute 参数 position 重复声明",
+                    ));
+                }
+                position = Some(parse_axis_move_numeric_arg(part, "position")?);
+            }
+            Rule::axis_move_speed_arg => {
+                if speed.is_some() {
+                    return Err(PlcError::parse(
+                        line,
+                        "axis.move_absolute 参数 speed 重复声明",
+                    ));
+                }
+                speed = Some(parse_axis_move_numeric_arg(part, "speed")?);
+            }
+            Rule::axis_move_acc_arg => {
+                if acceleration.is_some() {
+                    return Err(PlcError::parse(
+                        line,
+                        "axis.move_absolute 参数 acc 重复声明",
+                    ));
+                }
+                acceleration = Some(parse_axis_move_numeric_arg(part, "acc")?);
+            }
+            Rule::axis_move_dec_arg => {
+                if deceleration.is_some() {
+                    return Err(PlcError::parse(
+                        line,
+                        "axis.move_absolute 参数 dec 重复声明",
+                    ));
+                }
+                deceleration = Some(parse_axis_move_numeric_arg(part, "dec")?);
+            }
+            Rule::axis_move_params_arg => {
+                if params.is_some() {
+                    return Err(PlcError::parse(
+                        line,
+                        "axis.move_absolute 参数 params 重复声明",
+                    ));
+                }
+                params = Some(parse_axis_move_params_arg(part)?);
+            }
+            _ => {}
+        }
     }
 
-    Ok((
-        target.ok_or_else(|| PlcError::parse(line, "axis.move_absolute 缺少目标设备"))?,
-        numbers[0],
-        numbers[1],
-    ))
+    Ok(ParsedAxisMoveAbsolute {
+        target: target.ok_or_else(|| PlcError::parse(line, "axis.move_absolute 缺少目标设备"))?,
+        position: position
+            .ok_or_else(|| PlcError::parse(line, "axis.move_absolute 缺少 position 参数"))?,
+        speed,
+        acceleration,
+        deceleration,
+        params,
+    })
+}
+
+fn parse_axis_move_numeric_arg(pair: Pair<Rule>, field_name: &str) -> Result<f64, PlcError> {
+    let line = line_of(&pair);
+    let number = pair
+        .into_inner()
+        .find(|part| part.as_rule() == Rule::number)
+        .ok_or_else(|| PlcError::parse(line, format!("axis.move 缺少 {field_name} 数值")))?;
+
+    number
+        .as_str()
+        .parse::<f64>()
+        .map_err(|_| PlcError::parse(line, format!("axis.move 参数 {field_name} 数值解析失败")))
+}
+
+fn parse_axis_move_params_arg(pair: Pair<Rule>) -> Result<String, PlcError> {
+    let line = line_of(&pair);
+    let identifier = pair
+        .into_inner()
+        .find(|part| part.as_rule() == Rule::identifier)
+        .ok_or_else(|| PlcError::parse(line, "axis.move params 缺少参数集名称"))?;
+    Ok(identifier.as_str().to_string())
 }
 
 fn parse_axis_timeout_branch(pair: Pair<Rule>) -> Result<TimeoutDirective, PlcError> {
@@ -4091,18 +4325,14 @@ task ready:
             .find(|step| step.name == "detect")
             .expect("search 任务应包含 detect step");
 
-        assert!(
-            detect_step
-                .statements
-                .iter()
-                .any(|stmt| matches!(stmt, StepStatement::Race(_)))
-        );
-        assert!(
-            detect_step
-                .statements
-                .iter()
-                .any(|stmt| matches!(stmt, StepStatement::Timeout(_)))
-        );
+        assert!(detect_step
+            .statements
+            .iter()
+            .any(|stmt| matches!(stmt, StepStatement::Race(_))));
+        assert!(detect_step
+            .statements
+            .iter()
+            .any(|stmt| matches!(stmt, StepStatement::Timeout(_))));
 
         let ready_task = ast
             .tasks
@@ -4313,12 +4543,12 @@ device axis_x: stepper_motor
 [tasks]
 task motion:
     step start:
-        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2)
             timeout: 500ms -> fault.timeout
             on_reject -> fault.reject
             on_motion_fault -> fault.motion_fault
             on_safety_fault -> fault.safety_fault
-        action: axis.move_absolute(axis_x, position: 120, speed: 5)
+        action: axis.move_absolute(axis_x, position: 120, speed: 5, acc: 20, dec: 20)
             timeout: 800ms -> fault.timeout
             on_reject -> fault.reject
             on_motion_fault -> fault.motion_fault
@@ -4337,16 +4567,22 @@ task fault:
         match &step.statements[0] {
             StepStatement::Action(ActionStatement::AxisMoveRelative {
                 target,
+                params,
                 distance,
                 speed,
+                acceleration,
+                deceleration,
                 timeout,
                 on_reject,
                 on_motion_fault,
                 on_safety_fault,
             }) => {
                 assert_eq!(target.device, "axis_x");
+                assert_eq!(params.as_deref(), Some("stepper_default_fast"));
                 assert!((*distance - 10.0).abs() < f64::EPSILON);
-                assert!((*speed - 2.0).abs() < f64::EPSILON);
+                assert_eq!(*speed, Some(2.0));
+                assert_eq!(*acceleration, None);
+                assert_eq!(*deceleration, None);
                 assert_eq!(timeout.as_ref().map(|v| v.duration.value), Some(500));
                 assert_eq!(
                     timeout.as_ref().map(|v| v.target.task.as_str()),
@@ -4414,6 +4650,48 @@ task fault:
                 assert!(on_reject.is_some());
                 assert!(on_motion_fault.is_some());
                 assert!(on_safety_fault.is_none());
+            }
+            other => panic!("期望 AxisMoveRelative，实际: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_axis_move_with_params_reference_and_partial_overrides() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step start:
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+"#;
+
+        let ast = parse_plc(input).expect("params + override 语法应能解析");
+        let step = &ast.tasks.tasks[0].steps[0];
+        match &step.statements[0] {
+            StepStatement::Action(ActionStatement::AxisMoveRelative {
+                params,
+                speed,
+                acceleration,
+                deceleration,
+                ..
+            }) => {
+                assert_eq!(params.as_deref(), Some("stepper_default_fast"));
+                assert_eq!(*speed, Some(2.0));
+                assert_eq!(*acceleration, None);
+                assert_eq!(*deceleration, None);
             }
             other => panic!("期望 AxisMoveRelative，实际: {other:?}"),
         }

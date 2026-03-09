@@ -17,16 +17,20 @@ use crate::ir::{
     BinaryValue as IrBinaryValue, CamCouplingDef, CamInterpolation, CamTableIr, CausalityChain,
     ConnectionType, ConstraintSet, Device, DeviceKind, ExternCallBinding as IrExternCallBinding,
     ExternFunctionContract as IrExternContract, ExternFunctionDef as IrExternFunctionDef,
-    ExternFunctionParam as IrExternFunctionParam, MAX_CAM_POINTS, PidLoop as IrPidLoop, SafetyExpr,
+    ExternFunctionParam as IrExternFunctionParam, PidLoop as IrPidLoop, SafetyExpr,
     SafetyRelation as IrSafetyRelation, SafetyRule, SplineCoeff, State, StateExpr, StateMachine,
     TimeInterval, TimerOperation, TimerOperationKind, TimingModel,
     TimingRelation as IrTimingRelation, TimingRule, TimingScope, TopologyGraph, TopologyLink,
     Transition, TransitionAction, TransitionGuard, VariableDef, VariableType as IrVariableType,
+    MAX_CAM_POINTS,
 };
-use crate::plc_port::{PlcPortKind, canonical_physical_device_name, parse_plc_port_ref};
+use crate::plc_port::{canonical_physical_device_name, parse_plc_port_ref, PlcPortKind};
 use petgraph::graph::NodeIndex;
 use runtime_core::MAX_VARIABLES as RUNTIME_MAX_VARIABLES;
+use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fs;
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 struct DeviceNode {
@@ -963,7 +967,7 @@ pub fn build_topology_graph(program: &PlcProgram) -> Result<TopologyGraph, Vec<P
 }
 
 pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<PlcError>> {
-    let expanded = preprocess_program(program)?;
+    let mut expanded = preprocess_program(program)?;
     let variable_types = collect_variable_types(&expanded.topology);
     let mut expr_errors = Vec::new();
     validate_expression_actions_in_tasks(&expanded.tasks, &variable_types, &mut expr_errors);
@@ -994,6 +998,11 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
         &mut expr_errors,
     );
     validate_axis_motion_actions_in_tasks(&expanded.tasks, &device_kinds, &mut expr_errors);
+    resolve_axis_motion_parameters_in_tasks(
+        &mut expanded.tasks,
+        &expanded.topology,
+        &mut expr_errors,
+    );
     if !expr_errors.is_empty() {
         return Err(expr_errors);
     }
@@ -3990,6 +3999,395 @@ fn validate_axis_motion_target_kind(
     }
 }
 
+const AXIS_MOTION_PARAM_SETS_DIR: &str = "axis_motion_param_sets";
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AxisMotionParamSetDef {
+    name: String,
+    config_id: String,
+    speed: f64,
+    acceleration: f64,
+    deceleration: f64,
+}
+
+fn resolve_axis_motion_parameters_in_tasks(
+    tasks: &mut TasksSection,
+    topology: &TopologySection,
+    errors: &mut Vec<PlcError>,
+) {
+    if !tasks_contain_axis_motion_actions(tasks) {
+        return;
+    }
+
+    let axis_profiles = match resolve_axis_profiles(&topology.devices) {
+        Ok(profiles) => profiles,
+        Err(mut profile_errors) => {
+            errors.append(&mut profile_errors);
+            return;
+        }
+    };
+
+    let motion_param_sets = match load_axis_motion_param_sets() {
+        Ok(sets) => sets,
+        Err(mut load_errors) => {
+            errors.append(&mut load_errors);
+            return;
+        }
+    };
+
+    let mut device_default_param_sets = HashMap::<String, String>::new();
+    for device in &topology.devices {
+        if !matches!(
+            device.device_type,
+            DeviceType::StepperMotor | DeviceType::ServoDrive
+        ) {
+            continue;
+        }
+        if let Some(default_set) = device
+            .attributes
+            .motion_param_set
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            device_default_param_sets.insert(device.name.clone(), default_set.to_string());
+        }
+    }
+
+    for task in &mut tasks.tasks {
+        for step in &mut task.steps {
+            resolve_axis_motion_parameters_in_statements(
+                &mut step.statements,
+                step.line.max(1),
+                &axis_profiles,
+                &motion_param_sets,
+                &device_default_param_sets,
+                errors,
+            );
+        }
+    }
+}
+
+fn tasks_contain_axis_motion_actions(tasks: &TasksSection) -> bool {
+    tasks
+        .tasks
+        .iter()
+        .flat_map(|task| task.steps.iter())
+        .any(|step| statements_contain_axis_motion_actions(&step.statements))
+}
+
+fn statements_contain_axis_motion_actions(statements: &[StepStatement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        StepStatement::Action(ActionStatement::AxisMoveRelative { .. })
+        | StepStatement::Action(ActionStatement::AxisMoveAbsolute { .. }) => true,
+        StepStatement::Repeat { body, .. } => statements_contain_axis_motion_actions(body),
+        StepStatement::Parallel(block) => block
+            .branches
+            .iter()
+            .any(|branch| statements_contain_axis_motion_actions(&branch.statements)),
+        StepStatement::Race(block) => block
+            .branches
+            .iter()
+            .any(|branch| statements_contain_axis_motion_actions(&branch.statements)),
+        StepStatement::Action(_)
+        | StepStatement::Wait(_)
+        | StepStatement::IfElse { .. }
+        | StepStatement::Delay { .. }
+        | StepStatement::Timeout(_)
+        | StepStatement::Goto(_)
+        | StepStatement::AllowIndefiniteWait(_) => false,
+    })
+}
+
+fn resolve_axis_motion_parameters_in_statements(
+    statements: &mut [StepStatement],
+    line: usize,
+    axis_profiles: &BTreeMap<String, crate::ir::AxisProfile>,
+    motion_param_sets: &HashMap<String, AxisMotionParamSetDef>,
+    device_default_param_sets: &HashMap<String, String>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::AxisMoveRelative {
+                target,
+                params,
+                speed,
+                acceleration,
+                deceleration,
+                ..
+            })
+            | StepStatement::Action(ActionStatement::AxisMoveAbsolute {
+                target,
+                params,
+                speed,
+                acceleration,
+                deceleration,
+                ..
+            }) => resolve_axis_motion_parameters_on_action(
+                line,
+                &target.device,
+                params,
+                speed,
+                acceleration,
+                deceleration,
+                axis_profiles,
+                motion_param_sets,
+                device_default_param_sets,
+                errors,
+            ),
+            StepStatement::Repeat { body, .. } => resolve_axis_motion_parameters_in_statements(
+                body,
+                line,
+                axis_profiles,
+                motion_param_sets,
+                device_default_param_sets,
+                errors,
+            ),
+            StepStatement::Parallel(block) => {
+                for branch in &mut block.branches {
+                    resolve_axis_motion_parameters_in_statements(
+                        &mut branch.statements,
+                        line,
+                        axis_profiles,
+                        motion_param_sets,
+                        device_default_param_sets,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &mut block.branches {
+                    resolve_axis_motion_parameters_in_statements(
+                        &mut branch.statements,
+                        line,
+                        axis_profiles,
+                        motion_param_sets,
+                        device_default_param_sets,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_axis_motion_parameters_on_action(
+    line: usize,
+    target_device: &str,
+    params: &Option<String>,
+    speed: &mut Option<f64>,
+    acceleration: &mut Option<f64>,
+    deceleration: &mut Option<f64>,
+    axis_profiles: &BTreeMap<String, crate::ir::AxisProfile>,
+    motion_param_sets: &HashMap<String, AxisMotionParamSetDef>,
+    device_default_param_sets: &HashMap<String, String>,
+    errors: &mut Vec<PlcError>,
+) {
+    let Some(profile) = axis_profiles.get(target_device) else {
+        return;
+    };
+
+    let explicit_params = params
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+    let selected_params_name = explicit_params
+        .clone()
+        .or_else(|| device_default_param_sets.get(target_device).cloned());
+
+    let selected_param_set = match selected_params_name.as_deref() {
+        Some(name) => {
+            let Some(def) = motion_param_sets.get(name) else {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXIS-006] axis target '{}' references unknown motion params '{}'.",
+                        target_device, name
+                    ),
+                    format!(
+                        "请在 {AXIS_MOTION_PARAM_SETS_DIR}/{}.toml 中定义该参数集，或修正 params。",
+                        name
+                    ),
+                ));
+                return;
+            };
+            if def.config_id.trim() != profile.config_ref {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXIS-006] motion params '{}' is bound to config '{}' but '{}' uses config '{}'.",
+                        name, def.config_id, target_device, profile.config_ref
+                    ),
+                    "请确保参数集 config_id 与目标轴设备 config_ref 一致。".to_string(),
+                ));
+                return;
+            }
+            Some(def)
+        }
+        None => None,
+    };
+
+    let resolved_speed = speed
+        .as_ref()
+        .copied()
+        .or_else(|| selected_param_set.map(|def| def.speed));
+    let resolved_acc = acceleration
+        .as_ref()
+        .copied()
+        .or_else(|| selected_param_set.map(|def| def.acceleration));
+    let resolved_dec = deceleration
+        .as_ref()
+        .copied()
+        .or_else(|| selected_param_set.map(|def| def.deceleration));
+
+    let Some(resolved_speed) = resolved_speed else {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "[AXIS-007] axis.move on '{}' is missing speed/acc/dec parameters.",
+                target_device
+            ),
+            "请提供 params 引用，或显式填写 speed/acc/dec。".to_string(),
+        ));
+        return;
+    };
+    let Some(resolved_acc) = resolved_acc else {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "[AXIS-007] axis.move on '{}' is missing speed/acc/dec parameters.",
+                target_device
+            ),
+            "请提供 params 引用，或显式填写 speed/acc/dec。".to_string(),
+        ));
+        return;
+    };
+    let Some(resolved_dec) = resolved_dec else {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "[AXIS-007] axis.move on '{}' is missing speed/acc/dec parameters.",
+                target_device
+            ),
+            "请提供 params 引用，或显式填写 speed/acc/dec。".to_string(),
+        ));
+        return;
+    };
+
+    if !resolved_speed.is_finite()
+        || !resolved_acc.is_finite()
+        || !resolved_dec.is_finite()
+        || resolved_speed <= 0.0
+        || resolved_acc <= 0.0
+        || resolved_dec <= 0.0
+    {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "[AXIS-008] axis.move parameters on '{}' must be positive finite values.",
+                target_device
+            ),
+            "请确保 speed/acc/dec 均为正数。".to_string(),
+        ));
+        return;
+    }
+
+    let max_acc = profile.max_acceleration as f64;
+    if resolved_acc > max_acc || resolved_dec > max_acc {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "[AXIS-009] axis.move parameters on '{}' exceed profile limits.",
+                target_device
+            ),
+            format!(
+                "请满足 acc/dec <= {}（由 model/config 限制推导）。",
+                max_acc
+            ),
+        ));
+        return;
+    }
+
+    *speed = Some(resolved_speed);
+    *acceleration = Some(resolved_acc);
+    *deceleration = Some(resolved_dec);
+}
+
+fn load_axis_motion_param_sets() -> Result<HashMap<String, AxisMotionParamSetDef>, Vec<PlcError>> {
+    let root = Path::new(AXIS_MOTION_PARAM_SETS_DIR);
+    let mut defs = HashMap::new();
+    let mut errors = Vec::new();
+
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(err) => {
+            errors.push(PlcError::semantic_with_reason(
+                1,
+                format!("[AXIS-006] failed to read {AXIS_MOTION_PARAM_SETS_DIR} directory: {err}"),
+                "请确认 axis_motion_param_sets 目录存在且可读。".to_string(),
+            ));
+            return Err(errors);
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+            continue;
+        }
+
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(err) => {
+                errors.push(PlcError::semantic_with_reason(
+                    1,
+                    format!(
+                        "[AXIS-006] failed to read motion params file '{}': {err}",
+                        path.display()
+                    ),
+                    "请确认参数集文件可读。".to_string(),
+                ));
+                continue;
+            }
+        };
+
+        let def = match toml::from_str::<AxisMotionParamSetDef>(&content) {
+            Ok(def) => def,
+            Err(err) => {
+                errors.push(PlcError::semantic_with_reason(
+                    1,
+                    format!(
+                        "[AXIS-006] failed to parse motion params file '{}': {err}",
+                        path.display()
+                    ),
+                    "请检查 TOML 字段并确保仅使用 name/config_id/speed/acceleration/deceleration。"
+                        .to_string(),
+                ));
+                continue;
+            }
+        };
+
+        defs.insert(def.name.clone(), def);
+    }
+
+    if errors.is_empty() {
+        Ok(defs)
+    } else {
+        Err(errors)
+    }
+}
+
 fn validate_expression_variables(
     expr: &AstExpression,
     line: usize,
@@ -5361,8 +5759,11 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
         }),
         ActionStatement::AxisMoveRelative {
             target,
+            params: _,
             distance,
             speed,
+            acceleration: _,
+            deceleration: _,
             timeout,
             on_reject,
             on_motion_fault,
@@ -5371,7 +5772,9 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             target: target.device.clone(),
             port: target.port.clone(),
             distance_raw: distance.to_string(),
-            speed_raw: speed.to_string(),
+            speed_raw: speed
+                .expect("axis.move_relative speed must be resolved in semantic pass")
+                .to_string(),
             timeout: lower_axis_timeout_branch(timeout.as_ref()?),
             on_reject: lower_axis_fault_branch(on_reject.as_ref()?, None),
             on_motion_fault: lower_axis_fault_branch(on_motion_fault.as_ref()?, None),
@@ -5379,8 +5782,11 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
         }),
         ActionStatement::AxisMoveAbsolute {
             target,
+            params: _,
             position,
             speed,
+            acceleration: _,
+            deceleration: _,
             timeout,
             on_reject,
             on_motion_fault,
@@ -5389,7 +5795,9 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             target: target.device.clone(),
             port: target.port.clone(),
             position_raw: position.to_string(),
-            speed_raw: speed.to_string(),
+            speed_raw: speed
+                .expect("axis.move_absolute speed must be resolved in semantic pass")
+                .to_string(),
             timeout: lower_axis_timeout_branch(timeout.as_ref()?),
             on_reject: lower_axis_fault_branch(on_reject.as_ref()?, None),
             on_motion_fault: lower_axis_fault_branch(on_motion_fault.as_ref()?, None),
@@ -7169,18 +7577,14 @@ task ready:
         let program = parse_plc(input).expect("PRD 5.5.1 示例应能成功解析为 AST");
         let state_machine = build_state_machine(&program).expect("应能从 5.5.1 示例构建状态机");
 
-        assert!(
-            state_machine
-                .states
-                .iter()
-                .any(|state| state.task_name == "init" && state.step_name == "extend_A")
-        );
-        assert!(
-            state_machine
-                .states
-                .iter()
-                .any(|state| state.task_name == "init" && state.step_name == "retract_B")
-        );
+        assert!(state_machine
+            .states
+            .iter()
+            .any(|state| state.task_name == "init" && state.step_name == "extend_A"));
+        assert!(state_machine
+            .states
+            .iter()
+            .any(|state| state.task_name == "init" && state.step_name == "retract_B"));
 
         let has_wait_transition = state_machine.transitions.iter().any(|transition| {
             transition.from.task_name == "init"
@@ -8097,7 +8501,11 @@ task done:
     fn lowers_axis_move_actions_into_ir_transition_actions() {
         let input = r#"
 [topology]
-device axis_x: stepper_motor
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
 
 [constraints]
 
@@ -8619,7 +9027,11 @@ task main:
     #[test]
     fn rejects_axis_move_missing_branches_with_axis_rule_codes() {
         let input = "[topology]
-device axis_x: stepper_motor
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
 
 [constraints]
 
@@ -8685,7 +9097,11 @@ task fault:
     #[test]
     fn accepts_axis_move_with_complete_branches_on_stepper_target() {
         let input = "[topology]
-device axis_x: stepper_motor
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
 
 [constraints]
 
@@ -8706,6 +9122,121 @@ task fault:
 
         let program = parse_plc(input).expect("axis move 语法应可解析");
         build_state_machine(&program).expect("完整 axis move 分支 + 合法目标应通过语义校验");
+    }
+
+    #[test]
+    fn resolves_axis_move_params_reference_and_applies_inline_override_priority() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 1800)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+task done:
+    step idle:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let sm = build_state_machine(&program).expect("params 引用 + 覆盖应能通过语义校验");
+        let speed_raw = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveRelative { speed_raw, .. } => {
+                    Some(speed_raw.as_str())
+                }
+                _ => None,
+            })
+            .expect("应包含 axis_move_relative 动作");
+        assert_eq!(speed_raw, "1800");
+    }
+
+    #[test]
+    fn rejects_axis_move_missing_acc_or_dec_without_params_reference() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 1200)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors =
+            build_state_machine(&program).expect_err("缺少 acc/dec 且无 params 应触发 AXIS-007");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-007]"));
+    }
+
+    #[test]
+    fn rejects_axis_move_when_effective_params_exceed_axis_profile_limits() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, acc: 12000)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors = build_state_machine(&program).expect_err("超出 profile 上限应触发 AXIS-009");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-009]"));
     }
 
     #[test]

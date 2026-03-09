@@ -1,17 +1,17 @@
 use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use runtime_core::{AxisMotionResult, AxisMoveKind, Runtime, RuntimeError, RuntimeTickError};
 use rust_plc::extern_functions::{
-    EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR, ExternFunctionInfo,
-    ExternFunctionRegistry, ExternRuntimeError, ValueRange, extern_runtime_error_code,
+    extern_runtime_error_code, ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError,
+    ValueRange, EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR,
 };
 use rust_plc::ir::{ExternFunctionContract, TopologyGraph, VariableType};
 use rust_plc::parser::parse_plc;
-use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
+use rust_plc::runtime_bridge::{state_machine_to_runtime_program, BridgeError};
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'static> {
     let program = parse_plc(plc_source).expect("parse plc");
@@ -442,7 +442,7 @@ device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_d
 [tasks]
 task motion:
     step run:
-        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2)
             timeout: 500ms -> fault.timeout
             on_reject -> fault.reject
             on_motion_fault -> fault.motion_fault
@@ -468,7 +468,7 @@ device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_d
 [tasks]
 task motion:
     step run:
-        action: axis.move_relative(axis_x, distance: 10, speed: 3500)
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 3500)
             timeout: 500ms -> fault.timeout
             on_reject -> fault.reject
             on_motion_fault -> fault.motion_fault
