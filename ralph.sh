@@ -121,15 +121,15 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   # Run the selected tool with a watchdog timeout to avoid hanging forever.
   if [[ "$TOOL" == "amp" ]]; then
     timeout "${ITERATION_TIMEOUT_SECONDS}" bash -lc "cat \"$SCRIPT_DIR/prompt.md\" | amp --dangerously-allow-all" \
-      2>&1 | tee /dev/stderr | tee "$RUN_LOG" >/dev/null || OUTPUT_STATUS=$?
+      2>&1 | tee "$RUN_LOG" >/dev/null || OUTPUT_STATUS=$?
   elif [[ "$TOOL" == "claude" ]]; then
     # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
     timeout "${ITERATION_TIMEOUT_SECONDS}" claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/CLAUDE.md" \
-      2>&1 | tee /dev/stderr | tee "$RUN_LOG" >/dev/null || OUTPUT_STATUS=$?
+      2>&1 | tee "$RUN_LOG" >/dev/null || OUTPUT_STATUS=$?
   else
     # Codex CLI: use --dangerously-bypass-approvals-and-sandbox for autonomous operation
     timeout "${ITERATION_TIMEOUT_SECONDS}" codex exec --dangerously-bypass-approvals-and-sandbox - < "$SCRIPT_DIR/CODEX.md" \
-      2>&1 | tee /dev/stderr | tee "$RUN_LOG" >/dev/null || OUTPUT_STATUS=$?
+      2>&1 | tee "$RUN_LOG" >/dev/null || OUTPUT_STATUS=$?
   fi
 
   if [[ "$OUTPUT_STATUS" -eq 124 ]]; then
