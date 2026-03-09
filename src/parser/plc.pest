@@ -150,8 +150,10 @@ axis_fault_contract_field = {
     | "stop_mode"
     | "auto_reset_policy"
     | "manual_ack_required"
+    | "propagation_scope"
+    | "propagation_targets"
 }
-axis_fault_contract_value = { boolean_value | identifier }
+axis_fault_contract_value = { boolean_value | identifier_list | identifier }
 axis_fault_contract_entry = { axis_fault_contract_field ~ ":" ~ axis_fault_contract_value }
 axis_fault_contract_block = { "{" ~ axis_fault_contract_entry ~ ((","? ~ axis_fault_contract_entry))* ~ ","? ~ "}" }
 axis_fault_contract_declaration = {

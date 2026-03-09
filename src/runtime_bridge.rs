@@ -1,8 +1,9 @@
 use crate::ir::{
-    AxisAutoResetPolicy as IrAxisAutoResetPolicy, AxisFaultSeverity as IrAxisFaultSeverity,
-    AxisStopMode as IrAxisStopMode, BinaryValue as IrBinaryValue,
-    CamInterpolation as IrCamInterpolation, DeviceKind, State, StateMachine, TopologyGraph,
-    Transition, TransitionAction, TransitionGuard,
+    AxisAutoResetPolicy as IrAxisAutoResetPolicy,
+    AxisFaultPropagationScope as IrAxisFaultPropagationScope,
+    AxisFaultSeverity as IrAxisFaultSeverity, AxisStopMode as IrAxisStopMode,
+    BinaryValue as IrBinaryValue, CamInterpolation as IrCamInterpolation, DeviceKind, State,
+    StateMachine, TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
 use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
@@ -10,6 +11,7 @@ use petgraph::Direction;
 use petgraph::graph::NodeIndex;
 use runtime_core::{
     Action, AnalogRange, AntiWindup, AxisAutoResetPolicy as RtAxisAutoResetPolicy, AxisFaultPolicy,
+    AxisFaultPropagationScope as RtAxisFaultPropagationScope,
     AxisFaultSeverity as RtAxisFaultSeverity, AxisMotionCommand, AxisMoveKind,
     AxisStopMode as RtAxisStopMode, CamAnalogField, CamCouplingConfig, CamDigitalField,
     CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, ExprOp, ExprProgram, Instr,
@@ -290,8 +292,20 @@ fn build_axis_fault_policies(topology: &TopologyGraph) -> Vec<AxisFaultPolicy<'s
             stop_mode: lower_axis_stop_mode(contract.stop_mode.clone()),
             auto_reset_policy: lower_axis_auto_reset_policy(contract.auto_reset_policy.clone()),
             manual_ack_required: contract.manual_ack_required,
+            propagation_scope: lower_axis_fault_propagation_scope(
+                contract.propagation_scope.clone(),
+            ),
+            propagation_targets: leak_str_slice(&contract.propagation_targets),
         })
         .collect()
+}
+
+fn leak_str_slice(values: &[String]) -> &'static [&'static str] {
+    let leaked_values = values
+        .iter()
+        .map(|value| Box::leak(value.clone().into_boxed_str()) as &'static str)
+        .collect::<Vec<_>>();
+    Box::leak(leaked_values.into_boxed_slice())
 }
 
 fn lower_axis_fault_severity(severity: IrAxisFaultSeverity) -> RtAxisFaultSeverity {
@@ -315,6 +329,18 @@ fn lower_axis_auto_reset_policy(policy: IrAxisAutoResetPolicy) -> RtAxisAutoRese
         IrAxisAutoResetPolicy::Never => RtAxisAutoResetPolicy::Never,
         IrAxisAutoResetPolicy::OnClear => RtAxisAutoResetPolicy::OnClear,
         IrAxisAutoResetPolicy::Immediate => RtAxisAutoResetPolicy::Immediate,
+    }
+}
+
+fn lower_axis_fault_propagation_scope(
+    scope: IrAxisFaultPropagationScope,
+) -> RtAxisFaultPropagationScope {
+    match scope {
+        IrAxisFaultPropagationScope::SelfOnly => RtAxisFaultPropagationScope::SelfOnly,
+        IrAxisFaultPropagationScope::Group => RtAxisFaultPropagationScope::Group,
+        IrAxisFaultPropagationScope::All => RtAxisFaultPropagationScope::All,
+        IrAxisFaultPropagationScope::Followers => RtAxisFaultPropagationScope::Followers,
+        IrAxisFaultPropagationScope::Custom => RtAxisFaultPropagationScope::Custom,
     }
 }
 

@@ -2,8 +2,8 @@ use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use runtime_core::{
     AXIS_FAULT_POLICY_LOG_MESSAGE, AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE,
     AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE, AxisAutoResetPolicy, AxisFault, AxisFaultKind,
-    AxisFaultSeverity, AxisMotionResult, AxisMoveKind, AxisStopMode, AxisStopState,
-    AxisStopTransitionPhase, Runtime, RuntimeError, RuntimeTickError,
+    AxisFaultPropagationScope, AxisFaultSeverity, AxisMotionResult, AxisMoveKind, AxisStopMode,
+    AxisStopState, AxisStopTransitionPhase, Runtime, RuntimeError, RuntimeTickError,
     axis_fault_policy_log_message_id, axis_stop_transition_log_message_id,
 };
 use rust_plc::extern_functions::{
@@ -554,7 +554,12 @@ fn axis_fault_policy_fixture(
     stop_mode: &str,
     auto_reset_policy: &str,
     manual_ack_required: bool,
+    propagation_scope: &str,
+    propagation_targets: Option<&str>,
 ) -> String {
+    let propagation_targets_line = propagation_targets
+        .map(|targets| format!("\n    propagation_targets: {targets}"))
+        .unwrap_or_default();
     format!(
         r#"
 [topology]
@@ -566,6 +571,7 @@ axis_fault_contract axis_x_fault {{
     stop_mode: {stop_mode}
     auto_reset_policy: {auto_reset_policy}
     manual_ack_required: {manual_ack_required}
+    propagation_scope: {propagation_scope}{propagation_targets_line}
 }}
 
 [constraints]
@@ -846,6 +852,8 @@ fn runtime_bridge_applies_axis_fault_policy_matrix_and_emits_policy_logs() {
             stop_mode_src,
             auto_reset_src,
             manual_ack_required,
+            "self",
+            None,
         );
         let program = compile_to_runtime(&source, 10);
 
@@ -856,6 +864,11 @@ fn runtime_bridge_applies_axis_fault_policy_matrix_and_emits_policy_logs() {
         assert_eq!(policy.stop_mode, expected_stop_mode);
         assert_eq!(policy.auto_reset_policy, expected_auto_reset);
         assert_eq!(policy.manual_ack_required, manual_ack_required);
+        assert_eq!(
+            policy.propagation_scope,
+            AxisFaultPropagationScope::SelfOnly
+        );
+        assert_eq!(policy.propagation_targets, ["axis_x"]);
 
         let mut rt = Runtime::new(&program).expect("runtime init");
         let mut io = sim::SimIo::new(1, 1, 0, 0);
@@ -896,6 +909,125 @@ fn runtime_bridge_applies_axis_fault_policy_matrix_and_emits_policy_logs() {
             )
         );
     }
+}
+
+#[test]
+fn runtime_bridge_lowers_axis_fault_propagation_scope_matrix() {
+    let cases = [
+        (
+            "self",
+            None,
+            AxisFaultPropagationScope::SelfOnly,
+            vec!["axis_x"],
+        ),
+        ("all", None, AxisFaultPropagationScope::All, vec!["axis_x"]),
+        (
+            "group",
+            None,
+            AxisFaultPropagationScope::Group,
+            vec!["axis_x"],
+        ),
+        (
+            "custom",
+            Some("[axis_x]"),
+            AxisFaultPropagationScope::Custom,
+            vec!["axis_x"],
+        ),
+    ];
+
+    for (scope_src, targets_src, expected_scope, expected_targets) in cases {
+        let source = axis_fault_policy_fixture(
+            "recoverable",
+            "controlled",
+            "never",
+            false,
+            scope_src,
+            targets_src,
+        );
+        let program = compile_to_runtime(&source, 10);
+        assert_eq!(program.axis_fault_policies.len(), 1);
+        let policy = &program.axis_fault_policies[0];
+        assert_eq!(policy.propagation_scope, expected_scope);
+        assert_eq!(policy.propagation_targets, expected_targets.as_slice());
+    }
+}
+
+#[test]
+fn runtime_bridge_resolves_master_fault_followers_and_follower_isolation() {
+    let source = r#"
+[topology]
+device axis_master: servo_drive {
+    model_ref: servo_generic
+    config_ref: servo_default
+}
+device axis_follower: servo_drive {
+    model_ref: servo_generic
+    config_ref: servo_default
+}
+device cam_link: cam_coupling {
+    master: axis_master
+    slave: axis_follower
+    table: servo_cam_profile
+}
+cam_table servo_cam_profile: oneshot[(0.0, 0.0), (180.0, 180.0)]
+
+axis_fault_contract axis_master_fault {
+    axis: axis_master
+    severity: safety
+    stop_mode: immediate
+    auto_reset_policy: never
+    manual_ack_required: true
+    propagation_scope: followers
+}
+axis_fault_contract axis_follower_fault {
+    axis: axis_follower
+    severity: recoverable
+    stop_mode: controlled
+    auto_reset_policy: on_clear
+    manual_ack_required: false
+    propagation_scope: followers
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: axis.move_relative(axis_master, distance: 10, speed: 5, acc: 5, dec: 5)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+"#;
+
+    let program = parse_plc(source).expect("parse plc");
+    let expanded = preprocess_program(&program).expect("preprocess");
+    let topology = build_topology_graph(&expanded).expect("topology");
+
+    assert_eq!(topology.axis_fault_contracts.len(), 2);
+
+    let master_policy = topology
+        .axis_fault_contracts
+        .iter()
+        .find(|contract| contract.axis == "axis_master")
+        .expect("master policy should exist");
+    assert_eq!(
+        master_policy.propagation_targets,
+        ["axis_master", "axis_follower"]
+    );
+
+    let follower_policy = topology
+        .axis_fault_contracts
+        .iter()
+        .find(|contract| contract.axis == "axis_follower")
+        .expect("follower policy should exist");
+    assert_eq!(follower_policy.propagation_targets, ["axis_follower"]);
 }
 
 #[test]

@@ -1,15 +1,16 @@
 use crate::ast::{
     ActionStatement, ActionTarget, AxisAutoResetPolicy, AxisFaultContractDeclaration,
-    AxisFaultRouteDirective, AxisFaultRouteKind, AxisFaultSeverity, AxisStopMode, BinaryOperator,
-    Branch, CamPoint, CamTableDeclaration, CamTableMode, CausalityConstraint, ComparisonOperator,
-    ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DevicePort,
-    DeviceTags, DeviceType, DurationValue, Expression, ExternCallBinding, ExternFunctionContract,
-    ExternFunctionDeclaration, ExternFunctionParameter, GotoDirective, LiteralValue, MeasuredValue,
-    OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch,
-    SafetyConstraint, SafetyOperand, SafetyRelation, StateReference, StepDeclaration,
-    StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective, TimingConstraint,
-    TimingRelation, TimingTarget, TopologyConnection, TopologyRelation, TopologySection,
-    VariableDeclaration, VariableType, WaitCondition, WaitStatement,
+    AxisFaultPropagationScope, AxisFaultRouteDirective, AxisFaultRouteKind, AxisFaultSeverity,
+    AxisStopMode, BinaryOperator, Branch, CamPoint, CamTableDeclaration, CamTableMode,
+    CausalityConstraint, ComparisonOperator, ConditionExpression, ConstraintsSection,
+    DeviceAttributes, DeviceDeclaration, DevicePort, DeviceTags, DeviceType, DurationValue,
+    Expression, ExternCallBinding, ExternFunctionContract, ExternFunctionDeclaration,
+    ExternFunctionParameter, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective,
+    ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch, SafetyConstraint,
+    SafetyOperand, SafetyRelation, StateReference, StepDeclaration, StepStatement, TaskDeclaration,
+    TasksSection, TimeUnit, TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget,
+    TopologyConnection, TopologyRelation, TopologySection, VariableDeclaration, VariableType,
+    WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
 use pest::Parser;
@@ -331,6 +332,8 @@ fn parse_axis_fault_contract_declaration(
     let mut stop_mode = None;
     let mut auto_reset_policy = None;
     let mut manual_ack_required = None;
+    let mut propagation_scope = None;
+    let mut propagation_targets = Vec::new();
 
     for part in pair.into_inner() {
         match part.as_rule() {
@@ -347,6 +350,8 @@ fn parse_axis_fault_contract_declaration(
                 stop_mode = Some(parsed.stop_mode);
                 auto_reset_policy = Some(parsed.auto_reset_policy);
                 manual_ack_required = Some(parsed.manual_ack_required);
+                propagation_scope = Some(parsed.propagation_scope);
+                propagation_targets = parsed.propagation_targets;
             }
             _ => {}
         }
@@ -366,6 +371,10 @@ fn parse_axis_fault_contract_declaration(
         manual_ack_required: manual_ack_required.ok_or_else(|| {
             PlcError::parse(line, "axis_fault_contract 缺少 manual_ack_required 字段")
         })?,
+        propagation_scope: propagation_scope.ok_or_else(|| {
+            PlcError::parse(line, "axis_fault_contract 缺少 propagation_scope 字段")
+        })?,
+        propagation_targets,
     })
 }
 
@@ -375,6 +384,8 @@ struct ParsedAxisFaultContract {
     stop_mode: AxisStopMode,
     auto_reset_policy: AxisAutoResetPolicy,
     manual_ack_required: bool,
+    propagation_scope: AxisFaultPropagationScope,
+    propagation_targets: Vec<String>,
 }
 
 fn parse_axis_fault_contract_block(
@@ -388,6 +399,8 @@ fn parse_axis_fault_contract_block(
     let mut stop_mode = None;
     let mut auto_reset_policy = None;
     let mut manual_ack_required = None;
+    let mut propagation_scope = None;
+    let mut propagation_targets: Option<Vec<String>> = None;
 
     for entry in pair.into_inner() {
         if entry.as_rule() != Rule::axis_fault_contract_entry {
@@ -463,6 +476,28 @@ fn parse_axis_fault_contract_block(
                 }
                 manual_ack_required = Some(expect_boolean(value, "manual_ack_required")?);
             }
+            "propagation_scope" => {
+                if propagation_scope.is_some() {
+                    return Err(PlcError::parse_at(
+                        "<input>",
+                        line,
+                        col,
+                        "axis_fault_contract 字段 propagation_scope 重复声明",
+                    ));
+                }
+                propagation_scope = Some(parse_axis_fault_propagation_scope(value)?);
+            }
+            "propagation_targets" => {
+                if propagation_targets.is_some() {
+                    return Err(PlcError::parse_at(
+                        "<input>",
+                        line,
+                        col,
+                        "axis_fault_contract 字段 propagation_targets 重复声明",
+                    ));
+                }
+                propagation_targets = Some(expect_identifier_list(value, "propagation_targets")?);
+            }
             _ => {
                 return Err(PlcError::parse_at(
                     "<input>",
@@ -474,7 +509,7 @@ fn parse_axis_fault_contract_block(
         }
     }
 
-    Ok(ParsedAxisFaultContract {
+    let parsed = ParsedAxisFaultContract {
         axis: axis.ok_or_else(|| {
             PlcError::parse_at(
                 "<input>",
@@ -515,7 +550,44 @@ fn parse_axis_fault_contract_block(
                 format!("axis_fault_contract {contract_name} 缺少必填字段 manual_ack_required"),
             )
         })?,
-    })
+        propagation_scope: propagation_scope.ok_or_else(|| {
+            PlcError::parse_at(
+                "<input>",
+                declaration_line,
+                declaration_col,
+                format!("axis_fault_contract {contract_name} 缺少必填字段 propagation_scope"),
+            )
+        })?,
+        propagation_targets: propagation_targets.unwrap_or_default(),
+    };
+
+    if parsed.propagation_scope == AxisFaultPropagationScope::Custom
+        && parsed.propagation_targets.is_empty()
+    {
+        return Err(PlcError::parse_at(
+            "<input>",
+            declaration_line,
+            declaration_col,
+            format!(
+                "axis_fault_contract {contract_name} 在 propagation_scope=custom 时必须提供 propagation_targets"
+            ),
+        ));
+    }
+
+    if parsed.propagation_scope != AxisFaultPropagationScope::Custom
+        && !parsed.propagation_targets.is_empty()
+    {
+        return Err(PlcError::parse_at(
+            "<input>",
+            declaration_line,
+            declaration_col,
+            format!(
+                "axis_fault_contract {contract_name} 仅在 propagation_scope=custom 时允许 propagation_targets"
+            ),
+        ));
+    }
+
+    Ok(parsed)
 }
 
 fn parse_axis_fault_severity(pair: Pair<Rule>) -> Result<AxisFaultSeverity, PlcError> {
@@ -561,6 +633,26 @@ fn parse_axis_auto_reset_policy(pair: Pair<Rule>) -> Result<AxisAutoResetPolicy,
             line,
             format!(
                 "axis_fault_contract.auto_reset_policy 不支持 `{raw}`，仅支持 never/on_clear/immediate"
+            ),
+        )),
+    }
+}
+
+fn parse_axis_fault_propagation_scope(
+    pair: Pair<Rule>,
+) -> Result<AxisFaultPropagationScope, PlcError> {
+    let line = line_of(&pair);
+    let raw = expect_identifier(pair, "propagation_scope")?;
+    match raw.as_str() {
+        "self" => Ok(AxisFaultPropagationScope::SelfOnly),
+        "group" => Ok(AxisFaultPropagationScope::Group),
+        "all" => Ok(AxisFaultPropagationScope::All),
+        "followers" => Ok(AxisFaultPropagationScope::Followers),
+        "custom" => Ok(AxisFaultPropagationScope::Custom),
+        _ => Err(PlcError::parse(
+            line,
+            format!(
+                "axis_fault_contract.propagation_scope 不支持 `{raw}`，仅支持 self/group/all/followers/custom"
             ),
         )),
     }
@@ -3309,9 +3401,9 @@ fn map_parse_error(err: pest::error::Error<Rule>) -> PlcError {
 mod tests {
     use super::{parse_constraints, parse_plc, parse_tasks, parse_topology};
     use crate::ast::{
-        ActionStatement, AxisAutoResetPolicy, AxisFaultSeverity, AxisStopMode, BinaryOperator,
-        DeviceType, Expression, ExternCallBinding, LiteralValue, OnCompleteDirective, PortRole,
-        PortType, StepStatement, VariableType, WaitCondition,
+        ActionStatement, AxisAutoResetPolicy, AxisFaultPropagationScope, AxisFaultSeverity,
+        AxisStopMode, BinaryOperator, DeviceType, Expression, ExternCallBinding, LiteralValue,
+        OnCompleteDirective, PortRole, PortType, StepStatement, VariableType, WaitCondition,
     };
 
     #[test]
@@ -3875,6 +3967,7 @@ axis_fault_contract axis_x_fault {
     stop_mode: immediate
     auto_reset_policy: never
     manual_ack_required: true
+    propagation_scope: self
 }
 
 [constraints]
@@ -3893,6 +3986,11 @@ task main:
         assert_eq!(contract.stop_mode, AxisStopMode::Immediate);
         assert_eq!(contract.auto_reset_policy, AxisAutoResetPolicy::Never);
         assert!(contract.manual_ack_required);
+        assert_eq!(
+            contract.propagation_scope,
+            AxisFaultPropagationScope::SelfOnly
+        );
+        assert!(contract.propagation_targets.is_empty());
     }
 
     #[test]
@@ -3907,6 +4005,7 @@ axis_fault_contract axis_x_fault {
     stop_mode: quick
     auto_reset_policy: on_clear
     manual_ack_required: false
+    propagation_scope: self
 }
 
 [constraints]
@@ -3920,6 +4019,107 @@ task main:
         assert!(
             err.to_string().contains("缺少必填字段 severity"),
             "错误信息应明确缺失字段，实际: {err}"
+        );
+    }
+
+    #[test]
+    fn parses_axis_fault_contract_custom_propagation_targets() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    purpose: "transport"
+}
+device axis_y: servo_drive {
+    purpose: "transport"
+}
+axis_fault_contract axis_x_fault {
+    axis: axis_x
+    severity: safety
+    stop_mode: immediate
+    auto_reset_policy: never
+    manual_ack_required: true
+    propagation_scope: custom
+    propagation_targets: [axis_y]
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("custom propagation should parse");
+        let contract = &program.topology.axis_fault_contracts[0];
+        assert_eq!(
+            contract.propagation_scope,
+            AxisFaultPropagationScope::Custom
+        );
+        assert_eq!(contract.propagation_targets, vec!["axis_y".to_string()]);
+    }
+
+    #[test]
+    fn rejects_axis_fault_contract_custom_scope_without_targets() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    purpose: "transport"
+}
+axis_fault_contract axis_x_fault {
+    axis: axis_x
+    severity: recoverable
+    stop_mode: controlled
+    auto_reset_policy: on_clear
+    manual_ack_required: false
+    propagation_scope: custom
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let err = parse_plc(input).expect_err("custom scope without targets should fail");
+        assert!(
+            err.to_string().contains("必须提供 propagation_targets"),
+            "error should mention missing propagation_targets, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_axis_fault_contract_non_custom_scope_with_targets() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    purpose: "transport"
+}
+device axis_y: servo_drive {
+    purpose: "transport"
+}
+axis_fault_contract axis_x_fault {
+    axis: axis_x
+    severity: recoverable
+    stop_mode: controlled
+    auto_reset_policy: on_clear
+    manual_ack_required: false
+    propagation_scope: followers
+    propagation_targets: [axis_y]
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let err = parse_plc(input).expect_err("non-custom scope with targets should fail");
+        assert!(
+            err.to_string()
+                .contains("仅在 propagation_scope=custom 时允许 propagation_targets"),
+            "error should mention invalid propagation_targets usage, got: {err}"
         );
     }
 

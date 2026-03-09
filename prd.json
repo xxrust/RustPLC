@@ -188,8 +188,8 @@
         "Tests pass"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented multi-axis fault propagation/isolation flow by extending axis_fault_contract with propagation_scope (+ optional custom targets), adding semantic target resolution for self/group/all/followers/custom scopes (including cam-coupling follower chains and functional-group matching), bridging resolved targets into runtime policies, and adding parser/semantic/runtime-core/runtime_bridge regression matrix tests."
     },
     {
       "id": "US-013",

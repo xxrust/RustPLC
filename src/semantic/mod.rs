@@ -1,6 +1,7 @@
 use crate::ast::{
     ActionStatement, AxisAutoResetPolicy as AstAxisAutoResetPolicy,
     AxisFaultContractDeclaration as AstAxisFaultContractDeclaration,
+    AxisFaultPropagationScope as AstAxisFaultPropagationScope,
     AxisFaultRouteDirective as AstAxisFaultRouteDirective,
     AxisFaultRouteKind as AstAxisFaultRouteKind, AxisFaultSeverity as AstAxisFaultSeverity,
     AxisStopMode as AstAxisStopMode, BinaryOperator as AstBinaryOperator, CamTableMode,
@@ -20,6 +21,7 @@ use crate::error::PlcError;
 use crate::ir::{
     ActionKind, ActionRef, ActionTiming, AxisAutoResetPolicy as IrAxisAutoResetPolicy,
     AxisFaultBranch, AxisFaultContractDef as IrAxisFaultContractDef, AxisFaultKind,
+    AxisFaultPropagationScope as IrAxisFaultPropagationScope,
     AxisFaultRouteBranch as IrAxisFaultRouteBranch, AxisFaultRouteKind as IrAxisFaultRouteKind,
     AxisFaultSeverity as IrAxisFaultSeverity, AxisStopMode as IrAxisStopMode, AxisTimeoutBranch,
     BinaryValue as IrBinaryValue, CamCouplingDef, CamInterpolation, CamTableIr, CausalityChain,
@@ -2086,6 +2088,13 @@ fn extract_axis_fault_contract_defs(
     let mut defs = Vec::new();
     let mut seen_names = HashSet::<String>::new();
     let mut seen_axis = HashMap::<String, String>::new();
+    let axis_device_names = collect_axis_device_names(topology);
+    let axis_device_name_set = axis_device_names
+        .iter()
+        .cloned()
+        .collect::<HashSet<String>>();
+    let axis_functional_groups = collect_axis_functional_groups(topology, &axis_device_name_set);
+    let axis_followers_by_master = collect_axis_followers(topology, &axis_device_name_set);
 
     for contract in &topology.axis_fault_contracts {
         let line = contract.line.max(1);
@@ -2139,15 +2148,210 @@ fn extract_axis_fault_contract_defs(
             continue;
         }
 
+        if matches!(
+            contract.propagation_scope,
+            AstAxisFaultPropagationScope::Custom
+        ) {
+            let mut has_invalid_target = false;
+            for target in &contract.propagation_targets {
+                let Some(target_node) = device_nodes.get(target) else {
+                    errors.push(PlcError::undefined_reference_with_reason(
+                        line,
+                        "轴设备",
+                        target,
+                        format!(
+                            "axis_fault_contract {} 的 propagation_targets 引用了未定义设备",
+                            contract.name
+                        ),
+                    ));
+                    has_invalid_target = true;
+                    continue;
+                };
+
+                if !matches!(
+                    target_node.kind,
+                    DeviceKind::StepperMotor | DeviceKind::ServoDrive
+                ) {
+                    errors.push(PlcError::type_mismatch_with_reason(
+                        line,
+                        "stepper_motor 或 servo_drive",
+                        device_kind_name(&target_node.kind),
+                        format!("axis_fault_contract {}.propagation_targets", contract.name),
+                        "propagation_targets 只能包含轴设备（stepper_motor/servo_drive）",
+                    ));
+                    has_invalid_target = true;
+                }
+            }
+
+            if has_invalid_target {
+                continue;
+            }
+        }
+
         seen_axis.insert(contract.axis.clone(), contract.name.clone());
-        defs.push(lower_axis_fault_contract_def(contract));
+        let resolved_targets = resolve_axis_fault_propagation_targets(
+            contract,
+            &axis_device_names,
+            &axis_functional_groups,
+            &axis_followers_by_master,
+        );
+        defs.push(lower_axis_fault_contract_def(contract, resolved_targets));
     }
 
     defs
 }
 
+fn collect_axis_device_names(topology: &TopologySection) -> Vec<String> {
+    topology
+        .devices
+        .iter()
+        .filter(|device| {
+            matches!(
+                device.device_type,
+                DeviceType::StepperMotor | DeviceType::ServoDrive
+            )
+        })
+        .map(|device| device.name.clone())
+        .collect()
+}
+
+fn collect_axis_functional_groups(
+    topology: &TopologySection,
+    axis_device_name_set: &HashSet<String>,
+) -> HashMap<String, HashSet<String>> {
+    let mut groups = HashMap::new();
+    for device in &topology.devices {
+        if !axis_device_name_set.contains(&device.name) {
+            continue;
+        }
+
+        groups.insert(
+            device.name.clone(),
+            device
+                .attributes
+                .tags
+                .functional_group
+                .iter()
+                .cloned()
+                .collect(),
+        );
+    }
+    groups
+}
+
+fn collect_axis_followers(
+    topology: &TopologySection,
+    axis_device_name_set: &HashSet<String>,
+) -> HashMap<String, Vec<String>> {
+    let mut followers_by_master = HashMap::<String, Vec<String>>::new();
+
+    for device in &topology.devices {
+        if !matches!(device.device_type, DeviceType::CamCoupling) {
+            continue;
+        }
+
+        let Some(master) = device.attributes.master.as_ref() else {
+            continue;
+        };
+        let Some(slave) = device.attributes.slave.as_ref() else {
+            continue;
+        };
+        if !axis_device_name_set.contains(master) || !axis_device_name_set.contains(slave) {
+            continue;
+        }
+
+        followers_by_master
+            .entry(master.clone())
+            .or_default()
+            .push(slave.clone());
+    }
+
+    for followers in followers_by_master.values_mut() {
+        followers.sort();
+        followers.dedup();
+    }
+
+    followers_by_master
+}
+
+fn resolve_axis_fault_propagation_targets(
+    contract: &AstAxisFaultContractDeclaration,
+    axis_device_names: &[String],
+    axis_functional_groups: &HashMap<String, HashSet<String>>,
+    axis_followers_by_master: &HashMap<String, Vec<String>>,
+) -> Vec<String> {
+    let mut targets = vec![contract.axis.clone()];
+    match contract.propagation_scope {
+        AstAxisFaultPropagationScope::SelfOnly => {}
+        AstAxisFaultPropagationScope::Custom => {
+            for target in &contract.propagation_targets {
+                push_unique_target(&mut targets, target);
+            }
+        }
+        AstAxisFaultPropagationScope::All => {
+            let mut others = axis_device_names
+                .iter()
+                .filter(|name| *name != &contract.axis)
+                .cloned()
+                .collect::<Vec<_>>();
+            others.sort();
+            for target in others {
+                push_unique_target(&mut targets, &target);
+            }
+        }
+        AstAxisFaultPropagationScope::Group => {
+            let source_groups = axis_functional_groups
+                .get(&contract.axis)
+                .cloned()
+                .unwrap_or_default();
+            if !source_groups.is_empty() {
+                let mut grouped_axes = axis_device_names
+                    .iter()
+                    .filter(|name| {
+                        axis_functional_groups
+                            .get(*name)
+                            .map(|groups| !groups.is_disjoint(&source_groups))
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                grouped_axes.sort();
+                for target in grouped_axes {
+                    push_unique_target(&mut targets, &target);
+                }
+            }
+        }
+        AstAxisFaultPropagationScope::Followers => {
+            let mut queue = vec![contract.axis.clone()];
+            let mut cursor = 0usize;
+            while cursor < queue.len() {
+                let master = &queue[cursor];
+                cursor += 1;
+                if let Some(followers) = axis_followers_by_master.get(master) {
+                    for follower in followers {
+                        if !targets.iter().any(|existing| existing == follower) {
+                            targets.push(follower.clone());
+                            queue.push(follower.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    targets
+}
+
+fn push_unique_target(targets: &mut Vec<String>, candidate: &str) {
+    if targets.iter().any(|existing| existing == candidate) {
+        return;
+    }
+    targets.push(candidate.to_string());
+}
+
 fn lower_axis_fault_contract_def(
     contract: &AstAxisFaultContractDeclaration,
+    propagation_targets: Vec<String>,
 ) -> IrAxisFaultContractDef {
     IrAxisFaultContractDef {
         name: contract.name.clone(),
@@ -2156,6 +2360,8 @@ fn lower_axis_fault_contract_def(
         stop_mode: lower_axis_stop_mode(&contract.stop_mode),
         auto_reset_policy: lower_axis_auto_reset_policy(&contract.auto_reset_policy),
         manual_ack_required: contract.manual_ack_required,
+        propagation_scope: lower_axis_fault_propagation_scope(&contract.propagation_scope),
+        propagation_targets,
     }
 }
 
@@ -2180,6 +2386,18 @@ fn lower_axis_auto_reset_policy(policy: &AstAxisAutoResetPolicy) -> IrAxisAutoRe
         AstAxisAutoResetPolicy::Never => IrAxisAutoResetPolicy::Never,
         AstAxisAutoResetPolicy::OnClear => IrAxisAutoResetPolicy::OnClear,
         AstAxisAutoResetPolicy::Immediate => IrAxisAutoResetPolicy::Immediate,
+    }
+}
+
+fn lower_axis_fault_propagation_scope(
+    scope: &AstAxisFaultPropagationScope,
+) -> IrAxisFaultPropagationScope {
+    match scope {
+        AstAxisFaultPropagationScope::SelfOnly => IrAxisFaultPropagationScope::SelfOnly,
+        AstAxisFaultPropagationScope::Group => IrAxisFaultPropagationScope::Group,
+        AstAxisFaultPropagationScope::All => IrAxisFaultPropagationScope::All,
+        AstAxisFaultPropagationScope::Followers => IrAxisFaultPropagationScope::Followers,
+        AstAxisFaultPropagationScope::Custom => IrAxisFaultPropagationScope::Custom,
     }
 }
 
@@ -10428,6 +10646,7 @@ axis_fault_contract axis_x_fault {
     stop_mode: immediate
     auto_reset_policy: never
     manual_ack_required: true
+    propagation_scope: self
 }
 
 [constraints]
@@ -10456,6 +10675,11 @@ task main:
             crate::ir::AxisAutoResetPolicy::Never
         ));
         assert!(contract.manual_ack_required);
+        assert!(matches!(
+            contract.propagation_scope,
+            crate::ir::AxisFaultPropagationScope::SelfOnly
+        ));
+        assert_eq!(contract.propagation_targets, vec!["axis_x".to_string()]);
     }
 
     #[test]
@@ -10468,6 +10692,7 @@ axis_fault_contract valve_fault {
     stop_mode: quick
     auto_reset_policy: on_clear
     manual_ack_required: false
+    propagation_scope: self
 }
 
 [constraints]
@@ -10486,5 +10711,91 @@ task main:
             .collect::<Vec<_>>()
             .join("\n");
         assert!(joined.contains("axis_fault_contract 只能绑定到轴设备"));
+    }
+
+    #[test]
+    fn lowers_axis_fault_followers_scope_into_resolved_targets() {
+        let input = "[topology]
+device axis_master: servo_drive {
+    model_ref: servo_generic
+    config_ref: servo_default
+}
+device axis_follower: servo_drive {
+    model_ref: servo_generic
+    config_ref: servo_default
+}
+device cam_link: cam_coupling {
+    master: axis_master
+    slave: axis_follower
+    table: servo_cam_profile
+}
+cam_table servo_cam_profile: oneshot[(0.0, 0.0), (180.0, 180.0)]
+axis_fault_contract master_fault {
+    axis: axis_master
+    severity: recoverable
+    stop_mode: controlled
+    auto_reset_policy: on_clear
+    manual_ack_required: false
+    propagation_scope: followers
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+";
+
+        let program = parse_plc(input).expect("followers scope fixture should parse");
+        let topology = build_topology_graph(&program).expect("followers scope should lower");
+        let contract = topology
+            .axis_fault_contracts
+            .iter()
+            .find(|contract| contract.name == "master_fault")
+            .expect("contract should exist");
+        assert!(matches!(
+            contract.propagation_scope,
+            crate::ir::AxisFaultPropagationScope::Followers
+        ));
+        assert_eq!(
+            contract.propagation_targets,
+            vec!["axis_master".to_string(), "axis_follower".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_axis_fault_contract_custom_targets_with_non_axis_device() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+device valve_a: solenoid_valve
+axis_fault_contract axis_fault {
+    axis: axis_x
+    severity: recoverable
+    stop_mode: controlled
+    auto_reset_policy: never
+    manual_ack_required: false
+    propagation_scope: custom
+    propagation_targets: [valve_a]
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+";
+
+        let program = parse_plc(input).expect("custom targets fixture should parse");
+        let errors =
+            build_topology_graph(&program).expect_err("non-axis propagation target should fail");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("propagation_targets 只能包含轴设备"));
     }
 }

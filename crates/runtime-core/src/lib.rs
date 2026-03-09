@@ -110,12 +110,23 @@ pub enum AxisAutoResetPolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisFaultPropagationScope {
+    SelfOnly,
+    Group,
+    All,
+    Followers,
+    Custom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AxisFaultPolicy<'a> {
     pub axis: &'a str,
     pub severity: AxisFaultSeverity,
     pub stop_mode: AxisStopMode,
     pub auto_reset_policy: AxisAutoResetPolicy,
     pub manual_ack_required: bool,
+    pub propagation_scope: AxisFaultPropagationScope,
+    pub propagation_targets: &'a [&'static str],
 }
 
 pub const AXIS_FAULT_POLICY_LOG_MESSAGE: &str = "axis_fault_policy_applied";
@@ -1151,7 +1162,7 @@ impl<'a> Runtime<'a> {
                                         self.set_axis_homed(command.target, false)
                                             .map_err(RuntimeTickError::Core)?;
                                         if let Some(policy) =
-                                            self.axis_fault_policy_for(command.target)
+                                            self.axis_fault_policy_for(command.target).copied()
                                         {
                                             on_log(LogEvent {
                                                 tick: now,
@@ -1171,7 +1182,15 @@ impl<'a> Runtime<'a> {
                                                 now,
                                                 on_log,
                                             );
-                                            on_axis_fault_policy(command, fault);
+                                            if policy.propagation_targets.is_empty() {
+                                                on_axis_fault_policy(command, fault);
+                                            } else {
+                                                for target in policy.propagation_targets {
+                                                    let propagated_command =
+                                                        AxisMotionCommand { target, ..command };
+                                                    on_axis_fault_policy(propagated_command, fault);
+                                                }
+                                            }
                                         }
                                         return Err(RuntimeTickError::Core(
                                             RuntimeError::AxisFault {
@@ -3153,6 +3172,8 @@ mod tests {
                 stop_mode,
                 auto_reset_policy: AxisAutoResetPolicy::Never,
                 manual_ack_required: true,
+                propagation_scope: AxisFaultPropagationScope::SelfOnly,
+                propagation_targets: &["axis_x"],
             }];
             let program = Program {
                 tasks: &TASKS,
@@ -3208,6 +3229,91 @@ mod tests {
                 axis_stop_transition_log_message_id(stop_mode, AxisStopTransitionPhase::Completed)
             );
         }
+    }
+
+    #[test]
+    fn axis_fault_policy_propagates_targets_within_same_tick() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+                require_homed: false,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+
+        let policies = [AxisFaultPolicy {
+            axis: "axis_x",
+            severity: AxisFaultSeverity::Safety,
+            stop_mode: AxisStopMode::Immediate,
+            auto_reset_policy: AxisAutoResetPolicy::Never,
+            manual_ack_required: true,
+            propagation_scope: AxisFaultPropagationScope::Followers,
+            propagation_targets: &["axis_x", "axis_y"],
+        }];
+        let program = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &policies,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&program).expect("runtime init");
+        let mut on_event = |_| {};
+        let mut on_log = |_| {};
+        let mut on_extern_call = |_function: &'static str,
+                                  _args: &[f32],
+                                  _results: &mut [f32]|
+         -> Result<usize, ()> { Err(()) };
+        let mut map_extern_error_code = |_function: &'static str, _error: &()| 0.0;
+        let mut on_axis_motion =
+            |_command: AxisMotionCommand| Ok(AxisMotionResult::safety_fault(55));
+        let mut applied_targets = std::vec::Vec::new();
+
+        let err = rt.tick_with_trace_and_logs_impl(
+            &mut io,
+            &mut on_event,
+            &mut on_log,
+            &mut on_extern_call,
+            None,
+            &mut map_extern_error_code,
+            &mut on_axis_motion,
+            &mut |command: AxisMotionCommand, _fault: AxisFault| {
+                applied_targets.push(command.target)
+            },
+        );
+
+        assert!(matches!(
+            err,
+            Err(RuntimeTickError::Core(RuntimeError::AxisFault {
+                target: "axis_x",
+                fault,
+            })) if fault == AxisFault::safety(55)
+        ));
+        assert_eq!(applied_targets, vec!["axis_x", "axis_y"]);
     }
 
     #[test]

@@ -161,6 +161,9 @@ pub struct AxisFaultContractDef {
     pub stop_mode: AxisStopMode,
     pub auto_reset_policy: AxisAutoResetPolicy,
     pub manual_ack_required: bool,
+    pub propagation_scope: AxisFaultPropagationScope,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub propagation_targets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -185,6 +188,20 @@ pub enum AxisAutoResetPolicy {
     Never,
     OnClear,
     Immediate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AxisFaultPropagationScope {
+    #[serde(rename = "self")]
+    SelfOnly,
+    #[serde(rename = "group")]
+    Group,
+    #[serde(rename = "all")]
+    All,
+    #[serde(rename = "followers")]
+    Followers,
+    #[serde(rename = "custom")]
+    Custom,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -749,6 +766,8 @@ mod tests {
             stop_mode: AxisStopMode::Immediate,
             auto_reset_policy: AxisAutoResetPolicy::Never,
             manual_ack_required: true,
+            propagation_scope: AxisFaultPropagationScope::SelfOnly,
+            propagation_targets: vec!["axis_x".to_string()],
         });
 
         let state_machine = StateMachine {

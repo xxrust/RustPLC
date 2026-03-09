@@ -34,6 +34,8 @@
 - `axis.move_*` fault 路由采用“主桶 + 细分 routes”双层结构：主桶 `on_reject/on_motion_fault/on_safety_fault` 仍是必填回退路径，细分 `kind/code` matcher 仅作为优先匹配，不可替代主桶。
 - 运行时轴回调统一返回 `AxisMotionResult::Fault(AxisFault)`；测试优先使用 `AxisMotionResult::reject/motion_fault/safety_fault` 构造器保持语义稳定。
 - `axis_fault_contract` 策略矩阵通过 **runtime bridge**（`src/runtime_bridge.rs`）降级到 `runtime_core::Program.axis_fault_policies`；调整策略枚举时需同步 IR/runtime-core/bridge 三层。
+- `axis_fault_contract` 的传播范围字段采用严格白名单：`propagation_scope` 仅支持 `self/group/all/followers/custom`；仅 `custom` 允许 `propagation_targets`，且目标必须是轴设备。
+- `followers` 传播目标按 `cam_coupling master->slave` 关系（可传递）解析；`group` 传播按轴设备 `tags.functional_group` 交集解析；两者都会自动包含故障轴自身作为回退。
 - 运行时策略审计日志通过 `runtime_core::axis_fault_policy_log_message_id` + `AXIS_FAULT_POLICY_LOG_MESSAGE` 生成；修改编码规则时必须同步 `tests/runtime_bridge_us006.rs` 回归断言。
 - 停机模式语义在 runtime-core 中固定迁移为 `Running -> {ControlledStopping|QuickStopping|ImmediateStopping} -> Stopped`，并通过 `axis_stop_transition_log_message_id` + `AXIS_STOP_TRANSITION_{ENTER,COMPLETED}_LOG_MESSAGE` 输出可观测日志；修改 stop 编码或阶段名时需同步 `tests/runtime_bridge_us006.rs` 与 `crates/runtime-core/src/lib.rs` 单测。
 

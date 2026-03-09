@@ -13,6 +13,7 @@ Started: 2026-03-09 00:00:00 CST
 - runtime-core 在一个 tick 内会连续执行非阻塞状态（`Action/Goto/已满足 wait`）；写回归时若要精确逐 tick 断言，需在步骤间加入 `delay` 或未满足 `wait` 做节流。
 - `axis.move_*` 参数值语法中的 `number` 不接受带符号前缀；负值会在 parser 阶段先报错，语义层的非正数校验应使用 `0` 场景覆盖。
 - 垂直轴制动顺序检查应仅对“出现 `set <axis>.enable off` 且轴设备具备 `model_ref/config_ref`”的目标轴生效，避免把 legacy 无 profile 轴用例误判为配置错误。
+- `axis_fault_contract` 的传播目标在语义阶段统一收敛：`followers` 走 `cam_coupling master->slave`（可传递），`group` 走 `tags.functional_group` 交集，且始终包含故障轴自身。
 
 ---
 
@@ -248,4 +249,31 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: 垂直轴规则适合走“axis_profile 配置解析 + 语义硬约束 + safety 预检”三层同构，避免运行时才暴露顺序风险。
   - Gotchas encountered: 若无条件对全部轴设备解析 profile，会把 legacy（无 model_ref/config_ref）用例误升级成 `AXP-001` 失败；应先按 `enable off` 目标轴做最小化过滤。
   - Useful context: 规则当前按步骤内顺序判定（先 `set brake`、再 `wait confirm`、再 `disable`），并在 `parallel/race` 分支内按分支独立校验。
+---
+
+## [2026-03-09 23:59:21 CST] - US-012
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 扩展 `axis_fault_contract` 语法与模型：新增 `propagation_scope: self/group/all/followers/custom`，并支持 `propagation_targets`（仅 `custom` 可用）。
+  - 在 parser 增加交叉校验：`custom` 必须声明 `propagation_targets`，非 `custom` 禁止声明该字段。
+  - 在语义层新增传播目标收敛：`self/group/all/followers/custom` 统一解析为 IR `propagation_targets`，其中 `followers` 基于 `cam_coupling master->slave` 可传递链，`group` 基于 `tags.functional_group`。
+  - 在语义层新增 custom 目标校验：`propagation_targets` 必须引用已定义轴设备。
+  - 在 runtime bridge/runtime-core 打通传播字段：桥接到 `runtime_core::AxisFaultPolicy`，运行时故障策略回调按传播目标集合触发。
+  - 新增传播矩阵回归：parser/semantic/runtime-core/runtime_bridge 测试覆盖五种 scope、主轴带从轴传播和从轴隔离路径。
+- Files changed
+  - `AGENTS.md`
+  - `src/ast/mod.rs`
+  - `src/parser/plc.pest`
+  - `src/parser/mod.rs`
+  - `src/ir/mod.rs`
+  - `src/semantic/mod.rs`
+  - `src/runtime_bridge.rs`
+  - `crates/runtime-core/src/lib.rs`
+  - `tests/runtime_bridge_us006.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: 传播范围建议在语义层先“归一化”为确定目标集，再由 bridge/runtime 直接消费，避免运行时重复推导拓扑关系。
+  - Gotchas encountered: `AxisMotionCommand.target` 是 `&'static str`，runtime policy 的传播目标切片元素也必须是 `&'static str`，否则回调构造会触发生命周期冲突。
+  - Useful context: `runtime_bridge_us006` 已新增 `runtime_bridge_lowers_axis_fault_propagation_scope_matrix` 和主从传播/隔离断言，可作为后续 fault 传播改造的回归入口。
 ---
