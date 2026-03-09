@@ -721,6 +721,7 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             target,
             position_raw,
             speed_raw,
+            require_homed: _,
             port: _,
             timeout,
             on_reject,

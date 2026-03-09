@@ -2787,12 +2787,14 @@ fn build_state_machine_from_ast_with_context(
                 )
             })
             .collect::<BTreeMap<_, _>>();
-        Ok(StateMachine {
+        let mut state_machine = StateMachine {
             states: builder.states,
             transitions: builder.transitions,
             initial,
             analog_regions,
-        })
+        };
+        annotate_axis_absolute_homing_guards(&mut state_machine);
+        Ok(state_machine)
     } else {
         Err(errors)
     }
@@ -5339,6 +5341,158 @@ fn analyze_statements(
     analyzed
 }
 
+fn annotate_axis_absolute_homing_guards(state_machine: &mut StateMachine) {
+    let reachable = reachable_states(state_machine);
+    let axis_targets = collect_axis_targets(state_machine);
+    if axis_targets.is_empty() {
+        return;
+    }
+
+    let mut homed_facts = HashMap::<String, HashMap<(String, String), bool>>::new();
+    for axis in &axis_targets {
+        homed_facts.insert(
+            axis.clone(),
+            infer_definitely_homed_states(state_machine, &reachable, axis),
+        );
+    }
+
+    for transition in &mut state_machine.transitions {
+        let mut local_homed = HashMap::<String, bool>::new();
+        for axis in &axis_targets {
+            let homed = homed_facts
+                .get(axis)
+                .and_then(|facts| facts.get(&state_key(&transition.from)))
+                .copied()
+                .unwrap_or(false);
+            local_homed.insert(axis.clone(), homed);
+        }
+
+        for action in &mut transition.actions {
+            match action {
+                TransitionAction::AxisMoveRelative { target, .. } => {
+                    local_homed.insert(target.clone(), true);
+                }
+                TransitionAction::AxisMoveAbsolute {
+                    target,
+                    require_homed,
+                    ..
+                } => {
+                    let proven = local_homed.get(target).copied().unwrap_or(false);
+                    *require_homed = !proven;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn state_key(state: &State) -> (String, String) {
+    (state.task_name.clone(), state.step_name.clone())
+}
+
+fn collect_axis_targets(state_machine: &StateMachine) -> BTreeSet<String> {
+    let mut axis_targets = BTreeSet::new();
+    for transition in &state_machine.transitions {
+        for action in &transition.actions {
+            match action {
+                TransitionAction::AxisMoveRelative { target, .. }
+                | TransitionAction::AxisMoveAbsolute { target, .. } => {
+                    axis_targets.insert(target.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+    axis_targets
+}
+
+fn reachable_states(state_machine: &StateMachine) -> HashSet<(String, String)> {
+    let mut reachable = HashSet::new();
+    let mut stack = vec![state_machine.initial.clone()];
+
+    while let Some(state) = stack.pop() {
+        let key = state_key(&state);
+        if !reachable.insert(key) {
+            continue;
+        }
+
+        for transition in state_machine.transitions.iter().filter(|t| t.from == state) {
+            stack.push(transition.to.clone());
+        }
+    }
+
+    reachable
+}
+
+fn infer_definitely_homed_states(
+    state_machine: &StateMachine,
+    reachable: &HashSet<(String, String)>,
+    axis: &str,
+) -> HashMap<(String, String), bool> {
+    let mut facts = HashMap::<(String, String), bool>::new();
+    for key in reachable {
+        facts.insert(key.clone(), true);
+    }
+    let initial_key = state_key(&state_machine.initial);
+    facts.insert(initial_key.clone(), false);
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for state in reachable {
+            if *state == initial_key {
+                continue;
+            }
+
+            let predecessors = state_machine
+                .transitions
+                .iter()
+                .filter(|transition| {
+                    state_key(&transition.to) == *state
+                        && reachable.contains(&state_key(&transition.from))
+                })
+                .collect::<Vec<_>>();
+
+            if predecessors.is_empty() {
+                continue;
+            }
+
+            let next = predecessors.iter().all(|transition| {
+                let in_homed = facts
+                    .get(&state_key(&transition.from))
+                    .copied()
+                    .unwrap_or(false);
+                apply_homing_transition_effect(in_homed, &transition.actions, axis)
+            });
+
+            if let Some(entry) = facts.get_mut(state) {
+                if *entry != next {
+                    *entry = next;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    facts
+}
+
+fn apply_homing_transition_effect(
+    in_homed: bool,
+    actions: &[TransitionAction],
+    axis: &str,
+) -> bool {
+    let mut homed = in_homed;
+    for action in actions {
+        if let TransitionAction::AxisMoveRelative { target, .. } = action {
+            if target == axis {
+                homed = true;
+            }
+        }
+    }
+    homed
+}
+
 fn build_parallel_block(
     builder: &mut StateMachineBuilder,
     task: &TaskDeclaration,
@@ -6041,6 +6195,7 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             speed_raw: speed
                 .expect("axis.move_absolute speed must be resolved in semantic pass")
                 .to_string(),
+            require_homed: true,
             timeout: lower_axis_timeout_branch(timeout.as_ref()?),
             on_reject: lower_axis_fault_branch(on_reject.as_ref()?, AxisFaultKind::Reject, None),
             on_motion_fault: lower_axis_fault_branch(
@@ -8950,6 +9105,107 @@ task done:
         assert_eq!(action.1[1].kind, None);
         assert_eq!(action.1[1].code, Some(17));
         assert_eq!(action.1[1].target_step.as_deref(), Some("motion_code_17"));
+    }
+
+    #[test]
+    fn keeps_axis_move_absolute_homing_guard_when_not_statically_proven() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_absolute(axis_x, position: 120, speed: 5)
+            timeout: 800ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("axis absolute 示例应能解析");
+        let sm = build_state_machine(&program).expect("axis absolute 应能 lowering 到 IR");
+        let require_homed = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveAbsolute { require_homed, .. } => {
+                    Some(*require_homed)
+                }
+                _ => None,
+            })
+            .expect("应包含 axis_move_absolute 动作");
+
+        assert!(require_homed, "未被静态证明时应保留 runtime homing guard");
+    }
+
+    #[test]
+    fn elides_axis_move_absolute_homing_guard_after_proven_relative() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step home:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step run:
+        action: axis.move_absolute(axis_x, position: 120, speed: 5)
+            timeout: 800ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("axis relative+absolute 示例应能解析");
+        let sm = build_state_machine(&program).expect("应能 lowering 到 IR");
+        let require_homed = sm
+            .transitions
+            .iter()
+            .filter(|transition| transition.from.step_name == "run")
+            .flat_map(|transition| transition.actions.iter())
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveAbsolute { require_homed, .. } => {
+                    Some(*require_homed)
+                }
+                _ => None,
+            })
+            .expect("run step 应包含 axis_move_absolute 动作");
+
+        assert!(!require_homed, "可静态证明时应消解 runtime homing guard");
     }
 
     #[test]

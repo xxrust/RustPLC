@@ -248,6 +248,12 @@ pub enum RuntimeError {
     AxisMotionRequiresHandler {
         target: &'static str,
     },
+    AxisNotHomed {
+        target: &'static str,
+    },
+    TooManyAxisHomingTargets {
+        max: usize,
+    },
     ExternCallFailed {
         function: &'static str,
     },
@@ -359,6 +365,7 @@ pub struct AxisMotionCommand {
     pub kind: AxisMoveKind,
     pub value: f32,
     pub speed: f32,
+    pub require_homed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -640,6 +647,8 @@ pub struct Runtime<'a> {
     loc: Location,
     step_entered_at: Option<Tick>,
     axis_stop_state: AxisStopState,
+    axis_homing_targets: [Option<&'static str>; MAX_AXIS_HOMING_TARGETS],
+    axis_homing_flags: [bool; MAX_AXIS_HOMING_TARGETS],
     pid_states: [PidState; MAX_PID_LOOPS],
     variables: [f32; MAX_VARIABLES],
     cam_states: [CamState; MAX_CAM_COUPLINGS],
@@ -701,6 +710,8 @@ impl<'a> Runtime<'a> {
             },
             step_entered_at: None,
             axis_stop_state: AxisStopState::Running,
+            axis_homing_targets: [None; MAX_AXIS_HOMING_TARGETS],
+            axis_homing_flags: [false; MAX_AXIS_HOMING_TARGETS],
             pid_states: [PidState::default(); MAX_PID_LOOPS],
             variables,
             cam_states,
@@ -713,6 +724,42 @@ impl<'a> Runtime<'a> {
 
     pub fn axis_stop_state(&self) -> AxisStopState {
         self.axis_stop_state
+    }
+
+    fn axis_homing_slot(&mut self, target: &'static str) -> Result<usize, RuntimeError> {
+        let mut free_slot = None;
+        for idx in 0..MAX_AXIS_HOMING_TARGETS {
+            match self.axis_homing_targets[idx] {
+                Some(existing) if existing == target => return Ok(idx),
+                Some(_) => {}
+                None => {
+                    if free_slot.is_none() {
+                        free_slot = Some(idx);
+                    }
+                }
+            }
+        }
+
+        if let Some(idx) = free_slot {
+            self.axis_homing_targets[idx] = Some(target);
+            self.axis_homing_flags[idx] = false;
+            return Ok(idx);
+        }
+
+        Err(RuntimeError::TooManyAxisHomingTargets {
+            max: MAX_AXIS_HOMING_TARGETS,
+        })
+    }
+
+    fn axis_is_homed(&mut self, target: &'static str) -> Result<bool, RuntimeError> {
+        let idx = self.axis_homing_slot(target)?;
+        Ok(self.axis_homing_flags[idx])
+    }
+
+    fn set_axis_homed(&mut self, target: &'static str, homed: bool) -> Result<(), RuntimeError> {
+        let idx = self.axis_homing_slot(target)?;
+        self.axis_homing_flags[idx] = homed;
+        Ok(())
     }
 
     pub fn variables(&self) -> &[f32; MAX_VARIABLES] {
@@ -1072,11 +1119,37 @@ impl<'a> Runtime<'a> {
                                     .map_err(RuntimeTickError::Core)?;
                             }
                             Action::AxisMove { command } => {
-                                let result =
-                                    on_axis_motion(command).map_err(RuntimeTickError::Core)?;
+                                if command.kind == AxisMoveKind::Absolute
+                                    && command.require_homed
+                                    && !self
+                                        .axis_is_homed(command.target)
+                                        .map_err(RuntimeTickError::Core)?
+                                {
+                                    return Err(RuntimeTickError::Core(
+                                        RuntimeError::AxisNotHomed {
+                                            target: command.target,
+                                        },
+                                    ));
+                                }
+
+                                let result = match on_axis_motion(command) {
+                                    Ok(result) => result,
+                                    Err(err) => {
+                                        self.set_axis_homed(command.target, false)
+                                            .map_err(RuntimeTickError::Core)?;
+                                        return Err(RuntimeTickError::Core(err));
+                                    }
+                                };
                                 match result {
-                                    AxisMotionResult::Done => {}
+                                    AxisMotionResult::Done => {
+                                        if command.kind == AxisMoveKind::Relative {
+                                            self.set_axis_homed(command.target, true)
+                                                .map_err(RuntimeTickError::Core)?;
+                                        }
+                                    }
                                     AxisMotionResult::Fault(fault) => {
+                                        self.set_axis_homed(command.target, false)
+                                            .map_err(RuntimeTickError::Core)?;
                                         if let Some(policy) =
                                             self.axis_fault_policy_for(command.target)
                                         {
@@ -1737,11 +1810,7 @@ fn eval_expr(program: &ExprProgram, vars: &[f32; MAX_VARIABLES]) -> f32 {
         }
     }
 
-    if sp == 0 {
-        0.0
-    } else {
-        stack[0]
-    }
+    if sp == 0 { 0.0 } else { stack[0] }
 }
 
 const MAX_PID_LOOPS: usize = 8;
@@ -1750,6 +1819,7 @@ pub const MAX_EXPR_OPS: usize = 32;
 pub const MAX_EXPR_STACK: usize = 16;
 pub const MAX_CAM_POINTS: usize = 256;
 pub const MAX_CAM_COUPLINGS: usize = 8;
+pub const MAX_AXIS_HOMING_TARGETS: usize = 32;
 pub const MAX_EXTERN_ARGS: usize = 16;
 pub const MAX_EXTERN_RETURNS: usize = 8;
 
@@ -2566,6 +2636,7 @@ mod tests {
                 kind: AxisMoveKind::Relative,
                 value: 10.0,
                 speed: 2.0,
+                require_homed: false,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -2613,6 +2684,7 @@ mod tests {
                 kind: AxisMoveKind::Absolute,
                 value: 120.0,
                 speed: 5.0,
+                require_homed: false,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -2655,6 +2727,218 @@ mod tests {
     }
 
     #[test]
+    fn axis_move_absolute_requires_homing_predicate() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Absolute,
+                value: 120.0,
+                speed: 5.0,
+                require_homed: true,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        let mut invoked = false;
+        let err = rt
+            .tick_with_axis(&mut io, |_| {
+                invoked = true;
+                AxisMotionResult::Done
+            })
+            .expect_err("未回零时 absolute 应被 runtime 拦截");
+        assert_eq!(err, RuntimeError::AxisNotHomed { target: "axis_x" });
+        assert!(
+            !invoked,
+            "runtime homing guard should short-circuit handler"
+        );
+    }
+
+    #[test]
+    fn axis_move_relative_sets_homing_predicate_for_absolute() {
+        static ACTIONS_REL: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+                require_homed: false,
+            },
+        }];
+        static ACTIONS_ABS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Absolute,
+                value: 120.0,
+                speed: 5.0,
+                require_homed: true,
+            },
+        }];
+        static STEPS: [Step<'static>; 3] = [
+            Step {
+                name: "home",
+                instr: Instr::Action {
+                    actions: &ACTIONS_REL,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "move_abs",
+                instr: Instr::Action {
+                    actions: &ACTIONS_ABS,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        rt.tick_with_axis(&mut io, |_| AxisMotionResult::Done)
+            .expect("relative 应设置 homing 谓词");
+        rt.tick_with_axis(&mut io, |_| AxisMotionResult::Done)
+            .expect("已回零后 absolute 应允许执行");
+        assert_eq!(rt.location().step, StepId(2));
+    }
+
+    #[test]
+    fn axis_move_fault_invalidates_homing_predicate() {
+        static ACTIONS_REL: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+                require_homed: false,
+            },
+        }];
+        static ACTIONS_ABS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Absolute,
+                value: 120.0,
+                speed: 5.0,
+                require_homed: true,
+            },
+        }];
+        static STEPS: [Step<'static>; 3] = [
+            Step {
+                name: "home",
+                instr: Instr::Action {
+                    actions: &ACTIONS_REL,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "move_abs",
+                instr: Instr::Action {
+                    actions: &ACTIONS_ABS,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        let mut call_count = 0;
+        let err = rt
+            .tick_with_axis(&mut io, |command| {
+                call_count += 1;
+                if command.kind == AxisMoveKind::Relative {
+                    AxisMotionResult::Done
+                } else {
+                    AxisMotionResult::motion_fault(77)
+                }
+            })
+            .expect_err("fault 应中断 absolute 并清空 homing 谓词");
+        assert_eq!(
+            call_count, 2,
+            "single tick should execute relative then absolute"
+        );
+        assert_eq!(
+            err,
+            RuntimeError::AxisFault {
+                target: "axis_x",
+                fault: AxisFault::motion(77),
+            }
+        );
+
+        let mut invoked = false;
+        let err = rt
+            .tick_with_axis(&mut io, |_| {
+                invoked = true;
+                AxisMotionResult::Done
+            })
+            .expect_err("fault 后重试 absolute 应被未回零拦截");
+        assert_eq!(err, RuntimeError::AxisNotHomed { target: "axis_x" });
+        assert!(!invoked, "homing guard 应在 handler 前触发");
+    }
+
+    #[test]
     fn axis_move_handler_reject_returns_classified_error() {
         static ACTIONS: [Action; 1] = [Action::AxisMove {
             command: AxisMotionCommand {
@@ -2663,6 +2947,7 @@ mod tests {
                 kind: AxisMoveKind::Relative,
                 value: 5.0,
                 speed: 1.0,
+                require_homed: false,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -2715,6 +3000,7 @@ mod tests {
                 kind: AxisMoveKind::Relative,
                 value: 5.0,
                 speed: 1.0,
+                require_homed: false,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -2767,6 +3053,7 @@ mod tests {
                 kind: AxisMoveKind::Relative,
                 value: 5.0,
                 speed: 1.0,
+                require_homed: false,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -2819,6 +3106,7 @@ mod tests {
                 kind: AxisMoveKind::Relative,
                 value: 5.0,
                 speed: 1.0,
+                require_homed: false,
             },
         }];
         static STEPS: [Step<'static>; 2] = [

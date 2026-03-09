@@ -4,16 +4,16 @@ use crate::ir::{
     CamInterpolation as IrCamInterpolation, DeviceKind, State, StateMachine, TopologyGraph,
     Transition, TransitionAction, TransitionGuard,
 };
-use crate::plc_port::{parse_physical_plc_port_ref, PlcPortKind};
+use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
-use petgraph::graph::NodeIndex;
 use petgraph::Direction;
+use petgraph::graph::NodeIndex;
 use runtime_core::{
     Action, AnalogRange, AntiWindup, AxisAutoResetPolicy as RtAxisAutoResetPolicy, AxisFaultPolicy,
     AxisFaultSeverity as RtAxisFaultSeverity, AxisMotionCommand, AxisMoveKind,
     AxisStopMode as RtAxisStopMode, CamAnalogField, CamCouplingConfig, CamDigitalField,
     CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, ExprOp, ExprProgram, Instr,
-    PidConfig, Program, SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout, MAX_CAM_POINTS,
+    MAX_CAM_POINTS, PidConfig, Program, SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -59,9 +59,7 @@ pub enum BridgeError {
     )]
     UnresolvableDigitalOutput { state: String, device: String },
 
-    #[error(
-        "unable to resolve a unique physical analog input for device {device} (state {state})"
-    )]
+    #[error("unable to resolve a unique physical analog input for device {device} (state {state})")]
     UnresolvableAnalogInput { state: String, device: String },
 
     #[error(
@@ -1599,6 +1597,7 @@ fn convert_action(
                     kind: AxisMoveKind::Relative,
                     value: distance,
                     speed,
+                    require_homed: false,
                 },
             })
         }
@@ -1607,6 +1606,7 @@ fn convert_action(
             port,
             position_raw,
             speed_raw,
+            require_homed,
             ..
         } => {
             let profile =
@@ -1650,6 +1650,7 @@ fn convert_action(
                     kind: AxisMoveKind::Absolute,
                     value: position,
                     speed,
+                    require_homed: *require_homed,
                 },
             })
         }

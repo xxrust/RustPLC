@@ -1,23 +1,23 @@
 use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use runtime_core::{
-    axis_fault_policy_log_message_id, axis_stop_transition_log_message_id, AxisAutoResetPolicy,
-    AxisFault, AxisFaultKind, AxisFaultSeverity, AxisMotionResult, AxisMoveKind, AxisStopMode,
-    AxisStopState, AxisStopTransitionPhase, Runtime, RuntimeError, RuntimeTickError,
     AXIS_FAULT_POLICY_LOG_MESSAGE, AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE,
-    AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE,
+    AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE, AxisAutoResetPolicy, AxisFault, AxisFaultKind,
+    AxisFaultSeverity, AxisMotionResult, AxisMoveKind, AxisStopMode, AxisStopState,
+    AxisStopTransitionPhase, Runtime, RuntimeError, RuntimeTickError,
+    axis_fault_policy_log_message_id, axis_stop_transition_log_message_id,
 };
 use rust_plc::extern_functions::{
-    extern_runtime_error_code, ExternFunctionInfo, ExternFunctionRegistry, ExternRuntimeError,
-    ValueRange, EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR,
+    EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR, ExternFunctionInfo,
+    ExternFunctionRegistry, ExternRuntimeError, ValueRange, extern_runtime_error_code,
 };
 use rust_plc::ir::{ExternFunctionContract, TopologyGraph, VariableType};
 use rust_plc::parser::parse_plc;
-use rust_plc::runtime_bridge::{state_machine_to_runtime_program, BridgeError};
+use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
 use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'static> {
     let program = parse_plc(plc_source).expect("parse plc");
@@ -491,6 +491,64 @@ task done:
     step halt:
 "#;
 
+const PLC_AXIS_ABSOLUTE_ONLY_FIXTURE: &str = r#"
+[topology]
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_absolute(axis_x, position: 100, params: stepper_default_fast, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+
+task done:
+    step halt:
+"#;
+
+const PLC_AXIS_RELATIVE_THEN_ABSOLUTE_FIXTURE: &str = r#"
+[topology]
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
+
+[constraints]
+
+[tasks]
+task motion:
+    step home:
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step run:
+        action: axis.move_absolute(axis_x, position: 100, params: stepper_default_fast, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+
+task done:
+    step halt:
+"#;
+
 fn axis_fault_policy_fixture(
     severity: &str,
     stop_mode: &str,
@@ -578,12 +636,61 @@ fn bridge_maps_axis_move_actions_without_unsupported_action() {
                         saw_axis = true;
                         assert_eq!(command.target, "axis_x");
                         assert_eq!(command.kind, AxisMoveKind::Relative);
+                        assert!(!command.require_homed);
                     }
                 }
             }
         }
     }
     assert!(saw_axis, "axis_move should be lowered into runtime action");
+}
+
+#[test]
+fn bridge_requires_homing_guard_for_unproven_axis_move_absolute() {
+    let program = compile_to_runtime(PLC_AXIS_ABSOLUTE_ONLY_FIXTURE, 10);
+    let mut saw_absolute = false;
+    for task in program.tasks {
+        for step in task.steps {
+            if let runtime_core::Instr::Action { actions, .. } = step.instr {
+                for action in actions {
+                    if let runtime_core::Action::AxisMove { command } = action {
+                        if command.kind == AxisMoveKind::Absolute {
+                            saw_absolute = true;
+                            assert!(
+                                command.require_homed,
+                                "unproven absolute move should keep runtime homing guard"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(saw_absolute, "fixture should lower one absolute axis move");
+}
+
+#[test]
+fn bridge_elides_homing_guard_after_proven_relative_move() {
+    let program = compile_to_runtime(PLC_AXIS_RELATIVE_THEN_ABSOLUTE_FIXTURE, 10);
+    let mut saw_absolute = false;
+    for task in program.tasks {
+        for step in task.steps {
+            if let runtime_core::Instr::Action { actions, .. } = step.instr {
+                for action in actions {
+                    if let runtime_core::Action::AxisMove { command } = action {
+                        if command.kind == AxisMoveKind::Absolute {
+                            saw_absolute = true;
+                            assert!(
+                                !command.require_homed,
+                                "semantic proof should elide runtime homing guard"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(saw_absolute, "fixture should lower one absolute axis move");
 }
 
 #[test]
@@ -818,20 +925,25 @@ fn bridge_executes_axis_servo_example_fault_path_end_to_end() {
     let program = compile_example_to_runtime("axis_servo_fault_routing.plc", 10);
     let mut rt = Runtime::new(&program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let mut invoked = false;
 
     let err = rt
         .tick_with_axis(&mut io, |command| {
+            invoked = true;
             assert_eq!(command.target, "axis_servo");
             assert_eq!(command.kind, AxisMoveKind::Absolute);
             AxisMotionResult::motion_fault(88)
         })
-        .expect_err("servo axis motion fault should be surfaced");
+        .expect_err("servo absolute move should be blocked before homing");
     assert_eq!(
         err,
-        RuntimeError::AxisFault {
-            target: "axis_servo",
-            fault: AxisFault::motion(88),
+        RuntimeError::AxisNotHomed {
+            target: "axis_servo"
         }
+    );
+    assert!(
+        !invoked,
+        "runtime homing guard should run before axis handler"
     );
 }
 

@@ -333,6 +333,8 @@ pub enum TransitionAction {
         port: String,
         position_raw: String,
         speed_raw: String,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        require_homed: bool,
         timeout: AxisTimeoutBranch,
         on_reject: AxisFaultBranch,
         on_motion_fault: AxisFaultBranch,
@@ -527,6 +529,14 @@ pub struct StateExpr {
 
 fn default_self_port() -> String {
     "self".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

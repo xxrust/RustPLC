@@ -254,7 +254,7 @@ fn format_action(a: &Action) -> String {
             format_expr_program(&offset_expr)
         ),
         Action::AxisMove { command } => format!(
-            "Action::AxisMove {{ command: AxisMotionCommand {{ target: {:?}, port: {:?}, kind: AxisMoveKind::{}, value: {}, speed: {} }} }}",
+            "Action::AxisMove {{ command: AxisMotionCommand {{ target: {:?}, port: {:?}, kind: AxisMoveKind::{}, value: {}, speed: {}, require_homed: {} }} }}",
             command.target,
             command.port,
             match command.kind {
@@ -262,7 +262,8 @@ fn format_action(a: &Action) -> String {
                 AxisMoveKind::Absolute => "Absolute",
             },
             format_f32(command.value),
-            format_f32(command.speed)
+            format_f32(command.speed),
+            command.require_homed
         ),
         Action::Extend { output } => {
             format!("Action::Extend {{ output: DigitalOutputId({}) }}", output.0)
@@ -608,6 +609,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let src = generate_program_module(&PROGRAM, "gen").expect("codegen ok");

@@ -10,6 +10,7 @@ Started: 2026-03-09 00:00:00 CST
 - `runtime_core::Program` 结构字段变更需同步四处：`src/runtime_bridge.rs`（桥接填充）、`src/main.rs`（内置 `SIM_PROGRAM`）、`crates/codegen/src/lib.rs`（生成器模板）、`crates/board-rp2040/build.rs`（默认固件程序模板）。
 - 轴故障停机可观测性采用双日志阶段：先 `axis_stop_transition_enter` 再 `axis_stop_transition_completed`，并用 `axis_stop_transition_log_message_id(stop_mode, phase)` 做稳定断言，避免硬编码 message_id。
 - `axis.move_*` 异常分流使用“主桶 + 细分 routes”模式：主桶分支永远必填且作为回退，细分 `kind/code` 路由按声明顺序首条命中。
+- runtime-core 在一个 tick 内会连续执行非阻塞状态（`Action/Goto/已满足 wait`）；写回归时若要精确逐 tick 断言，需在步骤间加入 `delay` 或未满足 `wait` 做节流。
 
 ---
 
@@ -175,4 +176,30 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: 细分 fault route 应作为主桶的“前置匹配层”，不能反向把主桶变成可选项，否则 fallback 语义会丢失。
   - Gotchas encountered: `pest` matcher 规则若保留 wrapper（`axis_fault_route_matcher_entry`），parser 必须先解包再匹配具体 entry，否则会误判为“重复主桶”。
   - Useful context: 路由匹配顺序已在 `src/ir/mod.rs` 用 `resolve_axis_fault_route_target` 固化，后续 runtime 接入可直接复用该函数语义。
+---
+
+## [2026-03-09 21:52:19 CST] - US-009
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 为 IR `TransitionAction::AxisMoveAbsolute` 新增内部字段 `require_homed`，并在语义阶段执行静态同态推断：可证明已回零则编译期消解 guard，不可证明则保留运行时 guard。
+  - 在 `build_state_machine` 后增加 homing 数据流注解：按状态可达图推导各轴“definitely homed”事实，且支持同一 transition 内 `axis.move_relative` 先建立谓词后 `axis.move_absolute` 免守卫。
+  - 在 runtime-core 新增内部 homing 谓词跟踪（不暴露 DSL 字段）：`axis.move_absolute` 在 `require_homed=true` 时先校验谓词，不满足直接报 `RuntimeError::AxisNotHomed`。
+  - 将回零失效语义落地到运行时：axis fault/handler error 会清空对应轴 homing 谓词，确保故障后绝对运动再次被阻断。
+  - runtime bridge 透传 `require_homed` 到 `runtime_core::AxisMotionCommand`，并保持 `axis.move_relative` 默认不要求 homed。
+  - 增加语义/桥接/runtime-core 回归测试覆盖：未证明 guard 保留、已证明 guard 消解、fault 后谓词失效、示例 `axis_servo` 路径改为未回零拦截。
+- Files changed
+  - `AGENTS.md`
+  - `src/ir/mod.rs`
+  - `src/semantic/mod.rs`
+  - `src/runtime_bridge.rs`
+  - `src/codegen/st.rs`
+  - `crates/runtime-core/src/lib.rs`
+  - `crates/codegen/src/lib.rs`
+  - `tests/runtime_bridge_us006.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: homing 前置条件可通过“语义静态证明 + runtime 兜底 guard”双阶段实现，不需要把 `is_homed` 暴露到 DSL。
+  - Gotchas encountered: runtime-core 在单 tick 内会连续执行多个非阻塞 step，测试里若要分 tick 观测状态需加 `delay/wait` 打断链式推进。
+  - Useful context: 绝对运动现在可能在 handler 前被 `AxisNotHomed` 短路，fault 注入类测试若要命中 handler 必须先通过相对运动建立 homing 谓词或在 IR 中消解 guard。
 ---

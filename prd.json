@@ -143,8 +143,8 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented internal homing predicate flow across IR/runtime: added AxisMoveAbsolute `require_homed` flag, semantic static-proof/elision pass for homing guards, runtime-core homing tracker with pre-check (`AxisNotHomed`) and fault-driven invalidation, bridge propagation to runtime command, and regression coverage for guarded absolute moves, static-elided paths, and post-fault re-blocking behavior."
     },
     {
       "id": "US-010",
