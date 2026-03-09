@@ -5304,6 +5304,8 @@ fn build_parallel_block(
         Vec::new(),
     );
 
+    let mut previous_state = fork_state.clone();
+
     for (branch_index, branch) in block.branches.iter().enumerate() {
         let branch_state_name = format!(
             "{step_name}__parallel_{}_branch_{}",
@@ -5311,9 +5313,15 @@ fn build_parallel_block(
             branch_index + 1
         );
         let branch_state = builder.add_state(&task.name, &branch_state_name);
+        let branch_done_state_name = format!(
+            "{step_name}__parallel_{}_branch_{}_done",
+            block_index + 1,
+            branch_index + 1
+        );
+        let branch_done_state = builder.add_state(&task.name, &branch_done_state_name);
 
         builder.add_transition(
-            fork_state.clone(),
+            previous_state.clone(),
             branch_state.clone(),
             TransitionGuard::Always,
             Vec::new(),
@@ -5383,7 +5391,7 @@ fn build_parallel_block(
         for (delay_index, duration_ms) in analyzed.delays_ms.iter().enumerate() {
             builder.add_transition(
                 branch_state.clone(),
-                join_state.clone(),
+                branch_done_state.clone(),
                 TransitionGuard::Delay {
                     duration_ms: *duration_ms,
                 },
@@ -5436,7 +5444,7 @@ fn build_parallel_block(
         for wait_expression in &analyzed.waits {
             builder.add_transition(
                 branch_state.clone(),
-                join_state.clone(),
+                branch_done_state.clone(),
                 TransitionGuard::Condition {
                     expression: wait_expression.clone(),
                 },
@@ -5458,7 +5466,7 @@ fn build_parallel_block(
                 &branch_state,
                 nested_parallel_index,
                 nested_parallel,
-                Some(join_state.clone()),
+                Some(branch_done_state.clone()),
                 task_initial_states,
                 task_defined_steps,
                 errors,
@@ -5479,7 +5487,7 @@ fn build_parallel_block(
                 &branch_state,
                 nested_race_index,
                 nested_race,
-                Some(join_state.clone()),
+                Some(branch_done_state.clone()),
                 task_initial_states,
                 task_defined_steps,
                 errors,
@@ -5497,13 +5505,23 @@ fn build_parallel_block(
         if !has_control_flow {
             builder.add_transition(
                 branch_state,
-                join_state.clone(),
+                branch_done_state.clone(),
                 TransitionGuard::Always,
                 analyzed.actions,
                 Vec::new(),
             );
         }
+
+        previous_state = branch_done_state;
     }
+
+    builder.add_transition(
+        previous_state,
+        join_state.clone(),
+        TransitionGuard::Always,
+        Vec::new(),
+        Vec::new(),
+    );
 
     if let Some(target) = completion_target {
         builder.add_transition(
@@ -5541,6 +5559,29 @@ fn build_race_block(
         Vec::new(),
     );
 
+    if block.branches.is_empty() {
+        if let Some(target) = completion_target {
+            builder.add_transition(
+                decision_state,
+                target,
+                TransitionGuard::Always,
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        return;
+    }
+
+    let first_branch_state_name = format!("{step_name}__race_{}_branch_1", block_index + 1);
+    let first_branch_state = builder.add_state(&task.name, &first_branch_state_name);
+    builder.add_transition(
+        decision_state,
+        first_branch_state,
+        TransitionGuard::Always,
+        Vec::new(),
+        Vec::new(),
+    );
+
     for (branch_index, branch) in block.branches.iter().enumerate() {
         let branch_state_name = format!(
             "{step_name}__race_{}_branch_{}",
@@ -5548,14 +5589,6 @@ fn build_race_block(
             branch_index + 1
         );
         let branch_state = builder.add_state(&task.name, &branch_state_name);
-
-        builder.add_transition(
-            decision_state.clone(),
-            branch_state.clone(),
-            TransitionGuard::Always,
-            Vec::new(),
-            Vec::new(),
-        );
 
         let analyzed = analyze_statements(&branch.statements, wait_ctx);
         let branch_completion_target = branch
@@ -5751,13 +5784,29 @@ fn build_race_block(
         if !has_control_flow {
             if let Some(target) = branch_completion_target {
                 builder.add_transition(
-                    branch_state,
+                    branch_state.clone(),
                     target,
                     TransitionGuard::Always,
                     analyzed.actions,
                     Vec::new(),
                 );
             }
+        }
+
+        if branch_index + 1 < block.branches.len() {
+            let next_branch_state_name = format!(
+                "{step_name}__race_{}_branch_{}",
+                block_index + 1,
+                branch_index + 2
+            );
+            let next_branch_state = builder.add_state(&task.name, &next_branch_state_name);
+            builder.add_transition(
+                branch_state.clone(),
+                next_branch_state,
+                TransitionGuard::Always,
+                Vec::new(),
+                Vec::new(),
+            );
         }
     }
 }

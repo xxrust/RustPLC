@@ -29,14 +29,6 @@ impl Default for StCodegenConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StCodegenError {
-    ParallelNotSupported {
-        task: String,
-        step: String,
-    },
-    RaceNotSupported {
-        task: String,
-        step: String,
-    },
     EmptyStateMachine,
     UnresolvedGoto {
         from: String,
@@ -57,12 +49,6 @@ pub enum StCodegenError {
 impl fmt::Display for StCodegenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            StCodegenError::ParallelNotSupported { task, step } => {
-                write!(f, "parallel is not supported in phase 1: {task}.{step}")
-            }
-            StCodegenError::RaceNotSupported { task, step } => {
-                write!(f, "race is not supported in phase 1: {task}.{step}")
-            }
             StCodegenError::EmptyStateMachine => write!(f, "state machine has no states"),
             StCodegenError::UnresolvedGoto { from, target } => {
                 write!(f, "unresolved goto target from {from} -> {target}")
@@ -148,7 +134,7 @@ pub fn generate_st(
     state_machine: &StateMachine,
     config: &StCodegenConfig,
 ) -> Result<String, Vec<StCodegenError>> {
-    let mut errors = collect_unsupported_constructs(state_machine);
+    let mut errors = Vec::new();
     if state_machine.states.is_empty() {
         errors.push(StCodegenError::EmptyStateMachine);
     }
@@ -201,30 +187,6 @@ pub fn generate_st(
     out.push_str("END_PROGRAM\n");
 
     Ok(out)
-}
-
-fn collect_unsupported_constructs(state_machine: &StateMachine) -> Vec<StCodegenError> {
-    let mut errors = Vec::new();
-    let mut seen_parallel = HashSet::new();
-    let mut seen_race = HashSet::new();
-
-    for state in &state_machine.states {
-        let key = format!("{}.{}", state.task_name, state.step_name);
-        if state.step_name.contains("__parallel_") && seen_parallel.insert(key.clone()) {
-            errors.push(StCodegenError::ParallelNotSupported {
-                task: state.task_name.clone(),
-                step: state.step_name.clone(),
-            });
-        }
-        if state.step_name.contains("__race_") && seen_race.insert(key) {
-            errors.push(StCodegenError::RaceNotSupported {
-                task: state.task_name.clone(),
-                step: state.step_name.clone(),
-            });
-        }
-    }
-
-    errors
 }
 
 fn assign_state_ids(state_machine: &StateMachine) -> HashMap<(String, String), i32> {
@@ -1495,29 +1457,25 @@ mod tests {
     }
 
     #[test]
-    fn parallel_and_race_states_are_rejected() {
+    fn parallel_and_race_synthetic_states_can_codegen() {
         let parallel = state("task", "step__parallel_1_fork");
         let race = state("task", "step__race_1_decision");
         let sm = StateMachine {
             states: vec![parallel.clone(), race],
-            transitions: vec![],
+            transitions: vec![Transition {
+                from: parallel.clone(),
+                to: race.clone(),
+                guard: TransitionGuard::Always,
+                actions: vec![],
+                timers: vec![],
+            }],
             initial: parallel,
             analog_regions: BTreeMap::new(),
         };
 
-        let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect_err("must fail");
-
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, StCodegenError::ParallelNotSupported { .. }))
-        );
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, StCodegenError::RaceNotSupported { .. }))
-        );
+        let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
+            .expect("codegen should succeed");
+        assert!(st.contains("CASE _state OF"));
     }
 
     #[test]
