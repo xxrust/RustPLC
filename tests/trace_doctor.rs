@@ -182,10 +182,31 @@ inputs: []
             candidate
                 .get("issue_code")
                 .and_then(Value::as_str)
+                .map(|code| code.starts_with("AXF-"))
+                .unwrap_or(false)
+        }),
+        "all candidates should have AXF-* issue codes"
+    );
+    assert!(
+        candidates.iter().all(|candidate| {
+            candidate
+                .get("legacy_issue_code")
+                .and_then(Value::as_str)
                 .map(|code| code.starts_with("DIAG-"))
                 .unwrap_or(false)
         }),
-        "all candidates should have DIAG-* issue codes"
+        "all candidates should keep DIAG-* compatibility codes"
+    );
+    assert!(
+        candidates.iter().all(|candidate| {
+            candidate
+                .get("source_location")
+                .and_then(Value::as_object)
+                .and_then(|location| location.get("line"))
+                .and_then(Value::as_u64)
+                .is_some_and(|line| line > 0)
+        }),
+        "all candidates should include source_location line"
     );
 
     let summary = report.get("summary").expect("summary should exist");
@@ -245,9 +266,10 @@ inputs: []
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("trace-doctor: PASS"), "stderr: {stderr}");
     assert!(stderr.contains("Top 2 candidate(s):"), "stderr: {stderr}");
+    assert!(stderr.contains("[AXF-"), "stderr should include issue code");
     assert!(
-        stderr.contains("[DIAG-"),
-        "stderr should include issue code"
+        stderr.contains("source:"),
+        "stderr should include source location"
     );
     assert!(
         stderr.contains("evidence:"),

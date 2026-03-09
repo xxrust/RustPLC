@@ -133,8 +133,15 @@ inputs: []
         top_candidates[0]
             .get("issue_code")
             .and_then(Value::as_str)
+            .is_some_and(|code| code.starts_with("AXF-")),
+        "top candidate should carry AXF-* issue code"
+    );
+    assert!(
+        top_candidates[0]
+            .get("legacy_issue_code")
+            .and_then(Value::as_str)
             .is_some_and(|code| code.starts_with("DIAG-")),
-        "top candidate should carry DIAG-* issue code"
+        "top candidate should retain DIAG-* compatibility code"
     );
 }
 

@@ -939,6 +939,12 @@ fn print_trace_doctor_human(report: &TraceDoctorJsonReport, top_n: usize) {
         if let Some(first_evidence) = candidate.evidence.first() {
             eprintln!("     evidence: {first_evidence}");
         }
+        if let Some(location) = &candidate.source_location {
+            eprintln!(
+                "     source: {}:{}:{}",
+                location.file, location.line, location.column
+            );
+        }
         eprintln!("     next: {}", candidate.suggested_fix);
     }
 }
@@ -1491,7 +1497,7 @@ fn main() {
     }
     if first == "trace-doctor" {
         if let Err(msg) = run_trace_doctor_subcommand(&program, args) {
-            eprintln!("[DIAG-000] {msg}");
+            eprintln!("[AXF-000] {msg}");
             std::process::exit(1);
         }
         return;

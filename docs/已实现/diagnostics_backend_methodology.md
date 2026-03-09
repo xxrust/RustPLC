@@ -93,7 +93,7 @@ AI（如果后续接入）只做“解释增强”（例如把技术结果翻译
 ### 示例 A：传感器无响应导致 timeout
 
 - 现象：等待 `X0 == true`，一直等不到，超时。
-- 常见 Top 候选：`DIAG-IN-001`（expected_input_never_changed）。
+- 常见 Top 候选：`AXF-IN-001`（expected_input_never_changed，兼容字段保留 `DIAG-IN-001`）。
 - 常见证据：超时锚点 + wait 通道无变化 + io_snapshot 显示该通道在超时前始终未变化。
 
 ### 示例 B：现场 HMI 实时看到原因推测
@@ -128,7 +128,7 @@ AI（如果后续接入）只做“解释增强”（例如把技术结果翻译
 
 ## 9. 为什么这套方案适合“有板/无板通用”
 
-- 诊断编码统一（DIAG-* 不分场景）
+- 诊断编码统一（主码 `AXF-*`，兼容码 `DIAG-*`）
 - 证据来源可标记（`evidence_source`）
 - 证据输入可显式声明（`evidence_inputs`）
 

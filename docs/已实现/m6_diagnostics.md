@@ -7,18 +7,24 @@ This document introduces the M6 diagnostics package for scenario/build/gate work
 - `SCN-*`: scenario authoring/validation diagnostics
 - `GATE-*`: no-board gate command failures
 - `BLD-*`: RP2040 build-flow failures
-- `DIAG-*`: deterministic trace diagnosis candidates/errors
+- `AXF-*`: axis/fault diagnosis stable candidate codes (primary)
+- `DIAG-*`: legacy compatibility diagnosis codes (kept for backward parsing)
 
 Examples:
 
 - `SCN-MAP-002`: referenced digital input id does not exist in PLC topology
 - `SCN-TICK-001`: a scenario `at_ms` field is not aligned to `tick_ms`
 - `SCN-RISK-001`: start input is held true without release (same-tick-loop risk)
-- `DIAG-IN-001`: expected input never changed before timeout anchor
-- `DIAG-ACT-001`: actuator command likely missing around mismatch anchor
-- `DIAG-INT-001`: interlock/requires preconditions likely blocked
-- `DIAG-MAP-001`: mapping or alias mismatch likely
-- `DIAG-TIME-001`: timeout budget likely too short
+- `AXF-IN-001`: expected input never changed before timeout anchor
+- `AXF-ACT-001`: actuator command likely missing around mismatch anchor
+- `AXF-INT-001`: interlock/requires preconditions likely blocked
+- `AXF-MAP-001`: mapping or alias mismatch likely
+- `AXF-TIME-001`: timeout budget likely too short
+- `DIAG-IN-001`: legacy compatibility mirror of `AXF-IN-001`
+- `DIAG-ACT-001`: legacy compatibility mirror of `AXF-ACT-001`
+- `DIAG-INT-001`: legacy compatibility mirror of `AXF-INT-001`
+- `DIAG-MAP-001`: legacy compatibility mirror of `AXF-MAP-001`
+- `DIAG-TIME-001`: legacy compatibility mirror of `AXF-TIME-001`
 
 ## 2) Unified Output Mode (`--output human|json`)
 
@@ -111,6 +117,7 @@ inputs:
 - `evidence_source` (`no_board|hil_board|runtime_live|mixed`)
 - `evidence_inputs` (`trace|diff|timing_report|io_snapshot` used in this run)
 - `anchors`
-- `candidates` (stable `DIAG-*` issue codes)
+- `candidates` (stable `AXF-*` issue codes + `legacy_issue_code` compatibility field)
+- `source_location` (per-candidate source `{file,line,column}` for定位)
 - `summary`
 - `artifacts` (PLC/scenario/trace/diff/timing/io_snapshot paths)

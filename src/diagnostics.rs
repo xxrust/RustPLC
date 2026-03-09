@@ -88,7 +88,17 @@ pub enum DiagnosisCategory {
 }
 
 impl DiagnosisCategory {
-    fn issue_code(self) -> &'static str {
+    fn stable_issue_code(self) -> &'static str {
+        match self {
+            Self::ExpectedInputNeverChanged => "AXF-IN-001",
+            Self::ActuatorCommandMissing => "AXF-ACT-001",
+            Self::InterlockOrRequiresBlocked => "AXF-INT-001",
+            Self::MappingOrAliasMismatch => "AXF-MAP-001",
+            Self::TimeoutBudgetTooShort => "AXF-TIME-001",
+        }
+    }
+
+    fn legacy_issue_code(self) -> &'static str {
         match self {
             Self::ExpectedInputNeverChanged => "DIAG-IN-001",
             Self::ActuatorCommandMissing => "DIAG-ACT-001",
@@ -137,12 +147,33 @@ pub struct DiagnosisAnchor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DiagnosisCandidate {
     pub issue_code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_issue_code: Option<String>,
     pub category: DiagnosisCategory,
     pub rank: u32,
     pub confidence: f64,
     pub evidence: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_location: Option<DiagnosisSourceLocation>,
     pub suggested_fix: String,
     pub evidence_source: EvidenceSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiagnosisSourceLocation {
+    pub file: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+impl DiagnosisSourceLocation {
+    fn from_line(line: usize) -> Self {
+        Self {
+            file: "<input>".to_string(),
+            line,
+            column: 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -209,7 +240,8 @@ pub fn diagnose(input: DiagnosisInput<'_>) -> Result<DiagnosisReport, DiagnosisE
         .into_iter()
         .enumerate()
         .map(|(idx, draft)| DiagnosisCandidate {
-            issue_code: draft.category.issue_code().to_string(),
+            issue_code: draft.category.stable_issue_code().to_string(),
+            legacy_issue_code: Some(draft.category.legacy_issue_code().to_string()),
             category: draft.category,
             rank: u32::try_from(idx + 1).unwrap_or(u32::MAX),
             confidence: round_confidence(draft.confidence),
@@ -221,6 +253,9 @@ pub fn diagnose(input: DiagnosisInput<'_>) -> Result<DiagnosisReport, DiagnosisE
             } else {
                 draft.evidence
             },
+            source_location: plc
+                .source_line_for(draft.category)
+                .map(DiagnosisSourceLocation::from_line),
             suggested_fix: draft.category.suggested_fix().to_string(),
             evidence_source: input.evidence_source,
         })
@@ -266,12 +301,24 @@ struct PlcEvidence {
     action_targets: BTreeSet<String>,
     interlock_constraints: usize,
     min_timeout_ticks: Option<u64>,
+    first_wait_line: Option<usize>,
+    first_action_line: Option<usize>,
+    first_timeout_line: Option<usize>,
+    first_interlock_line: Option<usize>,
+    first_input_device_line: Option<usize>,
 }
 
 impl PlcEvidence {
     fn collect(program: &PlcProgram, tick_ms: u64) -> Self {
+        let first_interlock_line = program
+            .constraints
+            .safety
+            .iter()
+            .filter_map(|constraint| (constraint.line > 0).then_some(constraint.line))
+            .min();
         let mut out = PlcEvidence {
             interlock_constraints: program.constraints.safety.len(),
+            first_interlock_line,
             ..Self::default()
         };
 
@@ -283,13 +330,16 @@ impl PlcEvidence {
             };
             if let Some(id) = maybe_id {
                 out.known_input_ids.insert(id);
+                if device.line > 0 {
+                    Self::record_first_line(&mut out.first_input_device_line, device.line);
+                }
             }
         }
 
         for task in &program.tasks.tasks {
             for step in &task.steps {
                 for statement in &step.statements {
-                    out.collect_from_statement(statement, tick_ms);
+                    out.collect_from_statement(statement, tick_ms, step.line);
                 }
             }
         }
@@ -297,7 +347,12 @@ impl PlcEvidence {
         out
     }
 
-    fn collect_from_statement(&mut self, statement: &StepStatement, tick_ms: u64) {
+    fn collect_from_statement(
+        &mut self,
+        statement: &StepStatement,
+        tick_ms: u64,
+        step_line: usize,
+    ) {
         match statement {
             StepStatement::Action(action) => match action {
                 ActionStatement::Extend { target }
@@ -308,18 +363,28 @@ impl PlcEvidence {
                 | ActionStatement::AxisMoveRelative { target, .. }
                 | ActionStatement::AxisMoveAbsolute { target, .. } => {
                     self.action_targets.insert(target.device.clone());
+                    Self::record_first_line(&mut self.first_action_line, step_line);
                 }
-                ActionStatement::Compute { .. } | ActionStatement::Call { .. } => {}
+                ActionStatement::Compute { .. } | ActionStatement::Call { .. } => {
+                    Self::record_first_line(&mut self.first_action_line, step_line);
+                }
                 ActionStatement::CamEngage { target }
                 | ActionStatement::CamDisengage { target }
                 | ActionStatement::CamSwitch { target, .. }
                 | ActionStatement::CamPhase { target, .. } => {
                     self.action_targets.insert(target.clone());
+                    Self::record_first_line(&mut self.first_action_line, step_line);
                 }
-                ActionStatement::Log { .. } => {}
+                ActionStatement::Log { .. } => {
+                    Self::record_first_line(&mut self.first_action_line, step_line);
+                }
             },
-            StepStatement::Wait(wait) => self.collect_wait_condition(&wait.condition),
+            StepStatement::Wait(wait) => {
+                Self::record_first_line(&mut self.first_wait_line, step_line);
+                self.collect_wait_condition(&wait.condition)
+            }
             StepStatement::Timeout(timeout) => {
+                Self::record_first_line(&mut self.first_timeout_line, step_line);
                 let ticks = duration_to_ticks(&timeout.duration, tick_ms);
                 self.min_timeout_ticks = match self.min_timeout_ticks {
                     Some(existing) => Some(existing.min(ticks)),
@@ -328,20 +393,20 @@ impl PlcEvidence {
             }
             StepStatement::Repeat { body, .. } => {
                 for nested in body {
-                    self.collect_from_statement(nested, tick_ms);
+                    self.collect_from_statement(nested, tick_ms, step_line);
                 }
             }
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
                     for nested in &branch.statements {
-                        self.collect_from_statement(nested, tick_ms);
+                        self.collect_from_statement(nested, tick_ms, step_line);
                     }
                 }
             }
             StepStatement::Race(block) => {
                 for branch in &block.branches {
                     for nested in &branch.statements {
-                        self.collect_from_statement(nested, tick_ms);
+                        self.collect_from_statement(nested, tick_ms, step_line);
                     }
                 }
             }
@@ -350,6 +415,36 @@ impl PlcEvidence {
             | StepStatement::Goto(_)
             | StepStatement::AllowIndefiniteWait(_) => {}
         }
+    }
+
+    fn source_line_for(&self, category: DiagnosisCategory) -> Option<usize> {
+        match category {
+            DiagnosisCategory::ExpectedInputNeverChanged => {
+                self.first_wait_line.or(self.first_timeout_line)
+            }
+            DiagnosisCategory::ActuatorCommandMissing => {
+                self.first_action_line.or(self.first_wait_line)
+            }
+            DiagnosisCategory::InterlockOrRequiresBlocked => {
+                self.first_interlock_line.or(self.first_wait_line)
+            }
+            DiagnosisCategory::MappingOrAliasMismatch => {
+                self.first_input_device_line.or(self.first_wait_line)
+            }
+            DiagnosisCategory::TimeoutBudgetTooShort => {
+                self.first_timeout_line.or(self.first_wait_line)
+            }
+        }
+    }
+
+    fn record_first_line(slot: &mut Option<usize>, line: usize) {
+        if line == 0 {
+            return;
+        }
+        *slot = Some(match *slot {
+            Some(existing) => existing.min(line),
+            None => line,
+        });
     }
 
     fn collect_wait_condition(&mut self, wait: &WaitCondition) {
@@ -1032,9 +1127,21 @@ inputs: []
 
         for (idx, candidate) in report.candidates.iter().enumerate() {
             assert_eq!(candidate.rank, u32::try_from(idx + 1).unwrap_or(u32::MAX));
-            assert!(candidate.issue_code.starts_with("DIAG-"));
+            assert!(candidate.issue_code.starts_with("AXF-"));
+            assert!(
+                candidate
+                    .legacy_issue_code
+                    .as_deref()
+                    .is_some_and(|code| code.starts_with("DIAG-"))
+            );
             assert!((0.0..=1.0).contains(&candidate.confidence));
             assert!(!candidate.evidence.is_empty());
+            assert!(
+                candidate
+                    .source_location
+                    .as_ref()
+                    .is_some_and(|location| location.line > 0 && location.column == 1)
+            );
             assert!(!candidate.suggested_fix.is_empty());
             assert_eq!(candidate.evidence_source, EvidenceSource::NoBoard);
         }

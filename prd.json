@@ -234,8 +234,8 @@
         "Tests pass"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented diagnostics stabilization for trace-doctor outputs by introducing stable AXF-* primary issue codes with DIAG-* legacy compatibility (`legacy_issue_code`), adding per-candidate source_location (file/line/column), updating human/JSON contracts and docs, and adding regression coverage including a new snapshot-style test for the extended candidate payload."
     },
     {
       "id": "US-016",

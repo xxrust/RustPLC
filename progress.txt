@@ -17,6 +17,7 @@ Started: 2026-03-09 00:00:00 CST
 - `axis.move_*` 参数白名单建议使用 `pest` 兜底规则（如 `axis_move_unknown_arg`）并放在已知字段分支后，再在 parser 输出稳定错误码（`[AXIS-013]`），避免回退到不稳定的 `expected ...` 文案。
 - `must_complete_within_worst_case` 的 timeout 预算不能只看 `StepStatement::Timeout`；`axis.move_*` 的内联 `timeout` 也必须在时序估算里显式计入。
 - 轴异常因果链校验需覆盖 `timeout` 与 `on_reject/on_motion_fault/on_safety_fault` 全分支；只校验 fault 桶会漏掉 timeout 恢复链断裂。
+- `trace-doctor` 诊断码演进采用“双码并存”模式：`issue_code` 使用新主码（如 `AXF-*`），同时保留 `legacy_issue_code`（`DIAG-*`）以保证向后可解析；新增诊断字段优先做可选增量（如 `source_location`）。
 
 ---
 
@@ -320,4 +321,31 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: `axis.move_*` 的 timeout 是动作字段（不是 step 语句），做 worst-case 预算时要在 action 分支单独收集。
   - Gotchas encountered: 轴异常分支若只验证 `on_*fault` 容易漏掉 `timeout` 恢复链，导致因果验证与运行时行为不一致。
   - Useful context: 本轮新增的 timing/causality/liveness 单测可作为后续 AXF 诊断增强前的验证一致性基线。
+---
+
+## [2026-03-10 01:11:36 CST] - US-015
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 将 `trace-doctor` 候选诊断主码升级为稳定 `AXF-*`，并保留 `legacy_issue_code`（`DIAG-*`）确保旧解析器可持续消费。
+  - 在诊断候选中新增 `source_location { file, line, column }`，由 PLC AST 语句/约束行号收敛生成，实现“可机读 + 可定位 + 可修复”。
+  - 更新 CLI 输出契约：human 模式展示 `source` 行号；trace-doctor 子命令失败前缀切换为 `[AXF-000]`。
+  - 更新诊断文档契约（`m6_diagnostics` 与 methodology）说明 AXF 主码、DIAG 兼容码及 `source_location` 字段。
+  - 新增快照式回归 `tests/diagnostics_axf_snapshot_us015.rs`，并联动更新 `trace_doctor/runtime_alarm_events/m6_diagnostics` 断言覆盖新增字段。
+- Files changed
+  - `AGENTS.md`
+  - `src/diagnostics.rs`
+  - `src/alarm_runtime.rs`
+  - `src/main.rs`
+  - `tests/diagnostics_axf_snapshot_us015.rs`
+  - `tests/trace_doctor.rs`
+  - `tests/runtime_alarm_events.rs`
+  - `tests/m6_diagnostics.rs`
+  - `docs/已实现/m6_diagnostics.md`
+  - `docs/已实现/diagnostics_backend_methodology.md`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: 诊断协议升级优先采用“主码切换 + 兼容码并存 + 可选字段增量”策略，可在不破坏旧消费方的前提下平滑演进。
+  - Gotchas encountered: trace-doctor 默认 `evidence_source` 为 `mixed`，做 JSON 快照断言时需显式传 `--evidence-source` 固定输出。
+  - Useful context: `PlcEvidence` 已内置分类到行号的映射（wait/action/timeout/interlock/input 拓扑），后续新增诊断类别可直接扩展 `source_line_for`。
 ---
