@@ -654,12 +654,16 @@ fn axis_fault_branches(
     match action {
         ActionStatement::AxisMoveRelative {
             target,
+            timeout,
             on_reject,
             on_motion_fault,
             on_safety_fault,
             ..
         } => {
             let mut branches = Vec::new();
+            if let Some(branch) = timeout.as_ref() {
+                branches.push(("timeout", &branch.target));
+            }
             if let Some(branch) = on_reject.as_ref() {
                 branches.push(("on_reject", branch));
             }
@@ -677,12 +681,16 @@ fn axis_fault_branches(
         }
         ActionStatement::AxisMoveAbsolute {
             target,
+            timeout,
             on_reject,
             on_motion_fault,
             on_safety_fault,
             ..
         } => {
             let mut branches = Vec::new();
+            if let Some(branch) = timeout.as_ref() {
+                branches.push(("timeout", &branch.target));
+            }
             if let Some(branch) = on_reject.as_ref() {
                 branches.push(("on_reject", branch));
             }
@@ -1677,6 +1685,50 @@ task fault:
     }
 
     #[test]
+    fn verifies_axis_timeout_branch_wait_causality_when_links_exist() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+device sensor_fault: sensor
+
+relation { from: Y0.out, to: axis_x.enable, via: driven_by }
+relation { from: axis_x.fault, to: sensor_fault.sense, via: detects }
+relation { from: sensor_fault.out, to: X0.in, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+        wait: sensor_fault == true
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        verify_causality(&program, &topology, &constraints)
+            .expect("axis timeout 分支等待应参与因果验证并通过");
+    }
+
+    #[test]
     fn reports_missing_axis_fault_branch_causality_path() {
         let source = r#"
 [topology]
@@ -1729,6 +1781,60 @@ task fault:
                 .iter()
                 .any(|error| error.broken_link == "axis_x -> sensor_fault"),
             "应定位轴故障分支缺失的 axis->sensor 链路"
+        );
+    }
+
+    #[test]
+    fn reports_missing_axis_timeout_branch_causality_path() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+device sensor_fault: sensor
+
+relation { from: Y0.out, to: axis_x.enable, via: driven_by }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+        wait: sensor_fault == true
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        let errors = verify_causality(&program, &topology, &constraints)
+            .expect_err("axis timeout 分支缺失因果链应报错");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.action.as_deref().unwrap_or_default().contains("timeout")),
+            "诊断动作文本应标注 timeout 分支"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.broken_link == "axis_x -> sensor_fault"),
+            "应定位轴 timeout 分支缺失的 axis->sensor 链路"
         );
     }
 

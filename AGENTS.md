@@ -243,6 +243,7 @@
 
 - 关键路径分析
 - 检查 `must_complete_within`（仅 action/delay）和 `must_complete_within_worst_case`（包含超时界）
+- `axis.move_*` 的 `timeout` 是动作内联字段（非独立 `step timeout`），统计 worst-case 时必须在 `ActionStatement` 分支显式计入
 - 沿 `connected_to` 链累积上游 `response_time`
 - 两个变体用途不同；在约束中正确使用
 
@@ -250,6 +251,7 @@
 
 - 沿物理信号流的拓扑 BFS
 - 检查 `connected_to` 链和 `detects` 关系
+- `axis.move_*` 异常链校验需覆盖 `timeout` + `on_reject/on_motion_fault/on_safety_fault` 全分支，避免漏检超时恢复链
 - 在可达性前用 `detects.device → sensor` 逻辑边补充拓扑
 - 外部函数建模为：`arg_vars -> function`（调用点）+ `function -> binding`（仅纯函数）
 

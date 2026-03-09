@@ -15,6 +15,8 @@ Started: 2026-03-09 00:00:00 CST
 - 垂直轴制动顺序检查应仅对“出现 `set <axis>.enable off` 且轴设备具备 `model_ref/config_ref`”的目标轴生效，避免把 legacy 无 profile 轴用例误判为配置错误。
 - `axis_fault_contract` 的传播目标在语义阶段统一收敛：`followers` 走 `cam_coupling master->slave`（可传递），`group` 走 `tags.functional_group` 交集，且始终包含故障轴自身。
 - `axis.move_*` 参数白名单建议使用 `pest` 兜底规则（如 `axis_move_unknown_arg`）并放在已知字段分支后，再在 parser 输出稳定错误码（`[AXIS-013]`），避免回退到不稳定的 `expected ...` 文案。
+- `must_complete_within_worst_case` 的 timeout 预算不能只看 `StepStatement::Timeout`；`axis.move_*` 的内联 `timeout` 也必须在时序估算里显式计入。
+- 轴异常因果链校验需覆盖 `timeout` 与 `on_reject/on_motion_fault/on_safety_fault` 全分支；只校验 fault 桶会漏掉 timeout 恢复链断裂。
 
 ---
 
@@ -298,4 +300,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: 对 DSL 白名单字段建议在 grammar 侧保留“已知字段 + 兜底 unknown 字段”的组合，随后在 parser 给出稳定错误码，便于 CI 与文档契约固化。
   - Gotchas encountered: 若完全依赖 pest 语法失败（`expected ...`），错误文案会随 grammar 细节漂移，不适合作为回归门禁断言。
   - Useful context: `tests/axis_syntax_convergence_us013.rs` 可作为后续语法收敛故事的直接扩展入口（新增字段时同步更新白名单断言）。
+---
+
+## [2026-03-10 00:45:45 CST] - US-014
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 对 `timing` 引擎补齐 axis 语义：`must_complete_within_worst_case` 现在会计入 `axis.move_*` 动作内联 `timeout` 上界，不再仅依赖独立 `timeout:` 语句。
+  - 对 `causality` 引擎补齐异常链覆盖：`axis.move_*` 因果分支从 `on_reject/on_motion_fault/on_safety_fault` 扩展为同时覆盖 `timeout` 分支。
+  - 补充 `liveness` 回归：新增 axis 故障恢复路径用例，验证“有界等待可通过、缺少 timeout 会报风险”。
+  - 新增/更新四引擎回归测试，确保新轴故障语义在验证层的一致性。
+- Files changed
+  - `AGENTS.md`
+  - `src/verification/timing.rs`
+  - `src/verification/causality.rs`
+  - `src/verification/liveness.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: `axis.move_*` 的 timeout 是动作字段（不是 step 语句），做 worst-case 预算时要在 action 分支单独收集。
+  - Gotchas encountered: 轴异常分支若只验证 `on_*fault` 容易漏掉 `timeout` 恢复链，导致因果验证与运行时行为不一致。
+  - Useful context: 本轮新增的 timing/causality/liveness 单测可作为后续 AXF 诊断增强前的验证一致性基线。
 ---

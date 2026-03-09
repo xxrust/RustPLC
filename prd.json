@@ -219,8 +219,8 @@
         "Tests pass"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Aligned verification engines with axis fault semantics: timing now includes axis.move_* inline timeout in must_complete_within_worst_case budgets, causality now validates timeout branch chains in addition to on_reject/on_motion_fault/on_safety_fault, and liveness regression coverage now verifies fault recovery paths with bounded waits and flags missing timeout risks."
     },
     {
       "id": "US-015",
