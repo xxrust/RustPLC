@@ -1,0 +1,49 @@
+[topology]
+
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+axis_fault_contract axis_x_fault {
+    axis: axis_x
+    severity: safety
+    stop_mode: immediate
+    auto_reset_policy: immediate
+    manual_ack_required: true
+    propagation_scope: self
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move_axis:
+        action: axis.move_relative(axis_x, distance: 20, speed: 2)
+            timeout: 400ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_default
+            on_safety_fault(kind: vendor) -> fault.safety_vendor
+            on_safety_fault(code: 3303) -> fault.safety_code_3303
+    on_complete: goto done
+
+task fault:
+    step timeout:
+        action: log "axis timeout"
+    step reject:
+        action: log "reject fallback"
+    step motion_fault:
+        action: log "motion fallback"
+    step safety_default:
+        action: log "safety default"
+    step safety_vendor:
+        action: log "safety vendor"
+    step safety_code_3303:
+        action: log "safety code 3303"
+    on_complete: goto done
+
+task done:
+    step halt:

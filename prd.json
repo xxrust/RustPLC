@@ -249,8 +249,8 @@
         "Tests pass"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added four axis fault examples for normal/recoverable/non-recoverable/safety paths (`examples/axis_fault_*_path.plc`), extended `tests/examples_integration.rs` to compile and verify the new examples, and added `tests/axis_fault_routing_trace_snapshot_us016.rs` to snapshot IR fault-route resolution traces via `resolve_axis_fault_route_target`. Validation: `cargo check`, targeted example/trace tests, and full `cargo test` all pass."
     },
     {
       "id": "US-017",

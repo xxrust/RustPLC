@@ -10,6 +10,7 @@ Started: 2026-03-09 00:00:00 CST
 - `runtime_core::Program` 结构字段变更需同步四处：`src/runtime_bridge.rs`（桥接填充）、`src/main.rs`（内置 `SIM_PROGRAM`）、`crates/codegen/src/lib.rs`（生成器模板）、`crates/board-rp2040/build.rs`（默认固件程序模板）。
 - 轴故障停机可观测性采用双日志阶段：先 `axis_stop_transition_enter` 再 `axis_stop_transition_completed`，并用 `axis_stop_transition_log_message_id(stop_mode, phase)` 做稳定断言，避免硬编码 message_id。
 - `axis.move_*` 异常分流使用“主桶 + 细分 routes”模式：主桶分支永远必填且作为回退，细分 `kind/code` 路由按声明顺序首条命中。
+- `axis.move_*` 细分 fault route 的匹配语义在 IR 由 `resolve_axis_fault_route_target` 固化；当前 runtime 轴回调故障会直接返回 `RuntimeError::AxisFault`，路由匹配回归更适合在状态机/IR 层做快照。
 - runtime-core 在一个 tick 内会连续执行非阻塞状态（`Action/Goto/已满足 wait`）；写回归时若要精确逐 tick 断言，需在步骤间加入 `delay` 或未满足 `wait` 做节流。
 - `axis.move_*` 参数值语法中的 `number` 不接受带符号前缀；负值会在 parser 阶段先报错，语义层的非正数校验应使用 `0` 场景覆盖。
 - 垂直轴制动顺序检查应仅对“出现 `set <axis>.enable off` 且轴设备具备 `model_ref/config_ref`”的目标轴生效，避免把 legacy 无 profile 轴用例误判为配置错误。
@@ -348,4 +349,27 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: 诊断协议升级优先采用“主码切换 + 兼容码并存 + 可选字段增量”策略，可在不破坏旧消费方的前提下平滑演进。
   - Gotchas encountered: trace-doctor 默认 `evidence_source` 为 `mixed`，做 JSON 快照断言时需显式传 `--evidence-source` 固定输出。
   - Useful context: `PlcEvidence` 已内置分类到行号的映射（wait/action/timeout/interlock/input 拓扑），后续新增诊断类别可直接扩展 `source_line_for`。
+---
+
+## [2026-03-10 01:29:49 CST] - US-016
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 4 个轴异常样例：`examples/axis_fault_normal_path.plc`、`examples/axis_fault_recoverable_path.plc`、`examples/axis_fault_nonrecoverable_path.plc`、`examples/axis_fault_safety_path.plc`，覆盖正常、可恢复、不可恢复与安全故障策略场景。
+  - 扩展 `tests/examples_integration.rs`，将新增样例纳入端到端编译/验证回归，并断言 axis fault contract 严重级别字段正确降级到 IR。
+  - 新增 fault routing trace 快照测试 `tests/axis_fault_routing_trace_snapshot_us016.rs`：基于示例状态机调用 `resolve_axis_fault_route_target`，快照校验主桶回退与 `kind/code` 细分路由命中结果。
+  - 更新 `AGENTS.md`，补充“fault route 回归优先在 IR 层快照”的可复用模式。
+- Files changed
+  - `AGENTS.md`
+  - `examples/axis_fault_normal_path.plc`
+  - `examples/axis_fault_recoverable_path.plc`
+  - `examples/axis_fault_nonrecoverable_path.plc`
+  - `examples/axis_fault_safety_path.plc`
+  - `tests/examples_integration.rs`
+  - `tests/axis_fault_routing_trace_snapshot_us016.rs`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: 轴故障路由“主桶 + 细分 matcher”的行为回归，使用状态机层快照比 runtime tick 路径更稳定、更直观。
+  - Gotchas encountered: `kind: vendor` 路由若排在 `code` 路由前，vendor 故障会优先命中该路由；`code` 断言应用非 vendor kind 才能验证“按码命中”。
+  - Useful context: 新增样例可直接复用为后续 US-017 文档中的“正常/可恢复/不可恢复/安全”操作手册示例输入。
 ---

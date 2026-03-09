@@ -1,0 +1,49 @@
+[topology]
+
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+axis_fault_contract axis_x_fault {
+    axis: axis_x
+    severity: recoverable
+    stop_mode: controlled
+    auto_reset_policy: never
+    manual_ack_required: true
+    propagation_scope: self
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move_axis:
+        action: axis.move_relative(axis_x, distance: 20, speed: 2)
+            timeout: 400ms -> fault.timeout
+            on_reject -> fault.reject_default
+            on_reject(kind: vendor) -> fault.reject_vendor
+            on_reject(code: 1201) -> fault.reject_code_1201
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+        action: log "axis timeout"
+    step reject_default:
+        action: log "recoverable reject default"
+    step reject_vendor:
+        action: log "recoverable reject vendor"
+    step reject_code_1201:
+        action: log "recoverable reject code 1201"
+    step motion_fault:
+        action: log "motion fault fallback"
+    step safety_fault:
+        action: log "safety fault fallback"
+    on_complete: goto done
+
+task done:
+    step halt:

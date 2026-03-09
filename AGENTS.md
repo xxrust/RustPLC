@@ -39,6 +39,7 @@
 - `followers` 传播目标按 `cam_coupling master->slave` 关系（可传递）解析；`group` 传播按轴设备 `tags.functional_group` 交集解析；两者都会自动包含故障轴自身作为回退。
 - 运行时策略审计日志通过 `runtime_core::axis_fault_policy_log_message_id` + `AXIS_FAULT_POLICY_LOG_MESSAGE` 生成；修改编码规则时必须同步 `tests/runtime_bridge_us006.rs` 回归断言。
 - 停机模式语义在 runtime-core 中固定迁移为 `Running -> {ControlledStopping|QuickStopping|ImmediateStopping} -> Stopped`，并通过 `axis_stop_transition_log_message_id` + `AXIS_STOP_TRANSITION_{ENTER,COMPLETED}_LOG_MESSAGE` 输出可观测日志；修改 stop 编码或阶段名时需同步 `tests/runtime_bridge_us006.rs` 与 `crates/runtime-core/src/lib.rs` 单测。
+- `axis.move_*` 的细分 fault route 当前在 IR 通过 `resolve_axis_fault_route_target` 固化语义（声明顺序首条命中 + 主桶回退）；运行时轴回调仍以 `RuntimeError::AxisFault` 暴露，因此路由匹配回归建议在 IR/状态机层做快照测试（如 `tests/axis_fault_routing_trace_snapshot_us016.rs`）。
 
 ## 外部函数架构
 

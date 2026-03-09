@@ -1333,3 +1333,68 @@ fn parses_axis_servo_fault_routing_example_into_verified_ir_json() {
         "servo example should bind at least one safety rule"
     );
 }
+
+#[test]
+fn parses_axis_fault_normal_path_example_into_verified_ir_json() {
+    let source = read_example("axis_fault_normal_path.plc");
+    let ir_json = compile_source_to_json(&source).expect("axis_fault_normal_path should compile");
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+    assert!(
+        transitions.iter().any(|transition| {
+            transition["actions"].as_array().is_some_and(|actions| {
+                actions.iter().any(|action| {
+                    action["action"] == Value::String("axis_move_relative".to_string())
+                })
+            })
+        }),
+        "normal path example should include axis_move_relative"
+    );
+}
+
+#[test]
+fn parses_axis_fault_recoverable_path_example_with_policy_into_verified_ir_json() {
+    let source = read_example("axis_fault_recoverable_path.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("axis_fault_recoverable_path should compile");
+
+    let contracts = ir_json["topology"]["axis_fault_contracts"]
+        .as_array()
+        .expect("topology should include axis fault contracts array");
+    assert_eq!(contracts.len(), 1, "recoverable example should declare one policy");
+    assert_eq!(
+        contracts[0]["severity"],
+        Value::String("recoverable".to_string())
+    );
+}
+
+#[test]
+fn parses_axis_fault_nonrecoverable_path_example_with_policy_into_verified_ir_json() {
+    let source = read_example("axis_fault_nonrecoverable_path.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("axis_fault_nonrecoverable_path should compile");
+
+    let contracts = ir_json["topology"]["axis_fault_contracts"]
+        .as_array()
+        .expect("topology should include axis fault contracts array");
+    assert_eq!(
+        contracts[0]["severity"],
+        Value::String("non_recoverable".to_string())
+    );
+}
+
+#[test]
+fn parses_axis_fault_safety_path_example_with_policy_into_verified_ir_json() {
+    let source = read_example("axis_fault_safety_path.plc");
+    let ir_json = compile_source_to_json(&source).expect("axis_fault_safety_path should compile");
+
+    let contracts = ir_json["topology"]["axis_fault_contracts"]
+        .as_array()
+        .expect("topology should include axis fault contracts array");
+    assert_eq!(
+        contracts[0]["severity"],
+        Value::String("safety".to_string())
+    );
+}
