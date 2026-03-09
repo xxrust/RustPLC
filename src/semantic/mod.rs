@@ -4296,16 +4296,30 @@ fn resolve_axis_motion_parameters_in_statements(
                 acceleration,
                 deceleration,
                 ..
-            })
-            | StepStatement::Action(ActionStatement::AxisMoveAbsolute {
+            }) => resolve_axis_motion_parameters_on_action(
+                line,
+                None,
+                &target.device,
+                params,
+                speed,
+                acceleration,
+                deceleration,
+                axis_profiles,
+                motion_param_sets,
+                device_default_param_sets,
+                errors,
+            ),
+            StepStatement::Action(ActionStatement::AxisMoveAbsolute {
                 target,
                 params,
+                position,
                 speed,
                 acceleration,
                 deceleration,
                 ..
             }) => resolve_axis_motion_parameters_on_action(
                 line,
+                Some(*position),
                 &target.device,
                 params,
                 speed,
@@ -4362,6 +4376,7 @@ fn resolve_axis_motion_parameters_in_statements(
 #[allow(clippy::too_many_arguments)]
 fn resolve_axis_motion_parameters_on_action(
     line: usize,
+    absolute_position: Option<f64>,
     target_device: &str,
     params: &Option<String>,
     speed: &mut Option<f64>,
@@ -4496,6 +4511,25 @@ fn resolve_axis_motion_parameters_on_action(
             ),
         ));
         return;
+    }
+
+    if let Some(position) = absolute_position {
+        if let (Some(min), Some(max)) = (profile.soft_limit_min, profile.soft_limit_max) {
+            let min = min as f64;
+            let max = max as f64;
+            if position < min || position > max {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXIS-011] axis.move_absolute position on '{}' exceeds soft limits {}..{}.",
+                        target_device, min, max
+                    ),
+                    "请调整 position 或更新轴配置 soft_limit_min/soft_limit_max。"
+                        .to_string(),
+                ));
+                return;
+            }
+        }
     }
 
     *speed = Some(resolved_speed);
@@ -9920,6 +9954,77 @@ task fault:
             .collect::<Vec<_>>()
             .join("\n");
         assert!(joined.contains("[AXIS-009]"));
+    }
+
+    #[test]
+    fn rejects_axis_move_when_effective_params_are_non_positive() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 1200, acc: 0, dec: 100)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors = build_state_machine(&program).expect_err("非正参数应触发 AXIS-008");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-008]"));
+    }
+
+    #[test]
+    fn rejects_axis_move_absolute_when_position_exceeds_soft_limits() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_soft_limited
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_absolute(axis_x, position: 800, speed: 1200, acc: 1000, dec: 1000)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors =
+            build_state_machine(&program).expect_err("超出 soft limit 的绝对运动应触发 AXIS-011");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-011]"));
     }
 
     #[test]

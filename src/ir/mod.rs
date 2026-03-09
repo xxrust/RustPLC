@@ -42,6 +42,10 @@ pub struct AxisProfile {
     pub position_unit: String,
     pub max_speed: f32,
     pub max_acceleration: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_limit_min: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_limit_max: Option<f32>,
     pub model_ref: String,
     pub config_ref: String,
     pub motion_param_set: Option<String>,

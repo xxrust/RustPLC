@@ -11,6 +11,7 @@ Started: 2026-03-09 00:00:00 CST
 - 轴故障停机可观测性采用双日志阶段：先 `axis_stop_transition_enter` 再 `axis_stop_transition_completed`，并用 `axis_stop_transition_log_message_id(stop_mode, phase)` 做稳定断言，避免硬编码 message_id。
 - `axis.move_*` 异常分流使用“主桶 + 细分 routes”模式：主桶分支永远必填且作为回退，细分 `kind/code` 路由按声明顺序首条命中。
 - runtime-core 在一个 tick 内会连续执行非阻塞状态（`Action/Goto/已满足 wait`）；写回归时若要精确逐 tick 断言，需在步骤间加入 `delay` 或未满足 `wait` 做节流。
+- `axis.move_*` 参数值语法中的 `number` 不接受带符号前缀；负值会在 parser 阶段先报错，语义层的非正数校验应使用 `0` 场景覆盖。
 
 ---
 
@@ -202,4 +203,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Patterns discovered: homing 前置条件可通过“语义静态证明 + runtime 兜底 guard”双阶段实现，不需要把 `is_homed` 暴露到 DSL。
   - Gotchas encountered: runtime-core 在单 tick 内会连续执行多个非阻塞 step，测试里若要分 tick 观测状态需加 `delay/wait` 打断链式推进。
   - Useful context: 绝对运动现在可能在 handler 前被 `AxisNotHomed` 短路，fault 注入类测试若要命中 handler 必须先通过相对运动建立 homing 谓词或在 IR 中消解 guard。
+---
+
+## [2026-03-09 22:12:59 CST] - US-010
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 为轴配置增加可选软限位字段 `soft_limit_min/soft_limit_max`，并在 `axis_profile` 解析阶段做完整性与范围合法性校验（新增 `AXP-011`）。
+  - 将软限位透传进 IR `AxisProfile`，并在语义阶段对 `axis.move_absolute` 做静态可判定越界拦截（新增 `AXIS-011`）。
+  - 保持并验证参数合法性收敛：`speed/acc/dec` 非正值语义失败（`AXIS-008`）。
+  - 增加 parser 白名单回归：`axis.move_*` 出现未定义字段（如 `jerk`）在 parser 阶段直接失败。
+- Files changed
+  - `src/ir/mod.rs`
+  - `src/axis_profile.rs`
+  - `src/semantic/mod.rs`
+  - `src/parser/mod.rs`
+  - `axis_configs/stepper_soft_limited.toml`
+  - `prd.json`
+  - `progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: 软限位建议在 `axis_config` 层成对声明并在 `AxisProfile` 固化，便于语义层做静态越界裁剪。
+  - Gotchas encountered: `axis.move_*` 数值参数目前语法不接受负号，负值测试会在 parser 先失败而不是语义层。
+  - Useful context: 绝对位置越界的编译期失败路径已在 `semantic::tests::rejects_axis_move_absolute_when_position_exceeds_soft_limits` 固化。
 ---

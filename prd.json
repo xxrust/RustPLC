@@ -158,8 +158,8 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented compile-time parameter convergence for axis motions: added axis config soft-limit schema + validation, enforced semantic static rejection for axis.move_absolute targets beyond declared soft limits, and added parser/semantic/axis_profile regression tests for whitelist and non-positive/soft-limit failures."
     },
     {
       "id": "US-011",

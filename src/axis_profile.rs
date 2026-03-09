@@ -45,6 +45,10 @@ struct AxisConfigDef {
     position_unit: String,
     speed_limit: f64,
     acceleration_limit: f64,
+    #[serde(default)]
+    soft_limit_min: Option<f64>,
+    #[serde(default)]
+    soft_limit_max: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -348,6 +352,46 @@ fn resolve_axis_profiles_with_dirs(
             continue;
         }
 
+        let soft_limits = match (config.soft_limit_min, config.soft_limit_max) {
+            (Some(min), Some(max)) => {
+                if !min.is_finite() || !max.is_finite() {
+                    errors.push(PlcError::semantic_with_reason(
+                        line,
+                        format!(
+                            "[AXP-011] axis config '{}' has non-finite soft limits for '{}'.",
+                            config_ref, device.name
+                        ),
+                        "请确保 soft_limit_min/soft_limit_max 均为有限数值。".to_string(),
+                    ));
+                    continue;
+                }
+                if min > max {
+                    errors.push(PlcError::semantic_with_reason(
+                        line,
+                        format!(
+                            "[AXP-011] axis config '{}' has invalid soft limit range {}..{} for '{}'.",
+                            config_ref, min, max, device.name
+                        ),
+                        "请确保 soft_limit_min <= soft_limit_max。".to_string(),
+                    ));
+                    continue;
+                }
+                Some((min as f32, max as f32))
+            }
+            (None, None) => None,
+            _ => {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXP-011] axis config '{}' must declare both soft_limit_min and soft_limit_max for '{}'.",
+                        config_ref, device.name
+                    ),
+                    "请同时声明 soft_limit_min 和 soft_limit_max，或同时省略。".to_string(),
+                ));
+                continue;
+            }
+        };
+
         let motion_param_set = device
             .attributes
             .motion_param_set
@@ -429,6 +473,8 @@ fn resolve_axis_profiles_with_dirs(
                 position_unit: model.position_unit.clone(),
                 max_speed: config.speed_limit as f32,
                 max_acceleration: config.acceleration_limit as f32,
+                soft_limit_min: soft_limits.map(|(min, _)| min),
+                soft_limit_max: soft_limits.map(|(_, max)| max),
                 model_ref: model_ref.to_string(),
                 config_ref: config_ref.to_string(),
                 motion_param_set: motion_param_set.map(str::to_string),
@@ -1079,6 +1125,90 @@ deceleration = 12000.0
             .expect_err("out-of-range motion_param_set should fail");
         assert_error_contains(&errors, "[AXP-010]");
         assert_error_contains(&errors, "exceeds config");
+
+        fs::remove_dir_all(dirs.root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn resolves_soft_limits_from_axis_config() {
+        let dirs = mk_temp_axis_dirs("soft_limits_ok");
+        seed_default_axis_defs(&dirs);
+        fs::write(
+            dirs.configs.join("soft_limited.toml"),
+            r#"
+name = "soft_limited"
+model_id = "stepper_generic"
+position_unit = "pulse"
+speed_limit = 3000.0
+acceleration_limit = 10000.0
+soft_limit_min = -1000.0
+soft_limit_max = 2000.0
+"#,
+        )
+        .expect("write soft-limited config");
+
+        let devices = parse_devices(
+            "device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: soft_limited }",
+        );
+        let profiles = resolve_with_fixture(&devices, &dirs).expect("soft limits should resolve");
+        let profile = profiles.get("axis_x").expect("axis profile should exist");
+        assert_eq!(profile.soft_limit_min, Some(-1000.0));
+        assert_eq!(profile.soft_limit_max, Some(2000.0));
+
+        fs::remove_dir_all(dirs.root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn rejects_axis_config_with_partial_soft_limits() {
+        let dirs = mk_temp_axis_dirs("soft_limits_partial");
+        seed_default_axis_defs(&dirs);
+        fs::write(
+            dirs.configs.join("soft_limited_partial.toml"),
+            r#"
+name = "soft_limited_partial"
+model_id = "stepper_generic"
+position_unit = "pulse"
+speed_limit = 3000.0
+acceleration_limit = 10000.0
+soft_limit_min = 0.0
+"#,
+        )
+        .expect("write partial soft-limited config");
+
+        let devices = parse_devices(
+            "device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: soft_limited_partial }",
+        );
+        let errors =
+            resolve_with_fixture(&devices, &dirs).expect_err("partial soft limits should fail");
+        assert_error_contains(&errors, "[AXP-011]");
+
+        fs::remove_dir_all(dirs.root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn rejects_axis_config_with_inverted_soft_limit_range() {
+        let dirs = mk_temp_axis_dirs("soft_limits_inverted");
+        seed_default_axis_defs(&dirs);
+        fs::write(
+            dirs.configs.join("soft_limited_inverted.toml"),
+            r#"
+name = "soft_limited_inverted"
+model_id = "stepper_generic"
+position_unit = "pulse"
+speed_limit = 3000.0
+acceleration_limit = 10000.0
+soft_limit_min = 100.0
+soft_limit_max = -100.0
+"#,
+        )
+        .expect("write inverted soft-limited config");
+
+        let devices = parse_devices(
+            "device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: soft_limited_inverted }",
+        );
+        let errors =
+            resolve_with_fixture(&devices, &dirs).expect_err("inverted soft limits should fail");
+        assert_error_contains(&errors, "[AXP-011]");
 
         fs::remove_dir_all(dirs.root).expect("cleanup temp dir");
     }

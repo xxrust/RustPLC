@@ -5269,6 +5269,32 @@ task fault:
     }
 
     #[test]
+    fn rejects_axis_move_with_unknown_argument_field() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor
+
+[constraints]
+
+[tasks]
+task motion:
+    step start:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2, jerk: 1)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+"#;
+
+        parse_plc(input).expect_err("未知 axis.move 字段应在 parser 阶段失败");
+    }
+
+    #[test]
     fn parses_compute_and_set_analog_expression_actions() {
         let input = r#"
 [topology]
