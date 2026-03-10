@@ -1,460 +1,472 @@
-# Agent Notes - RustPLC 开发指南
-
-## 编译流水线架构
-
-### Parser → AST → Semantic → IR → Verification/Codegen
-
-编译流水线严格分层，每层职责清晰：
-
-- **Parser** (`src/parser/plc.pest` + `src/parser/mod.rs`): PEG 语法 → AST。长关键字必须在短前缀之前（如 `must_complete_within_worst_case` 在 `must_complete_within` 之前）。Wrapper 规则必须先解包再匹配具体规则。布尔字面量与 `identifier` 并存时，`boolean_value` 必须放在 `identifier` 之前，避免 `true/false` 被误解析成标识符。
-  - `axis.move_*` 参数白名单通过 `axis_move_unknown_arg` 兜底规则实现，且该规则必须放在已知参数规则之后；未知字段统一在 parser 报 `AXIS-013`，不要回退为 pest 原生 `expected ...` 文案。
-- **AST** (`src/ast/mod.rs`): 源语法的忠实表示。不进行语义验证或展开。
-- **Semantic** (`src/semantic/mod.rs`): 预处理（repeat/delay/operation-template 展开）+ IR 降级。所有语法糖在 IR 生成前展开。设备库约束在降级前注入 AST。
-- **IR** (`src/ir/mod.rs`): 规范中间形式（TopologyGraph + StateMachine + ConstraintSet + TimingModel）。验证引擎和运行时桥接消费 IR，不消费 AST。
-- **Verification** (`src/verification/*.rs`): 四个引擎（safety, liveness, timing, causality）并行运行在预处理后的 IR 上。
-- **Codegen** (`src/codegen/st.rs`): 从 IR 生成 ST 代码（Phase 1：不支持 parallel/race）。
-- **Runtime Bridge** (`src/runtime_bridge.rs`): IR → runtime-core Program。强制 tick 对齐，解析 I/O 映射，验证 action/guard 支持。
-
-### TransitionAction 变体更新
-
-引入新的 `TransitionAction` 变体时，必须同时更新**所有**依赖层：
-
-1. **AST** (`src/ast/mod.rs`): 添加 `ActionStatement` 变体
-2. **Parser** (`src/parser/plc.pest` + `src/parser/mod.rs`): 添加语法规则 + 降级逻辑
-3. **Semantic** (`src/semantic/mod.rs`): 在 `lower_action_statement` 中添加 IR 降级
-4. **IR** (`src/ir/mod.rs`): 添加 `TransitionAction` 变体
-5. **Verification** (`src/verification/safety.rs`, `causality.rs`, `timing.rs`): 添加匹配器
-6. **Runtime Bridge** (`src/runtime_bridge.rs`): 添加 action 翻译到 `runtime_core::Action`
-7. **Codegen** (`src/codegen/st.rs`): 添加 ST 代码生成（或用 `StCodegenError` 拒绝）
-8. **Tests**: 在 `tests/examples_integration.rs` 和各模块中添加集成测试和单元测试
-
-### AxisFault 语义对齐（US-003 起）
-
-- `AxisFaultKind` / `AxisFaultCategory` 需在 **IR**（`src/ir/mod.rs`）与 **runtime-core**（`crates/runtime-core/src/lib.rs`）保持同名同语义（`reject/motion/safety/vendor`）。
-- 语义降级必须通过 `lower_axis_fault_branch` 从 `kind` 推导 `category/vendor_code`，避免手工写死导致不一致。
-- `axis.move_*` fault 路由采用“主桶 + 细分 routes”双层结构：主桶 `on_reject/on_motion_fault/on_safety_fault` 仍是必填回退路径，细分 `kind/code` matcher 仅作为优先匹配，不可替代主桶。
-- 运行时轴回调统一返回 `AxisMotionResult::Fault(AxisFault)`；测试优先使用 `AxisMotionResult::reject/motion_fault/safety_fault` 构造器保持语义稳定。
-- `axis_fault_contract` 策略矩阵通过 **runtime bridge**（`src/runtime_bridge.rs`）降级到 `runtime_core::Program.axis_fault_policies`；调整策略枚举时需同步 IR/runtime-core/bridge 三层。
-- `axis_fault_contract` 的传播范围字段采用严格白名单：`propagation_scope` 仅支持 `self/group/all/followers/custom`；仅 `custom` 允许 `propagation_targets`，且目标必须是轴设备。
-- `followers` 传播目标按 `cam_coupling master->slave` 关系（可传递）解析；`group` 传播按轴设备 `tags.functional_group` 交集解析；两者都会自动包含故障轴自身作为回退。
-- 运行时策略审计日志通过 `runtime_core::axis_fault_policy_log_message_id` + `AXIS_FAULT_POLICY_LOG_MESSAGE` 生成；修改编码规则时必须同步 `tests/runtime_bridge_us006.rs` 回归断言。
-- 停机模式语义在 runtime-core 中固定迁移为 `Running -> {ControlledStopping|QuickStopping|ImmediateStopping} -> Stopped`，并通过 `axis_stop_transition_log_message_id` + `AXIS_STOP_TRANSITION_{ENTER,COMPLETED}_LOG_MESSAGE` 输出可观测日志；修改 stop 编码或阶段名时需同步 `tests/runtime_bridge_us006.rs` 与 `crates/runtime-core/src/lib.rs` 单测。
-- `axis.move_*` 的细分 fault route 当前在 IR 通过 `resolve_axis_fault_route_target` 固化语义（声明顺序首条命中 + 主桶回退）；运行时轴回调仍以 `RuntimeError::AxisFault` 暴露，因此路由匹配回归建议在 IR/状态机层做快照测试（如 `tests/axis_fault_routing_trace_snapshot_us016.rs`）。
+# AGENTS.md
 
-## 外部函数架构
+## 定位
 
-外部函数跨越**四层**：AST 声明 → IR 签名 → 语义验证 → 运行时执行。
+本文件是 RustPLC 的项目总纲，也是新接手项目时的第一份导航文档。
 
-### 声明与签名收集
+它回答四类长期稳定问题：
 
-- 外部函数声明在 `[topology]` 段：`extern_function <name> { rust_module: "...", params: [...], return_type: "...", time_bound_us: N, pure: true/false }`
-- 语义签名收集（`src/semantic/mod.rs`）强制合约检查：
-  - 禁止重复名称
-  - `rust_module` 非空
-  - `time_bound_us` 为正数
-  - Phase-1 标量签名类型（int, real, bool）
-  - 返回绑定类型检查对标 `[topology] variable` 声明
-- 错误在调用点验证前暴露；使用 `PlcError::extern_*` 构造器保持一致性。
+- 这个项目的核心目标是什么
+- 系统按什么分层运行
+- 某类问题应先看哪些文件
+- 做一类改动时，通常必须联动哪些层
 
-### 调用点验证与 IR 降级
+它不记录阶段性方案、一次性决策、临时 workaround 或会频繁变化的实现细节。  
+容易变化的内容应写入：
 
-- `action: call <name>(<args>) -> <bindings>` 在 `src/parser/mod.rs` 中解析
-- 语义降级（`src/semantic/mod.rs`）：
-  - 按名称解析函数
-  - 参数类型检查对标签签名
-  - 返回绑定类型检查对标声明变量
-  - 降级为 `TransitionAction::CallExtern { function_id, args, bindings }`
-- IR 携带 `ExternFunctionDef`（签名）+ `ExternCallBinding`（返回映射）
+- `docs/*_spec.md`
+- `docs/*_development_guide.md`
+- 模块附近测试
 
-### 运行时执行
+## 第一性原理
 
-- `ExternFunctionRegistry`（`src/extern_functions.rs`）集中合约强制：
-  - 内置数学外部函数：`add`, `multiply`, `quadratic_fit`
-  - 内置控制外部函数：`pid_update`（有状态）
-  - 自定义外部函数通过 `register_extern_function!` 宏注册
-  - 参数计数/范围/超时/运行时错误全部集中
-- 运行时桥接（`src/runtime_bridge.rs`）翻译 IR `CallExtern` → `runtime_core::Action::CallExtern`
-- `Runtime::tick_with_extern` 执行外部调用；违规作为 `RuntimeTickError::ExternCallFailed` 暴露，包含嵌套 `ExternRuntimeError` 详情
-- 测试使用 `with_time_source` 进行确定性超时断言；`reset_builtin_pid_state()` 用于 PID 回归
+RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 
-### 外部函数错误处理与回退
+- 有明确语义边界的工业控制建模系统
+- 可验证的编译系统
+- 可执行的 runtime 系统
+- 可追踪、可诊断、可演进的工程系统
 
-- DSL 级回退/重试，使用 `Runtime::tick_with_extern_error_code` 配合声明的 `[topology] variable last_error: int`
-- 通过 `extern_runtime_error_code` 映射 `ExternRuntimeError` 到变量驱动分支（无需新 DSL 关键字）
-- 调度器级护栏按阶段分割：
-  - 非纯跨分支并发检查：语义任务验证（`src/semantic/mod.rs`）
-  - Tick 预算强制（`tick_ms` vs 求和 `time_bound_us`）：运行时桥接（`src/runtime_bridge.rs`）
+做设计或改动时，先问：
 
-### 因果性与外部函数建模
+1. 这个问题属于哪一层
+2. 这个语义是否被显式建模
+3. 这个语义是否能进入 verification
+4. 这个语义是否能稳定映射到 runtime 与 codegen
+5. 这个改动是在消除例外，还是在增加例外
 
-- 因果链节点可引用设备、`[topology] variable` 和外部函数名称
-- 在 `src/verification/causality.rs` 中：
-  - 添加调用点边：`arg_vars -> function`
-  - 仅将 `pure: true` 外部函数视为确定性变换：`function -> binding` 边
-  - 非纯外部函数破坏因果链（需显式 `connected_to` 或 `detects`）
+默认偏好：
 
-### 外部函数文档
+- 明确语义，反对隐式行为
+- 稳定抽象，反对局部补丁
+- 可验证模型，反对只靠运行观察
+- 直接重构到更优模型，反对被历史兼容默认绑架
+- 防止抽象层下沉，反对把上层问题压到下层硬补
 
-- 保持两层文档：
-  - `docs/extern_function_mvp_spec.md`：冻结的语法合约（字段/默认/非目标边界）
-  - `docs/extern_function_development_guide.md`：推出指导、实际示例、迁移说明
-- 通过将规范视为不可变来避免规范漂移；所有指导放在开发指南中
-## 操作合约（EXOP）系统
+## 核心目标
 
-操作合约声明设备级安全合约，具有确定性展开和多阶段验证。
+项目的长期目标固定为三件事：
 
-### 声明与预处理
+- 用 DSL 表达工业控制意图
+- 将 DSL 收敛为统一 IR
+- 在 IR 上同时支撑 runtime、verification 与 codegen
 
-- 在 `[topology]` 段声明：`operation_contract <name> { kind: "...", device: "...", fields: {...} }`
-- 解析器语法（`src/parser/plc.pest`）+ 降级（`src/parser/mod.rs`）必须保持同步
-- 语义验证（`src/semantic/mod.rs`）强制 EXOP 规则（见下文）
-- 预处理（`preprocess_program`）展开 `action: op.<device>.<template>(...)` 为具体 `action+wait+timeout->fault` 语句
-- 展开是确定性的：相同合约 + 输入总是产生相同 IR
+任何新增能力，如果只能“跑起来”但不能进入 IR、不能验证、不能诊断，就不算完成。
 
-### EXOP 规则强制
+## 总体架构
 
-规则跨语义和运行时阶段分割：
+编译与执行主链固定为：
 
-- **EXOP-001**（合约存在性）：合约名称必须存在；在语义验证中解析
-- **EXOP-005/006**（路径唯一性）：沿 `driven_by` 追踪命令端点到恰好一个物理输出（Y*/AO*）；沿 `reports_to` 追踪反馈到恰好一个物理输入（X*/AI*）。在展开前在 `validate_operation_contract` 中强制。
-- **EXOP-007**（超时对齐）：在语义中强制超时字段类型/正值检查；在运行时桥接中使用 `TopologyGraph.operation_contract_timeouts` 强制 `tick_ms` 对齐
-- **EXOP-008**（安全状态兼容性）：在语义中验证合约类型-safe_state 兼容性；降级到 `TopologyGraph.operation_contract_safe_states`；让 stop/fault 任务降级合并这些动作作为默认值
-- **EXOP-010/011**（桥接子集护栏）：EXOP-005/006 通过后，要求操作模板命令路径解析到数字输出（Y*），反馈解析到数字输入（X*），以便展开永不到达桥接时 `UnsupportedAction`/`UnsupportedGuardExpression`
+`Parser -> AST -> Semantic -> IR -> Verification / Runtime Bridge / Codegen`
 
-### 模板展开
+各层职责固定：
 
-- `op.vacuum.on_and_confirm`：总是发出 `set+wait(true)+timeout_on_ms->fault`
-- `op.vacuum.off`：发出 `set off`；仅当声明 `timeout_off_ms` 时追加 `wait(false)+timeout_off_ms->fault`
-- `op.motor.move_to(contract, position)`：先解析 `motor_position` 合约 + `positions` 映射；发出 `set motor.run on + wait(sensor==true) + timeout_move_ms_default->fault + set motor.run off`
-- 展开时字段/超时失败携带 EXOP 规则 ID（`EXOP-001`, `EXOP-007` 等）和行感知诊断
+- `Parser`：把 DSL 文本解析为 AST，不承担语义裁决
+- `AST`：忠实表示源码结构，不做语义归并
+- `Semantic`：名称解析、约束检查、预处理展开、IR 降级前收敛
+- `IR`：全系统唯一的规范语义模型
+- `Verification`：在 IR 上验证 safety、liveness、timing、causality
+- `Runtime Bridge`：把 IR 映射到 runtime-core 可执行结构，并强制执行侧约束
+- `Codegen`：从 IR 输出目标代码，不负责补齐缺失语义
 
-### 诊断与回归
+长期规则：
 
-- EXOP 诊断携带稳定负载：规则 id（`[EXOP-*]`）、合约名称、非零源行、非空修复建议
-- 回归由 `tests/operation_contract_diagnostics_us012.rs` 和 `scripts/operation_contract_exop_gate.sh` 门禁
+- 语法糖必须在进入 IR 前展开
+- verification 与 runtime 不直接消费 AST
+- runtime 不能反向发明 DSL 语义
+- codegen 只能消费已经闭合的 IR 语义
 
----
+## 项目地图
 
-## 组件模型系统
+第一次接手项目时，优先按下面路径建立心智模型。
 
-组件拓扑和库提供声明式设备组合和约束注入。
+### 稳定入口
 
-### ComponentTopology 与 ComponentLibrary
+- `AGENTS.md`：项目总纲、分层原则、源码导航
+- `docs/`：规范、开发指南、架构文档
 
-- `ComponentTopology`（`src/component_topology.rs`）：组件实例 + 连接 + 标签规则的 JSON 模式
-- `ComponentLibrary`（`src/component_library.rs`）：设备类型定义，包含接口（端口、状态）+ 设备约束（安全规则）
-- 验证（`src/component_topology.rs::parse_component_topology_json`）：强制模式、端口兼容性、标签规则（danger_level, functional_group, location_group）
-- 标签规则支持三种模式：`AllowAny`, `WithinOnly`, `CrossOnly` 用于功能/位置分组
+### 核心源码目录
 
-### 设备库注入
+- `src/parser/plc.pest`：DSL PEG 语法
+- `src/parser/mod.rs`：Parser 到 AST 的降级逻辑
+- `src/ast/mod.rs`：AST 类型定义
+- `src/semantic/mod.rs`：语义分析、预处理、IR 降级主入口
+- `src/ir/mod.rs`：IR 类型定义
+- `src/runtime_bridge.rs`：IR 到 runtime-core 的桥接
+- `src/verification/`：四类验证引擎
+- `src/codegen/st.rs`：IEC 61131-3 ST 代码生成
+- `src/diagnostics.rs`：统一诊断结构
 
-- 设备库 TOML 文件（`devices/*.toml`）定义端口状态、默认状态和安全约束
-- 语义预处理（`src/semantic/mod.rs::inject_device_constraints`）用库端口定义丰富 AST 设备
-- 库约束在 IR 降级前展开为 AST 安全约束
-- 仅当设备暴露引用端口时应用；库丰富，永不覆盖
+### 运行时与子项目
 
-### 验证与诊断
+- `crates/runtime-core/src/lib.rs`：runtime 执行模型与动作语义
+- `crates/sim/`：仿真相关能力
+- `crates/codegen/`：代码生成相关子项目
+- `crates/io-traits/`：I/O 抽象
+- `crates/board-rp2040/`：板级目标
+- `crates/web-server/`：Web 侧能力
 
-- 组件拓扑验证产生结构化问题，带代码（如 `CTOP-PARSE-001`, `CTOP-SCHEMA-*`）
-- 设备库验证检查端口兼容性、约束语法、类型一致性
-- 诊断包括路径（JSON 指针）、消息和代码用于机器可读处理
+### 测试与夹具
 
----
+- `tests/examples_integration.rs`：示例 PLC 编译/回归总入口
+- `tests/*.rs`：端到端、回归、契约测试
+- `examples/*.plc`：DSL 示例与回归输入
+- `devices/*.toml`：设备库定义
+- `scenarios/*.yaml`：仿真场景
 
-## 运行时桥接架构
+## 阅读顺序
 
-运行时桥接（`src/runtime_bridge.rs`）翻译 IR → `runtime_core::Program`，严格验证。
+如果此前没接触过本项目，建议按以下顺序阅读：
 
-### Tick 对齐与持续时间验证
+1. 本文件 `AGENTS.md`
+2. `src/ir/mod.rs`
+3. `src/semantic/mod.rs`
+4. `src/runtime_bridge.rs`
+5. `crates/runtime-core/src/lib.rs`
+6. `src/verification/*.rs`
+7. 与当前需求相关的 `docs/*_spec.md` 或 `docs/*_development_guide.md`
+8. 对应的 `tests/*.rs` 与 `examples/*.plc`
 
-- `tick_ms` 必须 > 0
-- 所有 action/delay 持续时间必须对齐到 `tick_ms`（无余数）
-- PID 循环 `period_ms` 必须对齐到 `tick_ms`
-- 操作合约超时字段必须对齐到 `tick_ms`
-- 违规作为 `BridgeError::*NotAligned` 暴露，带状态/持续时间/tick 上下文
+原因：
 
-### I/O 解析
+- 先看 AGENTS，知道分层和导航
+- 再看 IR，先抓住语义汇合点
+- 然后沿“语义从何而来、如何执行、如何验证”往两侧展开
 
-- 数字/模拟输入/输出从拓扑通过 `PlcPortKind` 解析解析
-- 无法解析的 I/O 作为 `BridgeError::Unresolvable{Digital,Analog}{Input,Output}` 暴露
-- 模拟等待守卫需要状态机中的区域表；缺失表作为 `BridgeError::MissingAnalogRegions` 暴露
+## 问题类型到文件入口
 
-### Action 与守卫翻译
+遇到问题时，先判断问题属于哪一类，再进对应文件，不要盲目全仓搜索。
 
-- `TransitionAction` 变体翻译为 `runtime_core::Action` 枚举
-- 不支持的 action（Phase 1 中的 parallel, race）作为 `BridgeError::UnsupportedAction` 暴露
-- 守卫表达式必须可翻译为 `runtime_core::ExprProgram`；不支持的守卫作为 `BridgeError::UnsupportedGuardExpression` 暴露
+### 1. 语法解析问题
 
-### 状态机约束
+先看：
 
-- 初始状态必须存在于状态列表中
-- 所有转换目标必须解析到已知状态
-- 转换形状必须被支持（无跨分支 action/wait 配对）
-- 每 tick 最多 64 个转换在运行时强制
-- 运行时在单个 tick 内会串联执行非阻塞 `Action/Goto/已满足 wait` 转换；若回归测试需要“每 tick 仅执行一步”，需显式插入 `delay` 或未满足 `wait`
+- `src/parser/plc.pest`
+- `src/parser/mod.rs`
+- `src/ast/mod.rs`
 
----
+典型现象：
 
-## 语义分析与预处理
+- 新关键字无法解析
+- `true/false`、标识符、wrapper 规则冲突
+- 错误文案停留在 pest 原始 expected 文案
 
-语义分析（`src/semantic/mod.rs`）是 AST 和 IR 之间的桥梁。
+### 2. 语义建模问题
 
-### 预处理阶段
+先看：
 
-1. **PLC 控制器展开**（`expand_plc_controller_devices`）：展开 `device plc { ports: [...] }` 为单个数字/模拟 I/O 设备
-2. **Repeat 展开**（`expand_repeat_blocks`）：展开 `repeat N { ... }` 为 N 份块副本
-3. **操作模板展开**（`expand_operation_contract_actions`）：展开 `action: op.*` 为具体 action/wait/timeout 序列
-4. **设备库注入**（`inject_device_constraints`）：注入库端口定义和安全约束
+- `src/semantic/mod.rs`
+- `src/ir/mod.rs`
+- `src/diagnostics.rs`
 
-### IR 降级
+典型现象：
 
-- 拓扑降级：构建 `TopologyGraph`，包含设备、连接、外部函数、操作合约
-- 任务降级：构建 `StateMachine`，包含状态、转换、守卫、动作
-- `parallel` 合成状态命名约定固定为：`__parallel_<idx>_fork` → `__parallel_<idx>_branch_<n>_active` → `__parallel_<idx>_branch_<n>_done` → `__parallel_<idx>_join`（验证器/回归测试依赖该命名模式）
-- 约束降级：构建 `ConstraintSet`，包含安全/时序/因果规则
-- 所有降级对语义规则验证；错误聚合并一起暴露
+- DSL 语法合法但语义不合法
+- 某特性没有被正确降级到 IR
+- 某约束本应在语义阶段报错，却拖到 runtime 才炸
 
-### 验证门禁
+### 3. 运行时执行问题
 
-- `topology_semantic_gate.rs`：SEM-101~108 检查（设备目的、端口一致性、I/O 映射）
-- `sequence_lint.rs`：序列级检查（parallel/race 结构、action/wait 配对）
-- 设备库验证：端口状态兼容性、约束语法
+先看：
 
----
+- `src/runtime_bridge.rs`
+- `crates/runtime-core/src/lib.rs`
+- `tests/*runtime*`
 
-## 验证引擎
+典型现象：
 
-四个引擎在预处理后的 IR 上并行运行：
+- tick 调度错误
+- action 执行行为错误
+- timeout / fault / wait / delay / step 推进异常
 
-### 安全性（`src/verification/safety.rs`）
+### 4. 验证问题
 
-- BMC + k-归纳（可选 Z3 SMT 求解器）
-- 检查 `conflicts_with` 和 `requires` 约束
-- 有界模型检查到可配置深度
-- Z3 特性门禁；默认测试仅使用 BMC
+先看：
 
-### 活性（`src/verification/liveness.rs`）
+- `src/verification/safety.rs`
+- `src/verification/liveness.rs`
+- `src/verification/timing.rs`
+- `src/verification/causality.rs`
+- `src/ir/mod.rs`
 
-- SCC 分析 + 可达性
-- 检测死锁/活锁
-- 结合 AST 元数据（`allow_indefinite_wait`, `on_complete`）与 StateMachine 转换
-- 需要 AST 上下文；IR 守卫单独不足以处理所有等待豁免
+典型现象：
 
-### 时序（`src/verification/timing.rs`）
+- 明显非法的程序没被拦住
+- 合法程序被误报
+- 新语义进入 runtime 了，但 verification 没跟上
 
-- 关键路径分析
-- 检查 `must_complete_within`（仅 action/delay）和 `must_complete_within_worst_case`（包含超时界）
-- `axis.move_*` 的 `timeout` 是动作内联字段（非独立 `step timeout`），统计 worst-case 时必须在 `ActionStatement` 分支显式计入
-- 沿 `connected_to` 链累积上游 `response_time`
-- 两个变体用途不同；在约束中正确使用
+### 5. 代码生成问题
 
-### 因果性（`src/verification/causality.rs`）
+先看：
 
-- 沿物理信号流的拓扑 BFS
-- 检查 `connected_to` 链和 `detects` 关系
-- `axis.move_*` 异常链校验需覆盖 `timeout` + `on_reject/on_motion_fault/on_safety_fault` 全分支，避免漏检超时恢复链
-- 在可达性前用 `detects.device → sensor` 逻辑边补充拓扑
-- 外部函数建模为：`arg_vars -> function`（调用点）+ `function -> binding`（仅纯函数）
+- `src/codegen/st.rs`
+- `src/ir/mod.rs`
 
----
+典型现象：
 
-## 代码生成（ST）
+- IR 正常但 ST 输出错误
+- 不支持的结构没有被明确拒绝
 
-ST 代码生成（`src/codegen/st.rs`）从 IR 生成 IEC 61131-3 ST 代码。
+### 6. 设备库、组件拓扑、I/O 映射问题
 
-### Phase 1 限制
+先看：
 
-- 不支持 parallel/race（作为 `StCodegenError::ParallelNotSupported` / `RaceNotSupported` 暴露）
-- 状态机展平为单个 `_state` 变量，数字 ID（步长 10）
-- 计时器编码为 `_timer_*` 变量
-- 规范化后的变量名冲突作为 `StCodegenError::VariableNameConflict` 暴露
+- `devices/*.toml`
+- `src/component_library.rs`
+- `src/component_topology.rs`
+- `src/plc_port.rs`
+- `src/topology_semantic_gate.rs`
+- `src/runtime_bridge.rs`
 
-### 配置
+## 常见改动的联动路径
 
-- `StCodegenConfig`：程序名、源文件、验证摘要包含
-- 验证摘要包含安全/活性/时序/因果结果作为注释
+下面这些是长期稳定的“改一处通常要看多处”的路径。
 
-### 错误处理
+### 新增 DSL 动作或语法原语
 
-- 未解析的 goto 目标：`StCodegenError::UnresolvedGoto`
-- 类型冲突：`StCodegenError::TypeConflict`
-- 不支持的表达式：`StCodegenError::ExpressionNotSupported`
+通常要联动：
 
----
+1. `src/parser/plc.pest`
+2. `src/parser/mod.rs`
+3. `src/ast/mod.rs`
+4. `src/semantic/mod.rs`
+5. `src/ir/mod.rs`
+6. `src/runtime_bridge.rs`
+7. `crates/runtime-core/src/lib.rs`
+8. `src/verification/*.rs`
+9. `src/codegen/st.rs`
+10. `tests/` 与 `examples/`
 
-## 诊断系统
+原则：
 
-诊断（`src/diagnostics.rs`）提供结构化、可操作的错误消息。
+- 不允许只在 parser 接受语法，却不定义 IR
+- 不允许只在 runtime 执行特例，却不进入 verification
 
-### 错误类别
+### 修改执行模型
 
-- **解析器错误**：语法违规，带行/列上下文
-- **语义错误**：类型不匹配、未定义引用、约束违规
-- **验证错误**：安全/活性/时序/因果失败，带反例
-- **桥接错误**：I/O 解析、tick 对齐、action 支持问题
-- **组件错误**：拓扑验证、库约束违规
+通常要联动：
 
-### 诊断负载
+1. `src/ir/mod.rs`
+2. `src/runtime_bridge.rs`
+3. `crates/runtime-core/src/lib.rs`
+4. `src/verification/*.rs`
+5. `src/codegen/st.rs`
+6. `tests/*runtime*`
+7. `tests/*verification*`
 
-- 错误代码（如 `SEM-101`, `EXOP-005`, `CTOP-PARSE-001`）
-- 源位置（文件、行、列）
-- 消息（人类可读）
-- 修复建议（可操作指导）
-- 上下文（相关代码片段、约束详情）
-- `trace-doctor` 候选诊断码采用主码 `AXF-*`（`issue_code`），并保留兼容码 `DIAG-*`（`legacy_issue_code`）；新增字段时优先走“新增可选字段 + 兼容旧字段”策略，保持向后可解析。
+说明：
 
-### 回归测试
+- 执行模型变化不是 runtime 私事
+- 只改 runtime 而不改 IR 或 verification，属于典型抽象层下沉
 
-- `tests/diagnostics_backend_doc_contract.rs`：验证诊断模式和负载结构
-- `tests/io_snapshot_diagnostics.rs`：诊断输出快照测试
-- 诊断代码必须稳定；破坏性变更需要迁移指南
+### 修改语义门禁或诊断
 
----
+通常要联动：
 
-## 测试策略
+1. `src/semantic/mod.rs`
+2. `src/diagnostics.rs`
+3. 相关 spec / development guide
+4. `tests/*diagnostic*`
 
-### 测试组织
+原则：
 
-- **单元测试**（`cargo test --lib`）：`src/**/*.rs` 中的模块级测试
-- **集成测试**（`tests/*.rs`）：端到端测试，完整流水线
-- **示例测试**（`tests/examples_integration.rs`）：编译所有 `examples/*.plc` 文件
-- **回归测试**：诊断、trace diff、时序报告的快照测试
+- 错误码、payload、修复建议应稳定
+- 诊断变更要同步测试，不要只改文案
 
-### 测试夹具
+### 修改 verification 规则
 
-- 示例 PLC 文件（`examples/*.plc`）：30+ 文件覆盖所有 DSL 特性
-- 场景 YAML 文件（`scenarios/*.yaml`）：SIL 仿真输入
-- 设备库 TOML 文件（`devices/*.toml`）：设备定义
-- 组件拓扑 JSON 文件：组件模型夹具
+通常要联动：
 
-### 性能门禁
+1. `src/verification/*.rs`
+2. `src/ir/mod.rs`
+3. `src/semantic/mod.rs`
+4. `tests/*verification*`
 
-- `tests/extern_perf_gate_script.rs`：基准生产者 + 阈值配置
-- `tests/extern_perf_bench_cli.rs`：CLI 基准运行器
-- 基线快照 JSON + 脚本合约测试用于夹具注入
+原则：
 
----
+- verification 不是“后置插件”
+- 新规则必须有正例、反例、边界例
 
-## 强制语义门禁
+### 修改设备模型、组件模型或 I/O 映射
 
-所有 CLI/集成夹具必须强制语义门禁：
+通常要联动：
 
-- **SEM-101**：每个设备必须声明 `purpose` 元数据
-- **SEM-102~108**：端口一致性、I/O 映射、设备库验证
-- 遗留直接 `X0`/`Y0` 声明失败，错误 `SEM-107`/`SEM-108`
-- PLC I/O 通过 `device ...: plc { ports: [...] }` 声明
-- 违规在验证前暴露；无解决方案
+1. `devices/*.toml`
+2. `src/component_library.rs`
+3. `src/component_topology.rs`
+4. `src/plc_port.rs`
+5. `src/topology_semantic_gate.rs`
+6. `src/runtime_bridge.rs`
+7. 相关 tests
 
----
+## 长期工程原则
+
+### 1. IR 是唯一语义汇合点
+
+- 跨 parser、semantic、runtime、verification 的概念，必须在 IR 中有唯一表示
+- 不允许不同层各自维护近似同义但结构不同的版本
+
+### 2. 语义先于实现
+
+- 先定义语义边界，再实现 parser、runtime、verification 和 tests
+- 测试负责锁定语义，不负责反向发明语义
+
+### 3. 错误必须尽早暴露
+
+- 语法错误在 parser 暴露
+- 合法语法下的非法语义在 semantic 暴露
+- runtime bridge 只做可执行性校验，不替上游兜底
+
+### 4. verification 是主路径
+
+- 新能力必须同时考虑 safety、liveness、timing、causality
+- 如果某能力不能进入验证模型，它还没有设计完成
+
+### 5. 文档、示例、生成器必须同步
+
+- DSL 契约变更后，文档、示例、tests、skills 必须同步更新
+- 不允许编译器契约和生成器提示长期漂移
+
+### 6. 遇到显著更优方案时，优先直接重构
+
+- 显著更优、更一致、长期维护成本更低的方案，应优先直接重构
+- 历史兼容不是默认要求
+- 回退策略不是默认要求
+- 兼容层如果存在，必须被视为额外成本并单独论证
+
+### 7. 必须防止抽象层下沉
+
+- 上层语义问题不得下沉到 runtime、bridge、codegen 或测试里靠特例修补
+- 如果多个下层模块重复理解同一语义，说明抽象位置已经错了
+- 发现下沉时，应优先上提抽象，而不是继续补丁
+
+## 典型专题的稳定入口
+
+以下专题是项目中的长期主线，遇到相关需求时应优先进入对应文件。
+
+### 外部函数
+
+先看：
+
+- `src/semantic/mod.rs`
+- `src/extern_functions.rs`
+- `src/runtime_bridge.rs`
+- `crates/runtime-core/src/lib.rs`
+- `src/verification/causality.rs`
+- `docs/extern_function_mvp_spec.md`
+- `docs/extern_function_development_guide.md`
+
+### 操作合约 EXOP
+
+先看：
+
+- `src/parser/plc.pest`
+- `src/parser/mod.rs`
+- `src/semantic/mod.rs`
+- `src/runtime_bridge.rs`
+- `tests/operation_contract_diagnostics_us012.rs`
+- `docs/*operation*`
+
+### 组件拓扑与设备库
+
+先看：
+
+- `src/component_topology.rs`
+- `src/component_library.rs`
+- `devices/*.toml`
+- `src/semantic/mod.rs`
+
+### 轴资源与运动参数
+
+先看：
+
+- `src/axis_profile.rs`
+- `src/parser/plc.pest`
+- `src/parser/mod.rs`
+- `src/semantic/mod.rs`
+- `src/runtime_bridge.rs`
+- `crates/runtime-core/src/lib.rs`
+- `tests/*axis*`
+
+## 测试与回归原则
+
+测试结构长期固定为：
+
+- `cargo test --lib`：模块级单元测试
+- `tests/*.rs`：集成与回归测试
+- `tests/examples_integration.rs`：示例程序回归总入口
+
+做改动时至少回答：
+
+1. 这个变化需要单元测试还是集成测试
+2. 是否需要新增示例作为长期回归输入
+3. 是否需要新增诊断快照或验证反例
+
+新能力的理想闭环是：
+
+- 一个最小 parser/semantic 单测
+- 一个 runtime 或 bridge 测试
+- 一个 verification 测试
+- 一个 examples 回归输入
 
 ## 文档分层
 
-- **CLAUDE.md**：项目概览、常用命令、架构、DSL 结构、开发工作流
-- **README.md**：快速开始、特性对比、系统架构、示例
-- **Wiki**（`docs/wiki/`）：详细技术文档（14+ 页）
-- **规范文档**（`docs/*_spec.md`）：冻结的语法合约（extern, operation-contract）
-- **开发指南**（`docs/*_development_guide.md`）：推出指导、实际示例、迁移说明
-- **AGENTS.md**（本文件）：面向 Agent 的实现模式和架构决策
-- 若 DSL 合约/轴语义有新增字段或白名单收敛，需同步更新 `.codex/skills/plc-gen/SKILL.md` 与 `.codex/skills/plc-system/SKILL.md`，避免生成器提示与编译器契约漂移
+文档职责长期固定：
 
----
+- `AGENTS.md`：架构原则、目录导航、改动路径
+- `docs/*_spec.md`：冻结语法与契约
+- `docs/*_development_guide.md`：实现指南、迁移说明、落地建议
 
-## 关键代码库统计
+如果某内容的主要价值是“帮助未来新人知道去哪里看、改哪些层”，它适合写在 AGENTS。  
+如果某内容的主要价值是“描述某一具体能力的细节字段和边界”，它应写入 spec 或 development guide。
 
-- **源文件**：39 个 Rust 文件，~26K 行代码
-- **测试**：66 个测试文件，319 个测试函数
-- **示例**：30+ 个 `.plc` 示例文件
-- **Crates**：6 个子项目（runtime-core, sim, codegen, io-traits, board-rp2040, web-server）
-- **模块**：parser, ast, semantic, ir, verification (4 engines), codegen, diagnostics, component_*, device_*
+## 协作原则
 
----
+### 先判定问题类型，再决定是否并行
 
-## 常见开发模式
+复杂问题先区分它主要是：
 
-### 添加新 DSL 特性
+- 语法问题
+- 语义建模问题
+- 执行模型问题
+- 验证模型问题
+- 文档与迁移问题
 
-1. 更新 `src/parser/plc.pest` 语法规则
-2. 在 `src/parser/mod.rs` 中添加解析逻辑
-3. 在 `src/ast/mod.rs` 中添加 AST 类型
-4. 在 `src/semantic/mod.rs` 中添加 IR 降级
-5. 在 `src/ir/mod.rs` 中添加 IR 类型
-6. 在 `src/verification/*.rs` 中更新验证逻辑
-7. 在 `src/runtime_bridge.rs` 中添加运行时翻译
-8. 在 `src/codegen/st.rs` 中添加代码生成（或拒绝）
-9. 添加集成测试和单元测试
+### 能拆就拆
 
-### 添加新验证规则
+如果任务可以拆成边界清晰、接口明确、弱耦合的子任务，应优先拆分。
 
-1. 在 `src/verification/mod.rs` 中定义规则
-2. 在相应引擎（safety/liveness/timing/causality）中实现检查
-3. 添加诊断代码和修复建议
-4. 在 `tests/` 中添加回归测试
-5. 更新 AGENTS.md 和相关文档
+典型拆分方式：
 
-### 修改轴参数层级资源
+- `parser / ast`
+- `semantic / ir`
+- `runtime / runtime_bridge`
+- `verification`
+- `docs / examples / tests`
 
-1. 轴资源链按 5 层维护：`axis_motor_classes` → `axis_families` → `axis_models` → `axis_configs` → `axis_motion_param_sets`
-2. `axis_models/*.toml` 必须声明 `family_id`，`axis_configs/*.toml` 必须声明 `model_id`，`axis_motion_param_sets/*.toml` 必须声明 `config_id`
-3. 设备声明只允许通过 `model_ref/config_ref/motion_param_set` 引用，禁止恢复旧的内联轴参数（会触发 `AXP-006`）
-4. 层级 ID 一致性在 `src/axis_profile.rs` 集中校验（`AXP-007~AXP-010`）；新增字段时同步更新该模块与其单元测试
-5. `axis.move_relative/absolute` 支持 `params` 参数集引用 + 动作内 `speed/acc/dec` 覆盖；解析规则在 `src/parser/plc.pest`，降级逻辑在 `src/parser/mod.rs`
-6. 语义阶段会按优先级 `inline overrides > params 引用 > device.motion_param_set` 解析最终参数；缺失 `speed/acc/dec` 报 `AXIS-007`，`acc/dec` 超过 profile 上限报 `AXIS-009`
-7. 软限位仅在 `axis_configs/*.toml` 通过 `soft_limit_min/soft_limit_max` 成对声明；缺失任一侧或范围反转在 `src/axis_profile.rs` 报 `AXP-011`，`axis.move_absolute` 静态越界在 `src/semantic/mod.rs` 报 `AXIS-011`
-8. 垂直轴制动顺序通过 `axis_config.orientation = "vertical"` + `[brake]` 配置启用；语义/安全预检仅在任务里出现 `set <axis>.enable off` 且该轴具备 `model_ref/config_ref` 时触发，违规报 `AXIS-012`
+### 可独立时优先多 agent 并行
 
-### 修改 I/O 映射
+满足以下条件时，优先多 agent 并行：
 
-1. 在 `src/plc_port.rs` 中更新端口解析
-2. 在 `src/runtime_bridge.rs` 中更新 I/O 解析逻辑
-3. 在 `src/topology_semantic_gate.rs` 中更新验证
-4. 添加集成测试验证映射
+- 契约已冻结
+- 接口边界明确
+- 共享数据结构基本稳定
+- 各子任务可独立验证
 
----
+以下情况不适合并行：
 
-## 性能考虑
+- 语义尚未冻结
+- 关键 IR 结构仍在变化
+- 多个模块会同时修改同一个语义源头
 
-- **验证并行化**：四个验证引擎可并行运行；使用 `rayon` 或 `tokio` 进行并行化
-- **IR 缓存**：预处理后的 IR 可缓存以加速迭代验证
-- **增量验证**：仅重新验证受影响的约束（未实现，但可考虑）
-- **Z3 超时**：配置 Z3 求解器超时以防止长时间验证
+## 对 AGENTS.md 本身的要求
 
----
+本文件必须同时满足四点：
 
-## 调试技巧
+- 稳定：不追逐阶段性实现细节
+- 可导航：新人读完知道去哪里看
+- 可行动：知道一类改动通常要动哪些层
+- 可裁决：出现分歧时能回到统一原则
 
-- **查看 IR**：`cargo run -- examples/two_cylinder.plc`（不加 `--no-print-ir`）
-- **查看 AST**：在 `src/main.rs` 中添加 `dbg!(&program);`
-- **查看验证详情**：检查 stderr 输出的验证报告
-- **查看 ST 代码**：`cargo run --bin extern_perf_bench -- --output st.st`
-- **查看诊断**：运行编译器并检查诊断输出格式
-
----
-
-## 关键架构决策
-
-### 为什么分层编译流水线？
-
-- **清晰职责**：每层只做一件事，便于测试和维护
-- **可组合性**：可独立测试每层，也可组合测试
-- **可扩展性**：添加新特性时，只需在相应层添加逻辑
-- **错误诊断**：错误在最早可能的层暴露，便于定位
-
-### 为什么预处理而不是在 IR 中展开？
-
-- **验证一致性**：所有验证引擎在展开后的程序上运行，避免重复处理
-- **简化 IR**：IR 不需要处理语法糖，保持简洁
-- **确定性**：展开是确定性的，便于调试和测试
-
-### 为什么分离语义验证和运行时桥接？
-
-- **关注点分离**：语义验证关注 DSL 正确性，桥接关注运行时可行性
-- **独立测试**：可独立测试语义验证和桥接逻辑
-- **多目标支持**：可为不同运行时（SIL、Virtual Board、RP2040）实现不同桥接
-
-### 为什么使用组件模型？
-
-- **设备库复用**：设备定义可跨项目复用
-- **约束注入**：库可自动注入安全约束，减少手工编写
-- **拓扑验证**：组件模型提供结构化验证，便于检查连接正确性
-
----
+如果一条内容经常随版本变动，它大概率不该写在这里。  
+如果一条内容能长期帮助新人快速定位源码入口，它就应该写在这里。

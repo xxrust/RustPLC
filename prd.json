@@ -1,271 +1,325 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/axis-fault-formal-v1",
-  "description": "轴异常语义与处理系统 V1：建立统一 AxisFault 语义、完整轴参数层级（model/config/param set）、工业并行语义（parallel/race）与可形式验证的编译-运行时一致性。",
+  "branchName": "ralph/concurrent-task-runtime-and-blocking-steps",
+  "description": "将 RustPLC 从单执行点运行时升级为多 task 并发调度模型，引入默认阻塞的 step 完成语义，并在新执行模型下同步闭环 safety、liveness、timing、causality 四类验证。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "轴参数层级模型完整化（class -> family -> model -> config -> motion_param_set）",
-      "description": "As a 系统架构设计者, I want 完整分层与可见性边界 so that 用户只通过引用配置而不下沉到底层元信息。",
+      "title": "冻结并发 task 与阻塞 step 的术语契约",
+      "description": "作为架构维护者，我需要先冻结 active task、task context、blocking step、pending action 等核心术语和行为契约，确保 runtime、IR、verification 和文档基于同一套语义实现。",
       "acceptanceCriteria": [
-        "落地 5 层语义：motor_class -> family -> model -> config -> motion_param_set",
-        "model 仅承载型号能力边界；config 仅承载项目/装机参数",
-        "`.plc` 仅允许 model_ref/config_ref/motion_param_set，禁止显式声明 family/motor_class",
-        "设备库满足 model.family_id -> family.motor_class_id 引用链，编译器自动推导 family/motor_class",
-        "config 必须绑定 model_id 且与 model_ref 一致，不一致编译失败",
-        "新增层级不匹配与越界失败用例（>=4）",
+        "新增一份架构语义文档，定义 active task、task context、blocking step、non-blocking step、pending action、completion condition",
+        "文档明确说明：单个 task 可在同一 tick 内串联推进多个非阻塞 step，但遇到阻塞 step 后必须停止推进",
+        "文档明确说明：task 并发表示多个 task 持有独立执行上下文并被统一调度，而不是单执行点在不同 task.step 之间跳转",
+        "文档明确列出首版自动阻塞范围，包括 axis.move_*、delay、wait、timeout 驱动等待以及依赖外部反馈完成的动作",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "Completed in commit 4f55ad1: implemented 5-layer axis hierarchy resources, model/config chain validation, motion_param_set reference, and regression tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "运动参数集复用（结构体/模板）+ 动作内覆盖",
-      "description": "As a PLC 作者, I want params 引用与局部覆盖 so that 减少重复填写 speed/acc/dec 且保留动作灵活性。",
+      "title": "扩展 IR 以表达多 task 执行上下文",
+      "description": "作为编译器开发者，我需要让 IR 显式表达 task 级入口、局部状态和挂起动作元数据，以便 bridge、runtime 和验证器消费统一的并发模型。",
       "acceptanceCriteria": [
-        "支持定义 motion_param_set 并在 axis.move_* 通过 params 引用",
-        "支持纯直写与引用+覆盖两种动作写法",
-        "参数优先级固定：inline overrides > param set",
-        "禁止默认值：speed/acc/dec 任一缺失即编译失败",
-        "最终参数继续受 model/config 上限约束",
+        "IR 新增 task 级执行结构，而不是仅保留单一全局初始状态",
+        "IR 可表达每个 task 的入口 step、当前阻塞状态、定时器与挂起动作元数据",
+        "保留 task_name.step_name 的可读性，避免调试和诊断退化为匿名索引",
+        "repeat、operation-contract、device library 注入仍在 IR 生成前完成，IR 改造不绕过现有 preprocess",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Implemented params reference + inline override for axis.move actions, semantic resolution precedence (inline > params > device default), required speed/acc/dec enforcement, and regression tests/examples updates."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "定义统一 AxisFault 语义类型",
-      "description": "As a 编译器维护者, I want 统一 AxisFault 类型 so that parser/semantic/runtime/verification 语义一致。",
+      "title": "为每个 task 建立独立 runtime context",
+      "description": "作为 runtime 维护者，我需要每个活跃 task 都拥有自己的当前位置、进入时间、等待状态和挂起动作状态，这样单个 task 阻塞时不会卡死其他 task。",
       "acceptanceCriteria": [
-        "IR 与 runtime-core 定义一致的 AxisFaultKind/AxisFaultCategory",
-        "包含 recoverable/non-recoverable/safety 语义",
-        "保留 vendor_code 扩展位，不内置全量厂商码表",
+        "runtime 不再只保存一个全局 Location，而是保存每个活跃 task 的执行上下文",
+        "每个 task context 至少包含当前 step、step_entered_at、等待状态、超时状态和挂起动作状态",
+        "单 task 程序在新模型下仍能正常初始化和执行，不产生无解释的行为回归",
+        "新增 runtime-core 单元测试，覆盖多 task context 的初始化与推进",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Unified AxisFault semantics across IR and runtime-core by introducing aligned AxisFaultKind/AxisFaultCategory (+ vendor_code extension slot), migrated runtime axis callback/result/error path to AxisFault, and added regression tests for category/vendor semantics and bridged runtime behavior."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "DSL 扩展 Axis Fault Contract 声明",
-      "description": "As a PLC 作者, I want 在 topology 声明 axis fault contract so that 异常策略与能力边界可显式配置并可验证。",
+      "title": "实现按 tick 遍历所有活跃 task 的调度器",
+      "description": "作为 runtime 维护者，我需要调度器在每个 tick 内遍历所有活跃 task，并按固定顺序推进，这样 task 并发才是实际调度而不是伪并行。",
       "acceptanceCriteria": [
-        "新增 axis_fault_contract（或等价结构）语法与 AST/IR 降级",
-        "关键字段缺失直接报错，禁止隐式默认值",
-        "parser/semantic 成功与失败路径均有测试",
+        "每个 runtime tick 按固定且文档化的顺序遍历所有活跃 task context",
+        "单个 task 在同一 tick 内可串联推进多个已完成或非阻塞 step",
+        "某个 task 因阻塞 step 停止推进时，不影响同一 tick 内其他 task 的推进",
+        "新增 runtime-core 测试，证明一个 task 阻塞时另一个 task 仍可继续前进",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Implemented topology-level axis_fault_contract declaration across parser/AST/semantic/IR, enforced required-field parsing without implicit defaults, added semantic validation for axis-target compatibility/uniqueness, and added parser+semantic regression tests for both success and failure paths."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "工业并行语义落地（parallel/race -> scan-cycle fork/join）",
-      "description": "As a 自动化工程师, I want parallel/race 在 runtime 与 ST 目标都按扫描模型执行 so that A/B 同动与竞速分支在工业场景可落地。",
+      "title": "建立统一的 step 完成判定规则",
+      "description": "作为 DSL 使用者，我需要 step 是否离开由显式 completion rule 决定，而不是由某个 action 的隐式副作用决定，这样 step 语义才可预测。",
       "acceptanceCriteria": [
-        "定义并行语义为扫描周期并行求值，不引入线程并发语义",
-        "parallel 降级为 fork -> branch_active/branch_done -> join 非阻塞状态机",
-        "race 降级为先完成分支胜出，其余分支确定性收敛",
-        "ST codegen 支持 parallel/race，不再报 ParallelNotSupported/RaceNotSupported",
-        "runtime bridge 与 ST 在关键转移/fault 路由语义一致",
-        "新增 A/B 同时运动与 A 完成后 B 运动双轴回归",
+        "runtime 在执行 action 后统一执行 completion check，再决定 step 是否可以离开",
+        "仅包含 set、log、compute 等即时动作的 step 在无额外等待条件时可在当前 tick 完成",
+        "delay、wait 和包含挂起动作的 step 在完成条件满足前必须停留在当前 step",
+        "新增最小回归测试，覆盖即时 step、delay step、wait step 和挂起动作 step",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "Implemented scan-cycle parallel/race regression baseline: parallel synthetic state naming standardized to fork/branch_active/branch_done/join, added runtime regressions for same-tick dual-branch start, deterministic race winner selection, and slower-branch join behavior; ST codegen test compile path fixed and quality checks passed."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "异常策略矩阵可配置且可执行",
-      "description": "As a 控制工程师, I want severity/stop/reset 策略矩阵 so that 现场故障行为无歧义且可审计。",
+      "title": "为长时动作引入 Pending 生命周期",
+      "description": "作为运动控制开发者，我需要 runtime action 结果支持 Pending、Done、Fault 三态，这样 axis.move_* 之类的动作才能自然阻塞当前 step，直到完成、故障或超时。",
       "acceptanceCriteria": [
-        "支持 severity/stop_mode/auto_reset_policy/manual_ack_required 字段",
-        "运行时按策略执行并产生日志事件",
-        "策略矩阵在 runtime bridge 回归中可验证",
+        "运行时动作结果扩展为至少 Pending、Done、Fault 三态",
+        "axis.move_* 首次进入 step 时只发起一次命令，后续 tick 轮询同一挂起动作",
+        "当动作返回 Pending 时，当前 task 必须停留在当前 step",
+        "当动作返回 Done 时，当前 task 才能进入后续 step",
+        "当动作返回 Fault 时，必须沿 on_reject、on_motion_fault、on_safety_fault 路由跳转",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "Implemented axis fault strategy matrix execution by lowering topology axis_fault_contracts into runtime-core Program.axis_fault_policies, applying policy-aware runtime logging on axis faults (axis_fault_policy_applied with deterministic encoded message_id), and adding runtime bridge regressions validating severity/stop_mode/auto_reset/manual_ack matrix mapping and runtime behavior."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "停机语义落地（Controlled/Quick/Immediate）",
-      "description": "As a 现场调试人员, I want 三类停机语义可观测 so that 故障停机行为可预测。",
+      "title": "让 axis.move_* 在 step 内默认阻塞",
+      "description": "作为 PLC 程序作者，我希望 axis.move_* 自身承担运动完成语义，而不是每次调用后都手工补 wait，从而保持 DSL 表达紧凑并符合工业控制直觉。",
       "acceptanceCriteria": [
-        "runtime-core 增加 controlled/quick/immediate 三类停机状态迁移",
-        "AxisFault 触发与策略矩阵保持一致",
-        "覆盖三类停机路径回归测试",
+        "axis.move_relative 和 axis.move_absolute 的 DSL 语法保持可用，不强制新增额外字段",
+        "编译器与文档明确说明 axis.move_* 属于默认阻塞 step 的长时动作",
+        "axis.move_* 在无额外 wait 的情况下也会阻塞当前 step 直到完成、故障或超时",
+        "新增集成测试，覆盖阻塞式 axis.move_* 的成功路径和失败路径",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "Implemented runtime stop semantics for axis fault handling by introducing AxisStopState transitions (Running -> mode-specific Stopping -> Stopped), emitting deterministic stop transition logs (`axis_stop_transition_enter`/`axis_stop_transition_completed`) keyed by stop mode, and extending runtime/runtime-bridge regressions to verify controlled/quick/immediate paths remain aligned with policy matrix and AxisFault classification."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "异常分流从粗分桶升级为类型+策略路由",
-      "description": "As a 任务编排者, I want 细分 fault routing so that 不同异常类型进入不同处置路径。",
+      "title": "为挂起轴运动接入超时和故障路由",
+      "description": "作为 PLC 程序作者，我需要挂起中的 axis.move_* 继续遵循 timeout 与 fault-routing 契约，这样新的阻塞语义不会破坏现有 fault 分流能力。",
       "acceptanceCriteria": [
-        "保留 reject/motion_fault/safety_fault 主桶并支持 code/kind 细分派发",
-        "未细分时必须命中已声明主桶；主桶缺失编译失败",
-        "映射规则文档化且有测试覆盖",
+        "挂起轴运动超时后会跳转到配置的 timeout target",
+        "挂起轴运动发生 reject、motion fault、safety fault 时走现有 branch target",
+        "新增 runtime-core 或 runtime bridge 测试，覆盖 Pending 到 timeout 与 Pending 到 fault routing",
+        "axis.move_* 的 fault route 优先级与现有主桶回退契约保持一致",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "Implemented axis fault routing refinement with primary bucket + optional kind/code matcher routes across parser/AST/semantic/IR, added route compatibility validation (AXIS-010), documented deterministic mapping rules, and added parser/semantic/IR/codegen regression tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "回零状态模型与前置条件检查（内部 homing 谓词）",
-      "description": "As a PLC 编程者, I want move_absolute 自动受内部 homing 谓词约束 so that 用户无需显式管理 is_homed。",
+      "title": "让 runtime bridge 保留 task 边界",
+      "description": "作为 bridge 维护者，我需要 bridge 不再把所有 DSL task 扁平化成单个 runtime task，而是保留 task 边界和入口信息，供运行时并发调度。",
       "acceptanceCriteria": [
-        "内部 homing 谓词仅存在于 IR/runtime，不对 DSL 暴露可读写字段",
-        "move_absolute 自动注入已回零前置条件：可静态证明则编译消解，不可证明则运行时守卫",
-        "回零失败/中断/关键失效事件后 homing 谓词失效并阻断绝对运动",
+        "runtime bridge 不再把所有 DSL task 合成为一个 runtime task",
+        "bridge 输出保留 task 边界、入口和局部 step 图",
+        "tick 对齐、I/O 可解析性与动作支持校验继续对新结构生效",
+        "新增 runtime bridge 回归测试，证明多 task PLC 会被桥接为多 task 运行时结构",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "Implemented internal homing predicate flow across IR/runtime: added AxisMoveAbsolute `require_homed` flag, semantic static-proof/elision pass for homing guards, runtime-core homing tracker with pre-check (`AxisNotHomed`) and fault-driven invalidation, bridge propagation to runtime command, and regression coverage for guarded absolute moves, static-elided paths, and post-fault re-blocking behavior."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "参数合法性编译期收敛",
-      "description": "As a 开发者, I want 参数错误尽早在编译期暴露 so that 运行时不承担可静态消除的风险。",
+      "title": "重新定义并发模型下的 runtime budget",
+      "description": "作为平台维护者，我需要 runtime budget 与每 tick 保护栏能解释并发 task 执行，不再继续默认单执行点模型。",
       "acceptanceCriteria": [
-        "速度/加速度必须 > 0，单位与模型配置一致",
-        "已声明软限位时，静态可判定越界目标必须编译失败",
-        "动作参数字段采用白名单，未定义字段编译失败",
+        "明确每 tick 最大转换数是全局口径还是按 task 口径统计，并在实现与文档中保持一致",
+        "budget 相关告警和错误在多 task 模型下仍具可解释性",
+        "新增至少两个活跃 task 的 budget 分析测试",
+        "文档说明调度公平性与 budget 的关系",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 10,
-      "passes": true,
-      "notes": "Implemented compile-time parameter convergence for axis motions: added axis config soft-limit schema + validation, enforced semantic static rejection for axis.move_absolute targets beyond declared soft limits, and added parser/semantic/axis_profile regression tests for whitelist and non-positive/soft-limit failures."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-011",
-      "title": "垂直轴制动顺序安全约束",
-      "description": "As a 安全负责人, I want 先夹闸确认再去使能 so that 垂直轴故障停机符合硬安全顺序。",
+      "title": "在 safety 验证中建模并发全局状态",
+      "description": "作为验证维护者，我需要 safety 引擎能在并发 task 组合状态下检查资源冲突、互斥关系和设备约束，而不是只看顺序路径。",
       "acceptanceCriteria": [
-        "支持 orientation=vertical 与制动配置",
-        "语义/验证层强制 disable 前必须 brake_engage_confirmed",
-        "违规时输出可定位错误码与修复建议",
+        "Safety verification 可组合多个 task 的当前位置与 pending action 状态形成全局状态",
+        "conflicts_with 和 requires 能检测两个 task 时间重叠导致的冲突",
+        "新增一个共享资源冲突反例测试",
+        "新增一个不同资源可安全并发的正例测试",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 11,
-      "passes": true,
-      "notes": "Implemented vertical-axis brake sequencing contract by extending axis_config with orientation+brake schema, adding semantic AXIS-012 enforcement (disable requires prior brake engage + confirm), and adding safety preflight diagnostics plus regression tests for pass/fail paths."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-012",
-      "title": "多轴故障传播与隔离规则",
-      "description": "As a 系统集成人员, I want 可配置传播范围 so that 主从/协调组故障行为可控。",
+      "title": "在 liveness 验证中识别阻塞与死锁",
+      "description": "作为验证维护者，我需要 liveness 能区分合法等待、永久阻塞、死锁和活锁，避免阻塞 step 掩盖真实进度失败。",
       "acceptanceCriteria": [
-        "支持 propagation_scope：self/group/all/followers/custom",
-        "支持主轴故障触发从轴联停与从轴故障隔离策略",
-        "新增传播矩阵集成测试",
+        "Liveness 将 Pending action、wait、delay 统一建模为显式等待条件",
+        "当两个 task 只等待对方释放资源时，liveness 会报告 deadlock",
+        "allow_indefinite_wait 仍可豁免预期的无限等待点",
+        "新增回归测试，覆盖合法等待、死锁和活锁三类场景",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 12,
-      "passes": true,
-      "notes": "Implemented multi-axis fault propagation/isolation flow by extending axis_fault_contract with propagation_scope (+ optional custom targets), adding semantic target resolution for self/group/all/followers/custom scopes (including cam-coupling follower chains and functional-group matching), bridging resolved targets into runtime policies, and adding parser/semantic/runtime-core/runtime_bridge regression matrix tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-013",
-      "title": "语法收敛（单一合法写法）",
-      "description": "As a 项目负责人, I want 单入口语法与字段白名单 so that 现场没有歧义写法。",
+      "title": "在 timing 验证中纳入并发调度影响",
+      "description": "作为时序分析维护者，我需要 timing 引擎在并发调度下继续给出 defendable 的完成时间界限，覆盖局部 task 时长和全局完成时长。",
       "acceptanceCriteria": [
-        "轴与动作参数采用严格字段白名单，非规范字段报稳定错误码",
-        "文档只保留唯一合法语法，不提供并行别名写法",
-        "CI 增加语法收敛门禁测试",
+        "must_complete_within 与 must_complete_within_worst_case 在并发模型下有明确且可实现的解释",
+        "Pending 动作持续时间与 timeout 上界可纳入 worst-case timing 分析",
+        "Timing report 区分 task 局部完成时间和全局完成时间",
+        "新增 timing 回归测试，覆盖两个 task 并发改变最坏完成时间的场景",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 13,
-      "passes": true,
-      "notes": "Implemented syntax convergence gate for axis fields and axis.move args: parser now emits stable [AXIS-013] for non-whitelist axis.move_* argument keys (e.g. vel/jerk), axis non-whitelist inline params continue to fail with [AXP-006], added CI integration gate tests in tests/axis_syntax_convergence_us013.rs, and updated axis motion spec to keep a single canonical syntax without aliases."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-014",
-      "title": "验证引擎一致性改造",
-      "description": "As a 验证工程师, I want safety/liveness/timing/causality 对新语义一致 so that 形式验证结果可信。",
+      "title": "在 causality 验证中支持跨 task 因果链",
+      "description": "作为因果性验证维护者，我需要 causality 能识别不同 task 间通过设备、变量和事件形成的依赖链，而不是假设所有链都落在同一顺序路径中。",
       "acceptanceCriteria": [
-        "Safety 校验策略冲突与安全约束违规",
-        "Liveness 校验恢复路径可达与等待超时风险",
-        "Timing 计入 fault handling 最坏路径",
-        "Causality 覆盖异常触发链可达性",
+        "Causality graph 能在不同 task 间建立共享设备、共享变量或控制信号的边",
+        "axis.move_* 的 Pending、Done、Fault、timeout 路径都进入 causality 分析",
+        "新增一个缺失跨 task 因果链的反例测试",
+        "新增一个跨 task 因果链完整的正例测试",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 14,
-      "passes": true,
-      "notes": "Aligned verification engines with axis fault semantics: timing now includes axis.move_* inline timeout in must_complete_within_worst_case budgets, causality now validates timeout branch chains in addition to on_reject/on_motion_fault/on_safety_fault, and liveness regression coverage now verifies fault recovery paths with bounded waits and flags missing timeout risks."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-015",
-      "title": "诊断系统增强与稳定化",
-      "description": "As a 维护者, I want 诊断可机读可定位可修复 so that 故障排查可自动化。",
+      "title": "输出稳定的迁移诊断与行为差异说明",
+      "description": "作为项目维护者，我需要清楚指出旧模型与新模型的行为差异，尤其是 axis.move_* 从非阻塞假设切换到阻塞语义后的影响，避免用户在迁移时靠猜。",
       "acceptanceCriteria": [
-        "新增稳定错误码前缀 AXF-*",
-        "诊断包含源位置与修复建议，保持向后可解析",
-        "新增诊断快照测试覆盖新增字段",
+        "新增迁移指南，列出旧语义与新语义的关键行为差异",
+        "至少新增一个稳定诊断码或警告码，用于提示 axis.move_* 阻塞语义导致的行为变化",
+        "诊断 payload 保持结构化，新增字段优先采用向后兼容方式",
+        "新增诊断回归测试，覆盖新旧字段兼容解析",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 15,
-      "passes": true,
-      "notes": "Implemented diagnostics stabilization for trace-doctor outputs by introducing stable AXF-* primary issue codes with DIAG-* legacy compatibility (`legacy_issue_code`), adding per-candidate source_location (file/line/column), updating human/JSON contracts and docs, and adding regression coverage including a new snapshot-style test for the extended candidate payload."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-016",
-      "title": "示例与回归门禁",
-      "description": "As a 团队成员, I want 端到端样例与门禁 so that 方案可长期回归。",
+      "title": "提供阻塞式 axis.move_* 示例",
+      "description": "作为 PLC 用户，我需要一个最小可运行示例展示 axis.move_* 如何阻塞当前 step，并在完成、故障或超时后继续分流，作为理解和回归基线。",
       "acceptanceCriteria": [
-        "新增正常/可恢复/不可恢复或安全故障样例",
-        "examples_integration 覆盖新增样例并通过",
-        "新增 fault routing trace 快照测试",
+        "新增或更新一个 examples PLC，演示阻塞式 axis.move_* 流程",
+        "该示例在无额外 wait 模板的情况下表现出正确阻塞语义",
+        "examples 集成测试纳入该示例",
+        "文档引用该示例作为阻塞 move 的标准基线",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 16,
-      "passes": true,
-      "notes": "Added four axis fault examples for normal/recoverable/non-recoverable/safety paths (`examples/axis_fault_*_path.plc`), extended `tests/examples_integration.rs` to compile and verify the new examples, and added `tests/axis_fault_routing_trace_snapshot_us016.rs` to snapshot IR fault-route resolution traces via `resolve_axis_fault_route_target`. Validation: `cargo check`, targeted example/trace tests, and full `cargo test` all pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-017",
-      "title": "交付文档与操作手册",
-      "description": "As a 实施工程师, I want 可执行的架构与操作文档 so that 现场接入和排障可直接落地。",
+      "title": "提供上料与下料并发 task 示例",
+      "description": "作为 PLC 用户，我需要一个双 task 并发示例，例如上料与下料同时推进，用来证明新的运行时模型符合工业控制中的并行工位逻辑。",
       "acceptanceCriteria": [
-        "交付架构文档、DSL 合同文档、故障策略手册、参数分层说明",
-        "文档包含调试命令清单与常见故障诊断路径",
-        "文档示例命令可在仓库直接运行",
-        "修改E:\\personal_project\\rust_plc\\.codex\\skills\\plc-gen\\skill.md以及E:\\personal_project\\rust_plc\\.codex\\skills\\plc-system\\skill.md以适配新功能",
-        "Typecheck passes"
+        "新增或更新一个至少包含两个 task 并发推进的示例 PLC",
+        "该示例展示一个 task 阻塞时另一个 task 仍能继续推进",
+        "示例包含资源互斥或因果依赖的清晰边界，便于验证器复用",
+        "examples 集成测试纳入该并发示例",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 17,
-      "passes": true,
-      "notes": "Delivered four operator-facing documents for axis fault formalization: architecture overview (`docs/architecture/axis-fault-formal-v1.md`), frozen DSL contract (`docs/axis_fault_dsl_contract_spec.md`), fault policy operations manual (`docs/axis_fault_policy_operations_manual.md`), and axis parameter hierarchy guide (`docs/axis_parameter_hierarchy_guide.md`). Updated `.codex/skills/plc-gen/SKILL.md` and `.codex/skills/plc-system/SKILL.md` to include new axis whitelist, fault-routing, propagation, and hierarchy requirements. Validation run: `cargo check`, `cargo test --test axis_fault_routing_trace_snapshot_us016`, `cargo test --test runtime_bridge_us006`, `cargo test --test examples_integration`, and `cargo run --bin rust_plc -- examples/two_cylinder.plc`."
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "同步 AGENTS 与 skills 的长期契约",
+      "description": "作为项目维护者，我需要让 AGENTS.md 与相关 skills 同步新执行模型，避免后续生成器和代理继续基于旧的单执行点假设工作。",
+      "acceptanceCriteria": [
+        "更新 AGENTS.md，纳入并发 task、阻塞 step、验证闭环的长期原则",
+        "更新涉及 task 或 step 语义的 .codex skills，避免继续输出过时假设",
+        "清理或改写仍在描述单执行点 runtime 的相关指导文档",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "把并发运行时与验证门禁接入 CI",
+      "description": "作为平台维护者，我需要 CI 强制校验新的并发 runtime 与四类验证行为，防止未来演进悄悄退回旧模型。",
+      "acceptanceCriteria": [
+        "新增或更新 CI 与 gate 脚本，覆盖并发 runtime 行为和四类验证引擎",
+        "门禁至少覆盖阻塞 axis.move_* 示例与一个多 task 并发示例",
+        "文档化本地可复现的命令序列，能跑通这些门禁",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "形成端到端闭环验收基线",
+      "description": "作为项目负责人，我需要一个覆盖语义、编译、桥接、运行时、验证和示例回归的端到端验收清单，确保这次重构不是局部修补，而是完整闭环。",
+      "acceptanceCriteria": [
+        "给出分阶段 gate，至少包含语义冻结、IR 与 runtime 闭环、四类验证闭环、迁移与 CI 闭环",
+        "每个 gate 都有明确可执行的测试或产物要求",
+        "PRD 与 prd.json 的 user story 顺序满足依赖先后关系，可被 Ralph 顺序执行",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
