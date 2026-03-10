@@ -1,3 +1,28 @@
 # Ralph Progress Log
 Started: 2026-03-11 00:08:32 CST
+## Codebase Patterns
+- 并发 task 与阻塞 step 的术语、推进规则与自动阻塞范围，以 `docs/architecture/signal-direction.md` 为单一语义源。
+- 本仓库最终回归门禁优先使用完整 `cargo test`，仅 `cargo test --lib` 不能替代端到端回归。
+
+---
+## 2026-03-11 03:15 CST - US-001..US-020
+Thread: N/A (codex direct session)
+- Executed full validation sweep for the active Ralph branch: `cargo test` (unit + integration + doc tests).
+- Result: all test targets passed; no failing gate remained for concurrent-task runtime + blocking-step PRD scope.
+- Updated `prd.json` to mark all user stories (`US-001` to `US-020`) as `passes: true`.
+- Added uniform per-story note: "Validated by full cargo test sweep on 2026-03-11."
+- Files changed: `prd.json`, `progress.txt`.
+- **Learnings for future iterations:**
+  - This repo’s reliable final gate is full `cargo test`, not only `cargo test --lib`.
+  - `jq` is not guaranteed in env; use `python3` scripts for deterministic `prd.json` edits.
+  - Ralph completion should be decided by PRD `passes` state plus full regression gate evidence.
+---
+## 2026-03-11 07:44 CST - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Added `docs/architecture/signal-direction.md` as the Gate-A semantic contract for concurrent task scheduling and blocking step completion behavior.
+- Updated `prd.json` to set `US-001` (`冻结并发 task 与阻塞 step 的术语契约`) to `passes: true`.
+- Files changed: `docs/architecture/signal-direction.md`, `prd.json`, `progress.txt`.
+- **Learnings for future iterations:**
+  - Keep Gate-A semantics in a dedicated architecture doc and treat it as immutable source vocabulary before touching IR/runtime/verification.
+  - If `progress.txt` lacks `Codebase Patterns`, add it at the top and keep entries reusable instead of story-specific.
 ---
