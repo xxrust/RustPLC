@@ -1,0 +1,3 @@
+name = "servo_class_standard"
+max_speed = 10000.0
+max_acceleration = 32000.0

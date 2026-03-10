@@ -1,0 +1,12 @@
+name = "stepper_vertical_brake"
+model_id = "stepper_generic"
+position_unit = "pulse"
+speed_limit = 3000.0
+acceleration_limit = 10000.0
+orientation = "vertical"
+
+[brake]
+engage_port = "brake_cmd"
+engage_value = "on"
+engage_confirm_port = "brake_engaged"
+engage_confirm_value = true

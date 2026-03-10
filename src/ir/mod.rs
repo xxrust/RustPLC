@@ -34,14 +34,44 @@ pub enum AxisDeviceType {
     ServoDrive,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisOrientation {
+    Horizontal,
+    Vertical,
+}
+
+fn default_axis_orientation() -> AxisOrientation {
+    AxisOrientation::Horizontal
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AxisBrakeConfig {
+    pub engage_port: String,
+    pub engage_value: BinaryValue,
+    pub engage_confirm_port: String,
+    pub engage_confirm_value: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AxisProfile {
     pub device_type: AxisDeviceType,
+    pub motor_class_id: String,
+    pub family_id: String,
+    #[serde(default = "default_axis_orientation")]
+    pub orientation: AxisOrientation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brake: Option<AxisBrakeConfig>,
     pub position_unit: String,
     pub max_speed: f32,
     pub max_acceleration: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_limit_min: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_limit_max: Option<f32>,
     pub model_ref: String,
     pub config_ref: String,
+    pub motion_param_set: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -124,6 +154,57 @@ pub struct ExternFunctionContract {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AxisFaultContractDef {
+    pub name: String,
+    pub axis: String,
+    pub severity: AxisFaultSeverity,
+    pub stop_mode: AxisStopMode,
+    pub auto_reset_policy: AxisAutoResetPolicy,
+    pub manual_ack_required: bool,
+    pub propagation_scope: AxisFaultPropagationScope,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub propagation_targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisFaultSeverity {
+    Recoverable,
+    NonRecoverable,
+    Safety,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisStopMode {
+    Controlled,
+    Quick,
+    Immediate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisAutoResetPolicy {
+    Never,
+    OnClear,
+    Immediate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AxisFaultPropagationScope {
+    #[serde(rename = "self")]
+    SelfOnly,
+    #[serde(rename = "group")]
+    Group,
+    #[serde(rename = "all")]
+    All,
+    #[serde(rename = "followers")]
+    Followers,
+    #[serde(rename = "custom")]
+    Custom,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PidLoop {
     pub name: String,
     pub pv: String,
@@ -173,6 +254,8 @@ pub struct TopologyGraph {
     pub cam_couplings: Vec<CamCouplingDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extern_functions: Vec<ExternFunctionDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub axis_fault_contracts: Vec<AxisFaultContractDef>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub axis_profiles: BTreeMap<String, AxisProfile>,
 }
@@ -187,6 +270,7 @@ impl TopologyGraph {
             cam_tables: Vec::new(),
             cam_couplings: Vec::new(),
             extern_functions: Vec::new(),
+            axis_fault_contracts: Vec::new(),
             axis_profiles: BTreeMap::new(),
         }
     }
@@ -281,16 +365,30 @@ pub enum TransitionAction {
         on_reject: AxisFaultBranch,
         on_motion_fault: AxisFaultBranch,
         on_safety_fault: AxisFaultBranch,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_reject_routes: Vec<AxisFaultRouteBranch>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_motion_fault_routes: Vec<AxisFaultRouteBranch>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_safety_fault_routes: Vec<AxisFaultRouteBranch>,
     },
     AxisMoveAbsolute {
         target: String,
         port: String,
         position_raw: String,
         speed_raw: String,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        require_homed: bool,
         timeout: AxisTimeoutBranch,
         on_reject: AxisFaultBranch,
         on_motion_fault: AxisFaultBranch,
         on_safety_fault: AxisFaultBranch,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_reject_routes: Vec<AxisFaultRouteBranch>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_motion_fault_routes: Vec<AxisFaultRouteBranch>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_safety_fault_routes: Vec<AxisFaultRouteBranch>,
     },
     Log {
         message: String,
@@ -305,13 +403,117 @@ pub struct AxisTimeoutBranch {
     pub target_step: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisFaultCategory {
+    Recoverable,
+    NonRecoverable,
+    Safety,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AxisFaultKind {
+    Reject,
+    Motion,
+    Safety,
+    Vendor {
+        category: AxisFaultCategory,
+        vendor_code: i32,
+    },
+}
+
+impl AxisFaultKind {
+    pub const fn category(&self) -> AxisFaultCategory {
+        match self {
+            AxisFaultKind::Reject => AxisFaultCategory::Recoverable,
+            AxisFaultKind::Motion => AxisFaultCategory::NonRecoverable,
+            AxisFaultKind::Safety => AxisFaultCategory::Safety,
+            AxisFaultKind::Vendor { category, .. } => *category,
+        }
+    }
+
+    pub const fn vendor_code(&self) -> Option<i32> {
+        match self {
+            AxisFaultKind::Vendor { vendor_code, .. } => Some(*vendor_code),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AxisFaultBranch {
     pub target_task: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_step: Option<String>,
+    pub kind: AxisFaultKind,
+    pub category: AxisFaultCategory,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisFaultRouteKind {
+    Reject,
+    Motion,
+    Safety,
+    Vendor,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AxisFaultRouteBranch {
+    pub target_task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_step: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AxisFaultRouteKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<i32>,
+}
+
+impl AxisFaultRouteKind {
+    pub const fn from_fault_kind(kind: &AxisFaultKind) -> Self {
+        match kind {
+            AxisFaultKind::Reject => AxisFaultRouteKind::Reject,
+            AxisFaultKind::Motion => AxisFaultRouteKind::Motion,
+            AxisFaultKind::Safety => AxisFaultRouteKind::Safety,
+            AxisFaultKind::Vendor { .. } => AxisFaultRouteKind::Vendor,
+        }
+    }
+}
+
+impl AxisFaultRouteBranch {
+    pub fn matches(&self, kind: AxisFaultRouteKind, code: i32) -> bool {
+        let kind_match = match self.kind {
+            Some(expected) => expected == kind,
+            None => true,
+        };
+        let code_match = match self.code {
+            Some(expected) => expected == code,
+            None => true,
+        };
+        kind_match && code_match
+    }
+}
+
+pub fn resolve_axis_fault_route_target<'a>(
+    primary: &'a AxisFaultBranch,
+    routes: &'a [AxisFaultRouteBranch],
+    fault_kind: &AxisFaultKind,
+    error_code: i32,
+) -> (&'a str, Option<&'a str>) {
+    let route_kind = AxisFaultRouteKind::from_fault_kind(fault_kind);
+    if let Some(route) = routes
+        .iter()
+        .find(|route| route.matches(route_kind, error_code))
+    {
+        return (&route.target_task, route.target_step.as_deref());
+    }
+
+    (&primary.target_task, primary.target_step.as_deref())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -371,6 +573,14 @@ pub struct StateExpr {
 
 fn default_self_port() -> String {
     "self".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -549,6 +759,16 @@ mod tests {
                 time_bound_us: 50,
             },
         });
+        topology.axis_fault_contracts.push(AxisFaultContractDef {
+            name: "axis_x_fault".to_string(),
+            axis: "axis_x".to_string(),
+            severity: AxisFaultSeverity::Safety,
+            stop_mode: AxisStopMode::Immediate,
+            auto_reset_policy: AxisAutoResetPolicy::Never,
+            manual_ack_required: true,
+            propagation_scope: AxisFaultPropagationScope::SelfOnly,
+            propagation_targets: vec!["axis_x".to_string()],
+        });
 
         let state_machine = StateMachine {
             states: vec![
@@ -591,18 +811,30 @@ mod tests {
                         on_reject: AxisFaultBranch {
                             target_task: "fault".to_string(),
                             target_step: Some("reject".to_string()),
+                            kind: AxisFaultKind::Reject,
+                            category: AxisFaultCategory::Recoverable,
+                            vendor_code: None,
                             error_code: Some("AXIS_REJECT".to_string()),
                         },
                         on_motion_fault: AxisFaultBranch {
                             target_task: "fault".to_string(),
                             target_step: Some("motion_fault".to_string()),
+                            kind: AxisFaultKind::Motion,
+                            category: AxisFaultCategory::NonRecoverable,
+                            vendor_code: None,
                             error_code: Some("AXIS_MOTION_FAULT".to_string()),
                         },
                         on_safety_fault: AxisFaultBranch {
                             target_task: "fault".to_string(),
                             target_step: Some("safety_fault".to_string()),
+                            kind: AxisFaultKind::Safety,
+                            category: AxisFaultCategory::Safety,
+                            vendor_code: None,
                             error_code: Some("AXIS_SAFETY_FAULT".to_string()),
                         },
+                        on_reject_routes: vec![],
+                        on_motion_fault_routes: vec![],
+                        on_safety_fault_routes: vec![],
                     },
                     TransitionAction::CallExtern {
                         function: "add".to_string(),
@@ -677,9 +909,12 @@ mod tests {
 
         assert!(topology_json.contains("graph"));
         assert!(topology_json.contains("extern_functions"));
+        assert!(topology_json.contains("axis_fault_contracts"));
         assert!(sm_json.contains("transitions"));
         assert!(sm_json.contains("call_extern"));
         assert!(sm_json.contains("axis_move_relative"));
+        assert!(sm_json.contains("\"kind\": \"reject\""));
+        assert!(sm_json.contains("\"category\": \"recoverable\""));
         assert!(sm_json.contains("error_code"));
         assert!(constraints_json.contains("conflicts_with"));
         assert!(timing_json.contains("intervals"));
@@ -689,5 +924,65 @@ mod tests {
         assert_eq!(decoded_topology.graph.node_count(), 2);
         assert_eq!(decoded_topology.graph.edge_count(), 1);
         assert_eq!(decoded_topology.extern_functions.len(), 1);
+        assert_eq!(decoded_topology.axis_fault_contracts.len(), 1);
+    }
+
+    #[test]
+    fn axis_fault_kind_keeps_vendor_extension_slot() {
+        let kind = AxisFaultKind::Vendor {
+            category: AxisFaultCategory::NonRecoverable,
+            vendor_code: 1201,
+        };
+
+        assert_eq!(kind.category(), AxisFaultCategory::NonRecoverable);
+        assert_eq!(kind.vendor_code(), Some(1201));
+    }
+
+    #[test]
+    fn resolve_axis_fault_route_target_prefers_first_matching_route_then_fallback() {
+        let primary = AxisFaultBranch {
+            target_task: "fault".to_string(),
+            target_step: Some("motion_default".to_string()),
+            kind: AxisFaultKind::Motion,
+            category: AxisFaultCategory::NonRecoverable,
+            vendor_code: None,
+            error_code: None,
+        };
+        let routes = vec![
+            AxisFaultRouteBranch {
+                target_task: "fault".to_string(),
+                target_step: Some("motion_vendor".to_string()),
+                kind: Some(AxisFaultRouteKind::Vendor),
+                code: None,
+            },
+            AxisFaultRouteBranch {
+                target_task: "fault".to_string(),
+                target_step: Some("motion_code_17".to_string()),
+                kind: None,
+                code: Some(17),
+            },
+        ];
+
+        let (vendor_task, vendor_step) = resolve_axis_fault_route_target(
+            &primary,
+            &routes,
+            &AxisFaultKind::Vendor {
+                category: AxisFaultCategory::NonRecoverable,
+                vendor_code: 9901,
+            },
+            9901,
+        );
+        assert_eq!(vendor_task, "fault");
+        assert_eq!(vendor_step, Some("motion_vendor"));
+
+        let (code_task, code_step) =
+            resolve_axis_fault_route_target(&primary, &routes, &AxisFaultKind::Motion, 17);
+        assert_eq!(code_task, "fault");
+        assert_eq!(code_step, Some("motion_code_17"));
+
+        let (fallback_task, fallback_step) =
+            resolve_axis_fault_route_target(&primary, &routes, &AxisFaultKind::Motion, 99);
+        assert_eq!(fallback_task, "fault");
+        assert_eq!(fallback_step, Some("motion_default"));
     }
 }

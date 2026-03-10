@@ -1,4 +1,7 @@
 use crate::ir::{
+    AxisAutoResetPolicy as IrAxisAutoResetPolicy,
+    AxisFaultPropagationScope as IrAxisFaultPropagationScope,
+    AxisFaultSeverity as IrAxisFaultSeverity, AxisStopMode as IrAxisStopMode,
     BinaryValue as IrBinaryValue, CamInterpolation as IrCamInterpolation, DeviceKind, State,
     StateMachine, TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
@@ -7,10 +10,12 @@ use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
 use petgraph::Direction;
 use petgraph::graph::NodeIndex;
 use runtime_core::{
-    Action, AnalogRange, AntiWindup, AxisMotionCommand, AxisMoveKind, CamAnalogField,
-    CamCouplingConfig, CamDigitalField, CamInterpolation as RtCamInterpolation, CamTableData,
-    CompareOp, ExprOp, ExprProgram, Instr, MAX_CAM_POINTS, PidConfig, Program,
-    SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
+    Action, AnalogRange, AntiWindup, AxisAutoResetPolicy as RtAxisAutoResetPolicy, AxisFaultPolicy,
+    AxisFaultPropagationScope as RtAxisFaultPropagationScope,
+    AxisFaultSeverity as RtAxisFaultSeverity, AxisMotionCommand, AxisMoveKind,
+    AxisStopMode as RtAxisStopMode, CamAnalogField, CamCouplingConfig, CamDigitalField,
+    CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, ExprOp, ExprProgram, Instr,
+    MAX_CAM_POINTS, PidConfig, Program, SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -265,13 +270,78 @@ pub fn state_machine_to_runtime_program(
             .collect::<Vec<_>>()
             .into_boxed_slice(),
     );
+    let leaked_axis_fault_policies: &'static [AxisFaultPolicy<'static>] =
+        Box::leak(build_axis_fault_policies(topology).into_boxed_slice());
     Ok(Program {
         tasks: leaked_tasks,
         pid_loops: leaked_pid_loops,
         var_init: leaked_var_init,
         cam_configs: leaked_cam_configs,
         cam_tables: leaked_cam_tables,
+        axis_fault_policies: leaked_axis_fault_policies,
     })
+}
+
+fn build_axis_fault_policies(topology: &TopologyGraph) -> Vec<AxisFaultPolicy<'static>> {
+    topology
+        .axis_fault_contracts
+        .iter()
+        .map(|contract| AxisFaultPolicy {
+            axis: Box::leak(contract.axis.clone().into_boxed_str()),
+            severity: lower_axis_fault_severity(contract.severity.clone()),
+            stop_mode: lower_axis_stop_mode(contract.stop_mode.clone()),
+            auto_reset_policy: lower_axis_auto_reset_policy(contract.auto_reset_policy.clone()),
+            manual_ack_required: contract.manual_ack_required,
+            propagation_scope: lower_axis_fault_propagation_scope(
+                contract.propagation_scope.clone(),
+            ),
+            propagation_targets: leak_str_slice(&contract.propagation_targets),
+        })
+        .collect()
+}
+
+fn leak_str_slice(values: &[String]) -> &'static [&'static str] {
+    let leaked_values = values
+        .iter()
+        .map(|value| Box::leak(value.clone().into_boxed_str()) as &'static str)
+        .collect::<Vec<_>>();
+    Box::leak(leaked_values.into_boxed_slice())
+}
+
+fn lower_axis_fault_severity(severity: IrAxisFaultSeverity) -> RtAxisFaultSeverity {
+    match severity {
+        IrAxisFaultSeverity::Recoverable => RtAxisFaultSeverity::Recoverable,
+        IrAxisFaultSeverity::NonRecoverable => RtAxisFaultSeverity::NonRecoverable,
+        IrAxisFaultSeverity::Safety => RtAxisFaultSeverity::Safety,
+    }
+}
+
+fn lower_axis_stop_mode(stop_mode: IrAxisStopMode) -> RtAxisStopMode {
+    match stop_mode {
+        IrAxisStopMode::Controlled => RtAxisStopMode::Controlled,
+        IrAxisStopMode::Quick => RtAxisStopMode::Quick,
+        IrAxisStopMode::Immediate => RtAxisStopMode::Immediate,
+    }
+}
+
+fn lower_axis_auto_reset_policy(policy: IrAxisAutoResetPolicy) -> RtAxisAutoResetPolicy {
+    match policy {
+        IrAxisAutoResetPolicy::Never => RtAxisAutoResetPolicy::Never,
+        IrAxisAutoResetPolicy::OnClear => RtAxisAutoResetPolicy::OnClear,
+        IrAxisAutoResetPolicy::Immediate => RtAxisAutoResetPolicy::Immediate,
+    }
+}
+
+fn lower_axis_fault_propagation_scope(
+    scope: IrAxisFaultPropagationScope,
+) -> RtAxisFaultPropagationScope {
+    match scope {
+        IrAxisFaultPropagationScope::SelfOnly => RtAxisFaultPropagationScope::SelfOnly,
+        IrAxisFaultPropagationScope::Group => RtAxisFaultPropagationScope::Group,
+        IrAxisFaultPropagationScope::All => RtAxisFaultPropagationScope::All,
+        IrAxisFaultPropagationScope::Followers => RtAxisFaultPropagationScope::Followers,
+        IrAxisFaultPropagationScope::Custom => RtAxisFaultPropagationScope::Custom,
+    }
 }
 
 fn validate_extern_tick_budget(
@@ -548,7 +618,7 @@ fn convert_state_outgoing(
             cam_table_indices,
             extern_signatures,
         ),
-        2 => convert_wait_with_timeout(
+        2 => convert_two_transitions(
             resolver,
             state_name,
             outs,
@@ -709,7 +779,7 @@ fn convert_single_transition(
     }
 }
 
-fn convert_wait_with_timeout(
+fn convert_two_transitions(
     resolver: &TopologyResolver,
     state_name: &str,
     outs: &[&Transition],
@@ -722,36 +792,88 @@ fn convert_wait_with_timeout(
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
 ) -> Result<Instr<'static>, BridgeError> {
-    let (cond, timeout) = match (outs[0], outs[1]) {
+    let pair = (outs[0], outs[1]);
+
+    if let Some((always, timeout)) = match pair {
+        (a, b)
+            if matches!(a.guard, TransitionGuard::Always)
+                && matches!(b.guard, TransitionGuard::Timeout { .. }) =>
+        {
+            Some((a, b))
+        }
+        (a, b)
+            if matches!(b.guard, TransitionGuard::Always)
+                && matches!(a.guard, TransitionGuard::Timeout { .. }) =>
+        {
+            Some((b, a))
+        }
+        _ => None,
+    } {
+        let _ = timeout;
+        return convert_single_transition(
+            resolver,
+            state_name,
+            always,
+            state_to_step,
+            steps,
+            sm,
+            tick_ms,
+            variable_indices,
+            cam_indices,
+            cam_table_indices,
+            extern_signatures,
+        );
+    }
+
+    let (cond, fallback_transition, after_ticks) = if let Some((cond, timeout)) = match pair {
         (a, b)
             if matches!(a.guard, TransitionGuard::Condition { .. })
                 && matches!(b.guard, TransitionGuard::Timeout { .. }) =>
         {
-            (a, b)
+            Some((a, b))
         }
         (a, b)
             if matches!(b.guard, TransitionGuard::Condition { .. })
                 && matches!(a.guard, TransitionGuard::Timeout { .. }) =>
         {
-            (b, a)
+            Some((b, a))
         }
-        _ => {
-            return Err(BridgeError::UnsupportedTransitionShape {
-                state: state_name.to_string(),
-                details: "expected exactly one condition and one timeout transition".to_string(),
-            });
+        _ => None,
+    } {
+        let TransitionGuard::Timeout { duration_ms } = &timeout.guard else {
+            unreachable!();
+        };
+        (
+            cond,
+            timeout,
+            ms_to_ticks(state_name, *duration_ms, tick_ms)?,
+        )
+    } else if let Some((cond, fallback)) = match pair {
+        (a, b)
+            if matches!(a.guard, TransitionGuard::Condition { .. })
+                && matches!(b.guard, TransitionGuard::Always) =>
+        {
+            Some((a, b))
         }
+        (a, b)
+            if matches!(b.guard, TransitionGuard::Condition { .. })
+                && matches!(a.guard, TransitionGuard::Always) =>
+        {
+            Some((b, a))
+        }
+        _ => None,
+    } {
+        (cond, fallback, 0)
+    } else {
+        return Err(BridgeError::UnsupportedTransitionShape {
+            state: state_name.to_string(),
+            details: "expected condition+timeout, condition+always, or always+timeout".to_string(),
+        });
     };
 
     let TransitionGuard::Condition { expression } = &cond.guard else {
         unreachable!();
     };
-    let TransitionGuard::Timeout { duration_ms } = &timeout.guard else {
-        unreachable!();
-    };
-
-    let expr = expression.trim();
-    let analog_wait = parse_analog_region_guard(expr);
 
     let cond_target = lookup_target_step(state_name, &cond.to, state_to_step)?;
     let cond_next = if cond.actions.is_empty() {
@@ -771,17 +893,17 @@ fn convert_wait_with_timeout(
         )?
     };
 
-    let timeout_target = lookup_target_step(state_name, &timeout.to, state_to_step)?;
-    let timeout_next = if timeout.actions.is_empty() {
-        timeout_target
+    let fallback_target = lookup_target_step(state_name, &fallback_transition.to, state_to_step)?;
+    let fallback_next = if fallback_transition.actions.is_empty() {
+        fallback_target
     } else {
         push_action_step(
             steps,
-            &format!("{state_name}__timeout_actions"),
+            &format!("{state_name}__fallback_actions"),
             resolver,
             state_name,
-            &timeout.actions,
-            timeout_target,
+            &fallback_transition.actions,
+            fallback_target,
             variable_indices,
             cam_indices,
             cam_table_indices,
@@ -789,7 +911,34 @@ fn convert_wait_with_timeout(
         )?
     };
 
-    let after_ticks = ms_to_ticks(state_name, *duration_ms, tick_ms)?;
+    condition_to_wait_instr(
+        resolver,
+        state_name,
+        &expression,
+        sm,
+        variable_indices,
+        cam_indices,
+        cond_next,
+        Some(Timeout {
+            after_ticks,
+            target: fallback_next,
+        }),
+    )
+}
+
+fn condition_to_wait_instr(
+    resolver: &TopologyResolver,
+    state_name: &str,
+    expression: &str,
+    sm: &StateMachine,
+    variable_indices: &HashMap<String, u16>,
+    cam_indices: &HashMap<String, u16>,
+    cond_next: StepId,
+    timeout: Option<Timeout>,
+) -> Result<Instr<'static>, BridgeError> {
+    let expr = expression.trim();
+    let analog_wait = parse_analog_region_guard(expr);
+
     if let Some((device, ranges)) = analog_wait {
         let id = resolver.resolve_analog_input_id(state_name, &device)?;
         let analog_ranges = ranges_to_analog_ranges(sm, state_name, &device, &ranges)?;
@@ -797,19 +946,10 @@ fn convert_wait_with_timeout(
             id,
             ranges: analog_ranges,
             next: cond_next,
-            timeout: Some(Timeout {
-                after_ticks,
-                target: timeout_next,
-            }),
+            timeout,
         })
     } else if let Some(cam_guard) = parse_cam_wait_guard(expr, cam_indices) {
-        Ok(cam_guard.into_instr(
-            cond_next,
-            Some(Timeout {
-                after_ticks,
-                target: timeout_next,
-            }),
-        ))
+        Ok(cam_guard.into_instr(cond_next, timeout))
     } else if let Ok((lhs, equals)) = parse_single_bool_guard(state_name, expr) {
         if variable_indices.contains_key(&lhs) {
             let left = compile_guard_expr_program(state_name, &lhs, variable_indices)?;
@@ -823,10 +963,7 @@ fn convert_wait_with_timeout(
                 op: CompareOp::Eq,
                 right,
                 next: cond_next,
-                timeout: Some(Timeout {
-                    after_ticks,
-                    target: timeout_next,
-                }),
+                timeout,
             })
         } else {
             let id = resolver.resolve_digital_input_id(state_name, &lhs)?;
@@ -834,10 +971,7 @@ fn convert_wait_with_timeout(
                 id,
                 equals,
                 next: cond_next,
-                timeout: Some(Timeout {
-                    after_ticks,
-                    target: timeout_next,
-                }),
+                timeout,
             })
         }
     } else if let Some((left_raw, op, right_raw)) = parse_compare_guard(expr) {
@@ -848,10 +982,7 @@ fn convert_wait_with_timeout(
             op,
             right,
             next: cond_next,
-            timeout: Some(Timeout {
-                after_ticks,
-                target: timeout_next,
-            }),
+            timeout,
         })
     } else {
         Err(BridgeError::UnsupportedGuardExpression {
@@ -1492,6 +1623,7 @@ fn convert_action(
                     kind: AxisMoveKind::Relative,
                     value: distance,
                     speed,
+                    require_homed: false,
                 },
             })
         }
@@ -1500,6 +1632,7 @@ fn convert_action(
             port,
             position_raw,
             speed_raw,
+            require_homed,
             ..
         } => {
             let profile =
@@ -1543,6 +1676,7 @@ fn convert_action(
                     kind: AxisMoveKind::Absolute,
                     value: position,
                     speed,
+                    require_homed: *require_homed,
                 },
             })
         }

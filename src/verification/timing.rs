@@ -280,8 +280,9 @@ impl TimingContext {
             | ActionStatement::CamDisengage { .. }
             | ActionStatement::CamSwitch { .. }
             | ActionStatement::CamPhase { .. } => return None,
-            ActionStatement::AxisMoveRelative { .. }
-            | ActionStatement::AxisMoveAbsolute { .. } => return None,
+            ActionStatement::AxisMoveRelative { .. } | ActionStatement::AxisMoveAbsolute { .. } => {
+                return None;
+            }
             ActionStatement::Compute { .. } | ActionStatement::Call { .. } => return None,
             ActionStatement::Log { .. } => return None,
         };
@@ -511,6 +512,9 @@ fn max_timeout_ms(statements: &[StepStatement]) -> u64 {
             StepStatement::Timeout(timeout) => {
                 timeout_max_ms = timeout_max_ms.max(duration_value_to_ms(&timeout.duration));
             }
+            StepStatement::Action(action) => {
+                timeout_max_ms = timeout_max_ms.max(max_axis_timeout_in_action(action));
+            }
             StepStatement::IfElse { .. } => {}
             StepStatement::Repeat { body, .. } => {
                 timeout_max_ms = timeout_max_ms.max(max_timeout_ms(body));
@@ -525,8 +529,7 @@ fn max_timeout_ms(statements: &[StepStatement]) -> u64 {
                     timeout_max_ms = timeout_max_ms.max(max_timeout_ms(&branch.statements));
                 }
             }
-            StepStatement::Action(_)
-            | StepStatement::Wait(_)
+            StepStatement::Wait(_)
             | StepStatement::Delay { .. }
             | StepStatement::Goto(_)
             | StepStatement::AllowIndefiniteWait(_) => {}
@@ -534,6 +537,20 @@ fn max_timeout_ms(statements: &[StepStatement]) -> u64 {
     }
 
     timeout_max_ms
+}
+
+fn max_axis_timeout_in_action(action: &ActionStatement) -> u64 {
+    match action {
+        ActionStatement::AxisMoveRelative {
+            timeout: Some(timeout),
+            ..
+        }
+        | ActionStatement::AxisMoveAbsolute {
+            timeout: Some(timeout),
+            ..
+        } => duration_value_to_ms(&timeout.duration),
+        _ => 0,
+    }
 }
 
 fn max_delay_ms(statements: &[StepStatement]) -> u64 {
@@ -883,6 +900,59 @@ task init:
         assert!(joined.contains("must_complete_within 200ms"));
         assert!(joined.contains("must_complete_within_worst_case 200ms"));
         assert!(joined.contains("220ms"), "两条约束应共享相同关键路径 220ms");
+    }
+
+    #[test]
+    fn axis_move_timeout_is_counted_in_worst_case_timing_budget() {
+        let source = r#"
+[topology]
+
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+
+[constraints]
+
+timing: task.main.move must_complete_within 1200ms
+timing: task.main.move must_complete_within_worst_case 1200ms
+
+[tasks]
+
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 1500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+
+task fault:
+    step timeout:
+        action: log "timeout"
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let errors = verify_timing(&program, &topology, &constraints, &state_machine)
+            .expect_err("axis.move timeout 上界应计入 worst_case 并触发超限");
+
+        assert_eq!(errors.len(), 1, "仅 worst_case 约束应失败");
+        let rendered = errors[0].to_string();
+        assert!(
+            rendered.contains("must_complete_within_worst_case 1200ms"),
+            "失败约束应指向 must_complete_within_worst_case"
+        );
+        assert!(
+            rendered.contains("1500ms"),
+            "错误分析应体现 axis.move timeout 上界 1500ms"
+        );
     }
 
     #[test]

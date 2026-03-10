@@ -931,4 +931,95 @@ task fault_handler:
         verify_liveness(&program, &state_machine)
             .expect("race 每条路径都通过 goto/timeout 跳转时 unreachable 应合法");
     }
+
+    #[test]
+    fn accepts_axis_fault_recovery_path_with_bounded_wait() {
+        let source = r#"
+[topology]
+
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+device sensor_fault: sensor
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto ready
+
+task fault:
+    step timeout:
+        wait: sensor_fault == true
+        timeout: 200ms -> goto ready
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+    on_complete: goto ready
+
+task ready:
+    step idle:
+        action: log "idle"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        verify_liveness(&program, &state_machine)
+            .expect("axis 故障恢复路径有界等待且可完成时应通过活性检查");
+    }
+
+    #[test]
+    fn rejects_axis_fault_recovery_wait_without_timeout() {
+        let source = r#"
+[topology]
+
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+device sensor_fault: sensor
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+
+task fault:
+    step timeout:
+        wait: sensor_fault == true
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        let errors = verify_liveness(&program, &state_machine)
+            .expect_err("axis 故障恢复 wait 缺少 timeout 时应报错");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.to_string().contains("fault.timeout")
+                    && error.to_string().contains("缺少 timeout")),
+            "错误应指出 fault.timeout 恢复等待缺少 timeout"
+        );
+    }
 }

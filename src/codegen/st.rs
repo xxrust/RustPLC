@@ -29,14 +29,6 @@ impl Default for StCodegenConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StCodegenError {
-    ParallelNotSupported {
-        task: String,
-        step: String,
-    },
-    RaceNotSupported {
-        task: String,
-        step: String,
-    },
     EmptyStateMachine,
     UnresolvedGoto {
         from: String,
@@ -57,12 +49,6 @@ pub enum StCodegenError {
 impl fmt::Display for StCodegenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            StCodegenError::ParallelNotSupported { task, step } => {
-                write!(f, "parallel is not supported in phase 1: {task}.{step}")
-            }
-            StCodegenError::RaceNotSupported { task, step } => {
-                write!(f, "race is not supported in phase 1: {task}.{step}")
-            }
             StCodegenError::EmptyStateMachine => write!(f, "state machine has no states"),
             StCodegenError::UnresolvedGoto { from, target } => {
                 write!(f, "unresolved goto target from {from} -> {target}")
@@ -148,7 +134,7 @@ pub fn generate_st(
     state_machine: &StateMachine,
     config: &StCodegenConfig,
 ) -> Result<String, Vec<StCodegenError>> {
-    let mut errors = collect_unsupported_constructs(state_machine);
+    let mut errors = Vec::new();
     if state_machine.states.is_empty() {
         errors.push(StCodegenError::EmptyStateMachine);
     }
@@ -201,30 +187,6 @@ pub fn generate_st(
     out.push_str("END_PROGRAM\n");
 
     Ok(out)
-}
-
-fn collect_unsupported_constructs(state_machine: &StateMachine) -> Vec<StCodegenError> {
-    let mut errors = Vec::new();
-    let mut seen_parallel = HashSet::new();
-    let mut seen_race = HashSet::new();
-
-    for state in &state_machine.states {
-        let key = format!("{}.{}", state.task_name, state.step_name);
-        if state.step_name.contains("__parallel_") && seen_parallel.insert(key.clone()) {
-            errors.push(StCodegenError::ParallelNotSupported {
-                task: state.task_name.clone(),
-                step: state.step_name.clone(),
-            });
-        }
-        if state.step_name.contains("__race_") && seen_race.insert(key) {
-            errors.push(StCodegenError::RaceNotSupported {
-                task: state.task_name.clone(),
-                step: state.step_name.clone(),
-            });
-        }
-    }
-
-    errors
 }
 
 fn assign_state_ids(state_machine: &StateMachine) -> HashMap<(String, String), i32> {
@@ -738,8 +700,11 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             on_reject,
             on_motion_fault,
             on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         } => format!(
-            "(* AXIS_MOVE_RELATIVE {} distance={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} *)",
+            "(* AXIS_MOVE_RELATIVE {} distance={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
             normalize_identifier_for_st(target),
             distance_raw.trim(),
             speed_raw.trim(),
@@ -748,18 +713,25 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             render_axis_fault_target(on_reject),
             render_axis_fault_target(on_motion_fault),
             render_axis_fault_target(on_safety_fault),
+            render_axis_fault_routes(on_reject_routes),
+            render_axis_fault_routes(on_motion_fault_routes),
+            render_axis_fault_routes(on_safety_fault_routes),
         ),
         TransitionAction::AxisMoveAbsolute {
             target,
             position_raw,
             speed_raw,
+            require_homed: _,
             port: _,
             timeout,
             on_reject,
             on_motion_fault,
             on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         } => format!(
-            "(* AXIS_MOVE_ABSOLUTE {} position={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} *)",
+            "(* AXIS_MOVE_ABSOLUTE {} position={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
             normalize_identifier_for_st(target),
             position_raw.trim(),
             speed_raw.trim(),
@@ -768,6 +740,9 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             render_axis_fault_target(on_reject),
             render_axis_fault_target(on_motion_fault),
             render_axis_fault_target(on_safety_fault),
+            render_axis_fault_routes(on_reject_routes),
+            render_axis_fault_routes(on_motion_fault_routes),
+            render_axis_fault_routes(on_safety_fault_routes),
         ),
     }
 }
@@ -785,6 +760,28 @@ fn render_axis_fault_target(branch: &crate::ir::AxisFaultBranch) -> String {
         Some(code) => format!("{target}[{code}]"),
         None => target,
     }
+}
+
+fn render_axis_fault_routes(routes: &[crate::ir::AxisFaultRouteBranch]) -> String {
+    if routes.is_empty() {
+        return "-".to_string();
+    }
+    routes
+        .iter()
+        .map(|route| {
+            let target = render_axis_target(&route.target_task, route.target_step.as_deref());
+            let kind = route
+                .kind
+                .map(|value| format!("{:?}", value).to_lowercase())
+                .unwrap_or_else(|| "*".to_string());
+            let code = route
+                .code
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "*".to_string());
+            format!("{kind}:{code}->{target}")
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn render_bool_assignment_expr(expr_raw: &str) -> String {
@@ -1141,8 +1138,8 @@ fn state_id_of(state: &State, state_ids: &HashMap<(String, String), i32>) -> Opt
 mod tests {
     use super::*;
     use crate::ir::{
-        AxisFaultBranch, AxisTimeoutBranch, StateMachine, TimerOperation, Transition,
-        TransitionAction, TransitionGuard,
+        AxisFaultBranch, AxisFaultCategory, AxisFaultKind, AxisTimeoutBranch, StateMachine,
+        TimerOperation, Transition, TransitionAction, TransitionGuard,
     };
     use std::collections::BTreeMap;
 
@@ -1381,8 +1378,7 @@ mod tests {
         let st = generate_st(&topology, &sm, &StCodegenConfig::default())
             .expect("codegen should succeed");
         assert!(
-            st.contains("flag := NOT(a) OR (b=1);")
-                || st.contains("flag := (NOT(a) OR (b=1));")
+            st.contains("flag := NOT(a) OR (b=1);") || st.contains("flag := (NOT(a) OR (b=1));")
         );
         assert!(
             !st.contains("=="),
@@ -1496,29 +1492,25 @@ mod tests {
     }
 
     #[test]
-    fn parallel_and_race_states_are_rejected() {
+    fn parallel_and_race_synthetic_states_can_codegen() {
         let parallel = state("task", "step__parallel_1_fork");
         let race = state("task", "step__race_1_decision");
         let sm = StateMachine {
-            states: vec![parallel.clone(), race],
-            transitions: vec![],
+            states: vec![parallel.clone(), race.clone()],
+            transitions: vec![Transition {
+                from: parallel.clone(),
+                to: race.clone(),
+                guard: TransitionGuard::Always,
+                actions: vec![],
+                timers: vec![],
+            }],
             initial: parallel,
             analog_regions: BTreeMap::new(),
         };
 
-        let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect_err("must fail");
-
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, StCodegenError::ParallelNotSupported { .. }))
-        );
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, StCodegenError::RaceNotSupported { .. }))
-        );
+        let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
+            .expect("codegen should succeed");
+        assert!(st.contains("CASE _state OF"));
     }
 
     #[test]
@@ -1601,18 +1593,30 @@ mod tests {
                     on_reject: AxisFaultBranch {
                         target_task: "fault".to_string(),
                         target_step: Some("reject".to_string()),
+                        kind: AxisFaultKind::Reject,
+                        category: AxisFaultCategory::Recoverable,
+                        vendor_code: None,
                         error_code: Some("AXIS_REJECT".to_string()),
                     },
                     on_motion_fault: AxisFaultBranch {
                         target_task: "fault".to_string(),
                         target_step: Some("motion_fault".to_string()),
+                        kind: AxisFaultKind::Motion,
+                        category: AxisFaultCategory::NonRecoverable,
+                        vendor_code: None,
                         error_code: Some("AXIS_MOTION".to_string()),
                     },
                     on_safety_fault: AxisFaultBranch {
                         target_task: "fault".to_string(),
                         target_step: Some("safety_fault".to_string()),
+                        kind: AxisFaultKind::Safety,
+                        category: AxisFaultCategory::Safety,
+                        vendor_code: None,
                         error_code: Some("AXIS_SAFETY".to_string()),
                     },
+                    on_reject_routes: vec![],
+                    on_motion_fault_routes: vec![],
+                    on_safety_fault_routes: vec![],
                 }],
                 timers: vec![],
             }],
@@ -1627,5 +1631,6 @@ mod tests {
         assert!(st.contains("on_reject->fault.reject[AXIS_REJECT]"));
         assert!(st.contains("on_motion_fault->fault.motion_fault[AXIS_MOTION]"));
         assert!(st.contains("on_safety_fault->fault.safety_fault[AXIS_SAFETY]"));
+        assert!(st.contains("routes:-|-|-"));
     }
 }

@@ -1,0 +1,49 @@
+[topology]
+
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+axis_fault_contract axis_x_fault {
+    axis: axis_x
+    severity: non_recoverable
+    stop_mode: quick
+    auto_reset_policy: on_clear
+    manual_ack_required: false
+    propagation_scope: self
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move_axis:
+        action: axis.move_relative(axis_x, distance: 20, speed: 2)
+            timeout: 400ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_default
+            on_motion_fault(kind: vendor) -> fault.motion_vendor
+            on_motion_fault(code: 2202) -> fault.motion_code_2202
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+        action: log "axis timeout"
+    step reject:
+        action: log "reject fallback"
+    step motion_default:
+        action: log "non-recoverable motion default"
+    step motion_vendor:
+        action: log "non-recoverable motion vendor"
+    step motion_code_2202:
+        action: log "non-recoverable motion code 2202"
+    step safety_fault:
+        action: log "safety fallback"
+    on_complete: goto done
+
+task done:
+    step halt:

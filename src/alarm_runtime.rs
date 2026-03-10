@@ -51,7 +51,7 @@ pub fn build_alarm_event(input: AlarmBuildInput<'_>) -> AlarmEvent {
     let primary_issue_code = top_candidates
         .first()
         .map(|candidate| candidate.issue_code.as_str())
-        .unwrap_or("DIAG-UNKNOWN");
+        .unwrap_or("AXF-UNKNOWN");
 
     AlarmEvent {
         alarm_id: build_alarm_id(
@@ -403,11 +403,17 @@ mod tests {
                 detail: "timeout observed".to_string(),
             }],
             candidates: vec![DiagnosisCandidate {
-                issue_code: "DIAG-IN-001".to_string(),
+                issue_code: "AXF-IN-001".to_string(),
+                legacy_issue_code: Some("DIAG-IN-001".to_string()),
                 category: DiagnosisCategory::ExpectedInputNeverChanged,
                 rank: 1,
                 confidence: 0.91,
                 evidence: vec!["no DI edge observed".to_string()],
+                source_location: Some(crate::diagnostics::DiagnosisSourceLocation {
+                    file: "<input>".to_string(),
+                    line: 5,
+                    column: 1,
+                }),
                 suggested_fix: "inject DI earlier".to_string(),
                 evidence_source: EvidenceSource::RuntimeLive,
             }],

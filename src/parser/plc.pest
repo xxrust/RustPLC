@@ -75,6 +75,7 @@ attribute_name = {
     | "following_error_limit"
     | "model_ref"
     | "config_ref"
+    | "motion_param_set"
     // Motor enhancement params
     | "steps_per_rev"
     | "max_speed"
@@ -143,6 +144,21 @@ extern_contract_block = { "{" ~ extern_contract_entry ~ ((","? ~ extern_contract
 extern_function_declaration = {
     "extern" ~ "function" ~ identifier ~ "(" ~ extern_param_list? ~ ")" ~ "->" ~ extern_return_spec ~ extern_contract_block
 }
+axis_fault_contract_field = {
+    "axis"
+    | "severity"
+    | "stop_mode"
+    | "auto_reset_policy"
+    | "manual_ack_required"
+    | "propagation_scope"
+    | "propagation_targets"
+}
+axis_fault_contract_value = { boolean_value | identifier_list | identifier }
+axis_fault_contract_entry = { axis_fault_contract_field ~ ":" ~ axis_fault_contract_value }
+axis_fault_contract_block = { "{" ~ axis_fault_contract_entry ~ ((","? ~ axis_fault_contract_entry))* ~ ","? ~ "}" }
+axis_fault_contract_declaration = {
+    "axis_fault_contract" ~ identifier ~ axis_fault_contract_block
+}
 cam_table_mode = { "periodic" | "oneshot" }
 cam_point = { "(" ~ number ~ "," ~ number ~ ")" }
 cam_point_list = { "[" ~ cam_point ~ ("," ~ cam_point)* ~ ","? ~ "]" }
@@ -163,6 +179,7 @@ topology_entry = _{
     | variable_declaration
     | cam_table_declaration
     | extern_function_declaration
+    | axis_fault_contract_declaration
 }
 
 topology_section = { section_topology ~ topology_entry* }
@@ -230,32 +247,43 @@ action_cam_switch = { "cam_switch" ~ identifier ~ identifier }
 action_cam_phase = { "cam_phase" ~ identifier ~ expression }
 action_set       = { "set" ~ action_target ~ state_value }
 action_log = { "log" ~ string_literal }
+axis_move_distance_arg = { "distance" ~ ":" ~ number }
+axis_move_position_arg = { "position" ~ ":" ~ number }
+axis_move_speed_arg = { "speed" ~ ":" ~ number }
+axis_move_acc_arg = { "acc" ~ ":" ~ number }
+axis_move_dec_arg = { "dec" ~ ":" ~ number }
+axis_move_params_arg = { "params" ~ ":" ~ identifier }
+axis_move_unknown_arg = {
+    identifier ~ ":" ~ (number | boolean_value | string_literal | identifier)
+}
+axis_move_relative_arg = {
+    axis_move_distance_arg
+    | axis_move_speed_arg
+    | axis_move_acc_arg
+    | axis_move_dec_arg
+    | axis_move_params_arg
+    | axis_move_unknown_arg
+}
+axis_move_absolute_arg = {
+    axis_move_position_arg
+    | axis_move_speed_arg
+    | axis_move_acc_arg
+    | axis_move_dec_arg
+    | axis_move_params_arg
+    | axis_move_unknown_arg
+}
 axis_move_relative_action = {
     "axis.move_relative"
     ~ "("
     ~ action_target
-    ~ ","
-    ~ "distance"
-    ~ ":"
-    ~ number
-    ~ ","
-    ~ "speed"
-    ~ ":"
-    ~ number
+    ~ ("," ~ axis_move_relative_arg)+
     ~ ")"
 }
 axis_move_absolute_action = {
     "axis.move_absolute"
     ~ "("
     ~ action_target
-    ~ ","
-    ~ "position"
-    ~ ":"
-    ~ number
-    ~ ","
-    ~ "speed"
-    ~ ":"
-    ~ number
+    ~ ("," ~ axis_move_absolute_arg)+
     ~ ")"
 }
 action_command = {
@@ -298,17 +326,27 @@ allow_indefinite_wait_statement = { "allow_indefinite_wait" ~ ":" ~ boolean_valu
 then_goto_statement = { "then" ~ ":" ~ goto_statement }
 axis_branch_target = { identifier ~ ("." ~ identifier)? }
 axis_timeout_branch = { "timeout" ~ ":" ~ duration_value ~ "->" ~ axis_branch_target }
-axis_on_reject_branch = { "on_reject" ~ "->" ~ axis_branch_target }
-axis_on_motion_fault_branch = { "on_motion_fault" ~ "->" ~ axis_branch_target }
-axis_on_safety_fault_branch = { "on_safety_fault" ~ "->" ~ axis_branch_target }
+axis_fault_route_kind = { "reject" | "motion" | "safety" | "vendor" }
+axis_fault_route_kind_entry = { "kind" ~ ":" ~ axis_fault_route_kind }
+axis_fault_route_code_entry = { "code" ~ ":" ~ integer }
+axis_fault_route_matcher_entry = {
+    axis_fault_route_kind_entry
+    | axis_fault_route_code_entry
+}
+axis_fault_route_matcher = {
+    "(" ~ axis_fault_route_matcher_entry ~ ("," ~ axis_fault_route_matcher_entry)* ~ ")"
+}
+axis_on_reject_branch = { "on_reject" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
+axis_on_motion_fault_branch = { "on_motion_fault" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
+axis_on_safety_fault_branch = { "on_safety_fault" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
 axis_move_statement = {
     "action"
     ~ ":"
     ~ (axis_move_relative_action | axis_move_absolute_action)
     ~ axis_timeout_branch?
-    ~ axis_on_reject_branch?
-    ~ axis_on_motion_fault_branch?
-    ~ axis_on_safety_fault_branch?
+    ~ axis_on_reject_branch*
+    ~ axis_on_motion_fault_branch*
+    ~ axis_on_safety_fault_branch*
 }
 
 repeat_block = { "repeat" ~ integer ~ ":" ~ step_statement+ }

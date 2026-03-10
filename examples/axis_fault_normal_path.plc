@@ -1,0 +1,36 @@
+[topology]
+
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move_axis:
+        action: axis.move_relative(axis_x, distance: 20, speed: 2)
+            timeout: 400ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step done:
+        action: log "axis move finished without fault"
+    on_complete: goto idle
+
+task fault:
+    step timeout:
+        action: log "axis move timeout"
+    step reject:
+        action: log "axis move reject"
+    step motion_fault:
+        action: log "axis move motion fault"
+    step safety_fault:
+        action: log "axis move safety fault"
+    on_complete: goto idle
+
+task idle:
+    step halt:

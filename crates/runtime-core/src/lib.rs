@@ -13,6 +13,190 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct StepId(pub u16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisFaultCategory {
+    Recoverable,
+    NonRecoverable,
+    Safety,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisFaultKind {
+    Reject,
+    Motion,
+    Safety,
+    Vendor {
+        category: AxisFaultCategory,
+        vendor_code: i32,
+    },
+}
+
+impl AxisFaultKind {
+    pub const fn category(self) -> AxisFaultCategory {
+        match self {
+            AxisFaultKind::Reject => AxisFaultCategory::Recoverable,
+            AxisFaultKind::Motion => AxisFaultCategory::NonRecoverable,
+            AxisFaultKind::Safety => AxisFaultCategory::Safety,
+            AxisFaultKind::Vendor { category, .. } => category,
+        }
+    }
+
+    pub const fn vendor_code(self) -> Option<i32> {
+        match self {
+            AxisFaultKind::Vendor { vendor_code, .. } => Some(vendor_code),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisFault {
+    pub kind: AxisFaultKind,
+    pub category: AxisFaultCategory,
+    pub error_code: i32,
+    pub vendor_code: Option<i32>,
+}
+
+impl AxisFault {
+    pub const fn new(kind: AxisFaultKind, error_code: i32) -> Self {
+        Self {
+            category: kind.category(),
+            vendor_code: kind.vendor_code(),
+            kind,
+            error_code,
+        }
+    }
+
+    pub const fn reject(error_code: i32) -> Self {
+        Self::new(AxisFaultKind::Reject, error_code)
+    }
+
+    pub const fn motion(error_code: i32) -> Self {
+        Self::new(AxisFaultKind::Motion, error_code)
+    }
+
+    pub const fn safety(error_code: i32) -> Self {
+        Self::new(AxisFaultKind::Safety, error_code)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisFaultSeverity {
+    Recoverable,
+    NonRecoverable,
+    Safety,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisStopMode {
+    Controlled,
+    Quick,
+    Immediate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisStopState {
+    Running,
+    ControlledStopping,
+    QuickStopping,
+    ImmediateStopping,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisAutoResetPolicy {
+    Never,
+    OnClear,
+    Immediate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisFaultPropagationScope {
+    SelfOnly,
+    Group,
+    All,
+    Followers,
+    Custom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisFaultPolicy<'a> {
+    pub axis: &'a str,
+    pub severity: AxisFaultSeverity,
+    pub stop_mode: AxisStopMode,
+    pub auto_reset_policy: AxisAutoResetPolicy,
+    pub manual_ack_required: bool,
+    pub propagation_scope: AxisFaultPropagationScope,
+    pub propagation_targets: &'a [&'static str],
+}
+
+pub const AXIS_FAULT_POLICY_LOG_MESSAGE: &str = "axis_fault_policy_applied";
+const AXIS_FAULT_POLICY_LOG_BASE_ID: u16 = 50_000;
+pub const AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE: &str = "axis_stop_transition_enter";
+pub const AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE: &str = "axis_stop_transition_completed";
+const AXIS_STOP_TRANSITION_LOG_BASE_ID: u16 = 51_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisStopTransitionPhase {
+    Enter,
+    Completed,
+}
+
+pub const fn axis_fault_policy_log_message_id(
+    severity: AxisFaultSeverity,
+    stop_mode: AxisStopMode,
+    auto_reset_policy: AxisAutoResetPolicy,
+    manual_ack_required: bool,
+    fault_kind: AxisFaultKind,
+) -> u16 {
+    let severity_bits = match severity {
+        AxisFaultSeverity::Recoverable => 0,
+        AxisFaultSeverity::NonRecoverable => 1,
+        AxisFaultSeverity::Safety => 2,
+    };
+    let stop_mode_bits = match stop_mode {
+        AxisStopMode::Controlled => 0,
+        AxisStopMode::Quick => 1,
+        AxisStopMode::Immediate => 2,
+    };
+    let auto_reset_bits = match auto_reset_policy {
+        AxisAutoResetPolicy::Never => 0,
+        AxisAutoResetPolicy::OnClear => 1,
+        AxisAutoResetPolicy::Immediate => 2,
+    };
+    let ack_bits = if manual_ack_required { 1 } else { 0 };
+    let fault_kind_bits = match fault_kind {
+        AxisFaultKind::Reject => 0,
+        AxisFaultKind::Motion => 1,
+        AxisFaultKind::Safety => 2,
+        AxisFaultKind::Vendor { .. } => 3,
+    };
+
+    AXIS_FAULT_POLICY_LOG_BASE_ID
+        + severity_bits
+        + (stop_mode_bits << 2)
+        + (auto_reset_bits << 4)
+        + (ack_bits << 6)
+        + (fault_kind_bits << 7)
+}
+
+pub const fn axis_stop_transition_log_message_id(
+    stop_mode: AxisStopMode,
+    phase: AxisStopTransitionPhase,
+) -> u16 {
+    let stop_mode_bits = match stop_mode {
+        AxisStopMode::Controlled => 0,
+        AxisStopMode::Quick => 1,
+        AxisStopMode::Immediate => 2,
+    };
+    let phase_bits = match phase {
+        AxisStopTransitionPhase::Enter => 0,
+        AxisStopTransitionPhase::Completed => 1,
+    };
+
+    AXIS_STOP_TRANSITION_LOG_BASE_ID + stop_mode_bits + (phase_bits << 2)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransitionReason {
     Action,
     DelayElapsed,
@@ -75,6 +259,12 @@ pub enum RuntimeError {
     AxisMotionRequiresHandler {
         target: &'static str,
     },
+    AxisNotHomed {
+        target: &'static str,
+    },
+    TooManyAxisHomingTargets {
+        max: usize,
+    },
     ExternCallFailed {
         function: &'static str,
     },
@@ -101,17 +291,9 @@ pub enum RuntimeError {
         function: &'static str,
         variable: u16,
     },
-    AxisMotionRejected {
+    AxisFault {
         target: &'static str,
-        error_code: i32,
-    },
-    AxisMotionFault {
-        target: &'static str,
-        error_code: i32,
-    },
-    AxisSafetyFault {
-        target: &'static str,
-        error_code: i32,
+        fault: AxisFault,
     },
 }
 
@@ -194,14 +376,27 @@ pub struct AxisMotionCommand {
     pub kind: AxisMoveKind,
     pub value: f32,
     pub speed: f32,
+    pub require_homed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxisMotionResult {
     Done,
-    Reject { error_code: i32 },
-    MotionFault { error_code: i32 },
-    SafetyFault { error_code: i32 },
+    Fault(AxisFault),
+}
+
+impl AxisMotionResult {
+    pub const fn reject(error_code: i32) -> Self {
+        Self::Fault(AxisFault::reject(error_code))
+    }
+
+    pub const fn motion_fault(error_code: i32) -> Self {
+        Self::Fault(AxisFault::motion(error_code))
+    }
+
+    pub const fn safety_fault(error_code: i32) -> Self {
+        Self::Fault(AxisFault::safety(error_code))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -431,6 +626,7 @@ pub struct Program<'a> {
     pub var_init: &'a [f32],
     pub cam_configs: &'a [CamCouplingConfig],
     pub cam_tables: &'a [CamTableData],
+    pub axis_fault_policies: &'a [AxisFaultPolicy<'a>],
 }
 
 impl<'a> Program<'a> {
@@ -461,6 +657,9 @@ pub struct Runtime<'a> {
     program: &'a Program<'a>,
     loc: Location,
     step_entered_at: Option<Tick>,
+    axis_stop_state: AxisStopState,
+    axis_homing_targets: [Option<&'static str>; MAX_AXIS_HOMING_TARGETS],
+    axis_homing_flags: [bool; MAX_AXIS_HOMING_TARGETS],
     pid_states: [PidState; MAX_PID_LOOPS],
     variables: [f32; MAX_VARIABLES],
     cam_states: [CamState; MAX_CAM_COUPLINGS],
@@ -521,6 +720,9 @@ impl<'a> Runtime<'a> {
                 step: entry,
             },
             step_entered_at: None,
+            axis_stop_state: AxisStopState::Running,
+            axis_homing_targets: [None; MAX_AXIS_HOMING_TARGETS],
+            axis_homing_flags: [false; MAX_AXIS_HOMING_TARGETS],
             pid_states: [PidState::default(); MAX_PID_LOOPS],
             variables,
             cam_states,
@@ -529,6 +731,46 @@ impl<'a> Runtime<'a> {
 
     pub fn location(&self) -> Location {
         self.loc
+    }
+
+    pub fn axis_stop_state(&self) -> AxisStopState {
+        self.axis_stop_state
+    }
+
+    fn axis_homing_slot(&mut self, target: &'static str) -> Result<usize, RuntimeError> {
+        let mut free_slot = None;
+        for idx in 0..MAX_AXIS_HOMING_TARGETS {
+            match self.axis_homing_targets[idx] {
+                Some(existing) if existing == target => return Ok(idx),
+                Some(_) => {}
+                None => {
+                    if free_slot.is_none() {
+                        free_slot = Some(idx);
+                    }
+                }
+            }
+        }
+
+        if let Some(idx) = free_slot {
+            self.axis_homing_targets[idx] = Some(target);
+            self.axis_homing_flags[idx] = false;
+            return Ok(idx);
+        }
+
+        Err(RuntimeError::TooManyAxisHomingTargets {
+            max: MAX_AXIS_HOMING_TARGETS,
+        })
+    }
+
+    fn axis_is_homed(&mut self, target: &'static str) -> Result<bool, RuntimeError> {
+        let idx = self.axis_homing_slot(target)?;
+        Ok(self.axis_homing_flags[idx])
+    }
+
+    fn set_axis_homed(&mut self, target: &'static str, homed: bool) -> Result<(), RuntimeError> {
+        let idx = self.axis_homing_slot(target)?;
+        self.axis_homing_flags[idx] = homed;
+        Ok(())
     }
 
     pub fn variables(&self) -> &[f32; MAX_VARIABLES] {
@@ -578,6 +820,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
         .map_err(|err| match err {
             RuntimeTickError::Core(err) => err,
@@ -622,6 +865,52 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut axis_adapter,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
+        )
+        .map_err(|err| match err {
+            RuntimeTickError::Core(err) => err,
+            RuntimeTickError::ExternCallFailed { function, .. } => {
+                RuntimeError::ExternCallRequiresHandler { function }
+            }
+            RuntimeTickError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            } => RuntimeError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            },
+        })
+    }
+
+    pub fn tick_with_axis_and_logs<IO: Io>(
+        &mut self,
+        io: &mut IO,
+        mut on_log: impl FnMut(LogEvent),
+        mut on_axis_motion: impl FnMut(AxisMotionCommand) -> AxisMotionResult,
+    ) -> Result<(), RuntimeError> {
+        #[derive(Debug)]
+        struct MissingExternHandler;
+
+        let mut on_event = |_| {};
+        let mut missing_extern =
+            |_function: &'static str,
+             _args: &[f32],
+             _results: &mut [f32]|
+             -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
+        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
+        let mut axis_adapter = |command: AxisMotionCommand| Ok(on_axis_motion(command));
+
+        self.tick_with_trace_and_logs_impl(
+            io,
+            &mut on_event,
+            &mut on_log,
+            &mut missing_extern,
+            None,
+            &mut ignore_error_code,
+            &mut axis_adapter,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
         .map_err(|err| match err {
             RuntimeTickError::Core(err) => err,
@@ -661,6 +950,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
     }
 
@@ -686,6 +976,7 @@ impl<'a> Runtime<'a> {
             Some(error_code_var),
             &mut map_error_code,
             &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
     }
 
@@ -710,6 +1001,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
     }
 
@@ -734,6 +1026,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
         )
     }
 
@@ -745,9 +1038,8 @@ impl<'a> Runtime<'a> {
         on_extern_call: &mut impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
         extern_error_code_var: Option<u16>,
         map_extern_error_code: &mut impl FnMut(&'static str, &E) -> f32,
-        on_axis_motion: &mut impl FnMut(
-            AxisMotionCommand,
-        ) -> Result<AxisMotionResult, RuntimeError>,
+        on_axis_motion: &mut impl FnMut(AxisMotionCommand) -> Result<AxisMotionResult, RuntimeError>,
+        on_axis_fault_policy: &mut impl FnMut(AxisMotionCommand, AxisFault),
     ) -> Result<(), RuntimeTickError<E>> {
         let now = io.tick();
         if self.step_entered_at.is_none() {
@@ -838,30 +1130,72 @@ impl<'a> Runtime<'a> {
                                     .map_err(RuntimeTickError::Core)?;
                             }
                             Action::AxisMove { command } => {
-                                let result = on_axis_motion(command).map_err(RuntimeTickError::Core)?;
+                                if command.kind == AxisMoveKind::Absolute
+                                    && command.require_homed
+                                    && !self
+                                        .axis_is_homed(command.target)
+                                        .map_err(RuntimeTickError::Core)?
+                                {
+                                    return Err(RuntimeTickError::Core(
+                                        RuntimeError::AxisNotHomed {
+                                            target: command.target,
+                                        },
+                                    ));
+                                }
+
+                                let result = match on_axis_motion(command) {
+                                    Ok(result) => result,
+                                    Err(err) => {
+                                        self.set_axis_homed(command.target, false)
+                                            .map_err(RuntimeTickError::Core)?;
+                                        return Err(RuntimeTickError::Core(err));
+                                    }
+                                };
                                 match result {
-                                    AxisMotionResult::Done => {}
-                                    AxisMotionResult::Reject { error_code } => {
-                                        return Err(RuntimeTickError::Core(
-                                            RuntimeError::AxisMotionRejected {
-                                                target: command.target,
-                                                error_code,
-                                            },
-                                        ));
+                                    AxisMotionResult::Done => {
+                                        if command.kind == AxisMoveKind::Relative {
+                                            self.set_axis_homed(command.target, true)
+                                                .map_err(RuntimeTickError::Core)?;
+                                        }
                                     }
-                                    AxisMotionResult::MotionFault { error_code } => {
+                                    AxisMotionResult::Fault(fault) => {
+                                        self.set_axis_homed(command.target, false)
+                                            .map_err(RuntimeTickError::Core)?;
+                                        if let Some(policy) =
+                                            self.axis_fault_policy_for(command.target).copied()
+                                        {
+                                            on_log(LogEvent {
+                                                tick: now,
+                                                task: self.loc.task,
+                                                step: self.loc.step,
+                                                message_id: axis_fault_policy_log_message_id(
+                                                    policy.severity,
+                                                    policy.stop_mode,
+                                                    policy.auto_reset_policy,
+                                                    policy.manual_ack_required,
+                                                    fault.kind,
+                                                ),
+                                                message: AXIS_FAULT_POLICY_LOG_MESSAGE,
+                                            });
+                                            self.apply_axis_stop_transition(
+                                                policy.stop_mode,
+                                                now,
+                                                on_log,
+                                            );
+                                            if policy.propagation_targets.is_empty() {
+                                                on_axis_fault_policy(command, fault);
+                                            } else {
+                                                for target in policy.propagation_targets {
+                                                    let propagated_command =
+                                                        AxisMotionCommand { target, ..command };
+                                                    on_axis_fault_policy(propagated_command, fault);
+                                                }
+                                            }
+                                        }
                                         return Err(RuntimeTickError::Core(
-                                            RuntimeError::AxisMotionFault {
+                                            RuntimeError::AxisFault {
                                                 target: command.target,
-                                                error_code,
-                                            },
-                                        ));
-                                    }
-                                    AxisMotionResult::SafetyFault { error_code } => {
-                                        return Err(RuntimeTickError::Core(
-                                            RuntimeError::AxisSafetyFault {
-                                                target: command.target,
-                                                error_code,
+                                                fault,
                                             },
                                         ));
                                     }
@@ -1197,6 +1531,50 @@ impl<'a> Runtime<'a> {
         })
     }
 
+    fn axis_fault_policy_for(&self, target: &str) -> Option<&AxisFaultPolicy<'a>> {
+        self.program
+            .axis_fault_policies
+            .iter()
+            .find(|policy| policy.axis == target)
+    }
+
+    fn apply_axis_stop_transition(
+        &mut self,
+        stop_mode: AxisStopMode,
+        tick: Tick,
+        on_log: &mut impl FnMut(LogEvent),
+    ) {
+        let transition_state = match stop_mode {
+            AxisStopMode::Controlled => AxisStopState::ControlledStopping,
+            AxisStopMode::Quick => AxisStopState::QuickStopping,
+            AxisStopMode::Immediate => AxisStopState::ImmediateStopping,
+        };
+
+        self.axis_stop_state = transition_state;
+        on_log(LogEvent {
+            tick,
+            task: self.loc.task,
+            step: self.loc.step,
+            message_id: axis_stop_transition_log_message_id(
+                stop_mode,
+                AxisStopTransitionPhase::Enter,
+            ),
+            message: AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE,
+        });
+
+        self.axis_stop_state = AxisStopState::Stopped;
+        on_log(LogEvent {
+            tick,
+            task: self.loc.task,
+            step: self.loc.step,
+            message_id: axis_stop_transition_log_message_id(
+                stop_mode,
+                AxisStopTransitionPhase::Completed,
+            ),
+            message: AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE,
+        });
+    }
+
     fn transition(
         &mut self,
         tick: Tick,
@@ -1460,6 +1838,7 @@ pub const MAX_EXPR_OPS: usize = 32;
 pub const MAX_EXPR_STACK: usize = 16;
 pub const MAX_CAM_POINTS: usize = 256;
 pub const MAX_CAM_COUPLINGS: usize = 8;
+pub const MAX_AXIS_HOMING_TARGETS: usize = 32;
 pub const MAX_EXTERN_ARGS: usize = 16;
 pub const MAX_EXTERN_RETURNS: usize = 8;
 
@@ -1842,6 +2221,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -1908,6 +2288,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -1961,6 +2342,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2013,6 +2395,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2193,6 +2576,7 @@ mod tests {
             var_init: &VARS,
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2241,6 +2625,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2270,6 +2655,7 @@ mod tests {
                 kind: AxisMoveKind::Relative,
                 value: 10.0,
                 speed: 2.0,
+                require_homed: false,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -2296,6 +2682,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2316,6 +2703,7 @@ mod tests {
                 kind: AxisMoveKind::Absolute,
                 value: 120.0,
                 speed: 5.0,
+                require_homed: false,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -2342,6 +2730,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2357,14 +2746,15 @@ mod tests {
     }
 
     #[test]
-    fn axis_move_handler_reject_returns_classified_error() {
+    fn axis_move_absolute_requires_homing_predicate() {
         static ACTIONS: [Action; 1] = [Action::AxisMove {
             command: AxisMotionCommand {
                 target: "axis_x",
                 port: "self",
-                kind: AxisMoveKind::Relative,
-                value: 5.0,
-                speed: 1.0,
+                kind: AxisMoveKind::Absolute,
+                value: 120.0,
+                speed: 5.0,
+                require_homed: true,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -2391,18 +2781,231 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        let mut invoked = false;
+        let err = rt
+            .tick_with_axis(&mut io, |_| {
+                invoked = true;
+                AxisMotionResult::Done
+            })
+            .expect_err("未回零时 absolute 应被 runtime 拦截");
+        assert_eq!(err, RuntimeError::AxisNotHomed { target: "axis_x" });
+        assert!(
+            !invoked,
+            "runtime homing guard should short-circuit handler"
+        );
+    }
+
+    #[test]
+    fn axis_move_relative_sets_homing_predicate_for_absolute() {
+        static ACTIONS_REL: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+                require_homed: false,
+            },
+        }];
+        static ACTIONS_ABS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Absolute,
+                value: 120.0,
+                speed: 5.0,
+                require_homed: true,
+            },
+        }];
+        static STEPS: [Step<'static>; 3] = [
+            Step {
+                name: "home",
+                instr: Instr::Action {
+                    actions: &ACTIONS_REL,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "move_abs",
+                instr: Instr::Action {
+                    actions: &ACTIONS_ABS,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        rt.tick_with_axis(&mut io, |_| AxisMotionResult::Done)
+            .expect("relative 应设置 homing 谓词");
+        rt.tick_with_axis(&mut io, |_| AxisMotionResult::Done)
+            .expect("已回零后 absolute 应允许执行");
+        assert_eq!(rt.location().step, StepId(2));
+    }
+
+    #[test]
+    fn axis_move_fault_invalidates_homing_predicate() {
+        static ACTIONS_REL: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+                require_homed: false,
+            },
+        }];
+        static ACTIONS_ABS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Absolute,
+                value: 120.0,
+                speed: 5.0,
+                require_homed: true,
+            },
+        }];
+        static STEPS: [Step<'static>; 3] = [
+            Step {
+                name: "home",
+                instr: Instr::Action {
+                    actions: &ACTIONS_REL,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "move_abs",
+                instr: Instr::Action {
+                    actions: &ACTIONS_ABS,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        let mut call_count = 0;
+        let err = rt
+            .tick_with_axis(&mut io, |command| {
+                call_count += 1;
+                if command.kind == AxisMoveKind::Relative {
+                    AxisMotionResult::Done
+                } else {
+                    AxisMotionResult::motion_fault(77)
+                }
+            })
+            .expect_err("fault 应中断 absolute 并清空 homing 谓词");
+        assert_eq!(
+            call_count, 2,
+            "single tick should execute relative then absolute"
+        );
+        assert_eq!(
+            err,
+            RuntimeError::AxisFault {
+                target: "axis_x",
+                fault: AxisFault::motion(77),
+            }
+        );
+
+        let mut invoked = false;
+        let err = rt
+            .tick_with_axis(&mut io, |_| {
+                invoked = true;
+                AxisMotionResult::Done
+            })
+            .expect_err("fault 后重试 absolute 应被未回零拦截");
+        assert_eq!(err, RuntimeError::AxisNotHomed { target: "axis_x" });
+        assert!(!invoked, "homing guard 应在 handler 前触发");
+    }
+
+    #[test]
+    fn axis_move_handler_reject_returns_classified_error() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+                require_homed: false,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
-            .tick_with_axis(&mut io, |_| AxisMotionResult::Reject { error_code: 11 })
+            .tick_with_axis(&mut io, |_| AxisMotionResult::reject(11))
             .expect_err("reject 应返回分类错误");
         assert_eq!(
             err,
-            RuntimeError::AxisMotionRejected {
+            RuntimeError::AxisFault {
                 target: "axis_x",
-                error_code: 11
+                fault: AxisFault::reject(11),
             }
         );
     }
@@ -2416,6 +3019,7 @@ mod tests {
                 kind: AxisMoveKind::Relative,
                 value: 5.0,
                 speed: 1.0,
+                require_homed: false,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -2442,18 +3046,19 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
-            .tick_with_axis(&mut io, |_| AxisMotionResult::MotionFault { error_code: 21 })
+            .tick_with_axis(&mut io, |_| AxisMotionResult::motion_fault(21))
             .expect_err("motion_fault 应返回分类错误");
         assert_eq!(
             err,
-            RuntimeError::AxisMotionFault {
+            RuntimeError::AxisFault {
                 target: "axis_x",
-                error_code: 21
+                fault: AxisFault::motion(21),
             }
         );
     }
@@ -2467,6 +3072,7 @@ mod tests {
                 kind: AxisMoveKind::Relative,
                 value: 5.0,
                 speed: 1.0,
+                require_homed: false,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -2493,20 +3099,236 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
-            .tick_with_axis(&mut io, |_| AxisMotionResult::SafetyFault { error_code: 31 })
+            .tick_with_axis(&mut io, |_| AxisMotionResult::safety_fault(31))
             .expect_err("safety_fault 应返回分类错误");
         assert_eq!(
             err,
-            RuntimeError::AxisSafetyFault {
+            RuntimeError::AxisFault {
                 target: "axis_x",
-                error_code: 31
+                fault: AxisFault::safety(31),
             }
         );
+    }
+
+    #[test]
+    fn axis_fault_policy_applies_mode_specific_stop_transitions() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+                require_homed: false,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+
+        let cases = [
+            (
+                AxisFaultSeverity::Recoverable,
+                AxisStopMode::Controlled,
+                AxisMotionResult::reject(101),
+            ),
+            (
+                AxisFaultSeverity::NonRecoverable,
+                AxisStopMode::Quick,
+                AxisMotionResult::motion_fault(102),
+            ),
+            (
+                AxisFaultSeverity::Safety,
+                AxisStopMode::Immediate,
+                AxisMotionResult::safety_fault(103),
+            ),
+        ];
+
+        for (severity, stop_mode, axis_result) in cases {
+            let policies = [AxisFaultPolicy {
+                axis: "axis_x",
+                severity,
+                stop_mode,
+                auto_reset_policy: AxisAutoResetPolicy::Never,
+                manual_ack_required: true,
+                propagation_scope: AxisFaultPropagationScope::SelfOnly,
+                propagation_targets: &["axis_x"],
+            }];
+            let program = Program {
+                tasks: &TASKS,
+                pid_loops: &[],
+                var_init: &[],
+                cam_configs: &[],
+                cam_tables: &[],
+                axis_fault_policies: &policies,
+            };
+
+            let expected_fault = match axis_result {
+                AxisMotionResult::Fault(fault) => fault,
+                AxisMotionResult::Done => panic!("test case must carry fault result"),
+            };
+
+            let mut io = MemIo::new();
+            let mut rt = Runtime::new(&program).expect("runtime init");
+            assert_eq!(rt.axis_stop_state(), AxisStopState::Running);
+
+            let mut logs = std::vec::Vec::new();
+            let err = rt
+                .tick_with_axis_and_logs(&mut io, |event| logs.push(event), |_| axis_result)
+                .expect_err("fault result should be surfaced");
+
+            assert_eq!(
+                err,
+                RuntimeError::AxisFault {
+                    target: "axis_x",
+                    fault: expected_fault,
+                }
+            );
+            assert_eq!(rt.axis_stop_state(), AxisStopState::Stopped);
+            assert_eq!(logs.len(), 3);
+            assert_eq!(logs[0].message, AXIS_FAULT_POLICY_LOG_MESSAGE);
+            assert_eq!(
+                logs[0].message_id,
+                axis_fault_policy_log_message_id(
+                    severity,
+                    stop_mode,
+                    AxisAutoResetPolicy::Never,
+                    true,
+                    expected_fault.kind,
+                )
+            );
+            assert_eq!(logs[1].message, AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE);
+            assert_eq!(
+                logs[1].message_id,
+                axis_stop_transition_log_message_id(stop_mode, AxisStopTransitionPhase::Enter)
+            );
+            assert_eq!(logs[2].message, AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE);
+            assert_eq!(
+                logs[2].message_id,
+                axis_stop_transition_log_message_id(stop_mode, AxisStopTransitionPhase::Completed)
+            );
+        }
+    }
+
+    #[test]
+    fn axis_fault_policy_propagates_targets_within_same_tick() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 5.0,
+                speed: 1.0,
+                require_homed: false,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+
+        let policies = [AxisFaultPolicy {
+            axis: "axis_x",
+            severity: AxisFaultSeverity::Safety,
+            stop_mode: AxisStopMode::Immediate,
+            auto_reset_policy: AxisAutoResetPolicy::Never,
+            manual_ack_required: true,
+            propagation_scope: AxisFaultPropagationScope::Followers,
+            propagation_targets: &["axis_x", "axis_y"],
+        }];
+        let program = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &policies,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&program).expect("runtime init");
+        let mut on_event = |_| {};
+        let mut on_log = |_| {};
+        let mut on_extern_call = |_function: &'static str,
+                                  _args: &[f32],
+                                  _results: &mut [f32]|
+         -> Result<usize, ()> { Err(()) };
+        let mut map_extern_error_code = |_function: &'static str, _error: &()| 0.0;
+        let mut on_axis_motion =
+            |_command: AxisMotionCommand| Ok(AxisMotionResult::safety_fault(55));
+        let mut applied_targets = std::vec::Vec::new();
+
+        let err = rt.tick_with_trace_and_logs_impl(
+            &mut io,
+            &mut on_event,
+            &mut on_log,
+            &mut on_extern_call,
+            None,
+            &mut map_extern_error_code,
+            &mut on_axis_motion,
+            &mut |command: AxisMotionCommand, _fault: AxisFault| {
+                applied_targets.push(command.target)
+            },
+        );
+
+        assert!(matches!(
+            err,
+            Err(RuntimeTickError::Core(RuntimeError::AxisFault {
+                target: "axis_x",
+                fault,
+            })) if fault == AxisFault::safety(55)
+        ));
+        assert_eq!(applied_targets, vec!["axis_x", "axis_y"]);
+    }
+
+    #[test]
+    fn axis_fault_vendor_slot_preserves_category_and_vendor_code() {
+        let fault = AxisFault::new(
+            AxisFaultKind::Vendor {
+                category: AxisFaultCategory::NonRecoverable,
+                vendor_code: 9001,
+            },
+            77,
+        );
+
+        assert_eq!(fault.category, AxisFaultCategory::NonRecoverable);
+        assert_eq!(fault.vendor_code, Some(9001));
+        assert_eq!(fault.error_code, 77);
     }
 
     #[test]
@@ -2539,6 +3361,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2658,6 +3481,7 @@ mod tests {
             var_init: &VARS,
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let rt = Runtime::new(&PROGRAM).expect("runtime 创建应成功");
@@ -2685,6 +3509,7 @@ mod tests {
             var_init: &VARS,
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         };
 
         let err = match Runtime::new(&PROGRAM) {
@@ -2737,6 +3562,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let err = match Runtime::new(&program) {
@@ -2786,6 +3612,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let err = match Runtime::new(&program) {
@@ -2869,6 +3696,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2922,6 +3750,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -2971,6 +3800,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -3051,6 +3881,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -3169,6 +4000,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();
@@ -3232,6 +4064,7 @@ mod tests {
             var_init: &[],
             cam_configs,
             cam_tables,
+            axis_fault_policies: &[],
         };
 
         let mut io = MemIo::new();

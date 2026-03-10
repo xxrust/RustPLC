@@ -4,6 +4,7 @@ device plc_main: plc { ports: [Y0:digital:producer] }
 device axis_servo: servo_drive {
     model_ref: servo_generic
     config_ref: servo_default
+    motion_param_set: servo_default_precise
 }
 
 relation { from: plc_main.Y0, to: axis_servo.enable, via: driven_by }

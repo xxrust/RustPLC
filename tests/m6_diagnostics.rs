@@ -251,18 +251,24 @@ inputs:
 }
 
 #[test]
-fn diagnostics_doc_and_cli_usage_include_trace_doctor_and_diag_codes() {
+fn diagnostics_doc_and_cli_usage_include_trace_doctor_and_axf_codes() {
     let doc = read_first_existing_doc(&[
         repo_path("docs/m6_diagnostics.md"),
         repo_path("docs/已实现/m6_diagnostics.md"),
     ]);
     for needle in [
         "trace-doctor",
+        "AXF-IN-001",
+        "AXF-ACT-001",
+        "AXF-INT-001",
+        "AXF-MAP-001",
+        "AXF-TIME-001",
         "DIAG-IN-001",
         "DIAG-ACT-001",
         "DIAG-INT-001",
         "DIAG-MAP-001",
         "DIAG-TIME-001",
+        "source_location",
         "evidence_source",
     ] {
         assert!(doc.contains(needle), "doc should contain `{needle}`");

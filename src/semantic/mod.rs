@@ -1,7 +1,13 @@
 use crate::ast::{
-    ActionStatement, BinaryOperator as AstBinaryOperator, CamTableMode, ComparisonOperator,
-    ConditionExpression, ConstraintsSection, DeviceAttributes, DeviceDeclaration, DeviceType,
-    DurationValue, Expression as AstExpression, ExternCallBinding as AstExternCallBinding,
+    ActionStatement, AxisAutoResetPolicy as AstAxisAutoResetPolicy,
+    AxisFaultContractDeclaration as AstAxisFaultContractDeclaration,
+    AxisFaultPropagationScope as AstAxisFaultPropagationScope,
+    AxisFaultRouteDirective as AstAxisFaultRouteDirective,
+    AxisFaultRouteKind as AstAxisFaultRouteKind, AxisFaultSeverity as AstAxisFaultSeverity,
+    AxisStopMode as AstAxisStopMode, BinaryOperator as AstBinaryOperator, CamTableMode,
+    ComparisonOperator, ConditionExpression, ConstraintsSection, DeviceAttributes,
+    DeviceDeclaration, DeviceType, DurationValue, Expression as AstExpression,
+    ExternCallBinding as AstExternCallBinding,
     ExternFunctionDeclaration as AstExternFunctionDeclaration, GotoDirective, LiteralValue,
     OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock,
     SafetyConstraint, SafetyOperand, SafetyRelation as AstSafetyRelation, StateReference,
@@ -13,7 +19,11 @@ use crate::ast::{
 use crate::axis_profile::resolve_axis_profiles;
 use crate::error::PlcError;
 use crate::ir::{
-    ActionKind, ActionRef, ActionTiming, AxisFaultBranch, AxisTimeoutBranch,
+    ActionKind, ActionRef, ActionTiming, AxisAutoResetPolicy as IrAxisAutoResetPolicy,
+    AxisFaultBranch, AxisFaultContractDef as IrAxisFaultContractDef, AxisFaultKind,
+    AxisFaultPropagationScope as IrAxisFaultPropagationScope,
+    AxisFaultRouteBranch as IrAxisFaultRouteBranch, AxisFaultRouteKind as IrAxisFaultRouteKind,
+    AxisFaultSeverity as IrAxisFaultSeverity, AxisStopMode as IrAxisStopMode, AxisTimeoutBranch,
     BinaryValue as IrBinaryValue, CamCouplingDef, CamInterpolation, CamTableIr, CausalityChain,
     ConnectionType, ConstraintSet, Device, DeviceKind, ExternCallBinding as IrExternCallBinding,
     ExternFunctionContract as IrExternContract, ExternFunctionDef as IrExternFunctionDef,
@@ -26,7 +36,10 @@ use crate::ir::{
 use crate::plc_port::{PlcPortKind, canonical_physical_device_name, parse_plc_port_ref};
 use petgraph::graph::NodeIndex;
 use runtime_core::MAX_VARIABLES as RUNTIME_MAX_VARIABLES;
+use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fs;
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 struct DeviceNode {
@@ -631,6 +644,7 @@ fn expand_plc_controller_devices(
         variables: topology.variables.clone(),
         cam_tables: topology.cam_tables.clone(),
         extern_functions: topology.extern_functions.clone(),
+        axis_fault_contracts: topology.axis_fault_contracts.clone(),
     })
 }
 
@@ -963,7 +977,7 @@ pub fn build_topology_graph(program: &PlcProgram) -> Result<TopologyGraph, Vec<P
 }
 
 pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<PlcError>> {
-    let expanded = preprocess_program(program)?;
+    let mut expanded = preprocess_program(program)?;
     let variable_types = collect_variable_types(&expanded.topology);
     let mut expr_errors = Vec::new();
     validate_expression_actions_in_tasks(&expanded.tasks, &variable_types, &mut expr_errors);
@@ -994,6 +1008,16 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
         &mut expr_errors,
     );
     validate_axis_motion_actions_in_tasks(&expanded.tasks, &device_kinds, &mut expr_errors);
+    resolve_axis_motion_parameters_in_tasks(
+        &mut expanded.tasks,
+        &expanded.topology,
+        &mut expr_errors,
+    );
+    validate_vertical_axis_brake_sequence_in_tasks(
+        &expanded.tasks,
+        &expanded.topology,
+        &mut expr_errors,
+    );
     if !expr_errors.is_empty() {
         return Err(expr_errors);
     }
@@ -1130,7 +1154,21 @@ fn is_phase1_supported_extern_type(var_type: &AstVariableType) -> bool {
 
 pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
-    build_constraint_set_from_ast(&expanded.topology, &expanded.constraints, &expanded.tasks)
+    let mut errors = Vec::new();
+    validate_vertical_axis_brake_sequence_in_tasks(
+        &expanded.tasks,
+        &expanded.topology,
+        &mut errors,
+    );
+    match build_constraint_set_from_ast(&expanded.topology, &expanded.constraints, &expanded.tasks)
+    {
+        Ok(constraints) if errors.is_empty() => Ok(constraints),
+        Ok(_) => Err(errors),
+        Err(mut constraint_errors) => {
+            errors.append(&mut constraint_errors);
+            Err(errors)
+        }
+    }
 }
 
 pub fn build_timing_model(program: &PlcProgram) -> Result<TimingModel, Vec<PlcError>> {
@@ -1310,6 +1348,9 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
         Err(mut axis_errors) => errors.append(&mut axis_errors),
     }
 
+    let axis_fault_contract_defs =
+        extract_axis_fault_contract_defs(topology, &device_nodes, &mut errors);
+
     for connection in semantic_topology_connections(topology) {
         let line = topology_connection_line(topology, &connection);
         let context = topology_connection_context(&connection);
@@ -1400,6 +1441,7 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
     topology_graph.cam_tables = cam_table_defs;
     topology_graph.cam_couplings = cam_couplings;
     topology_graph.extern_functions = extern_function_defs;
+    topology_graph.axis_fault_contracts = axis_fault_contract_defs;
 
     if errors.is_empty() {
         Ok(topology_graph)
@@ -2038,6 +2080,327 @@ fn lower_extern_function_def(decl: &AstExternFunctionDeclaration) -> IrExternFun
     }
 }
 
+fn extract_axis_fault_contract_defs(
+    topology: &TopologySection,
+    device_nodes: &HashMap<String, DeviceNode>,
+    errors: &mut Vec<PlcError>,
+) -> Vec<IrAxisFaultContractDef> {
+    let mut defs = Vec::new();
+    let mut seen_names = HashSet::<String>::new();
+    let mut seen_axis = HashMap::<String, String>::new();
+    let axis_device_names = collect_axis_device_names(topology);
+    let axis_device_name_set = axis_device_names
+        .iter()
+        .cloned()
+        .collect::<HashSet<String>>();
+    let axis_functional_groups = collect_axis_functional_groups(topology, &axis_device_name_set);
+    let axis_followers_by_master = collect_axis_followers(topology, &axis_device_name_set);
+
+    for contract in &topology.axis_fault_contracts {
+        let line = contract.line.max(1);
+        if !seen_names.insert(contract.name.clone()) {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                line,
+                "axis_fault_contract",
+                &contract.name,
+                "axis_fault_contract 名称必须唯一，请重命名重复声明",
+            ));
+            continue;
+        }
+
+        let Some(axis_node) = device_nodes.get(&contract.axis) else {
+            errors.push(PlcError::undefined_reference_with_reason(
+                line,
+                "轴设备",
+                &contract.axis,
+                format!(
+                    "axis_fault_contract {} 的 axis 字段引用了未定义设备",
+                    contract.name
+                ),
+            ));
+            continue;
+        };
+
+        if !matches!(
+            axis_node.kind,
+            DeviceKind::StepperMotor | DeviceKind::ServoDrive
+        ) {
+            errors.push(PlcError::type_mismatch_with_reason(
+                line,
+                "stepper_motor 或 servo_drive",
+                device_kind_name(&axis_node.kind),
+                format!("axis_fault_contract {}.axis", contract.name),
+                "axis_fault_contract 只能绑定到轴设备（stepper_motor/servo_drive）",
+            ));
+            continue;
+        }
+
+        if let Some(previous_contract) = seen_axis.get(&contract.axis) {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                line,
+                "axis_fault_contract",
+                &contract.name,
+                format!(
+                    "轴设备 {} 已被 axis_fault_contract {} 绑定，同一轴仅允许一个 contract",
+                    contract.axis, previous_contract
+                ),
+            ));
+            continue;
+        }
+
+        if matches!(
+            contract.propagation_scope,
+            AstAxisFaultPropagationScope::Custom
+        ) {
+            let mut has_invalid_target = false;
+            for target in &contract.propagation_targets {
+                let Some(target_node) = device_nodes.get(target) else {
+                    errors.push(PlcError::undefined_reference_with_reason(
+                        line,
+                        "轴设备",
+                        target,
+                        format!(
+                            "axis_fault_contract {} 的 propagation_targets 引用了未定义设备",
+                            contract.name
+                        ),
+                    ));
+                    has_invalid_target = true;
+                    continue;
+                };
+
+                if !matches!(
+                    target_node.kind,
+                    DeviceKind::StepperMotor | DeviceKind::ServoDrive
+                ) {
+                    errors.push(PlcError::type_mismatch_with_reason(
+                        line,
+                        "stepper_motor 或 servo_drive",
+                        device_kind_name(&target_node.kind),
+                        format!("axis_fault_contract {}.propagation_targets", contract.name),
+                        "propagation_targets 只能包含轴设备（stepper_motor/servo_drive）",
+                    ));
+                    has_invalid_target = true;
+                }
+            }
+
+            if has_invalid_target {
+                continue;
+            }
+        }
+
+        seen_axis.insert(contract.axis.clone(), contract.name.clone());
+        let resolved_targets = resolve_axis_fault_propagation_targets(
+            contract,
+            &axis_device_names,
+            &axis_functional_groups,
+            &axis_followers_by_master,
+        );
+        defs.push(lower_axis_fault_contract_def(contract, resolved_targets));
+    }
+
+    defs
+}
+
+fn collect_axis_device_names(topology: &TopologySection) -> Vec<String> {
+    topology
+        .devices
+        .iter()
+        .filter(|device| {
+            matches!(
+                device.device_type,
+                DeviceType::StepperMotor | DeviceType::ServoDrive
+            )
+        })
+        .map(|device| device.name.clone())
+        .collect()
+}
+
+fn collect_axis_functional_groups(
+    topology: &TopologySection,
+    axis_device_name_set: &HashSet<String>,
+) -> HashMap<String, HashSet<String>> {
+    let mut groups = HashMap::new();
+    for device in &topology.devices {
+        if !axis_device_name_set.contains(&device.name) {
+            continue;
+        }
+
+        groups.insert(
+            device.name.clone(),
+            device
+                .attributes
+                .tags
+                .functional_group
+                .iter()
+                .cloned()
+                .collect(),
+        );
+    }
+    groups
+}
+
+fn collect_axis_followers(
+    topology: &TopologySection,
+    axis_device_name_set: &HashSet<String>,
+) -> HashMap<String, Vec<String>> {
+    let mut followers_by_master = HashMap::<String, Vec<String>>::new();
+
+    for device in &topology.devices {
+        if !matches!(device.device_type, DeviceType::CamCoupling) {
+            continue;
+        }
+
+        let Some(master) = device.attributes.master.as_ref() else {
+            continue;
+        };
+        let Some(slave) = device.attributes.slave.as_ref() else {
+            continue;
+        };
+        if !axis_device_name_set.contains(master) || !axis_device_name_set.contains(slave) {
+            continue;
+        }
+
+        followers_by_master
+            .entry(master.clone())
+            .or_default()
+            .push(slave.clone());
+    }
+
+    for followers in followers_by_master.values_mut() {
+        followers.sort();
+        followers.dedup();
+    }
+
+    followers_by_master
+}
+
+fn resolve_axis_fault_propagation_targets(
+    contract: &AstAxisFaultContractDeclaration,
+    axis_device_names: &[String],
+    axis_functional_groups: &HashMap<String, HashSet<String>>,
+    axis_followers_by_master: &HashMap<String, Vec<String>>,
+) -> Vec<String> {
+    let mut targets = vec![contract.axis.clone()];
+    match contract.propagation_scope {
+        AstAxisFaultPropagationScope::SelfOnly => {}
+        AstAxisFaultPropagationScope::Custom => {
+            for target in &contract.propagation_targets {
+                push_unique_target(&mut targets, target);
+            }
+        }
+        AstAxisFaultPropagationScope::All => {
+            let mut others = axis_device_names
+                .iter()
+                .filter(|name| *name != &contract.axis)
+                .cloned()
+                .collect::<Vec<_>>();
+            others.sort();
+            for target in others {
+                push_unique_target(&mut targets, &target);
+            }
+        }
+        AstAxisFaultPropagationScope::Group => {
+            let source_groups = axis_functional_groups
+                .get(&contract.axis)
+                .cloned()
+                .unwrap_or_default();
+            if !source_groups.is_empty() {
+                let mut grouped_axes = axis_device_names
+                    .iter()
+                    .filter(|name| {
+                        axis_functional_groups
+                            .get(*name)
+                            .map(|groups| !groups.is_disjoint(&source_groups))
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                grouped_axes.sort();
+                for target in grouped_axes {
+                    push_unique_target(&mut targets, &target);
+                }
+            }
+        }
+        AstAxisFaultPropagationScope::Followers => {
+            let mut queue = vec![contract.axis.clone()];
+            let mut cursor = 0usize;
+            while cursor < queue.len() {
+                let master = &queue[cursor];
+                cursor += 1;
+                if let Some(followers) = axis_followers_by_master.get(master) {
+                    for follower in followers {
+                        if !targets.iter().any(|existing| existing == follower) {
+                            targets.push(follower.clone());
+                            queue.push(follower.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    targets
+}
+
+fn push_unique_target(targets: &mut Vec<String>, candidate: &str) {
+    if targets.iter().any(|existing| existing == candidate) {
+        return;
+    }
+    targets.push(candidate.to_string());
+}
+
+fn lower_axis_fault_contract_def(
+    contract: &AstAxisFaultContractDeclaration,
+    propagation_targets: Vec<String>,
+) -> IrAxisFaultContractDef {
+    IrAxisFaultContractDef {
+        name: contract.name.clone(),
+        axis: contract.axis.clone(),
+        severity: lower_axis_fault_severity(&contract.severity),
+        stop_mode: lower_axis_stop_mode(&contract.stop_mode),
+        auto_reset_policy: lower_axis_auto_reset_policy(&contract.auto_reset_policy),
+        manual_ack_required: contract.manual_ack_required,
+        propagation_scope: lower_axis_fault_propagation_scope(&contract.propagation_scope),
+        propagation_targets,
+    }
+}
+
+fn lower_axis_fault_severity(severity: &AstAxisFaultSeverity) -> IrAxisFaultSeverity {
+    match severity {
+        AstAxisFaultSeverity::Recoverable => IrAxisFaultSeverity::Recoverable,
+        AstAxisFaultSeverity::NonRecoverable => IrAxisFaultSeverity::NonRecoverable,
+        AstAxisFaultSeverity::Safety => IrAxisFaultSeverity::Safety,
+    }
+}
+
+fn lower_axis_stop_mode(stop_mode: &AstAxisStopMode) -> IrAxisStopMode {
+    match stop_mode {
+        AstAxisStopMode::Controlled => IrAxisStopMode::Controlled,
+        AstAxisStopMode::Quick => IrAxisStopMode::Quick,
+        AstAxisStopMode::Immediate => IrAxisStopMode::Immediate,
+    }
+}
+
+fn lower_axis_auto_reset_policy(policy: &AstAxisAutoResetPolicy) -> IrAxisAutoResetPolicy {
+    match policy {
+        AstAxisAutoResetPolicy::Never => IrAxisAutoResetPolicy::Never,
+        AstAxisAutoResetPolicy::OnClear => IrAxisAutoResetPolicy::OnClear,
+        AstAxisAutoResetPolicy::Immediate => IrAxisAutoResetPolicy::Immediate,
+    }
+}
+
+fn lower_axis_fault_propagation_scope(
+    scope: &AstAxisFaultPropagationScope,
+) -> IrAxisFaultPropagationScope {
+    match scope {
+        AstAxisFaultPropagationScope::SelfOnly => IrAxisFaultPropagationScope::SelfOnly,
+        AstAxisFaultPropagationScope::Group => IrAxisFaultPropagationScope::Group,
+        AstAxisFaultPropagationScope::All => IrAxisFaultPropagationScope::All,
+        AstAxisFaultPropagationScope::Followers => IrAxisFaultPropagationScope::Followers,
+        AstAxisFaultPropagationScope::Custom => IrAxisFaultPropagationScope::Custom,
+    }
+}
+
 fn ast_variable_type_to_ir(var_type: &AstVariableType) -> IrVariableType {
     match var_type {
         AstVariableType::Float => IrVariableType::Float,
@@ -2661,12 +3024,14 @@ fn build_state_machine_from_ast_with_context(
                 )
             })
             .collect::<BTreeMap<_, _>>();
-        Ok(StateMachine {
+        let mut state_machine = StateMachine {
             states: builder.states,
             transitions: builder.transitions,
             initial,
             analog_regions,
-        })
+        };
+        annotate_axis_absolute_homing_guards(&mut state_machine);
+        Ok(state_machine)
     } else {
         Err(errors)
     }
@@ -3855,6 +4220,9 @@ fn validate_axis_motion_actions_in_statements(
                 on_reject,
                 on_motion_fault,
                 on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
                 ..
             })
             | StepStatement::Action(ActionStatement::AxisMoveAbsolute {
@@ -3863,6 +4231,9 @@ fn validate_axis_motion_actions_in_statements(
                 on_reject,
                 on_motion_fault,
                 on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
                 ..
             }) => {
                 if timeout.is_none() {
@@ -3901,6 +4272,30 @@ fn validate_axis_motion_actions_in_statements(
                         "添加 on_safety_fault -> <task.step> 分支。",
                     ));
                 }
+                validate_axis_fault_routes(
+                    line,
+                    step_name,
+                    "on_reject",
+                    on_reject_routes,
+                    &[AstAxisFaultRouteKind::Reject, AstAxisFaultRouteKind::Vendor],
+                    errors,
+                );
+                validate_axis_fault_routes(
+                    line,
+                    step_name,
+                    "on_motion_fault",
+                    on_motion_fault_routes,
+                    &[AstAxisFaultRouteKind::Motion, AstAxisFaultRouteKind::Vendor],
+                    errors,
+                );
+                validate_axis_fault_routes(
+                    line,
+                    step_name,
+                    "on_safety_fault",
+                    on_safety_fault_routes,
+                    &[AstAxisFaultRouteKind::Safety, AstAxisFaultRouteKind::Vendor],
+                    errors,
+                );
                 validate_axis_motion_target_kind(
                     line,
                     step_name,
@@ -3963,6 +4358,36 @@ fn axis_motion_branch_error(
     )
 }
 
+fn validate_axis_fault_routes(
+    line: usize,
+    step_name: &str,
+    branch_name: &str,
+    routes: &[AstAxisFaultRouteDirective],
+    allowed_kinds: &[AstAxisFaultRouteKind],
+    errors: &mut Vec<PlcError>,
+) {
+    for route in routes {
+        if let Some(kind) = route.kind {
+            if !allowed_kinds.contains(&kind) {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXIS-010] step '{step_name}' has incompatible {branch_name} route kind '{kind:?}'."
+                    ),
+                    format!(
+                        "{branch_name} 仅允许 kind 为 {}，请调整 matcher。",
+                        allowed_kinds
+                            .iter()
+                            .map(|v| format!("{:?}", v).to_lowercase())
+                            .collect::<Vec<_>>()
+                            .join("/")
+                    ),
+                ));
+            }
+        }
+    }
+}
+
 fn validate_axis_motion_target_kind(
     line: usize,
     step_name: &str,
@@ -3987,6 +4412,723 @@ fn validate_axis_motion_target_kind(
                 "step '{step_name}' 引用了未定义设备。请先在 [topology] 声明该轴设备，且类型为 stepper_motor 或 servo_drive。"
             ),
         )),
+    }
+}
+
+const AXIS_MOTION_PARAM_SETS_DIR: &str = "axis_motion_param_sets";
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AxisMotionParamSetDef {
+    name: String,
+    config_id: String,
+    speed: f64,
+    acceleration: f64,
+    deceleration: f64,
+}
+
+fn resolve_axis_motion_parameters_in_tasks(
+    tasks: &mut TasksSection,
+    topology: &TopologySection,
+    errors: &mut Vec<PlcError>,
+) {
+    if !tasks_contain_axis_motion_actions(tasks) {
+        return;
+    }
+
+    let axis_profiles = match resolve_axis_profiles(&topology.devices) {
+        Ok(profiles) => profiles,
+        Err(mut profile_errors) => {
+            errors.append(&mut profile_errors);
+            return;
+        }
+    };
+
+    let motion_param_sets = match load_axis_motion_param_sets() {
+        Ok(sets) => sets,
+        Err(mut load_errors) => {
+            errors.append(&mut load_errors);
+            return;
+        }
+    };
+
+    let mut device_default_param_sets = HashMap::<String, String>::new();
+    for device in &topology.devices {
+        if !matches!(
+            device.device_type,
+            DeviceType::StepperMotor | DeviceType::ServoDrive
+        ) {
+            continue;
+        }
+        if let Some(default_set) = device
+            .attributes
+            .motion_param_set
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            device_default_param_sets.insert(device.name.clone(), default_set.to_string());
+        }
+    }
+
+    for task in &mut tasks.tasks {
+        for step in &mut task.steps {
+            resolve_axis_motion_parameters_in_statements(
+                &mut step.statements,
+                step.line.max(1),
+                &axis_profiles,
+                &motion_param_sets,
+                &device_default_param_sets,
+                errors,
+            );
+        }
+    }
+}
+
+fn tasks_contain_axis_motion_actions(tasks: &TasksSection) -> bool {
+    tasks
+        .tasks
+        .iter()
+        .flat_map(|task| task.steps.iter())
+        .any(|step| statements_contain_axis_motion_actions(&step.statements))
+}
+
+fn statements_contain_axis_motion_actions(statements: &[StepStatement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        StepStatement::Action(ActionStatement::AxisMoveRelative { .. })
+        | StepStatement::Action(ActionStatement::AxisMoveAbsolute { .. }) => true,
+        StepStatement::Repeat { body, .. } => statements_contain_axis_motion_actions(body),
+        StepStatement::Parallel(block) => block
+            .branches
+            .iter()
+            .any(|branch| statements_contain_axis_motion_actions(&branch.statements)),
+        StepStatement::Race(block) => block
+            .branches
+            .iter()
+            .any(|branch| statements_contain_axis_motion_actions(&branch.statements)),
+        StepStatement::Action(_)
+        | StepStatement::Wait(_)
+        | StepStatement::IfElse { .. }
+        | StepStatement::Delay { .. }
+        | StepStatement::Timeout(_)
+        | StepStatement::Goto(_)
+        | StepStatement::AllowIndefiniteWait(_) => false,
+    })
+}
+
+fn resolve_axis_motion_parameters_in_statements(
+    statements: &mut [StepStatement],
+    line: usize,
+    axis_profiles: &BTreeMap<String, crate::ir::AxisProfile>,
+    motion_param_sets: &HashMap<String, AxisMotionParamSetDef>,
+    device_default_param_sets: &HashMap<String, String>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::AxisMoveRelative {
+                target,
+                params,
+                speed,
+                acceleration,
+                deceleration,
+                ..
+            }) => resolve_axis_motion_parameters_on_action(
+                line,
+                None,
+                &target.device,
+                params,
+                speed,
+                acceleration,
+                deceleration,
+                axis_profiles,
+                motion_param_sets,
+                device_default_param_sets,
+                errors,
+            ),
+            StepStatement::Action(ActionStatement::AxisMoveAbsolute {
+                target,
+                params,
+                position,
+                speed,
+                acceleration,
+                deceleration,
+                ..
+            }) => resolve_axis_motion_parameters_on_action(
+                line,
+                Some(*position),
+                &target.device,
+                params,
+                speed,
+                acceleration,
+                deceleration,
+                axis_profiles,
+                motion_param_sets,
+                device_default_param_sets,
+                errors,
+            ),
+            StepStatement::Repeat { body, .. } => resolve_axis_motion_parameters_in_statements(
+                body,
+                line,
+                axis_profiles,
+                motion_param_sets,
+                device_default_param_sets,
+                errors,
+            ),
+            StepStatement::Parallel(block) => {
+                for branch in &mut block.branches {
+                    resolve_axis_motion_parameters_in_statements(
+                        &mut branch.statements,
+                        line,
+                        axis_profiles,
+                        motion_param_sets,
+                        device_default_param_sets,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &mut block.branches {
+                    resolve_axis_motion_parameters_in_statements(
+                        &mut branch.statements,
+                        line,
+                        axis_profiles,
+                        motion_param_sets,
+                        device_default_param_sets,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_axis_motion_parameters_on_action(
+    line: usize,
+    absolute_position: Option<f64>,
+    target_device: &str,
+    params: &Option<String>,
+    speed: &mut Option<f64>,
+    acceleration: &mut Option<f64>,
+    deceleration: &mut Option<f64>,
+    axis_profiles: &BTreeMap<String, crate::ir::AxisProfile>,
+    motion_param_sets: &HashMap<String, AxisMotionParamSetDef>,
+    device_default_param_sets: &HashMap<String, String>,
+    errors: &mut Vec<PlcError>,
+) {
+    let Some(profile) = axis_profiles.get(target_device) else {
+        return;
+    };
+
+    let explicit_params = params
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+    let selected_params_name = explicit_params
+        .clone()
+        .or_else(|| device_default_param_sets.get(target_device).cloned());
+
+    let selected_param_set = match selected_params_name.as_deref() {
+        Some(name) => {
+            let Some(def) = motion_param_sets.get(name) else {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXIS-006] axis target '{}' references unknown motion params '{}'.",
+                        target_device, name
+                    ),
+                    format!(
+                        "请在 {AXIS_MOTION_PARAM_SETS_DIR}/{}.toml 中定义该参数集，或修正 params。",
+                        name
+                    ),
+                ));
+                return;
+            };
+            if def.config_id.trim() != profile.config_ref {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXIS-006] motion params '{}' is bound to config '{}' but '{}' uses config '{}'.",
+                        name, def.config_id, target_device, profile.config_ref
+                    ),
+                    "请确保参数集 config_id 与目标轴设备 config_ref 一致。".to_string(),
+                ));
+                return;
+            }
+            Some(def)
+        }
+        None => None,
+    };
+
+    let resolved_speed = speed
+        .as_ref()
+        .copied()
+        .or_else(|| selected_param_set.map(|def| def.speed));
+    let resolved_acc = acceleration
+        .as_ref()
+        .copied()
+        .or_else(|| selected_param_set.map(|def| def.acceleration));
+    let resolved_dec = deceleration
+        .as_ref()
+        .copied()
+        .or_else(|| selected_param_set.map(|def| def.deceleration));
+
+    let Some(resolved_speed) = resolved_speed else {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "[AXIS-007] axis.move on '{}' is missing speed/acc/dec parameters.",
+                target_device
+            ),
+            "请提供 params 引用，或显式填写 speed/acc/dec。".to_string(),
+        ));
+        return;
+    };
+    let Some(resolved_acc) = resolved_acc else {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "[AXIS-007] axis.move on '{}' is missing speed/acc/dec parameters.",
+                target_device
+            ),
+            "请提供 params 引用，或显式填写 speed/acc/dec。".to_string(),
+        ));
+        return;
+    };
+    let Some(resolved_dec) = resolved_dec else {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "[AXIS-007] axis.move on '{}' is missing speed/acc/dec parameters.",
+                target_device
+            ),
+            "请提供 params 引用，或显式填写 speed/acc/dec。".to_string(),
+        ));
+        return;
+    };
+
+    if !resolved_speed.is_finite()
+        || !resolved_acc.is_finite()
+        || !resolved_dec.is_finite()
+        || resolved_speed <= 0.0
+        || resolved_acc <= 0.0
+        || resolved_dec <= 0.0
+    {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "[AXIS-008] axis.move parameters on '{}' must be positive finite values.",
+                target_device
+            ),
+            "请确保 speed/acc/dec 均为正数。".to_string(),
+        ));
+        return;
+    }
+
+    let max_acc = profile.max_acceleration as f64;
+    if resolved_acc > max_acc || resolved_dec > max_acc {
+        errors.push(PlcError::semantic_with_reason(
+            line,
+            format!(
+                "[AXIS-009] axis.move parameters on '{}' exceed profile limits.",
+                target_device
+            ),
+            format!(
+                "请满足 acc/dec <= {}（由 model/config 限制推导）。",
+                max_acc
+            ),
+        ));
+        return;
+    }
+
+    if let Some(position) = absolute_position {
+        if let (Some(min), Some(max)) = (profile.soft_limit_min, profile.soft_limit_max) {
+            let min = min as f64;
+            let max = max as f64;
+            if position < min || position > max {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    format!(
+                        "[AXIS-011] axis.move_absolute position on '{}' exceeds soft limits {}..{}.",
+                        target_device, min, max
+                    ),
+                    "请调整 position 或更新轴配置 soft_limit_min/soft_limit_max。"
+                        .to_string(),
+                ));
+                return;
+            }
+        }
+    }
+
+    *speed = Some(resolved_speed);
+    *acceleration = Some(resolved_acc);
+    *deceleration = Some(resolved_dec);
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct BrakeSequenceProgress {
+    engage_seen: bool,
+    confirm_seen: bool,
+}
+
+fn validate_vertical_axis_brake_sequence_in_tasks(
+    tasks: &TasksSection,
+    topology: &TopologySection,
+    errors: &mut Vec<PlcError>,
+) {
+    let disable_targets = collect_axis_disable_targets_from_tasks(tasks);
+    if disable_targets.is_empty() {
+        return;
+    }
+
+    let profile_devices = topology
+        .devices
+        .iter()
+        .filter(|device| {
+            disable_targets.contains(&device.name)
+                && matches!(
+                    device.device_type,
+                    DeviceType::StepperMotor | DeviceType::ServoDrive
+                )
+                && device
+                    .attributes
+                    .model_ref
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+                && device
+                    .attributes
+                    .config_ref
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if profile_devices.is_empty() {
+        return;
+    }
+
+    let axis_profiles = match resolve_axis_profiles(&profile_devices) {
+        Ok(profiles) => profiles,
+        Err(mut profile_errors) => {
+            errors.append(&mut profile_errors);
+            return;
+        }
+    };
+
+    let brake_requirements = axis_profiles
+        .iter()
+        .filter_map(|(axis, profile)| {
+            if matches!(profile.orientation, crate::ir::AxisOrientation::Vertical) {
+                profile.brake.clone().map(|brake| (axis.clone(), brake))
+            } else {
+                None
+            }
+        })
+        .collect::<HashMap<_, _>>();
+
+    if brake_requirements.is_empty() {
+        return;
+    }
+
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            let mut progress = brake_requirements
+                .keys()
+                .map(|axis| (axis.clone(), BrakeSequenceProgress::default()))
+                .collect::<HashMap<_, _>>();
+            validate_vertical_axis_brake_sequence_in_statements(
+                &step.statements,
+                step.line.max(1),
+                &task.name,
+                &step.name,
+                &brake_requirements,
+                &mut progress,
+                errors,
+            );
+        }
+    }
+}
+
+fn collect_axis_disable_targets_from_tasks(tasks: &TasksSection) -> HashSet<String> {
+    let mut targets = HashSet::new();
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            collect_axis_disable_targets_from_statements(&step.statements, &mut targets);
+        }
+    }
+    targets
+}
+
+fn collect_axis_disable_targets_from_statements(
+    statements: &[StepStatement],
+    targets: &mut HashSet<String>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::Set { target, value }) => {
+                if target.port == "enable"
+                    && set_enum_to_binary(value.as_str()) == Some(IrBinaryValue::Off)
+                {
+                    targets.insert(target.device.clone());
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                collect_axis_disable_targets_from_statements(body, targets)
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    collect_axis_disable_targets_from_statements(&branch.statements, targets);
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    collect_axis_disable_targets_from_statements(&branch.statements, targets);
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_vertical_axis_brake_sequence_in_statements(
+    statements: &[StepStatement],
+    line: usize,
+    task_name: &str,
+    step_name: &str,
+    brake_requirements: &HashMap<String, crate::ir::AxisBrakeConfig>,
+    progress: &mut HashMap<String, BrakeSequenceProgress>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::Set { target, value }) => {
+                let Some(brake) = brake_requirements.get(&target.device) else {
+                    continue;
+                };
+
+                if target.port == brake.engage_port
+                    && set_enum_to_binary(value.as_str()) == Some(brake.engage_value.clone())
+                {
+                    if let Some(state) = progress.get_mut(&target.device) {
+                        state.engage_seen = true;
+                        state.confirm_seen = false;
+                    }
+                    continue;
+                }
+
+                if target.port == "enable"
+                    && set_enum_to_binary(value.as_str()) == Some(IrBinaryValue::Off)
+                {
+                    let state = progress.get(&target.device).copied().unwrap_or_default();
+                    if !(state.engage_seen && state.confirm_seen) {
+                        errors.push(PlcError::semantic_with_reason(
+                            line,
+                            format!(
+                                "[AXIS-012] vertical axis '{}' disables enable before brake_engage_confirmed.",
+                                target.device
+                            ),
+                            format!(
+                                "task '{}', step '{}' 中请先执行 `set {}.{} {}`，再 `wait: {}.{} == {}`，最后再 `set {}.enable off`。",
+                                task_name,
+                                step_name,
+                                target.device,
+                                brake.engage_port,
+                                binary_value_text(&brake.engage_value),
+                                target.device,
+                                brake.engage_confirm_port,
+                                bool_text(brake.engage_confirm_value),
+                                target.device
+                            ),
+                        ));
+                    }
+                }
+            }
+            StepStatement::Wait(wait) => {
+                for (axis, brake) in brake_requirements {
+                    let Some(state) = progress.get(axis).copied() else {
+                        continue;
+                    };
+                    if !state.engage_seen {
+                        continue;
+                    }
+                    if wait_asserts_brake_confirmed(wait, axis, brake) {
+                        if let Some(state_mut) = progress.get_mut(axis) {
+                            state_mut.confirm_seen = true;
+                        }
+                    }
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                validate_vertical_axis_brake_sequence_in_statements(
+                    body,
+                    line,
+                    task_name,
+                    step_name,
+                    brake_requirements,
+                    progress,
+                    errors,
+                );
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    let mut branch_progress = progress.clone();
+                    validate_vertical_axis_brake_sequence_in_statements(
+                        &branch.statements,
+                        line,
+                        task_name,
+                        step_name,
+                        brake_requirements,
+                        &mut branch_progress,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    let mut branch_progress = progress.clone();
+                    validate_vertical_axis_brake_sequence_in_statements(
+                        &branch.statements,
+                        line,
+                        task_name,
+                        step_name,
+                        brake_requirements,
+                        &mut branch_progress,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn wait_asserts_brake_confirmed(
+    wait: &WaitStatement,
+    axis: &str,
+    brake: &crate::ir::AxisBrakeConfig,
+) -> bool {
+    let expected_left = format!("{axis}.{}", brake.engage_confirm_port);
+    let expected_right = brake.engage_confirm_value;
+
+    let terms = match &wait.condition {
+        WaitCondition::Single(term) => vec![term],
+        WaitCondition::And(terms) => terms.iter().collect(),
+        WaitCondition::Or(_) => return false,
+    };
+
+    terms.into_iter().any(|term| {
+        !term.is_expression_compare()
+            && matches!(term.operator, ComparisonOperator::Eq)
+            && term.left == expected_left
+            && literal_matches_bool(&term.right, expected_right)
+    })
+}
+
+fn literal_matches_bool(literal: &LiteralValue, expected: bool) -> bool {
+    match literal {
+        LiteralValue::Boolean(value) => *value == expected,
+        LiteralValue::String(value) => {
+            let normalized = value.trim();
+            (normalized == "true" && expected) || (normalized == "false" && !expected)
+        }
+        _ => false,
+    }
+}
+
+fn binary_value_text(value: &IrBinaryValue) -> &'static str {
+    match value {
+        IrBinaryValue::On => "on",
+        IrBinaryValue::Off => "off",
+    }
+}
+
+fn bool_text(value: bool) -> &'static str {
+    if value { "true" } else { "false" }
+}
+
+fn load_axis_motion_param_sets() -> Result<HashMap<String, AxisMotionParamSetDef>, Vec<PlcError>> {
+    let root = Path::new(AXIS_MOTION_PARAM_SETS_DIR);
+    let mut defs = HashMap::new();
+    let mut errors = Vec::new();
+
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(err) => {
+            errors.push(PlcError::semantic_with_reason(
+                1,
+                format!("[AXIS-006] failed to read {AXIS_MOTION_PARAM_SETS_DIR} directory: {err}"),
+                "请确认 axis_motion_param_sets 目录存在且可读。".to_string(),
+            ));
+            return Err(errors);
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+            continue;
+        }
+
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(err) => {
+                errors.push(PlcError::semantic_with_reason(
+                    1,
+                    format!(
+                        "[AXIS-006] failed to read motion params file '{}': {err}",
+                        path.display()
+                    ),
+                    "请确认参数集文件可读。".to_string(),
+                ));
+                continue;
+            }
+        };
+
+        let def = match toml::from_str::<AxisMotionParamSetDef>(&content) {
+            Ok(def) => def,
+            Err(err) => {
+                errors.push(PlcError::semantic_with_reason(
+                    1,
+                    format!(
+                        "[AXIS-006] failed to parse motion params file '{}': {err}",
+                        path.display()
+                    ),
+                    "请检查 TOML 字段并确保仅使用 name/config_id/speed/acceleration/deceleration。"
+                        .to_string(),
+                ));
+                continue;
+            }
+        };
+
+        defs.insert(def.name.clone(), def);
+    }
+
+    if errors.is_empty() {
+        Ok(defs)
+    } else {
+        Err(errors)
     }
 }
 
@@ -4764,6 +5906,158 @@ fn analyze_statements(
     analyzed
 }
 
+fn annotate_axis_absolute_homing_guards(state_machine: &mut StateMachine) {
+    let reachable = reachable_states(state_machine);
+    let axis_targets = collect_axis_targets(state_machine);
+    if axis_targets.is_empty() {
+        return;
+    }
+
+    let mut homed_facts = HashMap::<String, HashMap<(String, String), bool>>::new();
+    for axis in &axis_targets {
+        homed_facts.insert(
+            axis.clone(),
+            infer_definitely_homed_states(state_machine, &reachable, axis),
+        );
+    }
+
+    for transition in &mut state_machine.transitions {
+        let mut local_homed = HashMap::<String, bool>::new();
+        for axis in &axis_targets {
+            let homed = homed_facts
+                .get(axis)
+                .and_then(|facts| facts.get(&state_key(&transition.from)))
+                .copied()
+                .unwrap_or(false);
+            local_homed.insert(axis.clone(), homed);
+        }
+
+        for action in &mut transition.actions {
+            match action {
+                TransitionAction::AxisMoveRelative { target, .. } => {
+                    local_homed.insert(target.clone(), true);
+                }
+                TransitionAction::AxisMoveAbsolute {
+                    target,
+                    require_homed,
+                    ..
+                } => {
+                    let proven = local_homed.get(target).copied().unwrap_or(false);
+                    *require_homed = !proven;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn state_key(state: &State) -> (String, String) {
+    (state.task_name.clone(), state.step_name.clone())
+}
+
+fn collect_axis_targets(state_machine: &StateMachine) -> BTreeSet<String> {
+    let mut axis_targets = BTreeSet::new();
+    for transition in &state_machine.transitions {
+        for action in &transition.actions {
+            match action {
+                TransitionAction::AxisMoveRelative { target, .. }
+                | TransitionAction::AxisMoveAbsolute { target, .. } => {
+                    axis_targets.insert(target.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+    axis_targets
+}
+
+fn reachable_states(state_machine: &StateMachine) -> HashSet<(String, String)> {
+    let mut reachable = HashSet::new();
+    let mut stack = vec![state_machine.initial.clone()];
+
+    while let Some(state) = stack.pop() {
+        let key = state_key(&state);
+        if !reachable.insert(key) {
+            continue;
+        }
+
+        for transition in state_machine.transitions.iter().filter(|t| t.from == state) {
+            stack.push(transition.to.clone());
+        }
+    }
+
+    reachable
+}
+
+fn infer_definitely_homed_states(
+    state_machine: &StateMachine,
+    reachable: &HashSet<(String, String)>,
+    axis: &str,
+) -> HashMap<(String, String), bool> {
+    let mut facts = HashMap::<(String, String), bool>::new();
+    for key in reachable {
+        facts.insert(key.clone(), true);
+    }
+    let initial_key = state_key(&state_machine.initial);
+    facts.insert(initial_key.clone(), false);
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for state in reachable {
+            if *state == initial_key {
+                continue;
+            }
+
+            let predecessors = state_machine
+                .transitions
+                .iter()
+                .filter(|transition| {
+                    state_key(&transition.to) == *state
+                        && reachable.contains(&state_key(&transition.from))
+                })
+                .collect::<Vec<_>>();
+
+            if predecessors.is_empty() {
+                continue;
+            }
+
+            let next = predecessors.iter().all(|transition| {
+                let in_homed = facts
+                    .get(&state_key(&transition.from))
+                    .copied()
+                    .unwrap_or(false);
+                apply_homing_transition_effect(in_homed, &transition.actions, axis)
+            });
+
+            if let Some(entry) = facts.get_mut(state) {
+                if *entry != next {
+                    *entry = next;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    facts
+}
+
+fn apply_homing_transition_effect(
+    in_homed: bool,
+    actions: &[TransitionAction],
+    axis: &str,
+) -> bool {
+    let mut homed = in_homed;
+    for action in actions {
+        if let TransitionAction::AxisMoveRelative { target, .. } = action {
+            if target == axis {
+                homed = true;
+            }
+        }
+    }
+    homed
+}
+
 fn build_parallel_block(
     builder: &mut StateMachineBuilder,
     task: &TaskDeclaration,
@@ -4792,16 +6086,24 @@ fn build_parallel_block(
         Vec::new(),
     );
 
+    let mut previous_state = fork_state.clone();
+
     for (branch_index, branch) in block.branches.iter().enumerate() {
         let branch_state_name = format!(
-            "{step_name}__parallel_{}_branch_{}",
+            "{step_name}__parallel_{}_branch_{}_active",
             block_index + 1,
             branch_index + 1
         );
         let branch_state = builder.add_state(&task.name, &branch_state_name);
+        let branch_done_state_name = format!(
+            "{step_name}__parallel_{}_branch_{}_done",
+            block_index + 1,
+            branch_index + 1
+        );
+        let branch_done_state = builder.add_state(&task.name, &branch_done_state_name);
 
         builder.add_transition(
-            fork_state.clone(),
+            previous_state.clone(),
             branch_state.clone(),
             TransitionGuard::Always,
             Vec::new(),
@@ -4871,7 +6173,7 @@ fn build_parallel_block(
         for (delay_index, duration_ms) in analyzed.delays_ms.iter().enumerate() {
             builder.add_transition(
                 branch_state.clone(),
-                join_state.clone(),
+                branch_done_state.clone(),
                 TransitionGuard::Delay {
                     duration_ms: *duration_ms,
                 },
@@ -4924,7 +6226,7 @@ fn build_parallel_block(
         for wait_expression in &analyzed.waits {
             builder.add_transition(
                 branch_state.clone(),
-                join_state.clone(),
+                branch_done_state.clone(),
                 TransitionGuard::Condition {
                     expression: wait_expression.clone(),
                 },
@@ -4939,14 +6241,14 @@ fn build_parallel_block(
                 builder,
                 task,
                 &format!(
-                    "{step_name}__parallel_{}_branch_{}",
+                    "{step_name}__parallel_{}_branch_{}_active",
                     block_index + 1,
                     branch_index + 1
                 ),
                 &branch_state,
                 nested_parallel_index,
                 nested_parallel,
-                Some(join_state.clone()),
+                Some(branch_done_state.clone()),
                 task_initial_states,
                 task_defined_steps,
                 errors,
@@ -4960,14 +6262,14 @@ fn build_parallel_block(
                 builder,
                 task,
                 &format!(
-                    "{step_name}__parallel_{}_branch_{}",
+                    "{step_name}__parallel_{}_branch_{}_active",
                     block_index + 1,
                     branch_index + 1
                 ),
                 &branch_state,
                 nested_race_index,
                 nested_race,
-                Some(join_state.clone()),
+                Some(branch_done_state.clone()),
                 task_initial_states,
                 task_defined_steps,
                 errors,
@@ -4985,13 +6287,23 @@ fn build_parallel_block(
         if !has_control_flow {
             builder.add_transition(
                 branch_state,
-                join_state.clone(),
+                branch_done_state.clone(),
                 TransitionGuard::Always,
                 analyzed.actions,
                 Vec::new(),
             );
         }
+
+        previous_state = branch_done_state;
     }
+
+    builder.add_transition(
+        previous_state,
+        join_state.clone(),
+        TransitionGuard::Always,
+        Vec::new(),
+        Vec::new(),
+    );
 
     if let Some(target) = completion_target {
         builder.add_transition(
@@ -5029,6 +6341,29 @@ fn build_race_block(
         Vec::new(),
     );
 
+    if block.branches.is_empty() {
+        if let Some(target) = completion_target {
+            builder.add_transition(
+                decision_state,
+                target,
+                TransitionGuard::Always,
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        return;
+    }
+
+    let first_branch_state_name = format!("{step_name}__race_{}_branch_1", block_index + 1);
+    let first_branch_state = builder.add_state(&task.name, &first_branch_state_name);
+    builder.add_transition(
+        decision_state,
+        first_branch_state,
+        TransitionGuard::Always,
+        Vec::new(),
+        Vec::new(),
+    );
+
     for (branch_index, branch) in block.branches.iter().enumerate() {
         let branch_state_name = format!(
             "{step_name}__race_{}_branch_{}",
@@ -5036,14 +6371,6 @@ fn build_race_block(
             branch_index + 1
         );
         let branch_state = builder.add_state(&task.name, &branch_state_name);
-
-        builder.add_transition(
-            decision_state.clone(),
-            branch_state.clone(),
-            TransitionGuard::Always,
-            Vec::new(),
-            Vec::new(),
-        );
 
         let analyzed = analyze_statements(&branch.statements, wait_ctx);
         let branch_completion_target = branch
@@ -5239,13 +6566,29 @@ fn build_race_block(
         if !has_control_flow {
             if let Some(target) = branch_completion_target {
                 builder.add_transition(
-                    branch_state,
+                    branch_state.clone(),
                     target,
                     TransitionGuard::Always,
                     analyzed.actions,
                     Vec::new(),
                 );
             }
+        }
+
+        if branch_index + 1 < block.branches.len() {
+            let next_branch_state_name = format!(
+                "{step_name}__race_{}_branch_{}",
+                block_index + 1,
+                branch_index + 2
+            );
+            let next_branch_state = builder.add_state(&task.name, &next_branch_state_name);
+            builder.add_transition(
+                branch_state.clone(),
+                next_branch_state,
+                TransitionGuard::Always,
+                Vec::new(),
+                Vec::new(),
+            );
         }
     }
 }
@@ -5361,39 +6704,78 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
         }),
         ActionStatement::AxisMoveRelative {
             target,
+            params: _,
             distance,
             speed,
+            acceleration: _,
+            deceleration: _,
             timeout,
             on_reject,
             on_motion_fault,
             on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         } => Some(TransitionAction::AxisMoveRelative {
             target: target.device.clone(),
             port: target.port.clone(),
             distance_raw: distance.to_string(),
-            speed_raw: speed.to_string(),
+            speed_raw: speed
+                .expect("axis.move_relative speed must be resolved in semantic pass")
+                .to_string(),
             timeout: lower_axis_timeout_branch(timeout.as_ref()?),
-            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, None),
-            on_motion_fault: lower_axis_fault_branch(on_motion_fault.as_ref()?, None),
-            on_safety_fault: lower_axis_fault_branch(on_safety_fault.as_ref()?, None),
+            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, AxisFaultKind::Reject, None),
+            on_motion_fault: lower_axis_fault_branch(
+                on_motion_fault.as_ref()?,
+                AxisFaultKind::Motion,
+                None,
+            ),
+            on_safety_fault: lower_axis_fault_branch(
+                on_safety_fault.as_ref()?,
+                AxisFaultKind::Safety,
+                None,
+            ),
+            on_reject_routes: lower_axis_fault_routes(on_reject_routes),
+            on_motion_fault_routes: lower_axis_fault_routes(on_motion_fault_routes),
+            on_safety_fault_routes: lower_axis_fault_routes(on_safety_fault_routes),
         }),
         ActionStatement::AxisMoveAbsolute {
             target,
+            params: _,
             position,
             speed,
+            acceleration: _,
+            deceleration: _,
             timeout,
             on_reject,
             on_motion_fault,
             on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         } => Some(TransitionAction::AxisMoveAbsolute {
             target: target.device.clone(),
             port: target.port.clone(),
             position_raw: position.to_string(),
-            speed_raw: speed.to_string(),
+            speed_raw: speed
+                .expect("axis.move_absolute speed must be resolved in semantic pass")
+                .to_string(),
+            require_homed: true,
             timeout: lower_axis_timeout_branch(timeout.as_ref()?),
-            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, None),
-            on_motion_fault: lower_axis_fault_branch(on_motion_fault.as_ref()?, None),
-            on_safety_fault: lower_axis_fault_branch(on_safety_fault.as_ref()?, None),
+            on_reject: lower_axis_fault_branch(on_reject.as_ref()?, AxisFaultKind::Reject, None),
+            on_motion_fault: lower_axis_fault_branch(
+                on_motion_fault.as_ref()?,
+                AxisFaultKind::Motion,
+                None,
+            ),
+            on_safety_fault: lower_axis_fault_branch(
+                on_safety_fault.as_ref()?,
+                AxisFaultKind::Safety,
+                None,
+            ),
+            on_reject_routes: lower_axis_fault_routes(on_reject_routes),
+            on_motion_fault_routes: lower_axis_fault_routes(on_motion_fault_routes),
+            on_safety_fault_routes: lower_axis_fault_routes(on_safety_fault_routes),
         }),
         ActionStatement::Log { message } => Some(TransitionAction::Log {
             message: message.clone(),
@@ -5409,11 +6791,39 @@ fn lower_axis_timeout_branch(timeout: &TimeoutDirective) -> AxisTimeoutBranch {
     }
 }
 
-fn lower_axis_fault_branch(goto: &GotoDirective, error_code: Option<&str>) -> AxisFaultBranch {
+fn lower_axis_fault_branch(
+    goto: &GotoDirective,
+    kind: AxisFaultKind,
+    error_code: Option<&str>,
+) -> AxisFaultBranch {
     AxisFaultBranch {
         target_task: goto.task.clone(),
         target_step: goto.step.clone(),
+        category: kind.category(),
+        vendor_code: kind.vendor_code(),
+        kind,
         error_code: error_code.map(ToString::to_string),
+    }
+}
+
+fn lower_axis_fault_routes(routes: &[AstAxisFaultRouteDirective]) -> Vec<IrAxisFaultRouteBranch> {
+    routes
+        .iter()
+        .map(|route| IrAxisFaultRouteBranch {
+            target_task: route.target.task.clone(),
+            target_step: route.target.step.clone(),
+            kind: route.kind.map(lower_axis_fault_route_kind),
+            code: route.code,
+        })
+        .collect()
+}
+
+fn lower_axis_fault_route_kind(kind: AstAxisFaultRouteKind) -> IrAxisFaultRouteKind {
+    match kind {
+        AstAxisFaultRouteKind::Reject => IrAxisFaultRouteKind::Reject,
+        AstAxisFaultRouteKind::Motion => IrAxisFaultRouteKind::Motion,
+        AstAxisFaultRouteKind::Safety => IrAxisFaultRouteKind::Safety,
+        AstAxisFaultRouteKind::Vendor => IrAxisFaultRouteKind::Vendor,
     }
 }
 
@@ -8097,7 +9507,11 @@ task done:
     fn lowers_axis_move_actions_into_ir_transition_actions() {
         let input = r#"
 [topology]
-device axis_x: stepper_motor
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
 
 [constraints]
 
@@ -8189,6 +9603,174 @@ task done:
         assert_eq!(absolute.2, "5");
         assert_eq!(absolute.3.duration_ms, 800);
         assert_eq!(absolute.3.target_step.as_deref(), Some("timeout"));
+    }
+
+    #[test]
+    fn lowers_axis_move_refined_fault_routes_into_ir_transition_actions() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_default
+            on_motion_fault(kind: vendor) -> fault.motion_vendor
+            on_motion_fault(code: 17) -> fault.motion_code_17
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_default:
+    step motion_vendor:
+    step motion_code_17:
+    step safety_fault:
+
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("axis refined routes 示例应能解析");
+        let sm = build_state_machine(&program).expect("axis refined routes 应能 lowering 到 IR");
+
+        let action = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveRelative {
+                    on_motion_fault,
+                    on_motion_fault_routes,
+                    ..
+                } => Some((on_motion_fault, on_motion_fault_routes)),
+                _ => None,
+            })
+            .expect("应包含 axis_move_relative 动作");
+
+        assert_eq!(action.0.target_step.as_deref(), Some("motion_default"));
+        assert_eq!(action.1.len(), 2);
+        assert_eq!(
+            action.1[0].kind,
+            Some(crate::ir::AxisFaultRouteKind::Vendor)
+        );
+        assert_eq!(action.1[0].code, None);
+        assert_eq!(action.1[0].target_step.as_deref(), Some("motion_vendor"));
+
+        assert_eq!(action.1[1].kind, None);
+        assert_eq!(action.1[1].code, Some(17));
+        assert_eq!(action.1[1].target_step.as_deref(), Some("motion_code_17"));
+    }
+
+    #[test]
+    fn keeps_axis_move_absolute_homing_guard_when_not_statically_proven() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_absolute(axis_x, position: 120, speed: 5)
+            timeout: 800ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("axis absolute 示例应能解析");
+        let sm = build_state_machine(&program).expect("axis absolute 应能 lowering 到 IR");
+        let require_homed = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveAbsolute { require_homed, .. } => {
+                    Some(*require_homed)
+                }
+                _ => None,
+            })
+            .expect("应包含 axis_move_absolute 动作");
+
+        assert!(require_homed, "未被静态证明时应保留 runtime homing guard");
+    }
+
+    #[test]
+    fn elides_axis_move_absolute_homing_guard_after_proven_relative() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step home:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step run:
+        action: axis.move_absolute(axis_x, position: 120, speed: 5)
+            timeout: 800ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+task done:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("axis relative+absolute 示例应能解析");
+        let sm = build_state_machine(&program).expect("应能 lowering 到 IR");
+        let require_homed = sm
+            .transitions
+            .iter()
+            .filter(|transition| transition.from.step_name == "run")
+            .flat_map(|transition| transition.actions.iter())
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveAbsolute { require_homed, .. } => {
+                    Some(*require_homed)
+                }
+                _ => None,
+            })
+            .expect("run step 应包含 axis_move_absolute 动作");
+
+        assert!(!require_homed, "可静态证明时应消解 runtime homing guard");
     }
 
     #[test]
@@ -8619,7 +10201,11 @@ task main:
     #[test]
     fn rejects_axis_move_missing_branches_with_axis_rule_codes() {
         let input = "[topology]
-device axis_x: stepper_motor
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
 
 [constraints]
 
@@ -8644,6 +10230,80 @@ task main:
         assert!(joined.contains("step 'move'"));
         assert!(joined.contains("timeout: <duration> -> <task.step>"));
         assert!(errors.iter().all(|err| err.line() > 0));
+    }
+
+    #[test]
+    fn rejects_axis_move_refined_route_without_primary_bucket() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault(kind: vendor) -> fault.motion_vendor
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_vendor:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("语法应可解析");
+        let errors = build_state_machine(&program).expect_err("缺失主桶分支应触发 AXIS-003");
+        let joined = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-003]"));
+    }
+
+    #[test]
+    fn rejects_axis_move_refined_route_with_incompatible_bucket_kind() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_reject(kind: safety) -> fault.bad_reject_route
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step bad_reject_route:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("语法应可解析");
+        let errors = build_state_machine(&program).expect_err("不兼容 kind 应触发 AXIS-010");
+        let joined = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-010]"));
     }
 
     #[test]
@@ -8685,7 +10345,11 @@ task fault:
     #[test]
     fn accepts_axis_move_with_complete_branches_on_stepper_target() {
         let input = "[topology]
-device axis_x: stepper_motor
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
 
 [constraints]
 
@@ -8706,6 +10370,242 @@ task fault:
 
         let program = parse_plc(input).expect("axis move 语法应可解析");
         build_state_machine(&program).expect("完整 axis move 分支 + 合法目标应通过语义校验");
+    }
+
+    #[test]
+    fn resolves_axis_move_params_reference_and_applies_inline_override_priority() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 1800)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+task done:
+    step idle:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let sm = build_state_machine(&program).expect("params 引用 + 覆盖应能通过语义校验");
+        let speed_raw = sm
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.actions.iter())
+            .find_map(|action| match action {
+                crate::ir::TransitionAction::AxisMoveRelative { speed_raw, .. } => {
+                    Some(speed_raw.as_str())
+                }
+                _ => None,
+            })
+            .expect("应包含 axis_move_relative 动作");
+        assert_eq!(speed_raw, "1800");
+    }
+
+    #[test]
+    fn rejects_axis_move_missing_acc_or_dec_without_params_reference() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 1200)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors =
+            build_state_machine(&program).expect_err("缺少 acc/dec 且无 params 应触发 AXIS-007");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-007]"));
+    }
+
+    #[test]
+    fn rejects_axis_move_when_effective_params_exceed_axis_profile_limits() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, acc: 12000)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors = build_state_machine(&program).expect_err("超出 profile 上限应触发 AXIS-009");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-009]"));
+    }
+
+    #[test]
+    fn rejects_axis_move_when_effective_params_are_non_positive() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, speed: 1200, acc: 0, dec: 100)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors = build_state_machine(&program).expect_err("非正参数应触发 AXIS-008");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-008]"));
+    }
+
+    #[test]
+    fn rejects_axis_move_absolute_when_position_exceeds_soft_limits() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_soft_limited
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_absolute(axis_x, position: 800, speed: 1200, acc: 1000, dec: 1000)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+";
+
+        let program = parse_plc(input).expect("axis move 语法应可解析");
+        let errors =
+            build_state_machine(&program).expect_err("超出 soft limit 的绝对运动应触发 AXIS-011");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-011]"));
+    }
+
+    #[test]
+    fn rejects_vertical_axis_disable_without_brake_confirmation() {
+        let input = "[topology]
+device axis_z: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_vertical_brake
+}
+
+[constraints]
+
+[tasks]
+task fault:
+    step stop_now:
+        action: set axis_z.enable off
+";
+
+        let program = parse_plc(input).expect("垂直轴示例语法应可解析");
+        let errors =
+            build_state_machine(&program).expect_err("未确认抱闸直接 disable 应触发 AXIS-012");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("[AXIS-012]"));
+        assert!(joined.contains("brake_engage_confirmed"));
+    }
+
+    #[test]
+    fn accepts_vertical_axis_disable_after_brake_confirmation() {
+        let input = "[topology]
+device axis_z: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_vertical_brake
+}
+
+[constraints]
+
+[tasks]
+task fault:
+    step safe_stop:
+        action: set axis_z.brake_cmd on
+        wait: axis_z.brake_engaged == true
+        action: set axis_z.enable off
+";
+
+        let program = parse_plc(input).expect("垂直轴示例语法应可解析");
+        build_state_machine(&program).expect("先抱闸确认再 disable 应通过语义校验");
     }
 
     #[test]
@@ -8731,5 +10631,171 @@ task main:
 
         let program = parse_plc(input).expect("示例语法应可解析");
         build_state_machine(&program).expect("Phase 1 标量类型签名应通过语义检查");
+    }
+
+    #[test]
+    fn lowers_axis_fault_contracts_into_topology_ir() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+axis_fault_contract axis_x_fault {
+    axis: axis_x
+    severity: safety
+    stop_mode: immediate
+    auto_reset_policy: never
+    manual_ack_required: true
+    propagation_scope: self
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+";
+
+        let program = parse_plc(input).expect("axis_fault_contract 语法应可解析");
+        let topology = build_topology_graph(&program).expect("axis_fault_contract 应能降级到 IR");
+        assert_eq!(topology.axis_fault_contracts.len(), 1);
+        let contract = &topology.axis_fault_contracts[0];
+        assert_eq!(contract.name, "axis_x_fault");
+        assert_eq!(contract.axis, "axis_x");
+        assert!(matches!(
+            contract.severity,
+            crate::ir::AxisFaultSeverity::Safety
+        ));
+        assert!(matches!(
+            contract.stop_mode,
+            crate::ir::AxisStopMode::Immediate
+        ));
+        assert!(matches!(
+            contract.auto_reset_policy,
+            crate::ir::AxisAutoResetPolicy::Never
+        ));
+        assert!(contract.manual_ack_required);
+        assert!(matches!(
+            contract.propagation_scope,
+            crate::ir::AxisFaultPropagationScope::SelfOnly
+        ));
+        assert_eq!(contract.propagation_targets, vec!["axis_x".to_string()]);
+    }
+
+    #[test]
+    fn rejects_axis_fault_contract_when_axis_is_not_motion_device() {
+        let input = "[topology]
+device valve_a: solenoid_valve
+axis_fault_contract valve_fault {
+    axis: valve_a
+    severity: recoverable
+    stop_mode: quick
+    auto_reset_policy: on_clear
+    manual_ack_required: false
+    propagation_scope: self
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+";
+
+        let program = parse_plc(input).expect("示例语法应可解析");
+        let errors =
+            build_topology_graph(&program).expect_err("非轴设备绑定 axis_fault_contract 应报错");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("axis_fault_contract 只能绑定到轴设备"));
+    }
+
+    #[test]
+    fn lowers_axis_fault_followers_scope_into_resolved_targets() {
+        let input = "[topology]
+device axis_master: servo_drive {
+    model_ref: servo_generic
+    config_ref: servo_default
+}
+device axis_follower: servo_drive {
+    model_ref: servo_generic
+    config_ref: servo_default
+}
+device cam_link: cam_coupling {
+    master: axis_master
+    slave: axis_follower
+    table: servo_cam_profile
+}
+cam_table servo_cam_profile: oneshot[(0.0, 0.0), (180.0, 180.0)]
+axis_fault_contract master_fault {
+    axis: axis_master
+    severity: recoverable
+    stop_mode: controlled
+    auto_reset_policy: on_clear
+    manual_ack_required: false
+    propagation_scope: followers
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+";
+
+        let program = parse_plc(input).expect("followers scope fixture should parse");
+        let topology = build_topology_graph(&program).expect("followers scope should lower");
+        let contract = topology
+            .axis_fault_contracts
+            .iter()
+            .find(|contract| contract.name == "master_fault")
+            .expect("contract should exist");
+        assert!(matches!(
+            contract.propagation_scope,
+            crate::ir::AxisFaultPropagationScope::Followers
+        ));
+        assert_eq!(
+            contract.propagation_targets,
+            vec!["axis_master".to_string(), "axis_follower".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_axis_fault_contract_custom_targets_with_non_axis_device() {
+        let input = "[topology]
+device axis_x: stepper_motor {
+    model_ref: stepper_generic
+    config_ref: stepper_default
+}
+device valve_a: solenoid_valve
+axis_fault_contract axis_fault {
+    axis: axis_x
+    severity: recoverable
+    stop_mode: controlled
+    auto_reset_policy: never
+    manual_ack_required: false
+    propagation_scope: custom
+    propagation_targets: [valve_a]
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+";
+
+        let program = parse_plc(input).expect("custom targets fixture should parse");
+        let errors =
+            build_topology_graph(&program).expect_err("non-axis propagation target should fail");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("propagation_targets 只能包含轴设备"));
     }
 }

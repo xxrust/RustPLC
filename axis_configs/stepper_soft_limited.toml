@@ -1,0 +1,7 @@
+name = "stepper_soft_limited"
+model_id = "stepper_generic"
+position_unit = "pulse"
+speed_limit = 3000.0
+acceleration_limit = 10000.0
+soft_limit_min = 0.0
+soft_limit_max = 500.0

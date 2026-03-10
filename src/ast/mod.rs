@@ -19,6 +19,8 @@ pub struct TopologySection {
     pub cam_tables: Vec<CamTableDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extern_functions: Vec<ExternFunctionDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub axis_fault_contracts: Vec<AxisFaultContractDeclaration>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -61,6 +63,59 @@ pub struct ExternFunctionContract {
     pub rust_module: String,
     pub pure: bool,
     pub time_bound_us: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AxisFaultContractDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub axis: String,
+    pub severity: AxisFaultSeverity,
+    pub stop_mode: AxisStopMode,
+    pub auto_reset_policy: AxisAutoResetPolicy,
+    pub manual_ack_required: bool,
+    pub propagation_scope: AxisFaultPropagationScope,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub propagation_targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisFaultSeverity {
+    Recoverable,
+    NonRecoverable,
+    Safety,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisStopMode {
+    Controlled,
+    Quick,
+    Immediate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisAutoResetPolicy {
+    Never,
+    OnClear,
+    Immediate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AxisFaultPropagationScope {
+    #[serde(rename = "self")]
+    SelfOnly,
+    #[serde(rename = "group")]
+    Group,
+    #[serde(rename = "all")]
+    All,
+    #[serde(rename = "followers")]
+    Followers,
+    #[serde(rename = "custom")]
+    Custom,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -213,6 +268,8 @@ pub struct DeviceAttributes {
     pub model_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_param_set: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub extra_params: HashMap<String, String>,
 }
@@ -464,21 +521,47 @@ pub enum ActionStatement {
     },
     AxisMoveRelative {
         target: ActionTarget,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<String>,
         distance: f64,
-        speed: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        speed: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        acceleration: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deceleration: Option<f64>,
         timeout: Option<TimeoutDirective>,
         on_reject: Option<GotoDirective>,
         on_motion_fault: Option<GotoDirective>,
         on_safety_fault: Option<GotoDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_reject_routes: Vec<AxisFaultRouteDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_motion_fault_routes: Vec<AxisFaultRouteDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_safety_fault_routes: Vec<AxisFaultRouteDirective>,
     },
     AxisMoveAbsolute {
         target: ActionTarget,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<String>,
         position: f64,
-        speed: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        speed: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        acceleration: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deceleration: Option<f64>,
         timeout: Option<TimeoutDirective>,
         on_reject: Option<GotoDirective>,
         on_motion_fault: Option<GotoDirective>,
         on_safety_fault: Option<GotoDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_reject_routes: Vec<AxisFaultRouteDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_motion_fault_routes: Vec<AxisFaultRouteDirective>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        on_safety_fault_routes: Vec<AxisFaultRouteDirective>,
     },
     Log {
         message: String,
@@ -621,6 +704,26 @@ pub struct GotoDirective {
     pub step: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisFaultRouteKind {
+    Reject,
+    Motion,
+    Safety,
+    Vendor,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AxisFaultRouteDirective {
+    #[serde(default)]
+    pub line: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AxisFaultRouteKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<i32>,
+    pub target: GotoDirective,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParallelBlock {
     pub branches: Vec<Branch>,
@@ -680,6 +783,17 @@ mod tests {
                         time_bound_us: 200,
                     },
                 }],
+                axis_fault_contracts: vec![AxisFaultContractDeclaration {
+                    line: 3,
+                    name: "axis_x_fault".to_string(),
+                    axis: "axis_x".to_string(),
+                    severity: AxisFaultSeverity::Safety,
+                    stop_mode: AxisStopMode::Immediate,
+                    auto_reset_policy: AxisAutoResetPolicy::Never,
+                    manual_ack_required: true,
+                    propagation_scope: AxisFaultPropagationScope::SelfOnly,
+                    propagation_targets: vec![],
+                }],
             },
             constraints: ConstraintsSection::default(),
             tasks: TasksSection {
@@ -716,6 +830,19 @@ mod tests {
         );
         assert_eq!(function.contract.rust_module, "math::split");
         assert_eq!(function.contract.time_bound_us, 200);
+        assert_eq!(decoded.topology.axis_fault_contracts.len(), 1);
+        let contract = &decoded.topology.axis_fault_contracts[0];
+        assert_eq!(contract.name, "axis_x_fault");
+        assert_eq!(contract.axis, "axis_x");
+        assert_eq!(contract.severity, AxisFaultSeverity::Safety);
+        assert_eq!(contract.stop_mode, AxisStopMode::Immediate);
+        assert_eq!(contract.auto_reset_policy, AxisAutoResetPolicy::Never);
+        assert!(contract.manual_ack_required);
+        assert_eq!(
+            contract.propagation_scope,
+            AxisFaultPropagationScope::SelfOnly
+        );
+        assert!(contract.propagation_targets.is_empty());
 
         let step = &decoded.tasks.tasks[0].steps[0];
         match &step.statements[0] {

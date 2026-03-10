@@ -1,4 +1,5 @@
 name = "servo_default"
+model_id = "servo_generic"
 position_unit = "pulse"
 speed_limit = 4000.0
 acceleration_limit = 12000.0
