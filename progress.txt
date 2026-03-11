@@ -10,6 +10,7 @@ Started: 2026-03-11 00:08:32 CST
 - 当 action step 出现 Pending 长时动作时，后续 tick 必须从挂起动作继续轮询，不能重放挂起动作之前的即时 action（避免重复 side effect）。
 - `axis.move_relative/axis.move_absolute` 默认是 blocking 长时动作；即使 DSL 未显式写 `wait`，也要用 Pending 轮询驱动 step 留驻，并覆盖 Pending->Done 与 Pending->Fault 集成回归。
 - axis `timeout/on_*fault` 语义若在 IR 中以 action 内分支存在，必须由 `runtime_bridge` 预先解析成 runtime `StepId` 元数据；`runtime-core` 在 Pending 轮询阶段消费这些元数据完成分流。
+- `runtime_bridge` 生成并发 runtime task 时，优先选择“无跨 task 入边”的 root task 作为 active 集合；若不存在 root task，回退到 IR 初始 task 以避免旧工作流被并发全激活破坏。
 
 
 
@@ -122,4 +123,17 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - For long-running actions with DSL-level timeout/fault branches, keep runtime action execution backward-compatible by routing only when a matching Pending context exists; non-pending or metadata-missing actions can still surface explicit runtime errors.
   - Any `runtime-core::Action` schema change must be mirrored in `crates/codegen/src/lib.rs` formatter output; otherwise generated static program modules silently lose semantics.
+---
+## 2026-03-11 22:33 CST - US-009
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Reworked `runtime_bridge` task lowering so runtime programs are no longer forced into a single flattened task: bridge now preserves root-task boundaries, entry steps, and per-task local step graphs.
+- Added root-task selection compatibility rule in bridge: prefer tasks without cross-task incoming edges; if none exist, fallback to IR initial task to avoid legacy workflows being fully activated concurrently.
+- Added bridge regression `bridge_preserves_task_boundaries_for_independent_roots` to prove a two-task PLC lowers to two runtime tasks with task-local step namespaces and correct entries.
+- Updated `AGENTS.md` execution-model section with the reusable root-task bridge rule.
+- Updated `prd.json` to set `US-009` (`让 runtime bridge 保留 task 边界`) to `passes: true`.
+- Files changed: `src/runtime_bridge.rs`, `tests/runtime_bridge_us006.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --test runtime_bridge_us006 bridge_preserves_task_boundaries_for_independent_roots`, `cargo test --test runtime_bridge_us006`, `cargo test`.
+- **Learnings for future iterations:**
+  - Bridge-level task-boundary migration can stay backward compatible by deriving active runtime tasks from root-task reachability rather than activating every declared task unconditionally.
+  - When action-level fault/timeout branches target task entries, include those entry states in per-task reachable graph construction; otherwise local `StepId` lowering will fail on branch resolution.
 ---

@@ -129,6 +129,55 @@ task done:
     step halt:
 "#;
 
+const PLC_MULTI_ROOT_TASK_FIXTURE: &str = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+task load:
+    step run:
+        action: log "load"
+    step halt:
+
+task unload:
+    step run:
+        action: log "unload"
+    step halt:
+"#;
+
+#[test]
+fn bridge_preserves_task_boundaries_for_independent_roots() {
+    let program = compile_to_runtime(PLC_MULTI_ROOT_TASK_FIXTURE, 1);
+    assert_eq!(program.tasks.len(), 2, "bridge should keep both root tasks");
+    assert_eq!(program.tasks[0].name, "load");
+    assert_eq!(program.tasks[1].name, "unload");
+    assert_eq!(
+        program.tasks[0]
+            .step(program.tasks[0].entry)
+            .expect("load entry step")
+            .name,
+        "load.run"
+    );
+    assert_eq!(
+        program.tasks[1]
+            .step(program.tasks[1].entry)
+            .expect("unload entry step")
+            .name,
+        "unload.run"
+    );
+    for task in program.tasks {
+        let task_prefix = format!("{}.", task.name);
+        assert!(
+            task.steps
+                .iter()
+                .all(|step| step.name.starts_with(&task_prefix)),
+            "task {} should only contain local steps",
+            task.name
+        );
+    }
+}
+
 #[test]
 fn bridge_compiles_plc_and_produces_deterministic_trace_and_edges() {
     let tick_ms = 10;

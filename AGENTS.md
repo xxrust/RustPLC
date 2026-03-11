@@ -265,6 +265,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - 对包含 Pending 长时动作的 step，后续 tick 必须从挂起动作继续轮询，不得重放该 step 中挂起动作之前的即时 action（避免重复 side effect）
 - `axis.move_relative/axis.move_absolute` 属于默认 blocking 长时动作；即使未显式编写 `wait`，也应由 `Pending -> Done/Fault` 生命周期驱动 step 离开，回归测试至少覆盖 Pending->Done 与 Pending->Fault
 - axis 动作的 `timeout/on_reject/on_motion_fault/on_safety_fault` 与细分 route 必须在 bridge 阶段降级成 runtime 可执行的 `StepId` 元数据；runtime 在 Pending 轮询阶段按“先专用 route、后主桶 fallback”执行分流，避免回退为裸 `RuntimeError::AxisFault`
+- `runtime_bridge` 构建 runtime task 时优先保留“无跨 task 入边”的 root task 边界；若全量 task 都存在跨 task 入边，则回退到 IR 初始 task 作为 active root，避免旧流程直接退化为并发全激活副作用
 
 ### 修改语义门禁或诊断
 
