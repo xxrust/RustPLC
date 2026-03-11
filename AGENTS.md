@@ -417,6 +417,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 先看：
 
 - `docs/architecture/signal-direction.md`
+- `docs/concurrent_runtime_e2e_acceptance_baseline.md`
 - `docs/concurrent_runtime_migration_guide.md`
 - `.codex/skills/plc-system/SKILL.md`
 - `.codex/skills/plc-gen/SKILL.md`
@@ -431,6 +432,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `tests/*.rs`：集成与回归测试
 - `tests/examples_integration.rs`：示例程序回归总入口
 - 并发 runtime + 四类 verification 的 CI/本地统一门禁入口：`scripts/concurrent_runtime_verification_gate.sh`
+- 并发重构的端到端分阶段验收清单：`docs/concurrent_runtime_e2e_acceptance_baseline.md`
 
 做改动时至少回答：
 

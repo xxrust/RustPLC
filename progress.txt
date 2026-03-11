@@ -6,6 +6,7 @@ Started: 2026-03-11 00:08:32 CST
 - 涉及 task/step 语义的生成器文档（`AGENTS.md`、`plc-system`、`plc-gen`）必须与 `docs/architecture/signal-direction.md` 同步；“单执行点”表述仅允许用于迁移差异对比。
 - 本仓库最终回归门禁优先使用完整 `cargo test`，仅 `cargo test --lib` 不能替代端到端回归。
 - 并发 runtime + 四类 verification 的回归门禁统一通过 `scripts/concurrent_runtime_verification_gate.sh` 执行；CI workflow 应直接调用该脚本，保持本地与 CI 同源。
+- 并发重构收口时，端到端验收按 `docs/concurrent_runtime_e2e_acceptance_baseline.md` 的 Gate-A/B/C/D 分阶段清单执行，并以根目录 `prd.json` 的 priority 顺序作为 Ralph 唯一执行顺序。
 - Task 级 pending action 元数据应从 step 语句收集，不应只依赖 transition.actions；阻塞语句可能让 transition 丢失 action。
 - `runtime-core` 在 `no_std` 约束下使用定长数组（`MAX_ACTIVE_TASKS`）和活跃计数管理 task context，避免动态分配。
 - `runtime-core` 每个 tick 必须按 task 声明顺序（索引升序）遍历全部 active task；单 task 命中 blocking step 只阻塞自身，不阻塞同 tick 其他 task。
@@ -284,4 +285,15 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Keep concurrent-runtime regression scope centralized in one script and let CI call that script directly to avoid command drift between local and pipeline runs.
   - For gate docs, pair a one-command happy path with explicit per-test commands so failures can be reproduced quickly without reverse-engineering CI logs.
+---
+## 2026-03-12 04:33 CST - US-020
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Added end-to-end acceptance baseline doc `docs/concurrent_runtime_e2e_acceptance_baseline.md` with staged Gate-A/B/C/D closure requirements, each with executable checks and artifact expectations.
+- Synced gate entrypoints and ordering guidance across `tasks/prd-concurrent-task-runtime-and-blocking-steps.md`, `docs/concurrent_runtime_migration_guide.md`, and `AGENTS.md`.
+- Updated `prd.json` to set `US-020` (`形成端到端闭环验收基线`) to `passes: true`.
+- Files changed: `docs/concurrent_runtime_e2e_acceptance_baseline.md`, `tasks/prd-concurrent-task-runtime-and-blocking-steps.md`, `docs/concurrent_runtime_migration_guide.md`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `scripts/concurrent_runtime_verification_gate.sh`, `cargo test`.
+- **Learnings for future iterations:**
+  - Keep end-to-end closure requirements as a dedicated baseline doc with stage-by-stage executable commands; this avoids scattering acceptance criteria across migration notes and PRD prose.
+  - When both PRD markdown and `prd.json` exist, keep execution authority explicit (`prd.json` priority order) to prevent agent scheduling drift.
 ---

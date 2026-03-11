@@ -226,6 +226,11 @@
 4. Gate-D Bridge / Migration / Docs / CI
    完成 bridge 保 task、迁移指南、示例、门禁和文档同步。US-012 ~ US-014 通过后，方可宣布需求落地。
 
+执行口径补充（US-020 收口）：
+
+- 端到端分阶段验收命令与产物清单以 `docs/concurrent_runtime_e2e_acceptance_baseline.md` 为准。
+- Ralph 顺序执行与 `passes` 状态以根目录 `prd.json` 的 priority 升序为准（不是本文件中的历史分组编号）。
+
 ## 9. Success Metrics
 
 - 至少一个“上料 task 与下料 task 并发推进”的示例可在新 runtime 中稳定运行。

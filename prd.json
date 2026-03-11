@@ -318,8 +318,8 @@
         "Tests pass"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": "Validated by full cargo test sweep on 2026-03-11."
+      "passes": true,
+      "notes": "Added staged end-to-end acceptance baseline doc + PRD ordering guidance; validated by concurrent gate script and full cargo test on 2026-03-12."
     }
   ]
 }
