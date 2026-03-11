@@ -385,6 +385,7 @@ pub struct AxisMotionCommand {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxisMotionResult {
+    Pending,
     Done,
     Fault(AxisFault),
 }
@@ -682,6 +683,7 @@ pub enum TaskPendingActionState {
     Idle,
     AxisMotion {
         target: &'static str,
+        action_index: usize,
     },
     ExternCall {
         function: &'static str,
@@ -1182,8 +1184,27 @@ impl<'a> Runtime<'a> {
 
                 match instr {
                     Instr::Action { actions, next } => {
-                        let action_completion = ActionCompletionState::Completed;
-                        for a in actions {
+                        let mut action_completion = ActionCompletionState::Completed;
+                        let mut action_start_index = 0usize;
+                        if let TaskPendingActionState::AxisMotion {
+                            target,
+                            action_index,
+                        } = self.task_contexts[task_idx].pending_action_state
+                        {
+                            if let Some(Action::AxisMove { command }) = actions.get(action_index) {
+                                if command.target == target {
+                                    action_start_index = action_index;
+                                } else {
+                                    self.task_contexts[task_idx].pending_action_state =
+                                        TaskPendingActionState::Idle;
+                                }
+                            } else {
+                                self.task_contexts[task_idx].pending_action_state =
+                                    TaskPendingActionState::Idle;
+                            }
+                        }
+                        for (action_index, a) in actions.iter().enumerate().skip(action_start_index)
+                        {
                             match *a {
                             Action::SetDigital { id, value } => io.write_digital_output(id, value),
                             Action::SetAnalog { id, value } => io.write_analog_output(id, value),
@@ -1237,7 +1258,15 @@ impl<'a> Runtime<'a> {
                                     .map_err(RuntimeTickError::Core)?;
                             }
                             Action::AxisMove { command } => {
-                                if command.kind == AxisMoveKind::Absolute
+                                let polling_this_action = matches!(
+                                    self.task_contexts[task_idx].pending_action_state,
+                                    TaskPendingActionState::AxisMotion {
+                                        action_index: pending_index,
+                                        ..
+                                    } if pending_index == action_index
+                                );
+                                if !polling_this_action
+                                    && command.kind == AxisMoveKind::Absolute
                                     && command.require_homed
                                     && !self
                                         .axis_is_homed(command.target)
@@ -1259,13 +1288,26 @@ impl<'a> Runtime<'a> {
                                     }
                                 };
                                 match result {
+                                    AxisMotionResult::Pending => {
+                                        self.task_contexts[task_idx].pending_action_state =
+                                            TaskPendingActionState::AxisMotion {
+                                                target: command.target,
+                                                action_index,
+                                            };
+                                        action_completion = ActionCompletionState::Pending;
+                                        break;
+                                    }
                                     AxisMotionResult::Done => {
+                                        self.task_contexts[task_idx].pending_action_state =
+                                            TaskPendingActionState::Idle;
                                         if command.kind == AxisMoveKind::Relative {
                                             self.set_axis_homed(command.target, true)
                                                 .map_err(RuntimeTickError::Core)?;
                                         }
                                     }
                                     AxisMotionResult::Fault(fault) => {
+                                        self.task_contexts[task_idx].pending_action_state =
+                                            TaskPendingActionState::Idle;
                                         self.set_axis_homed(command.target, false)
                                             .map_err(RuntimeTickError::Core)?;
                                         if let Some(policy) =
@@ -1323,6 +1365,9 @@ impl<'a> Runtime<'a> {
                                 message,
                             }),
                         }
+                            if action_completion == ActionCompletionState::Pending {
+                                break;
+                            }
                     }
                     match Self::action_completion_decision(next, action_completion) {
                         StepCompletionDecision::ContinueWith { target, reason } => {
@@ -1549,27 +1594,9 @@ impl<'a> Runtime<'a> {
             _ => TaskTimeoutState::Inactive,
         };
 
-        ctx.pending_action_state = match instr {
-            Instr::Action { actions, .. } => Self::pending_action_state_for_actions(actions),
-            _ => TaskPendingActionState::Idle,
-        };
-    }
-
-    fn pending_action_state_for_actions(actions: &[Action]) -> TaskPendingActionState {
-        for action in actions {
-            match action {
-                Action::AxisMove { command } => {
-                    return TaskPendingActionState::AxisMotion {
-                        target: command.target,
-                    };
-                }
-                Action::CallExtern { function, .. } => {
-                    return TaskPendingActionState::ExternCall { function };
-                }
-                _ => {}
-            }
+        if !matches!(instr, Instr::Action { .. }) {
+            ctx.pending_action_state = TaskPendingActionState::Idle;
         }
-        TaskPendingActionState::Idle
     }
 
     fn execute_extern_action<E>(
@@ -3355,6 +3382,166 @@ mod tests {
     }
 
     #[test]
+    fn axis_move_pending_blocks_and_polls_without_replaying_prior_actions() {
+        static ACTIONS: [Action; 2] = [
+            Action::Log {
+                message_id: 41,
+                message: "axis dispatch",
+            },
+            Action::AxisMove {
+                command: AxisMotionCommand {
+                    target: "axis_x",
+                    port: "self",
+                    kind: AxisMoveKind::Relative,
+                    value: 10.0,
+                    speed: 2.0,
+                    require_homed: false,
+                },
+            },
+        ];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+        let mut motion_calls = 0usize;
+        let mut logs = std::vec::Vec::new();
+
+        rt.tick_with_axis_and_logs(&mut io, |event| logs.push(event), |_| {
+            motion_calls += 1;
+            AxisMotionResult::Pending
+        })
+        .expect("pending axis should keep step active");
+
+        assert_eq!(motion_calls, 1);
+        assert_eq!(rt.location().step, StepId(0));
+        assert_eq!(
+            rt.task_context(0).expect("task context").pending_action_state,
+            TaskPendingActionState::AxisMotion {
+                target: "axis_x",
+                action_index: 1,
+            }
+        );
+        assert_eq!(logs.len(), 1, "dispatch log should fire only once on first entry");
+
+        rt.tick_with_axis_and_logs(&mut io, |event| logs.push(event), |_| {
+            motion_calls += 1;
+            AxisMotionResult::Done
+        })
+        .expect("done on polling tick should complete step");
+
+        assert_eq!(motion_calls, 2);
+        assert_eq!(rt.location().step, StepId(1));
+        assert_eq!(
+            rt.task_context(0).expect("task context").pending_action_state,
+            TaskPendingActionState::Idle
+        );
+        assert_eq!(
+            logs.len(),
+            1,
+            "pending polling tick must not replay pre-axis actions"
+        );
+    }
+
+    #[test]
+    fn axis_move_pending_then_fault_clears_pending_state_and_surfaces_error() {
+        static ACTIONS: [Action; 1] = [Action::AxisMove {
+            command: AxisMotionCommand {
+                target: "axis_x",
+                port: "self",
+                kind: AxisMoveKind::Relative,
+                value: 10.0,
+                speed: 2.0,
+                require_homed: false,
+            },
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "axis_run",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).unwrap();
+
+        rt.tick_with_axis(&mut io, |_| AxisMotionResult::Pending)
+            .expect("first tick should start pending axis move");
+        assert_eq!(rt.location().step, StepId(0));
+        assert_eq!(
+            rt.task_context(0).expect("task context").pending_action_state,
+            TaskPendingActionState::AxisMotion {
+                target: "axis_x",
+                action_index: 0,
+            }
+        );
+
+        let err = rt
+            .tick_with_axis(&mut io, |_| AxisMotionResult::motion_fault(77))
+            .expect_err("polling tick fault should be surfaced");
+        assert_eq!(
+            err,
+            RuntimeError::AxisFault {
+                target: "axis_x",
+                fault: AxisFault::motion(77),
+            }
+        );
+        assert_eq!(
+            rt.task_context(0).expect("task context").pending_action_state,
+            TaskPendingActionState::Idle
+        );
+        assert_eq!(
+            rt.location().step,
+            StepId(0),
+            "faulted pending action should not advance success path"
+        );
+    }
+
+    #[test]
     fn axis_move_absolute_requires_homing_predicate() {
         static ACTIONS: [Action; 1] = [Action::AxisMove {
             command: AxisMotionCommand {
@@ -3795,6 +3982,7 @@ mod tests {
 
             let expected_fault = match axis_result {
                 AxisMotionResult::Fault(fault) => fault,
+                AxisMotionResult::Pending => panic!("test case must carry fault result"),
                 AxisMotionResult::Done => panic!("test case must carry fault result"),
             };
 

@@ -7,6 +7,7 @@ Started: 2026-03-11 00:08:32 CST
 - `runtime-core` 在 `no_std` 约束下使用定长数组（`MAX_ACTIVE_TASKS`）和活跃计数管理 task context，避免动态分配。
 - `runtime-core` 每个 tick 必须按 task 声明顺序（索引升序）遍历全部 active task；单 task 命中 blocking step 只阻塞自身，不阻塞同 tick 其他 task。
 - runtime step 离开判定应集中在统一 completion 决策函数（action/delay/wait 共用），避免分支内重复写跳转条件。
+- 当 action step 出现 Pending 长时动作时，后续 tick 必须从挂起动作继续轮询，不能重放挂起动作之前的即时 action（避免重复 side effect）。
 
 
 
@@ -80,4 +81,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Centralize step transition eligibility in shared completion helpers; it reduces branch drift and makes future Pending lifecycle extension low-risk.
   - Keep completion tests mixed (immediate + blocking + pending-decision) so regressions are caught without depending on a single instruction family.
+---
+## 2026-03-11 21:28 CST - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Implemented runtime-core axis action lifecycle with explicit `AxisMotionResult::Pending/Done/Fault`, and wired Pending into step completion so pending axis moves block the current step.
+- Updated task context pending metadata to track pending axis action index, so polling resumes from the pending action instead of replaying earlier immediate actions in the same step.
+- Added runtime-core regressions:
+  - `axis_move_pending_blocks_and_polls_without_replaying_prior_actions`
+  - `axis_move_pending_then_fault_clears_pending_state_and_surfaces_error`
+- Updated `prd.json` to set `US-006` (`为长时动作引入 Pending 生命周期`) to `passes: true`.
+- Files changed: `crates/runtime-core/src/lib.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test -p runtime-core axis_move_pending_ -- --nocapture`, `cargo test -p runtime-core axis_move_handler_ -- --nocapture`, `cargo test`.
+- **Learnings for future iterations:**
+  - Pending lifecycle needs persistent action-index context; otherwise polling ticks will replay pre-pending immediate actions and duplicate side effects.
+  - Keep Pending-path tests mixed with logs/trace assertions to verify both blocking semantics and non-replay guarantees.
 ---
