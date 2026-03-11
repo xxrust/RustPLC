@@ -14,6 +14,7 @@ Started: 2026-03-11 00:08:32 CST
 - `runtime_bridge` 生成并发 runtime task 时，优先选择“无跨 task 入边”的 root task 作为 active 集合；若不存在 root task，回退到 IR 初始 task 以避免旧工作流被并发全激活破坏。
 - `verification::safety` 并发全局状态建模要复用 runtime root task 选择口径，并在 `ConcreteState` 中显式携带 task 级当前位置与 pending 标记，避免验证和执行对 active task 集合的理解漂移。
 - 若预算测试通过 `on_complete: goto <self>` 构造循环来触发 same-tick budget 告警，需同时声明 `allow_indefinite_wait: true`（或提供 timeout），否则会先被 liveness SCC 门禁拦截。
+- timing 并发验证要同时给出 task 局部耗时与 active tasks 的全局 `max` 完成时间，并保留顺序 `sum` 作为对照；`must_complete_within_worst_case` 需显式纳入 pending 动作和 timeout 上界。
 
 
 
@@ -179,4 +180,16 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Liveness stories should include one positive waiting case and separate deadlock/livelock negatives; this keeps wait semantics and cycle semantics independently guardrailed.
   - For `axis.move_*` fixtures in liveness tests, include mandatory `timeout/on_*fault` branches first; otherwise semantic AXIS guards fail before liveness rules execute.
+---
+## 2026-03-12 02:56 CST - US-013
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Implemented concurrent timing analysis updates in `src/verification/timing.rs`: timing diagnostics now distinguish task-local completion from concurrent global completion (`active task max`) while preserving sequential-sum baseline context.
+- Extended step timing estimation so pending long-running actions contribute explicit upper bounds, and worst-case analysis keeps timeout upper bounds in the same diagnostic path.
+- Added/updated timing regressions to cover pending axis timeout accounting and concurrent two-task worst-case analysis (`concurrent_worst_case_analysis_distinguishes_task_local_and_global_completion`).
+- Updated AGENTS timing guidance and marked `US-013` as passed in `prd.json`.
+- Files changed: `src/verification/timing.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --lib verification::timing -- --nocapture`, `cargo test`.
+- **Learnings for future iterations:**
+  - Concurrency-aware timing diagnostics are more actionable when they report both local task budget and global completion envelope in one message.
+  - Pending action duration inference should be sourced from IR pending-action metadata so blocking motion semantics remain aligned with runtime behavior.
 ---
