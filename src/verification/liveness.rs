@@ -263,9 +263,9 @@ fn check_strongly_connected_components(
             LivenessEdge {
                 is_bounded_wait: step_profile.has_bounded_wait()
                     || matches!(
-                    transition.guard,
-                    TransitionGuard::Timeout { .. } | TransitionGuard::Delay { .. }
-                ),
+                        transition.guard,
+                        TransitionGuard::Timeout { .. } | TransitionGuard::Delay { .. }
+                    ),
                 source_has_allow_wait: step_profile.has_allow_indefinite_wait,
                 source_wait_semantic,
             },
@@ -424,9 +424,11 @@ fn check_concurrent_wait_deadlocks(
             .collect::<Vec<_>>();
         component_tasks.sort();
 
-        let all_tasks_blocking = component_tasks
-            .iter()
-            .all(|task| blocking_lines_by_task.get(task).is_some_and(|lines| !lines.is_empty()));
+        let all_tasks_blocking = component_tasks.iter().all(|task| {
+            blocking_lines_by_task
+                .get(task)
+                .is_some_and(|lines| !lines.is_empty())
+        });
         if !all_tasks_blocking {
             continue;
         }
@@ -563,10 +565,7 @@ fn step_wait_profile_for_state(
         return profile.clone();
     }
 
-    let normalized = state_key(
-        &state.0,
-        state.1.split("__").next().unwrap_or(&state.1),
-    );
+    let normalized = state_key(&state.0, state.1.split("__").next().unwrap_or(&state.1));
     step_wait_profiles
         .get(&normalized)
         .cloned()

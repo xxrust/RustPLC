@@ -15,6 +15,8 @@ Started: 2026-03-11 00:08:32 CST
 - `verification::safety` 并发全局状态建模要复用 runtime root task 选择口径，并在 `ConcreteState` 中显式携带 task 级当前位置与 pending 标记，避免验证和执行对 active task 集合的理解漂移。
 - 若预算测试通过 `on_complete: goto <self>` 构造循环来触发 same-tick budget 告警，需同时声明 `allow_indefinite_wait: true`（或提供 timeout），否则会先被 liveness SCC 门禁拦截。
 - timing 并发验证要同时给出 task 局部耗时与 active tasks 的全局 `max` 完成时间，并保留顺序 `sum` 作为对照；`must_complete_within_worst_case` 需显式纳入 pending 动作和 timeout 上界。
+- causality 在跨 task 变量链路上依赖显式 dataflow：`compute`/`set_analog_expr`/纯 extern 会建边；缺失依赖时应报链路断裂而非默认放行。
+- causality 对 `parallel` 或 `on_complete` 导出的推断 pair 需先验证 `action -> wait` 可达，再做断链诊断，避免跨分支偶然组合误报。
 
 
 
@@ -192,4 +194,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Concurrency-aware timing diagnostics are more actionable when they report both local task budget and global completion envelope in one message.
   - Pending action duration inference should be sourced from IR pending-action metadata so blocking motion semantics remain aligned with runtime behavior.
+---
+## 2026-03-12 03:24 CST - US-014
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Completed causality concurrency modeling in `src/verification/causality.rs`: runtime graph now carries cross-task dataflow edges for `[topology] variable` + `compute`/`set_analog_expr` + pure extern calls, and action-wait pairing now includes `on_complete` target steps to capture cross-task control-signal causality.
+- Kept inferred-pair diagnostics constrained to reachable `action -> wait` pairs, preventing false positives from unrelated parallel/completion combinations.
+- Added/kept US-014 causality regressions for both required directions:
+  - Negative: `reports_missing_cross_task_variable_chain_when_compute_dependency_absent`
+  - Positive: `accepts_cross_task_variable_chain_with_compute_dataflow`
+  - Axis path coverage in causality: done/fault/timeout branch checks remain covered by existing `verifies_*`/`reports_missing_*` axis tests.
+- Updated `AGENTS.md` verification guidance with reusable causality rules.
+- Updated `prd.json` to set `US-014` (`在 causality 验证中支持跨 task 因果链`) to `passes: true`.
+- Files changed: `src/verification/causality.rs`, `src/verification/liveness.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --lib verification::causality -- --nocapture`, `cargo test`.
+- **Learnings for future iterations:**
+  - Cross-task causality over variables requires explicit dataflow edges; control semantics alone are insufficient for deterministic causal proof.
+  - When deriving causality obligations from inferred pairs (parallel/completion), gate diagnostics on graph reachability first to avoid over-constraining unrelated branch combinations.
 ---

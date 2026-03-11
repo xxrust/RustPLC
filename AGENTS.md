@@ -300,6 +300,8 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - safety 全局状态应显式携带 task 级当前位置与 pending action 标记，跨 task `conflicts_with/requires` 断言必须在该组合状态空间中检查
 - liveness 夹具若覆盖 `axis.move_*` Pending 语义，必须先满足 AXIS 语义门禁（`timeout` + `on_reject/on_motion_fault/on_safety_fault`）；否则会在 `build_state_machine` 阶段失败，无法进入 liveness checker
 - timing 并发分析应同时报告 task 局部完成时间与并发全局完成时间（active task 的 `max`），并保留顺序 `sum` 作为对照基线；`must_complete_within` 走局部 nominal 口径，`must_complete_within_worst_case` 需纳入 pending 动作上界与 timeout 上界
+- causality 跨 task 链路建模应把 `[topology] variable`、`compute`、`set_analog_expr` 与纯 extern 调用统一纳入 dataflow 边；缺失数据依赖时必须显式报链路断裂，不能默认放行
+- causality 对 `parallel` 分支组合或 `on_complete` 跳转导出的推断链路，只在 `action -> wait` 已可达时执行断链检查，避免跨分支偶然组合造成误报
 
 ### 修改设备模型、组件模型或 I/O 映射
 
