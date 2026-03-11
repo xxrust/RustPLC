@@ -263,6 +263,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - Task 级 pending action 元数据应从 step 语句收集，而不是仅从 transition.actions 推断；`delay/wait/timeout` 等阻塞路径常会让 transition 不携带动作
 - Step 离开判定应集中到统一 completion 决策（action/delay/wait 共用规则）；避免在各指令分支散落“是否跳转”的特例判断
 - 对包含 Pending 长时动作的 step，后续 tick 必须从挂起动作继续轮询，不得重放该 step 中挂起动作之前的即时 action（避免重复 side effect）
+- `axis.move_relative/axis.move_absolute` 属于默认 blocking 长时动作；即使未显式编写 `wait`，也应由 `Pending -> Done/Fault` 生命周期驱动 step 离开，回归测试至少覆盖 Pending->Done 与 Pending->Fault
 
 ### 修改语义门禁或诊断
 

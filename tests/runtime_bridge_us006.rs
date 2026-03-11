@@ -748,6 +748,64 @@ fn runtime_tick_with_axis_handler_done_for_bridged_axis_action() {
 }
 
 #[test]
+fn axis_move_blocks_current_step_without_explicit_wait_until_done() {
+    let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let mut calls = 0usize;
+
+    rt.tick_with_axis(&mut io, |command| {
+        calls += 1;
+        assert_eq!(command.target, "axis_x");
+        AxisMotionResult::Pending
+    })
+    .expect("pending axis move should keep the action step active");
+    assert_eq!(calls, 1);
+    assert_eq!(current_step_name(&rt, &program), "motion.run");
+
+    rt.tick_with_axis(&mut io, |command| {
+        calls += 1;
+        assert_eq!(command.target, "axis_x");
+        AxisMotionResult::Done
+    })
+    .expect("done polling result should release the blocked action step");
+    assert_eq!(calls, 2);
+    assert_eq!(current_step_name(&rt, &program), "done.halt");
+}
+
+#[test]
+fn axis_move_blocks_current_step_without_explicit_wait_until_fault() {
+    let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let mut calls = 0usize;
+
+    rt.tick_with_axis(&mut io, |_| {
+        calls += 1;
+        AxisMotionResult::Pending
+    })
+    .expect("pending axis move should keep the action step active");
+    assert_eq!(calls, 1);
+    assert_eq!(current_step_name(&rt, &program), "motion.run");
+
+    let err = rt
+        .tick_with_axis(&mut io, |_| {
+            calls += 1;
+            AxisMotionResult::motion_fault(66)
+        })
+        .expect_err("fault polling result should surface runtime axis fault");
+    assert_eq!(
+        err,
+        RuntimeError::AxisFault {
+            target: "axis_x",
+            fault: AxisFault::motion(66),
+        }
+    );
+    assert_eq!(calls, 2);
+    assert_eq!(current_step_name(&rt, &program), "motion.run");
+}
+
+#[test]
 fn runtime_tick_with_axis_handler_propagates_classified_faults_for_bridged_axis_action() {
     let cases = [
         (

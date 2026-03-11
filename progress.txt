@@ -8,6 +8,7 @@ Started: 2026-03-11 00:08:32 CST
 - `runtime-core` 每个 tick 必须按 task 声明顺序（索引升序）遍历全部 active task；单 task 命中 blocking step 只阻塞自身，不阻塞同 tick 其他 task。
 - runtime step 离开判定应集中在统一 completion 决策函数（action/delay/wait 共用），避免分支内重复写跳转条件。
 - 当 action step 出现 Pending 长时动作时，后续 tick 必须从挂起动作继续轮询，不能重放挂起动作之前的即时 action（避免重复 side effect）。
+- `axis.move_relative/axis.move_absolute` 默认是 blocking 长时动作；即使 DSL 未显式写 `wait`，也要用 Pending 轮询驱动 step 留驻，并覆盖 Pending->Done 与 Pending->Fault 集成回归。
 
 
 
@@ -95,4 +96,16 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Pending lifecycle needs persistent action-index context; otherwise polling ticks will replay pre-pending immediate actions and duplicate side effects.
   - Keep Pending-path tests mixed with logs/trace assertions to verify both blocking semantics and non-replay guarantees.
+---
+## 2026-03-11 21:47 CST - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Added integration regressions in `tests/runtime_bridge_us006.rs` to verify `axis.move_*` blocks the current step without explicit `wait`: one path `Pending -> Done`, one path `Pending -> Fault`.
+- Updated `docs/axis_motion_mvp_spec.md` to explicitly document `axis.move_relative/axis.move_absolute` as default blocking long-running actions and describe Pending-driven step completion semantics.
+- Updated `AGENTS.md` execution-model guidance with the reusable rule that `axis.move_*` must remain blocking even without explicit `wait`, and tests should cover both success and fault polling outcomes.
+- Updated `prd.json` to set `US-007` (`让 axis.move_* 在 step 内默认阻塞`) to `passes: true`.
+- Files changed: `tests/runtime_bridge_us006.rs`, `docs/axis_motion_mvp_spec.md`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --test runtime_bridge_us006`, `cargo test`.
+- **Learnings for future iterations:**
+  - Use runtime-bridge integration tests (not only runtime-core unit tests) to lock semantic contracts that depend on compiler + bridge + runtime together.
+  - For default-blocking action semantics, always assert both the first Pending tick remains on the action step and a later polling tick resolves via Done/Fault.
 ---
