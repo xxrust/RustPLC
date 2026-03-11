@@ -1,8 +1,8 @@
 use crate::ast::{
-    ComparisonOperator, ConditionExpression, LiteralValue, OnCompleteDirective, PlcProgram,
-    StepStatement, WaitCondition, WaitStatement,
+    ActionStatement, ComparisonOperator, ConditionExpression, Expression, LiteralValue,
+    OnCompleteDirective, PlcProgram, StepStatement, WaitCondition, WaitStatement,
 };
-use crate::ir::{StateMachine, TransitionGuard};
+use crate::ir::{ActionKind, StateMachine, TransitionGuard};
 use petgraph::algo::kosaraju_scc;
 use petgraph::graph::DiGraph;
 use petgraph::visit::EdgeRef;
@@ -56,6 +56,57 @@ impl FlowSummary {
 struct LivenessEdge {
     is_bounded_wait: bool,
     source_has_allow_wait: bool,
+    source_wait_semantic: WaitSemantic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum WaitSemantic {
+    #[default]
+    None,
+    WaitCondition,
+    Delay,
+    PendingAction,
+}
+
+#[derive(Debug, Clone, Default)]
+struct StepWaitProfile {
+    has_wait_condition: bool,
+    has_delay: bool,
+    has_pending_action: bool,
+    has_timeout_escape: bool,
+    has_allow_indefinite_wait: bool,
+}
+
+impl StepWaitProfile {
+    fn wait_semantic(&self) -> WaitSemantic {
+        if self.has_pending_action {
+            WaitSemantic::PendingAction
+        } else if self.has_delay {
+            WaitSemantic::Delay
+        } else if self.has_wait_condition {
+            WaitSemantic::WaitCondition
+        } else {
+            WaitSemantic::None
+        }
+    }
+
+    fn has_bounded_wait(&self) -> bool {
+        self.has_delay || self.has_timeout_escape
+    }
+
+    fn is_unbounded_wait(&self) -> bool {
+        matches!(
+            self.wait_semantic(),
+            WaitSemantic::WaitCondition | WaitSemantic::PendingAction
+        ) && !self.has_bounded_wait()
+            && !self.has_allow_indefinite_wait
+    }
+}
+
+#[derive(Debug, Clone)]
+struct UnboundedWaitRequirement {
+    line: usize,
+    signals: HashSet<String>,
 }
 
 pub fn verify_liveness(
@@ -65,10 +116,18 @@ pub fn verify_liveness(
     let mut diagnostics = Vec::new();
 
     let step_line_map = collect_step_line_map(program);
+    let step_wait_profiles = collect_step_wait_profiles(program, state_machine);
     check_wait_timeout_or_allow(program, &mut diagnostics);
+    check_concurrent_wait_deadlocks(program, &step_wait_profiles, &mut diagnostics);
     check_unreachable_on_complete(program, &mut diagnostics);
     check_non_terminal_zero_out_degree(program, state_machine, &step_line_map, &mut diagnostics);
-    check_strongly_connected_components(program, state_machine, &step_line_map, &mut diagnostics);
+    check_strongly_connected_components(
+        program,
+        state_machine,
+        &step_line_map,
+        &step_wait_profiles,
+        &mut diagnostics,
+    );
 
     if diagnostics.is_empty() {
         Ok(())
@@ -173,9 +232,9 @@ fn check_strongly_connected_components(
     program: &PlcProgram,
     state_machine: &StateMachine,
     step_line_map: &HashMap<(String, String), usize>,
+    step_wait_profiles: &HashMap<(String, String), StepWaitProfile>,
     diagnostics: &mut Vec<LivenessDiagnostic>,
 ) {
-    let allow_wait_states = collect_allow_wait_states(program);
     let mut graph = DiGraph::<(String, String), LivenessEdge>::new();
     let mut node_map = HashMap::<(String, String), petgraph::graph::NodeIndex>::new();
 
@@ -195,16 +254,20 @@ fn check_strongly_connected_components(
         let Some(to_index) = node_map.get(&to_key).copied() else {
             continue;
         };
+        let step_profile = step_wait_profile_for_state(step_wait_profiles, &from_key);
+        let source_wait_semantic = step_profile.wait_semantic();
 
         graph.add_edge(
             from_index,
             to_index,
             LivenessEdge {
-                is_bounded_wait: matches!(
+                is_bounded_wait: step_profile.has_bounded_wait()
+                    || matches!(
                     transition.guard,
                     TransitionGuard::Timeout { .. } | TransitionGuard::Delay { .. }
                 ),
-                source_has_allow_wait: allow_wait_states.contains(&from_key),
+                source_has_allow_wait: step_profile.has_allow_indefinite_wait,
+                source_wait_semantic,
             },
         );
     }
@@ -233,11 +296,15 @@ fn check_strongly_connected_components(
         }
 
         let mut has_bounded_wait_or_allow = false;
+        let mut has_wait_semantic = false;
         for node in &component {
             for edge in graph.edges(*node) {
                 if edge.weight().is_bounded_wait || edge.weight().source_has_allow_wait {
                     has_bounded_wait_or_allow = true;
                     break;
+                }
+                if edge.weight().source_wait_semantic != WaitSemantic::None {
+                    has_wait_semantic = true;
                 }
             }
             if has_bounded_wait_or_allow {
@@ -271,17 +338,423 @@ fn check_strongly_connected_components(
         diagnostics.push(LivenessDiagnostic {
             line,
             reason: format!(
-                "检测到强连通分量 [{}] 不包含 timeout 或 allow_indefinite_wait 出边",
-                component_states.join(", ")
+                "{}强连通分量 [{}] 不包含 timeout 或 allow_indefinite_wait 出边",
+                if has_wait_semantic { "检测到死锁" } else { "检测到活锁" },
+                component_states.join(", "),
+            ),
+            physical_analysis: if has_wait_semantic {
+                "一旦并发 task 在该环内进入 wait/delay/pending 等待点，若彼此依赖条件长期不满足，将形成无界等待死锁"
+                    .to_string()
+            } else {
+                "该环由非阻塞跳转组成且无退出边，流程会持续空转却无法完成有意义进展（活锁）".to_string()
+            },
+            suggestion: if has_wait_semantic {
+                "请在该循环中添加 timeout 逃生分支，或在人工等待点显式声明 allow_indefinite_wait: true"
+                    .to_string()
+            } else {
+                "请为该循环增加可达退出边（goto/timeout），或引入显式等待条件避免无界空转".to_string()
+            },
+        });
+    }
+}
+
+fn check_concurrent_wait_deadlocks(
+    program: &PlcProgram,
+    step_wait_profiles: &HashMap<(String, String), StepWaitProfile>,
+    diagnostics: &mut Vec<LivenessDiagnostic>,
+) {
+    let write_signals_by_task = collect_task_write_signals(program);
+    let mut writers_by_signal = HashMap::<String, HashSet<String>>::new();
+    for (task, signals) in &write_signals_by_task {
+        for signal in signals {
+            for key in signal_lookup_keys(signal) {
+                writers_by_signal
+                    .entry(key)
+                    .or_default()
+                    .insert(task.clone());
+            }
+        }
+    }
+
+    let wait_requirements = collect_unbounded_wait_requirements(program, step_wait_profiles);
+    let mut dependency_graph = DiGraph::<String, ()>::new();
+    let mut task_nodes = HashMap::<String, petgraph::graph::NodeIndex>::new();
+    let mut blocking_lines_by_task = HashMap::<String, Vec<usize>>::new();
+
+    for (task, requirements) in &wait_requirements {
+        if requirements.is_empty() {
+            continue;
+        }
+
+        let from_node = *task_nodes
+            .entry(task.clone())
+            .or_insert_with(|| dependency_graph.add_node(task.clone()));
+        blocking_lines_by_task.insert(task.clone(), requirements.iter().map(|r| r.line).collect());
+
+        for requirement in requirements {
+            for signal in &requirement.signals {
+                for key in signal_lookup_keys(signal) {
+                    let Some(writers) = writers_by_signal.get(&key) else {
+                        continue;
+                    };
+                    for writer in writers {
+                        if writer == task {
+                            continue;
+                        }
+
+                        let to_node = *task_nodes
+                            .entry(writer.clone())
+                            .or_insert_with(|| dependency_graph.add_node(writer.clone()));
+                        dependency_graph.add_edge(from_node, to_node, ());
+                    }
+                }
+            }
+        }
+    }
+
+    for component in kosaraju_scc(&dependency_graph) {
+        if component.len() < 2 {
+            continue;
+        }
+
+        let component_set = component.iter().copied().collect::<HashSet<_>>();
+        let mut component_tasks = component
+            .iter()
+            .map(|node| dependency_graph[*node].clone())
+            .collect::<Vec<_>>();
+        component_tasks.sort();
+
+        let all_tasks_blocking = component_tasks
+            .iter()
+            .all(|task| blocking_lines_by_task.get(task).is_some_and(|lines| !lines.is_empty()));
+        if !all_tasks_blocking {
+            continue;
+        }
+
+        let all_tasks_wait_on_component = component.iter().all(|node| {
+            dependency_graph
+                .edges(*node)
+                .any(|edge| component_set.contains(&edge.target()))
+        });
+        if !all_tasks_wait_on_component {
+            continue;
+        }
+
+        let line = component_tasks
+            .iter()
+            .flat_map(|task| blocking_lines_by_task.get(task).into_iter().flatten())
+            .copied()
+            .min()
+            .unwrap_or(1)
+            .max(1);
+
+        diagnostics.push(LivenessDiagnostic {
+            line,
+            reason: format!(
+                "检测到并发 deadlock：task [{}] 只等待彼此释放资源，且等待点未提供 timeout/allow_indefinite_wait",
+                component_tasks.join(", ")
             ),
             physical_analysis:
-                "一旦进入该循环，若条件长期不满足，流程会在环内反复执行且没有超时/人工等待豁免出口"
+                "这些 task 在无界等待条件上形成互相依赖闭环，任何一个 task 都无法先完成，系统会永久停滞"
                     .to_string(),
             suggestion:
-                "请在该循环中添加 timeout 逃生分支，或在人工等待点显式声明 allow_indefinite_wait: true"
+                "请至少为一个等待点提供 timeout 逃生路径，或重构同步协议（信号握手/资源仲裁）以打破互等环"
                     .to_string(),
         });
     }
+}
+
+fn collect_step_wait_profiles(
+    program: &PlcProgram,
+    state_machine: &StateMachine,
+) -> HashMap<(String, String), StepWaitProfile> {
+    let mut profiles = HashMap::new();
+
+    for task in &program.tasks.tasks {
+        for step in &task.steps {
+            let mut profile = StepWaitProfile::default();
+            collect_step_wait_profile_from_statements(&step.statements, &mut profile);
+            profiles.insert(state_key(&task.name, &step.name), profile);
+        }
+    }
+
+    for task_ctx in &state_machine.task_contexts {
+        for pending in &task_ctx.pending_actions {
+            if !matches!(
+                pending.action_kind,
+                ActionKind::AxisMoveRelative | ActionKind::AxisMoveAbsolute
+            ) {
+                continue;
+            }
+            profiles
+                .entry(state_key(
+                    &pending.source_state.task_name,
+                    &pending.source_state.step_name,
+                ))
+                .or_default()
+                .has_pending_action = true;
+        }
+    }
+
+    profiles
+}
+
+fn collect_step_wait_profile_from_statements(
+    statements: &[StepStatement],
+    profile: &mut StepWaitProfile,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(action) => match action {
+                ActionStatement::AxisMoveRelative { timeout, .. }
+                | ActionStatement::AxisMoveAbsolute { timeout, .. } => {
+                    profile.has_pending_action = true;
+                    if timeout.is_some() {
+                        profile.has_timeout_escape = true;
+                    }
+                }
+                ActionStatement::Extend { .. }
+                | ActionStatement::Retract { .. }
+                | ActionStatement::Set { .. }
+                | ActionStatement::SetAnalog { .. }
+                | ActionStatement::SetAnalogExpr { .. }
+                | ActionStatement::Compute { .. }
+                | ActionStatement::Call { .. }
+                | ActionStatement::CamEngage { .. }
+                | ActionStatement::CamDisengage { .. }
+                | ActionStatement::CamSwitch { .. }
+                | ActionStatement::CamPhase { .. }
+                | ActionStatement::Log { .. } => {}
+            },
+            StepStatement::Wait(_) => profile.has_wait_condition = true,
+            StepStatement::Timeout(_) => profile.has_timeout_escape = true,
+            StepStatement::Delay { .. } => {
+                profile.has_delay = true;
+                profile.has_timeout_escape = true;
+            }
+            StepStatement::AllowIndefiniteWait(value) => {
+                if *value {
+                    profile.has_allow_indefinite_wait = true;
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                collect_step_wait_profile_from_statements(body, profile)
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    collect_step_wait_profile_from_statements(&branch.statements, profile);
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    collect_step_wait_profile_from_statements(&branch.statements, profile);
+                }
+            }
+            StepStatement::IfElse { .. } | StepStatement::Goto(_) => {}
+        }
+    }
+}
+
+fn step_wait_profile_for_state(
+    step_wait_profiles: &HashMap<(String, String), StepWaitProfile>,
+    state: &(String, String),
+) -> StepWaitProfile {
+    if let Some(profile) = step_wait_profiles.get(state) {
+        return profile.clone();
+    }
+
+    let normalized = state_key(
+        &state.0,
+        state.1.split("__").next().unwrap_or(&state.1),
+    );
+    step_wait_profiles
+        .get(&normalized)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn collect_unbounded_wait_requirements(
+    program: &PlcProgram,
+    step_wait_profiles: &HashMap<(String, String), StepWaitProfile>,
+) -> HashMap<String, Vec<UnboundedWaitRequirement>> {
+    let mut requirements = HashMap::<String, Vec<UnboundedWaitRequirement>>::new();
+
+    for task in &program.tasks.tasks {
+        for step in &task.steps {
+            let step_key = state_key(&task.name, &step.name);
+            let profile = step_wait_profiles
+                .get(&step_key)
+                .cloned()
+                .unwrap_or_default();
+            if !profile.is_unbounded_wait() {
+                continue;
+            }
+
+            let mut signals = HashSet::new();
+            collect_wait_signals(&step.statements, &mut signals);
+            if signals.is_empty() {
+                continue;
+            }
+
+            requirements
+                .entry(task.name.clone())
+                .or_default()
+                .push(UnboundedWaitRequirement {
+                    line: step.line.max(1),
+                    signals,
+                });
+        }
+    }
+
+    requirements
+}
+
+fn collect_task_write_signals(program: &PlcProgram) -> HashMap<String, HashSet<String>> {
+    let mut writes = HashMap::<String, HashSet<String>>::new();
+
+    for task in &program.tasks.tasks {
+        let mut task_writes = HashSet::new();
+        for step in &task.steps {
+            collect_statement_write_signals(&step.statements, &mut task_writes);
+        }
+        if !task_writes.is_empty() {
+            writes.insert(task.name.clone(), task_writes);
+        }
+    }
+
+    writes
+}
+
+fn collect_statement_write_signals(statements: &[StepStatement], writes: &mut HashSet<String>) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(action) => collect_action_write_signals(action, writes),
+            StepStatement::Repeat { body, .. } => collect_statement_write_signals(body, writes),
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    collect_statement_write_signals(&branch.statements, writes);
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    collect_statement_write_signals(&branch.statements, writes);
+                }
+            }
+            StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn collect_action_write_signals(action: &ActionStatement, writes: &mut HashSet<String>) {
+    match action {
+        ActionStatement::Set { target, .. }
+        | ActionStatement::SetAnalog { target, .. }
+        | ActionStatement::SetAnalogExpr { target, .. }
+        | ActionStatement::Extend { target }
+        | ActionStatement::Retract { target }
+        | ActionStatement::AxisMoveRelative { target, .. }
+        | ActionStatement::AxisMoveAbsolute { target, .. } => {
+            writes.insert(target.device.clone());
+            if target.port != "self" {
+                writes.insert(format!("{}.{}", target.device, target.port));
+            }
+        }
+        ActionStatement::Compute { target, .. } => {
+            writes.insert(target.clone());
+        }
+        ActionStatement::CamEngage { target }
+        | ActionStatement::CamDisengage { target }
+        | ActionStatement::CamSwitch { target, .. }
+        | ActionStatement::CamPhase { target, .. } => {
+            writes.insert(target.clone());
+        }
+        ActionStatement::Call { .. } | ActionStatement::Log { .. } => {}
+    }
+}
+
+fn collect_wait_signals(statements: &[StepStatement], signals: &mut HashSet<String>) {
+    for statement in statements {
+        match statement {
+            StepStatement::Wait(wait) => collect_wait_signals_from_wait(wait, signals),
+            StepStatement::Repeat { body, .. } => collect_wait_signals(body, signals),
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    collect_wait_signals(&branch.statements, signals);
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    collect_wait_signals(&branch.statements, signals);
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn collect_wait_signals_from_wait(wait: &WaitStatement, signals: &mut HashSet<String>) {
+    let conditions = match &wait.condition {
+        WaitCondition::Single(cond) => vec![cond],
+        WaitCondition::And(conds) | WaitCondition::Or(conds) => conds.iter().collect::<Vec<_>>(),
+    };
+
+    for condition in conditions {
+        if let Some((left, right)) = condition.expression_pair() {
+            collect_signals_from_expression(left, signals);
+            collect_signals_from_expression(right, signals);
+        } else {
+            let left = condition.left.trim();
+            if !left.is_empty() {
+                signals.insert(left.to_string());
+            }
+        }
+    }
+}
+
+fn collect_signals_from_expression(expr: &Expression, signals: &mut HashSet<String>) {
+    match expr {
+        Expression::Variable(name) => {
+            signals.insert(name.clone());
+        }
+        Expression::UnaryNeg(inner) | Expression::UnaryNot(inner) => {
+            collect_signals_from_expression(inner, signals);
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            collect_signals_from_expression(left, signals);
+            collect_signals_from_expression(right, signals);
+        }
+        Expression::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_signals_from_expression(arg, signals);
+            }
+        }
+        Expression::Literal(_) | Expression::Boolean(_) => {}
+    }
+}
+
+fn signal_lookup_keys(signal: &str) -> Vec<String> {
+    let trimmed = signal.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let mut keys = vec![trimmed.to_string()];
+    if let Some((base, _)) = trimmed.split_once('.') {
+        if !base.is_empty() {
+            keys.push(base.to_string());
+        }
+    }
+    keys
 }
 
 fn collect_step_liveness_facts(statements: &[StepStatement], facts: &mut StepLivenessFacts) {
@@ -440,24 +913,6 @@ fn state_line(
         .find(|task| task.name == task_name)
         .map(|task| task.line.max(1))
         .unwrap_or(1)
-}
-
-fn collect_allow_wait_states(program: &PlcProgram) -> HashSet<(String, String)> {
-    let mut states = HashSet::new();
-
-    for task in &program.tasks.tasks {
-        for step in &task.steps {
-            if step
-                .statements
-                .iter()
-                .any(|statement| matches!(statement, StepStatement::AllowIndefiniteWait(true)))
-            {
-                states.insert(state_key(&task.name, &step.name));
-            }
-        }
-    }
-
-    states
 }
 
 fn state_key(task_name: &str, step_name: &str) -> (String, String) {
@@ -1021,5 +1476,146 @@ task fault:
                     && error.to_string().contains("缺少 timeout")),
             "错误应指出 fault.timeout 恢复等待缺少 timeout"
         );
+    }
+
+    #[test]
+    fn accepts_concurrent_manual_waits_with_allow_indefinite_wait() {
+        let source = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task loader:
+    step wait_operator:
+        wait: start_loader == true
+        allow_indefinite_wait: true
+    on_complete: goto loader
+
+task unloader:
+    step wait_operator:
+        wait: start_unloader == true
+        allow_indefinite_wait: true
+    on_complete: goto unloader
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        verify_liveness(&program, &state_machine)
+            .expect("allow_indefinite_wait 的并发人工等待应被视为合法等待");
+    }
+
+    #[test]
+    fn reports_deadlock_when_two_tasks_only_wait_each_other_resource_release() {
+        let source = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task feeder:
+    step hold_fixture:
+        action: set fixture_a on
+    step wait_peer_release:
+        wait: fixture_b == false
+    on_complete: goto feeder
+
+task picker:
+    step hold_fixture:
+        action: set fixture_b on
+    step wait_peer_release:
+        wait: fixture_a == false
+    on_complete: goto picker
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        let errors = verify_liveness(&program, &state_machine)
+            .expect_err("互相等待资源释放的并发 task 应触发 deadlock");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.to_string().contains("并发 deadlock")),
+            "错误应包含并发 deadlock 诊断"
+        );
+    }
+
+    #[test]
+    fn reports_livelock_for_non_blocking_cycle_without_exit() {
+        let source = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+
+task spin_a:
+    step loop:
+        action: log "spin_a"
+    on_complete: goto spin_b
+
+task spin_b:
+    step loop:
+        action: log "spin_b"
+    on_complete: goto spin_a
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        let errors = verify_liveness(&program, &state_machine)
+            .expect_err("无等待条件且无出口的循环应触发活锁诊断");
+
+        assert!(
+            errors.iter().any(|error| {
+                let text = error.to_string();
+                text.contains("活锁") && text.contains("强连通分量")
+            }),
+            "错误应明确区分为活锁风险"
+        );
+    }
+
+    #[test]
+    fn treats_pending_axis_motion_cycle_with_timeout_as_bounded_wait() {
+        let source = r#"
+[topology]
+
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+
+[constraints]
+
+[tasks]
+
+task move_loop:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto move_loop
+
+task fault:
+    step timeout:
+        action: log "timeout"
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion_fault"
+    step safety_fault:
+        action: log "safety_fault"
+    on_complete: goto move_loop
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        verify_liveness(&program, &state_machine)
+            .expect("Pending 轴动作带 timeout/fault 路由时应被视为有界等待");
     }
 }

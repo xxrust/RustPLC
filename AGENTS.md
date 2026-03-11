@@ -298,6 +298,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - 新规则必须有正例、反例、边界例
 - safety 并发建模应与 runtime active-task 口径对齐：优先从“无跨 task 入边”的 root task 构造初始全局状态；若无 root task，再回退 IR 初始 task，避免验证与执行的 task 激活集合漂移
 - safety 全局状态应显式携带 task 级当前位置与 pending action 标记，跨 task `conflicts_with/requires` 断言必须在该组合状态空间中检查
+- liveness 夹具若覆盖 `axis.move_*` Pending 语义，必须先满足 AXIS 语义门禁（`timeout` + `on_reject/on_motion_fault/on_safety_fault`）；否则会在 `build_state_machine` 阶段失败，无法进入 liveness checker
 
 ### 修改设备模型、组件模型或 I/O 映射
 

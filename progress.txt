@@ -1,6 +1,7 @@
 # Ralph Progress Log
 Started: 2026-03-11 00:08:32 CST
 ## Codebase Patterns
+- 在 liveness 夹具中若使用 `axis.move_*`，必须补齐 `timeout/on_reject/on_motion_fault/on_safety_fault`，否则会在语义门禁阶段失败并无法进入 liveness 检查。
 - 并发 task 与阻塞 step 的术语、推进规则与自动阻塞范围，以 `docs/architecture/signal-direction.md` 为单一语义源。
 - 本仓库最终回归门禁优先使用完整 `cargo test`，仅 `cargo test --lib` 不能替代端到端回归。
 - Task 级 pending action 元数据应从 step 语句收集，不应只依赖 transition.actions；阻塞语句可能让 transition 丢失 action。
@@ -167,4 +168,15 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - In safety BMC, model concurrent execution as a vector of task control states and advance one task slot per edge expansion; a single global control-state scalar cannot expose cross-task overlap violations.
   - Keep safety initial active-task selection consistent with runtime bridge root-task rules, otherwise safety verdicts can diverge from runtime-reachable concurrent states.
+---
+
+## 2026-03-12 02:40 CST - US-012
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Completed liveness concurrency checks for blocking semantics: unified wait modeling across `Pending action`/`wait`/`delay`, and kept SCC diagnostics distinguishing deadlock vs livelock based on explicit wait semantics.
+- Added/kept regressions for US-012 acceptance coverage: legal manual wait with `allow_indefinite_wait`, two-task mutual wait deadlock, and non-blocking no-exit livelock; adjusted axis pending regression to satisfy AXIS semantic gate while still validating bounded pending behavior.
+- Files changed: `src/verification/liveness.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --lib verification::liveness -- --nocapture`, `cargo test`.
+- **Learnings for future iterations:**
+  - Liveness stories should include one positive waiting case and separate deadlock/livelock negatives; this keeps wait semantics and cycle semantics independently guardrailed.
+  - For `axis.move_*` fixtures in liveness tests, include mandatory `timeout/on_*fault` branches first; otherwise semantic AXIS guards fail before liveness rules execute.
 ---
