@@ -430,6 +430,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `cargo test --lib`：模块级单元测试
 - `tests/*.rs`：集成与回归测试
 - `tests/examples_integration.rs`：示例程序回归总入口
+- 并发 runtime + 四类 verification 的 CI/本地统一门禁入口：`scripts/concurrent_runtime_verification_gate.sh`
 
 做改动时至少回答：
 

@@ -48,3 +48,28 @@
   "code": "MIG-AXIS-BLOCK-001"
 }
 ```
+
+## 并发门禁本地复现（CI 同源）
+
+并发 runtime 与四类 verification 的 CI 门禁统一脚本：
+
+- `scripts/concurrent_runtime_verification_gate.sh`
+
+本地复现命令序列：
+
+```bash
+scripts/concurrent_runtime_verification_gate.sh
+```
+
+若需要逐条定位失败，可按脚本内顺序单独执行：
+
+```bash
+cargo test --test runtime_bridge_us006 axis_move_blocking_baseline_example_blocks_without_explicit_wait_until_done -- --exact --nocapture
+cargo test --test runtime_bridge_us006 load_unload_concurrent_example_keeps_load_blocked_while_unload_advances -- --exact --nocapture
+cargo test --test examples_integration parses_axis_move_blocking_baseline_example_without_explicit_wait -- --exact --nocapture
+cargo test --test examples_integration parses_load_unload_concurrent_tasks_example_into_verified_ir_json -- --exact --nocapture
+cargo test --lib verification::safety::tests::reports_conflict_when_independent_tasks_overlap_on_conflicting_outputs -- --exact --nocapture
+cargo test --lib verification::liveness::tests::reports_deadlock_when_two_tasks_only_wait_each_other_resource_release -- --exact --nocapture
+cargo test --lib verification::timing::tests::concurrent_worst_case_analysis_distinguishes_task_local_and_global_completion -- --exact --nocapture
+cargo test --lib verification::causality::tests::accepts_cross_task_variable_chain_with_compute_dataflow -- --exact --nocapture
+```

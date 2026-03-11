@@ -5,6 +5,7 @@ Started: 2026-03-11 00:08:32 CST
 - 并发 task 与阻塞 step 的术语、推进规则与自动阻塞范围，以 `docs/architecture/signal-direction.md` 为单一语义源。
 - 涉及 task/step 语义的生成器文档（`AGENTS.md`、`plc-system`、`plc-gen`）必须与 `docs/architecture/signal-direction.md` 同步；“单执行点”表述仅允许用于迁移差异对比。
 - 本仓库最终回归门禁优先使用完整 `cargo test`，仅 `cargo test --lib` 不能替代端到端回归。
+- 并发 runtime + 四类 verification 的回归门禁统一通过 `scripts/concurrent_runtime_verification_gate.sh` 执行；CI workflow 应直接调用该脚本，保持本地与 CI 同源。
 - Task 级 pending action 元数据应从 step 语句收集，不应只依赖 transition.actions；阻塞语句可能让 transition 丢失 action。
 - `runtime-core` 在 `no_std` 约束下使用定长数组（`MAX_ACTIVE_TASKS`）和活跃计数管理 task context，避免动态分配。
 - `runtime-core` 每个 tick 必须按 task 声明顺序（索引升序）遍历全部 active task；单 task 命中 blocking step 只阻塞自身，不阻塞同 tick 其他 task。
@@ -270,4 +271,17 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Any task/step semantic change must be reflected in both architecture docs and generator skills in the same iteration, otherwise future generated DSL may drift from runtime/verification semantics.
   - Keep old-model wording confined to migration docs with an explicit disclaimer; avoid leaving it in normative guidance files.
+---
+## 2026-03-12 04:25 CST - US-019
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Added a dedicated concurrent gate script `scripts/concurrent_runtime_verification_gate.sh` covering: blocking `axis.move_*` runtime behavior, multi-task concurrent runtime behavior, concurrent examples compilation, and one concurrent regression per verification engine (safety/liveness/timing/causality).
+- Wired CI to that gate by adding `concurrent-runtime-verification-gate` job in `.github/workflows/rp2040_regression.yml`.
+- Documented reproducible local command sequence in `docs/concurrent_runtime_migration_guide.md`, reusing the same script and listing per-test fallback commands for debugging.
+- Updated `AGENTS.md` testing principles with the reusable concurrent gate entrypoint.
+- Updated `prd.json` to set `US-019` (`把并发运行时与验证门禁接入 CI`) to `passes: true`.
+- Files changed: `scripts/concurrent_runtime_verification_gate.sh`, `.github/workflows/rp2040_regression.yml`, `docs/concurrent_runtime_migration_guide.md`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `scripts/concurrent_runtime_verification_gate.sh`, `cargo test`.
+- **Learnings for future iterations:**
+  - Keep concurrent-runtime regression scope centralized in one script and let CI call that script directly to avoid command drift between local and pipeline runs.
+  - For gate docs, pair a one-command happy path with explicit per-test commands so failures can be reproduced quickly without reverse-engineering CI logs.
 ---
