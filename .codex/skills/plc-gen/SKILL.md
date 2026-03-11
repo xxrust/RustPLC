@@ -19,6 +19,17 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 
 ---
 
+## Gate-A 语义对齐（并发 task + 阻塞 step）
+
+- 涉及 task/step 的语义，以 `docs/architecture/signal-direction.md` 为唯一来源。
+- task 并发表示多个 active task 拥有独立 task context，被统一调度；不是单执行点在 task.step 间来回跳转。
+- 同一 tick 内，单 task 可串联推进多个 non-blocking step；一旦命中 blocking step（`delay`/`wait`/`timeout` 等待/`axis.move_*`/外部反馈动作），该 task 本 tick 停止推进。
+- 某个 task 进入 blocking step 只阻塞自身，不阻塞同 tick 的其他 active task。
+- `axis.move_relative` / `axis.move_absolute` 默认阻塞，禁止按“发命令即继续”假设在同一 step 继续堆叠后续动作；需要拆成后继 step。
+- 生成 DSL 时必须兼顾 `safety/liveness/timing/causality` 四类验证闭环，不允许只追求 runtime “能跑起来”。
+
+---
+
 ## 核心理念
 
 工程师不会告诉你"我需要3个气缸、2个电磁阀"。他会说：
@@ -79,6 +90,7 @@ description: "Generate RustPLC DSL code from natural language descriptions of in
 - 初始状态：上电后各执行器默认位置（尤其是气缸是否要求"全部回原位"）？
 - 人工介入点：是否存在人工装料/取料/确认按钮？对应等待是否允许无限等待？
 - 同步关系：是否允许并行动作？哪些动作必须互锁（互斥/依赖）？
+- 并发边界：哪些工位应拆成独立 task？当某个 task 因 `wait/delay/axis.move_*` 阻塞时，哪些 task 必须继续推进？
 
 **等待工程师确认后再进入下一阶段。**
 
@@ -599,6 +611,7 @@ step detect:
 
 - 需要“走到位置/角度”的运动任务，优先使用 `stepper_motor` 或 `servo_drive` + `axis.move_relative/axis.move_absolute`。
 - `axis.move_*` 必须带完整异常分流：`timeout`、`on_reject`、`on_motion_fault`、`on_safety_fault`，缺失会触发 `AXIS-001`~`AXIS-004`。
+- `axis.move_*` 默认阻塞当前 step；若动作后还需执行其它语句，请拆到后继 step，并通过 `goto`/`on_complete` 编排。
 - 细分 fault route 可叠加在主桶分支上：`on_reject(kind: vendor)` / `on_reject(code: 1201)` 等；按声明顺序首条命中，未命中回退主桶。
 - `axis.move_*` 的目标设备必须是 `stepper_motor` 或 `servo_drive`，否则触发 `AXIS-005`。
 - 运动参数解析优先级固定：`inline overrides (speed/acc/dec)` > `params` 引用 > 设备 `motion_param_set`。
@@ -653,6 +666,8 @@ step detect:
 - `ready`：只做人工启动等待（`allow_indefinite_wait: true`）
 - `cycle`：完整自动流程，每个 `wait` 必带 `timeout`
 - `fail_<具体故障名>`：收回到安全位 + 上下文化报警日志 + 回到 `ready`
+- 若流程存在可独立推进工位（如上料/下料），优先拆成多个 task，不要强行折叠成单一 `task cycle`
+- 并发 task 之间的共享资源边界用 `conflicts_with/requires` 与完整拓扑链路显式建模，不靠隐式调度假设
 
 示例结构（仅示意，不要原样照抄，按你的设备名替换）：
 ```plc
@@ -891,6 +906,7 @@ task done:
 - [ ] 每条 timeout 路径是否都映射到明确命名的失败处理任务（如 `fail_xxx_timeout`），且覆盖执行器安全复位？
 - [ ] 所有 `op.cylinder.*` / `op.vacuum.*` 是否都使用了同一行 inline timeout（`action: op... timeout: ... -> goto ...`）？
 - [ ] 是否需要 `race`/`parallel`/`repeat`/`if-else`/`goto task.step`？
+- [ ] 可独立推进的工位是否拆分为独立 task，而不是强行折叠到单 task？
 - [ ] 是否有时序约束？
 - [ ] 模拟量设备是否声明了 `range` 和 `unit`？
 - [ ] 如果使用 extern function，是否声明了 `rust_module`、`pure`、`time_bound_us`？
@@ -900,11 +916,13 @@ task done:
 - [ ] 复杂计算是否优先考虑 extern function 而非冗长的 `action: compute` 链？
 - [ ] `parallel` 块之后是否跟了至少一个 step（而非直接 `on_complete`）？
 - [ ] 同一 step 中是否只有一个"驱动动作"紧跟其对应的 `wait`（避免多 action 导致因果误配）？
+- [ ] 是否避免把 `axis.move_*` 当作同 step 非阻塞命令（需要后续动作时已拆 step）？
 - [ ] `motor` 设备在 `safety:` 约束中是否使用 `motor_x.run.on` 而非 `motor_x.on`？
 - [ ] 位置/角度运动是否改用 `axis.move_relative` / `axis.move_absolute`（而非 `set motor_x.run + delay`）？
 - [ ] 每个 `axis.move_*` 是否都包含 `timeout` + `on_reject` + `on_motion_fault` + `on_safety_fault`？
 - [ ] 是否只使用 `axis.move_*` 参数白名单字段（`distance/position/params/speed/acc/dec`）？
 - [ ] `axis.move_*` 目标是否是 `stepper_motor`/`servo_drive`（避免触发 `AXIS-005`）？
+- [ ] 并发设计是否能体现“某 task 阻塞时其他 active task 仍可推进”的预期（通过任务拆分与约束表达）？
 - [ ] 轴设备是否使用 `model_ref/config_ref`（可选 `motion_param_set`）而非内联参数？
 - [ ] 若定义 `axis_fault_contract`，`propagation_scope` 是否在 `self/group/all/followers/custom` 中，且仅 `custom` 使用 `propagation_targets`？
 - [ ] PID 的 `pv`/`out` 名称是否与 `analog_input`/`analog_output` 设备名及 `plc_main.ports` 端口名完全一致？

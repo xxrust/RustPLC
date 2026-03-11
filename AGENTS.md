@@ -358,6 +358,12 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - 如果多个下层模块重复理解同一语义，说明抽象位置已经错了
 - 发现下沉时，应优先上提抽象，而不是继续补丁
 
+### 8. 并发语义文档与 skills 必须同源
+
+- `docs/architecture/signal-direction.md` 是并发 task / blocking step 的唯一长期语义源
+- `AGENTS.md`、`CODEX.md`、`.codex/skills/plc-system`、`.codex/skills/plc-gen` 的 task/step 描述必须与该语义源同义
+- “单执行点在 task.step 间跳转”的表述仅允许出现在迁移差异文档，不能作为新实现指导
+
 ## 典型专题的稳定入口
 
 以下专题是项目中的长期主线，遇到相关需求时应优先进入对应文件。
@@ -405,6 +411,17 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `src/runtime_bridge.rs`
 - `crates/runtime-core/src/lib.rs`
 - `tests/*axis*`
+
+### 并发 task 与阻塞 step
+
+先看：
+
+- `docs/architecture/signal-direction.md`
+- `docs/concurrent_runtime_migration_guide.md`
+- `.codex/skills/plc-system/SKILL.md`
+- `.codex/skills/plc-gen/SKILL.md`
+- `tests/runtime_bridge_us006.rs`
+- `tests/examples_integration.rs`
 
 ## 测试与回归原则
 

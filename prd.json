@@ -288,8 +288,8 @@
         "Tests pass"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": "Validated by full cargo test sweep on 2026-03-11."
+      "passes": true,
+      "notes": "Synced AGENTS + plc-system/plc-gen skills with concurrent task/blocking step contract and migration-doc guardrail; validated by full cargo test on 2026-03-12."
     },
     {
       "id": "US-019",

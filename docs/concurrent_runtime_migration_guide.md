@@ -4,6 +4,8 @@
 
 本指南用于从“单执行点 + axis.move 近似非阻塞假设”迁移到“多 task 并发调度 + axis.move 默认阻塞 step”模型的项目。
 
+注意：本文中的“旧语义”仅用于迁移差异对比，不是新项目设计依据。新实现请以 `docs/architecture/signal-direction.md` 为准。
+
 ## 关键行为差异
 
 | 主题 | 旧语义（迁移前） | 新语义（迁移后） |
@@ -46,4 +48,3 @@
   "code": "MIG-AXIS-BLOCK-001"
 }
 ```
-

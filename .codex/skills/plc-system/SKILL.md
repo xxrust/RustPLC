@@ -7,6 +7,12 @@ description: "Generate system semantic description (.system.md) from natural lan
 
 从工程师的自然语言工艺描述，通过多轮对话确认，生成项目顶层语义描述（`.system.md`）。这是 PLC 代码生成的第一步，定义了"这是什么系统、为谁服务、安全等级多高、核心工艺意图是什么"。
 
+## Gate-A 语义基线（并发 task + 阻塞 step）
+
+- 涉及 task/step 的语义，以 `docs/architecture/signal-direction.md` 为唯一来源。
+- `.system.md` 必须明确并发 task 划分、blocking step 预期和阻塞隔离边界，供后续 `plc-gen` 映射到 IR/runtime/verification。
+- “单执行点在 task.step 间跳转”的表述只能用于迁移差异说明，不能作为新项目语义目标。
+
 ## 核心理念
 
 工程师通常会说：
@@ -78,6 +84,8 @@ description: "Generate system semantic description (.system.md) from natural lan
 - "有没有我遗漏的动作或状态？"
 - "有没有异常处理流程？（超时/传感器故障/急停）"
 - "有没有特殊工况？（手动模式/维护模式/测试模式）"
+- "哪些工位应拆成并发 task？哪些资源是共享互斥的？"
+- "当某个工位在 `wait/delay/axis.move_*` 或外部反馈中阻塞时，其他工位是否必须继续推进？"
 
 ### 第三步：理解启动与停机流程
 
@@ -204,6 +212,12 @@ description: "Generate system semantic description (.system.md) from natural lan
 ### 特殊工况
 [描述手动模式、维护模式、测试模式等特殊工况]
 
+## 并发与阻塞语义假设
+- **并发 task 划分**：[哪些工位/流程应作为独立 task]
+- **blocking step 清单**：[wait / delay / timeout 等待 / axis.move_* / 外部反馈动作]
+- **阻塞隔离预期**：[某 task 阻塞时，哪些 task 仍需推进]
+- **共享资源边界**：[跨 task 的互斥资源与依赖关系]
+
 ## 启动与停机流程
 
 ### 上电初始化
@@ -258,6 +272,8 @@ description: "Generate system semantic description (.system.md) from natural lan
 - [根据安全等级决定超时值、冗余策略]
 - [根据工艺特点决定并行/顺序控制]
 - [根据测试需求决定是否生成测试任务]
+- [遵守 `docs/architecture/signal-direction.md`：按并发 task + blocking step 组织任务语义，不回退单执行点假设]
+- [输出必须可进入 safety/liveness/timing/causality 四类验证闭环]
 ```
 
 ### 第七步：展示并确认
@@ -314,10 +330,13 @@ description: "Generate system semantic description (.system.md) from natural lan
 - [ ] 启动停机流程是否清晰？（初始化步骤、正常停止、急停）
 - [ ] 测试策略是否明确？（手动测试、自动测试、单步模式、维护模式）
 - [ ] 关键约束是否列出？（安全规则、时序要求、互锁关系）
+- [ ] 是否明确并发 task 划分与阻塞隔离预期？
+- [ ] 是否列出 blocking step 假设（至少覆盖 `wait/delay/axis.move_*` 与外部反馈等待）？
 - [ ] 若包含轴运动，是否明确参数层级（`model_ref/config_ref/motion_param_set`）？
 - [ ] 若包含轴运动，是否明确 fault policy（severity/stop_mode/ack/auto_reset）？
 - [ ] 若包含轴运动，是否明确传播范围（`self/group/all/followers/custom`）及 custom 目标？
 - [ ] 是否有"对 AI 的指引"章节？（指导后续代码生成）
+- [ ] AI 指引是否要求四类验证闭环（safety/liveness/timing/causality）？
 - [ ] 文件命名是否符合规则？（与未来的 .plc 文件同名）
 - [ ] 是否已经过工程师确认？
 
@@ -364,6 +383,7 @@ description: "Generate system semantic description (.system.md) from natural lan
 - 启动停机 → 决定 init/stop 任务的实现
 - 测试策略 → 决定是否生成 manual_test/auto_test 任务
 - 设计偏好 → 决定命名风格、注释详细程度
+- 并发与阻塞语义假设 → 决定 task 拆分、step completion 预期与阻塞隔离边界
 - 轴参数层级 → 决定 `axis.move_*` 的 params 引用与覆盖策略
 - 轴故障策略 → 决定 `axis_fault_contract` 与 `on_reject/on_motion_fault/on_safety_fault` 路由设计
 

@@ -3,6 +3,7 @@ Started: 2026-03-11 00:08:32 CST
 ## Codebase Patterns
 - 在 liveness 夹具中若使用 `axis.move_*`，必须补齐 `timeout/on_reject/on_motion_fault/on_safety_fault`，否则会在语义门禁阶段失败并无法进入 liveness 检查。
 - 并发 task 与阻塞 step 的术语、推进规则与自动阻塞范围，以 `docs/architecture/signal-direction.md` 为单一语义源。
+- 涉及 task/step 语义的生成器文档（`AGENTS.md`、`plc-system`、`plc-gen`）必须与 `docs/architecture/signal-direction.md` 同步；“单执行点”表述仅允许用于迁移差异对比。
 - 本仓库最终回归门禁优先使用完整 `cargo test`，仅 `cargo test --lib` 不能替代端到端回归。
 - Task 级 pending action 元数据应从 step 语句收集，不应只依赖 transition.actions；阻塞语句可能让 transition 丢失 action。
 - `runtime-core` 在 `no_std` 约束下使用定长数组（`MAX_ACTIVE_TASKS`）和活跃计数管理 task context，避免动态分配。
@@ -257,4 +258,16 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - For concurrent-task examples, pair an examples compile test with a runtime scheduling test so "example exists" and "runtime behavior holds" are gated together.
   - In multi-task runtime assertions, step-level expectations should be task-indexed (`task_context`) instead of cursor-indexed (`location`).
+---
+
+## 2026-03-12 04:15 CST - US-018
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Synced long-term concurrent runtime contract across agent docs and skills: updated `AGENTS.md` principles/entrypoints, added Gate-A concurrency semantics to `.codex/skills/plc-gen/SKILL.md` and `.codex/skills/plc-system/SKILL.md`.
+- Rewrote migration guidance boundary in `docs/concurrent_runtime_migration_guide.md` to state old single-execution semantics are migration-only and not valid for new design guidance.
+- Updated `prd.json` to set `US-018` (`同步 AGENTS 与 skills 的长期契约`) to `passes: true`.
+- Files changed: `AGENTS.md`, `.codex/skills/plc-gen/SKILL.md`, `.codex/skills/plc-system/SKILL.md`, `docs/concurrent_runtime_migration_guide.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test`.
+- **Learnings for future iterations:**
+  - Any task/step semantic change must be reflected in both architecture docs and generator skills in the same iteration, otherwise future generated DSL may drift from runtime/verification semantics.
+  - Keep old-model wording confined to migration docs with an explicit disclaimer; avoid leaving it in normative guidance files.
 ---
