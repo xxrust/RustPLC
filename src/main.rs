@@ -9765,11 +9765,11 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
 
     let mut verification = verify_all(&expanded_program, &topology, &constraints, &state_machine)
         .map_err(|issues| {
-            issues
-                .into_iter()
-                .map(|issue| issue.to_string())
-                .collect::<Vec<_>>()
-        })?;
+        issues
+            .into_iter()
+            .map(|issue| issue.to_string())
+            .collect::<Vec<_>>()
+    })?;
     apply_axis_move_blocking_migration_warning(&program, &mut verification);
 
     let runtime_budget = analyze_runtime_budget(&expanded_program, &state_machine);
@@ -10223,7 +10223,9 @@ fn apply_axis_move_blocking_migration_warning(
                 let statement_count = step
                     .statements
                     .iter()
-                    .filter(|stmt| !matches!(stmt, rust_plc::ast::StepStatement::AllowIndefiniteWait(_)))
+                    .filter(|stmt| {
+                        !matches!(stmt, rust_plc::ast::StepStatement::AllowIndefiniteWait(_))
+                    })
                     .count();
                 if statement_count <= 1 || !statements_include_axis_move(&step.statements) {
                     return None;
@@ -10265,7 +10267,9 @@ fn statements_include_axis_move(statements: &[rust_plc::ast::StepStatement]) -> 
 
 fn statement_includes_axis_move(statement: &rust_plc::ast::StepStatement) -> bool {
     match statement {
-        rust_plc::ast::StepStatement::Action(rust_plc::ast::ActionStatement::AxisMoveRelative { .. })
+        rust_plc::ast::StepStatement::Action(
+            rust_plc::ast::ActionStatement::AxisMoveRelative { .. },
+        )
         | rust_plc::ast::StepStatement::Action(
             rust_plc::ast::ActionStatement::AxisMoveAbsolute { .. },
         ) => true,

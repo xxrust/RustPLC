@@ -1281,6 +1281,55 @@ fn parses_welding_station_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_load_unload_concurrent_tasks_example_into_verified_ir_json() {
+    let source = read_example("load_unload_concurrent_tasks.plc");
+    let ir_json = compile_source_to_json(&source)
+        .expect("load_unload_concurrent_tasks example should compile");
+
+    let states = ir_json["state_machine"]["states"]
+        .as_array()
+        .expect("state machine should include states array");
+    assert!(
+        states
+            .iter()
+            .any(|state| { state["step_name"] == Value::String("wait_load_request".to_string()) }),
+        "example should include load_station.wait_load_request blocking step"
+    );
+    assert!(
+        states
+            .iter()
+            .any(|state| { state["step_name"] == Value::String("unload_dwell".to_string()) }),
+        "example should include unload_station.unload_dwell blocking step"
+    );
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+    assert!(
+        transitions.iter().any(|transition| {
+            transition["from"]["task_name"] == Value::String("unload_station".to_string())
+                && transition["from"]["step_name"] == Value::String("unload_dwell".to_string())
+                && transition["guard"]["kind"] == Value::String("delay".to_string())
+                && transition["guard"]["duration_ms"] == Value::Number(200u64.into())
+        }),
+        "example should keep unload task's local delay transition for runtime blocking semantics"
+    );
+
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
 fn parses_axis_stepper_fault_routing_example_into_verified_ir_json() {
     let source = read_example("axis_stepper_fault_routing.plc");
     let ir_json =
@@ -1381,9 +1430,9 @@ fn parses_axis_move_blocking_baseline_example_without_explicit_wait() {
     assert!(
         transitions.iter().any(|transition| {
             transition["actions"].as_array().is_some_and(|actions| {
-                actions
-                    .iter()
-                    .any(|action| action["action"] == Value::String("axis_move_relative".to_string()))
+                actions.iter().any(|action| {
+                    action["action"] == Value::String("axis_move_relative".to_string())
+                })
             })
         }),
         "blocking baseline example should include axis_move_relative"

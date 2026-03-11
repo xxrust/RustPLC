@@ -615,17 +615,15 @@ task done:
         "axis migration warning should include stable code MIG-AXIS-BLOCK-001"
     );
 
-    let legacy_report: LegacyVerificationReport = serde_json::from_str(&report_text)
-        .expect("legacy parser should accept new report payload");
+    let legacy_report: LegacyVerificationReport =
+        serde_json::from_str(&report_text).expect("legacy parser should accept new report payload");
     assert!(
         legacy_report
             .verification
             .liveness
             .warnings
             .iter()
-            .any(|warning| {
-                warning.level == "warn" && warning.message.contains("axis.move_*")
-            }),
+            .any(|warning| { warning.level == "warn" && warning.message.contains("axis.move_*") }),
         "legacy warning parser should still read level/message from code-aware warnings"
     );
 }

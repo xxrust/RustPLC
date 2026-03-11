@@ -1,0 +1,92 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "控制器本体与上料/下料双工位并发 I/O 端口映射",
+    ports: [
+        Y0:digital:producer,
+        Y1:digital:producer,
+        X0:digital:consumer,
+        X1:digital:consumer
+    ]
+}
+
+device conveyor_load: motor {
+    purpose: "上料输送带电机，负责将新工件推送到中间工位",
+    ramp_time: 50ms
+}
+
+device conveyor_unload: motor {
+    purpose: "下料输送带电机，负责将已完成工件移出工位",
+    ramp_time: 50ms
+}
+
+device sensor_load_request: sensor {
+    purpose: "上料请求传感器，检测前段工位是否有待上料工件",
+    subtype: "proximity_sensor"
+}
+
+device sensor_unload_ready: sensor {
+    purpose: "下料就绪传感器，检测下料通道是否可接收工件",
+    subtype: "proximity_sensor"
+}
+
+relation { from: plc_main.Y0, to: conveyor_load.cmd, via: driven_by }
+relation { from: conveyor_load.position_A, to: sensor_load_request.sense, via: detects }
+relation { from: sensor_load_request.out, to: plc_main.X0, via: reports_to }
+
+relation { from: plc_main.Y1, to: conveyor_unload.cmd, via: driven_by }
+relation { from: conveyor_unload.position_A, to: sensor_unload_ready.sense, via: detects }
+relation { from: sensor_unload_ready.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+causality: Y0 -> conveyor_load -> sensor_load_request
+    reason: "上料动作应在上料链路中形成可观测反馈"
+
+causality: Y1 -> conveyor_unload -> sensor_unload_ready
+    reason: "下料动作应在下料链路中形成可观测反馈"
+
+timing: task.load_station must_complete_within_worst_case 2500ms
+    reason: "单次上料等待+执行应在窗口内完成"
+
+timing: task.unload_station must_complete_within_worst_case 2500ms
+    reason: "单次下料等待+执行应在窗口内完成"
+
+[tasks]
+
+# 并发语义基线：
+# - load_station 在 wait_load_request 阻塞时，unload_station 仍可独立推进。
+# - 两个 task 通过独立因果链建模，便于 verification 复用。
+task load_station:
+    step wait_load_request:
+        wait: sensor_load_request == true
+        timeout: 2000ms -> goto load_fault
+    step start_load:
+        action: set conveyor_load.run on
+    step load_dwell:
+        delay: 200ms
+    step stop_load:
+        action: set conveyor_load.run off
+    on_complete: goto load_station.wait_load_request
+
+task unload_station:
+    step wait_unload_ready:
+        wait: sensor_unload_ready == true
+        timeout: 2000ms -> goto unload_fault
+    step start_unload:
+        action: set conveyor_unload.run on
+    step unload_dwell:
+        delay: 200ms
+    step stop_unload:
+        action: set conveyor_unload.run off
+    on_complete: goto unload_station.wait_unload_ready
+
+task load_fault:
+    step load_alarm:
+        action: set conveyor_load.run off
+        action: log "load request timeout"
+
+task unload_fault:
+    step unload_alarm:
+        action: set conveyor_unload.run off
+        action: log "unload ready timeout"

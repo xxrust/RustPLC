@@ -80,6 +80,23 @@ fn current_step_name<'a>(rt: &Runtime<'a>, program: &'a runtime_core::Program<'a
         .name
 }
 
+fn task_step_name<'a>(
+    rt: &Runtime<'a>,
+    program: &'a runtime_core::Program<'a>,
+    task_idx: usize,
+) -> &'a str {
+    let step_id = rt
+        .task_context(task_idx)
+        .expect("task context should exist")
+        .current_step;
+    program
+        .task(task_idx)
+        .expect("task should exist")
+        .step(step_id)
+        .expect("step should exist")
+        .name
+}
+
 const PLC_FIXTURE: &str = r#"
 [topology]
 
@@ -876,6 +893,53 @@ fn axis_move_blocking_baseline_example_blocks_without_explicit_wait_until_done()
     .expect("done polling result should release blocking baseline step");
     assert_eq!(calls, 2);
     assert_eq!(current_step_name(&rt, &program), "main.move_done");
+}
+
+#[test]
+fn load_unload_concurrent_example_keeps_load_blocked_while_unload_advances() {
+    let program = compile_example_to_runtime("load_unload_concurrent_tasks.plc", 100);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 2, 0, 0);
+
+    assert_eq!(
+        rt.active_task_count(),
+        2,
+        "example should activate two root tasks"
+    );
+    assert_eq!(
+        task_step_name(&rt, &program, 0),
+        "load_station.wait_load_request"
+    );
+    assert_eq!(
+        task_step_name(&rt, &program, 1),
+        "unload_station.wait_unload_ready"
+    );
+
+    rt.tick(&mut io)
+        .expect("tick0 should keep both tasks waiting");
+    assert_eq!(
+        task_step_name(&rt, &program, 0),
+        "load_station.wait_load_request"
+    );
+    assert_eq!(
+        task_step_name(&rt, &program, 1),
+        "unload_station.wait_unload_ready"
+    );
+
+    io.schedule_digital_input(Tick(1), DigitalInputId(1), true);
+    rt.tick(&mut io)
+        .expect("tick1 should allow unload task to progress independently");
+
+    assert_eq!(
+        task_step_name(&rt, &program, 0),
+        "load_station.wait_load_request",
+        "load task should remain blocked on missing load request"
+    );
+    assert_eq!(
+        task_step_name(&rt, &program, 1),
+        "unload_station.unload_dwell",
+        "unload task should continue to its local blocking delay"
+    );
 }
 
 #[test]

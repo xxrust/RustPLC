@@ -7,6 +7,7 @@ Started: 2026-03-11 00:08:32 CST
 - Task 级 pending action 元数据应从 step 语句收集，不应只依赖 transition.actions；阻塞语句可能让 transition 丢失 action。
 - `runtime-core` 在 `no_std` 约束下使用定长数组（`MAX_ACTIVE_TASKS`）和活跃计数管理 task context，避免动态分配。
 - `runtime-core` 每个 tick 必须按 task 声明顺序（索引升序）遍历全部 active task；单 task 命中 blocking step 只阻塞自身，不阻塞同 tick 其他 task。
+- 多 task 运行时回归不要用 `location()` 断言全局位置；应按 task 索引读取 `Runtime::task_context(task_idx).current_step`，才能稳定验证"一 task 阻塞、另一 task 继续推进"。
 - runtime step 离开判定应集中在统一 completion 决策函数（action/delay/wait 共用），避免分支内重复写跳转条件。
 - 当 action step 出现 Pending 长时动作时，后续 tick 必须从挂起动作继续轮询，不能重放挂起动作之前的即时 action（避免重复 side effect）。
 - `axis.move_relative/axis.move_absolute` 默认是 blocking 长时动作；即使 DSL 未显式写 `wait`，也要用 Pending 轮询驱动 step 留驻，并覆盖 Pending->Done 与 Pending->Fault 集成回归。
@@ -242,4 +243,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - If a new story introduces a canonical example fixture, bind it to both compile-time example tests and runtime execution tests to prevent semantic/documentation drift.
   - For axis blocking fixtures, keep branch completeness (`timeout + on_reject + on_motion_fault + on_safety_fault`) explicit in the example itself so it passes semantic gates before behavior assertions run.
+---
+
+## 2026-03-12 04:07 CST - US-017
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Added `examples/load_unload_concurrent_tasks.plc` with two concurrent tasks (`load_station` / `unload_station`) and explicit causality boundaries, as the new baseline for load/unload parallel station behavior.
+- Added compile regression `parses_load_unload_concurrent_tasks_example_into_verified_ir_json` in `tests/examples_integration.rs` to lock example inclusion, blocking steps, and verification pass status.
+- Added runtime regression `load_unload_concurrent_example_keeps_load_blocked_while_unload_advances` in `tests/runtime_bridge_us006.rs` to prove one task can remain blocked while the other advances in the same scheduler model.
+- Updated `AGENTS.md` with a reusable multi-task assertion rule: prefer `task_context(task_idx)` over `location()` for concurrent runtime checks.
+- Updated `prd.json` to set `US-017` (`提供上料与下料并发 task 示例`) to `passes: true`.
+- Files changed: `examples/load_unload_concurrent_tasks.plc`, `tests/examples_integration.rs`, `tests/runtime_bridge_us006.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --test examples_integration parses_load_unload_concurrent_tasks_example_into_verified_ir_json -- --nocapture`, `cargo test --test runtime_bridge_us006 load_unload_concurrent_example_keeps_load_blocked_while_unload_advances -- --nocapture`, `cargo test`.
+- **Learnings for future iterations:**
+  - For concurrent-task examples, pair an examples compile test with a runtime scheduling test so "example exists" and "runtime behavior holds" are gated together.
+  - In multi-task runtime assertions, step-level expectations should be task-indexed (`task_context`) instead of cursor-indexed (`location`).
 ---

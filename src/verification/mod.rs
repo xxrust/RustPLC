@@ -255,7 +255,8 @@ mod tests {
 
     #[test]
     fn warning_entry_deserializes_with_code() {
-        let payload = r#"{"level":"warn","message":"migration warning","code":"MIG-AXIS-BLOCK-001"}"#;
+        let payload =
+            r#"{"level":"warn","message":"migration warning","code":"MIG-AXIS-BLOCK-001"}"#;
         let warning: WarningEntry =
             serde_json::from_str(payload).expect("code-aware warning payload should deserialize");
         assert_eq!(warning.code.as_deref(), Some("MIG-AXIS-BLOCK-001"));
