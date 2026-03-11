@@ -23,7 +23,7 @@
 
 ## 3. 调度与推进规则
 
-1. 每个 runtime tick 统一调度 active task 集合。
+1. 每个 runtime tick 统一调度 active task 集合，并按 task 声明顺序（`task[0] -> task[1] -> ...`，即索引升序）遍历。
 2. 单个 task 在同一 tick 内允许串联推进多个 non-blocking step。
 3. 单个 task 一旦遇到 blocking step，必须在该 tick 停止推进。
 4. 某个 task 被 blocking step 阻塞，不得阻塞其他 task 在同一 tick 或后续 tick 的推进。
@@ -61,4 +61,3 @@ task 并发的定义固定为：
 - 本文件明确“同 tick 串联 non-blocking，遇 blocking 立即停”的推进规则。
 - 本文件明确 task 并发是“多独立 context 被统一调度”，不是单执行点跳转。
 - 本文件明确首版自动阻塞范围：`axis.move_*`、`delay`、`wait`、`timeout` 等等待、外部反馈动作。
-

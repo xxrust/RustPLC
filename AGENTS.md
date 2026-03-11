@@ -259,6 +259,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - 执行模型变化不是 runtime 私事
 - 只改 runtime 而不改 IR 或 verification，属于典型抽象层下沉
 - `runtime-core` 处于 `no_std` 约束下，不使用动态分配；task 级执行上下文采用 `MAX_ACTIVE_TASKS + active_task_count` 的定长数组模式
+- runtime 调度按 task 声明顺序（索引升序）逐 tick 遍历所有 active task；某个 task 命中 blocking step 只阻塞自身，不得阻塞同 tick 其他 task
 - Task 级 pending action 元数据应从 step 语句收集，而不是仅从 transition.actions 推断；`delay/wait/timeout` 等阻塞路径常会让 transition 不携带动作
 
 ### 修改语义门禁或诊断

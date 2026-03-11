@@ -712,6 +712,7 @@ impl Default for TaskRuntimeContext {
 /// A minimal deterministic tick executor.
 ///
 /// - One call to `tick()` consumes exactly one `Io` tick (it calls `Io::advance_tick()`).
+/// - Active tasks are evaluated in declaration/index order (`0..active_task_count`) every tick.
 /// - Within a tick, non-blocking steps (`Action`, `Goto`, and completed `Delay`/`Wait`) may chain.
 pub struct Runtime<'a> {
     program: &'a Program<'a>,
@@ -1126,9 +1127,6 @@ impl<'a> Runtime<'a> {
         on_axis_fault_policy: &mut impl FnMut(AxisMotionCommand, AxisFault),
     ) -> Result<(), RuntimeTickError<E>> {
         let now = io.tick();
-        if self.task_contexts[self.active_task].step_entered_at.is_none() {
-            self.task_contexts[self.active_task].step_entered_at = Some(now);
-        }
 
         // PID loops are executed once per tick before state-machine evaluation. This keeps the
         // execution deterministic, and allows task actions to override the output when needed.
@@ -1136,19 +1134,23 @@ impl<'a> Runtime<'a> {
         self.update_cam_couplings(now, io);
 
         let mut transitions = 0usize;
-        loop {
-            transitions += 1;
-            if transitions > 64 {
-                return Err(RuntimeTickError::Core(
-                    RuntimeError::TooManyTransitionsInOneTick,
-                ));
+        for task_idx in 0..self.active_task_count {
+            self.active_task = task_idx;
+            if self.task_contexts[task_idx].step_entered_at.is_none() {
+                self.task_contexts[task_idx].step_entered_at = Some(now);
             }
+            loop {
+                transitions += 1;
+                if transitions > 64 {
+                    return Err(RuntimeTickError::Core(
+                        RuntimeError::TooManyTransitionsInOneTick,
+                    ));
+                }
 
-            let task_idx = self.active_task;
-            let task = self
-                .program
-                .task(task_idx)
-                .map_err(RuntimeTickError::Core)?;
+                let task = self
+                    .program
+                    .task(task_idx)
+                    .map_err(RuntimeTickError::Core)?;
             let step_id = self.task_contexts[task_idx].current_step;
             let Some(step) = task.step(step_id) else {
                 return Err(RuntimeTickError::Core(RuntimeError::InvalidStepId {
@@ -1268,6 +1270,8 @@ impl<'a> Runtime<'a> {
                                             self.apply_axis_stop_transition(
                                                 policy.stop_mode,
                                                 now,
+                                                task_idx,
+                                                step_id,
                                                 on_log,
                                             );
                                             if policy.propagation_targets.is_empty() {
@@ -1503,6 +1507,8 @@ impl<'a> Runtime<'a> {
                 Instr::Halt => break,
             }
         }
+        }
+        self.active_task = 0;
 
         io.advance_tick();
         Ok(())
@@ -1758,6 +1764,8 @@ impl<'a> Runtime<'a> {
         &mut self,
         stop_mode: AxisStopMode,
         tick: Tick,
+        task: usize,
+        step: StepId,
         on_log: &mut impl FnMut(LogEvent),
     ) {
         let transition_state = match stop_mode {
@@ -1767,11 +1775,10 @@ impl<'a> Runtime<'a> {
         };
 
         self.axis_stop_state = transition_state;
-        let loc = self.location();
         on_log(LogEvent {
             tick,
-            task: loc.task,
-            step: loc.step,
+            task,
+            step,
             message_id: axis_stop_transition_log_message_id(
                 stop_mode,
                 AxisStopTransitionPhase::Enter,
@@ -1782,8 +1789,8 @@ impl<'a> Runtime<'a> {
         self.axis_stop_state = AxisStopState::Stopped;
         on_log(LogEvent {
             tick,
-            task: loc.task,
-            step: loc.step,
+            task,
+            step,
             message_id: axis_stop_transition_log_message_id(
                 stop_mode,
                 AxisStopTransitionPhase::Completed,
@@ -2485,7 +2492,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_tick_updates_only_active_task_context() {
+    fn runtime_tick_keeps_blocked_task_isolated_while_advancing_other_tasks() {
         static TASK0_STEPS: [Step<'static>; 2] = [
             Step {
                 name: "wait_part",
@@ -2504,13 +2511,20 @@ mod tests {
                 instr: Instr::Halt,
             },
         ];
-        static TASK1_STEPS: [Step<'static>; 2] = [
+        static TASK1_STEPS: [Step<'static>; 3] = [
             Step {
-                name: "delay_background",
-                instr: Instr::Delay {
-                    ticks: 2,
+                name: "prepare_output",
+                instr: Instr::Action {
+                    actions: &[Action::SetDigital {
+                        id: DigitalOutputId(0),
+                        value: true,
+                    }],
                     next: StepId(1),
                 },
+            },
+            Step {
+                name: "to_halt",
+                instr: Instr::Goto { target: StepId(2) },
             },
             Step {
                 name: "halt",
@@ -2540,8 +2554,10 @@ mod tests {
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let mut events: std::vec::Vec<TraceEvent> = std::vec::Vec::new();
 
-        rt.tick(&mut io).expect("tick should evaluate wait");
+        rt.tick_with_trace(&mut io, |e| events.push(e))
+            .expect("tick should evaluate all tasks");
 
         let loader = rt.task_context(0).expect("loader context");
         assert_eq!(loader.current_step, StepId(0));
@@ -2557,11 +2573,32 @@ mod tests {
         assert_eq!(loader.pending_action_state, TaskPendingActionState::Idle);
 
         let background = rt.task_context(1).expect("background context");
-        assert_eq!(background.current_step, StepId(0));
-        assert_eq!(background.step_entered_at, None);
+        assert_eq!(background.current_step, StepId(2));
+        assert_eq!(background.step_entered_at, Some(Tick(0)));
         assert_eq!(background.wait_state, TaskWaitState::Ready);
         assert_eq!(background.timeout_state, TaskTimeoutState::Inactive);
         assert_eq!(background.pending_action_state, TaskPendingActionState::Idle);
+        assert!(io.do_[0]);
+        assert_eq!(
+            events,
+            std::vec![
+                TraceEvent {
+                    tick: Tick(0),
+                    task: 1,
+                    from: StepId(0),
+                    to: StepId(1),
+                    reason: TransitionReason::Action,
+                },
+                TraceEvent {
+                    tick: Tick(0),
+                    task: 1,
+                    from: StepId(1),
+                    to: StepId(2),
+                    reason: TransitionReason::Goto,
+                },
+            ]
+        );
+        assert_eq!(rt.location().task, 0);
 
         io.di[0] = true;
         rt.tick(&mut io).expect("tick should satisfy wait and transition");
@@ -2571,6 +2608,97 @@ mod tests {
         assert_eq!(loader.step_entered_at, Some(Tick(1)));
         assert_eq!(loader.wait_state, TaskWaitState::Ready);
         assert_eq!(loader.timeout_state, TaskTimeoutState::Inactive);
+    }
+
+    #[test]
+    fn runtime_tick_schedules_tasks_in_fixed_index_order() {
+        static TASK0_ACTIONS: [Action; 1] = [Action::Log {
+            message_id: 10,
+            message: "task0",
+        }];
+        static TASK1_ACTIONS: [Action; 1] = [Action::Log {
+            message_id: 20,
+            message: "task1",
+        }];
+        static TASK0_STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "emit_log",
+                instr: Instr::Action {
+                    actions: &TASK0_ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASK1_STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "emit_log",
+                instr: Instr::Action {
+                    actions: &TASK1_ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 2] = [
+            Task {
+                name: "first",
+                steps: &TASK0_STEPS,
+                entry: StepId(0),
+            },
+            Task {
+                name: "second",
+                steps: &TASK1_STEPS,
+                entry: StepId(0),
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let mut events: std::vec::Vec<TraceEvent> = std::vec::Vec::new();
+        let mut logs: std::vec::Vec<LogEvent> = std::vec::Vec::new();
+
+        rt.tick_with_trace_and_logs(&mut io, |e| events.push(e), |l| logs.push(l))
+            .expect("tick should process both tasks");
+
+        assert_eq!(
+            events,
+            std::vec![
+                TraceEvent {
+                    tick: Tick(0),
+                    task: 0,
+                    from: StepId(0),
+                    to: StepId(1),
+                    reason: TransitionReason::Action,
+                },
+                TraceEvent {
+                    tick: Tick(0),
+                    task: 1,
+                    from: StepId(0),
+                    to: StepId(1),
+                    reason: TransitionReason::Action,
+                },
+            ]
+        );
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].task, 0);
+        assert_eq!(logs[0].message_id, 10);
+        assert_eq!(logs[1].task, 1);
+        assert_eq!(logs[1].message_id, 20);
     }
 
     #[test]

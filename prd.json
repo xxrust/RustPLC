@@ -64,8 +64,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "Validated by full cargo test sweep on 2026-03-11."
+      "passes": true,
+      "notes": "Implemented fixed-order per-tick active-task scheduler; validated by full cargo test on 2026-03-11."
     },
     {
       "id": "US-005",
