@@ -733,6 +733,22 @@ enum ExternActionResult {
     HandledFailure,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActionCompletionState {
+    Completed,
+    Pending,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepCompletionDecision {
+    ContinueWith {
+        target: StepId,
+        reason: TransitionReason,
+    },
+    StayOnStep,
+}
+
 impl<'a> Runtime<'a> {
     pub fn new(program: &'a Program<'a>) -> Result<Self, RuntimeError> {
         if program.tasks.is_empty() {
@@ -1164,10 +1180,11 @@ impl<'a> Runtime<'a> {
             let entered_at = self.task_contexts[task_idx].step_entered_at.unwrap_or(now);
             let elapsed = now.0.saturating_sub(entered_at.0);
 
-            match instr {
-                Instr::Action { actions, next } => {
-                    for a in actions {
-                        match *a {
+                match instr {
+                    Instr::Action { actions, next } => {
+                        let action_completion = ActionCompletionState::Completed;
+                        for a in actions {
+                            match *a {
                             Action::SetDigital { id, value } => io.write_digital_output(id, value),
                             Action::SetAnalog { id, value } => io.write_analog_output(id, value),
                             Action::SetAnalogExpr { id, expr } => {
@@ -1307,9 +1324,14 @@ impl<'a> Runtime<'a> {
                             }),
                         }
                     }
-                    self.transition(task_idx, now, next, TransitionReason::Action, on_event)
-                        .map_err(RuntimeTickError::Core)?;
-                    continue;
+                    match Self::action_completion_decision(next, action_completion) {
+                        StepCompletionDecision::ContinueWith { target, reason } => {
+                            self.transition(task_idx, now, target, reason, on_event)
+                                .map_err(RuntimeTickError::Core)?;
+                            continue;
+                        }
+                        StepCompletionDecision::StayOnStep => break,
+                    }
                 }
                 Instr::Goto { target } => {
                     self.transition(task_idx, now, target, TransitionReason::Goto, on_event)
@@ -1317,18 +1339,14 @@ impl<'a> Runtime<'a> {
                     continue;
                 }
                 Instr::Delay { ticks, next } => {
-                    if elapsed >= ticks {
-                        self.transition(
-                            task_idx,
-                            now,
-                            next,
-                            TransitionReason::DelayElapsed,
-                            on_event,
-                        )
-                            .map_err(RuntimeTickError::Core)?;
-                        continue;
+                    match Self::delay_completion_decision(elapsed, ticks, next) {
+                        StepCompletionDecision::ContinueWith { target, reason } => {
+                            self.transition(task_idx, now, target, reason, on_event)
+                                .map_err(RuntimeTickError::Core)?;
+                            continue;
+                        }
+                        StepCompletionDecision::StayOnStep => break,
                     }
-                    break;
                 }
                 Instr::WaitDigital {
                     id,
@@ -1337,31 +1355,14 @@ impl<'a> Runtime<'a> {
                     timeout,
                 } => {
                     let v = io.read_digital_input(id);
-                    if v == equals {
-                        self.transition(
-                            task_idx,
-                            now,
-                            next,
-                            TransitionReason::WaitSatisfied,
-                            on_event,
-                        )
-                            .map_err(RuntimeTickError::Core)?;
-                        continue;
-                    }
-                    if let Some(tmo) = timeout {
-                        if elapsed >= tmo.after_ticks {
-                            self.transition(
-                                task_idx,
-                                now,
-                                tmo.target,
-                                TransitionReason::Timeout,
-                                on_event,
-                            )
+                    match Self::wait_completion_decision(v == equals, elapsed, timeout, next) {
+                        StepCompletionDecision::ContinueWith { target, reason } => {
+                            self.transition(task_idx, now, target, reason, on_event)
                                 .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
+                        StepCompletionDecision::StayOnStep => break,
                     }
-                    break;
                 }
                 Instr::WaitAnalog {
                     id,
@@ -1370,31 +1371,19 @@ impl<'a> Runtime<'a> {
                     timeout,
                 } => {
                     let v = io.read_analog_input(id);
-                    if analog_in_selected_ranges(v, ranges) {
-                        self.transition(
-                            task_idx,
-                            now,
-                            next,
-                            TransitionReason::WaitSatisfied,
-                            on_event,
-                        )
-                            .map_err(RuntimeTickError::Core)?;
-                        continue;
-                    }
-                    if let Some(tmo) = timeout {
-                        if elapsed >= tmo.after_ticks {
-                            self.transition(
-                                task_idx,
-                                now,
-                                tmo.target,
-                                TransitionReason::Timeout,
-                                on_event,
-                            )
+                    match Self::wait_completion_decision(
+                        analog_in_selected_ranges(v, ranges),
+                        elapsed,
+                        timeout,
+                        next,
+                    ) {
+                        StepCompletionDecision::ContinueWith { target, reason } => {
+                            self.transition(task_idx, now, target, reason, on_event)
                                 .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
+                        StepCompletionDecision::StayOnStep => break,
                     }
-                    break;
                 }
                 Instr::WaitExpr {
                     left,
@@ -1405,31 +1394,19 @@ impl<'a> Runtime<'a> {
                 } => {
                     let lhs = eval_expr(&left, &self.variables);
                     let rhs = eval_expr(&right, &self.variables);
-                    if compare_f32(lhs, op, rhs) {
-                        self.transition(
-                            task_idx,
-                            now,
-                            next,
-                            TransitionReason::WaitSatisfied,
-                            on_event,
-                        )
-                            .map_err(RuntimeTickError::Core)?;
-                        continue;
-                    }
-                    if let Some(tmo) = timeout {
-                        if elapsed >= tmo.after_ticks {
-                            self.transition(
-                                task_idx,
-                                now,
-                                tmo.target,
-                                TransitionReason::Timeout,
-                                on_event,
-                            )
+                    match Self::wait_completion_decision(
+                        compare_f32(lhs, op, rhs),
+                        elapsed,
+                        timeout,
+                        next,
+                    ) {
+                        StepCompletionDecision::ContinueWith { target, reason } => {
+                            self.transition(task_idx, now, target, reason, on_event)
                                 .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
+                        StepCompletionDecision::StayOnStep => break,
                     }
-                    break;
                 }
                 Instr::WaitCamDigital {
                     cam_index,
@@ -1441,31 +1418,14 @@ impl<'a> Runtime<'a> {
                     let actual = self
                         .cam_digital_field(cam_index, field)
                         .map_err(RuntimeTickError::Core)?;
-                    if actual == equals {
-                        self.transition(
-                            task_idx,
-                            now,
-                            next,
-                            TransitionReason::WaitSatisfied,
-                            on_event,
-                        )
-                            .map_err(RuntimeTickError::Core)?;
-                        continue;
-                    }
-                    if let Some(tmo) = timeout {
-                        if elapsed >= tmo.after_ticks {
-                            self.transition(
-                                task_idx,
-                                now,
-                                tmo.target,
-                                TransitionReason::Timeout,
-                                on_event,
-                            )
+                    match Self::wait_completion_decision(actual == equals, elapsed, timeout, next) {
+                        StepCompletionDecision::ContinueWith { target, reason } => {
+                            self.transition(task_idx, now, target, reason, on_event)
                                 .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
+                        StepCompletionDecision::StayOnStep => break,
                     }
-                    break;
                 }
                 Instr::WaitCamAnalog {
                     cam_index,
@@ -1478,31 +1438,19 @@ impl<'a> Runtime<'a> {
                     let actual = self
                         .cam_analog_field(cam_index, field)
                         .map_err(RuntimeTickError::Core)?;
-                    if compare_f32(actual, op, value) {
-                        self.transition(
-                            task_idx,
-                            now,
-                            next,
-                            TransitionReason::WaitSatisfied,
-                            on_event,
-                        )
-                            .map_err(RuntimeTickError::Core)?;
-                        continue;
-                    }
-                    if let Some(tmo) = timeout {
-                        if elapsed >= tmo.after_ticks {
-                            self.transition(
-                                task_idx,
-                                now,
-                                tmo.target,
-                                TransitionReason::Timeout,
-                                on_event,
-                            )
+                    match Self::wait_completion_decision(
+                        compare_f32(actual, op, value),
+                        elapsed,
+                        timeout,
+                        next,
+                    ) {
+                        StepCompletionDecision::ContinueWith { target, reason } => {
+                            self.transition(task_idx, now, target, reason, on_event)
                                 .map_err(RuntimeTickError::Core)?;
                             continue;
                         }
+                        StepCompletionDecision::StayOnStep => break,
                     }
-                    break;
                 }
                 Instr::Halt => break,
             }
@@ -1512,6 +1460,54 @@ impl<'a> Runtime<'a> {
 
         io.advance_tick();
         Ok(())
+    }
+
+    fn action_completion_decision(
+        next: StepId,
+        action_completion: ActionCompletionState,
+    ) -> StepCompletionDecision {
+        match action_completion {
+            ActionCompletionState::Completed => StepCompletionDecision::ContinueWith {
+                target: next,
+                reason: TransitionReason::Action,
+            },
+            ActionCompletionState::Pending => StepCompletionDecision::StayOnStep,
+        }
+    }
+
+    fn delay_completion_decision(elapsed: u64, ticks: u64, next: StepId) -> StepCompletionDecision {
+        if elapsed >= ticks {
+            return StepCompletionDecision::ContinueWith {
+                target: next,
+                reason: TransitionReason::DelayElapsed,
+            };
+        }
+        StepCompletionDecision::StayOnStep
+    }
+
+    fn wait_completion_decision(
+        condition_satisfied: bool,
+        elapsed: u64,
+        timeout: Option<Timeout>,
+        next: StepId,
+    ) -> StepCompletionDecision {
+        if condition_satisfied {
+            return StepCompletionDecision::ContinueWith {
+                target: next,
+                reason: TransitionReason::WaitSatisfied,
+            };
+        }
+
+        if let Some(tmo) = timeout {
+            if elapsed >= tmo.after_ticks {
+                return StepCompletionDecision::ContinueWith {
+                    target: tmo.target,
+                    reason: TransitionReason::Timeout,
+                };
+            }
+        }
+
+        StepCompletionDecision::StayOnStep
     }
 
     fn sync_task_context_for_instr(&mut self, task: usize, instr: Instr<'a>) {
@@ -2699,6 +2695,109 @@ mod tests {
         assert_eq!(logs[0].message_id, 10);
         assert_eq!(logs[1].task, 1);
         assert_eq!(logs[1].message_id, 20);
+    }
+
+    #[test]
+    fn step_completion_rules_cover_immediate_delay_wait_and_pending_paths() {
+        static TASK0_STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "immediate_set",
+                instr: Instr::Action {
+                    actions: &[Action::SetDigital {
+                        id: DigitalOutputId(0),
+                        value: true,
+                    }],
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASK1_STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "delay_two_ticks",
+                instr: Instr::Delay {
+                    ticks: 2,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASK2_STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "wait_di0_true",
+                instr: Instr::WaitDigital {
+                    id: DigitalInputId(0),
+                    equals: true,
+                    next: StepId(1),
+                    timeout: None,
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 3] = [
+            Task {
+                name: "immediate_task",
+                steps: &TASK0_STEPS,
+                entry: StepId(0),
+            },
+            Task {
+                name: "delay_task",
+                steps: &TASK1_STEPS,
+                entry: StepId(0),
+            },
+            Task {
+                name: "wait_task",
+                steps: &TASK2_STEPS,
+                entry: StepId(0),
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        rt.tick(&mut io)
+            .expect("tick should evaluate immediate/delay/wait paths");
+
+        let immediate = rt.task_context(0).expect("immediate task");
+        assert_eq!(immediate.current_step, StepId(1));
+        assert_eq!(immediate.wait_state, TaskWaitState::Ready);
+        assert!(io.do_[0], "immediate action should commit output before completion");
+
+        let delay = rt.task_context(1).expect("delay task");
+        assert_eq!(delay.current_step, StepId(0));
+        assert_eq!(delay.wait_state, TaskWaitState::Delay);
+
+        let wait = rt.task_context(2).expect("wait task");
+        assert_eq!(wait.current_step, StepId(0));
+        assert_eq!(wait.wait_state, TaskWaitState::WaitCondition);
+
+        assert_eq!(
+            Runtime::action_completion_decision(StepId(9), ActionCompletionState::Pending),
+            StepCompletionDecision::StayOnStep
+        );
+        assert_eq!(
+            Runtime::action_completion_decision(StepId(9), ActionCompletionState::Completed),
+            StepCompletionDecision::ContinueWith {
+                target: StepId(9),
+                reason: TransitionReason::Action,
+            }
+        );
     }
 
     #[test]

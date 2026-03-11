@@ -6,6 +6,8 @@ Started: 2026-03-11 00:08:32 CST
 - Task 级 pending action 元数据应从 step 语句收集，不应只依赖 transition.actions；阻塞语句可能让 transition 丢失 action。
 - `runtime-core` 在 `no_std` 约束下使用定长数组（`MAX_ACTIVE_TASKS`）和活跃计数管理 task context，避免动态分配。
 - `runtime-core` 每个 tick 必须按 task 声明顺序（索引升序）遍历全部 active task；单 task 命中 blocking step 只阻塞自身，不阻塞同 tick 其他 task。
+- runtime step 离开判定应集中在统一 completion 决策函数（action/delay/wait 共用），避免分支内重复写跳转条件。
+
 
 
 ---
@@ -66,4 +68,16 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Keep scheduler order explicit and testable (trace/log ordering assertions) whenever runtime task traversal rules evolve.
   - When runtime loops over multiple tasks, avoid deriving log context from global `location()`; pass task-local `(task, step)` explicitly.
+---
+## 2026-03-11 21:07 CST - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Implemented unified runtime step-completion decisions in `runtime-core` so `Action` evaluates completion after action execution, and `Delay`/`Wait*` use shared completion rules instead of branch-local transition logic.
+- Added regression test `step_completion_rules_cover_immediate_delay_wait_and_pending_paths` to cover immediate step completion, delay blocking, wait blocking, and pending-action completion decision behavior.
+- Updated `AGENTS.md` execution-model guidance to require centralized completion decision rules for action/delay/wait steps.
+- Updated `prd.json` to set `US-005` (`建立统一的 step 完成判定规则`) to `passes: true`.
+- Files changed: `crates/runtime-core/src/lib.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test -p runtime-core step_completion_rules_cover_immediate_delay_wait_and_pending_paths`, `cargo test`.
+- **Learnings for future iterations:**
+  - Centralize step transition eligibility in shared completion helpers; it reduces branch drift and makes future Pending lifecycle extension low-risk.
+  - Keep completion tests mixed (immediate + blocking + pending-decision) so regressions are caught without depending on a single instruction family.
 ---
