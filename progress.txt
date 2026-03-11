@@ -4,6 +4,7 @@ Started: 2026-03-11 00:08:32 CST
 - 并发 task 与阻塞 step 的术语、推进规则与自动阻塞范围，以 `docs/architecture/signal-direction.md` 为单一语义源。
 - 本仓库最终回归门禁优先使用完整 `cargo test`，仅 `cargo test --lib` 不能替代端到端回归。
 - Task 级 pending action 元数据应从 step 语句收集，不应只依赖 transition.actions；阻塞语句可能让 transition 丢失 action。
+- `runtime-core` 在 `no_std` 约束下使用定长数组（`MAX_ACTIVE_TASKS`）和活跃计数管理 task context，避免动态分配。
 
 
 ---
@@ -38,4 +39,17 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - For concurrent task IR metadata, derive pending-action inventory from AST step statements; transition-level extraction is incomplete for blocking-step encodings.
   - Keep one-story validation strict by running a focused test first, then full `cargo test` as final gate.
+---
+## 2026-03-11 20:20 CST - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Implemented per-task runtime execution contexts in `runtime-core`, replacing the single global `Location + step_entered_at` state with `TaskRuntimeContext` storage (`current_step`, `step_entered_at`, wait/timeout/pending metadata).
+- Added runtime APIs `active_task_count()` and `task_context(task)` to inspect task-local state without flattening contexts.
+- Updated runtime tick execution and transition handling to read/write the active task’s context metadata in one place.
+- Added runtime-core unit tests for multi-task context initialization and for verifying that tick progression updates only the active task context.
+- Updated `prd.json` to set `US-003` (`为每个 task 建立独立 runtime context`) to `passes: true`.
+- Files changed: `crates/runtime-core/src/lib.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --lib -p runtime-core`, `cargo test`.
+- **Learnings for future iterations:**
+  - In `runtime-core`, model evolving task execution state in context structs first; scheduler evolution can then iterate contexts without reworking action/wait logic.
+  - Keep `location()` backward compatible while introducing task-context APIs, so bridge/sim callers continue to run during incremental migration.
 ---

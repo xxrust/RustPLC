@@ -48,8 +48,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Validated by full cargo test sweep on 2026-03-11."
+      "passes": true,
+      "notes": "Implemented per-task runtime contexts in runtime-core; validated by full cargo test on 2026-03-11."
     },
     {
       "id": "US-004",
