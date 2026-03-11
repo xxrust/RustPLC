@@ -266,6 +266,8 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `axis.move_relative/axis.move_absolute` 属于默认 blocking 长时动作；即使未显式编写 `wait`，也应由 `Pending -> Done/Fault` 生命周期驱动 step 离开，回归测试至少覆盖 Pending->Done 与 Pending->Fault
 - axis 动作的 `timeout/on_reject/on_motion_fault/on_safety_fault` 与细分 route 必须在 bridge 阶段降级成 runtime 可执行的 `StepId` 元数据；runtime 在 Pending 轮询阶段按“先专用 route、后主桶 fallback”执行分流，避免回退为裸 `RuntimeError::AxisFault`
 - `runtime_bridge` 构建 runtime task 时优先保留“无跨 task 入边”的 root task 边界；若全量 task 都存在跨 task 入边，则回退到 IR 初始 task 作为 active root，避免旧流程直接退化为并发全激活副作用
+- runtime transition budget 口径固定为“per-task-per-tick”：单 task 同 tick 转移上限为 `MAX_TRANSITIONS_PER_TASK_PER_TICK`；报告中的全局上界应按 `active_task_count * per_task_cap` 计算，并在告警/错误中带上 task 与 active_task_count 上下文
+- 构造 runtime budget 循环告警夹具时，若使用 `on_complete: goto <self>` 形成 SCC，必须同时提供 `timeout` 或 `allow_indefinite_wait: true`，否则会先被 liveness 门禁拦截而无法触发预算分析断言
 
 ### 修改语义门禁或诊断
 

@@ -1,10 +1,10 @@
 use crate::ir::{
     AxisAutoResetPolicy as IrAxisAutoResetPolicy,
-    AxisFaultRouteKind as IrAxisFaultRouteKind,
     AxisFaultPropagationScope as IrAxisFaultPropagationScope,
-    AxisFaultSeverity as IrAxisFaultSeverity, AxisStopMode as IrAxisStopMode,
-    BinaryValue as IrBinaryValue, CamInterpolation as IrCamInterpolation, DeviceKind, State,
-    StateMachine, TopologyGraph, Transition, TransitionAction, TransitionGuard,
+    AxisFaultRouteKind as IrAxisFaultRouteKind, AxisFaultSeverity as IrAxisFaultSeverity,
+    AxisStopMode as IrAxisStopMode, BinaryValue as IrBinaryValue,
+    CamInterpolation as IrCamInterpolation, DeviceKind, State, StateMachine, TopologyGraph,
+    Transition, TransitionAction, TransitionGuard,
 };
 use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
@@ -12,16 +12,15 @@ use petgraph::Direction;
 use petgraph::graph::NodeIndex;
 use runtime_core::{
     Action, AnalogRange, AntiWindup, AxisAutoResetPolicy as RtAxisAutoResetPolicy, AxisFaultPolicy,
-    AxisFaultRouteKind as RtAxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting,
     AxisFaultPropagationScope as RtAxisFaultPropagationScope,
+    AxisFaultRouteKind as RtAxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting,
     AxisFaultSeverity as RtAxisFaultSeverity, AxisMotionCommand, AxisMoveKind,
     AxisStopMode as RtAxisStopMode, CamAnalogField, CamCouplingConfig, CamDigitalField,
     CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, ExprOp, ExprProgram, Instr,
-    MAX_CAM_POINTS, PidConfig, Program, SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
+    MAX_CAM_POINTS, MAX_TRANSITIONS_PER_TASK_PER_TICK, PidConfig, Program,
+    SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
-
-const MAX_TRANSITIONS_PER_TICK: usize = 64;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BridgeError {
@@ -303,11 +302,12 @@ pub fn state_machine_to_runtime_program(
             steps[idx].instr = instr;
         }
 
-        let entry_state = task_entry_states
-            .get(&root_task)
-            .ok_or_else(|| BridgeError::MissingInitialState {
-                state: root_task.clone(),
-            })?;
+        let entry_state =
+            task_entry_states
+                .get(&root_task)
+                .ok_or_else(|| BridgeError::MissingInitialState {
+                    state: root_task.clone(),
+                })?;
         let entry = local_state_to_step
             .get(&(entry_state.task_name.clone(), entry_state.step_name.clone()))
             .copied()
@@ -695,7 +695,7 @@ fn validate_extern_tick_budget(
         let state_key = (state.task_name.clone(), state.step_name.clone());
         let state_cost = worst_case_extern_cost_from_state(
             &state_key,
-            MAX_TRANSITIONS_PER_TICK,
+            MAX_TRANSITIONS_PER_TASK_PER_TICK,
             &outgoing,
             &extern_bound_us,
             &mut memo,

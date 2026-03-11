@@ -150,20 +150,16 @@ task done:
     assert_eq!(edges.len(), 2, "两个并行分支应在同一 tick 写出");
     assert_eq!(edges[0].tick, Tick(0));
     assert_eq!(edges[1].tick, Tick(0));
-    assert!(
-        edges.contains(&sim::DigitalEdge {
-            tick: Tick(0),
-            id: DigitalOutputId(0),
-            value: true,
-        })
-    );
-    assert!(
-        edges.contains(&sim::DigitalEdge {
-            tick: Tick(0),
-            id: DigitalOutputId(1),
-            value: true,
-        })
-    );
+    assert!(edges.contains(&sim::DigitalEdge {
+        tick: Tick(0),
+        id: DigitalOutputId(0),
+        value: true,
+    }));
+    assert!(edges.contains(&sim::DigitalEdge {
+        tick: Tick(0),
+        id: DigitalOutputId(1),
+        value: true,
+    }));
 }
 
 #[test]

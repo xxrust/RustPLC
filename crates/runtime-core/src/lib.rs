@@ -237,7 +237,12 @@ pub enum RuntimeError {
         task: usize,
         step: StepId,
     },
-    TooManyTransitionsInOneTick,
+    TooManyTransitionsInOneTick {
+        task: usize,
+        attempted: usize,
+        per_task_cap: usize,
+        active_tasks: usize,
+    },
     TooManyPidLoops {
         configured: usize,
         max: usize,
@@ -740,10 +745,7 @@ pub enum TaskWaitState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskTimeoutState {
     Inactive,
-    Armed {
-        after_ticks: u64,
-        target: StepId,
-    },
+    Armed { after_ticks: u64, target: StepId },
 }
 
 impl Default for TaskTimeoutState {
@@ -1226,17 +1228,22 @@ impl<'a> Runtime<'a> {
         self.update_pid_loops(now, io);
         self.update_cam_couplings(now, io);
 
-        let mut transitions = 0usize;
         for task_idx in 0..self.active_task_count {
             self.active_task = task_idx;
             if self.task_contexts[task_idx].step_entered_at.is_none() {
                 self.task_contexts[task_idx].step_entered_at = Some(now);
             }
+            let mut task_transitions = 0usize;
             loop {
-                transitions += 1;
-                if transitions > 64 {
+                task_transitions = task_transitions.saturating_add(1);
+                if task_transitions > MAX_TRANSITIONS_PER_TASK_PER_TICK {
                     return Err(RuntimeTickError::Core(
-                        RuntimeError::TooManyTransitionsInOneTick,
+                        RuntimeError::TooManyTransitionsInOneTick {
+                            task: task_idx,
+                            attempted: task_transitions,
+                            per_task_cap: MAX_TRANSITIONS_PER_TASK_PER_TICK,
+                            active_tasks: self.active_task_count,
+                        },
                     ));
                 }
 
@@ -1244,18 +1251,18 @@ impl<'a> Runtime<'a> {
                     .program
                     .task(task_idx)
                     .map_err(RuntimeTickError::Core)?;
-            let step_id = self.task_contexts[task_idx].current_step;
-            let Some(step) = task.step(step_id) else {
-                return Err(RuntimeTickError::Core(RuntimeError::InvalidStepId {
-                    task: task_idx,
-                    step: step_id,
-                }));
-            };
-            let instr = step.instr;
-            self.sync_task_context_for_instr(task_idx, instr);
+                let step_id = self.task_contexts[task_idx].current_step;
+                let Some(step) = task.step(step_id) else {
+                    return Err(RuntimeTickError::Core(RuntimeError::InvalidStepId {
+                        task: task_idx,
+                        step: step_id,
+                    }));
+                };
+                let instr = step.instr;
+                self.sync_task_context_for_instr(task_idx, instr);
 
-            let entered_at = self.task_contexts[task_idx].step_entered_at.unwrap_or(now);
-            let elapsed = now.0.saturating_sub(entered_at.0);
+                let entered_at = self.task_contexts[task_idx].step_entered_at.unwrap_or(now);
+                let elapsed = now.0.saturating_sub(entered_at.0);
 
                 match instr {
                     Instr::Action { actions, next } => {
@@ -1283,323 +1290,341 @@ impl<'a> Runtime<'a> {
                         for (action_index, a) in actions.iter().enumerate().skip(action_start_index)
                         {
                             match *a {
-                            Action::SetDigital { id, value } => io.write_digital_output(id, value),
-                            Action::SetAnalog { id, value } => io.write_analog_output(id, value),
-                            Action::SetAnalogExpr { id, expr } => {
-                                let value = eval_expr(&expr, &self.variables);
-                                io.write_analog_output(id, value);
-                            }
-                            Action::Compute { target_var, expr } => {
-                                let idx = target_var as usize;
-                                if idx < MAX_VARIABLES {
-                                    self.variables[idx] = eval_expr(&expr, &self.variables);
+                                Action::SetDigital { id, value } => {
+                                    io.write_digital_output(id, value)
                                 }
-                            }
-                            Action::CallExtern {
-                                function,
-                                arg_exprs,
-                                binding_vars,
-                            } => {
-                                let result = self.execute_extern_action(
+                                Action::SetAnalog { id, value } => {
+                                    io.write_analog_output(id, value)
+                                }
+                                Action::SetAnalogExpr { id, expr } => {
+                                    let value = eval_expr(&expr, &self.variables);
+                                    io.write_analog_output(id, value);
+                                }
+                                Action::Compute { target_var, expr } => {
+                                    let idx = target_var as usize;
+                                    if idx < MAX_VARIABLES {
+                                        self.variables[idx] = eval_expr(&expr, &self.variables);
+                                    }
+                                }
+                                Action::CallExtern {
                                     function,
                                     arg_exprs,
                                     binding_vars,
-                                    on_extern_call,
-                                    extern_error_code_var,
-                                    map_extern_error_code,
-                                )?;
-                                if result == ExternActionResult::HandledFailure {
-                                    break;
-                                }
-                            }
-                            Action::CamEngage { cam_index } => {
-                                self.cam_engage(cam_index).map_err(RuntimeTickError::Core)?;
-                            }
-                            Action::CamDisengage { cam_index } => {
-                                self.cam_disengage(cam_index)
-                                    .map_err(RuntimeTickError::Core)?;
-                            }
-                            Action::CamSwitch {
-                                cam_index,
-                                table_index,
-                            } => {
-                                self.cam_switch(cam_index, table_index)
-                                    .map_err(RuntimeTickError::Core)?;
-                            }
-                            Action::CamPhase {
-                                cam_index,
-                                offset_expr,
-                            } => {
-                                let offset = eval_expr(&offset_expr, &self.variables);
-                                self.cam_phase(cam_index, offset)
-                                    .map_err(RuntimeTickError::Core)?;
-                            }
-                            Action::AxisMove { command } => {
-                                let polling_this_action = matches!(
-                                    self.task_contexts[task_idx].pending_action_state,
-                                    TaskPendingActionState::AxisMotion {
-                                        action_index: pending_index,
-                                        ..
-                                    } if pending_index == action_index
-                                );
-                                if !polling_this_action
-                                    && command.kind == AxisMoveKind::Absolute
-                                    && command.require_homed
-                                    && !self
-                                        .axis_is_homed(command.target)
-                                        .map_err(RuntimeTickError::Core)?
-                                {
-                                    return Err(RuntimeTickError::Core(
-                                        RuntimeError::AxisNotHomed {
-                                            target: command.target,
-                                        },
-                                    ));
-                                }
-
-                                let result = match on_axis_motion(command) {
-                                    Ok(result) => result,
-                                    Err(err) => {
-                                        self.set_axis_homed(command.target, false)
-                                            .map_err(RuntimeTickError::Core)?;
-                                        return Err(RuntimeTickError::Core(err));
+                                } => {
+                                    let result = self.execute_extern_action(
+                                        function,
+                                        arg_exprs,
+                                        binding_vars,
+                                        on_extern_call,
+                                        extern_error_code_var,
+                                        map_extern_error_code,
+                                    )?;
+                                    if result == ExternActionResult::HandledFailure {
+                                        break;
                                     }
-                                };
-                                match result {
-                                    AxisMotionResult::Pending => {
-                                        self.task_contexts[task_idx].pending_action_state =
-                                            TaskPendingActionState::AxisMotion {
+                                }
+                                Action::CamEngage { cam_index } => {
+                                    self.cam_engage(cam_index).map_err(RuntimeTickError::Core)?;
+                                }
+                                Action::CamDisengage { cam_index } => {
+                                    self.cam_disengage(cam_index)
+                                        .map_err(RuntimeTickError::Core)?;
+                                }
+                                Action::CamSwitch {
+                                    cam_index,
+                                    table_index,
+                                } => {
+                                    self.cam_switch(cam_index, table_index)
+                                        .map_err(RuntimeTickError::Core)?;
+                                }
+                                Action::CamPhase {
+                                    cam_index,
+                                    offset_expr,
+                                } => {
+                                    let offset = eval_expr(&offset_expr, &self.variables);
+                                    self.cam_phase(cam_index, offset)
+                                        .map_err(RuntimeTickError::Core)?;
+                                }
+                                Action::AxisMove { command } => {
+                                    let polling_this_action = matches!(
+                                        self.task_contexts[task_idx].pending_action_state,
+                                        TaskPendingActionState::AxisMotion {
+                                            action_index: pending_index,
+                                            ..
+                                        } if pending_index == action_index
+                                    );
+                                    if !polling_this_action
+                                        && command.kind == AxisMoveKind::Absolute
+                                        && command.require_homed
+                                        && !self
+                                            .axis_is_homed(command.target)
+                                            .map_err(RuntimeTickError::Core)?
+                                    {
+                                        return Err(RuntimeTickError::Core(
+                                            RuntimeError::AxisNotHomed {
                                                 target: command.target,
-                                                action_index,
-                                            };
-                                        if let Some(timeout) = command.timeout
-                                            && elapsed >= timeout.after_ticks
-                                        {
+                                            },
+                                        ));
+                                    }
+
+                                    let result = match on_axis_motion(command) {
+                                        Ok(result) => result,
+                                        Err(err) => {
+                                            self.set_axis_homed(command.target, false)
+                                                .map_err(RuntimeTickError::Core)?;
+                                            return Err(RuntimeTickError::Core(err));
+                                        }
+                                    };
+                                    match result {
+                                        AxisMotionResult::Pending => {
+                                            self.task_contexts[task_idx].pending_action_state =
+                                                TaskPendingActionState::AxisMotion {
+                                                    target: command.target,
+                                                    action_index,
+                                                };
+                                            if let Some(timeout) = command.timeout
+                                                && elapsed >= timeout.after_ticks
+                                            {
+                                                self.task_contexts[task_idx].pending_action_state =
+                                                    TaskPendingActionState::Idle;
+                                                self.set_axis_homed(command.target, false)
+                                                    .map_err(RuntimeTickError::Core)?;
+                                                action_transition_override = Some((
+                                                    timeout.target,
+                                                    TransitionReason::Timeout,
+                                                ));
+                                                break;
+                                            }
+                                            action_completion = ActionCompletionState::Pending;
+                                            break;
+                                        }
+                                        AxisMotionResult::Done => {
+                                            self.task_contexts[task_idx].pending_action_state =
+                                                TaskPendingActionState::Idle;
+                                            if command.kind == AxisMoveKind::Relative {
+                                                self.set_axis_homed(command.target, true)
+                                                    .map_err(RuntimeTickError::Core)?;
+                                            }
+                                        }
+                                        AxisMotionResult::Fault(fault) => {
                                             self.task_contexts[task_idx].pending_action_state =
                                                 TaskPendingActionState::Idle;
                                             self.set_axis_homed(command.target, false)
                                                 .map_err(RuntimeTickError::Core)?;
-                                            action_transition_override =
-                                                Some((timeout.target, TransitionReason::Timeout));
-                                            break;
-                                        }
-                                        action_completion = ActionCompletionState::Pending;
-                                        break;
-                                    }
-                                    AxisMotionResult::Done => {
-                                        self.task_contexts[task_idx].pending_action_state =
-                                            TaskPendingActionState::Idle;
-                                        if command.kind == AxisMoveKind::Relative {
-                                            self.set_axis_homed(command.target, true)
-                                                .map_err(RuntimeTickError::Core)?;
-                                        }
-                                    }
-                                    AxisMotionResult::Fault(fault) => {
-                                        self.task_contexts[task_idx].pending_action_state =
-                                            TaskPendingActionState::Idle;
-                                        self.set_axis_homed(command.target, false)
-                                            .map_err(RuntimeTickError::Core)?;
-                                        if let Some(policy) =
-                                            self.axis_fault_policy_for(command.target).copied()
-                                        {
-                                            on_log(LogEvent {
-                                                tick: now,
-                                                task: task_idx,
-                                                step: step_id,
-                                                message_id: axis_fault_policy_log_message_id(
-                                                    policy.severity,
+                                            if let Some(policy) =
+                                                self.axis_fault_policy_for(command.target).copied()
+                                            {
+                                                on_log(LogEvent {
+                                                    tick: now,
+                                                    task: task_idx,
+                                                    step: step_id,
+                                                    message_id: axis_fault_policy_log_message_id(
+                                                        policy.severity,
+                                                        policy.stop_mode,
+                                                        policy.auto_reset_policy,
+                                                        policy.manual_ack_required,
+                                                        fault.kind,
+                                                    ),
+                                                    message: AXIS_FAULT_POLICY_LOG_MESSAGE,
+                                                });
+                                                self.apply_axis_stop_transition(
                                                     policy.stop_mode,
-                                                    policy.auto_reset_policy,
-                                                    policy.manual_ack_required,
-                                                    fault.kind,
-                                                ),
-                                                message: AXIS_FAULT_POLICY_LOG_MESSAGE,
-                                            });
-                                            self.apply_axis_stop_transition(
-                                                policy.stop_mode,
-                                                now,
-                                                task_idx,
-                                                step_id,
-                                                on_log,
-                                            );
-                                            if policy.propagation_targets.is_empty() {
-                                                on_axis_fault_policy(command, fault);
-                                            } else {
-                                                for target in policy.propagation_targets {
-                                                    let propagated_command =
-                                                        AxisMotionCommand { target, ..command };
-                                                    on_axis_fault_policy(propagated_command, fault);
+                                                    now,
+                                                    task_idx,
+                                                    step_id,
+                                                    on_log,
+                                                );
+                                                if policy.propagation_targets.is_empty() {
+                                                    on_axis_fault_policy(command, fault);
+                                                } else {
+                                                    for target in policy.propagation_targets {
+                                                        let propagated_command =
+                                                            AxisMotionCommand { target, ..command };
+                                                        on_axis_fault_policy(
+                                                            propagated_command,
+                                                            fault,
+                                                        );
+                                                    }
                                                 }
                                             }
-                                        }
-                                        if polling_this_action
-                                            && let Some(routing) = command.fault_routing
-                                        {
-                                            action_transition_override = Some((
-                                                routing.resolve_target(fault),
-                                                TransitionReason::Action,
+                                            if polling_this_action
+                                                && let Some(routing) = command.fault_routing
+                                            {
+                                                action_transition_override = Some((
+                                                    routing.resolve_target(fault),
+                                                    TransitionReason::Action,
+                                                ));
+                                                break;
+                                            }
+                                            return Err(RuntimeTickError::Core(
+                                                RuntimeError::AxisFault {
+                                                    target: command.target,
+                                                    fault,
+                                                },
                                             ));
-                                            break;
                                         }
-                                        return Err(RuntimeTickError::Core(RuntimeError::AxisFault {
-                                            target: command.target,
-                                            fault,
-                                        }));
                                     }
                                 }
+                                Action::Extend { output } => io.write_digital_output(output, true),
+                                Action::Retract { output } => {
+                                    io.write_digital_output(output, false)
+                                }
+                                Action::Log {
+                                    message_id,
+                                    message,
+                                } => on_log(LogEvent {
+                                    tick: now,
+                                    task: task_idx,
+                                    step: step_id,
+                                    message_id,
+                                    message,
+                                }),
                             }
-                            Action::Extend { output } => io.write_digital_output(output, true),
-                            Action::Retract { output } => io.write_digital_output(output, false),
-                            Action::Log {
-                                message_id,
-                                message,
-                            } => on_log(LogEvent {
-                                tick: now,
-                                task: task_idx,
-                                step: step_id,
-                                message_id,
-                                message,
-                            }),
-                        }
                             if action_completion == ActionCompletionState::Pending {
                                 break;
                             }
+                        }
+                        if let Some((target, reason)) = action_transition_override {
+                            self.transition(task_idx, now, target, reason, on_event)
+                                .map_err(RuntimeTickError::Core)?;
+                            continue;
+                        }
+                        match Self::action_completion_decision(next, action_completion) {
+                            StepCompletionDecision::ContinueWith { target, reason } => {
+                                self.transition(task_idx, now, target, reason, on_event)
+                                    .map_err(RuntimeTickError::Core)?;
+                                continue;
+                            }
+                            StepCompletionDecision::StayOnStep => break,
+                        }
                     }
-                    if let Some((target, reason)) = action_transition_override {
-                        self.transition(task_idx, now, target, reason, on_event)
+                    Instr::Goto { target } => {
+                        self.transition(task_idx, now, target, TransitionReason::Goto, on_event)
                             .map_err(RuntimeTickError::Core)?;
                         continue;
                     }
-                    match Self::action_completion_decision(next, action_completion) {
-                        StepCompletionDecision::ContinueWith { target, reason } => {
-                            self.transition(task_idx, now, target, reason, on_event)
-                                .map_err(RuntimeTickError::Core)?;
-                            continue;
+                    Instr::Delay { ticks, next } => {
+                        match Self::delay_completion_decision(elapsed, ticks, next) {
+                            StepCompletionDecision::ContinueWith { target, reason } => {
+                                self.transition(task_idx, now, target, reason, on_event)
+                                    .map_err(RuntimeTickError::Core)?;
+                                continue;
+                            }
+                            StepCompletionDecision::StayOnStep => break,
                         }
-                        StepCompletionDecision::StayOnStep => break,
                     }
-                }
-                Instr::Goto { target } => {
-                    self.transition(task_idx, now, target, TransitionReason::Goto, on_event)
-                        .map_err(RuntimeTickError::Core)?;
-                    continue;
-                }
-                Instr::Delay { ticks, next } => {
-                    match Self::delay_completion_decision(elapsed, ticks, next) {
-                        StepCompletionDecision::ContinueWith { target, reason } => {
-                            self.transition(task_idx, now, target, reason, on_event)
-                                .map_err(RuntimeTickError::Core)?;
-                            continue;
-                        }
-                        StepCompletionDecision::StayOnStep => break,
-                    }
-                }
-                Instr::WaitDigital {
-                    id,
-                    equals,
-                    next,
-                    timeout,
-                } => {
-                    let v = io.read_digital_input(id);
-                    match Self::wait_completion_decision(v == equals, elapsed, timeout, next) {
-                        StepCompletionDecision::ContinueWith { target, reason } => {
-                            self.transition(task_idx, now, target, reason, on_event)
-                                .map_err(RuntimeTickError::Core)?;
-                            continue;
-                        }
-                        StepCompletionDecision::StayOnStep => break,
-                    }
-                }
-                Instr::WaitAnalog {
-                    id,
-                    ranges,
-                    next,
-                    timeout,
-                } => {
-                    let v = io.read_analog_input(id);
-                    match Self::wait_completion_decision(
-                        analog_in_selected_ranges(v, ranges),
-                        elapsed,
-                        timeout,
+                    Instr::WaitDigital {
+                        id,
+                        equals,
                         next,
-                    ) {
-                        StepCompletionDecision::ContinueWith { target, reason } => {
-                            self.transition(task_idx, now, target, reason, on_event)
-                                .map_err(RuntimeTickError::Core)?;
-                            continue;
-                        }
-                        StepCompletionDecision::StayOnStep => break,
-                    }
-                }
-                Instr::WaitExpr {
-                    left,
-                    op,
-                    right,
-                    next,
-                    timeout,
-                } => {
-                    let lhs = eval_expr(&left, &self.variables);
-                    let rhs = eval_expr(&right, &self.variables);
-                    match Self::wait_completion_decision(
-                        compare_f32(lhs, op, rhs),
-                        elapsed,
                         timeout,
+                    } => {
+                        let v = io.read_digital_input(id);
+                        match Self::wait_completion_decision(v == equals, elapsed, timeout, next) {
+                            StepCompletionDecision::ContinueWith { target, reason } => {
+                                self.transition(task_idx, now, target, reason, on_event)
+                                    .map_err(RuntimeTickError::Core)?;
+                                continue;
+                            }
+                            StepCompletionDecision::StayOnStep => break,
+                        }
+                    }
+                    Instr::WaitAnalog {
+                        id,
+                        ranges,
                         next,
-                    ) {
-                        StepCompletionDecision::ContinueWith { target, reason } => {
-                            self.transition(task_idx, now, target, reason, on_event)
-                                .map_err(RuntimeTickError::Core)?;
-                            continue;
-                        }
-                        StepCompletionDecision::StayOnStep => break,
-                    }
-                }
-                Instr::WaitCamDigital {
-                    cam_index,
-                    field,
-                    equals,
-                    next,
-                    timeout,
-                } => {
-                    let actual = self
-                        .cam_digital_field(cam_index, field)
-                        .map_err(RuntimeTickError::Core)?;
-                    match Self::wait_completion_decision(actual == equals, elapsed, timeout, next) {
-                        StepCompletionDecision::ContinueWith { target, reason } => {
-                            self.transition(task_idx, now, target, reason, on_event)
-                                .map_err(RuntimeTickError::Core)?;
-                            continue;
-                        }
-                        StepCompletionDecision::StayOnStep => break,
-                    }
-                }
-                Instr::WaitCamAnalog {
-                    cam_index,
-                    field,
-                    op,
-                    value,
-                    next,
-                    timeout,
-                } => {
-                    let actual = self
-                        .cam_analog_field(cam_index, field)
-                        .map_err(RuntimeTickError::Core)?;
-                    match Self::wait_completion_decision(
-                        compare_f32(actual, op, value),
-                        elapsed,
                         timeout,
-                        next,
-                    ) {
-                        StepCompletionDecision::ContinueWith { target, reason } => {
-                            self.transition(task_idx, now, target, reason, on_event)
-                                .map_err(RuntimeTickError::Core)?;
-                            continue;
+                    } => {
+                        let v = io.read_analog_input(id);
+                        match Self::wait_completion_decision(
+                            analog_in_selected_ranges(v, ranges),
+                            elapsed,
+                            timeout,
+                            next,
+                        ) {
+                            StepCompletionDecision::ContinueWith { target, reason } => {
+                                self.transition(task_idx, now, target, reason, on_event)
+                                    .map_err(RuntimeTickError::Core)?;
+                                continue;
+                            }
+                            StepCompletionDecision::StayOnStep => break,
                         }
-                        StepCompletionDecision::StayOnStep => break,
                     }
+                    Instr::WaitExpr {
+                        left,
+                        op,
+                        right,
+                        next,
+                        timeout,
+                    } => {
+                        let lhs = eval_expr(&left, &self.variables);
+                        let rhs = eval_expr(&right, &self.variables);
+                        match Self::wait_completion_decision(
+                            compare_f32(lhs, op, rhs),
+                            elapsed,
+                            timeout,
+                            next,
+                        ) {
+                            StepCompletionDecision::ContinueWith { target, reason } => {
+                                self.transition(task_idx, now, target, reason, on_event)
+                                    .map_err(RuntimeTickError::Core)?;
+                                continue;
+                            }
+                            StepCompletionDecision::StayOnStep => break,
+                        }
+                    }
+                    Instr::WaitCamDigital {
+                        cam_index,
+                        field,
+                        equals,
+                        next,
+                        timeout,
+                    } => {
+                        let actual = self
+                            .cam_digital_field(cam_index, field)
+                            .map_err(RuntimeTickError::Core)?;
+                        match Self::wait_completion_decision(
+                            actual == equals,
+                            elapsed,
+                            timeout,
+                            next,
+                        ) {
+                            StepCompletionDecision::ContinueWith { target, reason } => {
+                                self.transition(task_idx, now, target, reason, on_event)
+                                    .map_err(RuntimeTickError::Core)?;
+                                continue;
+                            }
+                            StepCompletionDecision::StayOnStep => break,
+                        }
+                    }
+                    Instr::WaitCamAnalog {
+                        cam_index,
+                        field,
+                        op,
+                        value,
+                        next,
+                        timeout,
+                    } => {
+                        let actual = self
+                            .cam_analog_field(cam_index, field)
+                            .map_err(RuntimeTickError::Core)?;
+                        match Self::wait_completion_decision(
+                            compare_f32(actual, op, value),
+                            elapsed,
+                            timeout,
+                            next,
+                        ) {
+                            StepCompletionDecision::ContinueWith { target, reason } => {
+                                self.transition(task_idx, now, target, reason, on_event)
+                                    .map_err(RuntimeTickError::Core)?;
+                                continue;
+                            }
+                            StepCompletionDecision::StayOnStep => break,
+                        }
+                    }
+                    Instr::Halt => break,
                 }
-                Instr::Halt => break,
             }
-        }
         }
         self.active_task = 0;
 
@@ -2188,6 +2213,7 @@ fn eval_expr(program: &ExprProgram, vars: &[f32; MAX_VARIABLES]) -> f32 {
 }
 
 const MAX_PID_LOOPS: usize = 8;
+pub const MAX_TRANSITIONS_PER_TASK_PER_TICK: usize = 64;
 pub const MAX_ACTIVE_TASKS: usize = 64;
 pub const MAX_VARIABLES: usize = 64;
 pub const MAX_EXPR_OPS: usize = 32;
@@ -2547,6 +2573,34 @@ mod tests {
         }
     }
 
+    fn leak_steps(steps: Vec<Step<'static>>) -> &'static [Step<'static>] {
+        Box::leak(steps.into_boxed_slice())
+    }
+
+    fn build_goto_chain_steps(chain_len: usize) -> &'static [Step<'static>] {
+        assert!(chain_len > 0, "chain length should be positive");
+        assert!(
+            chain_len <= (u16::MAX as usize + 1),
+            "chain length should fit in StepId"
+        );
+
+        let mut steps = vec![];
+        for idx in 0..chain_len {
+            let instr = if idx + 1 < chain_len {
+                Instr::Goto {
+                    target: StepId((idx + 1) as u16),
+                }
+            } else {
+                Instr::Halt
+            };
+            steps.push(Step {
+                name: "chain",
+                instr,
+            });
+        }
+        leak_steps(steps)
+    }
+
     #[test]
     fn runtime_initializes_independent_task_contexts() {
         static TASK0_STEPS: [Step<'static>; 2] = [
@@ -2700,7 +2754,10 @@ mod tests {
         assert_eq!(background.step_entered_at, Some(Tick(0)));
         assert_eq!(background.wait_state, TaskWaitState::Ready);
         assert_eq!(background.timeout_state, TaskTimeoutState::Inactive);
-        assert_eq!(background.pending_action_state, TaskPendingActionState::Idle);
+        assert_eq!(
+            background.pending_action_state,
+            TaskPendingActionState::Idle
+        );
         assert!(io.do_[0]);
         assert_eq!(
             events,
@@ -2724,7 +2781,8 @@ mod tests {
         assert_eq!(rt.location().task, 0);
 
         io.di[0] = true;
-        rt.tick(&mut io).expect("tick should satisfy wait and transition");
+        rt.tick(&mut io)
+            .expect("tick should satisfy wait and transition");
 
         let loader = rt.task_context(0).expect("loader context");
         assert_eq!(loader.current_step, StepId(1));
@@ -2825,6 +2883,101 @@ mod tests {
     }
 
     #[test]
+    fn per_task_transition_budget_allows_two_active_tasks_to_chain_under_cap() {
+        let task0_steps = build_goto_chain_steps(40);
+        let task1_steps = build_goto_chain_steps(40);
+        let tasks = Box::leak(
+            vec![
+                Task {
+                    name: "task0",
+                    steps: task0_steps,
+                    entry: StepId(0),
+                },
+                Task {
+                    name: "task1",
+                    steps: task1_steps,
+                    entry: StepId(0),
+                },
+            ]
+            .into_boxed_slice(),
+        );
+        let program = Program {
+            tasks,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut runtime = Runtime::new(&program).expect("runtime init should succeed");
+        runtime
+            .tick(&mut io)
+            .expect("per-task budget should allow both tasks under cap");
+
+        assert_eq!(
+            runtime.task_context(0).expect("task0 context").current_step,
+            StepId(39)
+        );
+        assert_eq!(
+            runtime.task_context(1).expect("task1 context").current_step,
+            StepId(39)
+        );
+        assert_eq!(io.tick(), Tick(1));
+    }
+
+    #[test]
+    fn per_task_transition_budget_error_reports_context_for_multi_task_runtime() {
+        let task0_steps = leak_steps(vec![Step {
+            name: "loop",
+            instr: Instr::Goto { target: StepId(0) },
+        }]);
+        let task1_steps = leak_steps(vec![Step {
+            name: "halt",
+            instr: Instr::Halt,
+        }]);
+        let tasks = Box::leak(
+            vec![
+                Task {
+                    name: "task0",
+                    steps: task0_steps,
+                    entry: StepId(0),
+                },
+                Task {
+                    name: "task1",
+                    steps: task1_steps,
+                    entry: StepId(0),
+                },
+            ]
+            .into_boxed_slice(),
+        );
+        let program = Program {
+            tasks,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut runtime = Runtime::new(&program).expect("runtime init should succeed");
+        let error = runtime
+            .tick(&mut io)
+            .expect_err("infinite same-tick chain should hit per-task budget");
+        assert_eq!(
+            error,
+            RuntimeError::TooManyTransitionsInOneTick {
+                task: 0,
+                attempted: MAX_TRANSITIONS_PER_TASK_PER_TICK + 1,
+                per_task_cap: MAX_TRANSITIONS_PER_TASK_PER_TICK,
+                active_tasks: 2,
+            }
+        );
+    }
+
+    #[test]
     fn step_completion_rules_cover_immediate_delay_wait_and_pending_paths() {
         static TASK0_STEPS: [Step<'static>; 2] = [
             Step {
@@ -2904,7 +3057,10 @@ mod tests {
         let immediate = rt.task_context(0).expect("immediate task");
         assert_eq!(immediate.current_step, StepId(1));
         assert_eq!(immediate.wait_state, TaskWaitState::Ready);
-        assert!(io.do_[0], "immediate action should commit output before completion");
+        assert!(
+            io.do_[0],
+            "immediate action should commit output before completion"
+        );
 
         let delay = rt.task_context(1).expect("delay task");
         assert_eq!(delay.current_step, StepId(0));
@@ -3392,8 +3548,8 @@ mod tests {
                 value: 10.0,
                 speed: 2.0,
                 require_homed: false,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3442,8 +3598,8 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: false,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3537,33 +3693,49 @@ mod tests {
         let mut motion_calls = 0usize;
         let mut logs = std::vec::Vec::new();
 
-        rt.tick_with_axis_and_logs(&mut io, |event| logs.push(event), |_| {
-            motion_calls += 1;
-            AxisMotionResult::Pending
-        })
+        rt.tick_with_axis_and_logs(
+            &mut io,
+            |event| logs.push(event),
+            |_| {
+                motion_calls += 1;
+                AxisMotionResult::Pending
+            },
+        )
         .expect("pending axis should keep step active");
 
         assert_eq!(motion_calls, 1);
         assert_eq!(rt.location().step, StepId(0));
         assert_eq!(
-            rt.task_context(0).expect("task context").pending_action_state,
+            rt.task_context(0)
+                .expect("task context")
+                .pending_action_state,
             TaskPendingActionState::AxisMotion {
                 target: "axis_x",
                 action_index: 1,
             }
         );
-        assert_eq!(logs.len(), 1, "dispatch log should fire only once on first entry");
+        assert_eq!(
+            logs.len(),
+            1,
+            "dispatch log should fire only once on first entry"
+        );
 
-        rt.tick_with_axis_and_logs(&mut io, |event| logs.push(event), |_| {
-            motion_calls += 1;
-            AxisMotionResult::Done
-        })
+        rt.tick_with_axis_and_logs(
+            &mut io,
+            |event| logs.push(event),
+            |_| {
+                motion_calls += 1;
+                AxisMotionResult::Done
+            },
+        )
         .expect("done on polling tick should complete step");
 
         assert_eq!(motion_calls, 2);
         assert_eq!(rt.location().step, StepId(1));
         assert_eq!(
-            rt.task_context(0).expect("task context").pending_action_state,
+            rt.task_context(0)
+                .expect("task context")
+                .pending_action_state,
             TaskPendingActionState::Idle
         );
         assert_eq!(
@@ -3621,7 +3793,9 @@ mod tests {
             .expect("first tick should start pending axis move");
         assert_eq!(rt.location().step, StepId(0));
         assert_eq!(
-            rt.task_context(0).expect("task context").pending_action_state,
+            rt.task_context(0)
+                .expect("task context")
+                .pending_action_state,
             TaskPendingActionState::AxisMotion {
                 target: "axis_x",
                 action_index: 0,
@@ -3639,7 +3813,9 @@ mod tests {
             }
         );
         assert_eq!(
-            rt.task_context(0).expect("task context").pending_action_state,
+            rt.task_context(0)
+                .expect("task context")
+                .pending_action_state,
             TaskPendingActionState::Idle
         );
         assert_eq!(
@@ -3659,8 +3835,8 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3716,8 +3892,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static ACTIONS_ABS: [Action; 1] = [Action::AxisMove {
@@ -3728,8 +3904,8 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 3] = [
@@ -3785,8 +3961,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static ACTIONS_ABS: [Action; 1] = [Action::AxisMove {
@@ -3797,8 +3973,8 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 3] = [
@@ -3881,8 +4057,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3936,8 +4112,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3991,8 +4167,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -4046,8 +4222,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -4220,8 +4396,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
-            timeout: None,
-            fault_routing: None,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [

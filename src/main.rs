@@ -22,7 +22,7 @@ use std::process::Command;
 
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io};
 use petgraph::Direction;
-use runtime_core::{Action, Instr, Program, Step, StepId, Task};
+use runtime_core::{Action, Instr, MAX_TRANSITIONS_PER_TASK_PER_TICK, Program, Step, StepId, Task};
 use rust_plc::alarm_runtime::{
     AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity, build_alarm_event,
 };
@@ -70,10 +70,20 @@ struct VerificationReportFile<'a> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum TransitionBudgetScope {
+    PerTaskPerTick,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct RuntimeBudget {
-    /// runtime-core hard cap (see Runtime::tick_with_trace_and_logs).
+    /// runtime-core hard cap per task per tick (see Runtime::tick_with_trace_and_logs).
+    transition_budget_scope: TransitionBudgetScope,
     max_transitions_per_tick_cap: usize,
-    /// Upper bound on same-tick transition chaining in the current state machine.
+    active_task_count: usize,
+    /// Global per-tick transition upper bound derived from active tasks.
+    max_transitions_all_tasks_per_tick_upper_bound: usize,
+    /// Upper bound on same-tick transition chaining within one task.
     max_transitions_same_tick_upper_bound: usize,
     max_actions_per_transition: usize,
     max_actions_per_tick_upper_bound: usize,
@@ -1372,7 +1382,7 @@ fn scenario_mismatch_hint_for_example(
 ) -> Option<String> {
     if !matches!(
         err,
-        sim::SimRunError::Runtime(runtime_core::RuntimeError::TooManyTransitionsInOneTick)
+        sim::SimRunError::Runtime(runtime_core::RuntimeError::TooManyTransitionsInOneTick { .. })
     ) {
         return None;
     }
@@ -9900,36 +9910,60 @@ fn analyze_runtime_budget(
     let (max_actions_per_transition, max_parallel_branches, max_race_branches) =
         analyze_program_budget_facts(program);
 
+    let mut task_names = state_machine
+        .task_contexts
+        .iter()
+        .map(|ctx| ctx.task_name.clone())
+        .collect::<BTreeSet<_>>();
+    if task_names.is_empty() {
+        for state in &state_machine.states {
+            task_names.insert(state.task_name.clone());
+        }
+    }
+    let active_task_count = task_names.len().max(1);
+
     // Edges that may fire within the same tick if inputs match.
-    let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); state_machine.states.len()];
-    let mut edges: Vec<(usize, usize)> = Vec::new();
     let mut state_index: HashMap<(String, String), usize> = HashMap::new();
     for (idx, state) in state_machine.states.iter().enumerate() {
         state_index.insert((state.task_name.clone(), state.step_name.clone()), idx);
     }
 
-    for tr in &state_machine.transitions {
-        let from = state_index
-            .get(&(tr.from.task_name.clone(), tr.from.step_name.clone()))
-            .copied();
-        let to = state_index
-            .get(&(tr.to.task_name.clone(), tr.to.step_name.clone()))
-            .copied();
-        let (Some(from), Some(to)) = (from, to) else {
-            continue;
-        };
+    let mut has_cycle = false;
+    let mut longest_chain = 0usize;
+    for task_name in task_names {
+        let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); state_machine.states.len()];
+        let mut edges: Vec<(usize, usize)> = Vec::new();
+        for tr in &state_machine.transitions {
+            if tr.from.task_name != task_name || tr.to.task_name != task_name {
+                continue;
+            }
+            if !guard_can_fire_same_tick(&tr.guard) {
+                continue;
+            }
 
-        if !guard_can_fire_same_tick(&tr.guard) {
-            continue;
+            let from = state_index
+                .get(&(tr.from.task_name.clone(), tr.from.step_name.clone()))
+                .copied();
+            let to = state_index
+                .get(&(tr.to.task_name.clone(), tr.to.step_name.clone()))
+                .copied();
+            let (Some(from), Some(to)) = (from, to) else {
+                continue;
+            };
+
+            let eid = edges.len();
+            edges.push((from, to));
+            outgoing[from].push(eid);
         }
 
-        let eid = edges.len();
-        edges.push((from, to));
-        outgoing[from].push(eid);
+        let (task_has_cycle, task_longest_chain) = analyze_longest_chain(&outgoing, &edges);
+        has_cycle |= task_has_cycle;
+        longest_chain = longest_chain.max(task_longest_chain);
     }
 
-    let (has_cycle, longest_chain) = analyze_longest_chain(&outgoing, &edges);
-    let max_transitions_per_tick_cap = 64;
+    let max_transitions_per_tick_cap = MAX_TRANSITIONS_PER_TASK_PER_TICK;
+    let max_transitions_all_tasks_per_tick_upper_bound =
+        max_transitions_per_tick_cap.saturating_mul(active_task_count);
     let max_transitions_same_tick_upper_bound = if has_cycle {
         max_transitions_per_tick_cap
     } else {
@@ -9937,11 +9971,14 @@ fn analyze_runtime_budget(
     };
 
     let max_actions_per_tick_upper_bound = max_actions_per_transition
-        .saturating_mul(max_transitions_per_tick_cap)
+        .saturating_mul(max_transitions_all_tasks_per_tick_upper_bound)
         .max(max_actions_per_transition);
 
     let mut budget = RuntimeBudget {
+        transition_budget_scope: TransitionBudgetScope::PerTaskPerTick,
         max_transitions_per_tick_cap,
+        active_task_count,
+        max_transitions_all_tasks_per_tick_upper_bound,
         max_transitions_same_tick_upper_bound,
         max_actions_per_transition,
         max_actions_per_tick_upper_bound,
@@ -10138,7 +10175,10 @@ fn apply_runtime_budget_warnings(
     if thresholds.warn_on_same_tick_cycle && budget.has_same_tick_cycle {
         warnings.push(WarningEntry {
             level: WarningLevel::Warn,
-            message: "runtime budget: same-tick transition subgraph contains a cycle; runtime-core will cap chaining per tick".to_string(),
+            message: format!(
+                "runtime budget: same-tick transition subgraph contains a cycle; runtime-core caps chaining to {} transitions per task per tick (active_tasks={})",
+                budget.max_transitions_per_tick_cap, budget.active_task_count
+            ),
         });
     }
     if budget.budget_time_estimate.exceeds_budget {

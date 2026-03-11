@@ -27,15 +27,15 @@ use crate::ir::{
     BinaryValue as IrBinaryValue, CamCouplingDef, CamInterpolation, CamTableIr, CausalityChain,
     ConnectionType, ConstraintSet, Device, DeviceKind, ExternCallBinding as IrExternCallBinding,
     ExternFunctionContract as IrExternContract, ExternFunctionDef as IrExternFunctionDef,
-    ExternFunctionParam as IrExternFunctionParam, PendingActionContext as IrPendingActionContext,
-    PidLoop as IrPidLoop, SafetyExpr, SafetyRelation as IrSafetyRelation, SafetyRule, SplineCoeff,
-    State, StateExpr, StateMachine, TaskBlockingState, TaskExecutionContext, TaskTimerContext,
-    TimeInterval, TimerOperation, TimerOperationKind, TimingModel,
-    TimingRelation as IrTimingRelation, TimingRule, TimingScope, TopologyGraph, TopologyLink,
-    Transition, TransitionAction, TransitionGuard, VariableDef, VariableType as IrVariableType,
-    MAX_CAM_POINTS,
+    ExternFunctionParam as IrExternFunctionParam, MAX_CAM_POINTS,
+    PendingActionContext as IrPendingActionContext, PidLoop as IrPidLoop, SafetyExpr,
+    SafetyRelation as IrSafetyRelation, SafetyRule, SplineCoeff, State, StateExpr, StateMachine,
+    TaskBlockingState, TaskExecutionContext, TaskTimerContext, TimeInterval, TimerOperation,
+    TimerOperationKind, TimingModel, TimingRelation as IrTimingRelation, TimingRule, TimingScope,
+    TopologyGraph, TopologyLink, Transition, TransitionAction, TransitionGuard, VariableDef,
+    VariableType as IrVariableType,
 };
-use crate::plc_port::{canonical_physical_device_name, parse_plc_port_ref, PlcPortKind};
+use crate::plc_port::{PlcPortKind, canonical_physical_device_name, parse_plc_port_ref};
 use petgraph::graph::NodeIndex;
 use runtime_core::MAX_VARIABLES as RUNTIME_MAX_VARIABLES;
 use serde::Deserialize;
@@ -3194,15 +3194,15 @@ fn pending_action_descriptor_from_statement(
     action: &ActionStatement,
 ) -> Option<(ActionKind, Option<String>)> {
     match action {
-        ActionStatement::AxisMoveRelative { target, .. } => Some((
-            ActionKind::AxisMoveRelative,
-            Some(target.device.clone()),
-        )),
-        ActionStatement::AxisMoveAbsolute { target, .. } => Some((
-            ActionKind::AxisMoveAbsolute,
-            Some(target.device.clone()),
-        )),
-        ActionStatement::Call { function, .. } => Some((ActionKind::CallExtern, Some(function.clone()))),
+        ActionStatement::AxisMoveRelative { target, .. } => {
+            Some((ActionKind::AxisMoveRelative, Some(target.device.clone())))
+        }
+        ActionStatement::AxisMoveAbsolute { target, .. } => {
+            Some((ActionKind::AxisMoveAbsolute, Some(target.device.clone())))
+        }
+        ActionStatement::Call { function, .. } => {
+            Some((ActionKind::CallExtern, Some(function.clone())))
+        }
         ActionStatement::Extend { .. }
         | ActionStatement::Retract { .. }
         | ActionStatement::Set { .. }
@@ -5188,11 +5188,7 @@ fn binary_value_text(value: &IrBinaryValue) -> &'static str {
 }
 
 fn bool_text(value: bool) -> &'static str {
-    if value {
-        "true"
-    } else {
-        "false"
-    }
+    if value { "true" } else { "false" }
 }
 
 fn load_axis_motion_param_sets() -> Result<HashMap<String, AxisMotionParamSetDef>, Vec<PlcError>> {
@@ -8706,14 +8702,18 @@ task ready:
         let program = parse_plc(input).expect("PRD 5.5.1 示例应能成功解析为 AST");
         let state_machine = build_state_machine(&program).expect("应能从 5.5.1 示例构建状态机");
 
-        assert!(state_machine
-            .states
-            .iter()
-            .any(|state| state.task_name == "init" && state.step_name == "extend_A"));
-        assert!(state_machine
-            .states
-            .iter()
-            .any(|state| state.task_name == "init" && state.step_name == "retract_B"));
+        assert!(
+            state_machine
+                .states
+                .iter()
+                .any(|state| state.task_name == "init" && state.step_name == "extend_A")
+        );
+        assert!(
+            state_machine
+                .states
+                .iter()
+                .any(|state| state.task_name == "init" && state.step_name == "retract_B")
+        );
 
         let has_wait_transition = state_machine.transitions.iter().any(|transition| {
             transition.from.task_name == "init"
@@ -10966,10 +10966,12 @@ task timeout:
             loader_ctx.blocking_state,
             TaskBlockingState::Ready
         ));
-        assert!(loader_ctx
-            .timers
-            .iter()
-            .any(|timer| timer.timer_name == "loader.invoke.delay_1"));
+        assert!(
+            loader_ctx
+                .timers
+                .iter()
+                .any(|timer| timer.timer_name == "loader.invoke.delay_1")
+        );
         assert!(loader_ctx.pending_actions.iter().any(|action| {
             action.action_kind == ActionKind::CallExtern
                 && action.target.as_deref() == Some("calc")
@@ -10983,9 +10985,11 @@ task timeout:
             .find(|ctx| ctx.task_name == "watcher")
             .expect("watcher context should exist");
         assert_eq!(watcher_ctx.entry_state.step_name, "await_output");
-        assert!(watcher_ctx
-            .timers
-            .iter()
-            .any(|timer| timer.timer_name == "watcher.await_output.timeout_1"));
+        assert!(
+            watcher_ctx
+                .timers
+                .iter()
+                .any(|timer| timer.timer_name == "watcher.await_output.timeout_1")
+        );
     }
 }

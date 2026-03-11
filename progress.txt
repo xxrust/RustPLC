@@ -11,6 +11,7 @@ Started: 2026-03-11 00:08:32 CST
 - `axis.move_relative/axis.move_absolute` 默认是 blocking 长时动作；即使 DSL 未显式写 `wait`，也要用 Pending 轮询驱动 step 留驻，并覆盖 Pending->Done 与 Pending->Fault 集成回归。
 - axis `timeout/on_*fault` 语义若在 IR 中以 action 内分支存在，必须由 `runtime_bridge` 预先解析成 runtime `StepId` 元数据；`runtime-core` 在 Pending 轮询阶段消费这些元数据完成分流。
 - `runtime_bridge` 生成并发 runtime task 时，优先选择“无跨 task 入边”的 root task 作为 active 集合；若不存在 root task，回退到 IR 初始 task 以避免旧工作流被并发全激活破坏。
+- 若预算测试通过 `on_complete: goto <self>` 构造循环来触发 same-tick budget 告警，需同时声明 `allow_indefinite_wait: true`（或提供 timeout），否则会先被 liveness SCC 门禁拦截。
 
 
 
@@ -136,4 +137,16 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Bridge-level task-boundary migration can stay backward compatible by deriving active runtime tasks from root-task reachability rather than activating every declared task unconditionally.
   - When action-level fault/timeout branches target task entries, include those entry states in per-task reachable graph construction; otherwise local `StepId` lowering will fail on branch resolution.
+---
+## 2026-03-12 02:01 CST - US-010
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Finalized US-010 runtime budget regression closure around per-task-per-tick semantics and multi-task report interpretation.
+- Fixed `runtime_budget_cycle_warning_keeps_per_task_cap_with_two_active_tasks` by adding liveness exemption to both intentional self-loop steps, so the test now reaches budget warning assertions instead of failing early in liveness verification.
+- Updated `AGENTS.md` with a reusable rule for budget-cycle fixtures under liveness SCC checks.
+- Updated `prd.json` to set `US-010` (`重新定义并发模型下的 runtime budget`) to `passes: true`.
+- Files changed: `tests/verification_report.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --test verification_report runtime_budget_cycle_warning_keeps_per_task_cap_with_two_active_tasks`, `cargo test`.
+- **Learnings for future iterations:**
+  - Budget warning regressions that rely on cycles must satisfy liveness contracts first; otherwise runtime budget assertions are never exercised.
+  - For concurrent budget semantics, keep assertions tied to both `max_transitions_per_tick_cap` and `active_task_count` derived upper bounds.
 ---

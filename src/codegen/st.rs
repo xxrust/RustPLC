@@ -1177,9 +1177,10 @@ mod tests {
         assert_eq!(state_id_of(&s0, &ids), Some(0));
         assert_eq!(state_id_of(&s1, &ids), Some(10));
         assert_eq!(state_id_of(&s2, &ids), Some(20));
-        assert!(ids
-            .values()
-            .all(|id| *id != RESERVED_INTERNAL_ERROR_STATE_ID));
+        assert!(
+            ids.values()
+                .all(|id| *id != RESERVED_INTERNAL_ERROR_STATE_ID)
+        );
 
         let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
             .expect("codegen should succeed");
@@ -1299,9 +1300,11 @@ mod tests {
 
         let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
             .expect_err("must fail");
-        assert!(errors
-            .iter()
-            .any(|e| matches!(e, StCodegenError::TypeConflict { name } if name == "mix")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, StCodegenError::TypeConflict { name } if name == "mix"))
+        );
     }
 
     #[test]

@@ -49,13 +49,27 @@ task 并发的定义固定为：
 
 不在本名单内的动作默认按 non-blocking 处理，除非后续故事显式扩展并同步文档。
 
-## 6. 约束与变更规则
+## 6. Runtime Budget 与调度公平性
+
+1. runtime transition budget 的口径固定为 **per-task-per-tick**：
+   - 单个 task 在同一 tick 内的 transition 链式推进上限是 `MAX_TRANSITIONS_PER_TASK_PER_TICK`。
+   - 该上限用于防止同 tick 自循环或零时延链路导致的无限推进。
+2. 全局每 tick 的最大 transition 上界按活跃 task 数量线性放大：
+   - `max_transitions_all_tasks_per_tick_upper_bound = active_task_count * max_transitions_per_tick_cap`。
+   - 该值用于 report/预算估算，不改变单个 task 的硬上限。
+3. 调度公平性与 budget 的关系：
+   - 调度器按固定顺序遍历所有 active task；
+   - 每个 task 在自己的预算耗尽、命中 blocking step 或完成推进后让出执行；
+   - 单个 task 的预算耗尽不会剥夺其他 task 在同 tick 的推进机会。
+4. 运行时错误与告警必须带上下文（task 索引、尝试次数、per-task cap、active task 数），避免并发场景下的“超预算”不可解释。
+
+## 7. 约束与变更规则
 
 1. 若实现需要新增/收紧术语，必须先更新本文件，再更新代码与测试。
 2. verification 的 safety/liveness/timing/causality 规则必须使用本文件同名术语解释。
 3. runtime bridge 与 codegen 不得自行补语义，必须消费已经在本文件与 IR 中闭合的定义。
 
-## 7. 最小验收映射（US-001）
+## 8. 最小验收映射（US-001）
 
 - 本文件提供 `active task/task context/blocking step/non-blocking step/pending action/completion condition` 的明确定义。
 - 本文件明确“同 tick 串联 non-blocking，遇 blocking 立即停”的推进规则。

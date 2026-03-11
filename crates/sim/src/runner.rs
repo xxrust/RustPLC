@@ -17,10 +17,15 @@ impl fmt::Display for SimRunError {
         match self {
             SimRunError::Scenario(e) => write!(f, "{e}"),
             SimRunError::Runtime(e) => match e {
-                RuntimeError::TooManyTransitionsInOneTick => {
+                RuntimeError::TooManyTransitionsInOneTick {
+                    task,
+                    attempted,
+                    per_task_cap,
+                    active_tasks,
+                } => {
                     write!(
                         f,
-                        "runtime error: TooManyTransitionsInOneTick\n\
+                        "runtime error: TooManyTransitionsInOneTick(task={task}, attempted={attempted}, per_task_cap={per_task_cap}, active_tasks={active_tasks})\n\
 hint: a same-tick transition loop likely occurred (e.g. a task completes immediately and re-enters within the same tick).\n\
 common causes:\n\
   - scenario sets start_button/sensors to values that make waits/guards satisfied instantly\n\

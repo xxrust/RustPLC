@@ -1363,7 +1363,11 @@ fn parses_axis_fault_recoverable_path_example_with_policy_into_verified_ir_json(
     let contracts = ir_json["topology"]["axis_fault_contracts"]
         .as_array()
         .expect("topology should include axis fault contracts array");
-    assert_eq!(contracts.len(), 1, "recoverable example should declare one policy");
+    assert_eq!(
+        contracts.len(),
+        1,
+        "recoverable example should declare one policy"
+    );
     assert_eq!(
         contracts[0]["severity"],
         Value::String("recoverable".to_string())

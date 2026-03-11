@@ -1825,9 +1825,11 @@ task fault:
             .expect_err("axis timeout 分支缺失因果链应报错");
 
         assert!(
-            errors
-                .iter()
-                .any(|error| error.action.as_deref().unwrap_or_default().contains("timeout")),
+            errors.iter().any(|error| error
+                .action
+                .as_deref()
+                .unwrap_or_default()
+                .contains("timeout")),
             "诊断动作文本应标注 timeout 分支"
         );
         assert!(
