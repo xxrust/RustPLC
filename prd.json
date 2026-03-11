@@ -177,8 +177,8 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": "Validated by full cargo test sweep on 2026-03-11."
+      "passes": true,
+      "notes": "Implemented concurrent global-state safety modeling with cross-task conflict/requires regressions; validated by full cargo test on 2026-03-12."
     },
     {
       "id": "US-012",

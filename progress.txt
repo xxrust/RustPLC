@@ -11,6 +11,7 @@ Started: 2026-03-11 00:08:32 CST
 - `axis.move_relative/axis.move_absolute` 默认是 blocking 长时动作；即使 DSL 未显式写 `wait`，也要用 Pending 轮询驱动 step 留驻，并覆盖 Pending->Done 与 Pending->Fault 集成回归。
 - axis `timeout/on_*fault` 语义若在 IR 中以 action 内分支存在，必须由 `runtime_bridge` 预先解析成 runtime `StepId` 元数据；`runtime-core` 在 Pending 轮询阶段消费这些元数据完成分流。
 - `runtime_bridge` 生成并发 runtime task 时，优先选择“无跨 task 入边”的 root task 作为 active 集合；若不存在 root task，回退到 IR 初始 task 以避免旧工作流被并发全激活破坏。
+- `verification::safety` 并发全局状态建模要复用 runtime root task 选择口径，并在 `ConcreteState` 中显式携带 task 级当前位置与 pending 标记，避免验证和执行对 active task 集合的理解漂移。
 - 若预算测试通过 `on_complete: goto <self>` 构造循环来触发 same-tick budget 告警，需同时声明 `allow_indefinite_wait: true`（或提供 timeout），否则会先被 liveness SCC 门禁拦截。
 
 
@@ -149,4 +150,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Budget warning regressions that rely on cycles must satisfy liveness contracts first; otherwise runtime budget assertions are never exercised.
   - For concurrent budget semantics, keep assertions tied to both `max_transitions_per_tick_cap` and `active_task_count` derived upper bounds.
+---
+## 2026-03-12 02:20 CST - US-011
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Implemented concurrent global-state safety modeling in `src/verification/safety.rs`: safety search state now tracks per-task current step and pending status, and explores transitions by task slot to capture cross-task overlaps.
+- Aligned safety active-task initialization with runtime root-task semantics (prefer no-cross-task-incoming roots, fallback to IR initial task) so verification and runtime share the same active task boundary assumptions.
+- Added safety regressions for US-011:
+  - cross-task `conflicts_with` counterexample (`reports_conflict_when_independent_tasks_overlap_on_conflicting_outputs`)
+  - cross-task `requires` counterexample (`reports_requires_violation_when_independent_tasks_overlap_without_prerequisite`)
+  - disjoint-resource positive example (`passes_when_independent_tasks_operate_on_disjoint_resources`)
+  - pending-state presence in concurrent global state (`models_pending_action_status_in_concurrent_global_state`)
+- Updated `AGENTS.md` with reusable safety-verification concurrency modeling rules.
+- Updated `prd.json` to set `US-011` (`在 safety 验证中建模并发全局状态`) to `passes: true`.
+- Files changed: `src/verification/safety.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --lib verification::safety -- --nocapture`, `cargo test`.
+- **Learnings for future iterations:**
+  - In safety BMC, model concurrent execution as a vector of task control states and advance one task slot per edge expansion; a single global control-state scalar cannot expose cross-task overlap violations.
+  - Keep safety initial active-task selection consistent with runtime bridge root-task rules, otherwise safety verdicts can diverge from runtime-reachable concurrent states.
 ---

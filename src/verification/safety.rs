@@ -125,6 +125,9 @@ struct SafetyModel {
     initial_state: usize,
     edges: Vec<ModelEdge>,
     outgoing: Vec<Vec<usize>>,
+    active_task_names: Vec<String>,
+    active_task_entries: Vec<usize>,
+    pending_source_states: HashSet<usize>,
     devices: Vec<DeviceDomain>,
     device_index: HashMap<(String, String), usize>,
     device_state_index: Vec<HashMap<String, usize>>,
@@ -150,7 +153,8 @@ struct DepthPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ConcreteState {
-    control_state: usize,
+    task_states: Vec<usize>,
+    task_pending: Vec<bool>,
     device_states: Vec<usize>,
 }
 
@@ -159,7 +163,13 @@ struct SearchNode {
     state: ConcreteState,
     depth: usize,
     parent: Option<usize>,
-    via_edge: Option<usize>,
+    via_edge: Option<TransitionStep>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TransitionStep {
+    task_slot: usize,
+    edge_id: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -763,6 +773,27 @@ impl SafetyModel {
 
         merge_parallel_join_effects(&states, &mut edges);
 
+        let task_entry_states = collect_task_entry_state_indices(state_machine, &state_index);
+        let runtime_root_tasks = select_safety_root_tasks(state_machine, &task_entry_states);
+        let mut active_task_names = Vec::new();
+        let mut active_task_entries = Vec::new();
+        let mut seen_task = HashSet::<String>::new();
+        for task_name in runtime_root_tasks {
+            if !seen_task.insert(task_name.clone()) {
+                continue;
+            }
+            if let Some(entry_state) = task_entry_states.get(&task_name).copied() {
+                active_task_names.push(task_name);
+                active_task_entries.push(entry_state);
+            }
+        }
+        if active_task_entries.is_empty() {
+            active_task_names.push(state_machine.initial.task_name.clone());
+            active_task_entries.push(initial_state);
+        }
+
+        let pending_source_states = collect_pending_source_states(state_machine, &state_index);
+
         let max_scc_depth = scc_minimum_depth(states.len(), &edges);
         let suggested_depth = states.len().max(max_scc_depth).max(1);
 
@@ -771,6 +802,9 @@ impl SafetyModel {
             initial_state,
             edges,
             outgoing,
+            active_task_names,
+            active_task_entries,
+            pending_source_states,
             devices,
             device_index,
             device_state_index,
@@ -778,6 +812,128 @@ impl SafetyModel {
             max_scc_depth,
         }
     }
+}
+
+fn collect_task_entry_state_indices(
+    state_machine: &StateMachine,
+    state_index: &HashMap<(String, String), usize>,
+) -> HashMap<String, usize> {
+    let mut entry_states = HashMap::<String, usize>::new();
+    for ctx in &state_machine.task_contexts {
+        let key = (
+            ctx.entry_state.task_name.clone(),
+            ctx.entry_state.step_name.clone(),
+        );
+        if let Some(entry) = state_index.get(&key).copied() {
+            entry_states.insert(ctx.task_name.clone(), entry);
+        }
+    }
+    entry_states
+}
+
+fn collect_pending_source_states(
+    state_machine: &StateMachine,
+    state_index: &HashMap<(String, String), usize>,
+) -> HashSet<usize> {
+    let mut pending = HashSet::<usize>::new();
+    for ctx in &state_machine.task_contexts {
+        for action in &ctx.pending_actions {
+            let key = (
+                action.source_state.task_name.clone(),
+                action.source_state.step_name.clone(),
+            );
+            if let Some(state_id) = state_index.get(&key).copied() {
+                pending.insert(state_id);
+            }
+        }
+    }
+    pending
+}
+
+fn select_safety_root_tasks(
+    state_machine: &StateMachine,
+    task_entry_states: &HashMap<String, usize>,
+) -> Vec<String> {
+    let mut cross_task_incoming = HashSet::<String>::new();
+    for transition in &state_machine.transitions {
+        if transition.from.task_name != transition.to.task_name {
+            cross_task_incoming.insert(transition.to.task_name.clone());
+        }
+        for target_task in axis_branch_target_task_names(&transition.actions) {
+            if transition.from.task_name != target_task {
+                cross_task_incoming.insert(target_task);
+            }
+        }
+    }
+
+    let mut roots = Vec::new();
+    for ctx in &state_machine.task_contexts {
+        if task_entry_states.contains_key(&ctx.task_name)
+            && !cross_task_incoming.contains(&ctx.task_name)
+        {
+            roots.push(ctx.task_name.clone());
+        }
+    }
+
+    if roots.is_empty() {
+        if task_entry_states.contains_key(&state_machine.initial.task_name) {
+            roots.push(state_machine.initial.task_name.clone());
+        } else if let Some(first) = state_machine.task_contexts.first() {
+            roots.push(first.task_name.clone());
+        }
+    }
+
+    roots
+}
+
+fn axis_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
+    let mut targets = Vec::new();
+    for action in actions {
+        match action {
+            TransitionAction::AxisMoveRelative {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+                ..
+            }
+            | TransitionAction::AxisMoveAbsolute {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+                ..
+            } => {
+                targets.push(timeout.target_task.clone());
+                targets.push(on_reject.target_task.clone());
+                targets.push(on_motion_fault.target_task.clone());
+                targets.push(on_safety_fault.target_task.clone());
+                targets.extend(
+                    on_reject_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+                targets.extend(
+                    on_motion_fault_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+                targets.extend(
+                    on_safety_fault_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+            }
+            _ => {}
+        }
+    }
+    targets
 }
 
 fn merge_parallel_join_effects(states: &[State], edges: &mut [ModelEdge]) {
@@ -2034,39 +2190,45 @@ fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> Sea
             };
         }
 
-        let outgoing = &model.outgoing[node.state.control_state];
-        if node.depth == max_depth {
-            for &edge_id in outgoing {
-                let edge = &model.edges[edge_id];
-                let candidate = apply_edge(edge, &node.state);
-                if !shortest_depth.contains_key(&candidate) {
-                    fully_explored = false;
+        for (task_slot, &control_state) in node.state.task_states.iter().enumerate() {
+            let outgoing = model
+                .outgoing
+                .get(control_state)
+                .cloned()
+                .unwrap_or_default();
+            if node.depth == max_depth {
+                for edge_id in outgoing {
+                    let edge = &model.edges[edge_id];
+                    let candidate = apply_edge(model, edge, &node.state, task_slot);
+                    if !shortest_depth.contains_key(&candidate) {
+                        fully_explored = false;
+                    }
                 }
-            }
-            continue;
-        }
-
-        for &edge_id in outgoing {
-            let edge = &model.edges[edge_id];
-            let next_state = apply_edge(edge, &node.state);
-            let next_depth = node.depth + 1;
-
-            if shortest_depth
-                .get(&next_state)
-                .is_some_and(|depth| *depth <= next_depth)
-            {
                 continue;
             }
 
-            shortest_depth.insert(next_state.clone(), next_depth);
-            let next_id = nodes.len();
-            nodes.push(SearchNode {
-                state: next_state,
-                depth: next_depth,
-                parent: Some(node_id),
-                via_edge: Some(edge_id),
-            });
-            queue.push_back(next_id);
+            for edge_id in outgoing {
+                let edge = &model.edges[edge_id];
+                let next_state = apply_edge(model, edge, &node.state, task_slot);
+                let next_depth = node.depth + 1;
+
+                if shortest_depth
+                    .get(&next_state)
+                    .is_some_and(|depth| *depth <= next_depth)
+                {
+                    continue;
+                }
+
+                shortest_depth.insert(next_state.clone(), next_depth);
+                let next_id = nodes.len();
+                nodes.push(SearchNode {
+                    state: next_state,
+                    depth: next_depth,
+                    parent: Some(node_id),
+                    via_edge: Some(TransitionStep { task_slot, edge_id }),
+                });
+                queue.push_back(next_id);
+            }
         }
     }
 
@@ -2082,23 +2244,49 @@ fn initial_concrete_state(model: &SafetyModel) -> ConcreteState {
         .iter()
         .map(|device| device.default_state)
         .collect::<Vec<_>>();
+    let mut task_states = model.active_task_entries.clone();
+    if task_states.is_empty() {
+        task_states.push(model.initial_state);
+    }
+    let task_pending = task_states
+        .iter()
+        .map(|state_id| model.pending_source_states.contains(state_id))
+        .collect::<Vec<_>>();
 
     ConcreteState {
-        control_state: model.initial_state,
+        task_states,
+        task_pending,
         device_states,
     }
 }
 
-fn apply_edge(edge: &ModelEdge, current: &ConcreteState) -> ConcreteState {
+fn apply_edge(
+    model: &SafetyModel,
+    edge: &ModelEdge,
+    current: &ConcreteState,
+    task_slot: usize,
+) -> ConcreteState {
     let mut device_states = current.device_states.clone();
     for (&device_id, &state_id) in &edge.effects {
         if device_id < device_states.len() {
             device_states[device_id] = state_id;
         }
     }
+    let mut task_states = current.task_states.clone();
+    if task_slot < task_states.len() {
+        task_states[task_slot] = edge.to;
+    }
+    let mut task_pending = current.task_pending.clone();
+    if task_pending.len() != task_states.len() {
+        task_pending.resize(task_states.len(), false);
+    }
+    if task_slot < task_pending.len() {
+        task_pending[task_slot] = model.pending_source_states.contains(&edge.to);
+    }
 
     ConcreteState {
-        control_state: edge.to,
+        task_states,
+        task_pending,
         device_states,
     }
 }
@@ -2132,7 +2320,7 @@ fn render_path(
     let initial = &nodes[order[0]].state;
     let mut lines = vec![format!(
         "初始状态 {}",
-        state_name(&model.states[initial.control_state])
+        render_global_state_name(model, initial)
     )];
 
     for window in order.windows(2) {
@@ -2140,21 +2328,46 @@ fn render_path(
         let to_node = &nodes[window[1]];
         let to = &to_node.state;
 
-        let edge_id = to_node.via_edge.unwrap_or_else(|| {
-            model.outgoing[from.control_state]
-                .first()
+        let step = to_node.via_edge.unwrap_or_else(|| {
+            let fallback_task_slot = 0usize;
+            let fallback_control_state = from.task_states.first().copied().unwrap_or(0);
+            let fallback_edge = model
+                .outgoing
+                .get(fallback_control_state)
+                .and_then(|edges| edges.first())
                 .copied()
-                .unwrap_or(0)
+                .unwrap_or(0);
+            TransitionStep {
+                task_slot: fallback_task_slot,
+                edge_id: fallback_edge,
+            }
         });
-        let edge = &model.edges[edge_id];
-
-        let from_name = state_name(&model.states[from.control_state]);
-        let to_name = state_name(&model.states[to.control_state]);
-        lines.push(format!("{from_name} --[{}]--> {to_name}", edge.label));
+        let edge = &model.edges[step.edge_id];
+        let from_state_id = from
+            .task_states
+            .get(step.task_slot)
+            .copied()
+            .unwrap_or(edge.from);
+        let to_state_id = to
+            .task_states
+            .get(step.task_slot)
+            .copied()
+            .unwrap_or(edge.to);
+        let from_name = state_name(&model.states[from_state_id]);
+        let to_name = state_name(&model.states[to_state_id]);
+        let task_name = model
+            .active_task_names
+            .get(step.task_slot)
+            .cloned()
+            .unwrap_or_else(|| model.states[to_state_id].task_name.clone());
+        lines.push(format!(
+            "{from_name} --[{}]--> {to_name} (task={task_name})",
+            edge.label
+        ));
     }
 
     let conflict_state = &nodes[terminal_node].state;
-    let conflict_state_name = state_name(&model.states[conflict_state.control_state]);
+    let conflict_state_name = render_global_state_name(model, conflict_state);
     let left_state_id = conflict_state.device_states[rule.left_device];
     let right_state_id = conflict_state.device_states[rule.right_device];
     let left_text = format!(
@@ -2181,6 +2394,28 @@ fn render_path(
     }
 
     lines
+}
+
+fn render_global_state_name(model: &SafetyModel, state: &ConcreteState) -> String {
+    let mut parts = Vec::new();
+    for (slot, state_id) in state.task_states.iter().enumerate() {
+        let state_name_text = model
+            .states
+            .get(*state_id)
+            .map(state_name)
+            .unwrap_or_else(|| format!("unknown_state_{state_id}"));
+        let task_name = model
+            .active_task_names
+            .get(slot)
+            .cloned()
+            .unwrap_or_else(|| format!("task_{slot}"));
+        let pending = state.task_pending.get(slot).copied().unwrap_or(false);
+        parts.push(format!(
+            "{task_name}:{state_name_text}{}",
+            if pending { "[pending]" } else { "" }
+        ));
+    }
+    parts.join(" | ")
 }
 
 fn state_name(state: &State) -> String {
@@ -2210,7 +2445,7 @@ fn z3_sanity_probe() {
 mod tests {
     use super::{
         SafetyConfig, SafetyModel, SafetyProofLevel, SafetyRuleStatusKind, analog_state_for_value,
-        verify_safety, verify_safety_with_config,
+        initial_concrete_state, verify_safety, verify_safety_with_config,
     };
     use crate::ir::{SafetyExpr, SafetyRelation, SafetyRule, StateExpr};
     use crate::parser::parse_plc;
@@ -2647,6 +2882,180 @@ task press:
                 SafetyProofLevel::Complete | SafetyProofLevel::Bounded
             ),
             "requires 满足场景应通过 safety"
+        );
+    }
+
+    #[test]
+    fn reports_conflict_when_independent_tasks_overlap_on_conflicting_outputs() {
+        let source = r#"
+[topology]
+
+device out_a: digital_output
+device out_b: digital_output
+
+[constraints]
+
+safety: out_a.on conflicts_with out_b.on
+
+[tasks]
+
+task load:
+    step set_a:
+        action: set out_a on
+    step hold_a:
+        action: log "load"
+
+task unload:
+    step set_b:
+        action: set out_b on
+    step hold_b:
+        action: log "unload"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let errors = verify_safety(&program, &constraints, &state_machine)
+            .expect_err("独立 task 并发命中冲突资源时应触发 safety 失败");
+        assert!(
+            errors.iter().any(|error| error
+                .constraint
+                .contains("out_a.on conflicts_with out_b.on")),
+            "错误应包含跨 task 冲突约束文本"
+        );
+    }
+
+    #[test]
+    fn reports_requires_violation_when_independent_tasks_overlap_without_prerequisite() {
+        let source = r#"
+[topology]
+
+device clamp: digital_output
+device press: digital_output
+
+[constraints]
+
+safety: press.on requires clamp.on
+
+[tasks]
+
+task clamp_task:
+    step idle:
+        action: log "clamp idle"
+
+task press_task:
+    step press_down:
+        action: set press on
+    step hold:
+        action: log "press hold"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let errors = verify_safety(&program, &constraints, &state_machine)
+            .expect_err("并发 task 中 prerequisite 缺失时应触发 requires 失败");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.constraint.contains("press.on requires clamp.on")),
+            "错误应包含 requires 约束文本"
+        );
+    }
+
+    #[test]
+    fn passes_when_independent_tasks_operate_on_disjoint_resources() {
+        let source = r#"
+[topology]
+
+device out_a: digital_output
+device out_b: digital_output
+device out_c: digital_output
+
+[constraints]
+
+safety: out_a.on conflicts_with out_b.on
+
+[tasks]
+
+task load:
+    step set_a:
+        action: set out_a on
+    step hold_a:
+        action: log "load"
+
+task inspect:
+    step set_c:
+        action: set out_c on
+    step hold_c:
+        action: log "inspect"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        let report = verify_safety(&program, &constraints, &state_machine)
+            .expect("并发 task 操作互不冲突资源时应通过 safety");
+        assert!(
+            matches!(
+                report.level,
+                SafetyProofLevel::Complete | SafetyProofLevel::Bounded
+            ),
+            "应返回有效 proof level"
+        );
+    }
+
+    #[test]
+    fn models_pending_action_status_in_concurrent_global_state() {
+        let source = r#"
+[topology]
+
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+device out_a: digital_output
+
+[constraints]
+
+[tasks]
+
+task motion:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step done:
+        action: log "done"
+
+task io:
+    step set_a:
+        action: set out_a on
+    step hold:
+        action: log "hold"
+
+task fault:
+    step timeout:
+        action: log "timeout"
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+        let model = SafetyModel::from_inputs(&program, &constraints, &state_machine);
+        let concrete = initial_concrete_state(&model);
+
+        assert!(
+            concrete.task_pending.iter().any(|pending| *pending),
+            "并发全局状态应携带 task 级 pending action 标记"
         );
     }
 
