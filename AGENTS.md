@@ -282,6 +282,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 
 - 错误码、payload、修复建议应稳定
 - 诊断变更要同步测试，不要只改文案
+- 扩展诊断/告警 payload 字段时优先走可选字段（`serde default + skip_serializing_if`）做向后兼容；并补“旧 payload 解析新结构、新 payload 解析旧结构”的回归测试
 
 ### 修改 verification 规则
 

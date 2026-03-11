@@ -17,6 +17,7 @@ Started: 2026-03-11 00:08:32 CST
 - timing 并发验证要同时给出 task 局部耗时与 active tasks 的全局 `max` 完成时间，并保留顺序 `sum` 作为对照；`must_complete_within_worst_case` 需显式纳入 pending 动作和 timeout 上界。
 - causality 在跨 task 变量链路上依赖显式 dataflow：`compute`/`set_analog_expr`/纯 extern 会建边；缺失依赖时应报链路断裂而非默认放行。
 - causality 对 `parallel` 或 `on_complete` 导出的推断 pair 需先验证 `action -> wait` 可达，再做断链诊断，避免跨分支偶然组合误报。
+- 验证告警 payload 扩展需保持向后兼容：新增字段使用可选字段（`serde(default)` + `skip_serializing_if`），并同时测试“旧消费者读新 payload + 新结构读旧 payload”。
 
 
 
@@ -210,4 +211,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Cross-task causality over variables requires explicit dataflow edges; control semantics alone are insufficient for deterministic causal proof.
   - When deriving causality obligations from inferred pairs (parallel/completion), gate diagnostics on graph reachability first to avoid over-constraining unrelated branch combinations.
+---
+
+## 2026-03-12 03:44 CST - US-015
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Added migration documentation `docs/concurrent_runtime_migration_guide.md` to freeze old-vs-new concurrent runtime behavior differences, with focus on `axis.move_*` shifting from implicit non-blocking assumptions to default blocking semantics.
+- Added stable migration warning code `MIG-AXIS-BLOCK-001` in compile pipeline verification output when a single step mixes `axis.move_*` and other statements, and surfaced warning code in CLI text output.
+- Extended verification warning payload schema with optional `code` field (`serde default + skip_serializing_if`) to keep report compatibility for legacy consumers.
+- Added regression coverage for compatibility in both directions:
+  - legacy report parser reads new warning payload with `code`
+  - new `WarningEntry` schema deserializes legacy payload without `code`
+- Updated `prd.json` to set `US-015` (`输出稳定的迁移诊断与行为差异说明`) to `passes: true`.
+- Files changed: `docs/concurrent_runtime_migration_guide.md`, `src/main.rs`, `src/verification/mod.rs`, `tests/verification_report.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --test verification_report report_emits_axis_blocking_migration_warning_with_stable_code`, `cargo test --test verification_report warning_entry_new_schema_parses_legacy_warning_payload`, `cargo test --lib warning_entry_deserializes`, `cargo test`.
+- **Learnings for future iterations:**
+  - For migration-facing warnings, keep a stable machine-readable code and include it in both structured report payload and CLI warning text.
+  - Add backward-compatibility tests whenever report schemas evolve, validating old consumer/new payload and new consumer/old payload paths together.
 ---

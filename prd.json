@@ -241,8 +241,8 @@
         "Tests pass"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": "Validated by full cargo test sweep on 2026-03-11."
+      "passes": true,
+      "notes": "Validated by full cargo test sweep on 2026-03-12."
     },
     {
       "id": "US-016",

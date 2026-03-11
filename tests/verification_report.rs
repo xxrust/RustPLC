@@ -2,6 +2,28 @@ use std::fs;
 use std::process::Command;
 
 use runtime_core::MAX_TRANSITIONS_PER_TASK_PER_TICK;
+use rust_plc::verification::WarningEntry;
+
+#[derive(Debug, serde::Deserialize)]
+struct LegacyWarningEntry {
+    level: String,
+    message: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LegacyCheckerSummary {
+    warnings: Vec<LegacyWarningEntry>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LegacyVerificationSummary {
+    liveness: LegacyCheckerSummary,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LegacyVerificationReport {
+    verification: LegacyVerificationSummary,
+}
 
 fn temp_dir(prefix: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -523,4 +545,96 @@ task station_b:
         }),
         "cycle warning should explain per-task cap with active task count"
     );
+}
+
+#[test]
+fn report_emits_axis_blocking_migration_warning_with_stable_code() {
+    let base = temp_dir("rust_plc_axis_blocking_migration_warning");
+    let plc_path = base.join("axis_blocking_warning.plc");
+    let report_path = base.join("axis_blocking_warning_report.json");
+
+    let source = r#"
+[topology]
+device axis_x: stepper_motor {
+    purpose: "X 轴",
+    model_ref: stepper_generic,
+    config_ref: stepper_default
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: set axis_x.enable on
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+
+task done:
+    step halt:
+"#;
+    fs::write(&plc_path, source).expect("write plc");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg(&plc_path)
+        .arg("--report")
+        .arg(&report_path)
+        .output()
+        .expect("run rust_plc");
+    assert!(
+        output.status.success(),
+        "rust_plc should succeed with migration warning, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report_text = fs::read_to_string(&report_path).expect("read report");
+    let report: serde_json::Value =
+        serde_json::from_str(&report_text).expect("report JSON should parse");
+    let liveness_warnings = report["verification"]["liveness"]["warnings"]
+        .as_array()
+        .expect("liveness warnings should be array");
+    assert!(
+        liveness_warnings.iter().any(|warning| {
+            warning["level"] == "warn"
+                && warning["code"] == "MIG-AXIS-BLOCK-001"
+                && warning["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("axis.move_* 现按默认阻塞语义执行")
+        }),
+        "axis migration warning should include stable code MIG-AXIS-BLOCK-001"
+    );
+
+    let legacy_report: LegacyVerificationReport = serde_json::from_str(&report_text)
+        .expect("legacy parser should accept new report payload");
+    assert!(
+        legacy_report
+            .verification
+            .liveness
+            .warnings
+            .iter()
+            .any(|warning| {
+                warning.level == "warn" && warning.message.contains("axis.move_*")
+            }),
+        "legacy warning parser should still read level/message from code-aware warnings"
+    );
+}
+
+#[test]
+fn warning_entry_new_schema_parses_legacy_warning_payload() {
+    let legacy_payload = r#"{"level":"warn","message":"legacy-only warning"}"#;
+    let parsed: WarningEntry = serde_json::from_str(legacy_payload)
+        .expect("new WarningEntry schema should accept payload without code");
+    assert_eq!(parsed.level, rust_plc::verification::WarningLevel::Warn);
+    assert!(parsed.code.is_none());
 }
