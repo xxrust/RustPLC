@@ -258,6 +258,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 
 - 执行模型变化不是 runtime 私事
 - 只改 runtime 而不改 IR 或 verification，属于典型抽象层下沉
+- Task 级 pending action 元数据应从 step 语句收集，而不是仅从 transition.actions 推断；`delay/wait/timeout` 等阻塞路径常会让 transition 不携带动作
 
 ### 修改语义门禁或诊断
 

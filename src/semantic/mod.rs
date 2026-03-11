@@ -27,13 +27,15 @@ use crate::ir::{
     BinaryValue as IrBinaryValue, CamCouplingDef, CamInterpolation, CamTableIr, CausalityChain,
     ConnectionType, ConstraintSet, Device, DeviceKind, ExternCallBinding as IrExternCallBinding,
     ExternFunctionContract as IrExternContract, ExternFunctionDef as IrExternFunctionDef,
-    ExternFunctionParam as IrExternFunctionParam, MAX_CAM_POINTS, PidLoop as IrPidLoop, SafetyExpr,
-    SafetyRelation as IrSafetyRelation, SafetyRule, SplineCoeff, State, StateExpr, StateMachine,
+    ExternFunctionParam as IrExternFunctionParam, PendingActionContext as IrPendingActionContext,
+    PidLoop as IrPidLoop, SafetyExpr, SafetyRelation as IrSafetyRelation, SafetyRule, SplineCoeff,
+    State, StateExpr, StateMachine, TaskBlockingState, TaskExecutionContext, TaskTimerContext,
     TimeInterval, TimerOperation, TimerOperationKind, TimingModel,
     TimingRelation as IrTimingRelation, TimingRule, TimingScope, TopologyGraph, TopologyLink,
     Transition, TransitionAction, TransitionGuard, VariableDef, VariableType as IrVariableType,
+    MAX_CAM_POINTS,
 };
-use crate::plc_port::{PlcPortKind, canonical_physical_device_name, parse_plc_port_ref};
+use crate::plc_port::{canonical_physical_device_name, parse_plc_port_ref, PlcPortKind};
 use petgraph::graph::NodeIndex;
 use runtime_core::MAX_VARIABLES as RUNTIME_MAX_VARIABLES;
 use serde::Deserialize;
@@ -3024,11 +3026,13 @@ fn build_state_machine_from_ast_with_context(
                 )
             })
             .collect::<BTreeMap<_, _>>();
+        let task_contexts = build_task_execution_contexts(tasks, &builder.transitions);
         let mut state_machine = StateMachine {
             states: builder.states,
             transitions: builder.transitions,
             initial,
             analog_regions,
+            task_contexts,
         };
         annotate_axis_absolute_homing_guards(&mut state_machine);
         Ok(state_machine)
@@ -3091,6 +3095,125 @@ impl StateMachineBuilder {
             actions,
             timers,
         });
+    }
+}
+
+fn build_task_execution_contexts(
+    tasks: &TasksSection,
+    transitions: &[Transition],
+) -> Vec<TaskExecutionContext> {
+    let mut timers_by_task = HashMap::<String, Vec<TaskTimerContext>>::new();
+    let mut pending_actions_by_task = HashMap::<String, Vec<IrPendingActionContext>>::new();
+    let mut seen_timers = HashSet::<(String, String, String, Option<u64>)>::new();
+    let mut seen_pending = HashSet::<(String, String, String, Option<String>)>::new();
+
+    for transition in transitions {
+        let task_name = transition.from.task_name.clone();
+        let source_state = transition.from.clone();
+
+        for timer in &transition.timers {
+            let key = (
+                task_name.clone(),
+                source_state.step_name.clone(),
+                timer.timer_name.clone(),
+                timer.duration_ms,
+            );
+            if seen_timers.insert(key) {
+                timers_by_task
+                    .entry(task_name.clone())
+                    .or_default()
+                    .push(TaskTimerContext {
+                        timer_name: timer.timer_name.clone(),
+                        source_state: source_state.clone(),
+                        duration_ms: timer.duration_ms,
+                        active: false,
+                    });
+            }
+        }
+    }
+
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            let source_state = State {
+                task_name: task.name.clone(),
+                step_name: step.name.clone(),
+            };
+            let mut actions = Vec::new();
+            collect_actions(&step.statements, &mut actions);
+
+            for action in actions {
+                let Some((action_kind, target)) = pending_action_descriptor_from_statement(&action)
+                else {
+                    continue;
+                };
+                let pending_key = (
+                    task.name.clone(),
+                    step.name.clone(),
+                    action_kind_name(&action_kind).to_string(),
+                    target.clone(),
+                );
+                if seen_pending.insert(pending_key) {
+                    pending_actions_by_task
+                        .entry(task.name.clone())
+                        .or_default()
+                        .push(IrPendingActionContext {
+                            source_state: source_state.clone(),
+                            action_kind,
+                            target,
+                            active: false,
+                        });
+                }
+            }
+        }
+    }
+
+    tasks
+        .tasks
+        .iter()
+        .filter_map(|task| {
+            let entry_step = task.steps.first()?;
+            let entry_state = State {
+                task_name: task.name.clone(),
+                step_name: entry_step.name.clone(),
+            };
+            Some(TaskExecutionContext {
+                task_name: task.name.clone(),
+                entry_state: entry_state.clone(),
+                current_state: entry_state,
+                blocking_state: TaskBlockingState::Ready,
+                timers: timers_by_task.remove(&task.name).unwrap_or_default(),
+                pending_actions: pending_actions_by_task
+                    .remove(&task.name)
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+fn pending_action_descriptor_from_statement(
+    action: &ActionStatement,
+) -> Option<(ActionKind, Option<String>)> {
+    match action {
+        ActionStatement::AxisMoveRelative { target, .. } => Some((
+            ActionKind::AxisMoveRelative,
+            Some(target.device.clone()),
+        )),
+        ActionStatement::AxisMoveAbsolute { target, .. } => Some((
+            ActionKind::AxisMoveAbsolute,
+            Some(target.device.clone()),
+        )),
+        ActionStatement::Call { function, .. } => Some((ActionKind::CallExtern, Some(function.clone()))),
+        ActionStatement::Extend { .. }
+        | ActionStatement::Retract { .. }
+        | ActionStatement::Set { .. }
+        | ActionStatement::SetAnalog { .. }
+        | ActionStatement::SetAnalogExpr { .. }
+        | ActionStatement::Compute { .. }
+        | ActionStatement::CamEngage { .. }
+        | ActionStatement::CamDisengage { .. }
+        | ActionStatement::CamSwitch { .. }
+        | ActionStatement::CamPhase { .. }
+        | ActionStatement::Log { .. } => None,
     }
 }
 
@@ -5065,7 +5188,11 @@ fn binary_value_text(value: &IrBinaryValue) -> &'static str {
 }
 
 fn bool_text(value: bool) -> &'static str {
-    if value { "true" } else { "false" }
+    if value {
+        "true"
+    } else {
+        "false"
+    }
 }
 
 fn load_axis_motion_param_sets() -> Result<HashMap<String, AxisMotionParamSetDef>, Vec<PlcError>> {
@@ -7142,8 +7269,8 @@ mod tests {
     };
     use crate::device_library::DeviceLibrary;
     use crate::ir::{
-        ConnectionType, DeviceKind, SafetyRelation, TimerOperationKind, TimingRelation,
-        TimingScope, TransitionGuard,
+        ActionKind, ConnectionType, DeviceKind, SafetyRelation, TaskBlockingState,
+        TimerOperationKind, TimingRelation, TimingScope, TransitionGuard,
     };
     use crate::parser::parse_plc;
     use petgraph::visit::EdgeRef;
@@ -8579,18 +8706,14 @@ task ready:
         let program = parse_plc(input).expect("PRD 5.5.1 示例应能成功解析为 AST");
         let state_machine = build_state_machine(&program).expect("应能从 5.5.1 示例构建状态机");
 
-        assert!(
-            state_machine
-                .states
-                .iter()
-                .any(|state| state.task_name == "init" && state.step_name == "extend_A")
-        );
-        assert!(
-            state_machine
-                .states
-                .iter()
-                .any(|state| state.task_name == "init" && state.step_name == "retract_B")
-        );
+        assert!(state_machine
+            .states
+            .iter()
+            .any(|state| state.task_name == "init" && state.step_name == "extend_A"));
+        assert!(state_machine
+            .states
+            .iter()
+            .any(|state| state.task_name == "init" && state.step_name == "retract_B"));
 
         let has_wait_transition = state_machine.transitions.iter().any(|transition| {
             transition.from.task_name == "init"
@@ -10797,5 +10920,72 @@ task main:
             .collect::<Vec<_>>()
             .join("\n");
         assert!(joined.contains("propagation_targets 只能包含轴设备"));
+    }
+
+    #[test]
+    fn state_machine_populates_task_execution_contexts_with_timer_and_pending_metadata() {
+        let input = "[topology]
+variable input_value: float = 1.0
+variable output_value: float = 0.0
+extern function calc(value: float) -> float {
+    rust_module: \"math::calc\"
+    pure: false
+    time_bound_us: 50
+}
+
+[constraints]
+
+[tasks]
+task loader:
+    step invoke:
+        action: call calc(input_value) -> output_value
+        delay: 20ms
+    on_complete: goto timeout
+
+task watcher:
+    step await_output:
+        wait: output_value > 0.5
+        timeout: 30ms -> goto timeout
+
+task timeout:
+    step halt:
+";
+
+        let program = parse_plc(input).expect("fixture should parse");
+        let sm = build_state_machine(&program).expect("state machine should be built");
+
+        assert_eq!(sm.task_contexts.len(), 3);
+
+        let loader_ctx = sm
+            .task_contexts
+            .iter()
+            .find(|ctx| ctx.task_name == "loader")
+            .expect("loader context should exist");
+        assert_eq!(loader_ctx.entry_state.step_name, "invoke");
+        assert!(matches!(
+            loader_ctx.blocking_state,
+            TaskBlockingState::Ready
+        ));
+        assert!(loader_ctx
+            .timers
+            .iter()
+            .any(|timer| timer.timer_name == "loader.invoke.delay_1"));
+        assert!(loader_ctx.pending_actions.iter().any(|action| {
+            action.action_kind == ActionKind::CallExtern
+                && action.target.as_deref() == Some("calc")
+                && action.source_state.task_name == "loader"
+                && action.source_state.step_name == "invoke"
+        }));
+
+        let watcher_ctx = sm
+            .task_contexts
+            .iter()
+            .find(|ctx| ctx.task_name == "watcher")
+            .expect("watcher context should exist");
+        assert_eq!(watcher_ctx.entry_state.step_name, "await_output");
+        assert!(watcher_ctx
+            .timers
+            .iter()
+            .any(|timer| timer.timer_name == "watcher.await_output.timeout_1"));
     }
 }

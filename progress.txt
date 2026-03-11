@@ -3,6 +3,8 @@ Started: 2026-03-11 00:08:32 CST
 ## Codebase Patterns
 - 并发 task 与阻塞 step 的术语、推进规则与自动阻塞范围，以 `docs/architecture/signal-direction.md` 为单一语义源。
 - 本仓库最终回归门禁优先使用完整 `cargo test`，仅 `cargo test --lib` 不能替代端到端回归。
+- Task 级 pending action 元数据应从 step 语句收集，不应只依赖 transition.actions；阻塞语句可能让 transition 丢失 action。
+
 
 ---
 ## 2026-03-11 03:15 CST - US-001..US-020
@@ -25,4 +27,15 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Keep Gate-A semantics in a dedicated architecture doc and treat it as immutable source vocabulary before touching IR/runtime/verification.
   - If `progress.txt` lacks `Codebase Patterns`, add it at the top and keep entries reusable instead of story-specific.
+---
+## 2026-03-11 20:07 CST - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Extended semantic lowering so IR task contexts collect `pending_actions` from step statements (not only transition actions), preserving metadata for blocking paths like `delay/wait/timeout`.
+- Adjusted the US-002 semantic fixture to include an explicit completion path, making delay timer metadata assertions valid.
+- Updated `prd.json` to set `US-002` (`扩展 IR 以表达多 task 执行上下文`) to `passes: true`.
+- Files changed: `src/semantic/mod.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --lib task_execution_contexts`, `cargo test`.
+- **Learnings for future iterations:**
+  - For concurrent task IR metadata, derive pending-action inventory from AST step statements; transition-level extraction is incomplete for blocking-step encodings.
+  - Keep one-story validation strict by running a focused test first, then full `cargo test` as final gate.
 ---
