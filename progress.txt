@@ -9,6 +9,7 @@ Started: 2026-03-11 00:08:32 CST
 - runtime step 离开判定应集中在统一 completion 决策函数（action/delay/wait 共用），避免分支内重复写跳转条件。
 - 当 action step 出现 Pending 长时动作时，后续 tick 必须从挂起动作继续轮询，不能重放挂起动作之前的即时 action（避免重复 side effect）。
 - `axis.move_relative/axis.move_absolute` 默认是 blocking 长时动作；即使 DSL 未显式写 `wait`，也要用 Pending 轮询驱动 step 留驻，并覆盖 Pending->Done 与 Pending->Fault 集成回归。
+- axis `timeout/on_*fault` 语义若在 IR 中以 action 内分支存在，必须由 `runtime_bridge` 预先解析成 runtime `StepId` 元数据；`runtime-core` 在 Pending 轮询阶段消费这些元数据完成分流。
 
 
 
@@ -108,4 +109,17 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - Use runtime-bridge integration tests (not only runtime-core unit tests) to lock semantic contracts that depend on compiler + bridge + runtime together.
   - For default-blocking action semantics, always assert both the first Pending tick remains on the action step and a later polling tick resolves via Done/Fault.
+---
+## 2026-03-11 22:17 CST - US-008
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Implemented pending-axis timeout/fault routing end-to-end: `runtime_bridge` now lowers `axis.move_*` timeout + fault branches (including refined route matchers) into runtime `StepId` metadata, and `runtime-core` consumes that metadata during Pending polling to route `Pending -> timeout` and `Pending -> reject/motion/safety` without surfacing `RuntimeError::AxisFault` in bridged flows.
+- Added runtime-core route-priority unit coverage (`first matching route` then primary bucket fallback) and runtime-bridge integration regressions for `Pending -> timeout` plus `Pending -> reject/motion/safety`.
+- Synced runtime program codegen to the expanded `AxisMotionCommand` schema so generated Rust modules preserve axis timeout/fault routing metadata.
+- Updated architecture guidance in `AGENTS.md` for the reusable bridge/runtime contract around axis route metadata.
+- Updated `prd.json` to set `US-008` (`为挂起轴运动接入超时和故障路由`) to `passes: true`.
+- Files changed: `crates/runtime-core/src/lib.rs`, `src/runtime_bridge.rs`, `tests/runtime_bridge_us006.rs`, `crates/codegen/src/lib.rs`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test -p runtime-core axis_fault_routing_resolves_vendor_match_and_primary_bucket_fallback`, `cargo test --test runtime_bridge_us006 axis_move_pending_`, `cargo test`.
+- **Learnings for future iterations:**
+  - For long-running actions with DSL-level timeout/fault branches, keep runtime action execution backward-compatible by routing only when a matching Pending context exists; non-pending or metadata-missing actions can still surface explicit runtime errors.
+  - Any `runtime-core::Action` schema change must be mirrored in `crates/codegen/src/lib.rs` formatter output; otherwise generated static program modules silently lose semantics.
 ---

@@ -381,6 +381,81 @@ pub struct AxisMotionCommand {
     pub value: f32,
     pub speed: f32,
     pub require_homed: bool,
+    pub timeout: Option<Timeout>,
+    pub fault_routing: Option<AxisFaultRouting>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisFaultRouteKind {
+    Reject,
+    Motion,
+    Safety,
+    Vendor,
+}
+
+impl AxisFaultRouteKind {
+    pub const fn from_fault_kind(kind: AxisFaultKind) -> Self {
+        match kind {
+            AxisFaultKind::Reject => Self::Reject,
+            AxisFaultKind::Motion => Self::Motion,
+            AxisFaultKind::Safety => Self::Safety,
+            AxisFaultKind::Vendor { .. } => Self::Vendor,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisFaultRouteRule {
+    pub kind: Option<AxisFaultRouteKind>,
+    pub code: Option<i32>,
+    pub target: StepId,
+}
+
+impl AxisFaultRouteRule {
+    pub fn matches(&self, kind: AxisFaultRouteKind, code: i32) -> bool {
+        let kind_match = match self.kind {
+            Some(expected) => expected == kind,
+            None => true,
+        };
+        let code_match = match self.code {
+            Some(expected) => expected == code,
+            None => true,
+        };
+        kind_match && code_match
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisFaultRouting {
+    pub on_reject: StepId,
+    pub on_motion_fault: StepId,
+    pub on_safety_fault: StepId,
+    pub on_reject_routes: &'static [AxisFaultRouteRule],
+    pub on_motion_fault_routes: &'static [AxisFaultRouteRule],
+    pub on_safety_fault_routes: &'static [AxisFaultRouteRule],
+}
+
+impl AxisFaultRouting {
+    pub fn resolve_target(&self, fault: AxisFault) -> StepId {
+        let route_kind = AxisFaultRouteKind::from_fault_kind(fault.kind);
+        let (primary, routes) = match fault.kind {
+            AxisFaultKind::Reject => (self.on_reject, self.on_reject_routes),
+            AxisFaultKind::Motion => (self.on_motion_fault, self.on_motion_fault_routes),
+            AxisFaultKind::Safety => (self.on_safety_fault, self.on_safety_fault_routes),
+            AxisFaultKind::Vendor { category, .. } => match category {
+                AxisFaultCategory::Recoverable => (self.on_reject, self.on_reject_routes),
+                AxisFaultCategory::NonRecoverable => {
+                    (self.on_motion_fault, self.on_motion_fault_routes)
+                }
+                AxisFaultCategory::Safety => (self.on_safety_fault, self.on_safety_fault_routes),
+            },
+        };
+
+        routes
+            .iter()
+            .find(|route| route.matches(route_kind, fault.error_code))
+            .map_or(primary, |route| route.target)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1185,6 +1260,8 @@ impl<'a> Runtime<'a> {
                 match instr {
                     Instr::Action { actions, next } => {
                         let mut action_completion = ActionCompletionState::Completed;
+                        let mut action_transition_override: Option<(StepId, TransitionReason)> =
+                            None;
                         let mut action_start_index = 0usize;
                         if let TaskPendingActionState::AxisMotion {
                             target,
@@ -1294,6 +1371,17 @@ impl<'a> Runtime<'a> {
                                                 target: command.target,
                                                 action_index,
                                             };
+                                        if let Some(timeout) = command.timeout
+                                            && elapsed >= timeout.after_ticks
+                                        {
+                                            self.task_contexts[task_idx].pending_action_state =
+                                                TaskPendingActionState::Idle;
+                                            self.set_axis_homed(command.target, false)
+                                                .map_err(RuntimeTickError::Core)?;
+                                            action_transition_override =
+                                                Some((timeout.target, TransitionReason::Timeout));
+                                            break;
+                                        }
                                         action_completion = ActionCompletionState::Pending;
                                         break;
                                     }
@@ -1343,12 +1431,19 @@ impl<'a> Runtime<'a> {
                                                 }
                                             }
                                         }
-                                        return Err(RuntimeTickError::Core(
-                                            RuntimeError::AxisFault {
-                                                target: command.target,
-                                                fault,
-                                            },
-                                        ));
+                                        if polling_this_action
+                                            && let Some(routing) = command.fault_routing
+                                        {
+                                            action_transition_override = Some((
+                                                routing.resolve_target(fault),
+                                                TransitionReason::Action,
+                                            ));
+                                            break;
+                                        }
+                                        return Err(RuntimeTickError::Core(RuntimeError::AxisFault {
+                                            target: command.target,
+                                            fault,
+                                        }));
                                     }
                                 }
                             }
@@ -1368,6 +1463,11 @@ impl<'a> Runtime<'a> {
                             if action_completion == ActionCompletionState::Pending {
                                 break;
                             }
+                    }
+                    if let Some((target, reason)) = action_transition_override {
+                        self.transition(task_idx, now, target, reason, on_event)
+                            .map_err(RuntimeTickError::Core)?;
+                        continue;
                     }
                     match Self::action_completion_decision(next, action_completion) {
                         StepCompletionDecision::ContinueWith { target, reason } => {
@@ -3292,6 +3392,8 @@ mod tests {
                 value: 10.0,
                 speed: 2.0,
                 require_homed: false,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3340,6 +3442,8 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: false,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3396,6 +3500,8 @@ mod tests {
                     value: 10.0,
                     speed: 2.0,
                     require_homed: false,
+                    timeout: None,
+                    fault_routing: None,
                 },
             },
         ];
@@ -3477,6 +3583,8 @@ mod tests {
                 value: 10.0,
                 speed: 2.0,
                 require_homed: false,
+                timeout: None,
+                fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3551,6 +3659,8 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3606,6 +3716,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static ACTIONS_ABS: [Action; 1] = [Action::AxisMove {
@@ -3616,6 +3728,8 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 3] = [
@@ -3671,6 +3785,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static ACTIONS_ABS: [Action; 1] = [Action::AxisMove {
@@ -3681,6 +3797,8 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 3] = [
@@ -3763,6 +3881,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3816,6 +3936,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3869,6 +3991,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -3922,6 +4046,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [
@@ -4029,6 +4155,62 @@ mod tests {
     }
 
     #[test]
+    fn axis_fault_routing_resolves_vendor_match_and_primary_bucket_fallback() {
+        static REJECT_ROUTES: [AxisFaultRouteRule; 1] = [AxisFaultRouteRule {
+            kind: Some(AxisFaultRouteKind::Vendor),
+            code: Some(1201),
+            target: StepId(11),
+        }];
+        static MOTION_ROUTES: [AxisFaultRouteRule; 2] = [
+            AxisFaultRouteRule {
+                kind: Some(AxisFaultRouteKind::Vendor),
+                code: None,
+                target: StepId(21),
+            },
+            AxisFaultRouteRule {
+                kind: Some(AxisFaultRouteKind::Vendor),
+                code: Some(2202),
+                target: StepId(22),
+            },
+        ];
+        static SAFETY_ROUTES: [AxisFaultRouteRule; 0] = [];
+
+        let routing = AxisFaultRouting {
+            on_reject: StepId(1),
+            on_motion_fault: StepId(2),
+            on_safety_fault: StepId(3),
+            on_reject_routes: &REJECT_ROUTES,
+            on_motion_fault_routes: &MOTION_ROUTES,
+            on_safety_fault_routes: &SAFETY_ROUTES,
+        };
+
+        assert_eq!(routing.resolve_target(AxisFault::reject(99)), StepId(1));
+        assert_eq!(routing.resolve_target(AxisFault::motion(77)), StepId(2));
+        assert_eq!(routing.resolve_target(AxisFault::safety(88)), StepId(3));
+        assert_eq!(
+            routing.resolve_target(AxisFault::new(
+                AxisFaultKind::Vendor {
+                    category: AxisFaultCategory::Recoverable,
+                    vendor_code: 1201,
+                },
+                1201,
+            )),
+            StepId(11)
+        );
+        assert_eq!(
+            routing.resolve_target(AxisFault::new(
+                AxisFaultKind::Vendor {
+                    category: AxisFaultCategory::NonRecoverable,
+                    vendor_code: 2202,
+                },
+                2202,
+            )),
+            StepId(21),
+            "first matching route should win inside the same fault bucket"
+        );
+    }
+
+    #[test]
     fn axis_fault_policy_propagates_targets_within_same_tick() {
         static ACTIONS: [Action; 1] = [Action::AxisMove {
             command: AxisMotionCommand {
@@ -4038,6 +4220,8 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+            timeout: None,
+            fault_routing: None,
             },
         }];
         static STEPS: [Step<'static>; 2] = [

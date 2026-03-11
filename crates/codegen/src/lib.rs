@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use runtime_core::{
-    Action, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr,
-    Program, StepId, Timeout,
+    Action, AxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting, AxisMoveKind, CamAnalogField,
+    CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr, Program, StepId, Timeout,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,7 +118,7 @@ pub fn generate_program_module(
     out.push_str(
         "  use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, AnalogOutputId};\n",
     );
-    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, AxisMotionCommand, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr, PidConfig, Program, Step, StepId, Task, Timeout};\n\n");
+    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, AxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting, AxisMotionCommand, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr, PidConfig, Program, Step, StepId, Task, Timeout};\n\n");
 
     // Emit actions arrays, then steps, then tasks, then program.
     for (tidx, task) in program.tasks.iter().enumerate() {
@@ -254,7 +254,7 @@ fn format_action(a: &Action) -> String {
             format_expr_program(&offset_expr)
         ),
         Action::AxisMove { command } => format!(
-            "Action::AxisMove {{ command: AxisMotionCommand {{ target: {:?}, port: {:?}, kind: AxisMoveKind::{}, value: {}, speed: {}, require_homed: {} }} }}",
+            "Action::AxisMove {{ command: AxisMotionCommand {{ target: {:?}, port: {:?}, kind: AxisMoveKind::{}, value: {}, speed: {}, require_homed: {}, timeout: {}, fault_routing: {} }} }}",
             command.target,
             command.port,
             match command.kind {
@@ -263,7 +263,9 @@ fn format_action(a: &Action) -> String {
             },
             format_f32(command.value),
             format_f32(command.speed),
-            command.require_homed
+            command.require_homed,
+            format_axis_timeout(command.timeout),
+            format_axis_fault_routing(command.fault_routing),
         ),
         Action::Extend { output } => {
             format!("Action::Extend {{ output: DigitalOutputId({}) }}", output.0)
@@ -317,6 +319,67 @@ fn format_u16_slice(values: &[u16]) -> String {
     }
     out.push(']');
     out
+}
+
+fn format_axis_timeout(timeout: Option<Timeout>) -> String {
+    match timeout {
+        Some(timeout) => format!(
+            "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
+            timeout.after_ticks, timeout.target.0
+        ),
+        None => "None".to_string(),
+    }
+}
+
+fn format_axis_fault_route_kind(kind: AxisFaultRouteKind) -> &'static str {
+    match kind {
+        AxisFaultRouteKind::Reject => "Reject",
+        AxisFaultRouteKind::Motion => "Motion",
+        AxisFaultRouteKind::Safety => "Safety",
+        AxisFaultRouteKind::Vendor => "Vendor",
+    }
+}
+
+fn format_axis_fault_route_rules(routes: &[AxisFaultRouteRule]) -> String {
+    let mut out = String::new();
+    out.push('[');
+    for (idx, route) in routes.iter().enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        let kind = match route.kind {
+            Some(kind) => format!(
+                "Some(AxisFaultRouteKind::{})",
+                format_axis_fault_route_kind(kind)
+            ),
+            None => "None".to_string(),
+        };
+        let code = match route.code {
+            Some(code) => format!("Some({code})"),
+            None => "None".to_string(),
+        };
+        out.push_str(&format!(
+            "AxisFaultRouteRule {{ kind: {kind}, code: {code}, target: StepId({}) }}",
+            route.target.0
+        ));
+    }
+    out.push(']');
+    out
+}
+
+fn format_axis_fault_routing(routing: Option<AxisFaultRouting>) -> String {
+    match routing {
+        Some(routing) => format!(
+            "Some(AxisFaultRouting {{ on_reject: StepId({}), on_motion_fault: StepId({}), on_safety_fault: StepId({}), on_reject_routes: &{}, on_motion_fault_routes: &{}, on_safety_fault_routes: &{} }})",
+            routing.on_reject.0,
+            routing.on_motion_fault.0,
+            routing.on_safety_fault.0,
+            format_axis_fault_route_rules(routing.on_reject_routes),
+            format_axis_fault_route_rules(routing.on_motion_fault_routes),
+            format_axis_fault_route_rules(routing.on_safety_fault_routes),
+        ),
+        None => "None".to_string(),
+    }
 }
 
 fn format_expr_op(op: &ExprOp) -> String {
