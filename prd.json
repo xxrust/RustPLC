@@ -257,8 +257,8 @@
         "Tests pass"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": "Validated by full cargo test sweep on 2026-03-11."
+      "passes": true,
+      "notes": "Added blocking axis.move baseline example + integration/runtime regression coverage; validated by full cargo test on 2026-03-12."
     },
     {
       "id": "US-017",

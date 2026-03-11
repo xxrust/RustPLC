@@ -855,6 +855,30 @@ fn axis_move_blocks_current_step_without_explicit_wait_until_done() {
 }
 
 #[test]
+fn axis_move_blocking_baseline_example_blocks_without_explicit_wait_until_done() {
+    let program = compile_example_to_runtime("axis_move_blocking_baseline.plc", 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let mut calls = 0usize;
+
+    rt.tick_with_axis(&mut io, |_| {
+        calls += 1;
+        AxisMotionResult::Pending
+    })
+    .expect("pending axis move should keep blocking baseline step active");
+    assert_eq!(calls, 1);
+    assert_eq!(current_step_name(&rt, &program), "main.move_axis");
+
+    rt.tick_with_axis(&mut io, |_| {
+        calls += 1;
+        AxisMotionResult::Done
+    })
+    .expect("done polling result should release blocking baseline step");
+    assert_eq!(calls, 2);
+    assert_eq!(current_step_name(&rt, &program), "main.move_done");
+}
+
+#[test]
 fn axis_move_pending_fault_routes_to_declared_branch_targets() {
     let cases = [
         (AxisMotionResult::reject(66), "reject_fault.halt"),

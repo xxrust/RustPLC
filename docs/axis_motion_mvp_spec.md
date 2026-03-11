@@ -62,6 +62,7 @@ action: axis.move_absolute(<axis_device>, position: <real>, params: <motion_para
 - 编译器不要求在 `axis.move_*` 后额外补 `wait` 才能获得阻塞语义。
 - 当动作结果为 `Pending` 时，当前 step 必须保持在原位并在后续 tick 继续轮询该动作。
 - 仅当动作结果进入完成态（例如 `Done`）或异常终态（例如 `Fault/Timeout`）时，step 才允许离开当前等待阶段。
+- 标准阻塞示例基线：`examples/axis_move_blocking_baseline.plc`（无额外 `wait`，通过 `timeout + on_*fault` 完整分流）。
 
 轴设备声明白名单（拓扑层）：
 

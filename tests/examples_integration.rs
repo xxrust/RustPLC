@@ -1355,6 +1355,42 @@ fn parses_axis_fault_normal_path_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_axis_move_blocking_baseline_example_without_explicit_wait() {
+    let source = read_example("axis_move_blocking_baseline.plc");
+    assert!(
+        !source.contains("wait:"),
+        "blocking baseline example should not rely on explicit wait"
+    );
+    assert!(
+        source.contains("timeout:"),
+        "blocking baseline example should declare timeout branch"
+    );
+    assert!(
+        source.contains("on_reject")
+            && source.contains("on_motion_fault")
+            && source.contains("on_safety_fault"),
+        "blocking baseline example should declare all fault branches"
+    );
+
+    let ir_json = compile_source_to_json(&source)
+        .expect("axis_move_blocking_baseline example should compile");
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+    assert!(
+        transitions.iter().any(|transition| {
+            transition["actions"].as_array().is_some_and(|actions| {
+                actions
+                    .iter()
+                    .any(|action| action["action"] == Value::String("axis_move_relative".to_string()))
+            })
+        }),
+        "blocking baseline example should include axis_move_relative"
+    );
+}
+
+#[test]
 fn parses_axis_fault_recoverable_path_example_with_policy_into_verified_ir_json() {
     let source = read_example("axis_fault_recoverable_path.plc");
     let ir_json =

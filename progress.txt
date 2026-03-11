@@ -10,6 +10,7 @@ Started: 2026-03-11 00:08:32 CST
 - runtime step 离开判定应集中在统一 completion 决策函数（action/delay/wait 共用），避免分支内重复写跳转条件。
 - 当 action step 出现 Pending 长时动作时，后续 tick 必须从挂起动作继续轮询，不能重放挂起动作之前的即时 action（避免重复 side effect）。
 - `axis.move_relative/axis.move_absolute` 默认是 blocking 长时动作；即使 DSL 未显式写 `wait`，也要用 Pending 轮询驱动 step 留驻，并覆盖 Pending->Done 与 Pending->Fault 集成回归。
+- 对“示例即语义基线”的故事，优先同时补 `tests/examples_integration.rs`（示例编译回归）与 `tests/runtime_bridge_us006.rs`（阻塞/Pending 运行时回归），并复用同一个 `examples/*.plc` 文件。
 - axis `timeout/on_*fault` 语义若在 IR 中以 action 内分支存在，必须由 `runtime_bridge` 预先解析成 runtime `StepId` 元数据；`runtime-core` 在 Pending 轮询阶段消费这些元数据完成分流。
 - `runtime_bridge` 生成并发 runtime task 时，优先选择“无跨 task 入边”的 root task 作为 active 集合；若不存在 root task，回退到 IR 初始 task 以避免旧工作流被并发全激活破坏。
 - `verification::safety` 并发全局状态建模要复用 runtime root task 选择口径，并在 `ConcreteState` 中显式携带 task 级当前位置与 pending 标记，避免验证和执行对 active task 集合的理解漂移。
@@ -227,4 +228,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
 - **Learnings for future iterations:**
   - For migration-facing warnings, keep a stable machine-readable code and include it in both structured report payload and CLI warning text.
   - Add backward-compatibility tests whenever report schemas evolve, validating old consumer/new payload and new consumer/old payload paths together.
+---
+
+## 2026-03-12 03:51 CST - US-016
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID (env not set)
+- Added a new baseline example `examples/axis_move_blocking_baseline.plc` demonstrating default blocking `axis.move_relative` with full `timeout/on_reject/on_motion_fault/on_safety_fault` branching and no explicit `wait`.
+- Added example regression coverage in `tests/examples_integration.rs` to compile the new example and assert it remains wait-free while containing required fault/timeout branches.
+- Added runtime behavior regression in `tests/runtime_bridge_us006.rs` to execute the same example under `Pending -> Done` polling and verify step blocking without explicit `wait`.
+- Updated docs to reference the baseline example as the canonical blocking-move fixture (`docs/axis_motion_mvp_spec.md`), and added the reusable test-linkage guideline to `AGENTS.md`.
+- Updated `prd.json` to set `US-016` (`提供阻塞式 axis.move_* 示例`) to `passes: true`.
+- Files changed: `examples/axis_move_blocking_baseline.plc`, `tests/examples_integration.rs`, `tests/runtime_bridge_us006.rs`, `docs/axis_motion_mvp_spec.md`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- Quality checks: `cargo test --test examples_integration parses_axis_move_blocking_baseline_example_without_explicit_wait -- --nocapture`, `cargo test --test runtime_bridge_us006 axis_move_blocking_baseline_example_blocks_without_explicit_wait_until_done -- --nocapture`, `cargo test`.
+- **Learnings for future iterations:**
+  - If a new story introduces a canonical example fixture, bind it to both compile-time example tests and runtime execution tests to prevent semantic/documentation drift.
+  - For axis blocking fixtures, keep branch completeness (`timeout + on_reject + on_motion_fault + on_safety_fault`) explicit in the example itself so it passes semantic gates before behavior assertions run.
 ---
