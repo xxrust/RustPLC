@@ -3,3 +3,22 @@
 /archive
 /.ralph_logs
 /历史prd
+
+# Root-level editor and OS files
+/.vscode/
+/.idea/
+/.DS_Store
+/Thumbs.db
+
+# Root-level temporary files
+/*.log
+/*.tmp
+/*.bak
+/*.swp
+
+# Root-level local environment files
+/.env
+/.env.*
+
+# Generated test artifacts
+/output/
