@@ -22,7 +22,7 @@ jobs:
             workdir="$(mktemp -d)"
             git clone --depth 1 https://github.com/beremiz/matiec.git "$workdir/matiec"
             cd "$workdir/matiec"
-            ./autogen.sh
+            autoreconf -i
             ./configure
             make -j"$(nproc)"
             sudo make install
