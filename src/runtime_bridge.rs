@@ -1,9 +1,10 @@
 use crate::ir::{
     AxisAutoResetPolicy as IrAxisAutoResetPolicy,
     AxisFaultPropagationScope as IrAxisFaultPropagationScope,
-    AxisFaultSeverity as IrAxisFaultSeverity, AxisStopMode as IrAxisStopMode,
-    BinaryValue as IrBinaryValue, CamInterpolation as IrCamInterpolation, DeviceKind, State,
-    StateMachine, TopologyGraph, Transition, TransitionAction, TransitionGuard,
+    AxisFaultRouteKind as IrAxisFaultRouteKind, AxisFaultSeverity as IrAxisFaultSeverity,
+    AxisStopMode as IrAxisStopMode, BinaryValue as IrBinaryValue,
+    CamInterpolation as IrCamInterpolation, DeviceKind, State, StateMachine, TopologyGraph,
+    Transition, TransitionAction, TransitionGuard,
 };
 use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
@@ -12,14 +13,14 @@ use petgraph::graph::NodeIndex;
 use runtime_core::{
     Action, AnalogRange, AntiWindup, AxisAutoResetPolicy as RtAxisAutoResetPolicy, AxisFaultPolicy,
     AxisFaultPropagationScope as RtAxisFaultPropagationScope,
+    AxisFaultRouteKind as RtAxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting,
     AxisFaultSeverity as RtAxisFaultSeverity, AxisMotionCommand, AxisMoveKind,
     AxisStopMode as RtAxisStopMode, CamAnalogField, CamCouplingConfig, CamDigitalField,
     CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, ExprOp, ExprProgram, Instr,
-    MAX_CAM_POINTS, PidConfig, Program, SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
+    MAX_CAM_POINTS, MAX_TRANSITIONS_PER_TASK_PER_TICK, PidConfig, Program,
+    SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
-
-const MAX_TRANSITIONS_PER_TICK: usize = 64;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BridgeError {
@@ -142,7 +143,8 @@ pub enum BridgeError {
 /// - `goto`
 ///
 /// Notes:
-/// - This converter flattens all PLC tasks into a single `runtime-core` task.
+/// - Runtime tasks are generated from root task contexts (tasks without cross-task incoming edges).
+/// - Per-task step graphs stay local (`StepId` is scoped per runtime task).
 /// - Generated program uses leaked allocations to produce a `'static` `Program`.
 pub fn state_machine_to_runtime_program(
     topology: &TopologyGraph,
@@ -183,77 +185,151 @@ pub fn state_machine_to_runtime_program(
         })
         .collect::<HashMap<_, _>>();
 
-    // Assign StepId to every IR state (flattened).
-    let mut state_to_step = HashMap::<(String, String), StepId>::new();
-    let mut step_names: Vec<&'static str> = Vec::with_capacity(sm.states.len());
-
-    for (idx, s) in sm.states.iter().enumerate() {
-        let name = format!("{}.{}", s.task_name, s.step_name);
-        let leaked: &'static str = Box::leak(name.into_boxed_str());
-        step_names.push(leaked);
-        state_to_step.insert(
-            (s.task_name.clone(), s.step_name.clone()),
-            StepId(idx as u16),
-        );
-    }
-
-    let initial_id = state_to_step
-        .get(&(sm.initial.task_name.clone(), sm.initial.step_name.clone()))
-        .copied()
-        .ok_or_else(|| BridgeError::MissingInitialState {
+    let task_entry_states = sm
+        .task_contexts
+        .iter()
+        .map(|ctx| (ctx.task_name.clone(), ctx.entry_state.clone()))
+        .collect::<HashMap<_, _>>();
+    if task_entry_states.is_empty() {
+        return Err(BridgeError::MissingInitialState {
             state: format!("{}.{}", sm.initial.task_name, sm.initial.step_name),
-        })?;
+        });
+    }
+    let known_state_keys = sm
+        .states
+        .iter()
+        .map(|state| (state.task_name.clone(), state.step_name.clone()))
+        .collect::<HashSet<_>>();
+    let runtime_root_tasks = select_runtime_root_tasks(sm, &task_entry_states);
+    if runtime_root_tasks.is_empty() {
+        return Err(BridgeError::MissingInitialState {
+            state: format!("{}.{}", sm.initial.task_name, sm.initial.step_name),
+        });
+    }
 
     // Index transitions by from-state.
-    let mut outgoing: HashMap<(String, String), Vec<&Transition>> = HashMap::new();
-    for t in &sm.transitions {
-        outgoing
-            .entry((t.from.task_name.clone(), t.from.step_name.clone()))
+    let mut outgoing_indices: HashMap<(String, String), Vec<usize>> = HashMap::new();
+    for (idx, transition) in sm.transitions.iter().enumerate() {
+        outgoing_indices
+            .entry((
+                transition.from.task_name.clone(),
+                transition.from.step_name.clone(),
+            ))
             .or_default()
-            .push(t);
+            .push(idx);
     }
 
-    // Placeholder steps for the base IR states.
-    let mut steps: Vec<Step<'static>> = step_names
-        .iter()
-        .map(|&name| Step {
-            name,
-            instr: Instr::Halt,
-        })
-        .collect();
-
-    for (idx, s) in sm.states.iter().enumerate() {
-        let state_name = format!("{}.{}", s.task_name, s.step_name);
-        let outs = outgoing
-            .get(&(s.task_name.clone(), s.step_name.clone()))
-            .cloned()
-            .unwrap_or_default();
-
-        let instr = convert_state_outgoing(
-            &resolver,
-            &state_name,
-            &outs,
-            &state_to_step,
-            &mut steps,
+    let mut runtime_tasks: Vec<Task<'static>> = Vec::new();
+    for root_task in runtime_root_tasks {
+        let reachable_state_keys = collect_runtime_task_state_keys(
+            &root_task,
+            &task_entry_states,
+            &known_state_keys,
+            &outgoing_indices,
             sm,
-            tick_ms,
-            &variable_indices,
-            &cam_index_by_name,
-            &cam_table_index_by_name,
-            &extern_signature_by_name,
-        )?;
+        );
+        if reachable_state_keys.is_empty() {
+            continue;
+        }
 
-        steps[idx].instr = instr;
+        let local_states = sm
+            .states
+            .iter()
+            .filter(|state| {
+                reachable_state_keys.contains(&(state.task_name.clone(), state.step_name.clone()))
+            })
+            .collect::<Vec<_>>();
+        if local_states.is_empty() {
+            continue;
+        }
+
+        let mut local_state_to_step = HashMap::<(String, String), StepId>::new();
+        let mut step_names: Vec<&'static str> = Vec::with_capacity(local_states.len());
+        for (idx, state) in local_states.iter().enumerate() {
+            let name = format!("{}.{}", state.task_name, state.step_name);
+            let leaked_name: &'static str = Box::leak(name.into_boxed_str());
+            step_names.push(leaked_name);
+            local_state_to_step.insert(
+                (state.task_name.clone(), state.step_name.clone()),
+                StepId(idx as u16),
+            );
+        }
+
+        let mut steps: Vec<Step<'static>> = step_names
+            .iter()
+            .map(|&name| Step {
+                name,
+                instr: Instr::Halt,
+            })
+            .collect();
+        let local_task_entry_steps = task_entry_states
+            .iter()
+            .filter_map(|(task_name, entry_state)| {
+                local_state_to_step
+                    .get(&(entry_state.task_name.clone(), entry_state.step_name.clone()))
+                    .copied()
+                    .map(|step_id| (task_name.clone(), step_id))
+            })
+            .collect::<HashMap<_, _>>();
+
+        for (idx, state) in local_states.iter().enumerate() {
+            let state_name = format!("{}.{}", state.task_name, state.step_name);
+            let state_key = (state.task_name.clone(), state.step_name.clone());
+            let outs = outgoing_indices
+                .get(&state_key)
+                .map(|indices| {
+                    indices
+                        .iter()
+                        .map(|transition_idx| &sm.transitions[*transition_idx])
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            let instr = convert_state_outgoing(
+                &resolver,
+                &state_name,
+                &outs,
+                &local_state_to_step,
+                &local_task_entry_steps,
+                &mut steps,
+                sm,
+                tick_ms,
+                &variable_indices,
+                &cam_index_by_name,
+                &cam_table_index_by_name,
+                &extern_signature_by_name,
+            )?;
+            steps[idx].instr = instr;
+        }
+
+        let entry_state =
+            task_entry_states
+                .get(&root_task)
+                .ok_or_else(|| BridgeError::MissingInitialState {
+                    state: root_task.clone(),
+                })?;
+        let entry = local_state_to_step
+            .get(&(entry_state.task_name.clone(), entry_state.step_name.clone()))
+            .copied()
+            .ok_or_else(|| BridgeError::MissingInitialState {
+                state: format!("{}.{}", entry_state.task_name, entry_state.step_name),
+            })?;
+
+        let leaked_steps: &'static [Step<'static>] = Box::leak(steps.into_boxed_slice());
+        let leaked_task_name: &'static str = Box::leak(root_task.into_boxed_str());
+        runtime_tasks.push(Task {
+            name: leaked_task_name,
+            steps: leaked_steps,
+            entry,
+        });
     }
 
-    // Leak steps/tasks/program as 'static (sufficient for CLI + tests for now).
-    let leaked_steps: &'static [Step<'static>] = Box::leak(steps.into_boxed_slice());
-    let task = Task {
-        name: "plc",
-        steps: leaked_steps,
-        entry: initial_id,
-    };
-    let leaked_tasks: &'static [Task<'static>] = Box::leak(vec![task].into_boxed_slice());
+    if runtime_tasks.is_empty() {
+        return Err(BridgeError::MissingInitialState {
+            state: format!("{}.{}", sm.initial.task_name, sm.initial.step_name),
+        });
+    }
+    let leaked_tasks: &'static [Task<'static>] = Box::leak(runtime_tasks.into_boxed_slice());
 
     let leaked_pid_loops: &'static [PidConfig] =
         Box::leak(build_pid_configs(&resolver, topology, tick_ms)?.into_boxed_slice());
@@ -280,6 +356,245 @@ pub fn state_machine_to_runtime_program(
         cam_tables: leaked_cam_tables,
         axis_fault_policies: leaked_axis_fault_policies,
     })
+}
+
+fn select_runtime_root_tasks(
+    sm: &StateMachine,
+    task_entry_states: &HashMap<String, State>,
+) -> Vec<String> {
+    let mut cross_task_incoming = HashSet::<String>::new();
+    for transition in &sm.transitions {
+        if transition.from.task_name != transition.to.task_name {
+            cross_task_incoming.insert(transition.to.task_name.clone());
+        }
+        for target_task in axis_branch_target_task_names(&transition.actions) {
+            if transition.from.task_name != target_task {
+                cross_task_incoming.insert(target_task);
+            }
+        }
+    }
+
+    let mut roots = Vec::new();
+    for ctx in &sm.task_contexts {
+        if task_entry_states.contains_key(&ctx.task_name)
+            && !cross_task_incoming.contains(&ctx.task_name)
+        {
+            roots.push(ctx.task_name.clone());
+        }
+    }
+
+    if roots.is_empty() {
+        if task_entry_states.contains_key(&sm.initial.task_name) {
+            roots.push(sm.initial.task_name.clone());
+        } else if let Some(first) = sm.task_contexts.first() {
+            roots.push(first.task_name.clone());
+        }
+    }
+
+    roots
+}
+
+fn axis_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
+    let mut targets = Vec::new();
+    for action in actions {
+        match action {
+            TransitionAction::AxisMoveRelative {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+                ..
+            }
+            | TransitionAction::AxisMoveAbsolute {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+                ..
+            } => {
+                targets.push(timeout.target_task.clone());
+                targets.push(on_reject.target_task.clone());
+                targets.push(on_motion_fault.target_task.clone());
+                targets.push(on_safety_fault.target_task.clone());
+                targets.extend(
+                    on_reject_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+                targets.extend(
+                    on_motion_fault_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+                targets.extend(
+                    on_safety_fault_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+            }
+            _ => {}
+        }
+    }
+    targets
+}
+
+fn collect_runtime_task_state_keys(
+    root_task: &str,
+    task_entry_states: &HashMap<String, State>,
+    known_state_keys: &HashSet<(String, String)>,
+    outgoing_indices: &HashMap<(String, String), Vec<usize>>,
+    sm: &StateMachine,
+) -> HashSet<(String, String)> {
+    let Some(entry_state) = task_entry_states.get(root_task) else {
+        return HashSet::new();
+    };
+
+    let mut reachable = HashSet::<(String, String)>::new();
+    let mut queue = VecDeque::new();
+    queue.push_back((entry_state.task_name.clone(), entry_state.step_name.clone()));
+
+    while let Some(state_key) = queue.pop_front() {
+        if !reachable.insert(state_key.clone()) {
+            continue;
+        }
+
+        let Some(transition_indices) = outgoing_indices.get(&state_key) else {
+            continue;
+        };
+
+        for transition_idx in transition_indices {
+            let transition = &sm.transitions[*transition_idx];
+            queue.push_back((
+                transition.to.task_name.clone(),
+                transition.to.step_name.clone(),
+            ));
+            for branch_target in axis_branch_target_state_keys(
+                &transition.actions,
+                task_entry_states,
+                known_state_keys,
+            ) {
+                queue.push_back(branch_target);
+            }
+        }
+    }
+
+    reachable
+}
+
+fn axis_branch_target_state_keys(
+    actions: &[TransitionAction],
+    task_entry_states: &HashMap<String, State>,
+    known_state_keys: &HashSet<(String, String)>,
+) -> Vec<(String, String)> {
+    let mut targets = Vec::new();
+    for action in actions {
+        match action {
+            TransitionAction::AxisMoveRelative {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+                ..
+            }
+            | TransitionAction::AxisMoveAbsolute {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+                ..
+            } => {
+                push_axis_branch_target_state_key(
+                    &mut targets,
+                    &timeout.target_task,
+                    &timeout.target_step,
+                    task_entry_states,
+                    known_state_keys,
+                );
+                push_axis_branch_target_state_key(
+                    &mut targets,
+                    &on_reject.target_task,
+                    &on_reject.target_step,
+                    task_entry_states,
+                    known_state_keys,
+                );
+                push_axis_branch_target_state_key(
+                    &mut targets,
+                    &on_motion_fault.target_task,
+                    &on_motion_fault.target_step,
+                    task_entry_states,
+                    known_state_keys,
+                );
+                push_axis_branch_target_state_key(
+                    &mut targets,
+                    &on_safety_fault.target_task,
+                    &on_safety_fault.target_step,
+                    task_entry_states,
+                    known_state_keys,
+                );
+                for route in on_reject_routes {
+                    push_axis_branch_target_state_key(
+                        &mut targets,
+                        &route.target_task,
+                        &route.target_step,
+                        task_entry_states,
+                        known_state_keys,
+                    );
+                }
+                for route in on_motion_fault_routes {
+                    push_axis_branch_target_state_key(
+                        &mut targets,
+                        &route.target_task,
+                        &route.target_step,
+                        task_entry_states,
+                        known_state_keys,
+                    );
+                }
+                for route in on_safety_fault_routes {
+                    push_axis_branch_target_state_key(
+                        &mut targets,
+                        &route.target_task,
+                        &route.target_step,
+                        task_entry_states,
+                        known_state_keys,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    targets
+}
+
+fn push_axis_branch_target_state_key(
+    out: &mut Vec<(String, String)>,
+    target_task: &str,
+    target_step: &Option<String>,
+    task_entry_states: &HashMap<String, State>,
+    known_state_keys: &HashSet<(String, String)>,
+) {
+    if let Some(step) = target_step {
+        let key = (target_task.to_string(), step.clone());
+        if known_state_keys.contains(&key) {
+            out.push(key);
+        }
+        return;
+    }
+
+    if let Some(entry_state) = task_entry_states.get(target_task) {
+        out.push((entry_state.task_name.clone(), entry_state.step_name.clone()));
+    }
 }
 
 fn build_axis_fault_policies(topology: &TopologyGraph) -> Vec<AxisFaultPolicy<'static>> {
@@ -380,7 +695,7 @@ fn validate_extern_tick_budget(
         let state_key = (state.task_name.clone(), state.step_name.clone());
         let state_cost = worst_case_extern_cost_from_state(
             &state_key,
-            MAX_TRANSITIONS_PER_TICK,
+            MAX_TRANSITIONS_PER_TASK_PER_TICK,
             &outgoing,
             &extern_bound_us,
             &mut memo,
@@ -595,6 +910,7 @@ fn convert_state_outgoing(
     state_name: &str,
     outs: &[&Transition],
     state_to_step: &HashMap<(String, String), StepId>,
+    task_entry_steps: &HashMap<String, StepId>,
     steps: &mut Vec<Step<'static>>,
     sm: &StateMachine,
     tick_ms: u64,
@@ -610,6 +926,7 @@ fn convert_state_outgoing(
             state_name,
             outs[0],
             state_to_step,
+            task_entry_steps,
             steps,
             sm,
             tick_ms,
@@ -623,6 +940,7 @@ fn convert_state_outgoing(
             state_name,
             outs,
             state_to_step,
+            task_entry_steps,
             steps,
             sm,
             tick_ms,
@@ -643,6 +961,7 @@ fn convert_single_transition(
     state_name: &str,
     t: &Transition,
     state_to_step: &HashMap<(String, String), StepId>,
+    task_entry_steps: &HashMap<String, StepId>,
     steps: &mut Vec<Step<'static>>,
     sm: &StateMachine,
     tick_ms: u64,
@@ -661,6 +980,9 @@ fn convert_single_transition(
                     resolver,
                     state_name,
                     &t.actions,
+                    state_to_step,
+                    task_entry_steps,
+                    tick_ms,
                     variable_indices,
                     cam_indices,
                     cam_table_indices,
@@ -689,6 +1011,9 @@ fn convert_single_transition(
                     state_name,
                     &t.actions,
                     target,
+                    state_to_step,
+                    task_entry_steps,
+                    tick_ms,
                     variable_indices,
                     cam_indices,
                     cam_table_indices,
@@ -713,6 +1038,9 @@ fn convert_single_transition(
                     state_name,
                     &t.actions,
                     target,
+                    state_to_step,
+                    task_entry_steps,
+                    tick_ms,
                     variable_indices,
                     cam_indices,
                     cam_table_indices,
@@ -784,6 +1112,7 @@ fn convert_two_transitions(
     state_name: &str,
     outs: &[&Transition],
     state_to_step: &HashMap<(String, String), StepId>,
+    task_entry_steps: &HashMap<String, StepId>,
     steps: &mut Vec<Step<'static>>,
     sm: &StateMachine,
     tick_ms: u64,
@@ -815,6 +1144,7 @@ fn convert_two_transitions(
             state_name,
             always,
             state_to_step,
+            task_entry_steps,
             steps,
             sm,
             tick_ms,
@@ -886,6 +1216,9 @@ fn convert_two_transitions(
             state_name,
             &cond.actions,
             cond_target,
+            state_to_step,
+            task_entry_steps,
+            tick_ms,
             variable_indices,
             cam_indices,
             cam_table_indices,
@@ -904,6 +1237,9 @@ fn convert_two_transitions(
             state_name,
             &fallback_transition.actions,
             fallback_target,
+            state_to_step,
+            task_entry_steps,
+            tick_ms,
             variable_indices,
             cam_indices,
             cam_table_indices,
@@ -1259,6 +1595,67 @@ fn ms_to_ticks(state_name: &str, duration_ms: u64, tick_ms: u64) -> Result<u64, 
     Ok(duration_ms / tick_ms)
 }
 
+fn lookup_axis_branch_target(
+    state_name: &str,
+    target_task: &str,
+    target_step: &Option<String>,
+    state_to_step: &HashMap<(String, String), StepId>,
+    task_entry_steps: &HashMap<String, StepId>,
+    branch_label: &str,
+) -> Result<StepId, BridgeError> {
+    if let Some(step) = target_step {
+        return state_to_step
+            .get(&(target_task.to_string(), step.clone()))
+            .copied()
+            .ok_or_else(|| BridgeError::UnknownTransitionTarget {
+                state: state_name.to_string(),
+                target: format!("{branch_label}: {target_task}.{step}"),
+            });
+    }
+
+    task_entry_steps
+        .get(target_task)
+        .copied()
+        .ok_or_else(|| BridgeError::UnknownTransitionTarget {
+            state: state_name.to_string(),
+            target: format!("{branch_label}: {target_task}"),
+        })
+}
+
+fn lower_axis_fault_route_kind(kind: IrAxisFaultRouteKind) -> RtAxisFaultRouteKind {
+    match kind {
+        IrAxisFaultRouteKind::Reject => RtAxisFaultRouteKind::Reject,
+        IrAxisFaultRouteKind::Motion => RtAxisFaultRouteKind::Motion,
+        IrAxisFaultRouteKind::Safety => RtAxisFaultRouteKind::Safety,
+        IrAxisFaultRouteKind::Vendor => RtAxisFaultRouteKind::Vendor,
+    }
+}
+
+fn leak_axis_fault_route_rules(
+    state_name: &str,
+    branch_label: &str,
+    routes: &[crate::ir::AxisFaultRouteBranch],
+    state_to_step: &HashMap<(String, String), StepId>,
+    task_entry_steps: &HashMap<String, StepId>,
+) -> Result<&'static [AxisFaultRouteRule], BridgeError> {
+    let mut out = Vec::with_capacity(routes.len());
+    for route in routes {
+        out.push(AxisFaultRouteRule {
+            kind: route.kind.map(lower_axis_fault_route_kind),
+            code: route.code,
+            target: lookup_axis_branch_target(
+                state_name,
+                &route.target_task,
+                &route.target_step,
+                state_to_step,
+                task_entry_steps,
+                branch_label,
+            )?,
+        });
+    }
+    Ok(Box::leak(out.into_boxed_slice()))
+}
+
 fn parse_single_bool_guard(
     state_name: &str,
     expression: &str,
@@ -1336,6 +1733,9 @@ fn push_action_step(
     state_name: &str,
     actions: &[TransitionAction],
     next: StepId,
+    state_to_step: &HashMap<(String, String), StepId>,
+    task_entry_steps: &HashMap<String, StepId>,
+    tick_ms: u64,
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
@@ -1346,6 +1746,9 @@ fn push_action_step(
         resolver,
         state_name,
         actions,
+        state_to_step,
+        task_entry_steps,
+        tick_ms,
         variable_indices,
         cam_indices,
         cam_table_indices,
@@ -1366,6 +1769,9 @@ fn leak_actions(
     resolver: &TopologyResolver,
     state_name: &str,
     actions: &[TransitionAction],
+    state_to_step: &HashMap<(String, String), StepId>,
+    task_entry_steps: &HashMap<String, StepId>,
+    tick_ms: u64,
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
@@ -1377,6 +1783,9 @@ fn leak_actions(
             resolver,
             state_name,
             a,
+            state_to_step,
+            task_entry_steps,
+            tick_ms,
             variable_indices,
             cam_indices,
             cam_table_indices,
@@ -1390,6 +1799,9 @@ fn convert_action(
     resolver: &TopologyResolver,
     state_name: &str,
     a: &TransitionAction,
+    state_to_step: &HashMap<(String, String), StepId>,
+    task_entry_steps: &HashMap<String, StepId>,
+    tick_ms: u64,
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
@@ -1580,7 +1992,13 @@ fn convert_action(
             port,
             distance_raw,
             speed_raw,
-            ..
+            timeout: timeout_branch,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         } => {
             let profile =
                 resolver
@@ -1616,6 +2034,60 @@ fn convert_action(
             }
             let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
             let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
+            let timeout_target = lookup_axis_branch_target(
+                state_name,
+                &timeout_branch.target_task,
+                &timeout_branch.target_step,
+                state_to_step,
+                task_entry_steps,
+                "axis timeout",
+            )?;
+            let timeout_ticks = ms_to_ticks(state_name, timeout_branch.duration_ms, tick_ms)?;
+            let on_reject_target = lookup_axis_branch_target(
+                state_name,
+                &on_reject.target_task,
+                &on_reject.target_step,
+                state_to_step,
+                task_entry_steps,
+                "axis on_reject",
+            )?;
+            let on_motion_fault_target = lookup_axis_branch_target(
+                state_name,
+                &on_motion_fault.target_task,
+                &on_motion_fault.target_step,
+                state_to_step,
+                task_entry_steps,
+                "axis on_motion_fault",
+            )?;
+            let on_safety_fault_target = lookup_axis_branch_target(
+                state_name,
+                &on_safety_fault.target_task,
+                &on_safety_fault.target_step,
+                state_to_step,
+                task_entry_steps,
+                "axis on_safety_fault",
+            )?;
+            let leaked_on_reject_routes = leak_axis_fault_route_rules(
+                state_name,
+                "axis on_reject route",
+                on_reject_routes,
+                state_to_step,
+                task_entry_steps,
+            )?;
+            let leaked_on_motion_fault_routes = leak_axis_fault_route_rules(
+                state_name,
+                "axis on_motion_fault route",
+                on_motion_fault_routes,
+                state_to_step,
+                task_entry_steps,
+            )?;
+            let leaked_on_safety_fault_routes = leak_axis_fault_route_rules(
+                state_name,
+                "axis on_safety_fault route",
+                on_safety_fault_routes,
+                state_to_step,
+                task_entry_steps,
+            )?;
             Ok(Action::AxisMove {
                 command: AxisMotionCommand {
                     target: leaked_target,
@@ -1624,6 +2096,18 @@ fn convert_action(
                     value: distance,
                     speed,
                     require_homed: false,
+                    timeout: Some(Timeout {
+                        after_ticks: timeout_ticks,
+                        target: timeout_target,
+                    }),
+                    fault_routing: Some(AxisFaultRouting {
+                        on_reject: on_reject_target,
+                        on_motion_fault: on_motion_fault_target,
+                        on_safety_fault: on_safety_fault_target,
+                        on_reject_routes: leaked_on_reject_routes,
+                        on_motion_fault_routes: leaked_on_motion_fault_routes,
+                        on_safety_fault_routes: leaked_on_safety_fault_routes,
+                    }),
                 },
             })
         }
@@ -1633,7 +2117,13 @@ fn convert_action(
             position_raw,
             speed_raw,
             require_homed,
-            ..
+            timeout: timeout_branch,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+            on_reject_routes,
+            on_motion_fault_routes,
+            on_safety_fault_routes,
         } => {
             let profile =
                 resolver
@@ -1669,6 +2159,60 @@ fn convert_action(
             }
             let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
             let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
+            let timeout_target = lookup_axis_branch_target(
+                state_name,
+                &timeout_branch.target_task,
+                &timeout_branch.target_step,
+                state_to_step,
+                task_entry_steps,
+                "axis timeout",
+            )?;
+            let timeout_ticks = ms_to_ticks(state_name, timeout_branch.duration_ms, tick_ms)?;
+            let on_reject_target = lookup_axis_branch_target(
+                state_name,
+                &on_reject.target_task,
+                &on_reject.target_step,
+                state_to_step,
+                task_entry_steps,
+                "axis on_reject",
+            )?;
+            let on_motion_fault_target = lookup_axis_branch_target(
+                state_name,
+                &on_motion_fault.target_task,
+                &on_motion_fault.target_step,
+                state_to_step,
+                task_entry_steps,
+                "axis on_motion_fault",
+            )?;
+            let on_safety_fault_target = lookup_axis_branch_target(
+                state_name,
+                &on_safety_fault.target_task,
+                &on_safety_fault.target_step,
+                state_to_step,
+                task_entry_steps,
+                "axis on_safety_fault",
+            )?;
+            let leaked_on_reject_routes = leak_axis_fault_route_rules(
+                state_name,
+                "axis on_reject route",
+                on_reject_routes,
+                state_to_step,
+                task_entry_steps,
+            )?;
+            let leaked_on_motion_fault_routes = leak_axis_fault_route_rules(
+                state_name,
+                "axis on_motion_fault route",
+                on_motion_fault_routes,
+                state_to_step,
+                task_entry_steps,
+            )?;
+            let leaked_on_safety_fault_routes = leak_axis_fault_route_rules(
+                state_name,
+                "axis on_safety_fault route",
+                on_safety_fault_routes,
+                state_to_step,
+                task_entry_steps,
+            )?;
             Ok(Action::AxisMove {
                 command: AxisMotionCommand {
                     target: leaked_target,
@@ -1677,6 +2221,18 @@ fn convert_action(
                     value: position,
                     speed,
                     require_homed: *require_homed,
+                    timeout: Some(Timeout {
+                        after_ticks: timeout_ticks,
+                        target: timeout_target,
+                    }),
+                    fault_routing: Some(AxisFaultRouting {
+                        on_reject: on_reject_target,
+                        on_motion_fault: on_motion_fault_target,
+                        on_safety_fault: on_safety_fault_target,
+                        on_reject_routes: leaked_on_reject_routes,
+                        on_motion_fault_routes: leaked_on_motion_fault_routes,
+                        on_safety_fault_routes: leaked_on_safety_fault_routes,
+                    }),
                 },
             })
         }

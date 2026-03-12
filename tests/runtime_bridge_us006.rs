@@ -80,6 +80,23 @@ fn current_step_name<'a>(rt: &Runtime<'a>, program: &'a runtime_core::Program<'a
         .name
 }
 
+fn task_step_name<'a>(
+    rt: &Runtime<'a>,
+    program: &'a runtime_core::Program<'a>,
+    task_idx: usize,
+) -> &'a str {
+    let step_id = rt
+        .task_context(task_idx)
+        .expect("task context should exist")
+        .current_step;
+    program
+        .task(task_idx)
+        .expect("task should exist")
+        .step(step_id)
+        .expect("step should exist")
+        .name
+}
+
 const PLC_FIXTURE: &str = r#"
 [topology]
 
@@ -128,6 +145,55 @@ task fault:
 task done:
     step halt:
 "#;
+
+const PLC_MULTI_ROOT_TASK_FIXTURE: &str = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+task load:
+    step run:
+        action: log "load"
+    step halt:
+
+task unload:
+    step run:
+        action: log "unload"
+    step halt:
+"#;
+
+#[test]
+fn bridge_preserves_task_boundaries_for_independent_roots() {
+    let program = compile_to_runtime(PLC_MULTI_ROOT_TASK_FIXTURE, 1);
+    assert_eq!(program.tasks.len(), 2, "bridge should keep both root tasks");
+    assert_eq!(program.tasks[0].name, "load");
+    assert_eq!(program.tasks[1].name, "unload");
+    assert_eq!(
+        program.tasks[0]
+            .step(program.tasks[0].entry)
+            .expect("load entry step")
+            .name,
+        "load.run"
+    );
+    assert_eq!(
+        program.tasks[1]
+            .step(program.tasks[1].entry)
+            .expect("unload entry step")
+            .name,
+        "unload.run"
+    );
+    for task in program.tasks {
+        let task_prefix = format!("{}.", task.name);
+        assert!(
+            task.steps
+                .iter()
+                .all(|step| step.name.starts_with(&task_prefix)),
+            "task {} should only contain local steps",
+            task.name
+        );
+    }
+}
 
 #[test]
 fn bridge_compiles_plc_and_produces_deterministic_trace_and_edges() {
@@ -549,6 +615,38 @@ task done:
     step halt:
 "#;
 
+const PLC_AXIS_ROUTE_TERMINAL_FIXTURE: &str = r#"
+[topology]
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2)
+            timeout: 500ms -> timeout_fault.halt
+            on_reject -> reject_fault.halt
+            on_motion_fault -> motion_fault.halt
+            on_safety_fault -> safety_fault.halt
+    on_complete: goto done.halt
+
+task timeout_fault:
+    step halt:
+
+task reject_fault:
+    step halt:
+
+task motion_fault:
+    step halt:
+
+task safety_fault:
+    step halt:
+
+task done:
+    step halt:
+"#;
+
 fn axis_fault_policy_fixture(
     severity: &str,
     stop_mode: &str,
@@ -745,6 +843,156 @@ fn runtime_tick_with_axis_handler_done_for_bridged_axis_action() {
         AxisMotionResult::Done
     })
     .expect("bridged axis action should run with handler");
+}
+
+#[test]
+fn axis_move_blocks_current_step_without_explicit_wait_until_done() {
+    let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let mut calls = 0usize;
+
+    rt.tick_with_axis(&mut io, |command| {
+        calls += 1;
+        assert_eq!(command.target, "axis_x");
+        AxisMotionResult::Pending
+    })
+    .expect("pending axis move should keep the action step active");
+    assert_eq!(calls, 1);
+    assert_eq!(current_step_name(&rt, &program), "motion.run");
+
+    rt.tick_with_axis(&mut io, |command| {
+        calls += 1;
+        assert_eq!(command.target, "axis_x");
+        AxisMotionResult::Done
+    })
+    .expect("done polling result should release the blocked action step");
+    assert_eq!(calls, 2);
+    assert_eq!(current_step_name(&rt, &program), "done.halt");
+}
+
+#[test]
+fn axis_move_blocking_baseline_example_blocks_without_explicit_wait_until_done() {
+    let program = compile_example_to_runtime("axis_move_blocking_baseline.plc", 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+    let mut calls = 0usize;
+
+    rt.tick_with_axis(&mut io, |_| {
+        calls += 1;
+        AxisMotionResult::Pending
+    })
+    .expect("pending axis move should keep blocking baseline step active");
+    assert_eq!(calls, 1);
+    assert_eq!(current_step_name(&rt, &program), "main.move_axis");
+
+    rt.tick_with_axis(&mut io, |_| {
+        calls += 1;
+        AxisMotionResult::Done
+    })
+    .expect("done polling result should release blocking baseline step");
+    assert_eq!(calls, 2);
+    assert_eq!(current_step_name(&rt, &program), "main.move_done");
+}
+
+#[test]
+fn load_unload_concurrent_example_keeps_load_blocked_while_unload_advances() {
+    let program = compile_example_to_runtime("load_unload_concurrent_tasks.plc", 100);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 2, 0, 0);
+
+    assert_eq!(
+        rt.active_task_count(),
+        2,
+        "example should activate two root tasks"
+    );
+    assert_eq!(
+        task_step_name(&rt, &program, 0),
+        "load_station.wait_load_request"
+    );
+    assert_eq!(
+        task_step_name(&rt, &program, 1),
+        "unload_station.wait_unload_ready"
+    );
+
+    rt.tick(&mut io)
+        .expect("tick0 should keep both tasks waiting");
+    assert_eq!(
+        task_step_name(&rt, &program, 0),
+        "load_station.wait_load_request"
+    );
+    assert_eq!(
+        task_step_name(&rt, &program, 1),
+        "unload_station.wait_unload_ready"
+    );
+
+    io.schedule_digital_input(Tick(1), DigitalInputId(1), true);
+    rt.tick(&mut io)
+        .expect("tick1 should allow unload task to progress independently");
+
+    assert_eq!(
+        task_step_name(&rt, &program, 0),
+        "load_station.wait_load_request",
+        "load task should remain blocked on missing load request"
+    );
+    assert_eq!(
+        task_step_name(&rt, &program, 1),
+        "unload_station.unload_dwell",
+        "unload task should continue to its local blocking delay"
+    );
+}
+
+#[test]
+fn axis_move_pending_fault_routes_to_declared_branch_targets() {
+    let cases = [
+        (AxisMotionResult::reject(66), "reject_fault.halt"),
+        (AxisMotionResult::motion_fault(67), "motion_fault.halt"),
+        (AxisMotionResult::safety_fault(68), "safety_fault.halt"),
+    ];
+
+    for (fault_result, expected_step) in cases {
+        let program = compile_to_runtime(PLC_AXIS_ROUTE_TERMINAL_FIXTURE, 10);
+        let mut rt = Runtime::new(&program).expect("runtime init");
+        let mut io = sim::SimIo::new(1, 1, 0, 0);
+        let mut calls = 0usize;
+
+        rt.tick_with_axis(&mut io, |_| {
+            calls += 1;
+            AxisMotionResult::Pending
+        })
+        .expect("pending axis move should keep the action step active");
+        assert_eq!(calls, 1);
+        assert_eq!(current_step_name(&rt, &program), "motion.run");
+
+        rt.tick_with_axis(&mut io, |_| {
+            calls += 1;
+            fault_result
+        })
+        .expect("pending fault should route to declared fault branch");
+        assert_eq!(calls, 2);
+        assert_eq!(current_step_name(&rt, &program), expected_step);
+    }
+}
+
+#[test]
+fn axis_move_pending_timeout_routes_to_declared_timeout_target() {
+    let program = compile_to_runtime(PLC_AXIS_ROUTE_TERMINAL_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(1, 1, 0, 0);
+
+    rt.tick_with_axis(&mut io, |_| AxisMotionResult::Pending)
+        .expect("first tick should start pending axis action");
+    assert_eq!(current_step_name(&rt, &program), "motion.run");
+
+    for _ in 0..49 {
+        rt.tick_with_axis(&mut io, |_| AxisMotionResult::Pending)
+            .expect("pending ticks before timeout should keep waiting");
+        assert_eq!(current_step_name(&rt, &program), "motion.run");
+    }
+
+    rt.tick_with_axis(&mut io, |_| AxisMotionResult::Pending)
+        .expect("timeout tick should route without surfacing runtime error");
+    assert_eq!(current_step_name(&rt, &program), "timeout_fault.halt");
 }
 
 #[test]

@@ -555,12 +555,58 @@ pub struct Transition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskBlockingState {
+    #[default]
+    Ready,
+    WaitingCondition,
+    WaitingDelay,
+    WaitingTimeout,
+    WaitingPendingAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TaskTimerContext {
+    pub timer_name: String,
+    pub source_state: State,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingActionContext {
+    pub source_state: State,
+    pub action_kind: ActionKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TaskExecutionContext {
+    pub task_name: String,
+    pub entry_state: State,
+    pub current_state: State,
+    #[serde(default)]
+    pub blocking_state: TaskBlockingState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timers: Vec<TaskTimerContext>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_actions: Vec<PendingActionContext>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct StateMachine {
     pub states: Vec<State>,
     pub transitions: Vec<Transition>,
     pub initial: State,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub analog_regions: BTreeMap<String, Vec<(String, String)>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_contexts: Vec<TaskExecutionContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -853,6 +899,36 @@ mod tests {
                 step_name: "extend_A".to_string(),
             },
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![TaskExecutionContext {
+                task_name: "init".to_string(),
+                entry_state: State {
+                    task_name: "init".to_string(),
+                    step_name: "extend_A".to_string(),
+                },
+                current_state: State {
+                    task_name: "init".to_string(),
+                    step_name: "extend_A".to_string(),
+                },
+                blocking_state: TaskBlockingState::Ready,
+                timers: vec![TaskTimerContext {
+                    timer_name: "extend_A_timeout".to_string(),
+                    source_state: State {
+                        task_name: "init".to_string(),
+                        step_name: "extend_A".to_string(),
+                    },
+                    duration_ms: Some(600),
+                    active: false,
+                }],
+                pending_actions: vec![PendingActionContext {
+                    source_state: State {
+                        task_name: "init".to_string(),
+                        step_name: "extend_A".to_string(),
+                    },
+                    action_kind: ActionKind::AxisMoveRelative,
+                    target: Some("axis_x".to_string()),
+                    active: false,
+                }],
+            }],
         };
 
         let constraints = ConstraintSet {
@@ -916,6 +992,7 @@ mod tests {
         assert!(sm_json.contains("\"kind\": \"reject\""));
         assert!(sm_json.contains("\"category\": \"recoverable\""));
         assert!(sm_json.contains("error_code"));
+        assert!(sm_json.contains("task_contexts"));
         assert!(constraints_json.contains("conflicts_with"));
         assert!(timing_json.contains("intervals"));
 
@@ -925,6 +1002,64 @@ mod tests {
         assert_eq!(decoded_topology.graph.edge_count(), 1);
         assert_eq!(decoded_topology.extern_functions.len(), 1);
         assert_eq!(decoded_topology.axis_fault_contracts.len(), 1);
+    }
+
+    #[test]
+    fn state_machine_can_describe_task_execution_contexts_for_concurrency() {
+        let loader_entry = State {
+            task_name: "loader".to_string(),
+            step_name: "pick".to_string(),
+        };
+        let unloader_entry = State {
+            task_name: "unloader".to_string(),
+            step_name: "wait_ready".to_string(),
+        };
+        let sm = StateMachine {
+            states: vec![loader_entry.clone(), unloader_entry.clone()],
+            transitions: vec![],
+            initial: loader_entry.clone(),
+            analog_regions: BTreeMap::new(),
+            task_contexts: vec![
+                TaskExecutionContext {
+                    task_name: "loader".to_string(),
+                    entry_state: loader_entry.clone(),
+                    current_state: loader_entry.clone(),
+                    blocking_state: TaskBlockingState::WaitingPendingAction,
+                    timers: vec![TaskTimerContext {
+                        timer_name: "loader.pick.timeout_1".to_string(),
+                        source_state: loader_entry.clone(),
+                        duration_ms: Some(500),
+                        active: true,
+                    }],
+                    pending_actions: vec![PendingActionContext {
+                        source_state: loader_entry,
+                        action_kind: ActionKind::AxisMoveAbsolute,
+                        target: Some("axis_x".to_string()),
+                        active: true,
+                    }],
+                },
+                TaskExecutionContext {
+                    task_name: "unloader".to_string(),
+                    entry_state: unloader_entry.clone(),
+                    current_state: unloader_entry,
+                    blocking_state: TaskBlockingState::WaitingCondition,
+                    timers: vec![],
+                    pending_actions: vec![],
+                },
+            ],
+        };
+
+        assert_eq!(sm.task_contexts.len(), 2);
+        assert_eq!(sm.task_contexts[0].entry_state.task_name, "loader");
+        assert_eq!(sm.task_contexts[0].entry_state.step_name, "pick");
+        assert_eq!(
+            sm.task_contexts[0].pending_actions[0].target.as_deref(),
+            Some("axis_x")
+        );
+        assert!(matches!(
+            sm.task_contexts[1].blocking_state,
+            TaskBlockingState::WaitingCondition
+        ));
     }
 
     #[test]

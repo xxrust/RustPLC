@@ -1,7 +1,7 @@
 use crate::ast::{
     ActionStatement, ComparisonOperator, ConditionExpression, DeviceType, ExternCallBinding,
-    GotoDirective, LiteralValue, PlcProgram, StepDeclaration, StepStatement, WaitCondition,
-    WaitStatement,
+    GotoDirective, LiteralValue, OnCompleteDirective, PlcProgram, StepDeclaration, StepStatement,
+    WaitCondition, WaitStatement,
 };
 use crate::ir::{ConstraintSet, DeviceKind, TopologyGraph};
 use petgraph::algo::has_path_connecting;
@@ -73,7 +73,7 @@ pub fn verify_causality(
         }
     }
 
-    let sensor_names = collect_sensor_names(program);
+    let observed_names = collect_observed_names(program);
     let output_ports = collect_output_ports(topology);
     let declared_chains: Vec<Vec<String>> = constraints
         .causality
@@ -81,7 +81,7 @@ pub fn verify_causality(
         .map(|chain| chain.devices.clone())
         .collect();
 
-    for pair in collect_action_wait_pairs(program, &sensor_names) {
+    for pair in collect_action_wait_pairs(program, &observed_names) {
         if let Some(expected_chain) =
             match_declared_chain(&declared_chains, &pair.action_target, &pair.wait_sensor)
         {
@@ -99,10 +99,9 @@ pub fn verify_causality(
             continue;
         }
 
-        // `parallel` 块会让不同分支的 action 与 step 级 wait 产生组合。
-        // 对于这类组合，只对位于传感器上游集合（action -> sensor 可达）的 action→sensor 对做推断检查，
-        // 以避免跨分支误报。
-        if pair.involves_parallel()
+        // 推断型 pair（parallel 分支组合、completion target 组合）只在 action->wait 可达时做兜底检查，
+        // 避免把“无因果关系的偶然组合”误报成链路断裂。
+        if pair.requires_existing_inferred_path()
             && !runtime_graph.path_exists(&pair.action_target, &pair.wait_sensor)
         {
             continue;
@@ -111,6 +110,14 @@ pub fn verify_causality(
         let source_path =
             shortest_output_path_to_target(&runtime_graph, &output_ports, &pair.action_target);
         let feedback_path = shortest_path(&runtime_graph, &pair.action_target, &pair.wait_sensor);
+
+        // 变量/外部函数等控制信号节点可能没有输出端口前缀，仅需验证 action->wait 可达性。
+        if source_path.is_none()
+            && let Some(feedback_path) = &feedback_path
+            && first_broken_link(&runtime_graph, feedback_path).is_none()
+        {
+            continue;
+        }
 
         if let (Some(source_path), Some(feedback_path)) = (&source_path, &feedback_path) {
             let full_path = join_paths(source_path, feedback_path);
@@ -160,14 +167,16 @@ struct CollectedAction {
 
 #[derive(Debug, Clone)]
 struct CollectedWait {
+    line: usize,
     text: String,
-    sensor: String,
+    observed: String,
     origin: StatementOrigin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StatementOrigin {
     StepLevel,
+    CompletionTarget,
     ParallelBranch {
         block_id: usize,
         branch_index: usize,
@@ -175,7 +184,7 @@ enum StatementOrigin {
 }
 
 impl ActionWaitPair {
-    fn involves_parallel(&self) -> bool {
+    fn requires_existing_inferred_path(&self) -> bool {
         !matches!(self.action_origin, StatementOrigin::StepLevel)
             || !matches!(self.wait_origin, StatementOrigin::StepLevel)
     }
@@ -223,7 +232,7 @@ impl RuntimeGraph {
         }
 
         let mut runtime_graph = Self { graph, nodes };
-        runtime_graph.add_extern_call_edges(program);
+        runtime_graph.add_dataflow_edges(program);
         runtime_graph
     }
 
@@ -255,7 +264,7 @@ impl RuntimeGraph {
         self.graph.add_edge(source, target, ());
     }
 
-    fn add_extern_call_edges(&mut self, program: &PlcProgram) {
+    fn add_dataflow_edges(&mut self, program: &PlcProgram) {
         for variable in &program.topology.variables {
             self.ensure_node(&variable.name);
         }
@@ -269,44 +278,58 @@ impl RuntimeGraph {
 
         for task in &program.tasks.tasks {
             for step in &task.steps {
-                collect_extern_edges_from_statements(&step.statements, &pure_externs, self);
+                collect_dataflow_edges_from_statements(&step.statements, &pure_externs, self);
             }
         }
     }
 }
 
-fn collect_extern_edges_from_statements(
+fn collect_dataflow_edges_from_statements(
     statements: &[StepStatement],
     pure_externs: &HashMap<String, bool>,
     runtime_graph: &mut RuntimeGraph,
 ) {
     for statement in statements {
         match statement {
-            StepStatement::Action(ActionStatement::Call {
-                function,
-                args,
-                binding,
-            }) => {
-                runtime_graph.ensure_node(function);
+            StepStatement::Action(action) => match action {
+                ActionStatement::Call {
+                    function,
+                    args,
+                    binding,
+                } => {
+                    runtime_graph.ensure_node(function);
 
-                for arg in args {
-                    for dep in expression_variables(arg) {
-                        runtime_graph.add_edge_by_name(&dep, function);
+                    for arg in args {
+                        for dep in expression_variables(arg) {
+                            runtime_graph.add_edge_by_name(&dep, function);
+                        }
+                    }
+
+                    if pure_externs.get(function).copied().unwrap_or(false) {
+                        for target in extern_binding_targets(binding) {
+                            runtime_graph.add_edge_by_name(function, target);
+                        }
                     }
                 }
-
-                if pure_externs.get(function).copied().unwrap_or(false) {
-                    for target in extern_binding_targets(binding) {
-                        runtime_graph.add_edge_by_name(function, target);
+                ActionStatement::Compute { target, expr } => {
+                    runtime_graph.ensure_node(target);
+                    for dep in expression_variables(expr) {
+                        runtime_graph.add_edge_by_name(&dep, target);
                     }
                 }
-            }
+                ActionStatement::SetAnalogExpr { target, expr } => {
+                    for dep in expression_variables(expr) {
+                        runtime_graph.add_edge_by_name(&dep, &target.device);
+                    }
+                }
+                _ => {}
+            },
             StepStatement::Repeat { body, .. } => {
-                collect_extern_edges_from_statements(body, pure_externs, runtime_graph);
+                collect_dataflow_edges_from_statements(body, pure_externs, runtime_graph);
             }
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
-                    collect_extern_edges_from_statements(
+                    collect_dataflow_edges_from_statements(
                         &branch.statements,
                         pure_externs,
                         runtime_graph,
@@ -315,7 +338,7 @@ fn collect_extern_edges_from_statements(
             }
             StepStatement::Race(block) => {
                 for branch in &block.branches {
-                    collect_extern_edges_from_statements(
+                    collect_dataflow_edges_from_statements(
                         &branch.statements,
                         pure_externs,
                         runtime_graph,
@@ -414,8 +437,8 @@ fn realized_prefix(runtime_graph: &RuntimeGraph, chain: &[String]) -> String {
     realized.join(" -> ")
 }
 
-fn collect_sensor_names(program: &PlcProgram) -> HashSet<String> {
-    program
+fn collect_observed_names(program: &PlcProgram) -> HashSet<String> {
+    let mut names = program
         .topology
         .devices
         .iter()
@@ -430,7 +453,15 @@ fn collect_sensor_names(program: &PlcProgram) -> HashSet<String> {
             }
             _ => None,
         })
-        .collect()
+        .collect::<HashSet<_>>();
+    names.extend(
+        program
+            .topology
+            .variables
+            .iter()
+            .map(|var| var.name.clone()),
+    );
+    names
 }
 
 fn collect_output_ports(topology: &TopologyGraph) -> Vec<String> {
@@ -449,20 +480,28 @@ fn collect_output_ports(topology: &TopologyGraph) -> Vec<String> {
 
 fn collect_action_wait_pairs(
     program: &PlcProgram,
-    sensor_names: &HashSet<String>,
+    observed_names: &HashSet<String>,
 ) -> Vec<ActionWaitPair> {
     let mut pairs = Vec::new();
     let mut next_parallel_block_id = 0usize;
 
-    for task in &program.tasks.tasks {
-        for step in &task.steps {
+    for (task_index, task) in program.tasks.tasks.iter().enumerate() {
+        for (step_index, step) in task.steps.iter().enumerate() {
             collect_pairs_from_statements(
                 &step.statements,
                 step.line.max(1),
-                sensor_names,
+                observed_names,
                 &mut next_parallel_block_id,
                 &mut pairs,
                 program,
+            );
+            collect_completion_target_pairs(
+                program,
+                task_index,
+                step_index,
+                observed_names,
+                &mut next_parallel_block_id,
+                &mut pairs,
             );
         }
     }
@@ -470,10 +509,96 @@ fn collect_action_wait_pairs(
     pairs
 }
 
+fn collect_completion_target_pairs(
+    program: &PlcProgram,
+    task_index: usize,
+    step_index: usize,
+    observed_names: &HashSet<String>,
+    next_parallel_block_id: &mut usize,
+    pairs: &mut Vec<ActionWaitPair>,
+) {
+    let Some((target_step, target_label)) =
+        completion_target_step_and_label(program, task_index, step_index)
+    else {
+        return;
+    };
+
+    let step = &program.tasks.tasks[task_index].steps[step_index];
+    let actions = collect_completion_actions(&step.statements);
+    if actions.is_empty() {
+        return;
+    }
+
+    let mut waits = Vec::new();
+    collect_wait_items_from_statements(
+        &target_step.statements,
+        target_step.line.max(1),
+        observed_names,
+        StatementOrigin::StepLevel,
+        next_parallel_block_id,
+        &mut waits,
+    );
+    if waits.is_empty() {
+        return;
+    }
+
+    for (action_text, action_target) in actions {
+        let action_text = format!("{action_text} [done -> {target_label}]");
+        for wait in &waits {
+            pairs.push(ActionWaitPair {
+                line: wait.line,
+                action: action_text.clone(),
+                action_target: action_target.clone(),
+                wait: wait.text.clone(),
+                wait_sensor: wait.observed.clone(),
+                action_origin: StatementOrigin::CompletionTarget,
+                wait_origin: wait.origin.clone(),
+            });
+        }
+    }
+}
+
+fn completion_target_step_and_label<'a>(
+    program: &'a PlcProgram,
+    task_index: usize,
+    step_index: usize,
+) -> Option<(&'a StepDeclaration, String)> {
+    let task = program.tasks.tasks.get(task_index)?;
+    if step_index + 1 < task.steps.len() {
+        let target = &task.steps[step_index + 1];
+        return Some((target, format!("{}.{}", task.name, target.name)));
+    }
+
+    let OnCompleteDirective::Goto { target } = task.on_complete.as_ref()? else {
+        return None;
+    };
+    Some((
+        resolve_goto_step(program, target)?,
+        format_branch_target(target),
+    ))
+}
+
+fn collect_completion_actions(statements: &[StepStatement]) -> Vec<(String, String)> {
+    let mut actions = Vec::new();
+    for statement in statements {
+        let StepStatement::Action(action) = statement else {
+            continue;
+        };
+        if matches!(
+            action,
+            ActionStatement::AxisMoveRelative { .. } | ActionStatement::AxisMoveAbsolute { .. }
+        ) && let Some((text, target)) = action_to_text_and_target(action)
+        {
+            actions.push((text, target));
+        }
+    }
+    actions
+}
+
 fn collect_pairs_from_statements(
     statements: &[StepStatement],
     line: usize,
-    sensor_names: &HashSet<String>,
+    observed_names: &HashSet<String>,
     next_parallel_block_id: &mut usize,
     pairs: &mut Vec<ActionWaitPair>,
     program: &PlcProgram,
@@ -484,7 +609,7 @@ fn collect_pairs_from_statements(
     collect_items_from_statements(
         statements,
         line,
-        sensor_names,
+        observed_names,
         StatementOrigin::StepLevel,
         next_parallel_block_id,
         &mut actions,
@@ -496,11 +621,11 @@ fn collect_pairs_from_statements(
     for action in &actions {
         for wait in &waits {
             pairs.push(ActionWaitPair {
-                line,
+                line: wait.line,
                 action: action.text.clone(),
                 action_target: action.target.clone(),
                 wait: wait.text.clone(),
-                wait_sensor: wait.sensor.clone(),
+                wait_sensor: wait.observed.clone(),
                 action_origin: action.origin.clone(),
                 wait_origin: wait.origin.clone(),
             });
@@ -511,7 +636,7 @@ fn collect_pairs_from_statements(
 fn collect_items_from_statements(
     statements: &[StepStatement],
     line: usize,
-    sensor_names: &HashSet<String>,
+    observed_names: &HashSet<String>,
     origin: StatementOrigin,
     next_parallel_block_id: &mut usize,
     actions: &mut Vec<CollectedAction>,
@@ -532,7 +657,7 @@ fn collect_items_from_statements(
                 collect_axis_fault_branch_pairs(
                     program,
                     action,
-                    sensor_names,
+                    observed_names,
                     &origin,
                     next_parallel_block_id,
                     pairs,
@@ -540,10 +665,11 @@ fn collect_items_from_statements(
             }
             StepStatement::Wait(wait) => {
                 let wait_text = wait_to_text(wait);
-                for sensor in infer_wait_sensors(wait, sensor_names) {
+                for observed in infer_wait_observed(wait, observed_names) {
                     waits.push(CollectedWait {
+                        line,
                         text: wait_text.clone(),
-                        sensor,
+                        observed,
                         origin: origin.clone(),
                     });
                 }
@@ -553,7 +679,7 @@ fn collect_items_from_statements(
                 collect_items_from_statements(
                     body,
                     line,
-                    sensor_names,
+                    observed_names,
                     origin.clone(),
                     next_parallel_block_id,
                     actions,
@@ -573,7 +699,7 @@ fn collect_items_from_statements(
                     collect_items_from_statements(
                         &branch.statements,
                         line,
-                        sensor_names,
+                        observed_names,
                         branch_origin,
                         next_parallel_block_id,
                         actions,
@@ -588,7 +714,7 @@ fn collect_items_from_statements(
                     collect_pairs_from_statements(
                         &branch.statements,
                         line,
-                        sensor_names,
+                        observed_names,
                         next_parallel_block_id,
                         pairs,
                         program,
@@ -603,7 +729,7 @@ fn collect_items_from_statements(
 fn collect_axis_fault_branch_pairs(
     program: &PlcProgram,
     action: &ActionStatement,
-    sensor_names: &HashSet<String>,
+    observed_names: &HashSet<String>,
     action_origin: &StatementOrigin,
     next_parallel_block_id: &mut usize,
     pairs: &mut Vec<ActionWaitPair>,
@@ -620,7 +746,8 @@ fn collect_axis_fault_branch_pairs(
         let mut waits = Vec::new();
         collect_wait_items_from_statements(
             &step.statements,
-            sensor_names,
+            step.line.max(1),
+            observed_names,
             StatementOrigin::StepLevel,
             next_parallel_block_id,
             &mut waits,
@@ -633,14 +760,13 @@ fn collect_axis_fault_branch_pairs(
             "{action_text} [{fault_kind} -> {}]",
             format_branch_target(target)
         );
-        let line = step.line.max(1);
         for wait in waits {
             pairs.push(ActionWaitPair {
-                line,
+                line: wait.line,
                 action: action_text.clone(),
                 action_target: action_target.clone(),
                 wait: wait.text,
-                wait_sensor: wait.sensor,
+                wait_sensor: wait.observed,
                 action_origin: action_origin.clone(),
                 wait_origin: wait.origin,
             });
@@ -734,7 +860,8 @@ fn format_branch_target(target: &GotoDirective) -> String {
 
 fn collect_wait_items_from_statements(
     statements: &[StepStatement],
-    sensor_names: &HashSet<String>,
+    line: usize,
+    observed_names: &HashSet<String>,
     origin: StatementOrigin,
     next_parallel_block_id: &mut usize,
     waits: &mut Vec<CollectedWait>,
@@ -743,10 +870,11 @@ fn collect_wait_items_from_statements(
         match statement {
             StepStatement::Wait(wait) => {
                 let wait_text = wait_to_text(wait);
-                for sensor in infer_wait_sensors(wait, sensor_names) {
+                for observed in infer_wait_observed(wait, observed_names) {
                     waits.push(CollectedWait {
+                        line,
                         text: wait_text.clone(),
-                        sensor,
+                        observed,
                         origin: origin.clone(),
                     });
                 }
@@ -754,7 +882,8 @@ fn collect_wait_items_from_statements(
             StepStatement::Repeat { body, .. } => {
                 collect_wait_items_from_statements(
                     body,
-                    sensor_names,
+                    line,
+                    observed_names,
                     origin.clone(),
                     next_parallel_block_id,
                     waits,
@@ -766,7 +895,8 @@ fn collect_wait_items_from_statements(
                 for (branch_index, branch) in block.branches.iter().enumerate() {
                     collect_wait_items_from_statements(
                         &branch.statements,
-                        sensor_names,
+                        line,
+                        observed_names,
                         StatementOrigin::ParallelBranch {
                             block_id,
                             branch_index,
@@ -782,7 +912,8 @@ fn collect_wait_items_from_statements(
                 for (branch_index, branch) in block.branches.iter().enumerate() {
                     collect_wait_items_from_statements(
                         &branch.statements,
-                        sensor_names,
+                        line,
+                        observed_names,
                         StatementOrigin::ParallelBranch {
                             block_id,
                             branch_index,
@@ -825,7 +956,10 @@ fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String
             format!("axis.move_absolute {}", target.device),
             target.device.clone(),
         )),
-        ActionStatement::Compute { .. } | ActionStatement::Call { .. } => None,
+        ActionStatement::Compute { target, .. } => {
+            Some((format!("compute {target}"), target.clone()))
+        }
+        ActionStatement::Call { .. } => None,
         ActionStatement::CamEngage { target }
         | ActionStatement::CamDisengage { target }
         | ActionStatement::CamPhase { target, .. } => {
@@ -838,40 +972,48 @@ fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String
     }
 }
 
-fn infer_wait_sensors(wait: &WaitStatement, sensor_names: &HashSet<String>) -> Vec<String> {
-    let mut sensors = Vec::new();
+fn infer_wait_observed(wait: &WaitStatement, observed_names: &HashSet<String>) -> Vec<String> {
+    let mut observed = Vec::new();
     let mut seen = HashSet::new();
 
     for condition in wait_conditions(wait) {
-        if condition.is_expression_compare() {
+        if let Some((left, right)) = condition.expression_pair() {
+            for candidate in expression_variables(left)
+                .into_iter()
+                .chain(expression_variables(right).into_iter())
+            {
+                if observed_names.contains(&candidate) && seen.insert(candidate.clone()) {
+                    observed.push(candidate);
+                }
+            }
             continue;
         }
-        if sensor_names.contains(&condition.left) {
+        if observed_names.contains(&condition.left) {
             if seen.insert(condition.left.clone()) {
-                sensors.push(condition.left.clone());
+                observed.push(condition.left.clone());
             }
             continue;
         }
 
         if let Some(candidate) = condition.left.split('.').next()
-            && sensor_names.contains(candidate)
+            && observed_names.contains(candidate)
         {
-            let sensor = candidate.to_string();
-            if seen.insert(sensor.clone()) {
-                sensors.push(sensor);
+            let candidate = candidate.to_string();
+            if seen.insert(candidate.clone()) {
+                observed.push(candidate);
             }
             continue;
         }
 
         if let LiteralValue::State(state) = &condition.right
-            && sensor_names.contains(&state.device)
+            && observed_names.contains(&state.device)
             && seen.insert(state.device.clone())
         {
-            sensors.push(state.device.clone());
+            observed.push(state.device.clone());
         }
     }
 
-    sensors
+    observed
 }
 
 fn wait_conditions(wait: &WaitStatement) -> Vec<&ConditionExpression> {
@@ -1103,6 +1245,17 @@ fn build_fallback_details(
     output_ports: &[String],
 ) -> (String, String, String, String) {
     if source_path.is_none() {
+        if feedback_path.is_some() {
+            return (
+                format!("{} -> {}", pair.action_target, pair.wait_sensor),
+                format!("{} -> {}", pair.action_target, pair.wait_sensor),
+                format!("{} -> ???", pair.action_target),
+                format!(
+                    "请补充 {} 到 {} 的因果链定义（设备关系、变量赋值或外部函数传播）",
+                    pair.action_target, pair.wait_sensor
+                ),
+            );
+        }
         let output = output_ports
             .first()
             .cloned()
@@ -1641,6 +1794,183 @@ task main:
     }
 
     #[test]
+    fn accepts_cross_task_variable_chain_with_compute_dataflow() {
+        let source = r#"
+[topology]
+
+variable upstream_ready: bool = false
+variable release_ok: bool = false
+
+[constraints]
+
+causality: upstream_ready -> release_ok
+
+[tasks]
+
+task feeder:
+    step publish:
+        action: compute upstream_ready = true
+task picker:
+    step capture:
+        action: compute release_ok = upstream_ready
+    step wait_release:
+        wait: release_ok == true
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        verify_causality(&program, &topology, &constraints)
+            .expect("跨 task 变量传播链应被因果图识别并通过");
+    }
+
+    #[test]
+    fn reports_missing_cross_task_variable_chain_when_compute_dependency_absent() {
+        let source = r#"
+[topology]
+
+variable upstream_ready: bool = false
+variable release_ok: bool = false
+
+[constraints]
+
+causality: upstream_ready -> release_ok
+
+[tasks]
+
+task feeder:
+    step publish:
+        action: compute upstream_ready = true
+task picker:
+    step capture:
+        action: compute release_ok = true
+    step wait_release:
+        wait: release_ok == true
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        let errors = verify_causality(&program, &topology, &constraints)
+            .expect_err("缺失跨 task 变量依赖时应报 causality 错误");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.broken_link == "upstream_ready -> release_ok"),
+            "错误应定位到跨 task 变量链缺失"
+        );
+    }
+
+    #[test]
+    fn verifies_axis_done_branch_wait_causality_when_links_exist() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+device sensor_done: sensor
+
+relation { from: Y0.out, to: axis_x.enable, via: driven_by }
+relation { from: axis_x.fault, to: sensor_done.sense, via: detects }
+relation { from: sensor_done.out, to: X0.in, via: reports_to }
+
+[constraints]
+
+causality: axis_x -> sensor_done
+
+[tasks]
+
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step confirm:
+        wait: sensor_done == true
+task fault:
+    step timeout:
+        action: log "timeout"
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        verify_causality(&program, &topology, &constraints)
+            .expect("axis done 分支后的等待应参与因果验证并通过");
+    }
+
+    #[test]
+    fn reports_missing_axis_done_branch_causality_path() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+device sensor_done: sensor
+
+relation { from: Y0.out, to: axis_x.enable, via: driven_by }
+
+[constraints]
+
+causality: axis_x -> sensor_done
+
+[tasks]
+
+task main:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step confirm:
+        wait: sensor_done == true
+task fault:
+    step timeout:
+        action: log "timeout"
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        let errors = verify_causality(&program, &topology, &constraints)
+            .expect_err("axis done 分支缺失因果链应报错");
+        assert!(
+            errors.iter().any(|error| error
+                .action
+                .as_deref()
+                .unwrap_or_default()
+                .contains("[done -> main.confirm]")),
+            "诊断动作文本应标注 done -> main.confirm 分支"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.broken_link == "axis_x -> sensor_done"),
+            "应定位 axis done 分支缺失的 axis->sensor 链路"
+        );
+    }
+
+    #[test]
     fn verifies_axis_fault_branch_wait_causality_when_links_exist() {
         let source = r#"
 [topology]
@@ -1825,9 +2155,11 @@ task fault:
             .expect_err("axis timeout 分支缺失因果链应报错");
 
         assert!(
-            errors
-                .iter()
-                .any(|error| error.action.as_deref().unwrap_or_default().contains("timeout")),
+            errors.iter().any(|error| error
+                .action
+                .as_deref()
+                .unwrap_or_default()
+                .contains("timeout")),
             "诊断动作文本应标注 timeout 分支"
         );
         assert!(

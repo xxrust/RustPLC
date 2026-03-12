@@ -258,6 +258,17 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 
 - 执行模型变化不是 runtime 私事
 - 只改 runtime 而不改 IR 或 verification，属于典型抽象层下沉
+- `runtime-core` 处于 `no_std` 约束下，不使用动态分配；task 级执行上下文采用 `MAX_ACTIVE_TASKS + active_task_count` 的定长数组模式
+- runtime 调度按 task 声明顺序（索引升序）逐 tick 遍历所有 active task；某个 task 命中 blocking step 只阻塞自身，不得阻塞同 tick 其他 task
+- 并发 runtime 回归中若需同时断言多个 task 的 step 位置，优先使用 `Runtime::task_context(task_idx)` 读取 task 局部状态；`location()` 仅反映当前执行游标，不适合作为多 task 断言入口
+- Task 级 pending action 元数据应从 step 语句收集，而不是仅从 transition.actions 推断；`delay/wait/timeout` 等阻塞路径常会让 transition 不携带动作
+- Step 离开判定应集中到统一 completion 决策（action/delay/wait 共用规则）；避免在各指令分支散落“是否跳转”的特例判断
+- 对包含 Pending 长时动作的 step，后续 tick 必须从挂起动作继续轮询，不得重放该 step 中挂起动作之前的即时 action（避免重复 side effect）
+- `axis.move_relative/axis.move_absolute` 属于默认 blocking 长时动作；即使未显式编写 `wait`，也应由 `Pending -> Done/Fault` 生命周期驱动 step 离开，回归测试至少覆盖 Pending->Done 与 Pending->Fault
+- axis 动作的 `timeout/on_reject/on_motion_fault/on_safety_fault` 与细分 route 必须在 bridge 阶段降级成 runtime 可执行的 `StepId` 元数据；runtime 在 Pending 轮询阶段按“先专用 route、后主桶 fallback”执行分流，避免回退为裸 `RuntimeError::AxisFault`
+- `runtime_bridge` 构建 runtime task 时优先保留“无跨 task 入边”的 root task 边界；若全量 task 都存在跨 task 入边，则回退到 IR 初始 task 作为 active root，避免旧流程直接退化为并发全激活副作用
+- runtime transition budget 口径固定为“per-task-per-tick”：单 task 同 tick 转移上限为 `MAX_TRANSITIONS_PER_TASK_PER_TICK`；报告中的全局上界应按 `active_task_count * per_task_cap` 计算，并在告警/错误中带上 task 与 active_task_count 上下文
+- 构造 runtime budget 循环告警夹具时，若使用 `on_complete: goto <self>` 形成 SCC，必须同时提供 `timeout` 或 `allow_indefinite_wait: true`，否则会先被 liveness 门禁拦截而无法触发预算分析断言
 
 ### 修改语义门禁或诊断
 
@@ -272,6 +283,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 
 - 错误码、payload、修复建议应稳定
 - 诊断变更要同步测试，不要只改文案
+- 扩展诊断/告警 payload 字段时优先走可选字段（`serde default + skip_serializing_if`）做向后兼容；并补“旧 payload 解析新结构、新 payload 解析旧结构”的回归测试
 
 ### 修改 verification 规则
 
@@ -286,6 +298,12 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 
 - verification 不是“后置插件”
 - 新规则必须有正例、反例、边界例
+- safety 并发建模应与 runtime active-task 口径对齐：优先从“无跨 task 入边”的 root task 构造初始全局状态；若无 root task，再回退 IR 初始 task，避免验证与执行的 task 激活集合漂移
+- safety 全局状态应显式携带 task 级当前位置与 pending action 标记，跨 task `conflicts_with/requires` 断言必须在该组合状态空间中检查
+- liveness 夹具若覆盖 `axis.move_*` Pending 语义，必须先满足 AXIS 语义门禁（`timeout` + `on_reject/on_motion_fault/on_safety_fault`）；否则会在 `build_state_machine` 阶段失败，无法进入 liveness checker
+- timing 并发分析应同时报告 task 局部完成时间与并发全局完成时间（active task 的 `max`），并保留顺序 `sum` 作为对照基线；`must_complete_within` 走局部 nominal 口径，`must_complete_within_worst_case` 需纳入 pending 动作上界与 timeout 上界
+- causality 跨 task 链路建模应把 `[topology] variable`、`compute`、`set_analog_expr` 与纯 extern 调用统一纳入 dataflow 边；缺失数据依赖时必须显式报链路断裂，不能默认放行
+- causality 对 `parallel` 分支组合或 `on_complete` 跳转导出的推断链路，只在 `action -> wait` 已可达时执行断链检查，避免跨分支偶然组合造成误报
 
 ### 修改设备模型、组件模型或 I/O 映射
 
@@ -340,6 +358,12 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - 如果多个下层模块重复理解同一语义，说明抽象位置已经错了
 - 发现下沉时，应优先上提抽象，而不是继续补丁
 
+### 8. 并发语义文档与 skills 必须同源
+
+- `docs/architecture/signal-direction.md` 是并发 task / blocking step 的唯一长期语义源
+- `AGENTS.md`、`CODEX.md`、`.codex/skills/plc-system`、`.codex/skills/plc-gen` 的 task/step 描述必须与该语义源同义
+- “单执行点在 task.step 间跳转”的表述仅允许出现在迁移差异文档，不能作为新实现指导
+
 ## 典型专题的稳定入口
 
 以下专题是项目中的长期主线，遇到相关需求时应优先进入对应文件。
@@ -388,6 +412,18 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `crates/runtime-core/src/lib.rs`
 - `tests/*axis*`
 
+### 并发 task 与阻塞 step
+
+先看：
+
+- `docs/architecture/signal-direction.md`
+- `docs/concurrent_runtime_e2e_acceptance_baseline.md`
+- `docs/concurrent_runtime_migration_guide.md`
+- `.codex/skills/plc-system/SKILL.md`
+- `.codex/skills/plc-gen/SKILL.md`
+- `tests/runtime_bridge_us006.rs`
+- `tests/examples_integration.rs`
+
 ## 测试与回归原则
 
 测试结构长期固定为：
@@ -395,6 +431,8 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `cargo test --lib`：模块级单元测试
 - `tests/*.rs`：集成与回归测试
 - `tests/examples_integration.rs`：示例程序回归总入口
+- 并发 runtime + 四类 verification 的 CI/本地统一门禁入口：`scripts/concurrent_runtime_verification_gate.sh`
+- 并发重构的端到端分阶段验收清单：`docs/concurrent_runtime_e2e_acceptance_baseline.md`
 
 做改动时至少回答：
 
@@ -408,6 +446,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - 一个 runtime 或 bridge 测试
 - 一个 verification 测试
 - 一个 examples 回归输入
+- 若语义由示例承载（尤其是 blocking/pending 行为），优先同时补 `tests/examples_integration.rs`（编译回归）与 `tests/runtime_bridge_us006.rs`（运行时行为回归）
 
 ## 文档分层
 

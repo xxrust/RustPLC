@@ -16,8 +16,8 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Validated by full cargo test sweep on 2026-03-11."
     },
     {
       "id": "US-002",
@@ -32,8 +32,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented task-level IR execution context metadata; validated by full cargo test on 2026-03-11."
     },
     {
       "id": "US-003",
@@ -48,8 +48,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented per-task runtime contexts in runtime-core; validated by full cargo test on 2026-03-11."
     },
     {
       "id": "US-004",
@@ -64,8 +64,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented fixed-order per-tick active-task scheduler; validated by full cargo test on 2026-03-11."
     },
     {
       "id": "US-005",
@@ -80,8 +80,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented unified runtime step completion rules and validated by full cargo test on 2026-03-11."
     },
     {
       "id": "US-006",
@@ -97,8 +97,8 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented Pending/Done/Fault axis action lifecycle in runtime-core; validated by full cargo test on 2026-03-11."
     },
     {
       "id": "US-007",
@@ -113,8 +113,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added blocking axis.move integration regressions and spec clarification; validated by full cargo test on 2026-03-11."
     },
     {
       "id": "US-008",
@@ -129,8 +129,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Routed pending axis timeout/fault branches through runtime bridge metadata and runtime polling logic; validated by full cargo test on 2026-03-11."
     },
     {
       "id": "US-009",
@@ -145,8 +145,8 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented runtime bridge root-task boundary preservation and validated by full cargo test on 2026-03-11."
     },
     {
       "id": "US-010",
@@ -161,8 +161,8 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Validated by full cargo test on 2026-03-12; budget cycle fixture now includes liveness exemption to keep per-task budget assertions effective."
     },
     {
       "id": "US-011",
@@ -177,8 +177,8 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented concurrent global-state safety modeling with cross-task conflict/requires regressions; validated by full cargo test on 2026-03-12."
     },
     {
       "id": "US-012",
@@ -193,8 +193,8 @@
         "Tests pass"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Validated by full cargo test on 2026-03-12."
     },
     {
       "id": "US-013",
@@ -209,8 +209,8 @@
         "Tests pass"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented concurrent timing local/global completion analysis with pending+timeout worst-case accounting; validated by full cargo test on 2026-03-12."
     },
     {
       "id": "US-014",
@@ -225,8 +225,8 @@
         "Tests pass"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented cross-task causality graph/dataflow + axis Pending/Done/Fault/timeout coverage; validated by full cargo test on 2026-03-12."
     },
     {
       "id": "US-015",
@@ -241,8 +241,8 @@
         "Tests pass"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Validated by full cargo test sweep on 2026-03-12."
     },
     {
       "id": "US-016",
@@ -257,8 +257,8 @@
         "Tests pass"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added blocking axis.move baseline example + integration/runtime regression coverage; validated by full cargo test on 2026-03-12."
     },
     {
       "id": "US-017",
@@ -273,8 +273,8 @@
         "Tests pass"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added concurrent load/unload task example with compile/runtime regressions; validated by full cargo test on 2026-03-12."
     },
     {
       "id": "US-018",
@@ -288,8 +288,8 @@
         "Tests pass"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Synced AGENTS + plc-system/plc-gen skills with concurrent task/blocking step contract and migration-doc guardrail; validated by full cargo test on 2026-03-12."
     },
     {
       "id": "US-019",
@@ -303,8 +303,8 @@
         "Tests pass"
       ],
       "priority": 19,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added concurrent runtime+verification CI gate script/workflow/docs and validated with gate script + full cargo test on 2026-03-12."
     },
     {
       "id": "US-020",
@@ -318,8 +318,8 @@
         "Tests pass"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added staged end-to-end acceptance baseline doc + PRD ordering guidance; validated by concurrent gate script and full cargo test on 2026-03-12."
     }
   ]
 }

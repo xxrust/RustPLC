@@ -1,6 +1,7 @@
 use crate::ast::{ActionStatement, PlcProgram, StepStatement};
 use crate::ir::{
-    ConstraintSet, StateMachine, TimingRelation, TimingScope, TopologyGraph, TransitionGuard,
+    ActionKind, ConstraintSet, StateMachine, TimingRelation, TimingScope, TopologyGraph,
+    TransitionAction, TransitionGuard,
 };
 use petgraph::visit::EdgeRef;
 use std::collections::{HashMap, HashSet};
@@ -35,11 +36,23 @@ struct DeviceTimingProfile {
 #[derive(Debug, Clone, Default)]
 struct StepTimingEstimate {
     action_max_ms: u64,
+    pending_action_max_ms: u64,
     delay_max_ms: u64,
     timeout_max_ms: u64,
     nominal_ms: u64,
     worst_case_ms: u64,
     action_details: Vec<String>,
+    pending_action_details: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ConcurrentTimingSummary {
+    active_nominal_by_task: Vec<(String, u64)>,
+    active_worst_by_task: Vec<(String, u64)>,
+    global_nominal_ms: u64,
+    global_worst_case_ms: u64,
+    sequential_nominal_ms: u64,
+    sequential_worst_case_ms: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -56,9 +69,11 @@ pub fn verify_timing(
     state_machine: &StateMachine,
 ) -> Result<(), Vec<TimingDiagnostic>> {
     let context = TimingContext::from_inputs(program, topology);
-    let step_estimates = build_step_estimates(program, &context);
+    let step_estimates = build_step_estimates(program, &context, state_machine);
     let task_nominal_case = build_task_nominal_case(program, &step_estimates);
     let task_worst_case = build_task_worst_case(program, &step_estimates);
+    let concurrent_summary =
+        build_concurrent_timing_summary(state_machine, &task_nominal_case, &task_worst_case);
 
     let mut diagnostics = Vec::new();
 
@@ -71,26 +86,43 @@ pub fn verify_timing(
                 let (observed_ms, analysis) = match &rule.scope {
                     TimingScope::Task { task } => {
                         let observed = task_nominal_case.get(task).copied().unwrap_or(0);
+                        let concurrent_line = format_concurrent_estimate(
+                            &concurrent_summary.active_nominal_by_task,
+                            concurrent_summary.global_nominal_ms,
+                            concurrent_summary.sequential_nominal_ms,
+                        );
                         (
                             observed,
                             format!(
-                                "task {task} 的动作关键路径时间 = {observed}ms（顺序 step 累加，忽略 timeout 上界）"
+                                "task {task} 的局部动作关键路径时间 = {observed}ms（顺序 step 累加，忽略 timeout 上界）；{concurrent_line}"
                             ),
                         )
                     }
                     TimingScope::Step { task, step } => {
                         let key = step_key(task, step);
                         let estimate = step_estimates.get(&key).cloned().unwrap_or_default();
+                        let task_nominal = task_nominal_case.get(task).copied().unwrap_or(0);
+                        let concurrent_line = format_concurrent_estimate(
+                            &concurrent_summary.active_nominal_by_task,
+                            concurrent_summary.global_nominal_ms,
+                            concurrent_summary.sequential_nominal_ms,
+                        );
                         let mut analysis = format!(
-                            "step {task}.{step} 的动作关键路径时间 = {}ms（同 step 动作并行取最大值 {}ms，delay 固定等待最大值 {}ms，timeout 上界 {}ms 仅用于 worst_case 约束）",
+                            "step {task}.{step} 的动作关键路径时间 = {}ms（同 step 显式动作并行取最大值 {}ms，pending 动作上界 {}ms，delay 固定等待最大值 {}ms，timeout 上界 {}ms 仅用于 worst_case 约束）；所属 task 局部完成时间 {}ms；{concurrent_line}",
                             estimate.nominal_ms,
                             estimate.action_max_ms,
+                            estimate.pending_action_max_ms,
                             estimate.delay_max_ms,
-                            estimate.timeout_max_ms
+                            estimate.timeout_max_ms,
+                            task_nominal
                         );
                         if !estimate.action_details.is_empty() {
                             analysis.push_str("；动作明细: ");
                             analysis.push_str(&estimate.action_details.join("；"));
+                        }
+                        if !estimate.pending_action_details.is_empty() {
+                            analysis.push_str("；pending 明细: ");
+                            analysis.push_str(&estimate.pending_action_details.join("；"));
                         }
                         (estimate.nominal_ms, analysis)
                     }
@@ -112,26 +144,43 @@ pub fn verify_timing(
                 let (observed_ms, analysis) = match &rule.scope {
                     TimingScope::Task { task } => {
                         let observed = task_worst_case.get(task).copied().unwrap_or(0);
+                        let concurrent_line = format_concurrent_estimate(
+                            &concurrent_summary.active_worst_by_task,
+                            concurrent_summary.global_worst_case_ms,
+                            concurrent_summary.sequential_worst_case_ms,
+                        );
                         (
                             observed,
                             format!(
-                                "task {task} 的最坏关键路径时间 = {observed}ms（顺序 step 累加，包含 timeout 上界）"
+                                "task {task} 的局部最坏关键路径时间 = {observed}ms（顺序 step 累加，包含 timeout 上界）；{concurrent_line}"
                             ),
                         )
                     }
                     TimingScope::Step { task, step } => {
                         let key = step_key(task, step);
                         let estimate = step_estimates.get(&key).cloned().unwrap_or_default();
+                        let task_worst = task_worst_case.get(task).copied().unwrap_or(0);
+                        let concurrent_line = format_concurrent_estimate(
+                            &concurrent_summary.active_worst_by_task,
+                            concurrent_summary.global_worst_case_ms,
+                            concurrent_summary.sequential_worst_case_ms,
+                        );
                         let mut analysis = format!(
-                            "step {task}.{step} 的最坏关键路径时间 = {}ms（同 step 动作并行取最大值 {}ms，delay 固定等待最大值 {}ms，timeout 上界 {}ms）",
+                            "step {task}.{step} 的最坏关键路径时间 = {}ms（同 step 显式动作并行取最大值 {}ms，pending 动作上界 {}ms，delay 固定等待最大值 {}ms，timeout 上界 {}ms）；所属 task 局部最坏完成时间 {}ms；{concurrent_line}",
                             estimate.worst_case_ms,
                             estimate.action_max_ms,
+                            estimate.pending_action_max_ms,
                             estimate.delay_max_ms,
-                            estimate.timeout_max_ms
+                            estimate.timeout_max_ms,
+                            task_worst
                         );
                         if !estimate.action_details.is_empty() {
                             analysis.push_str("；动作明细: ");
                             analysis.push_str(&estimate.action_details.join("；"));
+                        }
+                        if !estimate.pending_action_details.is_empty() {
+                            analysis.push_str("；pending 明细: ");
+                            analysis.push_str(&estimate.pending_action_details.join("；"));
                         }
                         (estimate.worst_case_ms, analysis)
                     }
@@ -322,13 +371,61 @@ impl TimingContext {
         visited.remove(target);
         best
     }
+
+    fn pending_action_duration_ms(
+        &self,
+        action_kind: &ActionKind,
+        target: Option<&str>,
+    ) -> Option<(String, u64)> {
+        let target = target?;
+        let profile = self.profiles.get(target)?;
+        let own_duration_ms = match action_kind {
+            ActionKind::Extend => profile
+                .stroke_ms
+                .or(profile.response_ms)
+                .or(profile.ramp_ms)?,
+            ActionKind::Retract => profile
+                .retract_ms
+                .or(profile.response_ms)
+                .or(profile.ramp_ms)?,
+            ActionKind::Set | ActionKind::SetAnalog | ActionKind::SetAnalogExpr => {
+                profile.ramp_ms.or(profile.response_ms)?
+            }
+            ActionKind::AxisMoveRelative | ActionKind::AxisMoveAbsolute => profile
+                .stroke_ms
+                .or(profile.retract_ms)
+                .or(profile.ramp_ms)
+                .or(profile.response_ms)?,
+            ActionKind::Compute
+            | ActionKind::CallExtern
+            | ActionKind::CamEngage
+            | ActionKind::CamDisengage
+            | ActionKind::CamSwitch
+            | ActionKind::CamPhase
+            | ActionKind::Log => return None,
+        };
+
+        let upstream_response_ms = self.max_upstream_response_ms(target, &mut HashSet::new());
+        let total_ms = own_duration_ms.saturating_add(upstream_response_ms);
+        let kind_label = pending_action_kind_label(action_kind);
+        let detail = if upstream_response_ms > 0 {
+            format!(
+                "pending {kind_label} {target} = 动作本体 {own_duration_ms}ms + 上游 response_time {upstream_response_ms}ms = {total_ms}ms"
+            )
+        } else {
+            format!("pending {kind_label} {target} = {total_ms}ms")
+        };
+        Some((detail, total_ms))
+    }
 }
 
 fn build_step_estimates(
     program: &PlcProgram,
     context: &TimingContext,
+    state_machine: &StateMachine,
 ) -> HashMap<String, StepTimingEstimate> {
     let mut estimates = HashMap::new();
+    let pending_actions_by_step = collect_pending_actions_by_step(state_machine);
 
     for task in &program.tasks.tasks {
         for step in &task.steps {
@@ -344,20 +441,37 @@ fn build_step_estimates(
                 }
             }
 
+            let key = step_key(&task.name, &step.name);
+            let mut pending_action_max_ms = 0;
+            let mut pending_action_details = Vec::new();
+            if let Some(pending_actions) = pending_actions_by_step.get(&key) {
+                for (action_kind, target) in pending_actions {
+                    if let Some((detail, duration_ms)) =
+                        context.pending_action_duration_ms(action_kind, target.as_deref())
+                    {
+                        pending_action_max_ms = pending_action_max_ms.max(duration_ms);
+                        pending_action_details.push(detail);
+                    }
+                }
+            }
+
             let delay_max_ms = max_delay_ms(&step.statements);
             let timeout_max_ms = max_timeout_ms(&step.statements);
-            let nominal_ms = action_max_ms.max(delay_max_ms);
-            let worst_case_ms = action_max_ms.max(delay_max_ms).max(timeout_max_ms);
+            let action_upper_bound_ms = action_max_ms.max(pending_action_max_ms);
+            let nominal_ms = action_upper_bound_ms.max(delay_max_ms);
+            let worst_case_ms = action_upper_bound_ms.max(delay_max_ms).max(timeout_max_ms);
 
             estimates.insert(
-                step_key(&task.name, &step.name),
+                key,
                 StepTimingEstimate {
                     action_max_ms,
+                    pending_action_max_ms,
                     delay_max_ms,
                     timeout_max_ms,
                     nominal_ms,
                     worst_case_ms,
                     action_details,
+                    pending_action_details,
                 },
             );
         }
@@ -404,6 +518,185 @@ fn build_task_worst_case(
     }
 
     task_worst_case
+}
+
+fn build_concurrent_timing_summary(
+    state_machine: &StateMachine,
+    task_nominal_case: &HashMap<String, u64>,
+    task_worst_case: &HashMap<String, u64>,
+) -> ConcurrentTimingSummary {
+    let active_tasks = select_timing_root_tasks(state_machine);
+
+    let mut active_nominal_by_task = Vec::new();
+    let mut active_worst_by_task = Vec::new();
+    let mut global_nominal_ms = 0u64;
+    let mut global_worst_case_ms = 0u64;
+    let mut sequential_nominal_ms = 0u64;
+    let mut sequential_worst_case_ms = 0u64;
+
+    for task in &active_tasks {
+        let nominal = task_nominal_case.get(task).copied().unwrap_or(0);
+        let worst = task_worst_case.get(task).copied().unwrap_or(0);
+        active_nominal_by_task.push((task.clone(), nominal));
+        active_worst_by_task.push((task.clone(), worst));
+        global_nominal_ms = global_nominal_ms.max(nominal);
+        global_worst_case_ms = global_worst_case_ms.max(worst);
+        sequential_nominal_ms = sequential_nominal_ms.saturating_add(nominal);
+        sequential_worst_case_ms = sequential_worst_case_ms.saturating_add(worst);
+    }
+
+    ConcurrentTimingSummary {
+        active_nominal_by_task,
+        active_worst_by_task,
+        global_nominal_ms,
+        global_worst_case_ms,
+        sequential_nominal_ms,
+        sequential_worst_case_ms,
+    }
+}
+
+fn collect_pending_actions_by_step(
+    state_machine: &StateMachine,
+) -> HashMap<String, Vec<(ActionKind, Option<String>)>> {
+    let mut by_step = HashMap::<String, Vec<(ActionKind, Option<String>)>>::new();
+    for ctx in &state_machine.task_contexts {
+        for pending in &ctx.pending_actions {
+            by_step
+                .entry(step_key(
+                    &pending.source_state.task_name,
+                    &pending.source_state.step_name,
+                ))
+                .or_default()
+                .push((pending.action_kind.clone(), pending.target.clone()));
+        }
+    }
+    by_step
+}
+
+fn select_timing_root_tasks(state_machine: &StateMachine) -> Vec<String> {
+    let mut cross_task_incoming = HashSet::<String>::new();
+    for transition in &state_machine.transitions {
+        if transition.from.task_name != transition.to.task_name {
+            cross_task_incoming.insert(transition.to.task_name.clone());
+        }
+        for target_task in axis_branch_target_task_names(&transition.actions) {
+            if transition.from.task_name != target_task {
+                cross_task_incoming.insert(target_task);
+            }
+        }
+    }
+
+    let mut roots = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    for ctx in &state_machine.task_contexts {
+        if !cross_task_incoming.contains(&ctx.task_name) && seen.insert(ctx.task_name.clone()) {
+            roots.push(ctx.task_name.clone());
+        }
+    }
+
+    if roots.is_empty() {
+        if state_machine
+            .task_contexts
+            .iter()
+            .any(|ctx| ctx.task_name == state_machine.initial.task_name)
+        {
+            roots.push(state_machine.initial.task_name.clone());
+        } else if let Some(first) = state_machine.task_contexts.first() {
+            roots.push(first.task_name.clone());
+        } else if !state_machine.initial.task_name.is_empty() {
+            roots.push(state_machine.initial.task_name.clone());
+        }
+    }
+
+    roots
+}
+
+fn axis_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
+    let mut targets = Vec::new();
+    for action in actions {
+        match action {
+            TransitionAction::AxisMoveRelative {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+                ..
+            }
+            | TransitionAction::AxisMoveAbsolute {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+                ..
+            } => {
+                targets.push(timeout.target_task.clone());
+                targets.push(on_reject.target_task.clone());
+                targets.push(on_motion_fault.target_task.clone());
+                targets.push(on_safety_fault.target_task.clone());
+                targets.extend(
+                    on_reject_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+                targets.extend(
+                    on_motion_fault_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+                targets.extend(
+                    on_safety_fault_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+            }
+            _ => {}
+        }
+    }
+    targets
+}
+
+fn format_concurrent_estimate(
+    active_task_durations: &[(String, u64)],
+    global_concurrent_ms: u64,
+    sequential_sum_ms: u64,
+) -> String {
+    if active_task_durations.is_empty() {
+        return "未识别 active task，上界按 0ms 处理".to_string();
+    }
+
+    let detail = active_task_durations
+        .iter()
+        .map(|(task, duration)| format!("{task}={duration}ms"))
+        .collect::<Vec<_>>()
+        .join("，");
+    format!(
+        "active tasks: [{detail}]；并发全局完成时间按 max={global_concurrent_ms}ms；顺序基线按 sum={sequential_sum_ms}ms"
+    )
+}
+
+fn pending_action_kind_label(kind: &ActionKind) -> &'static str {
+    match kind {
+        ActionKind::Extend => "extend",
+        ActionKind::Retract => "retract",
+        ActionKind::Set => "set",
+        ActionKind::SetAnalog => "set_analog",
+        ActionKind::SetAnalogExpr => "set_analog_expr",
+        ActionKind::Compute => "compute",
+        ActionKind::CallExtern => "call_extern",
+        ActionKind::CamEngage => "cam_engage",
+        ActionKind::CamDisengage => "cam_disengage",
+        ActionKind::CamSwitch => "cam_switch",
+        ActionKind::CamPhase => "cam_phase",
+        ActionKind::AxisMoveRelative => "axis.move_relative",
+        ActionKind::AxisMoveAbsolute => "axis.move_absolute",
+        ActionKind::Log => "log",
+    }
 }
 
 fn shortest_predecessor_interval_ms(
@@ -952,6 +1245,54 @@ task fault:
         assert!(
             rendered.contains("1500ms"),
             "错误分析应体现 axis.move timeout 上界 1500ms"
+        );
+        assert!(
+            rendered.contains("pending 动作上界"),
+            "worst_case 分析应显式包含 pending 动作上界口径"
+        );
+    }
+
+    #[test]
+    fn concurrent_worst_case_analysis_distinguishes_task_local_and_global_completion() {
+        let source = r#"
+[topology]
+
+[constraints]
+
+timing: task.loader must_complete_within_worst_case 900ms
+
+[tasks]
+
+task loader:
+    step hold:
+        delay: 1000ms
+
+task unloader:
+    step hold:
+        delay: 1500ms
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应构建成功");
+        let constraints = build_constraint_set(&program).expect("约束应构建成功");
+        let state_machine = build_state_machine(&program).expect("状态机应构建成功");
+
+        let errors = verify_timing(&program, &topology, &constraints, &state_machine)
+            .expect_err("loader 局部最坏 1000ms 超过 900ms 时应报错");
+
+        assert_eq!(errors.len(), 1, "仅 loader 的 worst_case 约束应失败");
+        let rendered = errors[0].to_string();
+        assert!(
+            rendered.contains("局部最坏关键路径时间 = 1000ms"),
+            "分析应给出 task 局部最坏完成时间"
+        );
+        assert!(
+            rendered.contains("并发全局完成时间按 max=1500ms"),
+            "分析应给出并发全局完成时间（max）"
+        );
+        assert!(
+            rendered.contains("顺序基线按 sum=2500ms"),
+            "分析应保留顺序求和基线，体现并发模型差异"
         );
     }
 

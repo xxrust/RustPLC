@@ -1170,6 +1170,7 @@ mod tests {
             }],
             initial: s1.clone(),
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let ids = assign_state_ids(&sm);
@@ -1217,6 +1218,7 @@ mod tests {
             }],
             initial: state("main", "idle"),
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
@@ -1252,6 +1254,7 @@ mod tests {
             }],
             initial: state("main", "idle"),
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
@@ -1292,6 +1295,7 @@ mod tests {
             }],
             initial: state("main", "idle"),
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
@@ -1320,6 +1324,7 @@ mod tests {
             }],
             initial: state("main", "idle"),
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let mut topology = empty_topology();
@@ -1353,6 +1358,7 @@ mod tests {
             }],
             initial: state("main", "idle"),
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let mut topology = empty_topology();
@@ -1403,6 +1409,7 @@ mod tests {
             }],
             initial: state("main", "idle"),
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
@@ -1434,6 +1441,7 @@ mod tests {
             }],
             initial: state("main", "wait"),
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
@@ -1481,6 +1489,7 @@ mod tests {
             ],
             initial: state("main", "idle"),
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
@@ -1506,6 +1515,7 @@ mod tests {
             }],
             initial: parallel,
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
@@ -1553,6 +1563,7 @@ mod tests {
             ],
             initial: s0,
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
@@ -1622,6 +1633,7 @@ mod tests {
             }],
             initial: s0,
             analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
         };
 
         let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())

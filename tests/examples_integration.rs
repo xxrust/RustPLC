@@ -1281,6 +1281,55 @@ fn parses_welding_station_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_load_unload_concurrent_tasks_example_into_verified_ir_json() {
+    let source = read_example("load_unload_concurrent_tasks.plc");
+    let ir_json = compile_source_to_json(&source)
+        .expect("load_unload_concurrent_tasks example should compile");
+
+    let states = ir_json["state_machine"]["states"]
+        .as_array()
+        .expect("state machine should include states array");
+    assert!(
+        states
+            .iter()
+            .any(|state| { state["step_name"] == Value::String("wait_load_request".to_string()) }),
+        "example should include load_station.wait_load_request blocking step"
+    );
+    assert!(
+        states
+            .iter()
+            .any(|state| { state["step_name"] == Value::String("unload_dwell".to_string()) }),
+        "example should include unload_station.unload_dwell blocking step"
+    );
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+    assert!(
+        transitions.iter().any(|transition| {
+            transition["from"]["task_name"] == Value::String("unload_station".to_string())
+                && transition["from"]["step_name"] == Value::String("unload_dwell".to_string())
+                && transition["guard"]["kind"] == Value::String("delay".to_string())
+                && transition["guard"]["duration_ms"] == Value::Number(200u64.into())
+        }),
+        "example should keep unload task's local delay transition for runtime blocking semantics"
+    );
+
+    assert_eq!(
+        ir_json["verification"]["liveness"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["timing"]["level"],
+        Value::String("通过".to_string())
+    );
+    assert_eq!(
+        ir_json["verification"]["causality"]["level"],
+        Value::String("通过".to_string())
+    );
+}
+
+#[test]
 fn parses_axis_stepper_fault_routing_example_into_verified_ir_json() {
     let source = read_example("axis_stepper_fault_routing.plc");
     let ir_json =
@@ -1355,6 +1404,42 @@ fn parses_axis_fault_normal_path_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_axis_move_blocking_baseline_example_without_explicit_wait() {
+    let source = read_example("axis_move_blocking_baseline.plc");
+    assert!(
+        !source.contains("wait:"),
+        "blocking baseline example should not rely on explicit wait"
+    );
+    assert!(
+        source.contains("timeout:"),
+        "blocking baseline example should declare timeout branch"
+    );
+    assert!(
+        source.contains("on_reject")
+            && source.contains("on_motion_fault")
+            && source.contains("on_safety_fault"),
+        "blocking baseline example should declare all fault branches"
+    );
+
+    let ir_json = compile_source_to_json(&source)
+        .expect("axis_move_blocking_baseline example should compile");
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+    assert!(
+        transitions.iter().any(|transition| {
+            transition["actions"].as_array().is_some_and(|actions| {
+                actions.iter().any(|action| {
+                    action["action"] == Value::String("axis_move_relative".to_string())
+                })
+            })
+        }),
+        "blocking baseline example should include axis_move_relative"
+    );
+}
+
+#[test]
 fn parses_axis_fault_recoverable_path_example_with_policy_into_verified_ir_json() {
     let source = read_example("axis_fault_recoverable_path.plc");
     let ir_json =
@@ -1363,7 +1448,11 @@ fn parses_axis_fault_recoverable_path_example_with_policy_into_verified_ir_json(
     let contracts = ir_json["topology"]["axis_fault_contracts"]
         .as_array()
         .expect("topology should include axis fault contracts array");
-    assert_eq!(contracts.len(), 1, "recoverable example should declare one policy");
+    assert_eq!(
+        contracts.len(),
+        1,
+        "recoverable example should declare one policy"
+    );
     assert_eq!(
         contracts[0]["severity"],
         Value::String("recoverable".to_string())

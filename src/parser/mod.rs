@@ -13,9 +13,9 @@ use crate::ast::{
     WaitCondition, WaitStatement,
 };
 use crate::error::PlcError;
+use pest::Parser;
 use pest::error::LineColLocation;
 use pest::iterators::Pair;
-use pest::Parser;
 use std::collections::HashSet;
 
 #[derive(pest_derive::Parser)]
@@ -5018,14 +5018,18 @@ task ready:
             .find(|step| step.name == "detect")
             .expect("search 任务应包含 detect step");
 
-        assert!(detect_step
-            .statements
-            .iter()
-            .any(|stmt| matches!(stmt, StepStatement::Race(_))));
-        assert!(detect_step
-            .statements
-            .iter()
-            .any(|stmt| matches!(stmt, StepStatement::Timeout(_))));
+        assert!(
+            detect_step
+                .statements
+                .iter()
+                .any(|stmt| matches!(stmt, StepStatement::Race(_)))
+        );
+        assert!(
+            detect_step
+                .statements
+                .iter()
+                .any(|stmt| matches!(stmt, StepStatement::Timeout(_)))
+        );
 
         let ready_task = ast
             .tasks

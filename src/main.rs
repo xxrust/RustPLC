@@ -22,7 +22,7 @@ use std::process::Command;
 
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io};
 use petgraph::Direction;
-use runtime_core::{Action, Instr, Program, Step, StepId, Task};
+use runtime_core::{Action, Instr, MAX_TRANSITIONS_PER_TASK_PER_TICK, Program, Step, StepId, Task};
 use rust_plc::alarm_runtime::{
     AlarmBuildInput, AlarmDispatchConfig, AlarmDispatcher, AlarmSeverity, build_alarm_event,
 };
@@ -70,10 +70,20 @@ struct VerificationReportFile<'a> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum TransitionBudgetScope {
+    PerTaskPerTick,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct RuntimeBudget {
-    /// runtime-core hard cap (see Runtime::tick_with_trace_and_logs).
+    /// runtime-core hard cap per task per tick (see Runtime::tick_with_trace_and_logs).
+    transition_budget_scope: TransitionBudgetScope,
     max_transitions_per_tick_cap: usize,
-    /// Upper bound on same-tick transition chaining in the current state machine.
+    active_task_count: usize,
+    /// Global per-tick transition upper bound derived from active tasks.
+    max_transitions_all_tasks_per_tick_upper_bound: usize,
+    /// Upper bound on same-tick transition chaining within one task.
     max_transitions_same_tick_upper_bound: usize,
     max_actions_per_transition: usize,
     max_actions_per_tick_upper_bound: usize,
@@ -108,6 +118,8 @@ struct RuntimeBudgetThresholds {
     parallel_expand_cost_us: u64,
     max_budget_time_estimate_us: u64,
 }
+
+const AXIS_BLOCKING_MIGRATION_WARNING_CODE: &str = "MIG-AXIS-BLOCK-001";
 
 impl Default for RuntimeBudgetThresholds {
     fn default() -> Self {
@@ -1372,7 +1384,7 @@ fn scenario_mismatch_hint_for_example(
 ) -> Option<String> {
     if !matches!(
         err,
-        sim::SimRunError::Runtime(runtime_core::RuntimeError::TooManyTransitionsInOneTick)
+        sim::SimRunError::Runtime(runtime_core::RuntimeError::TooManyTransitionsInOneTick { .. })
     ) {
         return None;
     }
@@ -9751,13 +9763,14 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
     let constraints = constraints.expect("constraints exist when semantic errors are empty");
     let timing_model = timing_model.expect("timing model exists when semantic errors are empty");
 
-    let verification = verify_all(&expanded_program, &topology, &constraints, &state_machine)
+    let mut verification = verify_all(&expanded_program, &topology, &constraints, &state_machine)
         .map_err(|issues| {
-            issues
-                .into_iter()
-                .map(|issue| issue.to_string())
-                .collect::<Vec<_>>()
-        })?;
+        issues
+            .into_iter()
+            .map(|issue| issue.to_string())
+            .collect::<Vec<_>>()
+    })?;
+    apply_axis_move_blocking_migration_warning(&program, &mut verification);
 
     let runtime_budget = analyze_runtime_budget(&expanded_program, &state_machine);
 
@@ -9841,9 +9854,15 @@ fn collect_checker_blocking_warnings(
 ) {
     for entry in entries {
         if matches!(entry.level, WarningLevel::Warn | WarningLevel::Error) {
+            let code_suffix = entry
+                .code
+                .as_ref()
+                .map(|code| format!(" ({code})"))
+                .unwrap_or_default();
             output.push(format!(
-                "[{checker}] {}: {}",
+                "[{checker}] {}{}: {}",
                 warning_level_label(&entry.level),
+                code_suffix,
                 entry.message
             ));
         }
@@ -9900,36 +9919,60 @@ fn analyze_runtime_budget(
     let (max_actions_per_transition, max_parallel_branches, max_race_branches) =
         analyze_program_budget_facts(program);
 
+    let mut task_names = state_machine
+        .task_contexts
+        .iter()
+        .map(|ctx| ctx.task_name.clone())
+        .collect::<BTreeSet<_>>();
+    if task_names.is_empty() {
+        for state in &state_machine.states {
+            task_names.insert(state.task_name.clone());
+        }
+    }
+    let active_task_count = task_names.len().max(1);
+
     // Edges that may fire within the same tick if inputs match.
-    let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); state_machine.states.len()];
-    let mut edges: Vec<(usize, usize)> = Vec::new();
     let mut state_index: HashMap<(String, String), usize> = HashMap::new();
     for (idx, state) in state_machine.states.iter().enumerate() {
         state_index.insert((state.task_name.clone(), state.step_name.clone()), idx);
     }
 
-    for tr in &state_machine.transitions {
-        let from = state_index
-            .get(&(tr.from.task_name.clone(), tr.from.step_name.clone()))
-            .copied();
-        let to = state_index
-            .get(&(tr.to.task_name.clone(), tr.to.step_name.clone()))
-            .copied();
-        let (Some(from), Some(to)) = (from, to) else {
-            continue;
-        };
+    let mut has_cycle = false;
+    let mut longest_chain = 0usize;
+    for task_name in task_names {
+        let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); state_machine.states.len()];
+        let mut edges: Vec<(usize, usize)> = Vec::new();
+        for tr in &state_machine.transitions {
+            if tr.from.task_name != task_name || tr.to.task_name != task_name {
+                continue;
+            }
+            if !guard_can_fire_same_tick(&tr.guard) {
+                continue;
+            }
 
-        if !guard_can_fire_same_tick(&tr.guard) {
-            continue;
+            let from = state_index
+                .get(&(tr.from.task_name.clone(), tr.from.step_name.clone()))
+                .copied();
+            let to = state_index
+                .get(&(tr.to.task_name.clone(), tr.to.step_name.clone()))
+                .copied();
+            let (Some(from), Some(to)) = (from, to) else {
+                continue;
+            };
+
+            let eid = edges.len();
+            edges.push((from, to));
+            outgoing[from].push(eid);
         }
 
-        let eid = edges.len();
-        edges.push((from, to));
-        outgoing[from].push(eid);
+        let (task_has_cycle, task_longest_chain) = analyze_longest_chain(&outgoing, &edges);
+        has_cycle |= task_has_cycle;
+        longest_chain = longest_chain.max(task_longest_chain);
     }
 
-    let (has_cycle, longest_chain) = analyze_longest_chain(&outgoing, &edges);
-    let max_transitions_per_tick_cap = 64;
+    let max_transitions_per_tick_cap = MAX_TRANSITIONS_PER_TASK_PER_TICK;
+    let max_transitions_all_tasks_per_tick_upper_bound =
+        max_transitions_per_tick_cap.saturating_mul(active_task_count);
     let max_transitions_same_tick_upper_bound = if has_cycle {
         max_transitions_per_tick_cap
     } else {
@@ -9937,11 +9980,14 @@ fn analyze_runtime_budget(
     };
 
     let max_actions_per_tick_upper_bound = max_actions_per_transition
-        .saturating_mul(max_transitions_per_tick_cap)
+        .saturating_mul(max_transitions_all_tasks_per_tick_upper_bound)
         .max(max_actions_per_transition);
 
     let mut budget = RuntimeBudget {
+        transition_budget_scope: TransitionBudgetScope::PerTaskPerTick,
         max_transitions_per_tick_cap,
+        active_task_count,
+        max_transitions_all_tasks_per_tick_upper_bound,
         max_transitions_same_tick_upper_bound,
         max_actions_per_transition,
         max_actions_per_tick_upper_bound,
@@ -10100,6 +10146,7 @@ fn apply_runtime_budget_warnings(
 
     if budget.max_actions_per_transition > thresholds.max_actions_per_transition {
         warnings.push(WarningEntry {
+            code: None,
             level: WarningLevel::Warn,
             message: format!(
                 "runtime budget: max_actions_per_transition={} exceeds threshold {}",
@@ -10109,6 +10156,7 @@ fn apply_runtime_budget_warnings(
     }
     if budget.max_actions_per_tick_upper_bound > thresholds.max_actions_per_tick_upper_bound {
         warnings.push(WarningEntry {
+            code: None,
             level: WarningLevel::Warn,
             message: format!(
                 "runtime budget: max_actions_per_tick_upper_bound={} exceeds threshold {}",
@@ -10119,6 +10167,7 @@ fn apply_runtime_budget_warnings(
     }
     if budget.max_parallel_branches > thresholds.max_parallel_branches {
         warnings.push(WarningEntry {
+            code: None,
             level: WarningLevel::Warn,
             message: format!(
                 "runtime budget: max_parallel_branches={} exceeds threshold {}",
@@ -10128,6 +10177,7 @@ fn apply_runtime_budget_warnings(
     }
     if budget.max_race_branches > thresholds.max_race_branches {
         warnings.push(WarningEntry {
+            code: None,
             level: WarningLevel::Warn,
             message: format!(
                 "runtime budget: max_race_branches={} exceeds threshold {}",
@@ -10137,12 +10187,17 @@ fn apply_runtime_budget_warnings(
     }
     if thresholds.warn_on_same_tick_cycle && budget.has_same_tick_cycle {
         warnings.push(WarningEntry {
+            code: None,
             level: WarningLevel::Warn,
-            message: "runtime budget: same-tick transition subgraph contains a cycle; runtime-core will cap chaining per tick".to_string(),
+            message: format!(
+                "runtime budget: same-tick transition subgraph contains a cycle; runtime-core caps chaining to {} transitions per task per tick (active_tasks={})",
+                budget.max_transitions_per_tick_cap, budget.active_task_count
+            ),
         });
     }
     if budget.budget_time_estimate.exceeds_budget {
         warnings.push(WarningEntry {
+            code: None,
             level: WarningLevel::Warn,
             message: format!(
                 "runtime budget time estimate: total_estimate_us={} exceeds threshold {}",
@@ -10153,6 +10208,82 @@ fn apply_runtime_budget_warnings(
     }
 
     verification.timing.warnings.extend(warnings);
+}
+
+fn apply_axis_move_blocking_migration_warning(
+    program: &rust_plc::ast::PlcProgram,
+    verification: &mut VerificationSummary,
+) {
+    let impacted_steps: Vec<String> = program
+        .tasks
+        .tasks
+        .iter()
+        .flat_map(|task| {
+            task.steps.iter().filter_map(move |step| {
+                let statement_count = step
+                    .statements
+                    .iter()
+                    .filter(|stmt| {
+                        !matches!(stmt, rust_plc::ast::StepStatement::AllowIndefiniteWait(_))
+                    })
+                    .count();
+                if statement_count <= 1 || !statements_include_axis_move(&step.statements) {
+                    return None;
+                }
+                Some(format!("{}.{}", task.name, step.name))
+            })
+        })
+        .collect();
+
+    if impacted_steps.is_empty() {
+        return;
+    }
+
+    let preview = impacted_steps
+        .iter()
+        .take(3)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let overflow = impacted_steps.len().saturating_sub(3);
+    let scope = if overflow > 0 {
+        format!("{preview} 等 {} 个 step", impacted_steps.len())
+    } else {
+        format!("{preview}（共 {} 个 step）", impacted_steps.len())
+    };
+
+    verification.liveness.warnings.push(WarningEntry {
+        code: Some(AXIS_BLOCKING_MIGRATION_WARNING_CODE.to_string()),
+        level: WarningLevel::Warn,
+        message: format!(
+            "迁移提示：axis.move_* 现按默认阻塞语义执行。检测到 {scope} 在同一 step 内混合了 axis.move_* 与其它语句，执行时序会与旧非阻塞假设不同。"
+        ),
+    });
+}
+
+fn statements_include_axis_move(statements: &[rust_plc::ast::StepStatement]) -> bool {
+    statements.iter().any(statement_includes_axis_move)
+}
+
+fn statement_includes_axis_move(statement: &rust_plc::ast::StepStatement) -> bool {
+    match statement {
+        rust_plc::ast::StepStatement::Action(
+            rust_plc::ast::ActionStatement::AxisMoveRelative { .. },
+        )
+        | rust_plc::ast::StepStatement::Action(
+            rust_plc::ast::ActionStatement::AxisMoveAbsolute { .. },
+        ) => true,
+        rust_plc::ast::StepStatement::Repeat { body, .. } => statements_include_axis_move(body),
+        rust_plc::ast::StepStatement::Parallel(block) => block
+            .branches
+            .iter()
+            .any(|branch| statements_include_axis_move(&branch.statements)),
+        rust_plc::ast::StepStatement::Race(block) => block
+            .branches
+            .iter()
+            .any(|branch| statements_include_axis_move(&branch.statements)),
+        _ => false,
+    }
 }
 
 fn estimate_budget_time(

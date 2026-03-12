@@ -31,7 +31,8 @@ fn find_axis_move_action(state_machine: &StateMachine) -> &TransitionAction {
         .find(|action| {
             matches!(
                 action,
-                TransitionAction::AxisMoveRelative { .. } | TransitionAction::AxisMoveAbsolute { .. }
+                TransitionAction::AxisMoveRelative { .. }
+                    | TransitionAction::AxisMoveAbsolute { .. }
             )
         })
         .expect("example should contain one axis move action")

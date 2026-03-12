@@ -25,6 +25,14 @@ jobs:
       - name: Stage-3 runtime/dev contract gates
         run: scripts/stage3_runtime_dev_gate.sh
 
+  concurrent-runtime-verification-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Concurrent runtime + verification gate
+        run: scripts/concurrent_runtime_verification_gate.sh
+
   workspace-test:
     runs-on: ubuntu-latest
     steps:

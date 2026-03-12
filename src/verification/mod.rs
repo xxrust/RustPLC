@@ -5,10 +5,10 @@ pub mod timing;
 
 use crate::ast::PlcProgram;
 use crate::ir::{ConstraintSet, StateMachine, TopologyGraph};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WarningLevel {
     Error,
@@ -16,8 +16,10 @@ pub enum WarningLevel {
     Info,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WarningEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     pub level: WarningLevel,
     pub message: String,
 }
@@ -201,23 +203,27 @@ fn warning_entry(raw: &str) -> WarningEntry {
     let trimmed = raw.trim();
     if let Some(message) = trimmed.strip_prefix("ERROR:").map(str::trim) {
         return WarningEntry {
+            code: None,
             level: WarningLevel::Error,
             message: message.to_string(),
         };
     }
     if let Some(message) = trimmed.strip_prefix("WARNING:").map(str::trim) {
         return WarningEntry {
+            code: None,
             level: WarningLevel::Warn,
             message: message.to_string(),
         };
     }
     if let Some(message) = trimmed.strip_prefix("INFO:").map(str::trim) {
         return WarningEntry {
+            code: None,
             level: WarningLevel::Info,
             message: message.to_string(),
         };
     }
     WarningEntry {
+        code: None,
         level: WarningLevel::Info,
         message: trimmed.to_string(),
     }
@@ -230,5 +236,30 @@ fn timing_suggestion(constraint: &str) -> String {
         "请放宽 must_complete_within 阈值，或缩短动作响应/行程时间".to_string()
     } else {
         "请调整流程顺序、增加必要延时，或放宽 must_start_after 约束".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WarningEntry, WarningLevel};
+
+    #[test]
+    fn warning_entry_deserializes_without_code_for_backward_compatibility() {
+        let payload = r#"{"level":"warn","message":"legacy warning"}"#;
+        let warning: WarningEntry =
+            serde_json::from_str(payload).expect("legacy warning payload should deserialize");
+        assert_eq!(warning.code, None);
+        assert_eq!(warning.level, WarningLevel::Warn);
+        assert_eq!(warning.message, "legacy warning");
+    }
+
+    #[test]
+    fn warning_entry_deserializes_with_code() {
+        let payload =
+            r#"{"level":"warn","message":"migration warning","code":"MIG-AXIS-BLOCK-001"}"#;
+        let warning: WarningEntry =
+            serde_json::from_str(payload).expect("code-aware warning payload should deserialize");
+        assert_eq!(warning.code.as_deref(), Some("MIG-AXIS-BLOCK-001"));
+        assert_eq!(warning.level, WarningLevel::Warn);
     }
 }
