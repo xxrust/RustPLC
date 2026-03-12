@@ -2486,7 +2486,7 @@ fn compare_f32(left: f32, op: CompareOp, right: f32) -> bool {
 mod tests {
     use super::*;
     use io_traits::{AnalogInputId, Tick};
-    use std::{boxed::Box, vec};
+    use std::{boxed::Box, vec, vec::Vec};
 
     struct MemIo {
         t: Tick,

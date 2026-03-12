@@ -397,6 +397,7 @@ mod tests {
             var_init: &[],
             cam_configs: &[],
             cam_tables: &[],
+            axis_fault_policies: &[],
         }
     }
 
