@@ -68,10 +68,77 @@ cargo run --release -- examples/two_cylinder.plc --no-print-ir
 - 🏭 `examples/assembly_station.plc` — 大型拓扑，展示复杂逻辑。
 - 🚨 `examples/recovery_templates/estop_recovery.plc` — 紧急停止与恢复模板。
 - 🛠️ `examples/force_override_demo.plc` — 在线强制信号与调试演示。
+- 📦 `examples/project_scaffold_demo/` — 完整项目脚手架示例，展示 `system/plc/scenario/config/out` 的组织方式。
 
 > ⚠️ **强制审核规则（自 2026-02-24 起）**：每个 `device` 必须声明 `purpose`，缺失将直接导致 Semantic Gate 校验失败。
 >
 > 🔄 **兼容说明（~ 2026-06-30）**：旧版 `connected_to` 或端口作为设备的写法仍可运行，但会给出 `WARN` 级迁移提示。
+
+---
+
+## 📦 项目脚手架（推荐）
+
+如果你不想把 `.system.md`、`.plc`、场景、I/O 映射和中间产物散落在各处，推荐直接生成完整项目骨架：
+
+```bash
+cargo run --release -- new my_plc_project
+```
+
+生成后的项目结构：
+
+```text
+my_plc_project/
+├── README.md
+├── .gitignore
+├── rustplc.project.toml
+├── plc/
+│   ├── main.system.md
+│   └── main.plc
+├── scenarios/
+│   ├── nominal/normal.yaml
+│   ├── faults/
+│   └── generated/
+├── config/
+│   ├── io_map.toml
+│   └── retain.toml
+├── docs/project-layout.md
+├── out/
+│   ├── ir/
+│   ├── sim/
+│   ├── gate/
+│   ├── codegen/
+│   ├── rp2040/
+│   └── release/
+├── .github/workflows/no_board_gate.yml
+└── .vscode/
+```
+
+关键点：
+
+- `plc/main.system.md` 与 `plc/main.plc` 同目录、同 basename，分别承载系统语义和 DSL 源码。
+- `scenarios/`、`config/` 与 `plc/` 分层，避免把运行输入和部署配置混进 DSL。
+- 所有可重建产物统一进入 `out/`，不再把 trace、codegen、build 结果平铺在项目根目录。
+- 根级 `rustplc.project.toml` 固定项目名、主入口和默认输出路径。
+
+推荐第一天命令：
+
+```bash
+cargo run --release -- scenario-validate plc/main.plc \
+  --scenario scenarios/nominal/normal.yaml --output human
+
+cargo run --release -- no-board-gate plc/main.plc \
+  --scenario scenarios/nominal/normal.yaml \
+  --out-dir out/gate/no_board/normal --output human
+
+cargo run --release -- gen-st plc/main.plc \
+  --out out/codegen/st/main.st
+```
+
+进一步说明：
+
+- 目录约定文档：`docs/generated_project_layout_spec.md`
+- 脚手架说明：`docs/已实现/developer_bootstrap_pack.md`
+- 仓库内完整示例：`examples/project_scaffold_demo/`
 
 ---
 

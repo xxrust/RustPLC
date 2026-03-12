@@ -1,0 +1,20 @@
+schema_version = 1
+
+[project]
+name = "Project Scaffold Demo"
+slug = "project_scaffold_demo"
+
+[entry]
+system = "plc/main.system.md"
+plc = "plc/main.plc"
+scenario = "scenarios/nominal/normal.yaml"
+io_map = "config/io_map.toml"
+retain = "config/retain.toml"
+
+[out]
+ir = "out/ir"
+sim = "out/sim"
+gate = "out/gate"
+codegen = "out/codegen"
+rp2040 = "out/rp2040"
+release = "out/release"

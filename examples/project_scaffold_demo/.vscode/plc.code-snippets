@@ -1,0 +1,40 @@
+{
+  "RustPLC: PLC Skeleton": {
+    "scope": "ini",
+    "prefix": "plc-skeleton",
+    "body": [
+      "[topology]",
+      "",
+      "device plc_main: plc {",
+      "    purpose: \"控制器本体与数字I/O端口映射\",",
+      "    ports: [X0:digital:consumer, Y0:digital:producer]",
+      "}",
+      "",
+      "[constraints]",
+      "",
+      "[tasks]",
+      "",
+      "task main:",
+      "    step wait_start:",
+      "        wait: X0 == true",
+      "",
+      "    step run:",
+      "        action: set Y0 on",
+      "",
+      "    on_complete: goto done",
+      "",
+      "task done:",
+      "    step halt:"
+    ],
+    "description": "Insert a minimal RustPLC file skeleton"
+  },
+  "RustPLC: Wait With Timeout": {
+    "scope": "ini",
+    "prefix": "plc-wait-timeout",
+    "body": [
+      "wait: ${1:X0} == ${2:true}",
+      "timeout: ${3:100ms} -> goto ${4:fault}"
+    ],
+    "description": "Insert wait+timeout pair"
+  }
+}

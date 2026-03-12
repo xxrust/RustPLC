@@ -33,9 +33,22 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
 
     for rel in [
         "README.md",
+        ".gitignore",
+        "rustplc.project.toml",
+        "plc/main.system.md",
         "plc/main.plc",
-        "scenarios/normal.yaml",
-        "io_map.toml",
+        "scenarios/nominal/normal.yaml",
+        "scenarios/faults/.gitkeep",
+        "scenarios/generated/.gitkeep",
+        "config/io_map.toml",
+        "config/retain.toml",
+        "docs/project-layout.md",
+        "out/ir/.gitkeep",
+        "out/sim/.gitkeep",
+        "out/gate/.gitkeep",
+        "out/codegen/.gitkeep",
+        "out/rp2040/.gitkeep",
+        "out/release/.gitkeep",
         ".github/workflows/no_board_gate.yml",
         ".vscode/tasks.json",
         ".vscode/settings.json",
@@ -55,7 +68,8 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
         tasks_json.contains("RustPLC: scenario-validate")
             && tasks_json.contains("RustPLC: scenario-doctor")
             && tasks_json.contains("RustPLC: sim-plc")
-            && tasks_json.contains("RustPLC: no-board-gate"),
+            && tasks_json.contains("RustPLC: no-board-gate")
+            && tasks_json.contains("RustPLC: gen-st"),
         "tasks.json should contain quick command entries"
     );
     let settings_json =
@@ -70,12 +84,34 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
         snippets.contains("plc-skeleton") && snippets.contains("[topology]"),
         "plc.code-snippets should include PLC skeleton snippet"
     );
+    let readme = fs::read_to_string(project_dir.join("README.md")).expect("read README.md");
+    assert!(
+        readme.contains("# Demo Project") && readme.contains("Project slug: `demo_project`"),
+        "README should include derived project name and slug"
+    );
+    let system_doc =
+        fs::read_to_string(project_dir.join("plc/main.system.md")).expect("read main.system.md");
+    assert!(
+        system_doc.contains("## 项目身份")
+            && system_doc.contains("**项目名称**：Demo Project")
+            && system_doc.contains("`demo_project`"),
+        "system doc should include derived project identity"
+    );
+    let manifest = fs::read_to_string(project_dir.join("rustplc.project.toml"))
+        .expect("read rustplc.project.toml");
+    assert!(
+        manifest.contains("name = \"Demo Project\"")
+            && manifest.contains("slug = \"demo_project\"")
+            && manifest.contains("scenario = \"scenarios/nominal/normal.yaml\"")
+            && manifest.contains("codegen = \"out/codegen\""),
+        "manifest should include project identity and default paths"
+    );
 
     let validate = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
         .arg("scenario-validate")
         .arg(project_dir.join("plc/main.plc"))
         .arg("--scenario")
-        .arg(project_dir.join("scenarios/normal.yaml"))
+        .arg(project_dir.join("scenarios/nominal/normal.yaml"))
         .arg("--output")
         .arg("json")
         .output()
@@ -90,7 +126,7 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
         .arg("scenario-doctor")
         .arg(project_dir.join("plc/main.plc"))
         .arg("--scenario")
-        .arg(project_dir.join("scenarios/normal.yaml"))
+        .arg(project_dir.join("scenarios/nominal/normal.yaml"))
         .arg("--output")
         .arg("json")
         .output()
@@ -105,9 +141,9 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
         .arg("no-board-gate")
         .arg(project_dir.join("plc/main.plc"))
         .arg("--scenario")
-        .arg(project_dir.join("scenarios/normal.yaml"))
+        .arg(project_dir.join("scenarios/nominal/normal.yaml"))
         .arg("--out-dir")
-        .arg(project_dir.join("out/no_board_gate"))
+        .arg(project_dir.join("out/gate/no_board/normal"))
         .arg("--output")
         .arg("json")
         .output()
