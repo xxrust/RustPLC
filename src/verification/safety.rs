@@ -5,7 +5,8 @@ use crate::ast::{
 use crate::axis_profile::resolve_axis_profiles;
 use crate::ir::{
     AxisFaultBranch, AxisOrientation, AxisTimeoutBranch, ConstraintSet, SafetyExpr, SafetyRelation,
-    State, StateMachine, Transition, TransitionAction, TransitionGuard,
+    State, StateExpr, StateMachine, Transition, TransitionAction, TransitionGuard,
+    WorkpieceCarrierLayoutDef, WorkpieceEffect, WorkpieceSiteKind,
 };
 use petgraph::algo::kosaraju_scc;
 use petgraph::graph::DiGraph;
@@ -128,6 +129,7 @@ struct SafetyModel {
     active_task_names: Vec<String>,
     active_task_entries: Vec<usize>,
     pending_source_states: HashSet<usize>,
+    pending_action_tags: HashMap<usize, Vec<String>>,
     devices: Vec<DeviceDomain>,
     device_index: HashMap<(String, String), usize>,
     device_state_index: Vec<HashMap<String, usize>>,
@@ -183,6 +185,19 @@ struct Counterexample {
     path: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct SemanticResourceHolder {
+    claim_index: usize,
+    description: String,
+}
+
+#[derive(Debug, Clone)]
+struct SemanticResourceCounterexample {
+    resource_name: String,
+    holders: Vec<SemanticResourceHolder>,
+    path: Vec<String>,
+}
+
 pub fn verify_safety(
     program: &PlcProgram,
     constraints: &ConstraintSet,
@@ -197,7 +212,9 @@ pub fn verify_safety_with_config(
     state_machine: &StateMachine,
     config: SafetyConfig,
 ) -> Result<SafetyReport, Vec<SafetyDiagnostic>> {
-    let preflight_diagnostics = verify_vertical_axis_brake_sequence(program);
+    let mut preflight_diagnostics = verify_vertical_axis_brake_sequence(program);
+    preflight_diagnostics.extend(verify_workpiece_flow(program, constraints, state_machine));
+    let preflight_warnings = collect_workpiece_contract_warnings(constraints, state_machine);
     if !preflight_diagnostics.is_empty() {
         return Err(preflight_diagnostics);
     }
@@ -321,11 +338,19 @@ pub fn verify_safety_with_config(
         }
     }
 
+    diagnostics.extend(check_semantic_resource_interlocks(
+        program,
+        constraints,
+        &model,
+        depth_plan.effective_depth,
+    ));
+
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
 
     let mut warnings = depth_plan.warnings;
+    warnings.extend(preflight_warnings);
     let total_rules = constraints.safety.len();
     let skipped_rules_count = total_rules.saturating_sub(checked_rules).max(skipped_rules);
 
@@ -504,6 +529,7 @@ fn collect_axis_disable_targets_from_statements(
                 }
             }
             StepStatement::Action(_)
+            | StepStatement::Effect(_)
             | StepStatement::Wait(_)
             | StepStatement::IfElse { .. }
             | StepStatement::Delay { .. }
@@ -625,6 +651,7 @@ fn verify_vertical_axis_brake_sequence_in_statements(
                 }
             }
             StepStatement::Action(_)
+            | StepStatement::Effect(_)
             | StepStatement::IfElse { .. }
             | StepStatement::Delay { .. }
             | StepStatement::Timeout(_)
@@ -793,6 +820,7 @@ impl SafetyModel {
         }
 
         let pending_source_states = collect_pending_source_states(state_machine, &state_index);
+        let pending_action_tags = collect_pending_action_tags(state_machine, &state_index);
 
         let max_scc_depth = scc_minimum_depth(states.len(), &edges);
         let suggested_depth = states.len().max(max_scc_depth).max(1);
@@ -805,6 +833,7 @@ impl SafetyModel {
             active_task_names,
             active_task_entries,
             pending_source_states,
+            pending_action_tags,
             devices,
             device_index,
             device_state_index,
@@ -848,6 +877,1456 @@ fn collect_pending_source_states(
         }
     }
     pending
+}
+
+fn verify_workpiece_flow(
+    program: &PlcProgram,
+    constraints: &ConstraintSet,
+    state_machine: &StateMachine,
+) -> Vec<SafetyDiagnostic> {
+    if constraints.workpiece_types.is_empty()
+        && constraints.workpiece_sites.is_empty()
+        && constraints.workpiece_holders.is_empty()
+        && constraints.workpiece_carriers.is_empty()
+        && state_machine
+            .transitions
+            .iter()
+            .all(|transition| transition.effects.is_empty())
+    {
+        return Vec::new();
+    }
+
+    let registry = WorkpieceFlowRegistry::from_constraints(constraints);
+    if registry.endpoints.names.is_empty() {
+        return Vec::new();
+    }
+
+    let Some((state_index, outgoing, initial_state_idx)) = workpiece_state_graph(state_machine)
+    else {
+        return Vec::new();
+    };
+
+    let reachable_transitions = collect_reachable_workpiece_transition_indices(
+        state_machine,
+        &state_index,
+        &outgoing,
+        initial_state_idx,
+    );
+    let initial_flow =
+        initial_workpiece_flow_state(state_machine, &registry, &reachable_transitions);
+    let mut queue: VecDeque<(usize, WorkpieceFlowState, Vec<String>)> = VecDeque::from([(
+        initial_state_idx,
+        initial_flow.clone(),
+        vec![state_name(&state_machine.initial)],
+    )]);
+    let mut visited = HashSet::from([(initial_state_idx, initial_flow)]);
+
+    while let Some((state_idx, flow_state, path)) = queue.pop_front() {
+        if outgoing[state_idx].is_empty() {
+            let occupied = flow_state.occupied_endpoints(&registry);
+            if !occupied.is_empty() {
+                return vec![SafetyDiagnostic {
+                    line: find_state_line(program, &state_machine.states[state_idx]),
+                    constraint: "workpiece_flow".to_string(),
+                    reason: format!(
+                        "reachable terminal state still holds workpieces at {}",
+                        occupied.join(", ")
+                    ),
+                    violation_path: path,
+                    suggestion:
+                        "finish, unmount, or transfer every workpiece before the flow terminates"
+                            .to_string(),
+                }];
+            }
+            continue;
+        }
+
+        for transition_idx in &outgoing[state_idx] {
+            let transition = &state_machine.transitions[*transition_idx];
+            let mut next_flow = flow_state.clone();
+            if let Some(diagnostic) =
+                apply_workpiece_effects(program, transition, &registry, &mut next_flow, &path)
+            {
+                return vec![diagnostic];
+            }
+
+            let Some(next_state_idx) = state_index
+                .get(&workpiece_state_key(&transition.to))
+                .copied()
+            else {
+                continue;
+            };
+            if visited.insert((next_state_idx, next_flow.clone())) {
+                let mut next_path = path.clone();
+                next_path.push(format_transition_label(transition));
+                queue.push_back((next_state_idx, next_flow, next_path));
+            }
+        }
+    }
+
+    Vec::new()
+}
+
+fn collect_workpiece_contract_warnings(
+    constraints: &ConstraintSet,
+    state_machine: &StateMachine,
+) -> Vec<String> {
+    if constraints.workpiece_types.is_empty() {
+        return Vec::new();
+    }
+    let Some((state_index, outgoing, initial_state_idx)) = workpiece_state_graph(state_machine)
+    else {
+        return Vec::new();
+    };
+    let reachable_transition_indices = collect_reachable_workpiece_transition_indices(
+        state_machine,
+        &state_index,
+        &outgoing,
+        initial_state_idx,
+    );
+    let reachable_transitions = reachable_transition_indices
+        .iter()
+        .filter_map(|idx| state_machine.transitions.get(*idx))
+        .collect::<Vec<_>>();
+    let mut warnings = Vec::new();
+    let single_type = (constraints.workpiece_types.len() == 1)
+        .then_some(constraints.workpiece_types[0].name.as_str());
+
+    for workpiece in &constraints.workpiece_types {
+        for ingress in &workpiece.ingress_sites {
+            let ingress_reachable = reachable_transitions.iter().any(|transition| {
+                transition.effects.iter().any(|effect| {
+                    workpiece_effect_source(effect).is_some_and(|endpoint| {
+                        single_type == Some(workpiece.name.as_str())
+                            && workpiece_endpoint_matches_pattern(&endpoint, ingress)
+                    }) || matches!(
+                        effect,
+                        WorkpieceEffect::Mount { workpiece_type, slot }
+                            if workpiece_type == &workpiece.name
+                                && workpiece_endpoint_matches_pattern(slot, ingress)
+                    )
+                })
+            });
+            if !ingress_reachable {
+                warnings.push(format!(
+                    "WARNING: workpiece type '{}' declares ingress site '{}', but no reachable effect uses that ingress endpoint",
+                    workpiece.name, ingress
+                ));
+            }
+        }
+
+        for terminal_state in &workpiece.normal_terminal_states {
+            let terminal_reachable = reachable_transitions.iter().any(|transition| {
+                transition.effects.iter().any(|effect| {
+                    matches!(effect, WorkpieceEffect::Finish { terminal_state: actual, .. }
+                        if single_type == Some(workpiece.name.as_str()) && actual == terminal_state)
+                })
+            });
+            if !terminal_reachable {
+                warnings.push(format!(
+                    "WARNING: workpiece type '{}' declares normal terminal state '{}', but no reachable finish lands on it",
+                    workpiece.name, terminal_state
+                ));
+            }
+        }
+
+        for site in &workpiece.normal_egress_sites {
+            let egress_reachable = reachable_transitions.iter().any(|transition| {
+                transition.effects.iter().any(|effect| {
+                    matches!(effect, WorkpieceEffect::Finish { at, terminal_state }
+                        if single_type == Some(workpiece.name.as_str())
+                            && workpiece.normal_terminal_states.iter().any(|state| state == terminal_state)
+                            && workpiece_endpoint_matches_pattern(at, site))
+                })
+            });
+            if !egress_reachable {
+                warnings.push(format!(
+                    "WARNING: workpiece type '{}' declares normal egress site '{}', but no reachable finish satisfies that egress contract",
+                    workpiece.name, site
+                ));
+            }
+        }
+
+        for terminal_state in &workpiece.abnormal_terminal_states {
+            let terminal_reachable = reachable_transitions.iter().any(|transition| {
+                transition.effects.iter().any(|effect| {
+                    matches!(effect, WorkpieceEffect::Finish { terminal_state: actual, .. }
+                        if single_type == Some(workpiece.name.as_str()) && actual == terminal_state)
+                })
+            });
+            if !terminal_reachable {
+                warnings.push(format!(
+                    "WARNING: workpiece type '{}' declares abnormal terminal state '{}', but no reachable finish lands on it",
+                    workpiece.name, terminal_state
+                ));
+            }
+        }
+
+        for site in &workpiece.abnormal_egress_sites {
+            let egress_reachable = reachable_transitions.iter().any(|transition| {
+                transition.effects.iter().any(|effect| {
+                    matches!(effect, WorkpieceEffect::Finish { at, terminal_state }
+                        if single_type == Some(workpiece.name.as_str())
+                            && workpiece.abnormal_terminal_states.iter().any(|state| state == terminal_state)
+                            && workpiece_endpoint_matches_pattern(at, site))
+                })
+            });
+            if !egress_reachable {
+                warnings.push(format!(
+                    "WARNING: workpiece type '{}' declares abnormal egress site '{}', but no reachable finish satisfies that egress contract",
+                    workpiece.name, site
+                ));
+            }
+        }
+
+        for allow in &workpiece.allows {
+            match allow {
+                crate::ir::WorkpieceAllowDef::SplitInto { target } => {
+                    let split_reachable = reachable_transitions.iter().any(|transition| {
+                        transition.effects.iter().any(|effect| {
+                            matches!(effect, WorkpieceEffect::Split { source_type, target_type, .. }
+                                if source_type == &workpiece.name && target_type == target)
+                        })
+                    });
+                    if !split_reachable {
+                        warnings.push(format!(
+                            "WARNING: workpiece type '{}' declares split_into({}), but no reachable split effect uses that contract",
+                            workpiece.name, target
+                        ));
+                    }
+                }
+            }
+        }
+
+        for derivation in &workpiece.derived_from {
+            match derivation {
+                crate::ir::WorkpieceDerivationDef::WorkpieceType { workpiece_type } => {
+                    let split_reachable = reachable_transitions.iter().any(|transition| {
+                        transition.effects.iter().any(|effect| {
+                            matches!(effect, WorkpieceEffect::Split { source_type, target_type, .. }
+                                if source_type == workpiece_type && target_type == &workpiece.name)
+                        })
+                    });
+                    if !split_reachable {
+                        warnings.push(format!(
+                            "WARNING: workpiece type '{}' is derived_from '{}', but no reachable split effect produces it",
+                            workpiece.name, workpiece_type
+                        ));
+                    }
+                }
+                crate::ir::WorkpieceDerivationDef::Merge { inputs } => {
+                    let merge_reachable = reachable_transitions.iter().any(|transition| {
+                        transition.effects.iter().any(|effect| {
+                            matches!(effect, WorkpieceEffect::Merge { target_type, inputs: actual_inputs, .. }
+                                if target_type == &workpiece.name && actual_inputs.len() == inputs.len())
+                        })
+                    });
+                    if !merge_reachable {
+                        warnings.push(format!(
+                            "WARNING: workpiece type '{}' declares merge({}) derivation, but no reachable merge effect produces it",
+                            workpiece.name,
+                            inputs.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    warnings.extend(collect_workpiece_type_flow_warnings(
+        constraints,
+        state_machine,
+        &state_index,
+        &outgoing,
+        initial_state_idx,
+        &reachable_transition_indices,
+    ));
+
+    warnings
+}
+
+fn workpiece_state_graph(
+    state_machine: &StateMachine,
+) -> Option<(HashMap<(String, String), usize>, Vec<Vec<usize>>, usize)> {
+    let state_index = state_machine
+        .states
+        .iter()
+        .enumerate()
+        .map(|(idx, state)| (workpiece_state_key(state), idx))
+        .collect::<HashMap<_, _>>();
+    let initial_state_idx = state_index
+        .get(&workpiece_state_key(&state_machine.initial))
+        .copied()?;
+
+    let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); state_machine.states.len()];
+    for (transition_idx, transition) in state_machine.transitions.iter().enumerate() {
+        if let Some(from_idx) = state_index
+            .get(&workpiece_state_key(&transition.from))
+            .copied()
+        {
+            outgoing[from_idx].push(transition_idx);
+        }
+    }
+
+    Some((state_index, outgoing, initial_state_idx))
+}
+
+fn collect_reachable_workpiece_transition_indices(
+    state_machine: &StateMachine,
+    state_index: &HashMap<(String, String), usize>,
+    outgoing: &[Vec<usize>],
+    initial_state_idx: usize,
+) -> HashSet<usize> {
+    let mut reachable_transitions = HashSet::new();
+    let mut visited_states = HashSet::from([initial_state_idx]);
+    let mut queue = VecDeque::from([initial_state_idx]);
+
+    while let Some(state_idx) = queue.pop_front() {
+        for transition_idx in outgoing.get(state_idx).into_iter().flatten() {
+            reachable_transitions.insert(*transition_idx);
+            if let Some(next_state_idx) = state_machine
+                .transitions
+                .get(*transition_idx)
+                .and_then(|transition| state_index.get(&workpiece_state_key(&transition.to)))
+                .copied()
+            {
+                if visited_states.insert(next_state_idx) {
+                    queue.push_back(next_state_idx);
+                }
+            }
+        }
+    }
+
+    reachable_transitions
+}
+
+#[derive(Debug, Clone)]
+struct WorkpieceTypeRegistry {
+    names: Vec<String>,
+    caps: Vec<u16>,
+    index: HashMap<String, usize>,
+}
+
+impl WorkpieceTypeRegistry {
+    fn from_constraints(
+        constraints: &ConstraintSet,
+        state_machine: &StateMachine,
+        reachable_transition_indices: &HashSet<usize>,
+    ) -> Self {
+        let mut names = Vec::new();
+        let mut caps = Vec::new();
+        let mut index = HashMap::new();
+
+        for workpiece in &constraints.workpiece_types {
+            index.insert(workpiece.name.clone(), names.len());
+            names.push(workpiece.name.clone());
+            caps.push(workpiece_type_warning_cap(
+                constraints,
+                state_machine,
+                reachable_transition_indices,
+                &workpiece.name,
+            ));
+        }
+
+        Self { names, caps, index }
+    }
+}
+
+fn workpiece_type_warning_cap(
+    constraints: &ConstraintSet,
+    state_machine: &StateMachine,
+    reachable_transition_indices: &HashSet<usize>,
+    workpiece_name: &str,
+) -> u16 {
+    let mut cap = 1u16;
+    for workpiece in &constraints.workpiece_types {
+        for rule in &workpiece.derived_from {
+            let crate::ir::WorkpieceDerivationDef::Merge { inputs } = rule else {
+                continue;
+            };
+            let multiplicity = inputs
+                .iter()
+                .filter(|input| input.as_str() == workpiece_name)
+                .count() as u16;
+            cap = cap.max(multiplicity);
+        }
+    }
+
+    for (transition_idx, transition) in state_machine.transitions.iter().enumerate() {
+        if !reachable_transition_indices.contains(&transition_idx) {
+            continue;
+        }
+        for effect in &transition.effects {
+            match effect {
+                WorkpieceEffect::Mount { workpiece_type, .. }
+                | WorkpieceEffect::Unmount { workpiece_type, .. }
+                    if workpiece_type == workpiece_name =>
+                {
+                    cap = cap.saturating_add(1);
+                }
+                WorkpieceEffect::Split {
+                    target_type, count, ..
+                } if target_type == workpiece_name => {
+                    cap = cap.saturating_add((*count).min(u16::MAX as u32) as u16);
+                }
+                WorkpieceEffect::Merge {
+                    inputs,
+                    target_type,
+                    ..
+                } if target_type == workpiece_name
+                    && resolve_merge_input_types(constraints, target_type, inputs.len())
+                        .is_some() =>
+                {
+                    cap = cap.saturating_add(1);
+                }
+                WorkpieceEffect::Acquire { from, .. } | WorkpieceEffect::Transfer { from, .. }
+                    if constraints.workpiece_types.len() == 1
+                        && constraints.workpiece_types[0].name == workpiece_name
+                        && constraints.workpiece_types[0]
+                            .ingress_sites
+                            .iter()
+                            .any(|pattern| workpiece_endpoint_matches_pattern(from, pattern)) =>
+                {
+                    cap = cap.saturating_add(1);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    cap
+}
+
+fn collect_workpiece_type_flow_warnings(
+    constraints: &ConstraintSet,
+    state_machine: &StateMachine,
+    state_index: &HashMap<(String, String), usize>,
+    outgoing: &[Vec<usize>],
+    initial_state_idx: usize,
+    reachable_transition_indices: &HashSet<usize>,
+) -> Vec<String> {
+    let registry = WorkpieceTypeRegistry::from_constraints(
+        constraints,
+        state_machine,
+        reachable_transition_indices,
+    );
+    if registry.names.is_empty() {
+        return Vec::new();
+    }
+
+    let available_before = compute_available_workpiece_type_counts(
+        constraints,
+        state_machine,
+        state_index,
+        outgoing,
+        initial_state_idx,
+        reachable_transition_indices,
+        &registry,
+    );
+    let mut warnings = Vec::new();
+
+    for transition_idx in reachable_transition_indices {
+        let Some(transition) = state_machine.transitions.get(*transition_idx) else {
+            continue;
+        };
+        let Some(from_state_idx) = state_index
+            .get(&workpiece_state_key(&transition.from))
+            .copied()
+        else {
+            continue;
+        };
+        let counts = &available_before[from_state_idx];
+
+        for effect in &transition.effects {
+            match effect {
+                WorkpieceEffect::Split {
+                    source_type,
+                    target_type: _,
+                    ..
+                } => {
+                    let available = registry
+                        .index
+                        .get(source_type)
+                        .and_then(|idx| counts.get(*idx))
+                        .copied()
+                        .unwrap_or(0);
+                    if available == 0 {
+                        warnings.push(format!(
+                            "WARNING: split at {} consumes source type '{}', but no prior reachable effect introduces that type",
+                            state_name(&transition.from),
+                            source_type
+                        ));
+                    }
+                }
+                WorkpieceEffect::Merge {
+                    inputs,
+                    target_type,
+                    ..
+                } => {
+                    let Some(required_inputs) =
+                        resolve_merge_input_types(constraints, target_type, inputs.len())
+                    else {
+                        continue;
+                    };
+                    let deficits = workpiece_type_deficits(&required_inputs, &registry, counts);
+                    if deficits.is_empty() {
+                        continue;
+                    }
+                    warnings.push(format!(
+                        "WARNING: merge at {} into '{}' requires prior reachable inputs {}, but the current flow never introduces enough of them",
+                        state_name(&transition.from),
+                        target_type,
+                        deficits.join(", ")
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if constraints.workpiece_types.len() > 1 {
+        for (state_idx, transitions) in outgoing.iter().enumerate() {
+            if !transitions.is_empty() {
+                continue;
+            }
+            let retained = registry
+                .names
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, workpiece_type)| {
+                    let count = available_before[state_idx].get(idx).copied().unwrap_or(0);
+                    (count > 0).then_some(format!("{count}x {workpiece_type}"))
+                })
+                .collect::<Vec<_>>();
+            if retained.is_empty() {
+                continue;
+            }
+            warnings.push(format!(
+                "WARNING: reachable terminal state {} may still retain unconsumed workpiece types {}",
+                state_name(&state_machine.states[state_idx]),
+                retained.join(", ")
+            ));
+        }
+    }
+
+    warnings
+}
+
+fn compute_available_workpiece_type_counts(
+    constraints: &ConstraintSet,
+    state_machine: &StateMachine,
+    state_index: &HashMap<(String, String), usize>,
+    outgoing: &[Vec<usize>],
+    initial_state_idx: usize,
+    reachable_transition_indices: &HashSet<usize>,
+    registry: &WorkpieceTypeRegistry,
+) -> Vec<Vec<u16>> {
+    let mut available_before = vec![vec![0u16; registry.names.len()]; state_machine.states.len()];
+    available_before[initial_state_idx] = initial_workpiece_type_counts(
+        constraints,
+        state_machine,
+        reachable_transition_indices,
+        registry,
+    );
+
+    let mut queue = VecDeque::from([initial_state_idx]);
+    let mut queued = HashSet::from([initial_state_idx]);
+
+    while let Some(state_idx) = queue.pop_front() {
+        queued.remove(&state_idx);
+        let current = available_before[state_idx].clone();
+
+        for transition_idx in outgoing.get(state_idx).into_iter().flatten() {
+            if !reachable_transition_indices.contains(transition_idx) {
+                continue;
+            }
+            let Some(transition) = state_machine.transitions.get(*transition_idx) else {
+                continue;
+            };
+            let Some(next_state_idx) = state_index
+                .get(&workpiece_state_key(&transition.to))
+                .copied()
+            else {
+                continue;
+            };
+
+            let mut propagated = current.clone();
+            apply_workpiece_type_flow_effects(constraints, transition, registry, &mut propagated);
+            if join_workpiece_type_counts(&mut available_before[next_state_idx], &propagated)
+                && queued.insert(next_state_idx)
+            {
+                queue.push_back(next_state_idx);
+            }
+        }
+    }
+
+    available_before
+}
+
+fn initial_workpiece_type_counts(
+    constraints: &ConstraintSet,
+    state_machine: &StateMachine,
+    reachable_transition_indices: &HashSet<usize>,
+    registry: &WorkpieceTypeRegistry,
+) -> Vec<u16> {
+    let mut counts = vec![0u16; registry.names.len()];
+    if constraints.workpiece_types.len() != 1 {
+        return counts;
+    }
+
+    let workpiece = &constraints.workpiece_types[0];
+    let Some(type_idx) = registry.index.get(&workpiece.name).copied() else {
+        return counts;
+    };
+
+    for (transition_idx, transition) in state_machine.transitions.iter().enumerate() {
+        if !reachable_transition_indices.contains(&transition_idx) {
+            continue;
+        }
+        let introduced = transition.effects.iter().any(|effect| {
+            workpiece_ingress_source(effect).is_some_and(|source| {
+                workpiece
+                    .ingress_sites
+                    .iter()
+                    .any(|pattern| workpiece_endpoint_matches_pattern(&source, pattern))
+            })
+        });
+        if introduced {
+            counts[type_idx] = counts[type_idx].max(1);
+        }
+    }
+
+    counts
+}
+
+fn apply_workpiece_type_flow_effects(
+    constraints: &ConstraintSet,
+    transition: &Transition,
+    registry: &WorkpieceTypeRegistry,
+    counts: &mut [u16],
+) {
+    for effect in &transition.effects {
+        match effect {
+            WorkpieceEffect::Mount { workpiece_type, .. } => {
+                increment_workpiece_type_count(registry, counts, workpiece_type, 1);
+            }
+            WorkpieceEffect::Unmount { workpiece_type, .. } => {
+                increment_workpiece_type_count(registry, counts, workpiece_type, 1);
+            }
+            WorkpieceEffect::Split {
+                source_type,
+                target_type,
+                count,
+                ..
+            } => {
+                if matches!(effect, WorkpieceEffect::Split { consumed: true, .. }) {
+                    decrement_workpiece_type_count(registry, counts, source_type, 1);
+                }
+                increment_workpiece_type_count(registry, counts, target_type, *count as u16);
+            }
+            WorkpieceEffect::Merge {
+                inputs,
+                target_type,
+                consumed_inputs,
+            } => {
+                if let Some(required_inputs) =
+                    resolve_merge_input_types(constraints, target_type, inputs.len())
+                {
+                    if *consumed_inputs {
+                        decrement_required_workpiece_types(registry, counts, &required_inputs);
+                    }
+                    increment_workpiece_type_count(registry, counts, target_type, 1);
+                }
+            }
+            WorkpieceEffect::Finish { .. } => {
+                if constraints.workpiece_types.len() == 1 {
+                    decrement_workpiece_type_count(
+                        registry,
+                        counts,
+                        &constraints.workpiece_types[0].name,
+                        1,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn increment_workpiece_type_count(
+    registry: &WorkpieceTypeRegistry,
+    counts: &mut [u16],
+    workpiece_type: &str,
+    amount: u16,
+) {
+    let Some(type_idx) = registry.index.get(workpiece_type).copied() else {
+        return;
+    };
+    let cap = registry.caps[type_idx].max(1);
+    let next = counts[type_idx].saturating_add(amount).min(cap);
+    counts[type_idx] = next;
+}
+
+fn decrement_workpiece_type_count(
+    registry: &WorkpieceTypeRegistry,
+    counts: &mut [u16],
+    workpiece_type: &str,
+    amount: u16,
+) {
+    let Some(type_idx) = registry.index.get(workpiece_type).copied() else {
+        return;
+    };
+    counts[type_idx] = counts[type_idx].saturating_sub(amount);
+}
+
+fn decrement_required_workpiece_types(
+    registry: &WorkpieceTypeRegistry,
+    counts: &mut [u16],
+    required_inputs: &[String],
+) {
+    let mut requirements = HashMap::<String, u16>::new();
+    for input in required_inputs {
+        *requirements.entry(input.clone()).or_default() += 1;
+    }
+    for (workpiece_type, amount) in requirements {
+        decrement_workpiece_type_count(registry, counts, &workpiece_type, amount);
+    }
+}
+
+fn join_workpiece_type_counts(target: &mut [u16], incoming: &[u16]) -> bool {
+    let mut changed = false;
+    for (target_count, incoming_count) in target.iter_mut().zip(incoming.iter()) {
+        if *incoming_count > *target_count {
+            *target_count = *incoming_count;
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn resolve_merge_input_types(
+    constraints: &ConstraintSet,
+    target_type: &str,
+    input_count: usize,
+) -> Option<Vec<String>> {
+    let workpiece = constraints
+        .workpiece_types
+        .iter()
+        .find(|candidate| candidate.name == target_type)?;
+    let matches = workpiece
+        .derived_from
+        .iter()
+        .filter_map(|rule| match rule {
+            crate::ir::WorkpieceDerivationDef::Merge { inputs } if inputs.len() == input_count => {
+                Some(inputs.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        matches.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn workpiece_type_deficits(
+    required_inputs: &[String],
+    registry: &WorkpieceTypeRegistry,
+    counts: &[u16],
+) -> Vec<String> {
+    let mut requirements = HashMap::<String, u16>::new();
+    for input in required_inputs {
+        *requirements.entry(input.clone()).or_default() += 1;
+    }
+
+    let mut deficits = requirements
+        .into_iter()
+        .filter_map(|(workpiece_type, required)| {
+            let available = registry
+                .index
+                .get(&workpiece_type)
+                .and_then(|idx| counts.get(*idx))
+                .copied()
+                .unwrap_or(0);
+            (available < required).then_some(format!(
+                "{}x {}",
+                required.saturating_sub(available),
+                workpiece_type
+            ))
+        })
+        .collect::<Vec<_>>();
+    deficits.sort();
+    deficits
+}
+
+#[derive(Debug, Clone)]
+struct WorkpieceEndpointRegistry {
+    names: Vec<String>,
+    capacities: Vec<u16>,
+    index: HashMap<String, usize>,
+}
+
+impl WorkpieceEndpointRegistry {
+    fn from_constraints(constraints: &ConstraintSet) -> Self {
+        let mut names = Vec::new();
+        let mut capacities = Vec::new();
+        let mut index = HashMap::new();
+
+        let mut push_endpoint = |name: String, capacity: u16| {
+            if index.contains_key(&name) {
+                return;
+            }
+            index.insert(name.clone(), names.len());
+            names.push(name);
+            capacities.push(capacity.max(1));
+        };
+
+        for site in &constraints.workpiece_sites {
+            if site.kind == WorkpieceSiteKind::WorkpieceLocation {
+                push_endpoint(site.name.clone(), site.capacity as u16);
+            }
+        }
+        for holder in &constraints.workpiece_holders {
+            push_endpoint(holder.name.clone(), holder.capacity as u16);
+        }
+        for carrier in &constraints.workpiece_carriers {
+            match &carrier.layout {
+                WorkpieceCarrierLayoutDef::Slots { count } => {
+                    for idx in 0..*count {
+                        push_endpoint(format!("{}.slot[{idx}]", carrier.name), 1);
+                    }
+                }
+                WorkpieceCarrierLayoutDef::Grid { rows, cols } => {
+                    for row in 0..*rows {
+                        for col in 0..*cols {
+                            push_endpoint(format!("{}.slot[{row},{col}]", carrier.name), 1);
+                        }
+                    }
+                }
+            }
+        }
+
+        Self {
+            names,
+            capacities,
+            index,
+        }
+    }
+
+    fn occupied_endpoints(&self, counts: &[u16]) -> Vec<String> {
+        counts
+            .iter()
+            .enumerate()
+            .filter(|(_, count)| **count > 0)
+            .map(|(idx, count)| format!("{}({})", self.names[idx], count))
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct WorkpieceFlowRegistry {
+    endpoints: WorkpieceEndpointRegistry,
+    workpiece_types: Vec<crate::ir::WorkpieceTypeDef>,
+    workpiece_index: HashMap<String, usize>,
+}
+
+impl WorkpieceFlowRegistry {
+    fn from_constraints(constraints: &ConstraintSet) -> Self {
+        let mut workpiece_index = HashMap::new();
+        for (idx, workpiece) in constraints.workpiece_types.iter().enumerate() {
+            workpiece_index.insert(workpiece.name.clone(), idx);
+        }
+
+        Self {
+            endpoints: WorkpieceEndpointRegistry::from_constraints(constraints),
+            workpiece_types: constraints.workpiece_types.clone(),
+            workpiece_index,
+        }
+    }
+
+    fn endpoint_idx(&self, endpoint: &str) -> Option<usize> {
+        self.endpoints.index.get(endpoint).copied()
+    }
+
+    fn endpoint_matches_any_ingress(&self, endpoint: &str) -> bool {
+        self.workpiece_types.iter().any(|workpiece| {
+            workpiece
+                .ingress_sites
+                .iter()
+                .any(|pattern| workpiece_endpoint_matches_pattern(endpoint, pattern))
+        })
+    }
+
+    fn endpoint_matches_ingress_for_type(&self, workpiece_type_idx: usize, endpoint: &str) -> bool {
+        self.workpiece_types
+            .get(workpiece_type_idx)
+            .is_some_and(|workpiece| {
+                workpiece
+                    .ingress_sites
+                    .iter()
+                    .any(|pattern| workpiece_endpoint_matches_pattern(endpoint, pattern))
+            })
+    }
+
+    fn finish_bucket_error(
+        &self,
+        workpiece_type_idx: usize,
+        endpoint: &str,
+        terminal_state: &str,
+    ) -> Option<String> {
+        let workpiece = self.workpiece_types.get(workpiece_type_idx)?;
+        if workpiece
+            .normal_terminal_states
+            .iter()
+            .any(|state| state == terminal_state)
+        {
+            if workpiece
+                .normal_egress_sites
+                .iter()
+                .any(|pattern| workpiece_endpoint_matches_pattern(endpoint, pattern))
+            {
+                return None;
+            }
+            return Some(format!(
+                "finish exits endpoint '{}' with normal terminal state '{}', but workpiece type '{}' only allows that bucket through normal egress sites [{}]",
+                endpoint,
+                terminal_state,
+                workpiece.name,
+                workpiece.normal_egress_sites.join(", ")
+            ));
+        }
+
+        if workpiece
+            .abnormal_terminal_states
+            .iter()
+            .any(|state| state == terminal_state)
+        {
+            if workpiece
+                .abnormal_egress_sites
+                .iter()
+                .any(|pattern| workpiece_endpoint_matches_pattern(endpoint, pattern))
+            {
+                return None;
+            }
+            return Some(format!(
+                "finish exits endpoint '{}' with abnormal terminal state '{}', but workpiece type '{}' only allows that bucket through abnormal egress sites [{}]",
+                endpoint,
+                terminal_state,
+                workpiece.name,
+                workpiece.abnormal_egress_sites.join(", ")
+            ));
+        }
+
+        Some(format!(
+            "finish uses undeclared terminal state '{}' for workpiece type '{}'",
+            terminal_state, workpiece.name
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct WorkpieceFlowToken {
+    workpiece_type_idx: usize,
+    endpoint_idx: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+struct WorkpieceFlowState {
+    tokens: Vec<WorkpieceFlowToken>,
+}
+
+impl WorkpieceFlowState {
+    fn canonicalize(&mut self) {
+        self.tokens.sort_unstable();
+        self.tokens.dedup();
+    }
+
+    fn occupancy(&self, endpoint_idx: usize) -> usize {
+        self.tokens
+            .iter()
+            .filter(|token| token.endpoint_idx == endpoint_idx)
+            .count()
+    }
+
+    fn unique_token_index_at(&self, endpoint_idx: usize) -> Result<usize, usize> {
+        let matches = self
+            .tokens
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, token)| (token.endpoint_idx == endpoint_idx).then_some(idx))
+            .collect::<Vec<_>>();
+        match matches.len() {
+            0 => Err(0),
+            1 => Ok(matches[0]),
+            count => Err(count),
+        }
+    }
+
+    fn occupied_endpoints(&self, registry: &WorkpieceFlowRegistry) -> Vec<String> {
+        let mut counts = vec![0u16; registry.endpoints.names.len()];
+        for token in &self.tokens {
+            if let Some(count) = counts.get_mut(token.endpoint_idx) {
+                *count = count.saturating_add(1);
+            }
+        }
+        registry.endpoints.occupied_endpoints(&counts)
+    }
+}
+
+fn initial_workpiece_flow_state(
+    state_machine: &StateMachine,
+    registry: &WorkpieceFlowRegistry,
+    reachable_transition_indices: &HashSet<usize>,
+) -> WorkpieceFlowState {
+    let mut flow_state = WorkpieceFlowState::default();
+
+    for (transition_idx, transition) in state_machine.transitions.iter().enumerate() {
+        if !reachable_transition_indices.contains(&transition_idx) {
+            continue;
+        }
+        for effect in &transition.effects {
+            let Some(source) = workpiece_ingress_source(effect) else {
+                continue;
+            };
+            let Some(endpoint_idx) = registry.endpoint_idx(&source) else {
+                continue;
+            };
+            for (workpiece_type_idx, workpiece) in registry.workpiece_types.iter().enumerate() {
+                if workpiece
+                    .ingress_sites
+                    .iter()
+                    .any(|pattern| workpiece_endpoint_matches_pattern(&source, pattern))
+                {
+                    flow_state.tokens.push(WorkpieceFlowToken {
+                        workpiece_type_idx,
+                        endpoint_idx,
+                    });
+                }
+            }
+        }
+    }
+
+    flow_state.canonicalize();
+    flow_state
+}
+
+fn workpiece_effect_source(effect: &WorkpieceEffect) -> Option<String> {
+    match effect {
+        WorkpieceEffect::Acquire { from, .. } => Some(from.clone()),
+        WorkpieceEffect::Transfer { from, .. } => Some(from.clone()),
+        WorkpieceEffect::Unmount { slot, .. } => Some(slot.clone()),
+        WorkpieceEffect::Finish { at, .. } => Some(at.clone()),
+        WorkpieceEffect::Mount { .. }
+        | WorkpieceEffect::Split { .. }
+        | WorkpieceEffect::Merge { .. }
+        | WorkpieceEffect::TransformCarrier { .. } => None,
+    }
+}
+
+fn workpiece_ingress_source(effect: &WorkpieceEffect) -> Option<String> {
+    match effect {
+        WorkpieceEffect::Acquire { from, .. } | WorkpieceEffect::Transfer { from, .. } => {
+            Some(from.clone())
+        }
+        WorkpieceEffect::Finish { .. }
+        | WorkpieceEffect::Mount { .. }
+        | WorkpieceEffect::Unmount { .. }
+        | WorkpieceEffect::Split { .. }
+        | WorkpieceEffect::Merge { .. }
+        | WorkpieceEffect::TransformCarrier { .. } => None,
+    }
+}
+
+fn apply_workpiece_effects(
+    program: &PlcProgram,
+    transition: &Transition,
+    registry: &WorkpieceFlowRegistry,
+    flow_state: &mut WorkpieceFlowState,
+    path: &[String],
+) -> Option<SafetyDiagnostic> {
+    for effect in &transition.effects {
+        match effect {
+            WorkpieceEffect::Acquire { holder, from } => {
+                if let Some(diag) = move_workpiece(
+                    program, transition, registry, flow_state, from, holder, path, "acquire",
+                ) {
+                    return Some(diag);
+                }
+            }
+            WorkpieceEffect::Transfer { from, to } => {
+                if let Some(diag) = move_workpiece(
+                    program, transition, registry, flow_state, from, to, path, "transfer",
+                ) {
+                    return Some(diag);
+                }
+            }
+            WorkpieceEffect::Unmount { slot, to, .. } => {
+                if let Some(diag) = move_workpiece(
+                    program, transition, registry, flow_state, slot, to, path, "unmount",
+                ) {
+                    return Some(diag);
+                }
+            }
+            WorkpieceEffect::Finish { at, terminal_state } => {
+                if let Some(diag) = finish_workpiece(
+                    program,
+                    transition,
+                    registry,
+                    flow_state,
+                    at,
+                    terminal_state,
+                    path,
+                ) {
+                    return Some(diag);
+                }
+            }
+            WorkpieceEffect::Mount {
+                workpiece_type,
+                slot,
+            } => {
+                if let Some(diag) = introduce_workpiece(
+                    program,
+                    transition,
+                    registry,
+                    flow_state,
+                    workpiece_type,
+                    slot,
+                    path,
+                    "mount",
+                ) {
+                    return Some(diag);
+                }
+            }
+            WorkpieceEffect::Split { .. }
+            | WorkpieceEffect::Merge { .. }
+            | WorkpieceEffect::TransformCarrier { .. } => {}
+        }
+    }
+
+    flow_state.canonicalize();
+    None
+}
+
+fn move_workpiece(
+    program: &PlcProgram,
+    transition: &Transition,
+    registry: &WorkpieceFlowRegistry,
+    flow_state: &mut WorkpieceFlowState,
+    from: &str,
+    to: &str,
+    path: &[String],
+    effect_name: &str,
+) -> Option<SafetyDiagnostic> {
+    let token_idx = match unique_active_workpiece(
+        program,
+        transition,
+        registry,
+        flow_state,
+        from,
+        path,
+        effect_name,
+    ) {
+        Ok(token_idx) => token_idx,
+        Err(diag) => return Some(diag),
+    };
+    if from == to {
+        return None;
+    }
+    if let Some(diag) = ensure_workpiece_destination(
+        program,
+        transition,
+        registry,
+        flow_state,
+        to,
+        path,
+        effect_name,
+    ) {
+        return Some(diag);
+    }
+    if let Some(endpoint_idx) = registry.endpoint_idx(to) {
+        flow_state.tokens[token_idx].endpoint_idx = endpoint_idx;
+    }
+    None
+}
+
+fn finish_workpiece(
+    program: &PlcProgram,
+    transition: &Transition,
+    registry: &WorkpieceFlowRegistry,
+    flow_state: &mut WorkpieceFlowState,
+    endpoint: &str,
+    terminal_state: &str,
+    path: &[String],
+) -> Option<SafetyDiagnostic> {
+    let token_idx = match unique_active_workpiece(
+        program, transition, registry, flow_state, endpoint, path, "finish",
+    ) {
+        Ok(token_idx) => token_idx,
+        Err(diag) => return Some(diag),
+    };
+    if let Some(reason) = registry.finish_bucket_error(
+        flow_state.tokens[token_idx].workpiece_type_idx,
+        endpoint,
+        terminal_state,
+    ) {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason,
+            violation_path: extend_path(path, transition),
+            suggestion:
+                "align the finish terminal_state and endpoint with the declared normal/abnormal egress bucket"
+                    .to_string(),
+        });
+    }
+    flow_state.tokens.remove(token_idx);
+    None
+}
+
+fn introduce_workpiece(
+    program: &PlcProgram,
+    transition: &Transition,
+    registry: &WorkpieceFlowRegistry,
+    flow_state: &mut WorkpieceFlowState,
+    workpiece_type: &str,
+    endpoint: &str,
+    path: &[String],
+    effect_name: &str,
+) -> Option<SafetyDiagnostic> {
+    let Some(workpiece_type_idx) = registry.workpiece_index.get(workpiece_type).copied() else {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!(
+                "{effect_name} introduces undeclared workpiece type '{}'",
+                workpiece_type
+            ),
+            violation_path: extend_path(path, transition),
+            suggestion: "declare the workpiece type before using it in runtime effects".to_string(),
+        });
+    };
+    if !registry.endpoint_matches_ingress_for_type(workpiece_type_idx, endpoint) {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!(
+                "{effect_name} introduces workpiece type '{}' at endpoint '{}', but that endpoint is not a declared ingress site",
+                workpiece_type, endpoint
+            ),
+            violation_path: extend_path(path, transition),
+            suggestion:
+                "introduce new workpieces only through ingress_sites declared on the matching workpiece type"
+                    .to_string(),
+        });
+    }
+    if let Some(diag) = ensure_workpiece_destination(
+        program,
+        transition,
+        registry,
+        flow_state,
+        endpoint,
+        path,
+        effect_name,
+    ) {
+        return Some(diag);
+    }
+    let Some(endpoint_idx) = registry.endpoint_idx(endpoint) else {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!("{effect_name} references undefined endpoint '{}'", endpoint),
+            violation_path: extend_path(path, transition),
+            suggestion: "declare the endpoint in topology before using it in workpiece effects"
+                .to_string(),
+        });
+    };
+    flow_state.tokens.push(WorkpieceFlowToken {
+        workpiece_type_idx,
+        endpoint_idx,
+    });
+    None
+}
+
+fn unique_active_workpiece(
+    program: &PlcProgram,
+    transition: &Transition,
+    registry: &WorkpieceFlowRegistry,
+    flow_state: &WorkpieceFlowState,
+    endpoint: &str,
+    path: &[String],
+    effect_name: &str,
+) -> Result<usize, SafetyDiagnostic> {
+    let Some(endpoint_idx) = registry.endpoint_idx(endpoint) else {
+        return Err(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!("{effect_name} references undefined endpoint '{}'", endpoint),
+            violation_path: extend_path(path, transition),
+            suggestion: "declare the endpoint in topology before using it in workpiece effects"
+                .to_string(),
+        });
+    };
+
+    match flow_state.unique_token_index_at(endpoint_idx) {
+        Ok(token_idx) => Ok(token_idx),
+        Err(0) => {
+            let mut reason = format!(
+                "{effect_name} reads endpoint '{}' before any workpiece is available",
+                endpoint
+            );
+            if path.len() == 1 && !registry.endpoint_matches_any_ingress(endpoint) {
+                reason.push_str("; the endpoint is not a declared ingress site");
+            }
+            Err(SafetyDiagnostic {
+                line: find_state_line(program, &transition.from),
+                constraint: "workpiece_flow".to_string(),
+                reason,
+                violation_path: extend_path(path, transition),
+                suggestion: "introduce the workpiece through a declared ingress or move it into the source endpoint first".to_string(),
+            })
+        }
+        Err(count) => Err(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!(
+                "{effect_name} requires a unique active workpiece at endpoint '{}', but reachable state has duplicate occupancy ({count} tokens)",
+                endpoint
+            ),
+            violation_path: extend_path(path, transition),
+            suggestion:
+                "drain or disambiguate the endpoint so each acquire/transfer/finish source resolves to exactly one active workpiece"
+                    .to_string(),
+        }),
+    }
+}
+
+fn ensure_workpiece_destination(
+    program: &PlcProgram,
+    transition: &Transition,
+    registry: &WorkpieceFlowRegistry,
+    flow_state: &WorkpieceFlowState,
+    endpoint: &str,
+    path: &[String],
+    effect_name: &str,
+) -> Option<SafetyDiagnostic> {
+    let Some(endpoint_idx) = registry.endpoint_idx(endpoint) else {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!("{effect_name} references undefined endpoint '{}'", endpoint),
+            violation_path: extend_path(path, transition),
+            suggestion: "declare the endpoint in topology before using it in workpiece effects"
+                .to_string(),
+        });
+    };
+    let occupancy = flow_state.occupancy(endpoint_idx);
+    if occupancy.saturating_add(1) > registry.endpoints.capacities[endpoint_idx] as usize {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!(
+                "{effect_name} would exceed capacity at endpoint '{}' (capacity={})",
+                endpoint, registry.endpoints.capacities[endpoint_idx]
+            ),
+            violation_path: extend_path(path, transition),
+            suggestion:
+                "move or finish the existing workpiece before placing another one into the endpoint"
+                    .to_string(),
+        });
+    }
+    None
+}
+
+fn extend_path(path: &[String], transition: &Transition) -> Vec<String> {
+    let mut out = path.to_vec();
+    out.push(format_transition_label(transition));
+    out
+}
+
+fn format_transition_label(transition: &Transition) -> String {
+    format!(
+        "{}.{} -> {}.{}",
+        transition.from.task_name,
+        transition.from.step_name,
+        transition.to.task_name,
+        transition.to.step_name
+    )
+}
+
+fn workpiece_state_key(state: &State) -> (String, String) {
+    (state.task_name.clone(), state.step_name.clone())
+}
+
+fn find_state_line(program: &PlcProgram, state: &State) -> usize {
+    program
+        .tasks
+        .tasks
+        .iter()
+        .find(|task| task.name == state.task_name)
+        .and_then(|task| task.steps.iter().find(|step| step.name == state.step_name))
+        .map(|step| step.line.max(1))
+        .unwrap_or(1)
+}
+
+fn workpiece_endpoint_matches_pattern(endpoint: &str, pattern: &str) -> bool {
+    if endpoint == pattern {
+        return true;
+    }
+    let Some((endpoint_carrier, endpoint_selectors)) = parse_slot_reference(endpoint) else {
+        return false;
+    };
+    let Some((pattern_carrier, pattern_selectors)) = parse_slot_reference(pattern) else {
+        return false;
+    };
+    if endpoint_carrier != pattern_carrier || endpoint_selectors.len() != pattern_selectors.len() {
+        return false;
+    }
+    endpoint_selectors
+        .iter()
+        .zip(pattern_selectors.iter())
+        .all(|(value, expected)| expected == "*" || value == expected)
+}
+
+fn parse_slot_reference(raw: &str) -> Option<(String, Vec<String>)> {
+    let (carrier, rest) = raw.split_once(".slot[")?;
+    let selectors = rest.strip_suffix(']')?;
+    let values = selectors
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if carrier.is_empty() || values.is_empty() {
+        return None;
+    }
+    Some((carrier.to_string(), values))
+}
+
+fn collect_pending_action_tags(
+    state_machine: &StateMachine,
+    state_index: &HashMap<(String, String), usize>,
+) -> HashMap<usize, Vec<String>> {
+    let mut pending_tags = HashMap::<usize, Vec<String>>::new();
+    for ctx in &state_machine.task_contexts {
+        for action in &ctx.pending_actions {
+            let Some(tag) = action.semantic_tag.as_ref() else {
+                continue;
+            };
+            let key = (
+                action.source_state.task_name.clone(),
+                action.source_state.step_name.clone(),
+            );
+            let Some(state_id) = state_index.get(&key).copied() else {
+                continue;
+            };
+            let tags = pending_tags.entry(state_id).or_default();
+            if !tags.iter().any(|existing| existing == tag) {
+                tags.push(tag.clone());
+            }
+        }
+    }
+    pending_tags
 }
 
 fn select_safety_root_tasks(
@@ -2236,6 +3715,311 @@ fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> Sea
         counterexample: None,
         fully_explored,
     }
+}
+
+fn check_semantic_resource_interlocks(
+    program: &PlcProgram,
+    constraints: &ConstraintSet,
+    model: &SafetyModel,
+    max_depth: usize,
+) -> Vec<SafetyDiagnostic> {
+    if constraints.semantic_resources.is_empty() || constraints.resource_claims.is_empty() {
+        return Vec::new();
+    }
+
+    let Some(counterexample) = find_semantic_resource_counterexample(model, constraints, max_depth)
+    else {
+        return Vec::new();
+    };
+
+    let line = counterexample
+        .holders
+        .iter()
+        .filter_map(|holder| {
+            program
+                .constraints
+                .claims
+                .get(holder.claim_index)
+                .map(|claim| claim.line.max(1))
+        })
+        .min()
+        .unwrap_or(1);
+    let holders_text = counterexample
+        .holders
+        .iter()
+        .map(|holder| holder.description.clone())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    vec![SafetyDiagnostic {
+        line,
+        constraint: format!(
+            "semantic_resource {} exclusive",
+            counterexample.resource_name
+        ),
+        reason: format!(
+            "semantic resource '{}' is occupied simultaneously by {}",
+            counterexample.resource_name, holders_text
+        ),
+        violation_path: counterexample.path,
+        suggestion: format!(
+            "请让这些 claim 不在同一可达状态同时成立，或拆分资源 `{}`",
+            counterexample.resource_name
+        ),
+    }]
+}
+
+fn find_semantic_resource_counterexample(
+    model: &SafetyModel,
+    constraints: &ConstraintSet,
+    max_depth: usize,
+) -> Option<SemanticResourceCounterexample> {
+    let initial_state = initial_concrete_state(model);
+    let mut nodes = vec![SearchNode {
+        state: initial_state.clone(),
+        depth: 0,
+        parent: None,
+        via_edge: None,
+    }];
+    let mut queue = VecDeque::from([0usize]);
+    let mut shortest_depth = HashMap::<ConcreteState, usize>::new();
+    shortest_depth.insert(initial_state, 0);
+
+    while let Some(node_id) = queue.pop_front() {
+        let node = nodes[node_id].clone();
+
+        if let Some((resource_name, holders)) =
+            semantic_resource_conflict_in_state(model, constraints, &node.state)
+        {
+            let path =
+                render_semantic_resource_path(model, &nodes, node_id, &resource_name, &holders);
+            return Some(SemanticResourceCounterexample {
+                resource_name,
+                holders,
+                path,
+            });
+        }
+
+        for (task_slot, &control_state) in node.state.task_states.iter().enumerate() {
+            let outgoing = model
+                .outgoing
+                .get(control_state)
+                .cloned()
+                .unwrap_or_default();
+            if node.depth == max_depth {
+                continue;
+            }
+
+            for edge_id in outgoing {
+                let edge = &model.edges[edge_id];
+                let next_state = apply_edge(model, edge, &node.state, task_slot);
+                let next_depth = node.depth + 1;
+
+                if shortest_depth
+                    .get(&next_state)
+                    .is_some_and(|depth| *depth <= next_depth)
+                {
+                    continue;
+                }
+
+                shortest_depth.insert(next_state.clone(), next_depth);
+                let next_id = nodes.len();
+                nodes.push(SearchNode {
+                    state: next_state,
+                    depth: next_depth,
+                    parent: Some(node_id),
+                    via_edge: Some(TransitionStep { task_slot, edge_id }),
+                });
+                queue.push_back(next_id);
+            }
+        }
+    }
+
+    None
+}
+
+fn semantic_resource_conflict_in_state(
+    model: &SafetyModel,
+    constraints: &ConstraintSet,
+    state: &ConcreteState,
+) -> Option<(String, Vec<SemanticResourceHolder>)> {
+    for resource in &constraints.semantic_resources {
+        if !matches!(resource.mode, crate::ir::SemanticResourceMode::Exclusive) {
+            continue;
+        }
+
+        let mut holders = Vec::new();
+        for (claim_index, claim) in constraints.resource_claims.iter().enumerate() {
+            if claim.resource != resource.name {
+                continue;
+            }
+            holders.extend(active_semantic_resource_holders(
+                model,
+                state,
+                claim_index,
+                &claim.source,
+            ));
+            if holders.len() > 1 {
+                return Some((resource.name.clone(), holders));
+            }
+        }
+    }
+    None
+}
+
+fn active_semantic_resource_holders(
+    model: &SafetyModel,
+    state: &ConcreteState,
+    claim_index: usize,
+    source: &crate::ir::ResourceClaimSource,
+) -> Vec<SemanticResourceHolder> {
+    match source {
+        crate::ir::ResourceClaimSource::State(state_expr) => {
+            if state_claim_matches(model, state, state_expr) {
+                vec![SemanticResourceHolder {
+                    claim_index,
+                    description: render_state_expr_text(state_expr),
+                }]
+            } else {
+                Vec::new()
+            }
+        }
+        crate::ir::ResourceClaimSource::ActionTag { tag } => {
+            let mut holders = Vec::new();
+            for (task_slot, state_id) in state.task_states.iter().enumerate() {
+                if !state.task_pending.get(task_slot).copied().unwrap_or(false) {
+                    continue;
+                }
+                let Some(tags) = model.pending_action_tags.get(state_id) else {
+                    continue;
+                };
+                if !tags.iter().any(|candidate| candidate == tag) {
+                    continue;
+                }
+                let task_name = model
+                    .active_task_names
+                    .get(task_slot)
+                    .cloned()
+                    .unwrap_or_else(|| format!("task_{task_slot}"));
+                holders.push(SemanticResourceHolder {
+                    claim_index,
+                    description: format!("action_tag {} (task={})", tag, task_name),
+                });
+            }
+            holders
+        }
+    }
+}
+
+fn state_claim_matches(model: &SafetyModel, state: &ConcreteState, state_expr: &StateExpr) -> bool {
+    let Some(device_id) = lookup_device_domain_id(
+        &model.device_index,
+        &state_expr.device,
+        &state_expr.port,
+        false,
+    ) else {
+        return false;
+    };
+    let Some(expected_state) = model.device_state_index[device_id]
+        .get(&state_expr.state)
+        .copied()
+    else {
+        return false;
+    };
+    state
+        .device_states
+        .get(device_id)
+        .copied()
+        .is_some_and(|actual| actual == expected_state)
+}
+
+fn render_state_expr_text(state_expr: &StateExpr) -> String {
+    if state_expr.port == "self" {
+        format!("{}.{}", state_expr.device, state_expr.state)
+    } else {
+        format!(
+            "{}.{}.{}",
+            state_expr.device, state_expr.port, state_expr.state
+        )
+    }
+}
+
+fn render_semantic_resource_path(
+    model: &SafetyModel,
+    nodes: &[SearchNode],
+    terminal_node: usize,
+    resource_name: &str,
+    holders: &[SemanticResourceHolder],
+) -> Vec<String> {
+    let mut order = Vec::new();
+    let mut cursor = Some(terminal_node);
+    while let Some(node_id) = cursor {
+        order.push(node_id);
+        cursor = nodes[node_id].parent;
+    }
+    order.reverse();
+
+    let initial = &nodes[order[0]].state;
+    let mut lines = vec![format!(
+        "初始状态 {}",
+        render_global_state_name(model, initial)
+    )];
+
+    for window in order.windows(2) {
+        let from = &nodes[window[0]].state;
+        let to_node = &nodes[window[1]];
+
+        let step = to_node.via_edge.unwrap_or_else(|| {
+            let fallback_task_slot = 0usize;
+            let fallback_control_state = from.task_states.first().copied().unwrap_or(0);
+            let fallback_edge = model
+                .outgoing
+                .get(fallback_control_state)
+                .and_then(|edges| edges.first())
+                .copied()
+                .unwrap_or(0);
+            TransitionStep {
+                task_slot: fallback_task_slot,
+                edge_id: fallback_edge,
+            }
+        });
+        let edge = &model.edges[step.edge_id];
+        let from_state_id = from
+            .task_states
+            .get(step.task_slot)
+            .copied()
+            .unwrap_or(edge.from);
+        let to_state_id = to_node
+            .state
+            .task_states
+            .get(step.task_slot)
+            .copied()
+            .unwrap_or(edge.to);
+        let from_name = state_name(&model.states[from_state_id]);
+        let to_name = state_name(&model.states[to_state_id]);
+        let task_name = model
+            .active_task_names
+            .get(step.task_slot)
+            .cloned()
+            .unwrap_or_else(|| model.states[to_state_id].task_name.clone());
+        lines.push(format!(
+            "{from_name} --[{}]--> {to_name} (task={task_name})",
+            edge.label
+        ));
+    }
+
+    lines.push(format!(
+        "在 {} 检测到资源 `{}` 冲突：{}",
+        render_global_state_name(model, &nodes[terminal_node].state),
+        resource_name,
+        holders
+            .iter()
+            .map(|holder| holder.description.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+
+    lines
 }
 
 fn initial_concrete_state(model: &SafetyModel) -> ConcreteState {

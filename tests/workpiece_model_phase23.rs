@@ -1145,6 +1145,24 @@ fn verify_all_rejects_workpiece_source_underflow() {
 }
 
 #[test]
+fn verify_all_rejects_phase1_effect_from_undeclared_ingress_site() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_DEAD_CONTRACTS).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let mut constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    constraints.workpiece_types[0].ingress_sites = vec!["outfeed".to_string()];
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error.reason.contains("before any workpiece is available")
+            && error.reason.contains("not a declared ingress site")
+    }));
+}
+
+#[test]
 fn verify_all_rejects_workpiece_capacity_overflow() {
     let program = parse_plc(PLC_WORKPIECE_VERIFY_CAPACITY).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
@@ -1161,6 +1179,26 @@ fn verify_all_rejects_workpiece_capacity_overflow() {
 }
 
 #[test]
+fn verify_all_rejects_reachable_duplicate_workpiece_occupancy() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_DEAD_CONTRACTS).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let mut constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let mut duplicate_type = constraints.workpiece_types[0].clone();
+    duplicate_type.name = "part_clone".to_string();
+    constraints.workpiece_types.push(duplicate_type);
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error.reason.contains("duplicate occupancy")
+            && error.reason.contains("infeed")
+    }));
+}
+
+#[test]
 fn verify_all_rejects_terminal_state_with_unfinished_workpiece() {
     let program = parse_plc(PLC_WORKPIECE_VERIFY_DANGLING).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
@@ -1171,6 +1209,27 @@ fn verify_all_rejects_terminal_state_with_unfinished_workpiece() {
         verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
     assert!(errors.iter().any(|error| {
         error.checker == "safety" && error.reason.contains("still holds workpieces")
+    }));
+}
+
+#[test]
+fn verify_all_rejects_finish_through_wrong_egress_bucket_on_reachable_state() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_DEAD_CONTRACTS).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let mut constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    constraints.workpiece_types[0]
+        .normal_terminal_states
+        .clear();
+    constraints.workpiece_types[0].abnormal_terminal_states = vec!["finished".to_string()];
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error.reason.contains("abnormal terminal state 'finished'")
+            && error.reason.contains("outfeed")
     }));
 }
 

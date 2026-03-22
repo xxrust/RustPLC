@@ -11,6 +11,7 @@ Started: 2026-03-23 01:07:00 CST
 - When `runtime_core::Action` or `Program` changes, also update exhaustive action matches and static `Program` fixtures in `src/main.rs`, `src/sim_regress.rs`, `crates/codegen/src/lib.rs`, and `crates/sim/*`; those crates compile against runtime-core directly and fail fast on stale variants/fields.
 - Phase 1 workpiece runtime seeds one initial token per declared ingress endpoint during `Runtime::new`; first-hop `acquire` must move that seeded token instead of silently minting from thin air.
 - Phase 1 workpiece effects require a unique active token at the source endpoint. Treat `0` as underflow, `>1` as duplicate occupancy ambiguity, and destination-capacity violations as explicit overflow errors.
+- When semantic already blocks a malformed workpiece contract but verification still needs its own regression, build the normal `ConstraintSet`/`StateMachine` first and then mutate the lowered structures in the test to isolate verification responsibility.
 
 ## [2026-03-23 01:40:23 +08:00] - US-001
 Thread: https://ampcode.com/threads/unknown
@@ -71,4 +72,21 @@ Thread: https://ampcode.com/threads/unknown
   - Phase 1 runtime semantics currently rely on ingress seeding because bridge-lowered `acquire/transfer/finish` effects still do not carry instance ids; if later stories add true instance creation, revisit `Runtime::new` seeding instead of layering ad-hoc exceptions on top.
   - When a workpiece action names only endpoints, source selection must stay deterministic. Runtime should reject multi-token source occupancy explicitly rather than guessing which token to move or finish.
   - A focused integration test in `tests/workpiece_model_phase1.rs` is enough to prove bridge + runtime wiring for the canonical example without waiting for the broader example-gate story.
+---
+
+## [2026-03-23 02:38:59 +08:00] - US-004
+Thread: https://ampcode.com/threads/unknown
+- Reworked `src/verification/safety.rs` workpiece preflight from endpoint-count propagation to reachable token-state propagation for `acquire`/`transfer`/`finish`/`mount`/`unmount`, so safety now validates ingress introduction, terminal bucket routing, unique-source occupancy, and dangling tokens on concrete reachable states.
+- Kept the public verification summary shape unchanged while adding exact workpiece diagnostics for undeclared ingress introduction, duplicate occupancy, wrong egress bucket, undefined endpoints, and capacity overflow.
+- Extended `tests/workpiece_model_phase23.rs` with negative verification coverage for undeclared ingress, reachable duplicate occupancy, and wrong egress bucket; existing overflow and dangling-token regressions continue to pass against the new model.
+- Files changed
+- `AGENTS.md`
+- `prd.json`
+- `progress.txt`
+- `src/verification/safety.rs`
+- `tests/workpiece_model_phase23.rs`
+- **Learnings for future iterations:**
+  - Workpiece verification is easier to keep aligned with runtime if reachable-state search tracks active tokens directly instead of only endpoint counters; token-state search can still stay finite by discarding finished tokens from the search state.
+  - Some workpiece safety regressions must be verification-only because semantic rejects them earlier; mutate lowered `ConstraintSet` data in tests rather than weakening parser or semantic guards.
+  - For Phase 1 ingress checks, seeding should stay tied to reachable `acquire/transfer` source endpoints; applying global ingress seeding to `mount`/`unmount` flows changes existing Phase 2 verification semantics.
 ---
