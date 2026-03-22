@@ -1,325 +1,206 @@
 {
   "project": "RustPLC",
-  "branchName": "ralph/concurrent-task-runtime-and-blocking-steps",
-  "description": "将 RustPLC 从单执行点运行时升级为多 task 并发调度模型，引入默认阻塞的 step 完成语义，并在新执行模型下同步闭环 safety、liveness、timing、causality 四类验证。",
+  "branchName": "ralph/workpiece-model-v1-completion",
+  "description": "Complete the remaining Workpiece Model V1 path across semantic checks, verification, runtime bridge, runtime-core execution, and example regressions. ST backend work is explicitly out of scope.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "冻结并发 task 与阻塞 step 的术语契约",
-      "description": "作为架构维护者，我需要先冻结 active task、task context、blocking step、pending action 等核心术语和行为契约，确保 runtime、IR、verification 和文档基于同一套语义实现。",
+      "title": "Add bounded workpiece token storage to runtime-core",
+      "description": "As a runtime maintainer, I need bounded token storage so runtime execution can track workpiece instance location, lifecycle, and occupancy without dynamic allocation.",
       "acceptanceCriteria": [
-        "新增一份架构语义文档，定义 active task、task context、blocking step、non-blocking step、pending action、completion condition",
-        "文档明确说明：单个 task 可在同一 tick 内串联推进多个非阻塞 step，但遇到阻塞 step 后必须停止推进",
-        "文档明确说明：task 并发表示多个 task 持有独立执行上下文并被统一调度，而不是单执行点在不同 task.step 之间跳转",
-        "文档明确列出首版自动阻塞范围，包括 axis.move_*、delay、wait、timeout 驱动等待以及依赖外部反馈完成的动作",
+        "Add bounded workpiece token storage in crates/runtime-core/src/lib.rs",
+        "Token storage tracks token id, workpiece type, current location, active state, and terminal status",
+        "Storage remains no_std compatible and does not use heap allocation",
+        "Add runtime-core tests for token creation, movement, termination, and capacity limits",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Validated by full cargo test sweep on 2026-03-11."
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "扩展 IR 以表达多 task 执行上下文",
-      "description": "作为编译器开发者，我需要让 IR 显式表达 task 级入口、局部状态和挂起动作元数据，以便 bridge、runtime 和验证器消费统一的并发模型。",
+      "title": "Lower Phase 1 workpiece resources and effects in runtime_bridge",
+      "description": "As a compiler maintainer, I want state_machine_to_runtime_program to lower Phase 1 workpiece flows instead of returning WorkpieceModelUnsupported.",
       "acceptanceCriteria": [
-        "IR 新增 task 级执行结构，而不是仅保留单一全局初始状态",
-        "IR 可表达每个 task 的入口 step、当前阻塞状态、定时器与挂起动作元数据",
-        "保留 task_name.step_name 的可读性，避免调试和诊断退化为匿名索引",
-        "repeat、operation-contract、device library 注入仍在 IR 生成前完成，IR 改造不绕过现有 preprocess",
+        "src/runtime_bridge.rs no longer rejects programs that only use Phase 1 workpiece features",
+        "Bridge lowers workpiece types, workpiece sites, holders, and Phase 1 effects into runtime metadata",
+        "Programs using unsupported later-phase workpiece effects still fail with effect-level bridge errors",
+        "Add bridge regression coverage for the Phase 1 workpiece example",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Implemented task-level IR execution context metadata; validated by full cargo test on 2026-03-11."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "为每个 task 建立独立 runtime context",
-      "description": "作为 runtime 维护者，我需要每个活跃 task 都拥有自己的当前位置、进入时间、等待状态和挂起动作状态，这样单个 task 阻塞时不会卡死其他 task。",
+      "title": "Execute Phase 1 acquire transfer finish in runtime-core",
+      "description": "As a PLC author, I want Phase 1 workpiece flows to execute in runtime so site-to-holder-to-site motion and finish semantics are real, not just IR.",
       "acceptanceCriteria": [
-        "runtime 不再只保存一个全局 Location，而是保存每个活跃 task 的执行上下文",
-        "每个 task context 至少包含当前 step、step_entered_at、等待状态、超时状态和挂起动作状态",
-        "单 task 程序在新模型下仍能正常初始化和执行，不产生无解释的行为回归",
-        "新增 runtime-core 单元测试，覆盖多 task context 的初始化与推进",
+        "Runtime executes acquire, transfer, and finish",
+        "Acquire moves a token from a site into a holder",
+        "Transfer updates token location across holder, site, and slot endpoints",
+        "Finish removes the token from occupancy and records terminal completion",
+        "Runtime returns explicit errors for underflow, duplicate occupancy, and overflow",
+        "Add runtime tests for successful flow and failure paths",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Implemented per-task runtime contexts in runtime-core; validated by full cargo test on 2026-03-11."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "实现按 tick 遍历所有活跃 task 的调度器",
-      "description": "作为 runtime 维护者，我需要调度器在每个 tick 内遍历所有活跃 task，并按固定顺序推进，这样 task 并发才是实际调度而不是伪并行。",
+      "title": "Verify Phase 1 ingress egress and endpoint uniqueness on reachable states",
+      "description": "As a verification maintainer, I need exact reachable-state checks for ingress, egress, terminal bucket, and endpoint uniqueness violations.",
       "acceptanceCriteria": [
-        "每个 runtime tick 按固定且文档化的顺序遍历所有活跃 task context",
-        "单个 task 在同一 tick 内可串联推进多个已完成或非阻塞 step",
-        "某个 task 因阻塞 step 停止推进时，不影响同一 tick 内其他 task 的推进",
-        "新增 runtime-core 测试，证明一个 task 阻塞时另一个 task 仍可继续前进",
+        "Safety verification checks that tokens only enter through declared ingress_sites",
+        "Finish only exits through the correct normal or abnormal egress bucket",
+        "Safety verification catches duplicate occupancy on reachable states, not just by preflight estimation",
+        "Add negative verification tests for illegal ingress, wrong egress bucket, duplicate occupancy, and dangling tokens",
+        "Keep the public verification summary shape stable",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Implemented fixed-order per-tick active-task scheduler; validated by full cargo test on 2026-03-11."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "建立统一的 step 完成判定规则",
-      "description": "作为 DSL 使用者，我需要 step 是否离开由显式 completion rule 决定，而不是由某个 action 的隐式副作用决定，这样 step 语义才可预测。",
+      "title": "Lower Phase 2 carrier slot mount unmount transform in runtime_bridge",
+      "description": "As a compiler maintainer, I want Phase 2 carrier semantics to reach runtime instead of stopping at IR.",
       "acceptanceCriteria": [
-        "runtime 在执行 action 后统一执行 completion check，再决定 step 是否可以离开",
-        "仅包含 set、log、compute 等即时动作的 step 在无额外等待条件时可在当前 tick 完成",
-        "delay、wait 和包含挂起动作的 step 在完成条件满足前必须停留在当前 step",
-        "新增最小回归测试，覆盖即时 step、delay step、wait step 和挂起动作 step",
+        "Bridge lowers workpiece_carrier, slot addresses, mount, unmount, and transform carrier",
+        "Runtime program metadata preserves carrier layout, slot capacity, and transform frame data",
+        "Invalid slot references and undeclared carriers return explicit bridge errors",
+        "Add bridge regression coverage for examples/workpiece_carrier_slot_transfer.plc",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "Implemented unified runtime step completion rules and validated by full cargo test on 2026-03-11."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "为长时动作引入 Pending 生命周期",
-      "description": "作为运动控制开发者，我需要 runtime action 结果支持 Pending、Done、Fault 三态，这样 axis.move_* 之类的动作才能自然阻塞当前 step，直到完成、故障或超时。",
+      "title": "Execute Phase 2 mount unmount transform in runtime-core",
+      "description": "As a PLC author, I want mounted workpieces to be tracked in carrier slots and remain consistent across carrier transforms.",
       "acceptanceCriteria": [
-        "运行时动作结果扩展为至少 Pending、Done、Fault 三态",
-        "axis.move_* 首次进入 step 时只发起一次命令，后续 tick 轮询同一挂起动作",
-        "当动作返回 Pending 时，当前 task 必须停留在当前 step",
-        "当动作返回 Done 时，当前 task 才能进入后续 step",
-        "当动作返回 Fault 时，必须沿 on_reject、on_motion_fault、on_safety_fault 路由跳转",
+        "Runtime executes mount, unmount, and transform carrier",
+        "Slot occupancy is updated correctly on mount and unmount",
+        "Carrier transform keeps mounted token association intact",
+        "Runtime returns explicit errors for empty-slot unmount, slot overflow, and duplicate mount",
+        "Add runtime tests for success and failure paths",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "Implemented Pending/Done/Fault axis action lifecycle in runtime-core; validated by full cargo test on 2026-03-11."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "让 axis.move_* 在 step 内默认阻塞",
-      "description": "作为 PLC 程序作者，我希望 axis.move_* 自身承担运动完成语义，而不是每次调用后都手工补 wait，从而保持 DSL 表达紧凑并符合工业控制直觉。",
+      "title": "Verify Phase 2 carrier consistency and slot capacity on reachable states",
+      "description": "As a verification maintainer, I need exact reachable-state checks for carrier-mounted token consistency.",
       "acceptanceCriteria": [
-        "axis.move_relative 和 axis.move_absolute 的 DSL 语法保持可用，不强制新增额外字段",
-        "编译器与文档明确说明 axis.move_* 属于默认阻塞 step 的长时动作",
-        "axis.move_* 在无额外 wait 的情况下也会阻塞当前 step 直到完成、故障或超时",
-        "新增集成测试，覆盖阻塞式 axis.move_* 的成功路径和失败路径",
+        "Safety verification rejects states where a token is both free-standing and mounted at the same time",
+        "Safety verification rejects slot overflow and out-of-bounds slot occupancy",
+        "Carrier transform preserves mounted token consistency in the reachable-state model",
+        "Add negative verification coverage for slot overflow and inconsistent mounted state",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "Added blocking axis.move integration regressions and spec clarification; validated by full cargo test on 2026-03-11."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "为挂起轴运动接入超时和故障路由",
-      "description": "作为 PLC 程序作者，我需要挂起中的 axis.move_* 继续遵循 timeout 与 fault-routing 契约，这样新的阻塞语义不会破坏现有 fault 分流能力。",
+      "title": "Add lineage data structures for split and merge",
+      "description": "As a system maintainer, I need explicit lineage storage so split and merge can be modeled as instance-level semantics rather than only type-level declarations.",
       "acceptanceCriteria": [
-        "挂起轴运动超时后会跳转到配置的 timeout target",
-        "挂起轴运动发生 reject、motion fault、safety fault 时走现有 branch target",
-        "新增 runtime-core 或 runtime bridge 测试，覆盖 Pending 到 timeout 与 Pending 到 fault routing",
-        "axis.move_* 的 fault route 优先级与现有主桶回退契约保持一致",
+        "Add lineage metadata needed to represent parent-to-child and merge-input-to-output relations",
+        "Runtime lineage storage is bounded and no_std compatible",
+        "Consumed tokens remain traceable through lineage records",
+        "Add focused tests for lineage creation and lookup",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "Routed pending axis timeout/fault branches through runtime bridge metadata and runtime polling logic; validated by full cargo test on 2026-03-11."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "让 runtime bridge 保留 task 边界",
-      "description": "作为 bridge 维护者，我需要 bridge 不再把所有 DSL task 扁平化成单个 runtime task，而是保留 task 边界和入口信息，供运行时并发调度。",
+      "title": "Lower and execute split",
+      "description": "As a PLC author, I want split count N consumed to create N output tokens and consume the source token in runtime.",
       "acceptanceCriteria": [
-        "runtime bridge 不再把所有 DSL task 合成为一个 runtime task",
-        "bridge 输出保留 task 边界、入口和局部 step 图",
-        "tick 对齐、I/O 可解析性与动作支持校验继续对新结构生效",
-        "新增 runtime bridge 回归测试，证明多 task PLC 会被桥接为多 task 运行时结构",
+        "Bridge lowers split source type, target type, count, and consumed metadata",
+        "Runtime split creates the requested number of output tokens",
+        "Runtime split records parent lineage for every produced token",
+        "Runtime split consumes the source token when consumed is set",
+        "Add bridge and runtime regressions for valid split and split failure paths",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "Implemented runtime bridge root-task boundary preservation and validated by full cargo test on 2026-03-11."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "重新定义并发模型下的 runtime budget",
-      "description": "作为平台维护者，我需要 runtime budget 与每 tick 保护栏能解释并发 task 执行，不再继续默认单执行点模型。",
+      "title": "Lower and execute merge",
+      "description": "As a PLC author, I want merge consumed_inputs to consume input tokens and create an output token in runtime.",
       "acceptanceCriteria": [
-        "明确每 tick 最大转换数是全局口径还是按 task 口径统计，并在实现与文档中保持一致",
-        "budget 相关告警和错误在多 task 模型下仍具可解释性",
-        "新增至少两个活跃 task 的 budget 分析测试",
-        "文档说明调度公平性与 budget 的关系",
+        "Bridge lowers merge input references, target type, and consumed-input metadata",
+        "Runtime merge consumes input tokens and creates the output token",
+        "Runtime merge records merge lineage",
+        "Runtime returns explicit errors for missing inputs, duplicate consumed input, and arity mismatch",
+        "Add bridge and runtime regressions for valid merge and merge failure paths",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 10,
-      "passes": true,
-      "notes": "Validated by full cargo test on 2026-03-12; budget cycle fixture now includes liveness exemption to keep per-task budget assertions effective."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-011",
-      "title": "在 safety 验证中建模并发全局状态",
-      "description": "作为验证维护者，我需要 safety 引擎能在并发 task 组合状态下检查资源冲突、互斥关系和设备约束，而不是只看顺序路径。",
+      "title": "Verify instance-level split and merge legality",
+      "description": "As a verification maintainer, I need split and merge checks to run on instance lineage, not only on type counts.",
       "acceptanceCriteria": [
-        "Safety verification 可组合多个 task 的当前位置与 pending action 状态形成全局状态",
-        "conflicts_with 和 requires 能检测两个 task 时间重叠导致的冲突",
-        "新增一个共享资源冲突反例测试",
-        "新增一个不同资源可安全并发的正例测试",
+        "Safety verification rejects split outputs that do not come from a valid source token",
+        "Safety verification rejects merge outputs that do not come from the declared legal input set",
+        "Safety verification rejects repeated consumption of the same merge input token",
+        "Terminal-state checks use instance token state, not only type-count approximations",
+        "Add negative verification coverage for illegal lineage and repeated input consumption",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 11,
-      "passes": true,
-      "notes": "Implemented concurrent global-state safety modeling with cross-task conflict/requires regressions; validated by full cargo test on 2026-03-12."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-012",
-      "title": "在 liveness 验证中识别阻塞与死锁",
-      "description": "作为验证维护者，我需要 liveness 能区分合法等待、永久阻塞、死锁和活锁，避免阻塞 step 掩盖真实进度失败。",
+      "title": "Expand the workpiece example regression gate",
+      "description": "As a maintainer, I want the existing workpiece examples to become the stable regression gate for compile, runtime bridge, runtime behavior, and verification.",
       "acceptanceCriteria": [
-        "Liveness 将 Pending action、wait、delay 统一建模为显式等待条件",
-        "当两个 task 只等待对方释放资源时，liveness 会报告 deadlock",
-        "allow_indefinite_wait 仍可豁免预期的无限等待点",
-        "新增回归测试，覆盖合法等待、死锁和活锁三类场景",
+        "Keep examples/workpiece_phase1_transfer.plc, examples/workpiece_carrier_slot_transfer.plc, and examples/workpiece_split_merge.plc as the canonical workpiece fixtures",
+        "tests/examples_integration.rs covers compile-to-json expectations for all three examples",
+        "Runtime bridge and runtime behavior regressions reuse the same examples where practical",
+        "Verification regressions reuse or mirror the same example semantics where practical",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 12,
-      "passes": true,
-      "notes": "Validated by full cargo test on 2026-03-12."
-    },
-    {
-      "id": "US-013",
-      "title": "在 timing 验证中纳入并发调度影响",
-      "description": "作为时序分析维护者，我需要 timing 引擎在并发调度下继续给出 defendable 的完成时间界限，覆盖局部 task 时长和全局完成时长。",
-      "acceptanceCriteria": [
-        "must_complete_within 与 must_complete_within_worst_case 在并发模型下有明确且可实现的解释",
-        "Pending 动作持续时间与 timeout 上界可纳入 worst-case timing 分析",
-        "Timing report 区分 task 局部完成时间和全局完成时间",
-        "新增 timing 回归测试，覆盖两个 task 并发改变最坏完成时间的场景",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": "Implemented concurrent timing local/global completion analysis with pending+timeout worst-case accounting; validated by full cargo test on 2026-03-12."
-    },
-    {
-      "id": "US-014",
-      "title": "在 causality 验证中支持跨 task 因果链",
-      "description": "作为因果性验证维护者，我需要 causality 能识别不同 task 间通过设备、变量和事件形成的依赖链，而不是假设所有链都落在同一顺序路径中。",
-      "acceptanceCriteria": [
-        "Causality graph 能在不同 task 间建立共享设备、共享变量或控制信号的边",
-        "axis.move_* 的 Pending、Done、Fault、timeout 路径都进入 causality 分析",
-        "新增一个缺失跨 task 因果链的反例测试",
-        "新增一个跨 task 因果链完整的正例测试",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 14,
-      "passes": true,
-      "notes": "Implemented cross-task causality graph/dataflow + axis Pending/Done/Fault/timeout coverage; validated by full cargo test on 2026-03-12."
-    },
-    {
-      "id": "US-015",
-      "title": "输出稳定的迁移诊断与行为差异说明",
-      "description": "作为项目维护者，我需要清楚指出旧模型与新模型的行为差异，尤其是 axis.move_* 从非阻塞假设切换到阻塞语义后的影响，避免用户在迁移时靠猜。",
-      "acceptanceCriteria": [
-        "新增迁移指南，列出旧语义与新语义的关键行为差异",
-        "至少新增一个稳定诊断码或警告码，用于提示 axis.move_* 阻塞语义导致的行为变化",
-        "诊断 payload 保持结构化，新增字段优先采用向后兼容方式",
-        "新增诊断回归测试，覆盖新旧字段兼容解析",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 15,
-      "passes": true,
-      "notes": "Validated by full cargo test sweep on 2026-03-12."
-    },
-    {
-      "id": "US-016",
-      "title": "提供阻塞式 axis.move_* 示例",
-      "description": "作为 PLC 用户，我需要一个最小可运行示例展示 axis.move_* 如何阻塞当前 step，并在完成、故障或超时后继续分流，作为理解和回归基线。",
-      "acceptanceCriteria": [
-        "新增或更新一个 examples PLC，演示阻塞式 axis.move_* 流程",
-        "该示例在无额外 wait 模板的情况下表现出正确阻塞语义",
-        "examples 集成测试纳入该示例",
-        "文档引用该示例作为阻塞 move 的标准基线",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 16,
-      "passes": true,
-      "notes": "Added blocking axis.move baseline example + integration/runtime regression coverage; validated by full cargo test on 2026-03-12."
-    },
-    {
-      "id": "US-017",
-      "title": "提供上料与下料并发 task 示例",
-      "description": "作为 PLC 用户，我需要一个双 task 并发示例，例如上料与下料同时推进，用来证明新的运行时模型符合工业控制中的并行工位逻辑。",
-      "acceptanceCriteria": [
-        "新增或更新一个至少包含两个 task 并发推进的示例 PLC",
-        "该示例展示一个 task 阻塞时另一个 task 仍能继续推进",
-        "示例包含资源互斥或因果依赖的清晰边界，便于验证器复用",
-        "examples 集成测试纳入该并发示例",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 17,
-      "passes": true,
-      "notes": "Added concurrent load/unload task example with compile/runtime regressions; validated by full cargo test on 2026-03-12."
-    },
-    {
-      "id": "US-018",
-      "title": "同步 AGENTS 与 skills 的长期契约",
-      "description": "作为项目维护者，我需要让 AGENTS.md 与相关 skills 同步新执行模型，避免后续生成器和代理继续基于旧的单执行点假设工作。",
-      "acceptanceCriteria": [
-        "更新 AGENTS.md，纳入并发 task、阻塞 step、验证闭环的长期原则",
-        "更新涉及 task 或 step 语义的 .codex skills，避免继续输出过时假设",
-        "清理或改写仍在描述单执行点 runtime 的相关指导文档",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 18,
-      "passes": true,
-      "notes": "Synced AGENTS + plc-system/plc-gen skills with concurrent task/blocking step contract and migration-doc guardrail; validated by full cargo test on 2026-03-12."
-    },
-    {
-      "id": "US-019",
-      "title": "把并发运行时与验证门禁接入 CI",
-      "description": "作为平台维护者，我需要 CI 强制校验新的并发 runtime 与四类验证行为，防止未来演进悄悄退回旧模型。",
-      "acceptanceCriteria": [
-        "新增或更新 CI 与 gate 脚本，覆盖并发 runtime 行为和四类验证引擎",
-        "门禁至少覆盖阻塞 axis.move_* 示例与一个多 task 并发示例",
-        "文档化本地可复现的命令序列，能跑通这些门禁",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 19,
-      "passes": true,
-      "notes": "Added concurrent runtime+verification CI gate script/workflow/docs and validated with gate script + full cargo test on 2026-03-12."
-    },
-    {
-      "id": "US-020",
-      "title": "形成端到端闭环验收基线",
-      "description": "作为项目负责人，我需要一个覆盖语义、编译、桥接、运行时、验证和示例回归的端到端验收清单，确保这次重构不是局部修补，而是完整闭环。",
-      "acceptanceCriteria": [
-        "给出分阶段 gate，至少包含语义冻结、IR 与 runtime 闭环、四类验证闭环、迁移与 CI 闭环",
-        "每个 gate 都有明确可执行的测试或产物要求",
-        "PRD 与 prd.json 的 user story 顺序满足依赖先后关系，可被 Ralph 顺序执行",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 20,
-      "passes": true,
-      "notes": "Added staged end-to-end acceptance baseline doc + PRD ordering guidance; validated by concurrent gate script and full cargo test on 2026-03-12."
+      "passes": false,
+      "notes": ""
     }
   ]
 }

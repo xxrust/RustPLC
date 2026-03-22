@@ -262,6 +262,11 @@ pub enum RuntimeError {
     InvalidCamIndex {
         cam_index: u16,
     },
+    InvalidSemanticResourceIndex {
+        claim_index: usize,
+        resource_index: u16,
+        resource_count: usize,
+    },
     ExternCallRequiresHandler {
         function: &'static str,
     },
@@ -385,9 +390,33 @@ pub struct AxisMotionCommand {
     pub kind: AxisMoveKind,
     pub value: f32,
     pub speed: f32,
+    pub semantic_tag: Option<&'static str>,
     pub require_homed: bool,
     pub timeout: Option<Timeout>,
     pub fault_routing: Option<AxisFaultRouting>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticResourceMode {
+    Exclusive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SemanticResource<'a> {
+    pub name: &'a str,
+    pub mode: SemanticResourceMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceClaimSource<'a> {
+    DigitalOutputState { id: DigitalOutputId, value: bool },
+    ActionTag { tag: &'a str },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourceClaimRule<'a> {
+    pub source: ResourceClaimSource<'a>,
+    pub resource_index: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -712,6 +741,149 @@ pub struct Program<'a> {
     pub cam_configs: &'a [CamCouplingConfig],
     pub cam_tables: &'a [CamTableData],
     pub axis_fault_policies: &'a [AxisFaultPolicy<'a>],
+    pub semantic_resources: &'a [SemanticResource<'a>],
+    pub resource_claims: &'a [ResourceClaimRule<'a>],
+}
+
+pub type WorkpieceTokenId = u32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkpieceTerminalStatus<'a> {
+    TerminalState { state: &'a str },
+    Consumed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceToken<'a> {
+    pub token_id: WorkpieceTokenId,
+    pub workpiece_type: &'a str,
+    pub current_location: &'a str,
+    pub active: bool,
+    pub terminal_status: Option<WorkpieceTerminalStatus<'a>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkpieceTokenStoreError {
+    DuplicateTokenId { token_id: WorkpieceTokenId },
+    TokenNotFound { token_id: WorkpieceTokenId },
+    TokenInactive { token_id: WorkpieceTokenId },
+    CapacityExceeded { max: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceTokenStore<'a> {
+    tokens: [Option<WorkpieceToken<'a>>; MAX_WORKPIECE_TOKENS],
+    slots_used: usize,
+    active_tokens: usize,
+}
+
+impl<'a> WorkpieceTokenStore<'a> {
+    pub const fn new() -> Self {
+        Self {
+            tokens: [None; MAX_WORKPIECE_TOKENS],
+            slots_used: 0,
+            active_tokens: 0,
+        }
+    }
+
+    pub fn slots_used(&self) -> usize {
+        self.slots_used
+    }
+
+    pub fn active_tokens(&self) -> usize {
+        self.active_tokens
+    }
+
+    pub fn token(&self, token_id: WorkpieceTokenId) -> Option<WorkpieceToken<'a>> {
+        self.find_index(token_id)
+            .and_then(|idx| self.tokens[idx].as_ref().copied())
+    }
+
+    pub fn active_tokens_at(&self, location: &str) -> usize {
+        self.tokens
+            .iter()
+            .flatten()
+            .filter(|token| token.active && token.current_location == location)
+            .count()
+    }
+
+    pub fn create_token(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        workpiece_type: &'a str,
+        current_location: &'a str,
+    ) -> Result<WorkpieceToken<'a>, WorkpieceTokenStoreError> {
+        if self.find_index(token_id).is_some() {
+            return Err(WorkpieceTokenStoreError::DuplicateTokenId { token_id });
+        }
+        let Some(slot_idx) = self.tokens.iter().position(Option::is_none) else {
+            return Err(WorkpieceTokenStoreError::CapacityExceeded {
+                max: MAX_WORKPIECE_TOKENS,
+            });
+        };
+
+        let token = WorkpieceToken {
+            token_id,
+            workpiece_type,
+            current_location,
+            active: true,
+            terminal_status: None,
+        };
+        self.tokens[slot_idx] = Some(token);
+        self.slots_used += 1;
+        self.active_tokens += 1;
+        Ok(token)
+    }
+
+    pub fn move_token(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        new_location: &'a str,
+    ) -> Result<WorkpieceToken<'a>, WorkpieceTokenStoreError> {
+        let idx = self
+            .find_index(token_id)
+            .ok_or(WorkpieceTokenStoreError::TokenNotFound { token_id })?;
+        let Some(token) = self.tokens[idx].as_mut() else {
+            return Err(WorkpieceTokenStoreError::TokenNotFound { token_id });
+        };
+        if !token.active {
+            return Err(WorkpieceTokenStoreError::TokenInactive { token_id });
+        }
+        token.current_location = new_location;
+        Ok(*token)
+    }
+
+    pub fn finish_token(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        terminal_status: WorkpieceTerminalStatus<'a>,
+    ) -> Result<WorkpieceToken<'a>, WorkpieceTokenStoreError> {
+        let idx = self
+            .find_index(token_id)
+            .ok_or(WorkpieceTokenStoreError::TokenNotFound { token_id })?;
+        let Some(token) = self.tokens[idx].as_mut() else {
+            return Err(WorkpieceTokenStoreError::TokenNotFound { token_id });
+        };
+        if !token.active {
+            return Err(WorkpieceTokenStoreError::TokenInactive { token_id });
+        }
+        token.active = false;
+        token.terminal_status = Some(terminal_status);
+        self.active_tokens = self.active_tokens.saturating_sub(1);
+        Ok(*token)
+    }
+
+    fn find_index(&self, token_id: WorkpieceTokenId) -> Option<usize> {
+        self.tokens
+            .iter()
+            .position(|entry| entry.is_some_and(|token| token.token_id == token_id))
+    }
+}
+
+impl<'a> Default for WorkpieceTokenStore<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<'a> Program<'a> {
@@ -761,6 +933,7 @@ pub enum TaskPendingActionState {
     AxisMotion {
         target: &'static str,
         action_index: usize,
+        semantic_tag: Option<&'static str>,
     },
     ExternCall {
         function: &'static str,
@@ -804,6 +977,8 @@ pub struct Runtime<'a> {
     pid_states: [PidState; MAX_PID_LOOPS],
     variables: [f32; MAX_VARIABLES],
     cam_states: [CamState; MAX_CAM_COUPLINGS],
+    digital_output_shadow: [bool; MAX_TRACKED_DIGITAL_OUTPUTS],
+    workpiece_tokens: WorkpieceTokenStore<'a>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -865,6 +1040,15 @@ impl<'a> Runtime<'a> {
                 });
             }
         }
+        for (claim_index, claim) in program.resource_claims.iter().enumerate() {
+            if claim.resource_index as usize >= program.semantic_resources.len() {
+                return Err(RuntimeError::InvalidSemanticResourceIndex {
+                    claim_index,
+                    resource_index: claim.resource_index,
+                    resource_count: program.semantic_resources.len(),
+                });
+            }
+        }
 
         let mut task_contexts = [TaskRuntimeContext::default(); MAX_ACTIVE_TASKS];
         for (task_idx, task) in program.tasks.iter().enumerate() {
@@ -891,6 +1075,8 @@ impl<'a> Runtime<'a> {
             pid_states: [PidState::default(); MAX_PID_LOOPS],
             variables,
             cam_states,
+            digital_output_shadow: [false; MAX_TRACKED_DIGITAL_OUTPUTS],
+            workpiece_tokens: WorkpieceTokenStore::new(),
         })
     }
 
@@ -959,6 +1145,105 @@ impl<'a> Runtime<'a> {
 
     pub fn cam_states(&self) -> &[CamState; MAX_CAM_COUPLINGS] {
         &self.cam_states
+    }
+
+    pub fn workpiece_tokens(&self) -> &WorkpieceTokenStore<'a> {
+        &self.workpiece_tokens
+    }
+
+    fn write_digital_output<IO: Io>(&mut self, io: &mut IO, id: DigitalOutputId, value: bool) {
+        io.write_digital_output(id, value);
+        if let Some(slot) = self.digital_output_shadow.get_mut(id.0 as usize) {
+            *slot = value;
+        }
+    }
+
+    fn active_action_tag_holders(
+        &self,
+        tag: &str,
+        ignore_axis_motion: Option<(usize, usize)>,
+    ) -> usize {
+        let mut holders = 0usize;
+        for task_idx in 0..self.active_task_count {
+            let TaskPendingActionState::AxisMotion {
+                action_index,
+                semantic_tag: Some(active_tag),
+                ..
+            } = self.task_contexts[task_idx].pending_action_state
+            else {
+                continue;
+            };
+            if active_tag != tag {
+                continue;
+            }
+            if ignore_axis_motion.is_some_and(|(ignore_task, ignore_action_index)| {
+                ignore_task == task_idx && ignore_action_index == action_index
+            }) {
+                continue;
+            }
+            holders = holders.saturating_add(1);
+        }
+        holders
+    }
+
+    fn claim_holders(
+        &self,
+        resource_index: usize,
+        ignore_axis_motion: Option<(usize, usize)>,
+    ) -> usize {
+        let mut holders = 0usize;
+        for claim in self.program.resource_claims {
+            if claim.resource_index as usize != resource_index {
+                continue;
+            }
+            match claim.source {
+                ResourceClaimSource::DigitalOutputState { id, value } => {
+                    if self
+                        .digital_output_shadow
+                        .get(id.0 as usize)
+                        .copied()
+                        .unwrap_or(false)
+                        == value
+                    {
+                        holders = holders.saturating_add(1);
+                    }
+                }
+                ResourceClaimSource::ActionTag { tag } => {
+                    holders = holders.saturating_add(
+                        self.active_action_tag_holders(tag, ignore_axis_motion),
+                    );
+                }
+            }
+            if holders > 1 {
+                break;
+            }
+        }
+        holders
+    }
+
+    fn semantic_resource_conflict_for_axis_motion(
+        &self,
+        task_idx: usize,
+        action_index: usize,
+        command: AxisMotionCommand,
+    ) -> Option<AxisFault> {
+        let tag = command.semantic_tag?;
+        for claim in self.program.resource_claims {
+            let ResourceClaimSource::ActionTag { tag: claim_tag } = claim.source else {
+                continue;
+            };
+            if claim_tag != tag {
+                continue;
+            }
+            let resource_index = claim.resource_index as usize;
+            let resource = self.program.semantic_resources.get(resource_index)?;
+            if matches!(resource.mode, SemanticResourceMode::Exclusive)
+                && self.claim_holders(resource_index, Some((task_idx, action_index))) > 0
+            {
+                return Some(AxisFault::safety(SEMANTIC_RESOURCE_CONFLICT_ERROR_CODE));
+            }
+        }
+        None
     }
 
     pub fn tick<IO: Io>(&mut self, io: &mut IO) -> Result<(), RuntimeError> {
@@ -1273,6 +1558,7 @@ impl<'a> Runtime<'a> {
                         if let TaskPendingActionState::AxisMotion {
                             target,
                             action_index,
+                            semantic_tag: _,
                         } = self.task_contexts[task_idx].pending_action_state
                         {
                             if let Some(Action::AxisMove { command }) = actions.get(action_index) {
@@ -1291,7 +1577,7 @@ impl<'a> Runtime<'a> {
                         {
                             match *a {
                                 Action::SetDigital { id, value } => {
-                                    io.write_digital_output(id, value)
+                                    self.write_digital_output(io, id, value)
                                 }
                                 Action::SetAnalog { id, value } => {
                                     io.write_analog_output(id, value)
@@ -1367,6 +1653,28 @@ impl<'a> Runtime<'a> {
                                         ));
                                     }
 
+                                    if let Some(fault) = self
+                                        .semantic_resource_conflict_for_axis_motion(
+                                            task_idx,
+                                            action_index,
+                                            command,
+                                        )
+                                    {
+                                        if let Some(routing) = command.fault_routing {
+                                            action_transition_override = Some((
+                                                routing.resolve_target(fault),
+                                                TransitionReason::Action,
+                                            ));
+                                            break;
+                                        }
+                                        return Err(RuntimeTickError::Core(
+                                            RuntimeError::AxisFault {
+                                                target: command.target,
+                                                fault,
+                                            },
+                                        ));
+                                    }
+
                                     let result = match on_axis_motion(command) {
                                         Ok(result) => result,
                                         Err(err) => {
@@ -1381,6 +1689,7 @@ impl<'a> Runtime<'a> {
                                                 TaskPendingActionState::AxisMotion {
                                                     target: command.target,
                                                     action_index,
+                                                    semantic_tag: command.semantic_tag,
                                                 };
                                             if let Some(timeout) = command.timeout
                                                 && elapsed >= timeout.after_ticks
@@ -1465,9 +1774,11 @@ impl<'a> Runtime<'a> {
                                         }
                                     }
                                 }
-                                Action::Extend { output } => io.write_digital_output(output, true),
+                                Action::Extend { output } => {
+                                    self.write_digital_output(io, output, true)
+                                }
                                 Action::Retract { output } => {
-                                    io.write_digital_output(output, false)
+                                    self.write_digital_output(io, output, false)
                                 }
                                 Action::Log {
                                     message_id,
@@ -2223,6 +2534,9 @@ pub const MAX_CAM_COUPLINGS: usize = 8;
 pub const MAX_AXIS_HOMING_TARGETS: usize = 32;
 pub const MAX_EXTERN_ARGS: usize = 16;
 pub const MAX_EXTERN_RETURNS: usize = 8;
+pub const MAX_TRACKED_DIGITAL_OUTPUTS: usize = 1024;
+pub const MAX_WORKPIECE_TOKENS: usize = 256;
+pub const SEMANTIC_RESOURCE_CONFLICT_ERROR_CODE: i32 = -32_001;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PidState {
@@ -2602,6 +2916,88 @@ mod tests {
     }
 
     #[test]
+    fn workpiece_token_store_creates_tokens_with_active_occupancy() {
+        let mut store = WorkpieceTokenStore::new();
+
+        let created = store
+            .create_token(1, "part", "infeed")
+            .expect("create token should succeed");
+
+        assert_eq!(created.token_id, 1);
+        assert_eq!(created.workpiece_type, "part");
+        assert_eq!(created.current_location, "infeed");
+        assert!(created.active);
+        assert_eq!(created.terminal_status, None);
+        assert_eq!(store.slots_used(), 1);
+        assert_eq!(store.active_tokens(), 1);
+        assert_eq!(store.active_tokens_at("infeed"), 1);
+        assert_eq!(store.token(1), Some(created));
+    }
+
+    #[test]
+    fn workpiece_token_store_moves_tokens_between_locations() {
+        let mut store = WorkpieceTokenStore::new();
+        store
+            .create_token(7, "part", "infeed")
+            .expect("create token should succeed");
+
+        let moved = store
+            .move_token(7, "arm")
+            .expect("move token should succeed");
+
+        assert_eq!(moved.current_location, "arm");
+        assert_eq!(store.active_tokens_at("infeed"), 0);
+        assert_eq!(store.active_tokens_at("arm"), 1);
+    }
+
+    #[test]
+    fn workpiece_token_store_finishes_tokens_and_retains_terminal_status() {
+        let mut store = WorkpieceTokenStore::new();
+        store
+            .create_token(9, "part", "outfeed")
+            .expect("create token should succeed");
+
+        let finished = store
+            .finish_token(
+                9,
+                WorkpieceTerminalStatus::TerminalState { state: "finished" },
+            )
+            .expect("finish token should succeed");
+
+        assert!(!finished.active);
+        assert_eq!(
+            finished.terminal_status,
+            Some(WorkpieceTerminalStatus::TerminalState { state: "finished" })
+        );
+        assert_eq!(store.active_tokens(), 0);
+        assert_eq!(store.active_tokens_at("outfeed"), 0);
+        assert_eq!(store.token(9), Some(finished));
+        assert_eq!(
+            store.move_token(9, "reject_bin"),
+            Err(WorkpieceTokenStoreError::TokenInactive { token_id: 9 })
+        );
+    }
+
+    #[test]
+    fn workpiece_token_store_rejects_capacity_overflow() {
+        let mut store = WorkpieceTokenStore::new();
+        for token_id in 0..MAX_WORKPIECE_TOKENS as WorkpieceTokenId {
+            store
+                .create_token(token_id, "part", "buffer")
+                .expect("capacity fill should succeed");
+        }
+
+        assert_eq!(store.slots_used(), MAX_WORKPIECE_TOKENS);
+        assert_eq!(store.active_tokens(), MAX_WORKPIECE_TOKENS);
+        assert_eq!(
+            store.create_token(MAX_WORKPIECE_TOKENS as WorkpieceTokenId, "part", "buffer"),
+            Err(WorkpieceTokenStoreError::CapacityExceeded {
+                max: MAX_WORKPIECE_TOKENS,
+            })
+        );
+    }
+
+    #[test]
     fn runtime_initializes_independent_task_contexts() {
         static TASK0_STEPS: [Step<'static>; 2] = [
             Step {
@@ -2641,6 +3037,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
@@ -2727,6 +3125,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -2846,6 +3246,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -2908,6 +3310,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -2959,6 +3363,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3047,6 +3453,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3114,6 +3522,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3181,6 +3591,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3235,6 +3647,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3288,6 +3702,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3315,23 +3731,23 @@ mod tests {
         let wrapped_over = linear_interpolate(&periodic, 250.0);
         assert!(
             (wrapped_neg - 50.0).abs() < 1e-5,
-            "periodic wrap(-50) 期望约 50，实际 {wrapped_neg}"
+            "periodic wrap(-50) 鏈熸湜绾?50锛屽疄闄?{wrapped_neg}"
         );
         assert!(
             (wrapped_over - 50.0).abs() < 1e-5,
-            "periodic wrap(250) 期望约 50，实际 {wrapped_over}"
+            "periodic wrap(250) 鏈熸湜绾?50锛屽疄闄?{wrapped_over}"
         );
 
         let oneshot = build_cam_table(false, &[(0.0, 0.0), (100.0, 100.0)]);
         assert_eq!(
             linear_interpolate(&oneshot, -10.0),
             0.0,
-            "oneshot 应在左侧钳制"
+            "oneshot 搴斿湪宸︿晶閽冲埗"
         );
         assert_eq!(
             linear_interpolate(&oneshot, 150.0),
             100.0,
-            "oneshot 应在右侧钳制"
+            "oneshot 搴斿湪鍙充晶閽冲埗"
         );
     }
 
@@ -3341,22 +3757,22 @@ mod tests {
         assert_eq!(
             binary_search_interval(&table, 0.0),
             0,
-            "表首边界应定位到首段"
+            "lower boundary should map to the first segment"
         );
         assert_eq!(
             binary_search_interval(&table, 40.0),
             0,
-            "区间内点应定位到对应段"
+            "midpoint should map to the matching segment"
         );
         assert_eq!(
             binary_search_interval(&table, 100.0),
             1,
-            "精确命中中间节点时应定位到右侧段"
+            "exact midpoint hit should advance to the right segment"
         );
         assert_eq!(
             binary_search_interval(&table, 200.0),
             1,
-            "表尾边界应钉在最后一段"
+            "upper boundary should clamp to the last segment"
         );
     }
 
@@ -3366,7 +3782,7 @@ mod tests {
         let y = linear_interpolate(&table, 5.0);
         assert!(
             (y - 10.0).abs() < 1e-6,
-            "线性插值中值误差应小于 1e-6，实际 {y}"
+            "绾挎€ф彃鍊间腑鍊艰宸簲灏忎簬 1e-6锛屽疄闄?{y}"
         );
     }
 
@@ -3382,7 +3798,7 @@ mod tests {
         let out = cubic_interpolate(&table, 2.0);
         assert!(
             (out - 49.0).abs() < 1e-6,
-            "Horner 多项式应为 49，实际 {out}"
+            "Horner 澶氶」寮忓簲涓?49锛屽疄闄?{out}"
         );
     }
 
@@ -3404,7 +3820,7 @@ mod tests {
 
         assert!(
             (analytical - finite_diff).abs() < 1e-3,
-            "cubic_derivative 应与有限差分近似一致，解析={analytical}, 差分={finite_diff}"
+            "cubic_derivative 搴斾笌鏈夐檺宸垎杩戜技涓€鑷达紝瑙ｆ瀽={analytical}, 宸垎={finite_diff}"
         );
     }
 
@@ -3469,6 +3885,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3518,6 +3936,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3548,6 +3968,7 @@ mod tests {
                 value: 10.0,
                 speed: 2.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3577,11 +3998,15 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
-        let err = rt.tick(&mut io).expect_err("未提供 axis handler 应报错");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("missing axis handler should fail");
         assert_eq!(
             err,
             RuntimeError::AxisMotionRequiresHandler { target: "axis_x" }
@@ -3598,6 +4023,7 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3627,6 +4053,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3636,7 +4064,7 @@ mod tests {
             assert_eq!(command.kind, AxisMoveKind::Absolute);
             AxisMotionResult::Done
         })
-        .expect("axis handler 返回 done 应继续执行");
+        .expect("axis handler done should continue execution");
         assert_eq!(rt.location().step, StepId(1));
         assert_eq!(io.tick(), Tick(1));
     }
@@ -3656,6 +4084,7 @@ mod tests {
                     value: 10.0,
                     speed: 2.0,
                     require_homed: false,
+                    semantic_tag: None,
                     timeout: None,
                     fault_routing: None,
                 },
@@ -3686,6 +4115,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3712,6 +4143,7 @@ mod tests {
             TaskPendingActionState::AxisMotion {
                 target: "axis_x",
                 action_index: 1,
+                semantic_tag: None,
             }
         );
         assert_eq!(
@@ -3755,6 +4187,7 @@ mod tests {
                 value: 10.0,
                 speed: 2.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3784,6 +4217,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3799,6 +4234,7 @@ mod tests {
             TaskPendingActionState::AxisMotion {
                 target: "axis_x",
                 action_index: 0,
+                semantic_tag: None,
             }
         );
 
@@ -3835,6 +4271,7 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3864,6 +4301,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -3874,7 +4313,7 @@ mod tests {
                 invoked = true;
                 AxisMotionResult::Done
             })
-            .expect_err("未回零时 absolute 应被 runtime 拦截");
+            .expect_err("absolute move should fail while the axis is not homed");
         assert_eq!(err, RuntimeError::AxisNotHomed { target: "axis_x" });
         assert!(
             !invoked,
@@ -3892,6 +4331,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3904,6 +4344,7 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3940,14 +4381,16 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         rt.tick_with_axis(&mut io, |_| AxisMotionResult::Done)
-            .expect("relative 应设置 homing 谓词");
+            .expect("relative motion should mark the axis as homed");
         rt.tick_with_axis(&mut io, |_| AxisMotionResult::Done)
-            .expect("已回零后 absolute 应允许执行");
+            .expect("absolute motion should run after homing");
         assert_eq!(rt.location().step, StepId(2));
     }
 
@@ -3961,6 +4404,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3973,6 +4417,7 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4009,6 +4454,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -4023,7 +4470,7 @@ mod tests {
                     AxisMotionResult::motion_fault(77)
                 }
             })
-            .expect_err("fault 应中断 absolute 并清空 homing 谓词");
+            .expect_err("fault should stop absolute move and clear homing");
         assert_eq!(
             call_count, 2,
             "single tick should execute relative then absolute"
@@ -4042,9 +4489,9 @@ mod tests {
                 invoked = true;
                 AxisMotionResult::Done
             })
-            .expect_err("fault 后重试 absolute 应被未回零拦截");
+            .expect_err("after fault absolute move should be rejected until re-homed");
         assert_eq!(err, RuntimeError::AxisNotHomed { target: "axis_x" });
-        assert!(!invoked, "homing guard 应在 handler 前触发");
+        assert!(!invoked, "homing guard should trigger before the handler");
     }
 
     #[test]
@@ -4057,6 +4504,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4086,13 +4534,15 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
             .tick_with_axis(&mut io, |_| AxisMotionResult::reject(11))
-            .expect_err("reject 应返回分类错误");
+            .expect_err("reject fault should be classified");
         assert_eq!(
             err,
             RuntimeError::AxisFault {
@@ -4112,6 +4562,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4141,13 +4592,15 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
             .tick_with_axis(&mut io, |_| AxisMotionResult::motion_fault(21))
-            .expect_err("motion_fault 应返回分类错误");
+            .expect_err("motion fault should be classified");
         assert_eq!(
             err,
             RuntimeError::AxisFault {
@@ -4167,6 +4620,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4196,13 +4650,15 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
             .tick_with_axis(&mut io, |_| AxisMotionResult::safety_fault(31))
-            .expect_err("safety_fault 应返回分类错误");
+            .expect_err("safety fault should be classified");
         assert_eq!(
             err,
             RuntimeError::AxisFault {
@@ -4222,6 +4678,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4280,6 +4737,8 @@ mod tests {
                 cam_configs: &[],
                 cam_tables: &[],
                 axis_fault_policies: &policies,
+                semantic_resources: &[],
+                resource_claims: &[],
             };
 
             let expected_fault = match axis_result {
@@ -4396,6 +4855,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4435,6 +4895,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &policies,
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -4519,6 +4981,8 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -4568,7 +5032,7 @@ mod tests {
         ops[6] = ExprOp::CallClamp;
         let expr = ExprProgram { ops, len: 7 };
         let out = eval_expr(&expr, &vars);
-        assert!((out - 9.0).abs() < 1e-6, "clamp(pow(abs(x),2),0,9) 应为 9");
+        assert!((out - 9.0).abs() < 1e-6, "clamp(pow(abs(x),2),0,9) 搴斾负 9");
 
         let mut ops2 = [ExprOp::PushLiteral(0.0); MAX_EXPR_OPS];
         ops2[0] = ExprOp::PushLiteral(3.0);
@@ -4582,7 +5046,7 @@ mod tests {
         let out2 = eval_expr(&expr2, &vars);
         assert!(
             (out2 - 1.0).abs() < 1e-6,
-            "max(fmod(3,2), cos(sin(0))) 应为 1"
+            "max(fmod(3,2), cos(sin(0))) 搴斾负 1"
         );
     }
 
@@ -4607,7 +5071,7 @@ mod tests {
         let out = eval_expr(&expr, &vars);
         assert!(
             (out - 1.0).abs() < 1e-6,
-            "NOT(false) OR (true AND 0.5 > 0) 应为 true"
+            "NOT(false) OR (true AND 0.5 > 0) 搴斾负 true"
         );
 
         vars[0] = 1.0; // a = true
@@ -4616,7 +5080,7 @@ mod tests {
         let out2 = eval_expr(&expr, &vars);
         assert!(
             (out2 - 0.0).abs() < 1e-6,
-            "NOT(true) OR (false AND -0.5 > 0) 应为 false"
+            "NOT(true) OR (false AND -0.5 > 0) 搴斾负 false"
         );
     }
 
@@ -4639,13 +5103,15 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
-        let rt = Runtime::new(&PROGRAM).expect("runtime 创建应成功");
+        let rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
         assert_eq!(rt.variables()[0], 1.5);
         assert_eq!(rt.variables()[1], 2.0);
         assert_eq!(rt.variables()[2], 0.0);
-        assert_eq!(rt.variables()[3], 0.0, "未初始化槽位应保持 0");
+        assert_eq!(rt.variables()[3], 0.0, "uninitialized variable slots should stay zero");
     }
 
     #[test]
@@ -4667,10 +5133,12 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let err = match Runtime::new(&PROGRAM) {
-            Ok(_) => panic!("超过变量上限应报错"),
+            Ok(_) => panic!("too many variables should fail"),
             Err(err) => err,
         };
         assert_eq!(
@@ -4720,10 +5188,12 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let err = match Runtime::new(&program) {
-            Ok(_) => panic!("超过 cam coupling 上限应报错"),
+            Ok(_) => panic!("too many cam couplings should fail"),
             Err(err) => err,
         };
         assert_eq!(
@@ -4770,10 +5240,12 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let err = match Runtime::new(&program) {
-            Ok(_) => panic!("初始化 table_index 越界应报错"),
+            Ok(_) => panic!("invalid initial table_index should fail"),
             Err(err) => err,
         };
         assert_eq!(
@@ -4854,11 +5326,13 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&program).expect("runtime init");
-        let err = rt.tick(&mut io).expect_err("非法 cam_index 应报错");
+        let err = rt.tick(&mut io).expect_err("invalid cam_index should fail");
         assert_eq!(err, RuntimeError::InvalidCamIndex { cam_index: 1 });
     }
 
@@ -4908,11 +5382,13 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&program).expect("runtime init");
-        let err = rt.tick(&mut io).expect_err("非法 cam_index 应报错");
+        let err = rt.tick(&mut io).expect_err("invalid cam_index should fail");
         assert_eq!(err, RuntimeError::InvalidCamIndex { cam_index: 2 });
     }
 
@@ -4958,11 +5434,15 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&program).expect("runtime init");
-        let err = rt.tick(&mut io).expect_err("非法 table_index 应报错");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("invalid table_index should fail");
         assert_eq!(
             err,
             RuntimeError::InvalidCamTableIndex {
@@ -5039,6 +5519,8 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -5054,26 +5536,26 @@ mod tests {
         let after_switch = io.ao[0];
         assert!(
             (after_switch - before_switch).abs() < 1e-4,
-            "切表瞬间输出应连续，before={before_switch}, after={after_switch}"
+            "switch output should stay continuous, before={before_switch}, after={after_switch}"
         );
         assert_eq!(
             rt.cam_states()[0].switch_decay_ticks,
             99,
-            "切表后应进入衰减路径"
+            "switch should enter decay tracking"
         );
 
         let adjusted_master = io.ai[0] * 2.0 + 30.0;
         let switched_base = linear_interpolate(&cam_tables[1], adjusted_master);
         assert!(
             (after_switch - switched_base).abs() > 1e-3,
-            "刚切表时应仍含 switch_offset 补偿"
+            "switch offset compensation should remain active on the first tick"
         );
 
         rt.tick(&mut io).expect("tick3 decay continues");
         assert_eq!(rt.cam_states()[0].switch_decay_ticks, 98);
         assert!(
             (io.ao[0] - after_switch).abs() > 1e-4,
-            "衰减推进后输出应发生变化"
+            "output should change while switch decay progresses"
         );
     }
 
@@ -5158,6 +5640,8 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -5222,6 +5706,8 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
         };
 
         let mut io = MemIo::new();
@@ -5237,3 +5723,6 @@ mod tests {
         assert!(!cam.engaged, "fault should disengage cam");
     }
 }
+
+
+
