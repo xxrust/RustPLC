@@ -1,0 +1,1338 @@
+use rust_plc::ast::EffectKind;
+use rust_plc::parser::parse_plc;
+use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
+use rust_plc::semantic::{build_constraint_set, build_state_machine, build_topology_graph};
+use rust_plc::verification::{WarningLevel, verify_all};
+
+const PLC_WORKPIECE_CARRIER_SLOT_TRANSFER: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [finished]
+    ingress_sites: [tray_a.slot[*]]
+    normal_egress_sites: [outfeed]
+}
+
+carrier tray_a: workpiece_carrier { slots: 4 }
+location outfeed: workpiece_location { capacity: 1 }
+holder arm: workpiece_holder { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task transfer_part:
+    step pick:
+        effect: acquire holder arm from tray_a.slot[0]
+    step place:
+        effect: transfer from arm to outfeed
+    step done:
+        effect: finish workpiece at outfeed as finished
+    on_complete: goto sink
+
+task sink:
+    step idle:
+        action: log "done"
+"#;
+
+const PLC_WORKPIECE_MOUNT_UNMOUNT: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    normal_terminal_states: [finished]
+    ingress_sites: [steel_plate.slot[*]]
+    normal_egress_sites: [outfeed]
+}
+
+carrier steel_plate: workpiece_carrier { slots: 2 }
+location outfeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task load_plate:
+    step mount_a:
+        effect: mount rod on steel_plate.slot[0]
+    step raise:
+        effect: transform carrier steel_plate to frame cut_height
+    step unload_a:
+        effect: unmount rod from steel_plate.slot[0] to outfeed
+    step done:
+        effect: finish workpiece at outfeed as finished
+    on_complete: goto sink
+
+task sink:
+    step idle:
+        action: log "done"
+"#;
+
+const PLC_WORKPIECE_SPLIT_MERGE: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(slice)]
+}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(slice, slice)]
+}
+
+[constraints]
+
+[tasks]
+
+task process:
+    step cut:
+        effect: split rod into slice count 4 consumed
+    step assemble:
+        effect: merge [slice_a, slice_b] into module consumed_inputs
+        goto sink
+
+task sink:
+    step idle:
+        action: log "done"
+"#;
+
+const PLC_WORKPIECE_INVALID_SLOT_ARITY: &str = r#"
+[topology]
+
+workpiece die: workpiece_type {
+    ingress_sites: [tray_scan.slot[*]]
+}
+
+carrier tray_scan: workpiece_carrier {
+    layout: grid(rows: 2, cols: 2)
+}
+holder nozzle: workpiece_holder { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task scan:
+    step pick:
+        effect: acquire holder nozzle from tray_scan.slot[0]
+"#;
+
+const PLC_WORKPIECE_VERIFY_UNDERFLOW: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [finished]
+    ingress_sites: [infeed]
+    normal_egress_sites: [outfeed]
+}
+
+location infeed: workpiece_location { capacity: 1 }
+location outfeed: workpiece_location { capacity: 1 }
+holder arm: workpiece_holder { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task transfer_part:
+    step place:
+        effect: transfer from arm to outfeed
+    step done:
+        effect: finish workpiece at outfeed as finished
+"#;
+
+const PLC_WORKPIECE_VERIFY_CAPACITY: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    ingress_sites: [plate.slot[*]]
+}
+
+carrier plate: workpiece_carrier { slots: 1 }
+
+[constraints]
+
+[tasks]
+
+task transfer_part:
+    step mount_a:
+        effect: mount part on plate.slot[0]
+    step mount_b:
+        effect: mount part on plate.slot[0]
+    step done:
+        action: log "overflow"
+"#;
+
+const PLC_WORKPIECE_VERIFY_DANGLING: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [finished]
+    ingress_sites: [infeed]
+    normal_egress_sites: [outfeed]
+}
+
+location infeed: workpiece_location { capacity: 1 }
+location outfeed: workpiece_location { capacity: 1 }
+holder arm: workpiece_holder { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task transfer_part:
+    step pick:
+        effect: acquire holder arm from infeed
+    step done:
+        action: log "dangling"
+"#;
+
+const PLC_WORKPIECE_VERIFY_UNMOUNT_UNDERFLOW: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    normal_terminal_states: [finished]
+    ingress_sites: [plate.slot[*]]
+    normal_egress_sites: [outfeed]
+}
+
+carrier plate: workpiece_carrier { slots: 1 }
+location outfeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task unload_part:
+    step unload:
+        effect: unmount rod from plate.slot[0] to outfeed
+    step done:
+        action: log "empty-slot"
+"#;
+
+const PLC_WORKPIECE_VERIFY_UNUSED_INGRESS: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    ingress_sites: [infeed]
+}
+
+location infeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task idle_flow:
+    step idle:
+        action: log "noop"
+"#;
+
+const PLC_WORKPIECE_VERIFY_DEAD_CONTRACTS: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [finished]
+    abnormal_terminal_states: [rejected]
+    ingress_sites: [infeed]
+    normal_egress_sites: [outfeed]
+    abnormal_egress_sites: [reject_bin]
+}
+
+location infeed: workpiece_location { capacity: 1 }
+location outfeed: workpiece_location { capacity: 1 }
+location reject_bin: workpiece_location { capacity: 1 }
+holder arm: workpiece_holder { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task transfer_part:
+    step pick:
+        effect: acquire holder arm from infeed
+    step place:
+        effect: transfer from arm to outfeed
+    step done:
+        effect: finish workpiece at outfeed as finished
+    on_complete: goto sink
+
+task sink:
+    step idle:
+        action: log "done"
+"#;
+
+const PLC_WORKPIECE_VERIFY_UNUSED_CONTRACTS: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    ingress_sites: [infeed]
+    allows: [split_into(slice)]
+}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(slice, slice)]
+}
+
+location infeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task idle_flow:
+    step idle:
+        action: log "noop"
+"#;
+
+const PLC_WORKPIECE_VERIFY_SPLIT_WITHOUT_SOURCE_INTRO: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(slice)]
+}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+[constraints]
+
+[tasks]
+
+task process:
+    step cut:
+        effect: split rod into slice count 2 consumed
+    step done:
+        action: log "noop"
+"#;
+
+const PLC_WORKPIECE_VERIFY_MERGE_WITHOUT_INPUT_INTRO: &str = r#"
+[topology]
+
+workpiece cell: workpiece_type {}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(cell, cell)]
+}
+
+[constraints]
+
+[tasks]
+
+task process:
+    step assemble:
+        effect: merge [cell_a, cell_b] into module consumed_inputs
+    step done:
+        action: log "noop"
+"#;
+
+const PLC_WORKPIECE_VERIFY_MERGE_AFTER_INSUFFICIENT_SPLIT: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(slice)]
+}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(slice, slice)]
+}
+
+[constraints]
+
+[tasks]
+
+task process:
+    step cut:
+        effect: split rod into slice count 1 consumed
+    step assemble:
+        effect: merge [slice_a, slice_b] into module consumed_inputs
+    step done:
+        action: log "noop"
+"#;
+
+const PLC_WORKPIECE_VERIFY_DOUBLE_MERGE_AFTER_SINGLE_SPLIT: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(slice)]
+}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(slice, slice)]
+}
+
+[constraints]
+
+[tasks]
+
+task process:
+    step cut:
+        effect: split rod into slice count 2 consumed
+    step assemble_a:
+        effect: merge [slice_a, slice_b] into module consumed_inputs
+    step assemble_b:
+        effect: merge [slice_c, slice_d] into module consumed_inputs
+    step done:
+        action: log "noop"
+"#;
+
+const PLC_WORKPIECE_VERIFY_DOUBLE_MERGE_AFTER_WIDE_SPLIT: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(slice)]
+}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(slice, slice)]
+}
+
+[constraints]
+
+[tasks]
+
+task process:
+    step cut:
+        effect: split rod into slice count 4 consumed
+    step assemble_a:
+        effect: merge [slice_a, slice_b] into module consumed_inputs
+    step assemble_b:
+        effect: merge [slice_c, slice_d] into module consumed_inputs
+    step done:
+        action: log "noop"
+"#;
+
+const PLC_WORKPIECE_INVALID_DUPLICATE_TERMINAL_STATE: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [finished, finished]
+    normal_egress_sites: [outfeed]
+}
+
+location outfeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_OVERLAPPING_TERMINAL_STATE: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [done]
+    abnormal_terminal_states: [done]
+    normal_egress_sites: [outfeed]
+    abnormal_egress_sites: [reject_bin]
+}
+
+location outfeed: workpiece_location { capacity: 1 }
+location reject_bin: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_CONSUMED_TERMINAL_STATE: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [consumed]
+    normal_egress_sites: [outfeed]
+}
+
+location outfeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_DUPLICATE_INGRESS_SITE: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    ingress_sites: [infeed, infeed]
+}
+
+location infeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_OVERLAPPING_EGRESS_SITE: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [finished]
+    abnormal_terminal_states: [rejected]
+    normal_egress_sites: [shared_outfeed]
+    abnormal_egress_sites: [shared_outfeed]
+}
+
+location shared_outfeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_DUPLICATE_SPLIT_RULE: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(slice), split_into(slice)]
+}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_DUPLICATE_DERIVATION_RULE: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod, rod]
+}
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_SPLIT_TARGET_MISSING_DERIVED_FROM: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(slice)]
+}
+
+workpiece slice: workpiece_type {}
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_DERIVED_FROM_SOURCE_MISSING_SPLIT_RULE: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_DUPLICATE_MERGE_RULE_BY_PERMUTATION: &str = r#"
+[topology]
+
+workpiece cell: workpiece_type {}
+workpiece shell: workpiece_type {}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(cell, shell), merge(shell, cell)]
+}
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_AMBIGUOUS_MERGE_RULE_ARITY: &str = r#"
+[topology]
+
+workpiece cell: workpiece_type {}
+workpiece shell: workpiece_type {}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(cell, cell), merge(shell, shell)]
+}
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_DUPLICATE_ENUM_VALUE: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    properties: [grade: enum(a, a, b)]
+}
+
+[constraints]
+
+[tasks]
+"#;
+
+const PLC_WORKPIECE_INVALID_SPLIT_COUNT_ZERO: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(slice)]
+}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+[constraints]
+
+[tasks]
+
+task cut:
+    step do_cut:
+        effect: split rod into slice count 0 consumed
+"#;
+
+const PLC_WORKPIECE_INVALID_STEP_SPLIT_UNDECLARED_TARGET: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(chip)]
+}
+
+workpiece chip: workpiece_type {
+    derived_from: [rod]
+}
+
+workpiece slice: workpiece_type {}
+
+[constraints]
+
+[tasks]
+
+task cut:
+    step do_cut:
+        effect: split rod into slice count 1 consumed
+"#;
+
+const PLC_WORKPIECE_INVALID_STEP_MERGE_ARITY_MISMATCH: &str = r#"
+[topology]
+
+workpiece cell: workpiece_type {}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(cell, cell, cell)]
+}
+
+[constraints]
+
+[tasks]
+
+task assemble:
+    step merge_cells:
+        effect: merge [cell_a, cell_b] into module consumed_inputs
+"#;
+
+const PLC_WORKPIECE_INVALID_FINISH_UNDECLARED_TERMINAL: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [finished]
+    normal_egress_sites: [outfeed]
+}
+
+location outfeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task finish_part:
+    step done:
+        effect: finish workpiece at outfeed as scrapped
+"#;
+
+const PLC_WORKPIECE_INVALID_FINISH_WRONG_EGRESS_BUCKET: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [finished]
+    abnormal_terminal_states: [rejected]
+    normal_egress_sites: [outfeed]
+    abnormal_egress_sites: [reject_bin]
+}
+
+location outfeed: workpiece_location { capacity: 1 }
+location reject_bin: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task finish_part:
+    step done:
+        effect: finish workpiece at outfeed as rejected
+"#;
+
+const PLC_WORKPIECE_INVALID_MULTI_TYPE_UNTYPED_TRANSFER: &str = r#"
+[topology]
+
+workpiece part: workpiece_type {
+    ingress_sites: [infeed]
+}
+
+workpiece rod: workpiece_type {
+    ingress_sites: [infeed]
+}
+
+location infeed: workpiece_location { capacity: 1 }
+location outfeed: workpiece_location { capacity: 1 }
+holder arm: workpiece_holder { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task move_part:
+    step pick:
+        effect: acquire holder arm from infeed
+    step place:
+        effect: transfer from arm to outfeed
+"#;
+
+#[test]
+fn workpiece_carrier_slot_transfer_builds_ir_and_verifies() {
+    let program = parse_plc(PLC_WORKPIECE_CARRIER_SLOT_TRANSFER).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    assert_eq!(constraints.workpiece_carriers.len(), 1);
+    assert!(state_machine.transitions.iter().any(|transition| {
+        transition.effects.iter().any(|effect| {
+            matches!(effect, rust_plc::ir::WorkpieceEffect::Acquire { from, .. } if from == "tray_a.slot[0]")
+        })
+    }));
+
+    verify_all(&program, &topology, &constraints, &state_machine)
+        .expect("carrier slot transfer fixture should pass verification");
+
+    let err = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+        .expect_err("runtime bridge should still reject phase2 workpiece effects");
+    assert!(matches!(
+        err,
+        BridgeError::UnsupportedWorkpieceEffect { ref effect, .. }
+            if effect == "acquire holder arm from tray_a.slot[0]"
+    ));
+}
+
+#[test]
+fn workpiece_mount_unmount_and_transform_lower_into_ir() {
+    let program = parse_plc(PLC_WORKPIECE_MOUNT_UNMOUNT).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    assert_eq!(constraints.workpiece_carriers.len(), 1);
+    assert_eq!(constraints.workpiece_types.len(), 1);
+    let effects = state_machine
+        .transitions
+        .iter()
+        .flat_map(|transition| transition.effects.iter())
+        .collect::<Vec<_>>();
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, rust_plc::ir::WorkpieceEffect::Mount { .. }))
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, rust_plc::ir::WorkpieceEffect::Unmount { .. }))
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        rust_plc::ir::WorkpieceEffect::TransformCarrier { .. }
+    )));
+
+    let summary = verify_all(&program, &topology, &constraints, &state_machine)
+        .expect("mount/transform/unmount flow should preserve mounted workpiece consistency");
+    assert!(!summary.safety.warnings.iter().any(|warning| {
+        warning.message.contains("ingress site")
+            || warning.message.contains("terminal state")
+            || warning.message.contains("egress site")
+    }));
+}
+
+#[test]
+fn runtime_bridge_rejects_mount_effect_with_effect_level_error() {
+    let program = parse_plc(PLC_WORKPIECE_MOUNT_UNMOUNT).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let err = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+        .expect_err("runtime bridge should reject unsupported phase2 effects");
+    assert!(matches!(
+        err,
+        BridgeError::UnsupportedWorkpieceEffect { ref effect, .. }
+            if effect == "mount rod on steel_plate.slot[0]"
+    ));
+}
+
+#[test]
+fn workpiece_split_merge_contracts_lower_into_ir() {
+    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    assert_eq!(constraints.workpiece_types.len(), 3);
+    assert!(constraints.workpiece_types.iter().any(|workpiece| {
+        workpiece.name == "rod"
+            && workpiece.allows.iter().any(|allow| {
+                matches!(allow, rust_plc::ir::WorkpieceAllowDef::SplitInto { target } if target == "slice")
+            })
+    }));
+    assert!(constraints.workpiece_types.iter().any(|workpiece| {
+        workpiece.name == "module"
+            && workpiece.derived_from.iter().any(|rule| {
+                matches!(rule, rust_plc::ir::WorkpieceDerivationDef::Merge { inputs } if inputs == &vec!["slice".to_string(), "slice".to_string()])
+            })
+    }));
+    assert!(state_machine.transitions.iter().any(|transition| {
+        transition
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, rust_plc::ir::WorkpieceEffect::Split { count, .. } if *count == 4))
+    }));
+    assert!(state_machine.transitions.iter().any(|transition| {
+        transition
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, rust_plc::ir::WorkpieceEffect::Merge { inputs, .. } if inputs.len() == 2))
+    }));
+
+    let summary = verify_all(&program, &topology, &constraints, &state_machine)
+        .expect("split/merge fixture should still verify with warnings");
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn
+            && warning
+                .message
+                .contains("split at process.cut consumes source type 'rod'")
+    }));
+    assert!(
+        !summary
+            .safety
+            .warnings
+            .iter()
+            .any(|warning| { warning.message.contains("merge at process.assemble") })
+    );
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn
+            && warning.message.contains(
+                "reachable terminal state sink.idle may still retain unconsumed workpiece types",
+            )
+            && warning.message.contains("module")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_slot_arity_mismatch() {
+    let program = parse_plc(PLC_WORKPIECE_INVALID_SLOT_ARITY).expect("fixture should parse");
+    let errors = build_constraint_set(&program).expect_err("slot arity mismatch should fail");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.to_string().contains("expects 2 slot dimensions"))
+    );
+}
+
+#[test]
+fn workpiece_rejects_duplicate_terminal_state_entries() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_DUPLICATE_TERMINAL_STATE).expect("fixture should parse");
+    let errors = build_constraint_set(&program).expect_err("duplicate terminal state should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("repeats normal terminal state 'finished'")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_terminal_state_in_both_normal_and_abnormal_sets() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_OVERLAPPING_TERMINAL_STATE).expect("fixture should parse");
+    let errors =
+        build_constraint_set(&program).expect_err("overlapping terminal state should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("declares terminal state 'done' in both normal and abnormal categories")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_consumed_as_declared_terminal_state() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_CONSUMED_TERMINAL_STATE).expect("fixture should parse");
+    let errors = build_constraint_set(&program).expect_err("consumed terminal state should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("cannot declare reserved terminal state 'consumed' in normal category")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_duplicate_ingress_sites() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_DUPLICATE_INGRESS_SITE).expect("fixture should parse");
+    let errors = build_constraint_set(&program).expect_err("duplicate ingress site should fail");
+    assert!(
+        errors
+            .iter()
+            .any(|error| { error.to_string().contains("repeats ingress site 'infeed'") })
+    );
+}
+
+#[test]
+fn workpiece_rejects_overlapping_normal_and_abnormal_egress_sites() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_OVERLAPPING_EGRESS_SITE).expect("fixture should parse");
+    let errors = build_constraint_set(&program).expect_err("overlapping egress site should fail");
+    assert!(errors.iter().any(|error| {
+        error.to_string().contains(
+            "declares egress site 'shared_outfeed' in both normal and abnormal categories",
+        )
+    }));
+}
+
+#[test]
+fn workpiece_rejects_duplicate_split_into_rules() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_DUPLICATE_SPLIT_RULE).expect("fixture should parse");
+    let errors = build_constraint_set(&program).expect_err("duplicate split rule should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("repeats split_into rule 'split_into(slice)'")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_duplicate_derived_from_rules() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_DUPLICATE_DERIVATION_RULE).expect("fixture should parse");
+    let errors = build_constraint_set(&program).expect_err("duplicate derived_from should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("repeats derived_from rule 'derived_from(rod)'")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_split_into_without_matching_target_derivation() {
+    let program = parse_plc(PLC_WORKPIECE_INVALID_SPLIT_TARGET_MISSING_DERIVED_FROM)
+        .expect("fixture should parse");
+    let errors =
+        build_constraint_set(&program).expect_err("missing target derived_from should fail");
+    assert!(errors.iter().any(|error| {
+        error.to_string().contains(
+            "declares split_into(slice), but target type 'slice' is missing derived_from(rod)",
+        )
+    }));
+}
+
+#[test]
+fn workpiece_rejects_derived_from_without_matching_source_split_rule() {
+    let program = parse_plc(PLC_WORKPIECE_INVALID_DERIVED_FROM_SOURCE_MISSING_SPLIT_RULE)
+        .expect("fixture should parse");
+    let errors = build_constraint_set(&program).expect_err("missing source split_into should fail");
+    assert!(errors.iter().any(|error| {
+        error.to_string().contains(
+            "declares derived_from(rod), but source type 'rod' is missing split_into(slice)",
+        )
+    }));
+}
+
+#[test]
+fn workpiece_rejects_duplicate_merge_rules_even_if_input_order_differs() {
+    let program = parse_plc(PLC_WORKPIECE_INVALID_DUPLICATE_MERGE_RULE_BY_PERMUTATION)
+        .expect("fixture should parse");
+    let errors =
+        build_constraint_set(&program).expect_err("permuted duplicate merge rule should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("repeats derived_from rule 'merge(cell, shell)'")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_ambiguous_merge_rules_with_same_input_arity() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_AMBIGUOUS_MERGE_RULE_ARITY).expect("fixture should parse");
+    let errors = build_constraint_set(&program).expect_err("ambiguous merge arity should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("declares multiple merge(...) derivations with 2 inputs")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_duplicate_enum_property_values() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_DUPLICATE_ENUM_VALUE).expect("fixture should parse");
+    let errors = build_constraint_set(&program).expect_err("duplicate enum value should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("enum property 'grade' repeats value 'a'")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_split_effect_with_zero_count() {
+    let program = parse_plc(PLC_WORKPIECE_INVALID_SPLIT_COUNT_ZERO).expect("fixture should parse");
+    let errors = build_state_machine(&program).expect_err("zero split count should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("split count must be greater than zero")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_split_effect_without_declared_target_contract() {
+    let program = parse_plc(PLC_WORKPIECE_INVALID_STEP_SPLIT_UNDECLARED_TARGET)
+        .expect("fixture should parse");
+    let errors = build_state_machine(&program).expect_err("step split target contract should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("workpiece type 'rod' does not allow split_into(slice)")
+    }));
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("workpiece type 'slice' is not derived_from 'rod'")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_merge_effect_with_input_arity_mismatch() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_STEP_MERGE_ARITY_MISMATCH).expect("fixture should parse");
+    let errors = build_state_machine(&program).expect_err("merge arity mismatch should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("workpiece type 'module' has no merge(...) derivation matching 2 inputs")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_finish_effect_with_undeclared_terminal_state() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_FINISH_UNDECLARED_TERMINAL).expect("fixture should parse");
+    let errors = build_state_machine(&program).expect_err("undeclared finish terminal should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("terminal state 'scrapped' is not declared on workpiece type 'part'")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_finish_effect_on_wrong_egress_bucket() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_FINISH_WRONG_EGRESS_BUCKET).expect("fixture should parse");
+    let errors = build_state_machine(&program).expect_err("wrong egress bucket should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("finish endpoint 'outfeed' does not satisfy the declared egress contract")
+    }));
+}
+
+#[test]
+fn workpiece_rejects_untyped_transfer_effects_when_multiple_types_exist() {
+    let program =
+        parse_plc(PLC_WORKPIECE_INVALID_MULTI_TYPE_UNTYPED_TRANSFER).expect("fixture should parse");
+    let errors = build_state_machine(&program).expect_err("multi-type transfer should fail");
+    assert!(errors.iter().any(|error| {
+        error
+            .to_string()
+            .contains("acquire/transfer/finish effects remain single-type in this phase")
+    }));
+}
+
+#[test]
+fn parser_supports_new_workpiece_effect_variants() {
+    let program = parse_plc(PLC_WORKPIECE_MOUNT_UNMOUNT).expect("fixture should parse");
+    let effects = program
+        .tasks
+        .tasks
+        .iter()
+        .flat_map(|task| task.steps.iter())
+        .flat_map(|step| step.statements.iter())
+        .filter_map(|statement| match statement {
+            rust_plc::ast::StepStatement::Effect(effect) => Some(&effect.kind),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, EffectKind::Mount { .. }))
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, EffectKind::Unmount { .. }))
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, EffectKind::TransformCarrier { .. }))
+    );
+}
+
+#[test]
+fn verify_all_rejects_workpiece_source_underflow() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_UNDERFLOW).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety" && error.reason.contains("before any workpiece is available")
+    }));
+}
+
+#[test]
+fn verify_all_rejects_workpiece_capacity_overflow() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_CAPACITY).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.checker == "safety" && error.reason.contains("exceed capacity"))
+    );
+}
+
+#[test]
+fn verify_all_rejects_terminal_state_with_unfinished_workpiece() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_DANGLING).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety" && error.reason.contains("still holds workpieces")
+    }));
+}
+
+#[test]
+fn verify_all_warns_when_abnormal_workpiece_contract_is_unreachable() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_DEAD_CONTRACTS).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let summary =
+        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn
+            && warning
+                .message
+                .contains("declares abnormal terminal state 'rejected'")
+    }));
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn
+            && warning
+                .message
+                .contains("declares abnormal egress site 'reject_bin'")
+    }));
+}
+
+#[test]
+fn verify_all_warns_when_declared_split_merge_contracts_are_unused() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_UNUSED_CONTRACTS).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let summary =
+        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn && warning.message.contains("split_into(slice)")
+    }));
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn && warning.message.contains("merge(slice, slice)")
+    }));
+}
+
+#[test]
+fn verify_all_warns_when_declared_ingress_is_unused() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_UNUSED_INGRESS).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let summary =
+        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn
+            && warning.message.contains("declares ingress site 'infeed'")
+    }));
+}
+
+#[test]
+fn verify_all_rejects_unmount_from_empty_slot() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_UNMOUNT_UNDERFLOW).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error.reason.contains("before any workpiece is available")
+            && error.reason.contains("plate.slot[0]")
+    }));
+}
+
+#[test]
+fn verify_all_warns_when_split_source_type_has_no_prior_introduction() {
+    let program =
+        parse_plc(PLC_WORKPIECE_VERIFY_SPLIT_WITHOUT_SOURCE_INTRO).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let summary =
+        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn
+            && warning
+                .message
+                .contains("split at process.cut consumes source type 'rod'")
+    }));
+}
+
+#[test]
+fn verify_all_warns_when_merge_inputs_have_no_prior_introduction() {
+    let program =
+        parse_plc(PLC_WORKPIECE_VERIFY_MERGE_WITHOUT_INPUT_INTRO).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let summary =
+        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn
+            && warning
+                .message
+                .contains("merge at process.assemble into 'module' requires prior reachable inputs")
+            && warning.message.contains("2x cell")
+    }));
+}
+
+#[test]
+fn verify_all_warns_when_split_outputs_are_insufficient_for_merge() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_MERGE_AFTER_INSUFFICIENT_SPLIT)
+        .expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let summary =
+        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn
+            && warning
+                .message
+                .contains("merge at process.assemble into 'module' requires prior reachable inputs")
+            && warning.message.contains("1x slice")
+    }));
+}
+
+#[test]
+fn verify_all_warns_when_consumed_merge_inputs_are_reused_later() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_DOUBLE_MERGE_AFTER_SINGLE_SPLIT)
+        .expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let summary =
+        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
+    assert!(summary.safety.warnings.iter().any(|warning| {
+        warning.level == WarningLevel::Warn
+            && warning.message.contains(
+                "merge at process.assemble_b into 'module' requires prior reachable inputs",
+            )
+            && warning.message.contains("2x slice")
+    }));
+}
+
+#[test]
+fn verify_all_does_not_warn_when_wide_split_covers_two_merges() {
+    let program = parse_plc(PLC_WORKPIECE_VERIFY_DOUBLE_MERGE_AFTER_WIDE_SPLIT)
+        .expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let summary =
+        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
+    assert!(!summary.safety.warnings.iter().any(|warning| {
+        warning
+            .message
+            .contains("merge at process.assemble_b into 'module'")
+    }));
+}

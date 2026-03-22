@@ -233,6 +233,11 @@ static SIM_PROGRAM: Program<'static> = Program {
     cam_configs: &[],
     cam_tables: &[],
     axis_fault_policies: &[],
+    semantic_resources: &[],
+    resource_claims: &[],
+    workpiece_types: &[],
+    workpiece_sites: &[],
+    workpiece_holders: &[],
 };
 
 const SCENARIO_YAML_MINIMAL_TEMPLATE: &str = r#"tick_ms: 10
@@ -459,7 +464,14 @@ fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHint
             .collect::<Vec<_>>()
             .join("\n")
     })?;
-    let runtime = state_machine_to_runtime_program(&topology, &state_machine, 10)
+    let constraints = build_constraint_set(&expanded).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let runtime = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
         .map_err(|e| e.to_string())?;
 
     let mut used_di = BTreeSet::<u16>::new();
@@ -2033,8 +2045,13 @@ fn run_gen_st_subcommand(
         source_file: plc_path.clone(),
         include_verification_summary,
     };
-    let st_text = generate_st(&ir_bundle.topology, &ir_bundle.state_machine, &config)
-        .map_err(format_st_codegen_errors)?;
+    let st_text = generate_st(
+        &ir_bundle.topology,
+        &ir_bundle.constraints,
+        &ir_bundle.state_machine,
+        &config,
+    )
+    .map_err(format_st_codegen_errors)?;
 
     if let Some(path) = out_path {
         if let Some(parent) = path.parent() {
@@ -2139,7 +2156,8 @@ fn run_new_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
     let plc = "[topology]\n\ndevice plc_main: plc {\n    purpose: \"控制器本体与数字I/O端口映射\",\n    ports: [X0:digital:consumer, Y0:digital:producer]\n}\n\n[constraints]\n\n[tasks]\n\ntask main:\n    step wait_start:\n        wait: X0 == true\n        timeout: 100ms -> goto fault\n\n    step run:\n        action: set Y0 on\n        delay: 20ms\n\n    step stop:\n        action: set Y0 off\n\n    on_complete: goto done\n\ntask fault:\n    step safe_stop:\n        action: set Y0 off\n    on_complete: goto done\n\ntask done:\n    step halt:\n";
     let scenario = "tick_ms: 10\nduration_ms: 300\ninputs:\n  - at_ms: 0\n    set:\n      digital_inputs:\n        0: true\n  - at_ms: 50\n    set:\n      digital_inputs:\n        0: false\nforces: []\n";
     let io_map = "schema_version = 1\n\n[digital_inputs]\ndi0 = { gpio = 2, pull = \"up\" }\n\n[digital_outputs]\ndo0 = { gpio = 10, active_low = false }\n\n[safe_state]\nmode = \"all_zero\"\non_exit_timeout_ms = 0\n";
-    let retain = "schema_version = 1\n\n[retain]\nenabled = false\npath = \"out/sim/retain_state.json\"\n";
+    let retain =
+        "schema_version = 1\n\n[retain]\nenabled = false\npath = \"out/sim/retain_state.json\"\n";
     let manifest = format!(
         "schema_version = 1\n\n[project]\nname = \"{project_title}\"\nslug = \"{project_slug}\"\n\n[entry]\nsystem = \"plc/main.system.md\"\nplc = \"plc/main.plc\"\nscenario = \"scenarios/nominal/normal.yaml\"\nio_map = \"config/io_map.toml\"\nretain = \"config/retain.toml\"\n\n[out]\nir = \"out/ir\"\nsim = \"out/sim\"\ngate = \"out/gate\"\ncodegen = \"out/codegen\"\nrp2040 = \"out/rp2040\"\nrelease = \"out/release\"\n"
     );
@@ -5668,9 +5686,13 @@ fn run_build_rp2040_subcommand(
     let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
 
     // For build artifacts we use 1ms ticks so ms-based DSL durations are always aligned.
-    let runtime_program =
-        state_machine_to_runtime_program(&ir_bundle.topology, &ir_bundle.state_machine, 1)
-            .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
+    let runtime_program = state_machine_to_runtime_program(
+        &ir_bundle.topology,
+        &ir_bundle.constraints,
+        &ir_bundle.state_machine,
+        1,
+    )
+    .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
 
     let usage = io_usage_for_program(&runtime_program);
     let io_map = match io_map_path.as_ref() {
@@ -5916,9 +5938,13 @@ fn run_release_bundle_subcommand(
     let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
 
     // Board-oriented program generation uses 1ms ticks to align with firmware build artifacts.
-    let board_program =
-        state_machine_to_runtime_program(&ir_bundle.topology, &ir_bundle.state_machine, 1)
-            .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
+    let board_program = state_machine_to_runtime_program(
+        &ir_bundle.topology,
+        &ir_bundle.constraints,
+        &ir_bundle.state_machine,
+        1,
+    )
+    .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
 
     let usage = io_usage_for_program(&board_program);
     let io_map = match io_map_path.as_ref() {
@@ -5992,6 +6018,7 @@ Start from the generated `io_map.template.toml` under `--out-dir <dir>` and fill
     // SIL artifacts for trace/report packaging.
     let sil_program = state_machine_to_runtime_program(
         &ir_bundle.topology,
+        &ir_bundle.constraints,
         &ir_bundle.state_machine,
         scenario.tick_ms,
     )
@@ -6517,7 +6544,10 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }
-                            | Action::CamPhase { .. } => {}
+                            | Action::CamPhase { .. }
+                            | Action::WorkpieceAcquire { .. }
+                            | Action::WorkpieceTransfer { .. }
+                            | Action::WorkpieceFinish { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
@@ -6692,7 +6722,10 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }
-                            | Action::CamPhase { .. } => {}
+                            | Action::CamPhase { .. }
+                            | Action::WorkpieceAcquire { .. }
+                            | Action::WorkpieceTransfer { .. }
+                            | Action::WorkpieceFinish { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
@@ -9666,8 +9699,16 @@ fn compile_plc_to_runtime_program(
             .collect::<Vec<_>>()
             .join("\n")
     })?;
+    let constraints = build_constraint_set(&expanded).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
 
-    state_machine_to_runtime_program(&topology, &sm, tick_ms).map_err(|e| e.to_string())
+    state_machine_to_runtime_program(&topology, &constraints, &sm, tick_ms)
+        .map_err(|e| e.to_string())
 }
 
 fn io_sizes_for_program_and_scenario(
@@ -9708,7 +9749,10 @@ fn io_sizes_for_program_and_scenario(
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }
-                            | Action::CamPhase { .. } => {}
+                            | Action::CamPhase { .. }
+                            | Action::WorkpieceAcquire { .. }
+                            | Action::WorkpieceTransfer { .. }
+                            | Action::WorkpieceFinish { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }

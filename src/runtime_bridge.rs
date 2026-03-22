@@ -3,8 +3,8 @@ use crate::ir::{
     AxisFaultPropagationScope as IrAxisFaultPropagationScope,
     AxisFaultRouteKind as IrAxisFaultRouteKind, AxisFaultSeverity as IrAxisFaultSeverity,
     AxisStopMode as IrAxisStopMode, BinaryValue as IrBinaryValue,
-    CamInterpolation as IrCamInterpolation, DeviceKind, State, StateMachine, TopologyGraph,
-    Transition, TransitionAction, TransitionGuard,
+    CamInterpolation as IrCamInterpolation, ConstraintSet, DeviceKind, State, StateMachine,
+    TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
 use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
@@ -17,8 +17,13 @@ use runtime_core::{
     AxisFaultSeverity as RtAxisFaultSeverity, AxisMotionCommand, AxisMoveKind,
     AxisStopMode as RtAxisStopMode, CamAnalogField, CamCouplingConfig, CamDigitalField,
     CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, ExprOp, ExprProgram, Instr,
-    MAX_CAM_POINTS, MAX_TRANSITIONS_PER_TASK_PER_TICK, PidConfig, Program,
-    SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
+    MAX_CAM_POINTS, MAX_TRACKED_DIGITAL_OUTPUTS, MAX_TRANSITIONS_PER_TASK_PER_TICK, PidConfig,
+    Program, ResourceClaimRule as RtResourceClaimRule,
+    ResourceClaimSource as RtResourceClaimSource, SemanticResource as RtSemanticResource,
+    SemanticResourceMode as RtSemanticResourceMode, SplineCoeff as RtSplineCoeff, Step, StepId,
+    Task, Timeout, WorkpieceHolderDef as RtWorkpieceHolderDef,
+    WorkpieceSiteDef as RtWorkpieceSiteDef, WorkpieceSiteKind as RtWorkpieceSiteKind,
+    WorkpieceTypeDef as RtWorkpieceTypeDef,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -118,6 +123,14 @@ pub enum BridgeError {
         value: String,
     },
 
+    #[error(
+        "Phase 1 workpiece lowering requires exactly one declared workpiece type, found {count}"
+    )]
+    Phase1WorkpieceTypeArity { count: usize },
+
+    #[error("unsupported workpiece effect in {state}: {effect}")]
+    UnsupportedWorkpieceEffect { state: String, effect: String },
+
     #[error("cam_coupling {cam} references unknown cam table {table}")]
     UnknownCamTableReference { cam: String, table: String },
 
@@ -129,6 +142,9 @@ pub enum BridgeError {
         tick_budget_us: u64,
         worst_case_us: u64,
     },
+
+    #[error("unsupported semantic resource claim `{claim}`: {detail}")]
+    UnsupportedSemanticResourceClaim { claim: String, detail: String },
 }
 
 /// Convert a compiler/semantic `StateMachine` IR into a minimal `runtime-core` `Program`.
@@ -148,6 +164,7 @@ pub enum BridgeError {
 /// - Generated program uses leaked allocations to produce a `'static` `Program`.
 pub fn state_machine_to_runtime_program(
     topology: &TopologyGraph,
+    constraints: &ConstraintSet,
     sm: &StateMachine,
     tick_ms: u64,
 ) -> Result<Program<'static>, BridgeError> {
@@ -155,6 +172,7 @@ pub fn state_machine_to_runtime_program(
         return Err(BridgeError::InvalidTickMs);
     }
     validate_extern_tick_budget(topology, sm, tick_ms)?;
+    let workpiece_ctx = WorkpieceBridgeContext::new(constraints, sm)?;
 
     let resolver = TopologyResolver::new(topology);
     let variable_indices = topology
@@ -289,6 +307,7 @@ pub fn state_machine_to_runtime_program(
                 &resolver,
                 &state_name,
                 &outs,
+                &workpiece_ctx,
                 &local_state_to_step,
                 &local_task_entry_steps,
                 &mut steps,
@@ -348,6 +367,10 @@ pub fn state_machine_to_runtime_program(
     );
     let leaked_axis_fault_policies: &'static [AxisFaultPolicy<'static>] =
         Box::leak(build_axis_fault_policies(topology).into_boxed_slice());
+    let leaked_semantic_resources: &'static [RtSemanticResource<'static>] =
+        Box::leak(build_semantic_resources(constraints).into_boxed_slice());
+    let leaked_resource_claims: &'static [RtResourceClaimRule<'static>] =
+        Box::leak(build_resource_claims(&resolver, constraints)?.into_boxed_slice());
     Ok(Program {
         tasks: leaked_tasks,
         pid_loops: leaked_pid_loops,
@@ -355,6 +378,11 @@ pub fn state_machine_to_runtime_program(
         cam_configs: leaked_cam_configs,
         cam_tables: leaked_cam_tables,
         axis_fault_policies: leaked_axis_fault_policies,
+        semantic_resources: leaked_semantic_resources,
+        resource_claims: leaked_resource_claims,
+        workpiece_types: workpiece_ctx.runtime_types,
+        workpiece_sites: workpiece_ctx.runtime_sites,
+        workpiece_holders: workpiece_ctx.runtime_holders,
     })
 }
 
@@ -613,6 +641,220 @@ fn build_axis_fault_policies(topology: &TopologyGraph) -> Vec<AxisFaultPolicy<'s
             propagation_targets: leak_str_slice(&contract.propagation_targets),
         })
         .collect()
+}
+
+fn build_semantic_resources(constraints: &ConstraintSet) -> Vec<RtSemanticResource<'static>> {
+    constraints
+        .semantic_resources
+        .iter()
+        .map(|resource| RtSemanticResource {
+            name: Box::leak(resource.name.clone().into_boxed_str()),
+            mode: lower_semantic_resource_mode(resource.mode.clone()),
+        })
+        .collect()
+}
+
+fn build_resource_claims(
+    resolver: &TopologyResolver,
+    constraints: &ConstraintSet,
+) -> Result<Vec<RtResourceClaimRule<'static>>, BridgeError> {
+    let resource_index_by_name = constraints
+        .semantic_resources
+        .iter()
+        .enumerate()
+        .map(|(idx, resource)| (resource.name.as_str(), idx as u16))
+        .collect::<HashMap<_, _>>();
+
+    let mut out = Vec::with_capacity(constraints.resource_claims.len());
+    for claim in &constraints.resource_claims {
+        let claim_text = render_resource_claim(claim);
+        let Some(resource_index) = resource_index_by_name.get(claim.resource.as_str()).copied()
+        else {
+            return Err(BridgeError::UnsupportedSemanticResourceClaim {
+                claim: claim_text,
+                detail: format!("semantic resource `{}` is not declared", claim.resource),
+            });
+        };
+        let source = lower_runtime_claim_source(resolver, &claim_text, &claim.source)?;
+        out.push(RtResourceClaimRule {
+            source,
+            resource_index,
+        });
+    }
+    Ok(out)
+}
+
+#[derive(Clone, Copy)]
+struct WorkpieceBridgeContext {
+    phase1_workpiece_type: Option<&'static str>,
+    runtime_types: &'static [RtWorkpieceTypeDef<'static>],
+    runtime_sites: &'static [RtWorkpieceSiteDef<'static>],
+    runtime_holders: &'static [RtWorkpieceHolderDef<'static>],
+}
+
+impl WorkpieceBridgeContext {
+    fn new(constraints: &ConstraintSet, sm: &StateMachine) -> Result<Self, BridgeError> {
+        let has_effects = sm
+            .transitions
+            .iter()
+            .any(|transition| !transition.effects.is_empty());
+        let phase1_workpiece_type = if has_effects {
+            match constraints.workpiece_types.as_slice() {
+                [workpiece] => {
+                    Some(Box::leak(workpiece.name.clone().into_boxed_str()) as &'static str)
+                }
+                _ => {
+                    return Err(BridgeError::Phase1WorkpieceTypeArity {
+                        count: constraints.workpiece_types.len(),
+                    });
+                }
+            }
+        } else {
+            None
+        };
+
+        Ok(Self {
+            phase1_workpiece_type,
+            runtime_types: leak_workpiece_types(&constraints.workpiece_types),
+            runtime_sites: leak_workpiece_sites(&constraints.workpiece_sites),
+            runtime_holders: leak_workpiece_holders(&constraints.workpiece_holders),
+        })
+    }
+}
+
+fn leak_workpiece_types(
+    workpiece_types: &[crate::ir::WorkpieceTypeDef],
+) -> &'static [RtWorkpieceTypeDef<'static>] {
+    let leaked_types = workpiece_types
+        .iter()
+        .map(|workpiece| RtWorkpieceTypeDef {
+            name: Box::leak(workpiece.name.clone().into_boxed_str()),
+            normal_terminal_states: leak_str_slice(&workpiece.normal_terminal_states),
+            abnormal_terminal_states: leak_str_slice(&workpiece.abnormal_terminal_states),
+            ingress_sites: leak_str_slice(&workpiece.ingress_sites),
+            normal_egress_sites: leak_str_slice(&workpiece.normal_egress_sites),
+            abnormal_egress_sites: leak_str_slice(&workpiece.abnormal_egress_sites),
+        })
+        .collect::<Vec<_>>();
+    Box::leak(leaked_types.into_boxed_slice())
+}
+
+fn leak_workpiece_sites(
+    workpiece_sites: &[crate::ir::WorkpieceSiteDef],
+) -> &'static [RtWorkpieceSiteDef<'static>] {
+    let leaked_sites = workpiece_sites
+        .iter()
+        .map(|site| RtWorkpieceSiteDef {
+            name: Box::leak(site.name.clone().into_boxed_str()),
+            kind: lower_workpiece_site_kind(site.kind.clone()),
+            capacity: site.capacity,
+        })
+        .collect::<Vec<_>>();
+    Box::leak(leaked_sites.into_boxed_slice())
+}
+
+fn leak_workpiece_holders(
+    workpiece_holders: &[crate::ir::WorkpieceHolderDef],
+) -> &'static [RtWorkpieceHolderDef<'static>] {
+    let leaked_holders = workpiece_holders
+        .iter()
+        .map(|holder| RtWorkpieceHolderDef {
+            name: Box::leak(holder.name.clone().into_boxed_str()),
+            capacity: holder.capacity,
+        })
+        .collect::<Vec<_>>();
+    Box::leak(leaked_holders.into_boxed_slice())
+}
+
+fn lower_workpiece_site_kind(kind: crate::ir::WorkpieceSiteKind) -> RtWorkpieceSiteKind {
+    match kind {
+        crate::ir::WorkpieceSiteKind::WorkpieceLocation => RtWorkpieceSiteKind::WorkpieceLocation,
+        crate::ir::WorkpieceSiteKind::CarrierLocation => RtWorkpieceSiteKind::CarrierLocation,
+    }
+}
+
+fn lower_runtime_claim_source(
+    resolver: &TopologyResolver,
+    claim_text: &str,
+    source: &crate::ir::ResourceClaimSource,
+) -> Result<RtResourceClaimSource<'static>, BridgeError> {
+    match source {
+        crate::ir::ResourceClaimSource::ActionTag { tag } => Ok(RtResourceClaimSource::ActionTag {
+            tag: Box::leak(tag.clone().into_boxed_str()),
+        }),
+        crate::ir::ResourceClaimSource::State(state_expr) => {
+            lower_runtime_state_claim_source(resolver, claim_text, state_expr)
+        }
+    }
+}
+
+fn lower_runtime_state_claim_source(
+    resolver: &TopologyResolver,
+    claim_text: &str,
+    state_expr: &crate::ir::StateExpr,
+) -> Result<RtResourceClaimSource<'static>, BridgeError> {
+    let Some(value) = binary_state_value(&state_expr.state) else {
+        return Err(BridgeError::UnsupportedSemanticResourceClaim {
+            claim: claim_text.to_string(),
+            detail: format!(
+                "state `{}` is not runtime-lowerable; only binary output-backed states are supported",
+                render_state_expr(state_expr)
+            ),
+        });
+    };
+    let id = resolver
+        .resolve_digital_output_id(
+            "semantic resource claim",
+            &state_expr.device,
+            &state_expr.port,
+        )
+        .map_err(|err| BridgeError::UnsupportedSemanticResourceClaim {
+            claim: claim_text.to_string(),
+            detail: err.to_string(),
+        })?;
+    if id.0 as usize >= MAX_TRACKED_DIGITAL_OUTPUTS {
+        return Err(BridgeError::UnsupportedSemanticResourceClaim {
+            claim: claim_text.to_string(),
+            detail: format!(
+                "digital output {} exceeds runtime shadow limit {}",
+                id.0, MAX_TRACKED_DIGITAL_OUTPUTS
+            ),
+        });
+    }
+    Ok(RtResourceClaimSource::DigitalOutputState { id, value })
+}
+
+fn lower_semantic_resource_mode(mode: crate::ir::SemanticResourceMode) -> RtSemanticResourceMode {
+    match mode {
+        crate::ir::SemanticResourceMode::Exclusive => RtSemanticResourceMode::Exclusive,
+    }
+}
+
+fn binary_state_value(state: &str) -> Option<bool> {
+    match state {
+        "on" | "forward" | "active" | "extended" => Some(true),
+        "off" | "reverse" | "idle" | "retracted" => Some(false),
+        _ => None,
+    }
+}
+
+fn render_resource_claim(claim: &crate::ir::ResourceClaimRule) -> String {
+    let source = match &claim.source {
+        crate::ir::ResourceClaimSource::ActionTag { tag } => format!("action_tag {tag}"),
+        crate::ir::ResourceClaimSource::State(state_expr) => render_state_expr(state_expr),
+    };
+    format!("claim: {source} occupies {}", claim.resource)
+}
+
+fn render_state_expr(state_expr: &crate::ir::StateExpr) -> String {
+    if state_expr.port == "self" {
+        format!("{}.{}", state_expr.device, state_expr.state)
+    } else {
+        format!(
+            "{}.{}.{}",
+            state_expr.device, state_expr.port, state_expr.state
+        )
+    }
 }
 
 fn leak_str_slice(values: &[String]) -> &'static [&'static str] {
@@ -909,6 +1151,7 @@ fn convert_state_outgoing(
     resolver: &TopologyResolver,
     state_name: &str,
     outs: &[&Transition],
+    workpiece_ctx: &WorkpieceBridgeContext,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
     steps: &mut Vec<Step<'static>>,
@@ -925,6 +1168,7 @@ fn convert_state_outgoing(
             resolver,
             state_name,
             outs[0],
+            workpiece_ctx,
             state_to_step,
             task_entry_steps,
             steps,
@@ -939,6 +1183,7 @@ fn convert_state_outgoing(
             resolver,
             state_name,
             outs,
+            workpiece_ctx,
             state_to_step,
             task_entry_steps,
             steps,
@@ -960,6 +1205,7 @@ fn convert_single_transition(
     resolver: &TopologyResolver,
     state_name: &str,
     t: &Transition,
+    workpiece_ctx: &WorkpieceBridgeContext,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
     steps: &mut Vec<Step<'static>>,
@@ -973,13 +1219,15 @@ fn convert_single_transition(
     match &t.guard {
         TransitionGuard::Always => {
             let target = lookup_target_step(state_name, &t.to, state_to_step)?;
-            if t.actions.is_empty() {
+            if t.actions.is_empty() && t.effects.is_empty() {
                 Ok(Instr::Goto { target })
             } else {
                 let actions = leak_actions(
                     resolver,
                     state_name,
                     &t.actions,
+                    &t.effects,
+                    workpiece_ctx,
                     state_to_step,
                     task_entry_steps,
                     tick_ms,
@@ -998,7 +1246,7 @@ fn convert_single_transition(
             let ticks = ms_to_ticks(state_name, *duration_ms, tick_ms)?;
             let target = lookup_target_step(state_name, &t.to, state_to_step)?;
 
-            if t.actions.is_empty() {
+            if t.actions.is_empty() && t.effects.is_empty() {
                 Ok(Instr::Delay {
                     ticks,
                     next: target,
@@ -1010,6 +1258,8 @@ fn convert_single_transition(
                     resolver,
                     state_name,
                     &t.actions,
+                    &t.effects,
+                    workpiece_ctx,
                     target,
                     state_to_step,
                     task_entry_steps,
@@ -1028,7 +1278,7 @@ fn convert_single_transition(
         TransitionGuard::Condition { expression } => {
             let expr = expression.trim();
             let target = lookup_target_step(state_name, &t.to, state_to_step)?;
-            let next = if t.actions.is_empty() {
+            let next = if t.actions.is_empty() && t.effects.is_empty() {
                 target
             } else {
                 push_action_step(
@@ -1037,6 +1287,8 @@ fn convert_single_transition(
                     resolver,
                     state_name,
                     &t.actions,
+                    &t.effects,
+                    workpiece_ctx,
                     target,
                     state_to_step,
                     task_entry_steps,
@@ -1111,6 +1363,7 @@ fn convert_two_transitions(
     resolver: &TopologyResolver,
     state_name: &str,
     outs: &[&Transition],
+    workpiece_ctx: &WorkpieceBridgeContext,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
     steps: &mut Vec<Step<'static>>,
@@ -1143,6 +1396,7 @@ fn convert_two_transitions(
             resolver,
             state_name,
             always,
+            workpiece_ctx,
             state_to_step,
             task_entry_steps,
             steps,
@@ -1206,7 +1460,7 @@ fn convert_two_transitions(
     };
 
     let cond_target = lookup_target_step(state_name, &cond.to, state_to_step)?;
-    let cond_next = if cond.actions.is_empty() {
+    let cond_next = if cond.actions.is_empty() && cond.effects.is_empty() {
         cond_target
     } else {
         push_action_step(
@@ -1215,6 +1469,8 @@ fn convert_two_transitions(
             resolver,
             state_name,
             &cond.actions,
+            &cond.effects,
+            workpiece_ctx,
             cond_target,
             state_to_step,
             task_entry_steps,
@@ -1227,25 +1483,28 @@ fn convert_two_transitions(
     };
 
     let fallback_target = lookup_target_step(state_name, &fallback_transition.to, state_to_step)?;
-    let fallback_next = if fallback_transition.actions.is_empty() {
-        fallback_target
-    } else {
-        push_action_step(
-            steps,
-            &format!("{state_name}__fallback_actions"),
-            resolver,
-            state_name,
-            &fallback_transition.actions,
-            fallback_target,
-            state_to_step,
-            task_entry_steps,
-            tick_ms,
-            variable_indices,
-            cam_indices,
-            cam_table_indices,
-            extern_signatures,
-        )?
-    };
+    let fallback_next =
+        if fallback_transition.actions.is_empty() && fallback_transition.effects.is_empty() {
+            fallback_target
+        } else {
+            push_action_step(
+                steps,
+                &format!("{state_name}__fallback_actions"),
+                resolver,
+                state_name,
+                &fallback_transition.actions,
+                &fallback_transition.effects,
+                workpiece_ctx,
+                fallback_target,
+                state_to_step,
+                task_entry_steps,
+                tick_ms,
+                variable_indices,
+                cam_indices,
+                cam_table_indices,
+                extern_signatures,
+            )?
+        };
 
     condition_to_wait_instr(
         resolver,
@@ -1732,6 +1991,8 @@ fn push_action_step(
     resolver: &TopologyResolver,
     state_name: &str,
     actions: &[TransitionAction],
+    effects: &[crate::ir::WorkpieceEffect],
+    workpiece_ctx: &WorkpieceBridgeContext,
     next: StepId,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
@@ -1746,6 +2007,8 @@ fn push_action_step(
         resolver,
         state_name,
         actions,
+        effects,
+        workpiece_ctx,
         state_to_step,
         task_entry_steps,
         tick_ms,
@@ -1769,6 +2032,8 @@ fn leak_actions(
     resolver: &TopologyResolver,
     state_name: &str,
     actions: &[TransitionAction],
+    effects: &[crate::ir::WorkpieceEffect],
+    workpiece_ctx: &WorkpieceBridgeContext,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
     tick_ms: u64,
@@ -1777,12 +2042,28 @@ fn leak_actions(
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
 ) -> Result<&'static [Action], BridgeError> {
-    let mut out: Vec<Action> = Vec::with_capacity(actions.len());
+    let mut out: Vec<Action> = Vec::with_capacity(actions.len() + effects.len());
     for a in actions {
         out.push(convert_action(
             resolver,
             state_name,
-            a,
+            workpiece_ctx,
+            RuntimeActionRef::Transition(a),
+            state_to_step,
+            task_entry_steps,
+            tick_ms,
+            variable_indices,
+            cam_indices,
+            cam_table_indices,
+            extern_signatures,
+        )?);
+    }
+    for effect in effects {
+        out.push(convert_action(
+            resolver,
+            state_name,
+            workpiece_ctx,
+            RuntimeActionRef::Workpiece(effect),
             state_to_step,
             task_entry_steps,
             tick_ms,
@@ -1795,10 +2076,16 @@ fn leak_actions(
     Ok(Box::leak(out.into_boxed_slice()))
 }
 
+enum RuntimeActionRef<'a> {
+    Transition(&'a TransitionAction),
+    Workpiece(&'a crate::ir::WorkpieceEffect),
+}
+
 fn convert_action(
     resolver: &TopologyResolver,
     state_name: &str,
-    a: &TransitionAction,
+    workpiece_ctx: &WorkpieceBridgeContext,
+    runtime_action: RuntimeActionRef<'_>,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
     tick_ms: u64,
@@ -1807,443 +2094,572 @@ fn convert_action(
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
 ) -> Result<Action, BridgeError> {
-    match a {
-        TransitionAction::Extend { target, port } => {
-            let output = resolver.resolve_digital_output_id(state_name, target, port)?;
-            Ok(Action::Extend { output })
-        }
-        TransitionAction::Retract { target, port } => {
-            let output = resolver.resolve_digital_output_id(state_name, target, port)?;
-            Ok(Action::Retract { output })
-        }
-        TransitionAction::Set {
-            target,
-            port,
-            value,
-        } => {
-            let id = resolver.resolve_digital_output_id(state_name, target, port)?;
-            let value = match value {
-                IrBinaryValue::On => true,
-                IrBinaryValue::Off => false,
-            };
-            Ok(Action::SetDigital { id, value })
-        }
-        TransitionAction::SetAnalog {
-            target,
-            port,
-            value_raw,
-        } => {
-            let id = resolver.resolve_analog_output_id(state_name, target, port)?;
-            let value =
-                value_raw
-                    .parse::<f32>()
-                    .map_err(|_| BridgeError::InvalidAnalogLiteral {
-                        state: state_name.to_string(),
-                        target: target.clone(),
-                        value_raw: value_raw.clone(),
-                    })?;
-            Ok(Action::SetAnalog { id, value })
-        }
-        TransitionAction::SetAnalogExpr {
-            target,
-            port,
-            expr_raw,
-        } => {
-            let id = resolver.resolve_analog_output_id(state_name, target, port)?;
-            let expr = compile_expr_program(state_name, expr_raw, variable_indices)?;
-            Ok(Action::SetAnalogExpr { id, expr })
-        }
-        TransitionAction::Compute { target, expr_raw } => {
-            let Some(target_var) = variable_indices.get(target).copied() else {
-                return Err(BridgeError::UnsupportedAction {
-                    state: state_name.to_string(),
-                    action: format!("compute {target}"),
-                });
-            };
-            let expr = compile_expr_program(state_name, expr_raw, variable_indices)?;
-            Ok(Action::Compute { target_var, expr })
-        }
-        TransitionAction::CallExtern {
-            function,
-            args_raw,
-            binding,
-        } => {
-            let rendered_binding = match binding {
-                crate::ir::ExternCallBinding::Single(name) => name.clone(),
-                crate::ir::ExternCallBinding::Tuple(names) => format!("({})", names.join(", ")),
-            };
-            let rendered_action = format!(
-                "call {}({}) -> {}",
-                function,
-                args_raw.join(", "),
-                rendered_binding
-            );
-
-            let Some((expected_args, expected_returns)) = extern_signatures.get(function).copied()
-            else {
-                return Err(BridgeError::UnsupportedAction {
-                    state: state_name.to_string(),
-                    action: format!("{rendered_action} (extern function not declared)"),
-                });
-            };
-            if args_raw.len() != expected_args {
-                return Err(BridgeError::UnsupportedAction {
-                    state: state_name.to_string(),
-                    action: format!(
-                        "{rendered_action} (expected {expected_args} args, got {})",
-                        args_raw.len()
-                    ),
-                });
+    match runtime_action {
+        RuntimeActionRef::Transition(a) => match a {
+            TransitionAction::Extend { target, port } => {
+                let output = resolver.resolve_digital_output_id(state_name, target, port)?;
+                Ok(Action::Extend { output })
             }
-
-            let arg_exprs = args_raw
-                .iter()
-                .map(|raw| compile_expr_program(state_name, raw, variable_indices))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let binding_names = match binding {
-                crate::ir::ExternCallBinding::Single(name) => vec![name.clone()],
-                crate::ir::ExternCallBinding::Tuple(names) => names.clone(),
-            };
-            if binding_names.len() != expected_returns {
-                return Err(BridgeError::UnsupportedAction {
-                    state: state_name.to_string(),
-                    action: format!(
-                        "{rendered_action} (expected {expected_returns} return bindings, got {})",
-                        binding_names.len()
-                    ),
-                });
+            TransitionAction::Retract { target, port } => {
+                let output = resolver.resolve_digital_output_id(state_name, target, port)?;
+                Ok(Action::Retract { output })
             }
-
-            let mut binding_vars = Vec::with_capacity(binding_names.len());
-            for target in binding_names {
-                let Some(index) = variable_indices.get(&target).copied() else {
+            TransitionAction::Set {
+                target,
+                port,
+                value,
+            } => {
+                let id = resolver.resolve_digital_output_id(state_name, target, port)?;
+                let value = match value {
+                    IrBinaryValue::On => true,
+                    IrBinaryValue::Off => false,
+                };
+                Ok(Action::SetDigital { id, value })
+            }
+            TransitionAction::SetAnalog {
+                target,
+                port,
+                value_raw,
+            } => {
+                let id = resolver.resolve_analog_output_id(state_name, target, port)?;
+                let value =
+                    value_raw
+                        .parse::<f32>()
+                        .map_err(|_| BridgeError::InvalidAnalogLiteral {
+                            state: state_name.to_string(),
+                            target: target.clone(),
+                            value_raw: value_raw.clone(),
+                        })?;
+                Ok(Action::SetAnalog { id, value })
+            }
+            TransitionAction::SetAnalogExpr {
+                target,
+                port,
+                expr_raw,
+            } => {
+                let id = resolver.resolve_analog_output_id(state_name, target, port)?;
+                let expr = compile_expr_program(state_name, expr_raw, variable_indices)?;
+                Ok(Action::SetAnalogExpr { id, expr })
+            }
+            TransitionAction::Compute { target, expr_raw } => {
+                let Some(target_var) = variable_indices.get(target).copied() else {
                     return Err(BridgeError::UnsupportedAction {
                         state: state_name.to_string(),
-                        action: format!("{rendered_action} (unknown binding variable {target})"),
+                        action: format!("compute {target}"),
                     });
                 };
-                binding_vars.push(index);
+                let expr = compile_expr_program(state_name, expr_raw, variable_indices)?;
+                Ok(Action::Compute { target_var, expr })
             }
+            TransitionAction::CallExtern {
+                function,
+                args_raw,
+                binding,
+            } => {
+                let rendered_binding = match binding {
+                    crate::ir::ExternCallBinding::Single(name) => name.clone(),
+                    crate::ir::ExternCallBinding::Tuple(names) => format!("({})", names.join(", ")),
+                };
+                let rendered_action = format!(
+                    "call {}({}) -> {}",
+                    function,
+                    args_raw.join(", "),
+                    rendered_binding
+                );
 
-            let leaked_function: &'static str = Box::leak(function.clone().into_boxed_str());
-            let leaked_arg_exprs: &'static [ExprProgram] = Box::leak(arg_exprs.into_boxed_slice());
-            let leaked_binding_vars: &'static [u16] = Box::leak(binding_vars.into_boxed_slice());
-            Ok(Action::CallExtern {
-                function: leaked_function,
-                arg_exprs: leaked_arg_exprs,
-                binding_vars: leaked_binding_vars,
-            })
-        }
-        TransitionAction::CamEngage { target } => {
-            let Some(cam_index) = cam_indices.get(target).copied() else {
-                return Err(BridgeError::UnsupportedAction {
-                    state: state_name.to_string(),
-                    action: format!("cam_engage {target}"),
-                });
-            };
-            Ok(Action::CamEngage { cam_index })
-        }
-        TransitionAction::CamDisengage { target } => {
-            let Some(cam_index) = cam_indices.get(target).copied() else {
-                return Err(BridgeError::UnsupportedAction {
-                    state: state_name.to_string(),
-                    action: format!("cam_disengage {target}"),
-                });
-            };
-            Ok(Action::CamDisengage { cam_index })
-        }
-        TransitionAction::CamSwitch { target, new_table } => {
-            let Some(cam_index) = cam_indices.get(target).copied() else {
-                return Err(BridgeError::UnsupportedAction {
-                    state: state_name.to_string(),
-                    action: format!("cam_switch {target} {new_table}"),
-                });
-            };
-            let Some(table_index) = cam_table_indices.get(new_table).copied() else {
-                return Err(BridgeError::UnsupportedAction {
-                    state: state_name.to_string(),
-                    action: format!("cam_switch {target} {new_table}"),
-                });
-            };
-            Ok(Action::CamSwitch {
-                cam_index,
-                table_index,
-            })
-        }
-        TransitionAction::CamPhase {
-            target,
-            offset_expr_raw,
-        } => {
-            let Some(cam_index) = cam_indices.get(target).copied() else {
-                return Err(BridgeError::UnsupportedAction {
-                    state: state_name.to_string(),
-                    action: format!("cam_phase {target} {offset_expr_raw}"),
-                });
-            };
-            let offset_expr = compile_expr_program(state_name, offset_expr_raw, variable_indices)?;
-            Ok(Action::CamPhase {
-                cam_index,
-                offset_expr,
-            })
-        }
-        TransitionAction::AxisMoveRelative {
-            target,
-            port,
-            distance_raw,
-            speed_raw,
-            timeout: timeout_branch,
-            on_reject,
-            on_motion_fault,
-            on_safety_fault,
-            on_reject_routes,
-            on_motion_fault_routes,
-            on_safety_fault_routes,
-        } => {
-            let profile =
-                resolver
-                    .axis_profile(target)
-                    .ok_or_else(|| BridgeError::MissingAxisProfile {
+                let Some((expected_args, expected_returns)) =
+                    extern_signatures.get(function).copied()
+                else {
+                    return Err(BridgeError::UnsupportedAction {
+                        state: state_name.to_string(),
+                        action: format!("{rendered_action} (extern function not declared)"),
+                    });
+                };
+                if args_raw.len() != expected_args {
+                    return Err(BridgeError::UnsupportedAction {
+                        state: state_name.to_string(),
+                        action: format!(
+                            "{rendered_action} (expected {expected_args} args, got {})",
+                            args_raw.len()
+                        ),
+                    });
+                }
+
+                let arg_exprs = args_raw
+                    .iter()
+                    .map(|raw| compile_expr_program(state_name, raw, variable_indices))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let binding_names = match binding {
+                    crate::ir::ExternCallBinding::Single(name) => vec![name.clone()],
+                    crate::ir::ExternCallBinding::Tuple(names) => names.clone(),
+                };
+                if binding_names.len() != expected_returns {
+                    return Err(BridgeError::UnsupportedAction {
+                        state: state_name.to_string(),
+                        action: format!(
+                            "{rendered_action} (expected {expected_returns} return bindings, got {})",
+                            binding_names.len()
+                        ),
+                    });
+                }
+
+                let mut binding_vars = Vec::with_capacity(binding_names.len());
+                for target in binding_names {
+                    let Some(index) = variable_indices.get(&target).copied() else {
+                        return Err(BridgeError::UnsupportedAction {
+                            state: state_name.to_string(),
+                            action: format!(
+                                "{rendered_action} (unknown binding variable {target})"
+                            ),
+                        });
+                    };
+                    binding_vars.push(index);
+                }
+
+                let leaked_function: &'static str = Box::leak(function.clone().into_boxed_str());
+                let leaked_arg_exprs: &'static [ExprProgram] =
+                    Box::leak(arg_exprs.into_boxed_slice());
+                let leaked_binding_vars: &'static [u16] =
+                    Box::leak(binding_vars.into_boxed_slice());
+                Ok(Action::CallExtern {
+                    function: leaked_function,
+                    arg_exprs: leaked_arg_exprs,
+                    binding_vars: leaked_binding_vars,
+                })
+            }
+            TransitionAction::CamEngage { target } => {
+                let Some(cam_index) = cam_indices.get(target).copied() else {
+                    return Err(BridgeError::UnsupportedAction {
+                        state: state_name.to_string(),
+                        action: format!("cam_engage {target}"),
+                    });
+                };
+                Ok(Action::CamEngage { cam_index })
+            }
+            TransitionAction::CamDisengage { target } => {
+                let Some(cam_index) = cam_indices.get(target).copied() else {
+                    return Err(BridgeError::UnsupportedAction {
+                        state: state_name.to_string(),
+                        action: format!("cam_disengage {target}"),
+                    });
+                };
+                Ok(Action::CamDisengage { cam_index })
+            }
+            TransitionAction::CamSwitch { target, new_table } => {
+                let Some(cam_index) = cam_indices.get(target).copied() else {
+                    return Err(BridgeError::UnsupportedAction {
+                        state: state_name.to_string(),
+                        action: format!("cam_switch {target} {new_table}"),
+                    });
+                };
+                let Some(table_index) = cam_table_indices.get(new_table).copied() else {
+                    return Err(BridgeError::UnsupportedAction {
+                        state: state_name.to_string(),
+                        action: format!("cam_switch {target} {new_table}"),
+                    });
+                };
+                Ok(Action::CamSwitch {
+                    cam_index,
+                    table_index,
+                })
+            }
+            TransitionAction::CamPhase {
+                target,
+                offset_expr_raw,
+            } => {
+                let Some(cam_index) = cam_indices.get(target).copied() else {
+                    return Err(BridgeError::UnsupportedAction {
+                        state: state_name.to_string(),
+                        action: format!("cam_phase {target} {offset_expr_raw}"),
+                    });
+                };
+                let offset_expr =
+                    compile_expr_program(state_name, offset_expr_raw, variable_indices)?;
+                Ok(Action::CamPhase {
+                    cam_index,
+                    offset_expr,
+                })
+            }
+            TransitionAction::AxisMoveRelative {
+                target,
+                port,
+                distance_raw,
+                speed_raw,
+                semantic_tag,
+                timeout: timeout_branch,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+            } => {
+                let profile = resolver.axis_profile(target).ok_or_else(|| {
+                    BridgeError::MissingAxisProfile {
                         state: state_name.to_string(),
                         target: target.clone(),
-                    })?;
-            let distance =
-                distance_raw
-                    .parse::<f32>()
-                    .map_err(|_| BridgeError::InvalidAxisLiteral {
-                        state: state_name.to_string(),
-                        target: target.clone(),
-                        field: "distance".to_string(),
-                        value_raw: distance_raw.clone(),
-                    })?;
-            let speed = speed_raw
-                .parse::<f32>()
-                .map_err(|_| BridgeError::InvalidAxisLiteral {
-                    state: state_name.to_string(),
-                    target: target.clone(),
-                    field: "speed".to_string(),
-                    value_raw: speed_raw.clone(),
+                    }
                 })?;
-            if speed <= 0.0 || speed > profile.max_speed {
-                return Err(BridgeError::AxisSpeedOutOfRange {
+                let distance =
+                    distance_raw
+                        .parse::<f32>()
+                        .map_err(|_| BridgeError::InvalidAxisLiteral {
+                            state: state_name.to_string(),
+                            target: target.clone(),
+                            field: "distance".to_string(),
+                            value_raw: distance_raw.clone(),
+                        })?;
+                let speed =
+                    speed_raw
+                        .parse::<f32>()
+                        .map_err(|_| BridgeError::InvalidAxisLiteral {
+                            state: state_name.to_string(),
+                            target: target.clone(),
+                            field: "speed".to_string(),
+                            value_raw: speed_raw.clone(),
+                        })?;
+                if speed <= 0.0 || speed > profile.max_speed {
+                    return Err(BridgeError::AxisSpeedOutOfRange {
+                        state: state_name.to_string(),
+                        target: target.clone(),
+                        speed,
+                        max_speed: profile.max_speed,
+                    });
+                }
+                let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
+                let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
+                let timeout_target = lookup_axis_branch_target(
+                    state_name,
+                    &timeout_branch.target_task,
+                    &timeout_branch.target_step,
+                    state_to_step,
+                    task_entry_steps,
+                    "axis timeout",
+                )?;
+                let timeout_ticks = ms_to_ticks(state_name, timeout_branch.duration_ms, tick_ms)?;
+                let on_reject_target = lookup_axis_branch_target(
+                    state_name,
+                    &on_reject.target_task,
+                    &on_reject.target_step,
+                    state_to_step,
+                    task_entry_steps,
+                    "axis on_reject",
+                )?;
+                let on_motion_fault_target = lookup_axis_branch_target(
+                    state_name,
+                    &on_motion_fault.target_task,
+                    &on_motion_fault.target_step,
+                    state_to_step,
+                    task_entry_steps,
+                    "axis on_motion_fault",
+                )?;
+                let on_safety_fault_target = lookup_axis_branch_target(
+                    state_name,
+                    &on_safety_fault.target_task,
+                    &on_safety_fault.target_step,
+                    state_to_step,
+                    task_entry_steps,
+                    "axis on_safety_fault",
+                )?;
+                let leaked_on_reject_routes = leak_axis_fault_route_rules(
+                    state_name,
+                    "axis on_reject route",
+                    on_reject_routes,
+                    state_to_step,
+                    task_entry_steps,
+                )?;
+                let leaked_on_motion_fault_routes = leak_axis_fault_route_rules(
+                    state_name,
+                    "axis on_motion_fault route",
+                    on_motion_fault_routes,
+                    state_to_step,
+                    task_entry_steps,
+                )?;
+                let leaked_on_safety_fault_routes = leak_axis_fault_route_rules(
+                    state_name,
+                    "axis on_safety_fault route",
+                    on_safety_fault_routes,
+                    state_to_step,
+                    task_entry_steps,
+                )?;
+                Ok(Action::AxisMove {
+                    command: AxisMotionCommand {
+                        target: leaked_target,
+                        port: leaked_port,
+                        kind: AxisMoveKind::Relative,
+                        value: distance,
+                        speed,
+                        semantic_tag: semantic_tag
+                            .as_ref()
+                            .map(|tag| Box::leak(tag.clone().into_boxed_str()) as &'static str),
+                        require_homed: false,
+                        timeout: Some(Timeout {
+                            after_ticks: timeout_ticks,
+                            target: timeout_target,
+                        }),
+                        fault_routing: Some(AxisFaultRouting {
+                            on_reject: on_reject_target,
+                            on_motion_fault: on_motion_fault_target,
+                            on_safety_fault: on_safety_fault_target,
+                            on_reject_routes: leaked_on_reject_routes,
+                            on_motion_fault_routes: leaked_on_motion_fault_routes,
+                            on_safety_fault_routes: leaked_on_safety_fault_routes,
+                        }),
+                    },
+                })
+            }
+            TransitionAction::AxisMoveAbsolute {
+                target,
+                port,
+                position_raw,
+                speed_raw,
+                require_homed,
+                semantic_tag,
+                timeout: timeout_branch,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+            } => {
+                let profile = resolver.axis_profile(target).ok_or_else(|| {
+                    BridgeError::MissingAxisProfile {
+                        state: state_name.to_string(),
+                        target: target.clone(),
+                    }
+                })?;
+                let position =
+                    position_raw
+                        .parse::<f32>()
+                        .map_err(|_| BridgeError::InvalidAxisLiteral {
+                            state: state_name.to_string(),
+                            target: target.clone(),
+                            field: "position".to_string(),
+                            value_raw: position_raw.clone(),
+                        })?;
+                let speed =
+                    speed_raw
+                        .parse::<f32>()
+                        .map_err(|_| BridgeError::InvalidAxisLiteral {
+                            state: state_name.to_string(),
+                            target: target.clone(),
+                            field: "speed".to_string(),
+                            value_raw: speed_raw.clone(),
+                        })?;
+                if speed <= 0.0 || speed > profile.max_speed {
+                    return Err(BridgeError::AxisSpeedOutOfRange {
+                        state: state_name.to_string(),
+                        target: target.clone(),
+                        speed,
+                        max_speed: profile.max_speed,
+                    });
+                }
+                let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
+                let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
+                let timeout_target = lookup_axis_branch_target(
+                    state_name,
+                    &timeout_branch.target_task,
+                    &timeout_branch.target_step,
+                    state_to_step,
+                    task_entry_steps,
+                    "axis timeout",
+                )?;
+                let timeout_ticks = ms_to_ticks(state_name, timeout_branch.duration_ms, tick_ms)?;
+                let on_reject_target = lookup_axis_branch_target(
+                    state_name,
+                    &on_reject.target_task,
+                    &on_reject.target_step,
+                    state_to_step,
+                    task_entry_steps,
+                    "axis on_reject",
+                )?;
+                let on_motion_fault_target = lookup_axis_branch_target(
+                    state_name,
+                    &on_motion_fault.target_task,
+                    &on_motion_fault.target_step,
+                    state_to_step,
+                    task_entry_steps,
+                    "axis on_motion_fault",
+                )?;
+                let on_safety_fault_target = lookup_axis_branch_target(
+                    state_name,
+                    &on_safety_fault.target_task,
+                    &on_safety_fault.target_step,
+                    state_to_step,
+                    task_entry_steps,
+                    "axis on_safety_fault",
+                )?;
+                let leaked_on_reject_routes = leak_axis_fault_route_rules(
+                    state_name,
+                    "axis on_reject route",
+                    on_reject_routes,
+                    state_to_step,
+                    task_entry_steps,
+                )?;
+                let leaked_on_motion_fault_routes = leak_axis_fault_route_rules(
+                    state_name,
+                    "axis on_motion_fault route",
+                    on_motion_fault_routes,
+                    state_to_step,
+                    task_entry_steps,
+                )?;
+                let leaked_on_safety_fault_routes = leak_axis_fault_route_rules(
+                    state_name,
+                    "axis on_safety_fault route",
+                    on_safety_fault_routes,
+                    state_to_step,
+                    task_entry_steps,
+                )?;
+                Ok(Action::AxisMove {
+                    command: AxisMotionCommand {
+                        target: leaked_target,
+                        port: leaked_port,
+                        kind: AxisMoveKind::Absolute,
+                        value: position,
+                        speed,
+                        semantic_tag: semantic_tag
+                            .as_ref()
+                            .map(|tag| Box::leak(tag.clone().into_boxed_str()) as &'static str),
+                        require_homed: *require_homed,
+                        timeout: Some(Timeout {
+                            after_ticks: timeout_ticks,
+                            target: timeout_target,
+                        }),
+                        fault_routing: Some(AxisFaultRouting {
+                            on_reject: on_reject_target,
+                            on_motion_fault: on_motion_fault_target,
+                            on_safety_fault: on_safety_fault_target,
+                            on_reject_routes: leaked_on_reject_routes,
+                            on_motion_fault_routes: leaked_on_motion_fault_routes,
+                            on_safety_fault_routes: leaked_on_safety_fault_routes,
+                        }),
+                    },
+                })
+            }
+            TransitionAction::Log { message } => {
+                let leaked_message: &'static str = Box::leak(message.clone().into_boxed_str());
+                Ok(Action::Log {
+                    message_id: stable_log_message_id(message),
+                    message: leaked_message,
+                })
+            }
+        },
+        RuntimeActionRef::Workpiece(effect) => {
+            convert_workpiece_effect(state_name, workpiece_ctx, effect)
+        }
+    }
+}
+
+fn convert_workpiece_effect(
+    state_name: &str,
+    workpiece_ctx: &WorkpieceBridgeContext,
+    effect: &crate::ir::WorkpieceEffect,
+) -> Result<Action, BridgeError> {
+    match effect {
+        crate::ir::WorkpieceEffect::Acquire { holder, from } => {
+            if is_workpiece_slot_reference(from) {
+                return Err(BridgeError::UnsupportedWorkpieceEffect {
                     state: state_name.to_string(),
-                    target: target.clone(),
-                    speed,
-                    max_speed: profile.max_speed,
+                    effect: render_workpiece_effect(effect),
                 });
             }
-            let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
-            let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
-            let timeout_target = lookup_axis_branch_target(
-                state_name,
-                &timeout_branch.target_task,
-                &timeout_branch.target_step,
-                state_to_step,
-                task_entry_steps,
-                "axis timeout",
-            )?;
-            let timeout_ticks = ms_to_ticks(state_name, timeout_branch.duration_ms, tick_ms)?;
-            let on_reject_target = lookup_axis_branch_target(
-                state_name,
-                &on_reject.target_task,
-                &on_reject.target_step,
-                state_to_step,
-                task_entry_steps,
-                "axis on_reject",
-            )?;
-            let on_motion_fault_target = lookup_axis_branch_target(
-                state_name,
-                &on_motion_fault.target_task,
-                &on_motion_fault.target_step,
-                state_to_step,
-                task_entry_steps,
-                "axis on_motion_fault",
-            )?;
-            let on_safety_fault_target = lookup_axis_branch_target(
-                state_name,
-                &on_safety_fault.target_task,
-                &on_safety_fault.target_step,
-                state_to_step,
-                task_entry_steps,
-                "axis on_safety_fault",
-            )?;
-            let leaked_on_reject_routes = leak_axis_fault_route_rules(
-                state_name,
-                "axis on_reject route",
-                on_reject_routes,
-                state_to_step,
-                task_entry_steps,
-            )?;
-            let leaked_on_motion_fault_routes = leak_axis_fault_route_rules(
-                state_name,
-                "axis on_motion_fault route",
-                on_motion_fault_routes,
-                state_to_step,
-                task_entry_steps,
-            )?;
-            let leaked_on_safety_fault_routes = leak_axis_fault_route_rules(
-                state_name,
-                "axis on_safety_fault route",
-                on_safety_fault_routes,
-                state_to_step,
-                task_entry_steps,
-            )?;
-            Ok(Action::AxisMove {
-                command: AxisMotionCommand {
-                    target: leaked_target,
-                    port: leaked_port,
-                    kind: AxisMoveKind::Relative,
-                    value: distance,
-                    speed,
-                    require_homed: false,
-                    timeout: Some(Timeout {
-                        after_ticks: timeout_ticks,
-                        target: timeout_target,
-                    }),
-                    fault_routing: Some(AxisFaultRouting {
-                        on_reject: on_reject_target,
-                        on_motion_fault: on_motion_fault_target,
-                        on_safety_fault: on_safety_fault_target,
-                        on_reject_routes: leaked_on_reject_routes,
-                        on_motion_fault_routes: leaked_on_motion_fault_routes,
-                        on_safety_fault_routes: leaked_on_safety_fault_routes,
-                    }),
-                },
+            let workpiece_type = workpiece_ctx
+                .phase1_workpiece_type
+                .ok_or(BridgeError::Phase1WorkpieceTypeArity { count: 0 })?;
+            Ok(Action::WorkpieceAcquire {
+                workpiece_type,
+                holder: Box::leak(holder.clone().into_boxed_str()),
+                from: Box::leak(from.clone().into_boxed_str()),
             })
         }
-        TransitionAction::AxisMoveAbsolute {
-            target,
-            port,
-            position_raw,
-            speed_raw,
-            require_homed,
-            timeout: timeout_branch,
-            on_reject,
-            on_motion_fault,
-            on_safety_fault,
-            on_reject_routes,
-            on_motion_fault_routes,
-            on_safety_fault_routes,
-        } => {
-            let profile =
-                resolver
-                    .axis_profile(target)
-                    .ok_or_else(|| BridgeError::MissingAxisProfile {
-                        state: state_name.to_string(),
-                        target: target.clone(),
-                    })?;
-            let position =
-                position_raw
-                    .parse::<f32>()
-                    .map_err(|_| BridgeError::InvalidAxisLiteral {
-                        state: state_name.to_string(),
-                        target: target.clone(),
-                        field: "position".to_string(),
-                        value_raw: position_raw.clone(),
-                    })?;
-            let speed = speed_raw
-                .parse::<f32>()
-                .map_err(|_| BridgeError::InvalidAxisLiteral {
+        crate::ir::WorkpieceEffect::Transfer { from, to } => {
+            if is_workpiece_slot_reference(from) || is_workpiece_slot_reference(to) {
+                return Err(BridgeError::UnsupportedWorkpieceEffect {
                     state: state_name.to_string(),
-                    target: target.clone(),
-                    field: "speed".to_string(),
-                    value_raw: speed_raw.clone(),
-                })?;
-            if speed <= 0.0 || speed > profile.max_speed {
-                return Err(BridgeError::AxisSpeedOutOfRange {
-                    state: state_name.to_string(),
-                    target: target.clone(),
-                    speed,
-                    max_speed: profile.max_speed,
+                    effect: render_workpiece_effect(effect),
                 });
             }
-            let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
-            let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
-            let timeout_target = lookup_axis_branch_target(
-                state_name,
-                &timeout_branch.target_task,
-                &timeout_branch.target_step,
-                state_to_step,
-                task_entry_steps,
-                "axis timeout",
-            )?;
-            let timeout_ticks = ms_to_ticks(state_name, timeout_branch.duration_ms, tick_ms)?;
-            let on_reject_target = lookup_axis_branch_target(
-                state_name,
-                &on_reject.target_task,
-                &on_reject.target_step,
-                state_to_step,
-                task_entry_steps,
-                "axis on_reject",
-            )?;
-            let on_motion_fault_target = lookup_axis_branch_target(
-                state_name,
-                &on_motion_fault.target_task,
-                &on_motion_fault.target_step,
-                state_to_step,
-                task_entry_steps,
-                "axis on_motion_fault",
-            )?;
-            let on_safety_fault_target = lookup_axis_branch_target(
-                state_name,
-                &on_safety_fault.target_task,
-                &on_safety_fault.target_step,
-                state_to_step,
-                task_entry_steps,
-                "axis on_safety_fault",
-            )?;
-            let leaked_on_reject_routes = leak_axis_fault_route_rules(
-                state_name,
-                "axis on_reject route",
-                on_reject_routes,
-                state_to_step,
-                task_entry_steps,
-            )?;
-            let leaked_on_motion_fault_routes = leak_axis_fault_route_rules(
-                state_name,
-                "axis on_motion_fault route",
-                on_motion_fault_routes,
-                state_to_step,
-                task_entry_steps,
-            )?;
-            let leaked_on_safety_fault_routes = leak_axis_fault_route_rules(
-                state_name,
-                "axis on_safety_fault route",
-                on_safety_fault_routes,
-                state_to_step,
-                task_entry_steps,
-            )?;
-            Ok(Action::AxisMove {
-                command: AxisMotionCommand {
-                    target: leaked_target,
-                    port: leaked_port,
-                    kind: AxisMoveKind::Absolute,
-                    value: position,
-                    speed,
-                    require_homed: *require_homed,
-                    timeout: Some(Timeout {
-                        after_ticks: timeout_ticks,
-                        target: timeout_target,
-                    }),
-                    fault_routing: Some(AxisFaultRouting {
-                        on_reject: on_reject_target,
-                        on_motion_fault: on_motion_fault_target,
-                        on_safety_fault: on_safety_fault_target,
-                        on_reject_routes: leaked_on_reject_routes,
-                        on_motion_fault_routes: leaked_on_motion_fault_routes,
-                        on_safety_fault_routes: leaked_on_safety_fault_routes,
-                    }),
-                },
+            Ok(Action::WorkpieceTransfer {
+                from: Box::leak(from.clone().into_boxed_str()),
+                to: Box::leak(to.clone().into_boxed_str()),
             })
         }
-        TransitionAction::Log { message } => {
-            let leaked_message: &'static str = Box::leak(message.clone().into_boxed_str());
-            Ok(Action::Log {
-                message_id: stable_log_message_id(message),
-                message: leaked_message,
+        crate::ir::WorkpieceEffect::Finish { at, terminal_state } => {
+            if is_workpiece_slot_reference(at) {
+                return Err(BridgeError::UnsupportedWorkpieceEffect {
+                    state: state_name.to_string(),
+                    effect: render_workpiece_effect(effect),
+                });
+            }
+            Ok(Action::WorkpieceFinish {
+                at: Box::leak(at.clone().into_boxed_str()),
+                terminal_state: Box::leak(terminal_state.clone().into_boxed_str()),
+            })
+        }
+        crate::ir::WorkpieceEffect::Mount { .. }
+        | crate::ir::WorkpieceEffect::Unmount { .. }
+        | crate::ir::WorkpieceEffect::Split { .. }
+        | crate::ir::WorkpieceEffect::Merge { .. }
+        | crate::ir::WorkpieceEffect::TransformCarrier { .. } => {
+            Err(BridgeError::UnsupportedWorkpieceEffect {
+                state: state_name.to_string(),
+                effect: render_workpiece_effect(effect),
             })
         }
     }
+}
+
+fn render_workpiece_effect(effect: &crate::ir::WorkpieceEffect) -> String {
+    match effect {
+        crate::ir::WorkpieceEffect::Acquire { holder, from } => {
+            format!("acquire holder {holder} from {from}")
+        }
+        crate::ir::WorkpieceEffect::Transfer { from, to } => {
+            format!("transfer from {from} to {to}")
+        }
+        crate::ir::WorkpieceEffect::Finish { at, terminal_state } => {
+            format!("finish workpiece at {at} as {terminal_state}")
+        }
+        crate::ir::WorkpieceEffect::Mount {
+            workpiece_type,
+            slot,
+        } => format!("mount {workpiece_type} on {slot}"),
+        crate::ir::WorkpieceEffect::Unmount {
+            workpiece_type,
+            slot,
+            to,
+        } => format!("unmount {workpiece_type} from {slot} to {to}"),
+        crate::ir::WorkpieceEffect::Split {
+            source_type,
+            target_type,
+            count,
+            consumed,
+        } => {
+            let suffix = if *consumed { " consumed" } else { "" };
+            format!("split {source_type} into {target_type} count {count}{suffix}")
+        }
+        crate::ir::WorkpieceEffect::Merge {
+            inputs,
+            target_type,
+            consumed_inputs,
+        } => {
+            let suffix = if *consumed_inputs {
+                " consumed_inputs"
+            } else {
+                ""
+            };
+            format!("merge [{}] into {target_type}{suffix}", inputs.join(", "))
+        }
+        crate::ir::WorkpieceEffect::TransformCarrier { carrier, frame } => {
+            format!("transform carrier {carrier} to frame {frame}")
+        }
+    }
+}
+
+fn is_workpiece_slot_reference(endpoint: &str) -> bool {
+    endpoint.contains(".slot[") && endpoint.ends_with(']')
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

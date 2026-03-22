@@ -264,6 +264,8 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - Task 级 pending action 元数据应从 step 语句收集，而不是仅从 transition.actions 推断；`delay/wait/timeout` 等阻塞路径常会让 transition 不携带动作
 - Step 离开判定应集中到统一 completion 决策（action/delay/wait 共用规则）；避免在各指令分支散落“是否跳转”的特例判断
 - 对包含 Pending 长时动作的 step，后续 tick 必须从挂起动作继续轮询，不得重放该 step 中挂起动作之前的即时 action（避免重复 side effect）
+- `runtime_bridge` 降级运行时 `Instr::Action` 时，必须同时处理 `transition.actions` 与 `transition.effects`；只消费 `actions` 会把 workpiece 语义静默丢失到 runtime 之外
+- 当 `runtime_core::Action` 或 `Program` 增加新字段/变体时，除 bridge 外还要同步更新 `src/main.rs`、`src/sim_regress.rs`、`crates/codegen/src/lib.rs`、`crates/sim/*` 中对 runtime 结构的穷举匹配与静态 `Program` 夹具，否则很容易在非目标 crate 上留下编译断点
 - `axis.move_relative/axis.move_absolute` 属于默认 blocking 长时动作；即使未显式编写 `wait`，也应由 `Pending -> Done/Fault` 生命周期驱动 step 离开，回归测试至少覆盖 Pending->Done 与 Pending->Fault
 - axis 动作的 `timeout/on_reject/on_motion_fault/on_safety_fault` 与细分 route 必须在 bridge 阶段降级成 runtime 可执行的 `StepId` 元数据；runtime 在 Pending 轮询阶段按“先专用 route、后主桶 fallback”执行分流，避免回退为裸 `RuntimeError::AxisFault`
 - `runtime_bridge` 构建 runtime task 时优先保留“无跨 task 入边”的 root task 边界；若全量 task 都存在跨 task 入边，则回退到 IR 初始 task 作为 active root，避免旧流程直接退化为并发全激活副作用

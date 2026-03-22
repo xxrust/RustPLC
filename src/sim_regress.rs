@@ -1,7 +1,9 @@
 use crate::parser::parse_plc;
 use crate::runtime_bridge::state_machine_to_runtime_program;
 use crate::scenario_resolve::resolve_scenario_yaml_for_plc;
-use crate::semantic::{build_state_machine, build_topology_graph, preprocess_program};
+use crate::semantic::{
+    build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
+};
 use runtime_core::{Action, Instr, Program};
 use serde::Serialize;
 use std::fs;
@@ -728,8 +730,16 @@ fn compile_plc_to_runtime_program(
             .collect::<Vec<_>>()
             .join("\n")
     })?;
+    let constraints = build_constraint_set(&expanded).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
 
-    state_machine_to_runtime_program(&topology, &sm, tick_ms).map_err(|e| e.to_string())
+    state_machine_to_runtime_program(&topology, &constraints, &sm, tick_ms)
+        .map_err(|e| e.to_string())
 }
 
 fn io_sizes_for_program_and_scenario(
@@ -771,6 +781,9 @@ fn io_sizes_for_program_and_scenario(
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }
                             | Action::CamPhase { .. } => {}
+                            Action::WorkpieceAcquire { .. }
+                            | Action::WorkpieceTransfer { .. }
+                            | Action::WorkpieceFinish { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }

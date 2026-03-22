@@ -8,6 +8,7 @@ Started: 2026-03-23 01:07:00 CST
 - Reuse `tests/workpiece_model_phase23.rs`, `tests/examples_integration.rs`, and `examples/workpiece_*.plc` wherever possible.
 - Unsupported workpiece behavior must fail explicitly. Do not silently drop semantics in bridge, runtime, or verification.
 - `crates/runtime-core/src/lib.rs` keeps most runtime-core fixtures inline; when `Program`, `AxisMotionCommand`, or pending-axis state gains fields, update those in-file test literals together before trusting the crate test baseline.
+- When `runtime_core::Action` or `Program` changes, also update exhaustive action matches and static `Program` fixtures in `src/main.rs`, `src/sim_regress.rs`, `crates/codegen/src/lib.rs`, and `crates/sim/*`; those crates compile against runtime-core directly and fail fast on stale variants/fields.
 
 ## [2026-03-23 01:40:23 +08:00] - US-001
 Thread: https://ampcode.com/threads/unknown
@@ -21,4 +22,34 @@ Thread: https://ampcode.com/threads/unknown
 - **Learnings for future iterations:**
 - `crates/runtime-core` unit tests are concentrated in the same source file, so API surface changes in that crate often require fixture updates in dozens of nearby static literals.
 - The workpiece token store is currently record-preserving: terminal tokens stay stored and become inactive instead of being deleted, which keeps traceability available for later execution and lineage stories.
+---
+
+## [2026-03-23 02:07:00 +08:00] - US-002
+Thread: https://ampcode.com/threads/unknown
+- Implemented Phase 1 workpiece lowering in `src/runtime_bridge.rs` by removing the global workpiece rejection gate, lowering workpiece type/site/holder metadata into `runtime_core::Program`, and converting `acquire`/`transfer`/`finish` effects into explicit runtime actions.
+- Kept unsupported later-phase workpiece behavior explicit: slot-based Phase 2 flows and `mount`/`unmount`/`split`/`merge`/`transform carrier` now fail with `BridgeError::UnsupportedWorkpieceEffect` instead of a coarse model-wide rejection.
+- Extended `crates/runtime-core/src/lib.rs` with Phase 1 workpiece metadata structs plus placeholder runtime actions that currently surface explicit unsupported-runtime errors until US-003 implements execution semantics.
+- Updated downstream runtime-core consumers (`crates/codegen`, `crates/sim`, `src/main.rs`, `src/sim_regress.rs`) to account for the new `Program` fields and `Action` variants, then added regressions proving the Phase 1 example bridges successfully while Phase 2 effects still fail explicitly.
+- Files changed
+- `AGENTS.md`
+- `crates/board-rp2040/build.rs`
+- `crates/codegen/src/lib.rs`
+- `crates/runtime-core/src/lib.rs`
+- `crates/sim/src/control_kpi.rs`
+- `crates/sim/src/lib.rs`
+- `crates/sim/src/plant.rs`
+- `crates/sim/src/runner.rs`
+- `crates/sim/src/scenario.rs`
+- `crates/sim/src/waveform.rs`
+- `prd.json`
+- `progress.txt`
+- `src/main.rs`
+- `src/runtime_bridge.rs`
+- `src/sim_regress.rs`
+- `tests/workpiece_model_phase1.rs`
+- `tests/workpiece_model_phase23.rs`
+- **Learnings for future iterations:**
+- `runtime_bridge` must lower `transition.effects` alongside `transition.actions`; otherwise workpiece semantics disappear before runtime even if IR and verification are correct.
+- Phase 1 bridge support still depends on a single declared workpiece type because `acquire`/`transfer`/`finish` effects are untyped in IR; multi-type runtime support needs new effect shapes or extra metadata, not bridge-side guessing.
+- Adding runtime-core workpiece actions before their executor exists is still useful, but they must fail explicitly in `Runtime::tick` to avoid silently accepting semantics that do nothing at runtime.
 ---

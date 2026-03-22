@@ -309,6 +309,9 @@ pub enum RuntimeError {
         target: &'static str,
         fault: AxisFault,
     },
+    UnsupportedWorkpieceEffect {
+        effect: &'static str,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -364,6 +367,19 @@ pub enum Action {
     },
     AxisMove {
         command: AxisMotionCommand,
+    },
+    WorkpieceAcquire {
+        workpiece_type: &'static str,
+        holder: &'static str,
+        from: &'static str,
+    },
+    WorkpieceTransfer {
+        from: &'static str,
+        to: &'static str,
+    },
+    WorkpieceFinish {
+        at: &'static str,
+        terminal_state: &'static str,
     },
     Extend {
         output: DigitalOutputId,
@@ -733,6 +749,35 @@ pub struct Task<'a> {
     pub entry: StepId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkpieceSiteKind {
+    WorkpieceLocation,
+    CarrierLocation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceTypeDef<'a> {
+    pub name: &'a str,
+    pub normal_terminal_states: &'a [&'a str],
+    pub abnormal_terminal_states: &'a [&'a str],
+    pub ingress_sites: &'a [&'a str],
+    pub normal_egress_sites: &'a [&'a str],
+    pub abnormal_egress_sites: &'a [&'a str],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceSiteDef<'a> {
+    pub name: &'a str,
+    pub kind: WorkpieceSiteKind,
+    pub capacity: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceHolderDef<'a> {
+    pub name: &'a str,
+    pub capacity: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Program<'a> {
     pub tasks: &'a [Task<'a>],
@@ -743,6 +788,9 @@ pub struct Program<'a> {
     pub axis_fault_policies: &'a [AxisFaultPolicy<'a>],
     pub semantic_resources: &'a [SemanticResource<'a>],
     pub resource_claims: &'a [ResourceClaimRule<'a>],
+    pub workpiece_types: &'a [WorkpieceTypeDef<'a>],
+    pub workpiece_sites: &'a [WorkpieceSiteDef<'a>],
+    pub workpiece_holders: &'a [WorkpieceHolderDef<'a>],
 }
 
 pub type WorkpieceTokenId = u32;
@@ -1209,9 +1257,8 @@ impl<'a> Runtime<'a> {
                     }
                 }
                 ResourceClaimSource::ActionTag { tag } => {
-                    holders = holders.saturating_add(
-                        self.active_action_tag_holders(tag, ignore_axis_motion),
-                    );
+                    holders = holders
+                        .saturating_add(self.active_action_tag_holders(tag, ignore_axis_motion));
                 }
             }
             if holders > 1 {
@@ -1779,6 +1826,27 @@ impl<'a> Runtime<'a> {
                                 }
                                 Action::Retract { output } => {
                                     self.write_digital_output(io, output, false)
+                                }
+                                Action::WorkpieceAcquire { .. } => {
+                                    return Err(RuntimeTickError::Core(
+                                        RuntimeError::UnsupportedWorkpieceEffect {
+                                            effect: "acquire",
+                                        },
+                                    ));
+                                }
+                                Action::WorkpieceTransfer { .. } => {
+                                    return Err(RuntimeTickError::Core(
+                                        RuntimeError::UnsupportedWorkpieceEffect {
+                                            effect: "transfer",
+                                        },
+                                    ));
+                                }
+                                Action::WorkpieceFinish { .. } => {
+                                    return Err(RuntimeTickError::Core(
+                                        RuntimeError::UnsupportedWorkpieceEffect {
+                                            effect: "finish",
+                                        },
+                                    ));
                                 }
                                 Action::Log {
                                     message_id,
@@ -3039,6 +3107,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
@@ -3127,6 +3198,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3248,6 +3322,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3312,6 +3389,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3365,6 +3445,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3455,6 +3538,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3524,6 +3610,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3593,6 +3682,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3649,6 +3741,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3704,6 +3799,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3731,23 +3829,23 @@ mod tests {
         let wrapped_over = linear_interpolate(&periodic, 250.0);
         assert!(
             (wrapped_neg - 50.0).abs() < 1e-5,
-            "periodic wrap(-50) 鏈熸湜绾?50锛屽疄闄?{wrapped_neg}"
+            "periodic wrap(-50) should resolve to 50, got {wrapped_neg}"
         );
         assert!(
             (wrapped_over - 50.0).abs() < 1e-5,
-            "periodic wrap(250) 鏈熸湜绾?50锛屽疄闄?{wrapped_over}"
+            "periodic wrap(250) should resolve to 50, got {wrapped_over}"
         );
 
         let oneshot = build_cam_table(false, &[(0.0, 0.0), (100.0, 100.0)]);
         assert_eq!(
             linear_interpolate(&oneshot, -10.0),
             0.0,
-            "oneshot 搴斿湪宸︿晶閽冲埗"
+            "oneshot should clamp on the left edge"
         );
         assert_eq!(
             linear_interpolate(&oneshot, 150.0),
             100.0,
-            "oneshot 搴斿湪鍙充晶閽冲埗"
+            "oneshot should clamp on the right edge"
         );
     }
 
@@ -3782,7 +3880,7 @@ mod tests {
         let y = linear_interpolate(&table, 5.0);
         assert!(
             (y - 10.0).abs() < 1e-6,
-            "绾挎€ф彃鍊间腑鍊艰宸簲灏忎簬 1e-6锛屽疄闄?{y}"
+            "linear interpolation midpoint error should stay below 1e-6, got {y}"
         );
     }
 
@@ -3798,7 +3896,7 @@ mod tests {
         let out = cubic_interpolate(&table, 2.0);
         assert!(
             (out - 49.0).abs() < 1e-6,
-            "Horner 澶氶」寮忓簲涓?49锛屽疄闄?{out}"
+            "Horner polynomial should evaluate to 49, got {out}"
         );
     }
 
@@ -3820,7 +3918,7 @@ mod tests {
 
         assert!(
             (analytical - finite_diff).abs() < 1e-3,
-            "cubic_derivative 搴斾笌鏈夐檺宸垎杩戜技涓€鑷达紝瑙ｆ瀽={analytical}, 宸垎={finite_diff}"
+            "cubic_derivative should match the finite difference estimate, analytical={analytical}, finite_diff={finite_diff}"
         );
     }
 
@@ -3887,6 +3985,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3938,6 +4039,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4000,6 +4104,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4055,6 +4162,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4117,6 +4227,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4219,6 +4332,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4303,6 +4419,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4383,6 +4502,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4456,6 +4578,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4536,6 +4661,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4594,6 +4722,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4652,6 +4783,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4739,6 +4873,9 @@ mod tests {
                 axis_fault_policies: &policies,
                 semantic_resources: &[],
                 resource_claims: &[],
+                workpiece_types: &[],
+                workpiece_sites: &[],
+                workpiece_holders: &[],
             };
 
             let expected_fault = match axis_result {
@@ -4897,6 +5034,9 @@ mod tests {
             axis_fault_policies: &policies,
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4983,6 +5123,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -5032,7 +5175,10 @@ mod tests {
         ops[6] = ExprOp::CallClamp;
         let expr = ExprProgram { ops, len: 7 };
         let out = eval_expr(&expr, &vars);
-        assert!((out - 9.0).abs() < 1e-6, "clamp(pow(abs(x),2),0,9) 搴斾负 9");
+        assert!(
+            (out - 9.0).abs() < 1e-6,
+            "clamp(pow(abs(x),2),0,9) should evaluate to 9"
+        );
 
         let mut ops2 = [ExprOp::PushLiteral(0.0); MAX_EXPR_OPS];
         ops2[0] = ExprOp::PushLiteral(3.0);
@@ -5046,7 +5192,7 @@ mod tests {
         let out2 = eval_expr(&expr2, &vars);
         assert!(
             (out2 - 1.0).abs() < 1e-6,
-            "max(fmod(3,2), cos(sin(0))) 搴斾负 1"
+            "max(fmod(3,2), cos(sin(0))) should evaluate to 1"
         );
     }
 
@@ -5071,7 +5217,7 @@ mod tests {
         let out = eval_expr(&expr, &vars);
         assert!(
             (out - 1.0).abs() < 1e-6,
-            "NOT(false) OR (true AND 0.5 > 0) 搴斾负 true"
+            "NOT(false) OR (true AND 0.5 > 0) should evaluate to true"
         );
 
         vars[0] = 1.0; // a = true
@@ -5080,7 +5226,7 @@ mod tests {
         let out2 = eval_expr(&expr, &vars);
         assert!(
             (out2 - 0.0).abs() < 1e-6,
-            "NOT(true) OR (false AND -0.5 > 0) 搴斾负 false"
+            "NOT(true) OR (false AND -0.5 > 0) should evaluate to false"
         );
     }
 
@@ -5105,13 +5251,20 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
         assert_eq!(rt.variables()[0], 1.5);
         assert_eq!(rt.variables()[1], 2.0);
         assert_eq!(rt.variables()[2], 0.0);
-        assert_eq!(rt.variables()[3], 0.0, "uninitialized variable slots should stay zero");
+        assert_eq!(
+            rt.variables()[3],
+            0.0,
+            "uninitialized variable slots should stay zero"
+        );
     }
 
     #[test]
@@ -5135,6 +5288,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let err = match Runtime::new(&PROGRAM) {
@@ -5190,6 +5346,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let err = match Runtime::new(&program) {
@@ -5242,6 +5401,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let err = match Runtime::new(&program) {
@@ -5328,6 +5490,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -5384,6 +5549,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -5436,6 +5604,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -5521,6 +5692,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -5642,6 +5816,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -5708,6 +5885,9 @@ mod tests {
             axis_fault_policies: &[],
             semantic_resources: &[],
             resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -5723,6 +5903,3 @@ mod tests {
         assert!(!cam.engaged, "fault should disengage cam");
     }
 }
-
-
-
