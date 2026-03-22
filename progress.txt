@@ -9,7 +9,8 @@ Started: 2026-03-23 01:07:00 CST
 - Unsupported workpiece behavior must fail explicitly. Do not silently drop semantics in bridge, runtime, or verification.
 - `crates/runtime-core/src/lib.rs` keeps most runtime-core fixtures inline; when `Program`, `AxisMotionCommand`, or pending-axis state gains fields, update those in-file test literals together before trusting the crate test baseline.
 - When `runtime_core::Action` or `Program` changes, also update exhaustive action matches and static `Program` fixtures in `src/main.rs`, `src/sim_regress.rs`, `crates/codegen/src/lib.rs`, and `crates/sim/*`; those crates compile against runtime-core directly and fail fast on stale variants/fields.
-- Phase 1 workpiece runtime seeds one initial token per declared ingress endpoint during `Runtime::new`; first-hop `acquire` must move that seeded token instead of silently minting from thin air.
+- Runtime ingress seeding must be driven by actions that actually consume a source endpoint (`acquire` / `transfer` from that endpoint), not by blindly preloading every declared `ingress_site`; otherwise mount-only carrier flows start with falsely occupied slots.
+- Phase 2 carrier flows need token metadata that distinguishes “free-standing at slot X” from “mounted on slot X”; `current_location` alone is not enough once `mount` / `transform carrier` / `unmount` are executable.
 - Phase 1 workpiece effects require a unique active token at the source endpoint. Treat `0` as underflow, `>1` as duplicate occupancy ambiguity, and destination-capacity violations as explicit overflow errors.
 - When semantic already blocks a malformed workpiece contract but verification still needs its own regression, build the normal `ConstraintSet`/`StateMachine` first and then mutate the lowered structures in the test to isolate verification responsibility.
 - Carrier-slot bridge lowering must expand `carrier.slot[*]` / grid selectors into concrete runtime ingress-egress endpoints and synthesized carrier `workpiece_sites`; otherwise runtime seeding and slot-addressed actions drift apart even when IR is correct.
@@ -112,4 +113,22 @@ Thread: https://ampcode.com/threads/unknown
   - Carrier-slot examples only become runtime-executable after bridge concretizes wildcard ingress/egress patterns into real slot endpoints; leaving wildcard strings in runtime metadata breaks `Runtime::new` token seeding and later slot-addressed actions.
   - If semantic already rejects malformed carrier slot syntax, bridge-specific negative tests should mutate lowered `ConstraintSet` or `StateMachine` data to exercise `UnknownWorkpieceCarrier` and `InvalidWorkpieceSlotReference` directly.
   - When a new workpiece action variant is introduced in `runtime_core::Action`, `src/main.rs`, `src/sim_regress.rs`, and `crates/codegen/src/lib.rs` need matching updates even if the runtime executor still returns `UnsupportedWorkpieceEffect`.
+---
+
+## [2026-03-23 03:12:39 +08:00] - US-006
+Thread: https://ampcode.com/threads/unknown
+- Implemented Phase 2 runtime execution in `crates/runtime-core/src/lib.rs`: `mount`, `unmount`, and `transform carrier` now execute instead of returning `UnsupportedWorkpieceEffect`.
+- Extended runtime token state with explicit `mounted_slot` metadata so carrier-slot occupancy can distinguish a free-standing token at a slot from a token mounted on that slot, and kept mounted association intact across `transform carrier`.
+- Tightened runtime ingress seeding to endpoints that are actually consumed as action sources (`acquire` / `transfer` sources), which keeps mount-only carrier flows aligned with verification instead of pre-filling every declared ingress slot at `Runtime::new`.
+- Added runtime-core regressions for Phase 2 success, empty-slot unmount, duplicate mount, and slot overflow, and added an integration regression in `tests/workpiece_model_phase23.rs` proving the canonical mount/transform/unmount fixture executes end-to-end after bridge lowering.
+- Files changed
+- `AGENTS.md`
+- `crates/runtime-core/src/lib.rs`
+- `prd.json`
+- `progress.txt`
+- `tests/workpiece_model_phase23.rs`
+- **Learnings for future iterations:**
+  - Carrier slot ingress and carrier mounting are separate semantics. If a future story only stores `current_location`, it will not be able to tell “token arrived at slot” apart from “token is mounted on carrier slot”.
+  - Runtime ingress seeding should mirror verification reachability rules: seed only endpoints that a runtime action can consume as a source, otherwise mount-only fixtures create false duplicate occupancy before the first tick.
+  - The local `cargo fmt` toolchain currently rejects this repo's existing let-chain syntax even though `cargo test` passes, so formatting cannot be treated as a reliable gate until rustfmt/toolchain alignment is fixed.
 ---

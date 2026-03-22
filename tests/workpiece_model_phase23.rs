@@ -1,10 +1,57 @@
+use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
+use runtime_core::{Action, Instr, Runtime, WorkpieceSiteKind, WorkpieceTerminalStatus};
 use rust_plc::ast::EffectKind;
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
 use rust_plc::semantic::{build_constraint_set, build_state_machine, build_topology_graph};
 use rust_plc::verification::{WarningLevel, verify_all};
-use runtime_core::{Action, Instr, WorkpieceSiteKind};
 use std::fs;
+
+struct MemIo {
+    tick: Tick,
+    di: [bool; 4],
+    do_: [bool; 4],
+    ai: [f32; 4],
+    ao: [f32; 4],
+}
+
+impl MemIo {
+    fn new() -> Self {
+        Self {
+            tick: Tick(0),
+            di: [false; 4],
+            do_: [false; 4],
+            ai: [0.0; 4],
+            ao: [0.0; 4],
+        }
+    }
+}
+
+impl Io for MemIo {
+    fn tick(&self) -> Tick {
+        self.tick
+    }
+
+    fn advance_tick(&mut self) {
+        self.tick.0 += 1;
+    }
+
+    fn read_digital_input(&self, id: DigitalInputId) -> bool {
+        self.di[id.0 as usize]
+    }
+
+    fn read_analog_input(&self, id: AnalogInputId) -> f32 {
+        self.ai[id.0 as usize]
+    }
+
+    fn write_digital_output(&mut self, id: DigitalOutputId, value: bool) {
+        self.do_[id.0 as usize] = value;
+    }
+
+    fn write_analog_output(&mut self, id: AnalogOutputId, value: f32) {
+        self.ao[id.0 as usize] = value;
+    }
+}
 
 const PLC_WORKPIECE_MOUNT_UNMOUNT: &str = r#"
 [topology]
@@ -703,9 +750,7 @@ fn read_example_source(file_name: &str) -> String {
         .unwrap_or_else(|err| panic!("failed to read example {file_name}: {err}"))
 }
 
-fn collect_runtime_actions(
-    program: &runtime_core::Program<'static>,
-) -> Vec<runtime_core::Action> {
+fn collect_runtime_actions(program: &runtime_core::Program<'static>) -> Vec<runtime_core::Action> {
     program
         .tasks
         .iter()
@@ -735,8 +780,9 @@ fn workpiece_carrier_slot_transfer_builds_ir_and_verifies() {
     verify_all(&program, &topology, &constraints, &state_machine)
         .expect("carrier slot transfer fixture should pass verification");
 
-    let runtime_program = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
-        .expect("runtime bridge should lower carrier slot endpoints");
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge should lower carrier slot endpoints");
     let slot_sites = runtime_program
         .workpiece_sites
         .iter()
@@ -748,18 +794,27 @@ fn workpiece_carrier_slot_transfer_builds_ir_and_verifies() {
     }));
     assert_eq!(
         runtime_program.workpiece_types[0].ingress_sites,
-        &["tray_a.slot[0]", "tray_a.slot[1]", "tray_a.slot[2]", "tray_a.slot[3]"]
+        &[
+            "tray_a.slot[0]",
+            "tray_a.slot[1]",
+            "tray_a.slot[2]",
+            "tray_a.slot[3]"
+        ]
     );
-    assert!(collect_runtime_actions(&runtime_program).iter().any(|action| {
-        matches!(
-            action,
-            Action::WorkpieceAcquire {
-                workpiece_type,
-                holder,
-                from,
-            } if *workpiece_type == "part" && *holder == "arm" && *from == "tray_a.slot[0]"
-        )
-    }));
+    assert!(
+        collect_runtime_actions(&runtime_program)
+            .iter()
+            .any(|action| {
+                matches!(
+                    action,
+                    Action::WorkpieceAcquire {
+                        workpiece_type,
+                        holder,
+                        from,
+                    } if *workpiece_type == "part" && *holder == "arm" && *from == "tray_a.slot[0]"
+                )
+            })
+    );
 }
 
 #[test]
@@ -807,8 +862,9 @@ fn runtime_bridge_lowers_mount_unmount_and_transform_actions() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
-        .expect("runtime bridge should lower phase2 carrier actions");
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge should lower phase2 carrier actions");
     let actions = collect_runtime_actions(&runtime_program);
     assert!(actions.iter().any(|action| matches!(
         action,
@@ -835,6 +891,37 @@ fn runtime_bridge_lowers_mount_unmount_and_transform_actions() {
             && site.capacity == 1
             && matches!(site.kind, WorkpieceSiteKind::CarrierLocation)
     }));
+}
+
+#[test]
+fn runtime_executes_mount_unmount_and_transform_actions_end_to_end() {
+    let program = parse_plc(PLC_WORKPIECE_MOUNT_UNMOUNT).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge should lower phase2 carrier actions");
+
+    let mut io = MemIo::new();
+    let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
+    runtime
+        .tick(&mut io)
+        .expect("mount/transform/unmount flow should execute");
+
+    assert_eq!(runtime.workpiece_tokens().active_tokens(), 0);
+    let finished = runtime
+        .workpiece_tokens()
+        .token(0)
+        .expect("mounted token should remain traceable after finish");
+    assert_eq!(finished.current_location, "outfeed");
+    assert_eq!(finished.mounted_slot, None);
+    assert!(!finished.active);
+    assert_eq!(
+        finished.terminal_status,
+        Some(WorkpieceTerminalStatus::TerminalState { state: "finished" })
+    );
 }
 
 #[test]
