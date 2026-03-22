@@ -128,6 +128,12 @@ pub enum BridgeError {
     )]
     Phase1WorkpieceTypeArity { count: usize },
 
+    #[error("workpiece carrier {carrier} is not declared in runtime bridge metadata")]
+    UnknownWorkpieceCarrier { carrier: String },
+
+    #[error("invalid workpiece slot reference {slot}: {details}")]
+    InvalidWorkpieceSlotReference { slot: String, details: String },
+
     #[error("unsupported workpiece effect in {state}: {effect}")]
     UnsupportedWorkpieceEffect { state: String, effect: String },
 
@@ -684,8 +690,14 @@ fn build_resource_claims(
     Ok(out)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
+enum BridgeCarrierLayout {
+    Slots { count: u32 },
+    Grid { rows: u32, cols: u32 },
+}
+
 struct WorkpieceBridgeContext {
+    carrier_layouts: HashMap<String, BridgeCarrierLayout>,
     phase1_workpiece_type: Option<&'static str>,
     runtime_types: &'static [RtWorkpieceTypeDef<'static>],
     runtime_sites: &'static [RtWorkpieceSiteDef<'static>],
@@ -694,11 +706,13 @@ struct WorkpieceBridgeContext {
 
 impl WorkpieceBridgeContext {
     fn new(constraints: &ConstraintSet, sm: &StateMachine) -> Result<Self, BridgeError> {
-        let has_effects = sm
+        let carrier_layouts = collect_workpiece_carrier_layouts(&constraints.workpiece_carriers);
+        let has_phase1_effects = sm
             .transitions
             .iter()
-            .any(|transition| !transition.effects.is_empty());
-        let phase1_workpiece_type = if has_effects {
+            .flat_map(|transition| transition.effects.iter())
+            .any(workpiece_effect_requires_phase1_type);
+        let phase1_workpiece_type = if has_phase1_effects {
             match constraints.workpiece_types.as_slice() {
                 [workpiece] => {
                     Some(Box::leak(workpiece.name.clone().into_boxed_str()) as &'static str)
@@ -714,9 +728,13 @@ impl WorkpieceBridgeContext {
         };
 
         Ok(Self {
+            carrier_layouts: carrier_layouts.clone(),
             phase1_workpiece_type,
-            runtime_types: leak_workpiece_types(&constraints.workpiece_types),
-            runtime_sites: leak_workpiece_sites(&constraints.workpiece_sites),
+            runtime_types: leak_workpiece_types(&constraints.workpiece_types, &carrier_layouts)?,
+            runtime_sites: leak_workpiece_sites(
+                &constraints.workpiece_sites,
+                &constraints.workpiece_carriers,
+            ),
             runtime_holders: leak_workpiece_holders(&constraints.workpiece_holders),
         })
     }
@@ -724,25 +742,38 @@ impl WorkpieceBridgeContext {
 
 fn leak_workpiece_types(
     workpiece_types: &[crate::ir::WorkpieceTypeDef],
-) -> &'static [RtWorkpieceTypeDef<'static>] {
+    carrier_layouts: &HashMap<String, BridgeCarrierLayout>,
+) -> Result<&'static [RtWorkpieceTypeDef<'static>], BridgeError> {
     let leaked_types = workpiece_types
         .iter()
-        .map(|workpiece| RtWorkpieceTypeDef {
-            name: Box::leak(workpiece.name.clone().into_boxed_str()),
-            normal_terminal_states: leak_str_slice(&workpiece.normal_terminal_states),
-            abnormal_terminal_states: leak_str_slice(&workpiece.abnormal_terminal_states),
-            ingress_sites: leak_str_slice(&workpiece.ingress_sites),
-            normal_egress_sites: leak_str_slice(&workpiece.normal_egress_sites),
-            abnormal_egress_sites: leak_str_slice(&workpiece.abnormal_egress_sites),
+        .map(|workpiece| {
+            Ok(RtWorkpieceTypeDef {
+                name: Box::leak(workpiece.name.clone().into_boxed_str()),
+                normal_terminal_states: leak_str_slice(&workpiece.normal_terminal_states),
+                abnormal_terminal_states: leak_str_slice(&workpiece.abnormal_terminal_states),
+                ingress_sites: leak_expanded_workpiece_endpoint_slice(
+                    &workpiece.ingress_sites,
+                    carrier_layouts,
+                )?,
+                normal_egress_sites: leak_expanded_workpiece_endpoint_slice(
+                    &workpiece.normal_egress_sites,
+                    carrier_layouts,
+                )?,
+                abnormal_egress_sites: leak_expanded_workpiece_endpoint_slice(
+                    &workpiece.abnormal_egress_sites,
+                    carrier_layouts,
+                )?,
+            })
         })
-        .collect::<Vec<_>>();
-    Box::leak(leaked_types.into_boxed_slice())
+        .collect::<Result<Vec<_>, BridgeError>>()?;
+    Ok(Box::leak(leaked_types.into_boxed_slice()))
 }
 
 fn leak_workpiece_sites(
     workpiece_sites: &[crate::ir::WorkpieceSiteDef],
+    workpiece_carriers: &[crate::ir::WorkpieceCarrierDef],
 ) -> &'static [RtWorkpieceSiteDef<'static>] {
-    let leaked_sites = workpiece_sites
+    let mut leaked_sites = workpiece_sites
         .iter()
         .map(|site| RtWorkpieceSiteDef {
             name: Box::leak(site.name.clone().into_boxed_str()),
@@ -750,7 +781,213 @@ fn leak_workpiece_sites(
             capacity: site.capacity,
         })
         .collect::<Vec<_>>();
+    for carrier in workpiece_carriers {
+        for endpoint in expand_all_carrier_slot_endpoints(&carrier.name, &carrier.layout) {
+            leaked_sites.push(RtWorkpieceSiteDef {
+                name: Box::leak(endpoint.into_boxed_str()),
+                kind: RtWorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            });
+        }
+    }
     Box::leak(leaked_sites.into_boxed_slice())
+}
+
+fn leak_expanded_workpiece_endpoint_slice(
+    endpoints: &[String],
+    carrier_layouts: &HashMap<String, BridgeCarrierLayout>,
+) -> Result<&'static [&'static str], BridgeError> {
+    let expanded = endpoints
+        .iter()
+        .map(|endpoint| expand_runtime_endpoint_pattern(endpoint, carrier_layouts))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .map(|endpoint| Box::leak(endpoint.into_boxed_str()) as &'static str)
+        .collect::<Vec<_>>();
+    Ok(Box::leak(expanded.into_boxed_slice()))
+}
+
+fn collect_workpiece_carrier_layouts(
+    workpiece_carriers: &[crate::ir::WorkpieceCarrierDef],
+) -> HashMap<String, BridgeCarrierLayout> {
+    workpiece_carriers
+        .iter()
+        .map(|carrier| {
+            (
+                carrier.name.clone(),
+                match &carrier.layout {
+                    crate::ir::WorkpieceCarrierLayoutDef::Slots { count } => {
+                        BridgeCarrierLayout::Slots { count: *count }
+                    }
+                    crate::ir::WorkpieceCarrierLayoutDef::Grid { rows, cols } => {
+                        BridgeCarrierLayout::Grid {
+                            rows: *rows,
+                            cols: *cols,
+                        }
+                    }
+                },
+            )
+        })
+        .collect()
+}
+
+fn workpiece_effect_requires_phase1_type(effect: &crate::ir::WorkpieceEffect) -> bool {
+    matches!(
+        effect,
+        crate::ir::WorkpieceEffect::Acquire { .. }
+            | crate::ir::WorkpieceEffect::Transfer { .. }
+            | crate::ir::WorkpieceEffect::Finish { .. }
+    )
+}
+
+fn expand_runtime_endpoint_pattern(
+    endpoint: &str,
+    carrier_layouts: &HashMap<String, BridgeCarrierLayout>,
+) -> Result<Vec<String>, BridgeError> {
+    let Some((carrier, selectors)) = parse_workpiece_slot_reference(endpoint) else {
+        return Ok(vec![endpoint.to_string()]);
+    };
+    let Some(layout) = carrier_layouts.get(&carrier) else {
+        return Err(BridgeError::UnknownWorkpieceCarrier { carrier });
+    };
+    expand_slot_reference(&carrier, &selectors, layout)
+}
+
+fn validate_runtime_effect_endpoint(
+    endpoint: &str,
+    carrier_layouts: &HashMap<String, BridgeCarrierLayout>,
+) -> Result<&'static str, BridgeError> {
+    let expanded = expand_runtime_endpoint_pattern(endpoint, carrier_layouts)?;
+    match expanded.as_slice() {
+        [single] => Ok(Box::leak(single.clone().into_boxed_str())),
+        _ => Err(BridgeError::InvalidWorkpieceSlotReference {
+            slot: endpoint.to_string(),
+            details: "runtime effects must use a concrete slot index, not a wildcard".to_string(),
+        }),
+    }
+}
+
+fn validate_runtime_carrier_name(
+    carrier: &str,
+    carrier_layouts: &HashMap<String, BridgeCarrierLayout>,
+) -> Result<&'static str, BridgeError> {
+    if carrier_layouts.contains_key(carrier) {
+        Ok(Box::leak(carrier.to_string().into_boxed_str()))
+    } else {
+        Err(BridgeError::UnknownWorkpieceCarrier {
+            carrier: carrier.to_string(),
+        })
+    }
+}
+
+fn expand_all_carrier_slot_endpoints(
+    carrier: &str,
+    layout: &crate::ir::WorkpieceCarrierLayoutDef,
+) -> Vec<String> {
+    match layout {
+        crate::ir::WorkpieceCarrierLayoutDef::Slots { count } => (0..*count)
+            .map(|slot| format!("{carrier}.slot[{slot}]"))
+            .collect(),
+        crate::ir::WorkpieceCarrierLayoutDef::Grid { rows, cols } => {
+            let mut out = Vec::with_capacity((*rows as usize).saturating_mul(*cols as usize));
+            for row in 0..*rows {
+                for col in 0..*cols {
+                    out.push(format!("{carrier}.slot[{row},{col}]"));
+                }
+            }
+            out
+        }
+    }
+}
+
+fn expand_slot_reference(
+    carrier: &str,
+    selectors: &[String],
+    layout: &BridgeCarrierLayout,
+) -> Result<Vec<String>, BridgeError> {
+    match layout {
+        BridgeCarrierLayout::Slots { count } => {
+            if selectors.len() != 1 {
+                return Err(BridgeError::InvalidWorkpieceSlotReference {
+                    slot: render_slot_reference(carrier, selectors),
+                    details: format!("carrier '{carrier}' expects 1 slot dimension"),
+                });
+            }
+            let slots = expand_slot_selector(carrier, selectors, 0, *count)?;
+            Ok(slots
+                .into_iter()
+                .map(|slot| format!("{carrier}.slot[{slot}]"))
+                .collect())
+        }
+        BridgeCarrierLayout::Grid { rows, cols } => {
+            if selectors.len() != 2 {
+                return Err(BridgeError::InvalidWorkpieceSlotReference {
+                    slot: render_slot_reference(carrier, selectors),
+                    details: format!("carrier '{carrier}' expects 2 slot dimensions"),
+                });
+            }
+            let row_values = expand_slot_selector(carrier, selectors, 0, *rows)?;
+            let col_values = expand_slot_selector(carrier, selectors, 1, *cols)?;
+            let mut out =
+                Vec::with_capacity(row_values.len().saturating_mul(col_values.len()));
+            for row in &row_values {
+                for col in &col_values {
+                    out.push(format!("{carrier}.slot[{row},{col}]"));
+                }
+            }
+            Ok(out)
+        }
+    }
+}
+
+fn expand_slot_selector(
+    carrier: &str,
+    selectors: &[String],
+    dim_idx: usize,
+    bound: u32,
+) -> Result<Vec<u32>, BridgeError> {
+    let selector = selectors.get(dim_idx).ok_or_else(|| {
+        BridgeError::InvalidWorkpieceSlotReference {
+            slot: render_slot_reference(carrier, selectors),
+            details: format!("missing slot selector at dimension {}", dim_idx + 1),
+        }
+    })?;
+    if selector == "*" {
+        return Ok((0..bound).collect());
+    }
+    let parsed = selector
+        .parse::<u32>()
+        .map_err(|_| BridgeError::InvalidWorkpieceSlotReference {
+            slot: render_slot_reference(carrier, selectors),
+            details: format!("slot selector '{selector}' must be '*' or an integer"),
+        })?;
+    if parsed >= bound {
+        return Err(BridgeError::InvalidWorkpieceSlotReference {
+            slot: render_slot_reference(carrier, selectors),
+            details: format!(
+                "slot index {parsed} is out of range for carrier '{carrier}' dimension {}",
+                dim_idx + 1
+            ),
+        });
+    }
+    Ok(vec![parsed])
+}
+
+fn parse_workpiece_slot_reference(raw: &str) -> Option<(String, Vec<String>)> {
+    let (carrier, rest) = raw.split_once(".slot[")?;
+    let selectors = rest.strip_suffix(']')?;
+    Some((
+        carrier.to_string(),
+        selectors
+            .split(',')
+            .map(|selector| selector.trim().to_string())
+            .collect(),
+    ))
+}
+
+fn render_slot_reference(carrier: &str, selectors: &[String]) -> String {
+    format!("{carrier}.slot[{}]", selectors.join(","))
 }
 
 fn leak_workpiece_holders(
@@ -2559,50 +2796,50 @@ fn convert_workpiece_effect(
 ) -> Result<Action, BridgeError> {
     match effect {
         crate::ir::WorkpieceEffect::Acquire { holder, from } => {
-            if is_workpiece_slot_reference(from) {
-                return Err(BridgeError::UnsupportedWorkpieceEffect {
-                    state: state_name.to_string(),
-                    effect: render_workpiece_effect(effect),
-                });
-            }
             let workpiece_type = workpiece_ctx
                 .phase1_workpiece_type
                 .ok_or(BridgeError::Phase1WorkpieceTypeArity { count: 0 })?;
             Ok(Action::WorkpieceAcquire {
                 workpiece_type,
                 holder: Box::leak(holder.clone().into_boxed_str()),
-                from: Box::leak(from.clone().into_boxed_str()),
+                from: validate_runtime_effect_endpoint(from, &workpiece_ctx.carrier_layouts)?,
             })
         }
         crate::ir::WorkpieceEffect::Transfer { from, to } => {
-            if is_workpiece_slot_reference(from) || is_workpiece_slot_reference(to) {
-                return Err(BridgeError::UnsupportedWorkpieceEffect {
-                    state: state_name.to_string(),
-                    effect: render_workpiece_effect(effect),
-                });
-            }
             Ok(Action::WorkpieceTransfer {
-                from: Box::leak(from.clone().into_boxed_str()),
-                to: Box::leak(to.clone().into_boxed_str()),
+                from: validate_runtime_effect_endpoint(from, &workpiece_ctx.carrier_layouts)?,
+                to: validate_runtime_effect_endpoint(to, &workpiece_ctx.carrier_layouts)?,
             })
         }
         crate::ir::WorkpieceEffect::Finish { at, terminal_state } => {
-            if is_workpiece_slot_reference(at) {
-                return Err(BridgeError::UnsupportedWorkpieceEffect {
-                    state: state_name.to_string(),
-                    effect: render_workpiece_effect(effect),
-                });
-            }
             Ok(Action::WorkpieceFinish {
-                at: Box::leak(at.clone().into_boxed_str()),
+                at: validate_runtime_effect_endpoint(at, &workpiece_ctx.carrier_layouts)?,
                 terminal_state: Box::leak(terminal_state.clone().into_boxed_str()),
             })
         }
-        crate::ir::WorkpieceEffect::Mount { .. }
-        | crate::ir::WorkpieceEffect::Unmount { .. }
-        | crate::ir::WorkpieceEffect::Split { .. }
-        | crate::ir::WorkpieceEffect::Merge { .. }
-        | crate::ir::WorkpieceEffect::TransformCarrier { .. } => {
+        crate::ir::WorkpieceEffect::Mount {
+            workpiece_type,
+            slot,
+        } => Ok(Action::WorkpieceMount {
+            workpiece_type: Box::leak(workpiece_type.clone().into_boxed_str()),
+            slot: validate_runtime_effect_endpoint(slot, &workpiece_ctx.carrier_layouts)?,
+        }),
+        crate::ir::WorkpieceEffect::Unmount {
+            workpiece_type,
+            slot,
+            to,
+        } => Ok(Action::WorkpieceUnmount {
+            workpiece_type: Box::leak(workpiece_type.clone().into_boxed_str()),
+            slot: validate_runtime_effect_endpoint(slot, &workpiece_ctx.carrier_layouts)?,
+            to: validate_runtime_effect_endpoint(to, &workpiece_ctx.carrier_layouts)?,
+        }),
+        crate::ir::WorkpieceEffect::TransformCarrier { carrier, frame } => {
+            Ok(Action::WorkpieceTransformCarrier {
+                carrier: validate_runtime_carrier_name(carrier, &workpiece_ctx.carrier_layouts)?,
+                frame: Box::leak(frame.clone().into_boxed_str()),
+            })
+        }
+        crate::ir::WorkpieceEffect::Split { .. } | crate::ir::WorkpieceEffect::Merge { .. } => {
             Err(BridgeError::UnsupportedWorkpieceEffect {
                 state: state_name.to_string(),
                 effect: render_workpiece_effect(effect),
@@ -2657,11 +2894,6 @@ fn render_workpiece_effect(effect: &crate::ir::WorkpieceEffect) -> String {
         }
     }
 }
-
-fn is_workpiece_slot_reference(endpoint: &str) -> bool {
-    endpoint.contains(".slot[") && endpoint.ends_with(']')
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExprToken<'a> {
     Number(&'a str),

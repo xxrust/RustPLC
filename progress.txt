@@ -12,6 +12,7 @@ Started: 2026-03-23 01:07:00 CST
 - Phase 1 workpiece runtime seeds one initial token per declared ingress endpoint during `Runtime::new`; first-hop `acquire` must move that seeded token instead of silently minting from thin air.
 - Phase 1 workpiece effects require a unique active token at the source endpoint. Treat `0` as underflow, `>1` as duplicate occupancy ambiguity, and destination-capacity violations as explicit overflow errors.
 - When semantic already blocks a malformed workpiece contract but verification still needs its own regression, build the normal `ConstraintSet`/`StateMachine` first and then mutate the lowered structures in the test to isolate verification responsibility.
+- Carrier-slot bridge lowering must expand `carrier.slot[*]` / grid selectors into concrete runtime ingress-egress endpoints and synthesized carrier `workpiece_sites`; otherwise runtime seeding and slot-addressed actions drift apart even when IR is correct.
 
 ## [2026-03-23 01:40:23 +08:00] - US-001
 Thread: https://ampcode.com/threads/unknown
@@ -89,4 +90,26 @@ Thread: https://ampcode.com/threads/unknown
   - Workpiece verification is easier to keep aligned with runtime if reachable-state search tracks active tokens directly instead of only endpoint counters; token-state search can still stay finite by discarding finished tokens from the search state.
   - Some workpiece safety regressions must be verification-only because semantic rejects them earlier; mutate lowered `ConstraintSet` data in tests rather than weakening parser or semantic guards.
   - For Phase 1 ingress checks, seeding should stay tied to reachable `acquire/transfer` source endpoints; applying global ingress seeding to `mount`/`unmount` flows changes existing Phase 2 verification semantics.
+---
+
+## [2026-03-23 02:55:50 +08:00] - US-005
+Thread: https://ampcode.com/threads/unknown
+- Implemented Phase 2 bridge lowering in `src/runtime_bridge.rs` by expanding carrier slot patterns into concrete runtime endpoints, synthesizing carrier slots as runtime `workpiece_sites`, and lowering `mount` / `unmount` / `transform carrier` into explicit runtime actions.
+- Kept later-phase behavior explicit: `split` / `merge` still fail at bridge time with effect-level `UnsupportedWorkpieceEffect`, while malformed slot references and undeclared carriers now raise dedicated bridge errors instead of being hidden behind generic unsupported-effect failures.
+- Extended `crates/runtime-core/src/lib.rs` and downstream runtime-core consumers so the new Phase 2 action variants compile cleanly everywhere; runtime still rejects them explicitly until US-006 lands.
+- Added regression coverage in `tests/workpiece_model_phase23.rs` using `examples/workpiece_carrier_slot_transfer.plc` plus mutated lowered fixtures for unknown-carrier and invalid-slot bridge failures.
+- Files changed
+- `AGENTS.md`
+- `crates/codegen/src/lib.rs`
+- `crates/runtime-core/src/lib.rs`
+- `prd.json`
+- `progress.txt`
+- `src/main.rs`
+- `src/runtime_bridge.rs`
+- `src/sim_regress.rs`
+- `tests/workpiece_model_phase23.rs`
+- **Learnings for future iterations:**
+  - Carrier-slot examples only become runtime-executable after bridge concretizes wildcard ingress/egress patterns into real slot endpoints; leaving wildcard strings in runtime metadata breaks `Runtime::new` token seeding and later slot-addressed actions.
+  - If semantic already rejects malformed carrier slot syntax, bridge-specific negative tests should mutate lowered `ConstraintSet` or `StateMachine` data to exercise `UnknownWorkpieceCarrier` and `InvalidWorkpieceSlotReference` directly.
+  - When a new workpiece action variant is introduced in `runtime_core::Action`, `src/main.rs`, `src/sim_regress.rs`, and `crates/codegen/src/lib.rs` need matching updates even if the runtime executor still returns `UnsupportedWorkpieceEffect`.
 ---

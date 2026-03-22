@@ -283,6 +283,25 @@ fn format_action(a: &Action) -> String {
             "Action::WorkpieceFinish {{ at: {:?}, terminal_state: {:?} }}",
             at, terminal_state
         ),
+        Action::WorkpieceMount {
+            workpiece_type,
+            slot,
+        } => format!(
+            "Action::WorkpieceMount {{ workpiece_type: {:?}, slot: {:?} }}",
+            workpiece_type, slot
+        ),
+        Action::WorkpieceUnmount {
+            workpiece_type,
+            slot,
+            to,
+        } => format!(
+            "Action::WorkpieceUnmount {{ workpiece_type: {:?}, slot: {:?}, to: {:?} }}",
+            workpiece_type, slot, to
+        ),
+        Action::WorkpieceTransformCarrier { carrier, frame } => format!(
+            "Action::WorkpieceTransformCarrier {{ carrier: {:?}, frame: {:?} }}",
+            carrier, frame
+        ),
         Action::Extend { output } => {
             format!("Action::Extend {{ output: DigitalOutputId({}) }}", output.0)
         }

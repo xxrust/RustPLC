@@ -6547,7 +6547,10 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                             | Action::CamPhase { .. }
                             | Action::WorkpieceAcquire { .. }
                             | Action::WorkpieceTransfer { .. }
-                            | Action::WorkpieceFinish { .. } => {}
+                            | Action::WorkpieceFinish { .. }
+                            | Action::WorkpieceMount { .. }
+                            | Action::WorkpieceUnmount { .. }
+                            | Action::WorkpieceTransformCarrier { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
@@ -6725,7 +6728,10 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                             | Action::CamPhase { .. }
                             | Action::WorkpieceAcquire { .. }
                             | Action::WorkpieceTransfer { .. }
-                            | Action::WorkpieceFinish { .. } => {}
+                            | Action::WorkpieceFinish { .. }
+                            | Action::WorkpieceMount { .. }
+                            | Action::WorkpieceUnmount { .. }
+                            | Action::WorkpieceTransformCarrier { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
@@ -9752,7 +9758,10 @@ fn io_sizes_for_program_and_scenario(
                             | Action::CamPhase { .. }
                             | Action::WorkpieceAcquire { .. }
                             | Action::WorkpieceTransfer { .. }
-                            | Action::WorkpieceFinish { .. } => {}
+                            | Action::WorkpieceFinish { .. }
+                            | Action::WorkpieceMount { .. }
+                            | Action::WorkpieceUnmount { .. }
+                            | Action::WorkpieceTransformCarrier { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }

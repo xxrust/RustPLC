@@ -3,37 +3,8 @@ use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
 use rust_plc::semantic::{build_constraint_set, build_state_machine, build_topology_graph};
 use rust_plc::verification::{WarningLevel, verify_all};
-
-const PLC_WORKPIECE_CARRIER_SLOT_TRANSFER: &str = r#"
-[topology]
-
-workpiece part: workpiece_type {
-    normal_terminal_states: [finished]
-    ingress_sites: [tray_a.slot[*]]
-    normal_egress_sites: [outfeed]
-}
-
-carrier tray_a: workpiece_carrier { slots: 4 }
-location outfeed: workpiece_location { capacity: 1 }
-holder arm: workpiece_holder { capacity: 1 }
-
-[constraints]
-
-[tasks]
-
-task transfer_part:
-    step pick:
-        effect: acquire holder arm from tray_a.slot[0]
-    step place:
-        effect: transfer from arm to outfeed
-    step done:
-        effect: finish workpiece at outfeed as finished
-    on_complete: goto sink
-
-task sink:
-    step idle:
-        action: log "done"
-"#;
+use runtime_core::{Action, Instr, WorkpieceSiteKind};
+use std::fs;
 
 const PLC_WORKPIECE_MOUNT_UNMOUNT: &str = r#"
 [topology]
@@ -727,9 +698,29 @@ task move_part:
         effect: transfer from arm to outfeed
 "#;
 
+fn read_example_source(file_name: &str) -> String {
+    fs::read_to_string(format!("examples/{file_name}"))
+        .unwrap_or_else(|err| panic!("failed to read example {file_name}: {err}"))
+}
+
+fn collect_runtime_actions(
+    program: &runtime_core::Program<'static>,
+) -> Vec<runtime_core::Action> {
+    program
+        .tasks
+        .iter()
+        .flat_map(|task| task.steps.iter())
+        .flat_map(|step| match step.instr {
+            Instr::Action { actions, .. } => actions.to_vec(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
 #[test]
 fn workpiece_carrier_slot_transfer_builds_ir_and_verifies() {
-    let program = parse_plc(PLC_WORKPIECE_CARRIER_SLOT_TRANSFER).expect("fixture should parse");
+    let source = read_example_source("workpiece_carrier_slot_transfer.plc");
+    let program = parse_plc(&source).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
@@ -744,13 +735,31 @@ fn workpiece_carrier_slot_transfer_builds_ir_and_verifies() {
     verify_all(&program, &topology, &constraints, &state_machine)
         .expect("carrier slot transfer fixture should pass verification");
 
-    let err = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
-        .expect_err("runtime bridge should still reject phase2 workpiece effects");
-    assert!(matches!(
-        err,
-        BridgeError::UnsupportedWorkpieceEffect { ref effect, .. }
-            if effect == "acquire holder arm from tray_a.slot[0]"
-    ));
+    let runtime_program = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+        .expect("runtime bridge should lower carrier slot endpoints");
+    let slot_sites = runtime_program
+        .workpiece_sites
+        .iter()
+        .filter(|site| site.name.starts_with("tray_a.slot["))
+        .collect::<Vec<_>>();
+    assert_eq!(slot_sites.len(), 4);
+    assert!(slot_sites.iter().all(|site| {
+        site.capacity == 1 && matches!(site.kind, WorkpieceSiteKind::CarrierLocation)
+    }));
+    assert_eq!(
+        runtime_program.workpiece_types[0].ingress_sites,
+        &["tray_a.slot[0]", "tray_a.slot[1]", "tray_a.slot[2]", "tray_a.slot[3]"]
+    );
+    assert!(collect_runtime_actions(&runtime_program).iter().any(|action| {
+        matches!(
+            action,
+            Action::WorkpieceAcquire {
+                workpiece_type,
+                holder,
+                from,
+            } if *workpiece_type == "part" && *holder == "arm" && *from == "tray_a.slot[0]"
+        )
+    }));
 }
 
 #[test]
@@ -792,18 +801,93 @@ fn workpiece_mount_unmount_and_transform_lower_into_ir() {
 }
 
 #[test]
-fn runtime_bridge_rejects_mount_effect_with_effect_level_error() {
+fn runtime_bridge_lowers_mount_unmount_and_transform_actions() {
     let program = parse_plc(PLC_WORKPIECE_MOUNT_UNMOUNT).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
+    let runtime_program = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+        .expect("runtime bridge should lower phase2 carrier actions");
+    let actions = collect_runtime_actions(&runtime_program);
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        Action::WorkpieceMount {
+            workpiece_type,
+            slot,
+        } if *workpiece_type == "rod" && *slot == "steel_plate.slot[0]"
+    )));
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        Action::WorkpieceUnmount {
+            workpiece_type,
+            slot,
+            to,
+        } if *workpiece_type == "rod" && *slot == "steel_plate.slot[0]" && *to == "outfeed"
+    )));
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        Action::WorkpieceTransformCarrier { carrier, frame }
+            if *carrier == "steel_plate" && *frame == "cut_height"
+    )));
+    assert!(runtime_program.workpiece_sites.iter().any(|site| {
+        site.name == "steel_plate.slot[1]"
+            && site.capacity == 1
+            && matches!(site.kind, WorkpieceSiteKind::CarrierLocation)
+    }));
+}
+
+#[test]
+fn runtime_bridge_still_rejects_split_merge_effect_with_effect_level_error() {
+    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
     let err = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
-        .expect_err("runtime bridge should reject unsupported phase2 effects");
+        .expect_err("runtime bridge should still reject later-phase workpiece effects");
     assert!(matches!(
         err,
         BridgeError::UnsupportedWorkpieceEffect { ref effect, .. }
-            if effect == "mount rod on steel_plate.slot[0]"
+            if effect == "split rod into slice count 4 consumed"
+    ));
+}
+
+#[test]
+fn runtime_bridge_rejects_unknown_workpiece_carrier_explicitly() {
+    let program = parse_plc(PLC_WORKPIECE_MOUNT_UNMOUNT).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let mut constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    constraints.workpiece_carriers.clear();
+
+    let err = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+        .expect_err("undeclared carrier should fail bridge validation");
+    assert!(matches!(
+        err,
+        BridgeError::UnknownWorkpieceCarrier { ref carrier } if carrier == "steel_plate"
+    ));
+}
+
+#[test]
+fn runtime_bridge_rejects_invalid_slot_reference_explicitly() {
+    let program = parse_plc(PLC_WORKPIECE_MOUNT_UNMOUNT).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let mut state_machine = build_state_machine(&program).expect("state machine should build");
+
+    state_machine.transitions[0].effects = vec![rust_plc::ir::WorkpieceEffect::Mount {
+        workpiece_type: "rod".to_string(),
+        slot: "steel_plate.slot[9]".to_string(),
+    }];
+
+    let err = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+        .expect_err("out-of-range slot should fail bridge validation");
+    assert!(matches!(
+        err,
+        BridgeError::InvalidWorkpieceSlotReference { ref slot, .. }
+            if slot == "steel_plate.slot[9]"
     ));
 }
 

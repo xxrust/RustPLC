@@ -783,7 +783,10 @@ fn io_sizes_for_program_and_scenario(
                             | Action::CamPhase { .. } => {}
                             Action::WorkpieceAcquire { .. }
                             | Action::WorkpieceTransfer { .. }
-                            | Action::WorkpieceFinish { .. } => {}
+                            | Action::WorkpieceFinish { .. }
+                            | Action::WorkpieceMount { .. }
+                            | Action::WorkpieceUnmount { .. }
+                            | Action::WorkpieceTransformCarrier { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }

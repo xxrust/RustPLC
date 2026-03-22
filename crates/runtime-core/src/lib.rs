@@ -403,6 +403,19 @@ pub enum Action {
         at: &'static str,
         terminal_state: &'static str,
     },
+    WorkpieceMount {
+        workpiece_type: &'static str,
+        slot: &'static str,
+    },
+    WorkpieceUnmount {
+        workpiece_type: &'static str,
+        slot: &'static str,
+        to: &'static str,
+    },
+    WorkpieceTransformCarrier {
+        carrier: &'static str,
+        frame: &'static str,
+    },
     Extend {
         output: DigitalOutputId,
     },
@@ -2011,6 +2024,27 @@ impl<'a> Runtime<'a> {
                                 Action::WorkpieceFinish { at, terminal_state } => self
                                     .execute_workpiece_finish(at, terminal_state)
                                     .map_err(RuntimeTickError::Core)?,
+                                Action::WorkpieceMount { .. } => {
+                                    return Err(RuntimeTickError::Core(
+                                        RuntimeError::UnsupportedWorkpieceEffect {
+                                            effect: "mount",
+                                        },
+                                    ));
+                                }
+                                Action::WorkpieceUnmount { .. } => {
+                                    return Err(RuntimeTickError::Core(
+                                        RuntimeError::UnsupportedWorkpieceEffect {
+                                            effect: "unmount",
+                                        },
+                                    ));
+                                }
+                                Action::WorkpieceTransformCarrier { .. } => {
+                                    return Err(RuntimeTickError::Core(
+                                        RuntimeError::UnsupportedWorkpieceEffect {
+                                            effect: "transform_carrier",
+                                        },
+                                    ));
+                                }
                                 Action::Log {
                                     message_id,
                                     message,
@@ -3595,6 +3629,47 @@ mod tests {
                 capacity: 1,
                 occupancy: 1,
             }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_phase2_workpiece_actions_until_executor_support_lands() {
+        static ACTIONS: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "steel_plate.slot[0]",
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "mount",
+            instr: Instr::Action {
+                actions: &ACTIONS,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt.tick(&mut io).expect_err("phase2 mount should stay explicit");
+        assert_eq!(
+            err,
+            RuntimeError::UnsupportedWorkpieceEffect { effect: "mount" }
         );
     }
 

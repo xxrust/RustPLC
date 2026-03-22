@@ -267,6 +267,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `runtime_bridge` 降级运行时 `Instr::Action` 时，必须同时处理 `transition.actions` 与 `transition.effects`；只消费 `actions` 会把 workpiece 语义静默丢失到 runtime 之外
 - Phase 1 workpiece runtime 以 `workpiece_type.ingress_sites` 作为初始 token 种子源：`Runtime::new` 会为每个 ingress 端点预置一个 token，因此首个 `acquire` 语义是“搬运已有 token”，不是隐式凭空造 token
 - Phase 1 `acquire/transfer/finish` 在 runtime 只能消费“源端点恰好 1 个 active token”的状态；`0` 个属于 underflow，`>1` 个属于 duplicate occupancy 歧义，目标端点容量检查走显式 overflow 错误，避免 bridge/runtime 对未定实例做静默猜测
+- `runtime_bridge` 进入 carrier workpiece 阶段后，必须把 `workpiece_type.ingress_sites` / `*_egress_sites` 中的 `carrier.slot[*]`、`carrier.slot[row,col]` 模式展开成 runtime 可执行的具体端点，并把 carrier 每个具体 slot 追加到 runtime `workpiece_sites`；否则 `Runtime::new` 的 ingress seeding 与后续 `acquire/mount/unmount` 会在 slot 名称上失配
 - 当 `runtime_core::Action` 或 `Program` 增加新字段/变体时，除 bridge 外还要同步更新 `src/main.rs`、`src/sim_regress.rs`、`crates/codegen/src/lib.rs`、`crates/sim/*` 中对 runtime 结构的穷举匹配与静态 `Program` 夹具，否则很容易在非目标 crate 上留下编译断点
 - `axis.move_relative/axis.move_absolute` 属于默认 blocking 长时动作；即使未显式编写 `wait`，也应由 `Pending -> Done/Fault` 生命周期驱动 step 离开，回归测试至少覆盖 Pending->Done 与 Pending->Fault
 - axis 动作的 `timeout/on_reject/on_motion_fault/on_safety_fault` 与细分 route 必须在 bridge 阶段降级成 runtime 可执行的 `StepId` 元数据；runtime 在 Pending 轮询阶段按“先专用 route、后主桶 fallback”执行分流，避免回退为裸 `RuntimeError::AxisFault`
