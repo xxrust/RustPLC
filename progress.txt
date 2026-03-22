@@ -9,6 +9,8 @@ Started: 2026-03-23 01:07:00 CST
 - Unsupported workpiece behavior must fail explicitly. Do not silently drop semantics in bridge, runtime, or verification.
 - `crates/runtime-core/src/lib.rs` keeps most runtime-core fixtures inline; when `Program`, `AxisMotionCommand`, or pending-axis state gains fields, update those in-file test literals together before trusting the crate test baseline.
 - When `runtime_core::Action` or `Program` changes, also update exhaustive action matches and static `Program` fixtures in `src/main.rs`, `src/sim_regress.rs`, `crates/codegen/src/lib.rs`, and `crates/sim/*`; those crates compile against runtime-core directly and fail fast on stale variants/fields.
+- Phase 1 workpiece runtime seeds one initial token per declared ingress endpoint during `Runtime::new`; first-hop `acquire` must move that seeded token instead of silently minting from thin air.
+- Phase 1 workpiece effects require a unique active token at the source endpoint. Treat `0` as underflow, `>1` as duplicate occupancy ambiguity, and destination-capacity violations as explicit overflow errors.
 
 ## [2026-03-23 01:40:23 +08:00] - US-001
 Thread: https://ampcode.com/threads/unknown
@@ -52,4 +54,21 @@ Thread: https://ampcode.com/threads/unknown
 - `runtime_bridge` must lower `transition.effects` alongside `transition.actions`; otherwise workpiece semantics disappear before runtime even if IR and verification are correct.
 - Phase 1 bridge support still depends on a single declared workpiece type because `acquire`/`transfer`/`finish` effects are untyped in IR; multi-type runtime support needs new effect shapes or extra metadata, not bridge-side guessing.
 - Adding runtime-core workpiece actions before their executor exists is still useful, but they must fail explicitly in `Runtime::tick` to avoid silently accepting semantics that do nothing at runtime.
+---
+
+## [2026-03-23 02:23:14 +08:00] - US-003
+Thread: https://ampcode.com/threads/unknown
+- Implemented Phase 1 workpiece execution in `crates/runtime-core/src/lib.rs`: `Runtime::new` now seeds ingress endpoints with initial tokens, and `Runtime::tick` executes `WorkpieceAcquire`, `WorkpieceTransfer`, and `WorkpieceFinish` instead of returning `UnsupportedWorkpieceEffect`.
+- Added explicit runtime errors for workpiece source underflow, duplicate source occupancy ambiguity, destination overflow, endpoint lookup failures, and token-store invariant/capacity issues so Phase 1 failures are observable instead of silent.
+- Added runtime-core regressions for the successful site -> holder -> site -> finish flow plus underflow, duplicate occupancy, and overflow failures; added an integration regression in `tests/workpiece_model_phase1.rs` proving the canonical Phase 1 example now executes end-to-end after bridge lowering.
+- Files changed
+- `AGENTS.md`
+- `crates/runtime-core/src/lib.rs`
+- `prd.json`
+- `progress.txt`
+- `tests/workpiece_model_phase1.rs`
+- **Learnings for future iterations:**
+  - Phase 1 runtime semantics currently rely on ingress seeding because bridge-lowered `acquire/transfer/finish` effects still do not carry instance ids; if later stories add true instance creation, revisit `Runtime::new` seeding instead of layering ad-hoc exceptions on top.
+  - When a workpiece action names only endpoints, source selection must stay deterministic. Runtime should reject multi-token source occupancy explicitly rather than guessing which token to move or finish.
+  - A focused integration test in `tests/workpiece_model_phase1.rs` is enough to prove bridge + runtime wiring for the canonical example without waiting for the broader example-gate story.
 ---

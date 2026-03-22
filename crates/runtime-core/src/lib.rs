@@ -309,6 +309,28 @@ pub enum RuntimeError {
         target: &'static str,
         fault: AxisFault,
     },
+    WorkpieceSourceUnderflow {
+        endpoint: &'static str,
+    },
+    WorkpieceDuplicateOccupancy {
+        endpoint: &'static str,
+        count: usize,
+    },
+    WorkpieceOverflow {
+        endpoint: &'static str,
+        capacity: u32,
+        occupancy: usize,
+    },
+    WorkpieceEndpointUndefined {
+        endpoint: &'static str,
+    },
+    WorkpieceTokenCapacityExceeded {
+        required: usize,
+        max: usize,
+    },
+    WorkpieceStoreInvariantViolation {
+        token_id: WorkpieceTokenId,
+    },
     UnsupportedWorkpieceEffect {
         effect: &'static str,
     },
@@ -1112,6 +1134,8 @@ impl<'a> Runtime<'a> {
             cam_states[idx].active_table = cfg.table_index;
             cam_states[idx].phase_offset = cfg.initial_phase_offset;
         }
+        let workpiece_tokens = Self::seed_workpiece_tokens(program)?;
+
         Ok(Self {
             program,
             active_task: 0,
@@ -1124,7 +1148,7 @@ impl<'a> Runtime<'a> {
             variables,
             cam_states,
             digital_output_shadow: [false; MAX_TRACKED_DIGITAL_OUTPUTS],
-            workpiece_tokens: WorkpieceTokenStore::new(),
+            workpiece_tokens,
         })
     }
 
@@ -1197,6 +1221,153 @@ impl<'a> Runtime<'a> {
 
     pub fn workpiece_tokens(&self) -> &WorkpieceTokenStore<'a> {
         &self.workpiece_tokens
+    }
+
+    fn seed_workpiece_tokens(
+        program: &'a Program<'a>,
+    ) -> Result<WorkpieceTokenStore<'a>, RuntimeError> {
+        let mut store = WorkpieceTokenStore::new();
+        let mut next_token_id = 0u32;
+
+        for workpiece_type in program.workpiece_types {
+            for &ingress in workpiece_type.ingress_sites {
+                store
+                    .create_token(next_token_id, workpiece_type.name, ingress)
+                    .map_err(|error| match error {
+                        WorkpieceTokenStoreError::CapacityExceeded { max } => {
+                            RuntimeError::WorkpieceTokenCapacityExceeded {
+                                required: store.slots_used().saturating_add(1),
+                                max,
+                            }
+                        }
+                        _ => RuntimeError::WorkpieceStoreInvariantViolation {
+                            token_id: next_token_id,
+                        },
+                    })?;
+                next_token_id = next_token_id.saturating_add(1);
+            }
+        }
+
+        Ok(store)
+    }
+
+    fn workpiece_endpoint_capacity(&self, endpoint: &str) -> Option<u32> {
+        self.program
+            .workpiece_sites
+            .iter()
+            .find(|site| site.name == endpoint)
+            .map(|site| site.capacity)
+            .or_else(|| {
+                self.program
+                    .workpiece_holders
+                    .iter()
+                    .find(|holder| holder.name == endpoint)
+                    .map(|holder| holder.capacity)
+            })
+    }
+
+    fn unique_active_token_id_at(
+        &self,
+        endpoint: &'static str,
+    ) -> Result<WorkpieceTokenId, RuntimeError> {
+        if self.workpiece_endpoint_capacity(endpoint).is_none() {
+            return Err(RuntimeError::WorkpieceEndpointUndefined { endpoint });
+        }
+
+        let mut token_id = None;
+        let mut count = 0usize;
+        for token in self.workpiece_tokens.tokens.iter().flatten() {
+            if token.active && token.current_location == endpoint {
+                count = count.saturating_add(1);
+                token_id.get_or_insert(token.token_id);
+                if count > 1 {
+                    return Err(RuntimeError::WorkpieceDuplicateOccupancy { endpoint, count });
+                }
+            }
+        }
+
+        token_id.ok_or(RuntimeError::WorkpieceSourceUnderflow { endpoint })
+    }
+
+    fn ensure_workpiece_destination_capacity(
+        &self,
+        endpoint: &'static str,
+    ) -> Result<(), RuntimeError> {
+        let Some(capacity) = self.workpiece_endpoint_capacity(endpoint) else {
+            return Err(RuntimeError::WorkpieceEndpointUndefined { endpoint });
+        };
+
+        let occupancy = self.workpiece_tokens.active_tokens_at(endpoint);
+        if occupancy >= capacity as usize {
+            return Err(RuntimeError::WorkpieceOverflow {
+                endpoint,
+                capacity,
+                occupancy,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn move_workpiece_token(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        to: &'static str,
+    ) -> Result<(), RuntimeError> {
+        self.workpiece_tokens
+            .move_token(token_id, to)
+            .map(|_| ())
+            .map_err(|_| RuntimeError::WorkpieceStoreInvariantViolation { token_id })
+    }
+
+    fn finish_workpiece_token(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        terminal_state: &'static str,
+    ) -> Result<(), RuntimeError> {
+        self.workpiece_tokens
+            .finish_token(
+                token_id,
+                WorkpieceTerminalStatus::TerminalState {
+                    state: terminal_state,
+                },
+            )
+            .map(|_| ())
+            .map_err(|_| RuntimeError::WorkpieceStoreInvariantViolation { token_id })
+    }
+
+    fn execute_workpiece_acquire(
+        &mut self,
+        _workpiece_type: &'static str,
+        holder: &'static str,
+        from: &'static str,
+    ) -> Result<(), RuntimeError> {
+        let token_id = self.unique_active_token_id_at(from)?;
+        self.ensure_workpiece_destination_capacity(holder)?;
+        self.move_workpiece_token(token_id, holder)
+    }
+
+    fn execute_workpiece_transfer(
+        &mut self,
+        from: &'static str,
+        to: &'static str,
+    ) -> Result<(), RuntimeError> {
+        if from == to {
+            return Ok(());
+        }
+
+        let token_id = self.unique_active_token_id_at(from)?;
+        self.ensure_workpiece_destination_capacity(to)?;
+        self.move_workpiece_token(token_id, to)
+    }
+
+    fn execute_workpiece_finish(
+        &mut self,
+        at: &'static str,
+        terminal_state: &'static str,
+    ) -> Result<(), RuntimeError> {
+        let token_id = self.unique_active_token_id_at(at)?;
+        self.finish_workpiece_token(token_id, terminal_state)
     }
 
     fn write_digital_output<IO: Io>(&mut self, io: &mut IO, id: DigitalOutputId, value: bool) {
@@ -1827,27 +1998,19 @@ impl<'a> Runtime<'a> {
                                 Action::Retract { output } => {
                                     self.write_digital_output(io, output, false)
                                 }
-                                Action::WorkpieceAcquire { .. } => {
-                                    return Err(RuntimeTickError::Core(
-                                        RuntimeError::UnsupportedWorkpieceEffect {
-                                            effect: "acquire",
-                                        },
-                                    ));
-                                }
-                                Action::WorkpieceTransfer { .. } => {
-                                    return Err(RuntimeTickError::Core(
-                                        RuntimeError::UnsupportedWorkpieceEffect {
-                                            effect: "transfer",
-                                        },
-                                    ));
-                                }
-                                Action::WorkpieceFinish { .. } => {
-                                    return Err(RuntimeTickError::Core(
-                                        RuntimeError::UnsupportedWorkpieceEffect {
-                                            effect: "finish",
-                                        },
-                                    ));
-                                }
+                                Action::WorkpieceAcquire {
+                                    workpiece_type,
+                                    holder,
+                                    from,
+                                } => self
+                                    .execute_workpiece_acquire(workpiece_type, holder, from)
+                                    .map_err(RuntimeTickError::Core)?,
+                                Action::WorkpieceTransfer { from, to } => self
+                                    .execute_workpiece_transfer(from, to)
+                                    .map_err(RuntimeTickError::Core)?,
+                                Action::WorkpieceFinish { at, terminal_state } => self
+                                    .execute_workpiece_finish(at, terminal_state)
+                                    .map_err(RuntimeTickError::Core)?,
                                 Action::Log {
                                     message_id,
                                     message,
@@ -3062,6 +3225,376 @@ mod tests {
             Err(WorkpieceTokenStoreError::CapacityExceeded {
                 max: MAX_WORKPIECE_TOKENS,
             })
+        );
+    }
+
+    #[test]
+    fn runtime_executes_phase1_workpiece_flow_across_site_holder_site_and_finish() {
+        static PICK: [Action; 1] = [Action::WorkpieceAcquire {
+            workpiece_type: "part",
+            holder: "arm",
+            from: "infeed",
+        }];
+        static PLACE: [Action; 1] = [Action::WorkpieceTransfer {
+            from: "arm",
+            to: "outfeed",
+        }];
+        static FINISH: [Action; 1] = [Action::WorkpieceFinish {
+            at: "outfeed",
+            terminal_state: "finished",
+        }];
+        static STEPS: [Step<'static>; 6] = [
+            Step {
+                name: "pick",
+                instr: Instr::Action {
+                    actions: &PICK,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "after_pick",
+                instr: Instr::Delay {
+                    ticks: 1,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "place",
+                instr: Instr::Action {
+                    actions: &PLACE,
+                    next: StepId(3),
+                },
+            },
+            Step {
+                name: "after_place",
+                instr: Instr::Delay {
+                    ticks: 1,
+                    next: StepId(4),
+                },
+            },
+            Step {
+                name: "finish",
+                instr: Instr::Action {
+                    actions: &FINISH,
+                    next: StepId(5),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 1] = [WorkpieceTypeDef {
+            name: "part",
+            normal_terminal_states: &["finished"],
+            abnormal_terminal_states: &["rejected"],
+            ingress_sites: &["infeed"],
+            normal_egress_sites: &["outfeed"],
+            abnormal_egress_sites: &["reject_bin"],
+        }];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 3] = [
+            WorkpieceSiteDef {
+                name: "infeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "reject_bin",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static WORKPIECE_HOLDERS: [WorkpieceHolderDef<'static>; 1] = [WorkpieceHolderDef {
+            name: "arm",
+            capacity: 1,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &WORKPIECE_HOLDERS,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should seed ingress token");
+
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("infeed"), 1);
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("arm"), 0);
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("outfeed"), 0);
+
+        rt.tick(&mut io).expect("pick tick should succeed");
+        assert_eq!(
+            rt.task_context(0).expect("task context").current_step,
+            StepId(1)
+        );
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("infeed"), 0);
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("arm"), 1);
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("outfeed"), 0);
+
+        rt.tick(&mut io).expect("place tick should succeed");
+        assert_eq!(
+            rt.task_context(0).expect("task context").current_step,
+            StepId(3)
+        );
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("arm"), 0);
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("outfeed"), 1);
+
+        rt.tick(&mut io).expect("finish tick should succeed");
+        assert_eq!(
+            rt.task_context(0).expect("task context").current_step,
+            StepId(5)
+        );
+        assert_eq!(rt.workpiece_tokens().active_tokens(), 0);
+        let finished = rt
+            .workpiece_tokens()
+            .token(0)
+            .expect("seeded token should remain traceable");
+        assert_eq!(finished.current_location, "outfeed");
+        assert!(!finished.active);
+        assert_eq!(
+            finished.terminal_status,
+            Some(WorkpieceTerminalStatus::TerminalState { state: "finished" })
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_workpiece_source_underflow() {
+        static ACTIONS: [Action; 1] = [Action::WorkpieceTransfer {
+            from: "arm",
+            to: "outfeed",
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "transfer_without_part",
+            instr: Instr::Action {
+                actions: &ACTIONS,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 1] = [WorkpieceTypeDef {
+            name: "part",
+            normal_terminal_states: &["finished"],
+            abnormal_terminal_states: &[],
+            ingress_sites: &["infeed"],
+            normal_egress_sites: &["outfeed"],
+            abnormal_egress_sites: &[],
+        }];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "infeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static WORKPIECE_HOLDERS: [WorkpieceHolderDef<'static>; 1] = [WorkpieceHolderDef {
+            name: "arm",
+            capacity: 1,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &WORKPIECE_HOLDERS,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt.tick(&mut io).expect_err("empty source should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceSourceUnderflow { endpoint: "arm" }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_workpiece_duplicate_source_occupancy() {
+        static ACTIONS: [Action; 1] = [Action::WorkpieceAcquire {
+            workpiece_type: "part_a",
+            holder: "arm",
+            from: "infeed",
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "pick_ambiguous_source",
+            instr: Instr::Action {
+                actions: &ACTIONS,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "part_a",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &["infeed"],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "part_b",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &["infeed"],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "infeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 2,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static WORKPIECE_HOLDERS: [WorkpieceHolderDef<'static>; 1] = [WorkpieceHolderDef {
+            name: "arm",
+            capacity: 1,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &WORKPIECE_HOLDERS,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should seed both ingress parts");
+        let err = rt.tick(&mut io).expect_err("ambiguous source should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceDuplicateOccupancy {
+                endpoint: "infeed",
+                count: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_workpiece_destination_overflow() {
+        static ACTIONS: [Action; 1] = [Action::WorkpieceAcquire {
+            workpiece_type: "incoming_part",
+            holder: "arm",
+            from: "infeed",
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "pick_into_full_holder",
+            instr: Instr::Action {
+                actions: &ACTIONS,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "incoming_part",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &["infeed"],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "holder_part",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &["arm"],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "infeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static WORKPIECE_HOLDERS: [WorkpieceHolderDef<'static>; 1] = [WorkpieceHolderDef {
+            name: "arm",
+            capacity: 1,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &WORKPIECE_HOLDERS,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should seed source and holder");
+        let err = rt.tick(&mut io).expect_err("full destination should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceOverflow {
+                endpoint: "arm",
+                capacity: 1,
+                occupancy: 1,
+            }
         );
     }
 

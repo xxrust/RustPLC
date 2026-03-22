@@ -1,10 +1,57 @@
-use runtime_core::{Action, Instr};
+use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
+use runtime_core::{Action, Instr, Runtime, WorkpieceTerminalStatus};
 use rust_plc::codegen::st::{StCodegenConfig, StCodegenError, generate_st};
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::semantic::{build_constraint_set, build_state_machine, build_topology_graph};
 use rust_plc::verification::verify_all;
 use std::fs;
+
+struct MemIo {
+    tick: Tick,
+    di: [bool; 4],
+    do_: [bool; 4],
+    ai: [f32; 4],
+    ao: [f32; 4],
+}
+
+impl MemIo {
+    fn new() -> Self {
+        Self {
+            tick: Tick(0),
+            di: [false; 4],
+            do_: [false; 4],
+            ai: [0.0; 4],
+            ao: [0.0; 4],
+        }
+    }
+}
+
+impl Io for MemIo {
+    fn tick(&self) -> Tick {
+        self.tick
+    }
+
+    fn advance_tick(&mut self) {
+        self.tick.0 += 1;
+    }
+
+    fn read_digital_input(&self, id: DigitalInputId) -> bool {
+        self.di[id.0 as usize]
+    }
+
+    fn read_analog_input(&self, id: AnalogInputId) -> f32 {
+        self.ai[id.0 as usize]
+    }
+
+    fn write_digital_output(&mut self, id: DigitalOutputId, value: bool) {
+        self.do_[id.0 as usize] = value;
+    }
+
+    fn write_analog_output(&mut self, id: AnalogOutputId, value: f32) {
+        self.ao[id.0 as usize] = value;
+    }
+}
 
 const PLC_WORKPIECE_PHASE1: &str = r#"
 [topology]
@@ -155,6 +202,38 @@ fn runtime_bridge_lowers_phase1_example_into_runtime_program() {
         Action::WorkpieceFinish { at, terminal_state }
             if *at == "outfeed" && *terminal_state == "finished"
     )));
+}
+
+#[test]
+fn runtime_executes_phase1_example_end_to_end() {
+    let source = fs::read_to_string("examples/workpiece_phase1_transfer.plc")
+        .expect("phase1 example should be readable");
+    let program = parse_plc(&source).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge should lower phase1 workpiece model");
+
+    let mut io = MemIo::new();
+    let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
+    runtime
+        .tick(&mut io)
+        .expect("phase1 example should execute");
+
+    assert_eq!(runtime.workpiece_tokens().active_tokens(), 0);
+    let finished = runtime
+        .workpiece_tokens()
+        .token(0)
+        .expect("seeded token should remain traceable after finish");
+    assert_eq!(finished.current_location, "outfeed");
+    assert!(!finished.active);
+    assert_eq!(
+        finished.terminal_status,
+        Some(WorkpieceTerminalStatus::TerminalState { state: "finished" })
+    );
 }
 
 #[test]
