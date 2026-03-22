@@ -1829,6 +1829,7 @@ impl WorkpieceFlowRegistry {
 struct WorkpieceFlowToken {
     workpiece_type_idx: usize,
     endpoint_idx: usize,
+    mounted_endpoint_idx: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -1849,12 +1850,19 @@ impl WorkpieceFlowState {
             .count()
     }
 
-    fn unique_token_index_at(&self, endpoint_idx: usize) -> Result<usize, usize> {
+    fn unique_token_index_at(&self, endpoint_idx: usize, mounted: Option<bool>) -> Result<usize, usize> {
         let matches = self
             .tokens
             .iter()
             .enumerate()
-            .filter_map(|(idx, token)| (token.endpoint_idx == endpoint_idx).then_some(idx))
+            .filter_map(|(idx, token)| {
+                let mount_matches = match mounted {
+                    Some(true) => token.mounted_endpoint_idx == Some(endpoint_idx),
+                    Some(false) => token.mounted_endpoint_idx.is_none(),
+                    None => true,
+                };
+                (token.endpoint_idx == endpoint_idx && mount_matches).then_some(idx)
+            })
             .collect::<Vec<_>>();
         match matches.len() {
             0 => Err(0),
@@ -1871,6 +1879,23 @@ impl WorkpieceFlowState {
             }
         }
         registry.endpoints.occupied_endpoints(&counts)
+    }
+
+    fn inconsistent_mount_state(
+        &self,
+        registry: &WorkpieceFlowRegistry,
+    ) -> Option<(String, String, String)> {
+        self.tokens.iter().find_map(|token| {
+            let mounted_endpoint_idx = token.mounted_endpoint_idx?;
+            if mounted_endpoint_idx == token.endpoint_idx {
+                return None;
+            }
+            Some((
+                registry.workpiece_types[token.workpiece_type_idx].name.clone(),
+                registry.endpoints.names[mounted_endpoint_idx].clone(),
+                registry.endpoints.names[token.endpoint_idx].clone(),
+            ))
+        })
     }
 }
 
@@ -1901,6 +1926,7 @@ fn initial_workpiece_flow_state(
                     flow_state.tokens.push(WorkpieceFlowToken {
                         workpiece_type_idx,
                         endpoint_idx,
+                        mounted_endpoint_idx: None,
                     });
                 }
             }
@@ -1949,21 +1975,48 @@ fn apply_workpiece_effects(
         match effect {
             WorkpieceEffect::Acquire { holder, from } => {
                 if let Some(diag) = move_workpiece(
-                    program, transition, registry, flow_state, from, holder, path, "acquire",
+                    program,
+                    transition,
+                    registry,
+                    flow_state,
+                    from,
+                    holder,
+                    path,
+                    "acquire",
+                    Some(false),
+                    None,
                 ) {
                     return Some(diag);
                 }
             }
             WorkpieceEffect::Transfer { from, to } => {
                 if let Some(diag) = move_workpiece(
-                    program, transition, registry, flow_state, from, to, path, "transfer",
+                    program,
+                    transition,
+                    registry,
+                    flow_state,
+                    from,
+                    to,
+                    path,
+                    "transfer",
+                    Some(false),
+                    None,
                 ) {
                     return Some(diag);
                 }
             }
             WorkpieceEffect::Unmount { slot, to, .. } => {
                 if let Some(diag) = move_workpiece(
-                    program, transition, registry, flow_state, slot, to, path, "unmount",
+                    program,
+                    transition,
+                    registry,
+                    flow_state,
+                    slot,
+                    to,
+                    path,
+                    "unmount",
+                    Some(true),
+                    None,
                 ) {
                     return Some(diag);
                 }
@@ -1977,6 +2030,7 @@ fn apply_workpiece_effects(
                     at,
                     terminal_state,
                     path,
+                    Some(false),
                 ) {
                     return Some(diag);
                 }
@@ -1985,7 +2039,7 @@ fn apply_workpiece_effects(
                 workpiece_type,
                 slot,
             } => {
-                if let Some(diag) = introduce_workpiece(
+                if let Some(diag) = mount_workpiece(
                     program,
                     transition,
                     registry,
@@ -1993,7 +2047,6 @@ fn apply_workpiece_effects(
                     workpiece_type,
                     slot,
                     path,
-                    "mount",
                 ) {
                     return Some(diag);
                 }
@@ -2002,6 +2055,12 @@ fn apply_workpiece_effects(
             | WorkpieceEffect::Merge { .. }
             | WorkpieceEffect::TransformCarrier { .. } => {}
         }
+    }
+
+    if let Some(diag) =
+        validate_workpiece_flow_invariants(program, transition, registry, flow_state, path)
+    {
+        return Some(diag);
     }
 
     flow_state.canonicalize();
@@ -2017,6 +2076,8 @@ fn move_workpiece(
     to: &str,
     path: &[String],
     effect_name: &str,
+    source_mounted: Option<bool>,
+    destination_mounted: Option<&str>,
 ) -> Option<SafetyDiagnostic> {
     let token_idx = match unique_active_workpiece(
         program,
@@ -2024,29 +2085,55 @@ fn move_workpiece(
         registry,
         flow_state,
         from,
+        source_mounted,
         path,
         effect_name,
     ) {
         Ok(token_idx) => token_idx,
         Err(diag) => return Some(diag),
     };
-    if from == to {
-        return None;
+    let Some(endpoint_idx) = registry.endpoint_idx(to) else {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!("{effect_name} references undefined endpoint '{}'", to),
+            violation_path: extend_path(path, transition),
+            suggestion: "declare the endpoint in topology before using it in workpiece effects"
+                .to_string(),
+        });
+    };
+    let mounted_endpoint_idx = match destination_mounted {
+        Some(slot) => {
+            let Some(slot_idx) = registry.endpoint_idx(slot) else {
+                return Some(SafetyDiagnostic {
+                    line: find_state_line(program, &transition.from),
+                    constraint: "workpiece_flow".to_string(),
+                    reason: format!("{effect_name} references undefined endpoint '{}'", slot),
+                    violation_path: extend_path(path, transition),
+                    suggestion:
+                        "declare the endpoint in topology before using it in workpiece effects"
+                            .to_string(),
+                });
+            };
+            Some(slot_idx)
+        }
+        None => None,
+    };
+    if from != to {
+        if let Some(diag) = ensure_workpiece_destination(
+            program,
+            transition,
+            registry,
+            flow_state,
+            to,
+            path,
+            effect_name,
+        ) {
+            return Some(diag);
+        }
     }
-    if let Some(diag) = ensure_workpiece_destination(
-        program,
-        transition,
-        registry,
-        flow_state,
-        to,
-        path,
-        effect_name,
-    ) {
-        return Some(diag);
-    }
-    if let Some(endpoint_idx) = registry.endpoint_idx(to) {
-        flow_state.tokens[token_idx].endpoint_idx = endpoint_idx;
-    }
+    flow_state.tokens[token_idx].endpoint_idx = endpoint_idx;
+    flow_state.tokens[token_idx].mounted_endpoint_idx = mounted_endpoint_idx;
     None
 }
 
@@ -2058,9 +2145,17 @@ fn finish_workpiece(
     endpoint: &str,
     terminal_state: &str,
     path: &[String],
+    source_mounted: Option<bool>,
 ) -> Option<SafetyDiagnostic> {
     let token_idx = match unique_active_workpiece(
-        program, transition, registry, flow_state, endpoint, path, "finish",
+        program,
+        transition,
+        registry,
+        flow_state,
+        endpoint,
+        source_mounted,
+        path,
+        "finish",
     ) {
         Ok(token_idx) => token_idx,
         Err(diag) => return Some(diag),
@@ -2084,35 +2179,34 @@ fn finish_workpiece(
     None
 }
 
-fn introduce_workpiece(
+fn mount_workpiece(
     program: &PlcProgram,
     transition: &Transition,
     registry: &WorkpieceFlowRegistry,
     flow_state: &mut WorkpieceFlowState,
     workpiece_type: &str,
-    endpoint: &str,
+    slot: &str,
     path: &[String],
-    effect_name: &str,
 ) -> Option<SafetyDiagnostic> {
     let Some(workpiece_type_idx) = registry.workpiece_index.get(workpiece_type).copied() else {
         return Some(SafetyDiagnostic {
             line: find_state_line(program, &transition.from),
             constraint: "workpiece_flow".to_string(),
             reason: format!(
-                "{effect_name} introduces undeclared workpiece type '{}'",
+                "mount introduces undeclared workpiece type '{}'",
                 workpiece_type
             ),
             violation_path: extend_path(path, transition),
             suggestion: "declare the workpiece type before using it in runtime effects".to_string(),
         });
     };
-    if !registry.endpoint_matches_ingress_for_type(workpiece_type_idx, endpoint) {
+    if !registry.endpoint_matches_ingress_for_type(workpiece_type_idx, slot) {
         return Some(SafetyDiagnostic {
             line: find_state_line(program, &transition.from),
             constraint: "workpiece_flow".to_string(),
             reason: format!(
-                "{effect_name} introduces workpiece type '{}' at endpoint '{}', but that endpoint is not a declared ingress site",
-                workpiece_type, endpoint
+                "mount introduces workpiece type '{}' at endpoint '{}', but that endpoint is not a declared ingress site",
+                workpiece_type, slot
             ),
             violation_path: extend_path(path, transition),
             suggestion:
@@ -2120,30 +2214,99 @@ fn introduce_workpiece(
                     .to_string(),
         });
     }
-    if let Some(diag) = ensure_workpiece_destination(
-        program,
-        transition,
-        registry,
-        flow_state,
-        endpoint,
-        path,
-        effect_name,
-    ) {
-        return Some(diag);
-    }
-    let Some(endpoint_idx) = registry.endpoint_idx(endpoint) else {
+    let Some(slot_idx) = registry.endpoint_idx(slot) else {
         return Some(SafetyDiagnostic {
             line: find_state_line(program, &transition.from),
             constraint: "workpiece_flow".to_string(),
-            reason: format!("{effect_name} references undefined endpoint '{}'", endpoint),
+            reason: format!("mount references undefined endpoint '{}'", slot),
             violation_path: extend_path(path, transition),
             suggestion: "declare the endpoint in topology before using it in workpiece effects"
                 .to_string(),
         });
     };
+
+    match flow_state.unique_token_index_at(slot_idx, Some(true)) {
+        Ok(_) => {
+            return Some(SafetyDiagnostic {
+                line: find_state_line(program, &transition.from),
+                constraint: "workpiece_flow".to_string(),
+                reason: format!(
+                    "mount would place a second mounted workpiece at slot '{}'",
+                    slot
+                ),
+                violation_path: extend_path(path, transition),
+                suggestion:
+                    "unmount or finish the mounted workpiece before mounting another token on the same slot"
+                        .to_string(),
+            });
+        }
+        Err(count) if count > 1 => {
+            return Some(SafetyDiagnostic {
+                line: find_state_line(program, &transition.from),
+                constraint: "workpiece_flow".to_string(),
+                reason: format!(
+                    "reachable state already has duplicate mounted occupancy ({count} tokens) at slot '{}'",
+                    slot
+                ),
+                violation_path: extend_path(path, transition),
+                suggestion:
+                    "preserve at most one mounted workpiece per carrier slot in every reachable state"
+                        .to_string(),
+            });
+        }
+        Err(_) => {}
+    }
+
+    let free_candidates = flow_state
+        .tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, token)| {
+            (token.endpoint_idx == slot_idx
+                && token.mounted_endpoint_idx.is_none()
+                && token.workpiece_type_idx == workpiece_type_idx)
+                .then_some(idx)
+        })
+        .collect::<Vec<_>>();
+
+    match free_candidates.as_slice() {
+        [token_idx] => {
+            flow_state.tokens[*token_idx].mounted_endpoint_idx = Some(slot_idx);
+            return None;
+        }
+        [] => {}
+        _ => {
+            return Some(SafetyDiagnostic {
+                line: find_state_line(program, &transition.from),
+                constraint: "workpiece_flow".to_string(),
+                reason: format!(
+                    "mount requires a unique free-standing workpiece type '{}' at slot '{}', but reachable state has duplicate candidates",
+                    workpiece_type, slot
+                ),
+                violation_path: extend_path(path, transition),
+                suggestion:
+                    "ensure each slot resolves to at most one free-standing token before mounting it"
+                        .to_string(),
+            });
+        }
+    }
+
+    if let Some(diag) = ensure_workpiece_destination(
+        program,
+        transition,
+        registry,
+        flow_state,
+        slot,
+        path,
+        "mount",
+    ) {
+        return Some(diag);
+    }
+
     flow_state.tokens.push(WorkpieceFlowToken {
         workpiece_type_idx,
-        endpoint_idx,
+        endpoint_idx: slot_idx,
+        mounted_endpoint_idx: Some(slot_idx),
     });
     None
 }
@@ -2154,6 +2317,7 @@ fn unique_active_workpiece(
     registry: &WorkpieceFlowRegistry,
     flow_state: &WorkpieceFlowState,
     endpoint: &str,
+    mounted: Option<bool>,
     path: &[String],
     effect_name: &str,
 ) -> Result<usize, SafetyDiagnostic> {
@@ -2168,14 +2332,23 @@ fn unique_active_workpiece(
         });
     };
 
-    match flow_state.unique_token_index_at(endpoint_idx) {
+    let expectation = match mounted {
+        Some(true) => "mounted",
+        Some(false) => "free-standing",
+        None => "active",
+    };
+
+    match flow_state.unique_token_index_at(endpoint_idx, mounted) {
         Ok(token_idx) => Ok(token_idx),
         Err(0) => {
             let mut reason = format!(
-                "{effect_name} reads endpoint '{}' before any workpiece is available",
-                endpoint
+                "{effect_name} reads endpoint '{}' before any {expectation} workpiece is available",
+                endpoint,
             );
-            if path.len() == 1 && !registry.endpoint_matches_any_ingress(endpoint) {
+            if path.len() == 1
+                && mounted != Some(true)
+                && !registry.endpoint_matches_any_ingress(endpoint)
+            {
                 reason.push_str("; the endpoint is not a declared ingress site");
             }
             Err(SafetyDiagnostic {
@@ -2183,15 +2356,21 @@ fn unique_active_workpiece(
                 constraint: "workpiece_flow".to_string(),
                 reason,
                 violation_path: extend_path(path, transition),
-                suggestion: "introduce the workpiece through a declared ingress or move it into the source endpoint first".to_string(),
+                suggestion: match mounted {
+                    Some(true) => {
+                        "mount the workpiece on the slot before consuming it through unmount"
+                            .to_string()
+                    }
+                    _ => "introduce the workpiece through a declared ingress or move it into the source endpoint first".to_string(),
+                },
             })
         }
         Err(count) => Err(SafetyDiagnostic {
             line: find_state_line(program, &transition.from),
             constraint: "workpiece_flow".to_string(),
             reason: format!(
-                "{effect_name} requires a unique active workpiece at endpoint '{}', but reachable state has duplicate occupancy ({count} tokens)",
-                endpoint
+                "{effect_name} requires a unique {expectation} workpiece at endpoint '{}', but reachable state has duplicate occupancy ({count} tokens)",
+                endpoint,
             ),
             violation_path: extend_path(path, transition),
             suggestion:
@@ -2199,6 +2378,29 @@ fn unique_active_workpiece(
                     .to_string(),
         }),
     }
+}
+
+fn validate_workpiece_flow_invariants(
+    program: &PlcProgram,
+    transition: &Transition,
+    registry: &WorkpieceFlowRegistry,
+    flow_state: &WorkpieceFlowState,
+    path: &[String],
+) -> Option<SafetyDiagnostic> {
+    let (workpiece_type, mounted_slot, current_endpoint) =
+        flow_state.inconsistent_mount_state(registry)?;
+    Some(SafetyDiagnostic {
+        line: find_state_line(program, &transition.from),
+        constraint: "workpiece_flow".to_string(),
+        reason: format!(
+            "workpiece type '{}' is still mounted on slot '{}' while also being reachable at '{}'",
+            workpiece_type, mounted_slot, current_endpoint
+        ),
+        violation_path: extend_path(path, transition),
+        suggestion:
+            "mounted workpieces must remain bound to their slot until an explicit unmount clears the mounted association"
+                .to_string(),
+    })
 }
 
 fn ensure_workpiece_destination(

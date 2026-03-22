@@ -14,6 +14,7 @@ Started: 2026-03-23 01:07:00 CST
 - Phase 1 workpiece effects require a unique active token at the source endpoint. Treat `0` as underflow, `>1` as duplicate occupancy ambiguity, and destination-capacity violations as explicit overflow errors.
 - When semantic already blocks a malformed workpiece contract but verification still needs its own regression, build the normal `ConstraintSet`/`StateMachine` first and then mutate the lowered structures in the test to isolate verification responsibility.
 - Carrier-slot bridge lowering must expand `carrier.slot[*]` / grid selectors into concrete runtime ingress-egress endpoints and synthesized carrier `workpiece_sites`; otherwise runtime seeding and slot-addressed actions drift apart even when IR is correct.
+- Phase 2 safety verification must mirror runtime token semantics: track `mounted_slot` separately, let `mount` reuse a same-type free-standing token already at the slot, treat `acquire/transfer/finish` as free-standing-only, and keep mounted association intact across `transform carrier`.
 
 ## [2026-03-23 01:40:23 +08:00] - US-001
 Thread: https://ampcode.com/threads/unknown
@@ -28,7 +29,6 @@ Thread: https://ampcode.com/threads/unknown
 - `crates/runtime-core` unit tests are concentrated in the same source file, so API surface changes in that crate often require fixture updates in dozens of nearby static literals.
 - The workpiece token store is currently record-preserving: terminal tokens stay stored and become inactive instead of being deleted, which keeps traceability available for later execution and lineage stories.
 ---
-
 ## [2026-03-23 02:07:00 +08:00] - US-002
 Thread: https://ampcode.com/threads/unknown
 - Implemented Phase 1 workpiece lowering in `src/runtime_bridge.rs` by removing the global workpiece rejection gate, lowering workpiece type/site/holder metadata into `runtime_core::Program`, and converting `acquire`/`transfer`/`finish` effects into explicit runtime actions.
@@ -131,4 +131,20 @@ Thread: https://ampcode.com/threads/unknown
   - Carrier slot ingress and carrier mounting are separate semantics. If a future story only stores `current_location`, it will not be able to tell “token arrived at slot” apart from “token is mounted on carrier slot”.
   - Runtime ingress seeding should mirror verification reachability rules: seed only endpoints that a runtime action can consume as a source, otherwise mount-only fixtures create false duplicate occupancy before the first tick.
   - The local `cargo fmt` toolchain currently rejects this repo's existing let-chain syntax even though `cargo test` passes, so formatting cannot be treated as a reliable gate until rustfmt/toolchain alignment is fixed.
+---
+## [2026-03-23 03:28:35 +08:00] - US-007
+Thread: https://ampcode.com/threads/unknown
+- Implemented exact Phase 2 carrier reachable-state checks in `src/verification/safety.rs` by extending workpiece flow tokens with explicit `mounted_slot` state and separating free-standing versus mounted source selection.
+- Updated safety-side `mount` semantics to reuse an existing same-type free-standing token already at the slot before introducing a new mounted token, which prevents verification from inventing impossible free-standing-plus-mounted duplicates.
+- Added regressions in `tests/workpiece_model_phase23.rs` for real slot overflow and for consuming a mounted token after `transform carrier`, proving mounted association survives carrier transforms until `unmount`.
+- Files changed
+- `AGENTS.md`
+- `prd.json`
+- `progress.txt`
+- `src/verification/safety.rs`
+- `tests/workpiece_model_phase23.rs`
+- **Learnings for future iterations:**
+  - Phase 2 verification has to mirror runtime token shape, not just endpoint occupancy counts; otherwise slot consumers silently collapse mounted and free-standing semantics.
+  - A last step without a successor transition never executes its `effect` during reachable-state exploration, so negative verification fixtures that must exercise an effect need a following step or another outgoing edge.
+  - Slot overflow coverage is more meaningful when the slot is already occupied and another action tries to place a different token there; duplicate `mount` mostly models duplicate-mounted occupancy rather than generic capacity overflow.
 ---

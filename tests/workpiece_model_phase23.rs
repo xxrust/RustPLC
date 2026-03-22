@@ -165,10 +165,12 @@ const PLC_WORKPIECE_VERIFY_CAPACITY: &str = r#"
 [topology]
 
 workpiece part: workpiece_type {
-    ingress_sites: [plate.slot[*]]
+    ingress_sites: [infeed, plate.slot[*]]
 }
 
 carrier plate: workpiece_carrier { slots: 1 }
+location infeed: workpiece_location { capacity: 1 }
+holder arm: workpiece_holder { capacity: 1 }
 
 [constraints]
 
@@ -177,8 +179,10 @@ carrier plate: workpiece_carrier { slots: 1 }
 task transfer_part:
     step mount_a:
         effect: mount part on plate.slot[0]
-    step mount_b:
-        effect: mount part on plate.slot[0]
+    step pick:
+        effect: acquire holder arm from infeed
+    step place:
+        effect: transfer from arm to plate.slot[0]
     step done:
         action: log "overflow"
 "#;
@@ -228,6 +232,31 @@ task unload_part:
         effect: unmount rod from plate.slot[0] to outfeed
     step done:
         action: log "empty-slot"
+"#;
+
+const PLC_WORKPIECE_VERIFY_MOUNTED_CONSISTENCY: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    ingress_sites: [plate.slot[*]]
+}
+
+carrier plate: workpiece_carrier { slots: 1 }
+location outfeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task inspect_part:
+    step mount_part:
+        effect: mount rod on plate.slot[0]
+    step rotate:
+        effect: transform carrier plate to frame inspection
+    step illegal_transfer:
+        effect: transfer from plate.slot[0] to outfeed
+    step done:
+        action: log "unexpected"
 "#;
 
 const PLC_WORKPIECE_VERIFY_UNUSED_INGRESS: &str = r#"
@@ -1311,7 +1340,10 @@ fn verify_all_rejects_workpiece_source_underflow() {
     let errors =
         verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
     assert!(errors.iter().any(|error| {
-        error.checker == "safety" && error.reason.contains("before any workpiece is available")
+        error.checker == "safety"
+            && error
+                .reason
+                .contains("before any free-standing workpiece is available")
     }));
 }
 
@@ -1328,7 +1360,9 @@ fn verify_all_rejects_phase1_effect_from_undeclared_ingress_site() {
         verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
     assert!(errors.iter().any(|error| {
         error.checker == "safety"
-            && error.reason.contains("before any workpiece is available")
+            && error
+                .reason
+                .contains("before any free-standing workpiece is available")
             && error.reason.contains("not a declared ingress site")
     }));
 }
@@ -1347,6 +1381,23 @@ fn verify_all_rejects_workpiece_capacity_overflow() {
             .iter()
             .any(|error| error.checker == "safety" && error.reason.contains("exceed capacity"))
     );
+}
+
+#[test]
+fn verify_all_rejects_consuming_mounted_workpiece_after_transform() {
+    let program =
+        parse_plc(PLC_WORKPIECE_VERIFY_MOUNTED_CONSISTENCY).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error.reason.contains("before any free-standing workpiece is available")
+            && error.reason.contains("plate.slot[0]")
+    }));
 }
 
 #[test]
@@ -1470,7 +1521,9 @@ fn verify_all_rejects_unmount_from_empty_slot() {
         verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
     assert!(errors.iter().any(|error| {
         error.checker == "safety"
-            && error.reason.contains("before any workpiece is available")
+            && error
+                .reason
+                .contains("before any mounted workpiece is available")
             && error.reason.contains("plate.slot[0]")
     }));
 }
