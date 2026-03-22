@@ -5,6 +5,7 @@ Started: 2026-03-23 01:07:00 CST
 - Workpiece semantics must close through semantic checks, verification, runtime bridge, runtime-core execution, and example regressions.
 - ST backend is explicitly out of scope for this Ralph run.
 - `crates/runtime-core` is `no_std`, so workpiece token and lineage storage must stay bounded and allocation-free.
+- Keep workpiece lineage as an append-only edge store separate from token records; consumed tokens stay in the token store and are traced through lineage by token id.
 - Reuse `tests/workpiece_model_phase23.rs`, `tests/examples_integration.rs`, and `examples/workpiece_*.plc` wherever possible.
 - Unsupported workpiece behavior must fail explicitly. Do not silently drop semantics in bridge, runtime, or verification.
 - `crates/runtime-core/src/lib.rs` keeps most runtime-core fixtures inline; when `Program`, `AxisMotionCommand`, or pending-axis state gains fields, update those in-file test literals together before trusting the crate test baseline.
@@ -147,4 +148,19 @@ Thread: https://ampcode.com/threads/unknown
   - Phase 2 verification has to mirror runtime token shape, not just endpoint occupancy counts; otherwise slot consumers silently collapse mounted and free-standing semantics.
   - A last step without a successor transition never executes its `effect` during reachable-state exploration, so negative verification fixtures that must exercise an effect need a following step or another outgoing edge.
   - Slot overflow coverage is more meaningful when the slot is already occupied and another action tries to place a different token there; duplicate `mount` mostly models duplicate-mounted occupancy rather than generic capacity overflow.
+---
+## [2026-03-23 03:39:36 +08:00] - US-008
+Thread: https://ampcode.com/threads/unknown
+- Added bounded `WorkpieceLineageStore` and lineage record types in `crates/runtime-core/src/lib.rs` to model `split parent -> child` and `merge input -> output` relations without allocation.
+- Wired lineage storage into `Runtime` as a separate append-only structure next to `WorkpieceTokenStore`, while keeping execution semantics unchanged until the later `split` and `merge` stories land.
+- Added runtime-core tests covering split lineage lookup, merge lineage lookup, consumed-token traceability, and lineage capacity overflow; also preserved the pattern in `AGENTS.md` for future runtime workpiece stories.
+- Files changed
+- `AGENTS.md`
+- `crates/runtime-core/src/lib.rs`
+- `prd.json`
+- `progress.txt`
+- **Learnings for future iterations:**
+  - Treat lineage as edges between token ids, not extra mutable state on the token itself; that keeps split one-to-many and merge many-to-one representable without changing token identity rules.
+  - Consumed workpiece traceability depends on two stores working together: token records remain in `WorkpieceTokenStore` with `terminal_status = Consumed`, while lineage keeps the relationship history in an append-only log.
+  - Adding a future `split` or `merge` executor should populate lineage through dedicated store helpers instead of inventing ad-hoc per-effect side tables.
 ---

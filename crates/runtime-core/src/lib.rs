@@ -833,6 +833,7 @@ pub struct Program<'a> {
 }
 
 pub type WorkpieceTokenId = u32;
+pub type WorkpieceLineageRecordId = u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkpieceTerminalStatus<'a> {
@@ -994,6 +995,147 @@ impl<'a> Default for WorkpieceTokenStore<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkpieceLineageKind {
+    SplitParentToChild,
+    MergeInputToOutput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceLineageRecord {
+    pub record_id: WorkpieceLineageRecordId,
+    pub relation: WorkpieceLineageKind,
+    pub source_token_id: WorkpieceTokenId,
+    pub target_token_id: WorkpieceTokenId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkpieceLineageStoreError {
+    DuplicateRelation {
+        relation: WorkpieceLineageKind,
+        source_token_id: WorkpieceTokenId,
+        target_token_id: WorkpieceTokenId,
+    },
+    CapacityExceeded {
+        max: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceLineageStore {
+    records: [Option<WorkpieceLineageRecord>; MAX_WORKPIECE_LINEAGE_RECORDS],
+    records_used: usize,
+    next_record_id: WorkpieceLineageRecordId,
+}
+
+impl WorkpieceLineageStore {
+    pub const fn new() -> Self {
+        Self {
+            records: [None; MAX_WORKPIECE_LINEAGE_RECORDS],
+            records_used: 0,
+            next_record_id: 0,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.records_used
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.records_used == 0
+    }
+
+    pub fn record_split_child(
+        &mut self,
+        parent_token_id: WorkpieceTokenId,
+        child_token_id: WorkpieceTokenId,
+    ) -> Result<WorkpieceLineageRecord, WorkpieceLineageStoreError> {
+        self.record_relation(
+            WorkpieceLineageKind::SplitParentToChild,
+            parent_token_id,
+            child_token_id,
+        )
+    }
+
+    pub fn record_merge_input(
+        &mut self,
+        input_token_id: WorkpieceTokenId,
+        output_token_id: WorkpieceTokenId,
+    ) -> Result<WorkpieceLineageRecord, WorkpieceLineageStoreError> {
+        self.record_relation(
+            WorkpieceLineageKind::MergeInputToOutput,
+            input_token_id,
+            output_token_id,
+        )
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = WorkpieceLineageRecord> + '_ {
+        self.records.iter().flatten().copied()
+    }
+
+    pub fn split_children_of(
+        &self,
+        parent_token_id: WorkpieceTokenId,
+    ) -> impl Iterator<Item = WorkpieceLineageRecord> + '_ {
+        self.iter().filter(move |record| {
+            record.relation == WorkpieceLineageKind::SplitParentToChild
+                && record.source_token_id == parent_token_id
+        })
+    }
+
+    pub fn merge_inputs_of(
+        &self,
+        output_token_id: WorkpieceTokenId,
+    ) -> impl Iterator<Item = WorkpieceLineageRecord> + '_ {
+        self.iter().filter(move |record| {
+            record.relation == WorkpieceLineageKind::MergeInputToOutput
+                && record.target_token_id == output_token_id
+        })
+    }
+
+    fn record_relation(
+        &mut self,
+        relation: WorkpieceLineageKind,
+        source_token_id: WorkpieceTokenId,
+        target_token_id: WorkpieceTokenId,
+    ) -> Result<WorkpieceLineageRecord, WorkpieceLineageStoreError> {
+        if self.iter().any(|record| {
+            record.relation == relation
+                && record.source_token_id == source_token_id
+                && record.target_token_id == target_token_id
+        }) {
+            return Err(WorkpieceLineageStoreError::DuplicateRelation {
+                relation,
+                source_token_id,
+                target_token_id,
+            });
+        }
+
+        let Some(slot_idx) = self.records.iter().position(Option::is_none) else {
+            return Err(WorkpieceLineageStoreError::CapacityExceeded {
+                max: MAX_WORKPIECE_LINEAGE_RECORDS,
+            });
+        };
+
+        let record = WorkpieceLineageRecord {
+            record_id: self.next_record_id,
+            relation,
+            source_token_id,
+            target_token_id,
+        };
+        self.records[slot_idx] = Some(record);
+        self.records_used += 1;
+        self.next_record_id = self.next_record_id.saturating_add(1);
+        Ok(record)
+    }
+}
+
+impl Default for WorkpieceLineageStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> Program<'a> {
     pub fn task(&self, index: usize) -> Result<&Task<'a>, RuntimeError> {
         self.tasks
@@ -1087,6 +1229,7 @@ pub struct Runtime<'a> {
     cam_states: [CamState; MAX_CAM_COUPLINGS],
     digital_output_shadow: [bool; MAX_TRACKED_DIGITAL_OUTPUTS],
     workpiece_tokens: WorkpieceTokenStore<'a>,
+    workpiece_lineage: WorkpieceLineageStore,
     next_workpiece_token_id: WorkpieceTokenId,
 }
 
@@ -1188,6 +1331,7 @@ impl<'a> Runtime<'a> {
             cam_states,
             digital_output_shadow: [false; MAX_TRACKED_DIGITAL_OUTPUTS],
             workpiece_tokens,
+            workpiece_lineage: WorkpieceLineageStore::new(),
             next_workpiece_token_id,
         })
     }
@@ -1261,6 +1405,10 @@ impl<'a> Runtime<'a> {
 
     pub fn workpiece_tokens(&self) -> &WorkpieceTokenStore<'a> {
         &self.workpiece_tokens
+    }
+
+    pub fn workpiece_lineage(&self) -> &WorkpieceLineageStore {
+        &self.workpiece_lineage
     }
 
     fn seed_workpiece_tokens(
@@ -2942,6 +3090,7 @@ pub const MAX_EXTERN_ARGS: usize = 16;
 pub const MAX_EXTERN_RETURNS: usize = 8;
 pub const MAX_TRACKED_DIGITAL_OUTPUTS: usize = 1024;
 pub const MAX_WORKPIECE_TOKENS: usize = 256;
+pub const MAX_WORKPIECE_LINEAGE_RECORDS: usize = MAX_WORKPIECE_TOKENS * 4;
 pub const SEMANTIC_RESOURCE_CONFLICT_ERROR_CODE: i32 = -32_001;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3402,6 +3551,116 @@ mod tests {
             store.create_token(MAX_WORKPIECE_TOKENS as WorkpieceTokenId, "part", "buffer"),
             Err(WorkpieceTokenStoreError::CapacityExceeded {
                 max: MAX_WORKPIECE_TOKENS,
+            })
+        );
+    }
+
+    #[test]
+    fn workpiece_lineage_store_tracks_split_children_after_source_is_consumed() {
+        let mut tokens = WorkpieceTokenStore::new();
+        tokens
+            .create_token(1, "rod", "cut_station")
+            .expect("source token should exist");
+        tokens
+            .create_token(2, "slice", "tray_a")
+            .expect("child token a should exist");
+        tokens
+            .create_token(3, "slice", "tray_b")
+            .expect("child token b should exist");
+
+        let mut lineage = WorkpieceLineageStore::new();
+        let child_a = lineage
+            .record_split_child(1, 2)
+            .expect("first split child should record");
+        let child_b = lineage
+            .record_split_child(1, 3)
+            .expect("second split child should record");
+
+        tokens
+            .finish_token(1, WorkpieceTerminalStatus::Consumed)
+            .expect("split source should be consumable");
+
+        assert_eq!(lineage.len(), 2);
+        assert_eq!(
+            lineage.split_children_of(1).collect::<Vec<_>>(),
+            vec![child_a, child_b]
+        );
+        assert_eq!(
+            tokens.token(1).expect("source token should remain traceable"),
+            WorkpieceToken {
+                token_id: 1,
+                workpiece_type: "rod",
+                current_location: "cut_station",
+                mounted_slot: None,
+                active: false,
+                terminal_status: Some(WorkpieceTerminalStatus::Consumed),
+            }
+        );
+    }
+
+    #[test]
+    fn workpiece_lineage_store_tracks_merge_inputs_after_inputs_are_consumed() {
+        let mut tokens = WorkpieceTokenStore::new();
+        tokens
+            .create_token(10, "cell", "buffer_a")
+            .expect("merge input a should exist");
+        tokens
+            .create_token(11, "cell", "buffer_b")
+            .expect("merge input b should exist");
+        tokens
+            .create_token(12, "module", "assembly")
+            .expect("merge output should exist");
+
+        let mut lineage = WorkpieceLineageStore::new();
+        let input_a = lineage
+            .record_merge_input(10, 12)
+            .expect("first merge input should record");
+        let input_b = lineage
+            .record_merge_input(11, 12)
+            .expect("second merge input should record");
+
+        tokens
+            .finish_token(10, WorkpieceTerminalStatus::Consumed)
+            .expect("merge input a should be consumable");
+        tokens
+            .finish_token(11, WorkpieceTerminalStatus::Consumed)
+            .expect("merge input b should be consumable");
+
+        assert_eq!(lineage.len(), 2);
+        assert_eq!(
+            lineage.merge_inputs_of(12).collect::<Vec<_>>(),
+            vec![input_a, input_b]
+        );
+        assert_eq!(
+            tokens
+                .token(10)
+                .expect("consumed merge input should stay inspectable")
+                .terminal_status,
+            Some(WorkpieceTerminalStatus::Consumed)
+        );
+        assert_eq!(
+            tokens
+                .token(11)
+                .expect("consumed merge input should stay inspectable")
+                .terminal_status,
+            Some(WorkpieceTerminalStatus::Consumed)
+        );
+    }
+
+    #[test]
+    fn workpiece_lineage_store_rejects_capacity_overflow() {
+        let mut lineage = WorkpieceLineageStore::new();
+        for relation_id in 0..MAX_WORKPIECE_LINEAGE_RECORDS as WorkpieceTokenId {
+            lineage
+                .record_split_child(relation_id, relation_id.saturating_add(10_000))
+                .expect("capacity fill should succeed");
+        }
+
+        assert_eq!(lineage.len(), MAX_WORKPIECE_LINEAGE_RECORDS);
+        assert_eq!(
+            lineage.record_merge_input(99_001, 99_002),
+            Err(WorkpieceLineageStoreError::CapacityExceeded {
+                max: MAX_WORKPIECE_LINEAGE_RECORDS,
             })
         );
     }

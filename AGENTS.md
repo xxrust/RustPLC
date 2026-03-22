@@ -267,6 +267,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `runtime_bridge` 降级运行时 `Instr::Action` 时，必须同时处理 `transition.actions` 与 `transition.effects`；只消费 `actions` 会把 workpiece 语义静默丢失到 runtime 之外
 - Phase 1 workpiece runtime 的 ingress seeding 必须由“实际会从该端点消耗工件”的动作源驱动（当前是 `acquire/transfer` 的 source 端点），而不是无差别遍历所有 `workpiece_type.ingress_sites`；否则 mount-only carrier 流程会在 `Runtime::new` 时把 slot 预填满，和 verification 的可达状态语义漂移
 - Phase 2 `mount/unmount` 不能只靠 `current_location` 表示语义；runtime token 必须显式区分“自由占位于 slot”与“mounted 在该 slot 上”的关系，否则 carrier slot ingress、`transform carrier` 与后续 `unmount` 会被错误折叠成普通位置迁移
+- split/merge lineage 应保持为 `runtime-core` 中独立于 token 记录的追加式边存储；被 `Consumed` 的 token 仍保留在 token store 中，并通过 lineage 的 token id 关联供后续实例级追踪
 - Phase 1 `acquire/transfer/finish` 在 runtime 只能消费“源端点恰好 1 个 active token”的状态；`0` 个属于 underflow，`>1` 个属于 duplicate occupancy 歧义，目标端点容量检查走显式 overflow 错误，避免 bridge/runtime 对未定实例做静默猜测
 - `runtime_bridge` 进入 carrier workpiece 阶段后，必须把 `workpiece_type.ingress_sites` / `*_egress_sites` 中的 `carrier.slot[*]`、`carrier.slot[row,col]` 模式展开成 runtime 可执行的具体端点，并把 carrier 每个具体 slot 追加到 runtime `workpiece_sites`；否则 `Runtime::new` 的 ingress seeding 与后续 `acquire/mount/unmount` 会在 slot 名称上失配
 - 当 `runtime_core::Action` 或 `Program` 增加新字段/变体时，除 bridge 外还要同步更新 `src/main.rs`、`src/sim_regress.rs`、`crates/codegen/src/lib.rs`、`crates/sim/*` 中对 runtime 结构的穷举匹配与静态 `Program` 夹具，否则很容易在非目标 crate 上留下编译断点
