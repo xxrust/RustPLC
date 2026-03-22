@@ -1,0 +1,28 @@
+[topology]
+
+workpiece part: workpiece_type {
+    normal_terminal_states: [finished]
+    ingress_sites: [tray_a.slot[*]]
+    normal_egress_sites: [outfeed]
+}
+
+carrier tray_a: workpiece_carrier { slots: 4 }
+location outfeed: workpiece_location { capacity: 1 }
+holder arm: workpiece_holder { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task transfer_part:
+    step pick:
+        effect: acquire holder arm from tray_a.slot[0]
+    step place:
+        effect: transfer from arm to outfeed
+    step done:
+        effect: finish workpiece at outfeed as finished
+    on_complete: goto sink
+
+task sink:
+    step idle:
+        action: log "done"

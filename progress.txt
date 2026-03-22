@@ -16,6 +16,7 @@ Started: 2026-03-23 01:07:00 CST
 - When semantic already blocks a malformed workpiece contract but verification still needs its own regression, build the normal `ConstraintSet`/`StateMachine` first and then mutate the lowered structures in the test to isolate verification responsibility.
 - Carrier-slot bridge lowering must expand `carrier.slot[*]` / grid selectors into concrete runtime ingress-egress endpoints and synthesized carrier `workpiece_sites`; otherwise runtime seeding and slot-addressed actions drift apart even when IR is correct.
 - Phase 2 safety verification must mirror runtime token semantics: track `mounted_slot` separately, let `mount` reuse a same-type free-standing token already at the slot, treat `acquire/transfer/finish` as free-standing-only, and keep mounted association intact across `transform carrier`.
+- Phase 3 `split` is still type-level in IR. Runtime must consume exactly one active token of `source_type` globally and let child tokens inherit the source token's `current_location` and `mounted_slot`; if future stories need endpoint-level routing, add that data to IR instead of guessing in bridge/runtime.
 
 ## [2026-03-23 01:40:23 +08:00] - US-001
 Thread: https://ampcode.com/threads/unknown
@@ -163,4 +164,26 @@ Thread: https://ampcode.com/threads/unknown
   - Treat lineage as edges between token ids, not extra mutable state on the token itself; that keeps split one-to-many and merge many-to-one representable without changing token identity rules.
   - Consumed workpiece traceability depends on two stores working together: token records remain in `WorkpieceTokenStore` with `terminal_status = Consumed`, while lineage keeps the relationship history in an append-only log.
   - Adding a future `split` or `merge` executor should populate lineage through dedicated store helpers instead of inventing ad-hoc per-effect side tables.
+---
+## [2026-03-23 04:05:50 +08:00] - US-009
+Thread: https://ampcode.com/threads/unknown
+- Implemented `split` end-to-end for the current WPM-v1 scope: `src/runtime_bridge.rs` now lowers `WorkpieceEffect::Split` into `runtime_core::Action::WorkpieceSplit`, while `merge` still fails explicitly at the effect level.
+- Added runtime-core split execution in `crates/runtime-core/src/lib.rs` with bounded token/lineage preflight checks, source-token consumption to `Consumed`, child-token creation, and lineage recording for every produced token.
+- Added split regressions in `tests/workpiece_model_phase23.rs` and `crates/runtime-core/src/lib.rs`, and staged the canonical workpiece example fixtures under `examples/` that existing example regression tests already depend on.
+- Files changed
+- `AGENTS.md`
+- `crates/codegen/src/lib.rs`
+- `crates/runtime-core/src/lib.rs`
+- `examples/workpiece_carrier_slot_transfer.plc`
+- `examples/workpiece_split_merge.plc`
+- `prd.json`
+- `progress.txt`
+- `src/main.rs`
+- `src/runtime_bridge.rs`
+- `src/sim_regress.rs`
+- `tests/workpiece_model_phase23.rs`
+- **Learnings for future iterations:**
+  - `split` currently has no endpoint or instance selector in IR, so runtime must reject `source_type` multiplicity instead of guessing which token to consume.
+  - Split children should inherit the source token's location/mounted association; otherwise carrier-mounted and in-place process semantics drift between bridge, runtime, and later verification.
+  - Because consumed source tokens stay in `WorkpieceTokenStore`, split capacity checks must use `slots_used + count`, not `active_tokens + count`.
 ---

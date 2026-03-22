@@ -786,7 +786,8 @@ fn io_sizes_for_program_and_scenario(
                             | Action::WorkpieceFinish { .. }
                             | Action::WorkpieceMount { .. }
                             | Action::WorkpieceUnmount { .. }
-                            | Action::WorkpieceTransformCarrier { .. } => {}
+                            | Action::WorkpieceTransformCarrier { .. }
+                            | Action::WorkpieceSplit { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }

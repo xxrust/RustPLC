@@ -302,6 +302,15 @@ fn format_action(a: &Action) -> String {
             "Action::WorkpieceTransformCarrier {{ carrier: {:?}, frame: {:?} }}",
             carrier, frame
         ),
+        Action::WorkpieceSplit {
+            source_type,
+            target_type,
+            count,
+            consumed,
+        } => format!(
+            "Action::WorkpieceSplit {{ source_type: {:?}, target_type: {:?}, count: {}, consumed: {:?} }}",
+            source_type, target_type, count, consumed
+        ),
         Action::Extend { output } => {
             format!("Action::Extend {{ output: DigitalOutputId({}) }}", output.0)
         }

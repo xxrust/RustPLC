@@ -929,8 +929,7 @@ fn expand_slot_reference(
             }
             let row_values = expand_slot_selector(carrier, selectors, 0, *rows)?;
             let col_values = expand_slot_selector(carrier, selectors, 1, *cols)?;
-            let mut out =
-                Vec::with_capacity(row_values.len().saturating_mul(col_values.len()));
+            let mut out = Vec::with_capacity(row_values.len().saturating_mul(col_values.len()));
             for row in &row_values {
                 for col in &col_values {
                     out.push(format!("{carrier}.slot[{row},{col}]"));
@@ -947,21 +946,23 @@ fn expand_slot_selector(
     dim_idx: usize,
     bound: u32,
 ) -> Result<Vec<u32>, BridgeError> {
-    let selector = selectors.get(dim_idx).ok_or_else(|| {
-        BridgeError::InvalidWorkpieceSlotReference {
-            slot: render_slot_reference(carrier, selectors),
-            details: format!("missing slot selector at dimension {}", dim_idx + 1),
-        }
-    })?;
+    let selector =
+        selectors
+            .get(dim_idx)
+            .ok_or_else(|| BridgeError::InvalidWorkpieceSlotReference {
+                slot: render_slot_reference(carrier, selectors),
+                details: format!("missing slot selector at dimension {}", dim_idx + 1),
+            })?;
     if selector == "*" {
         return Ok((0..bound).collect());
     }
-    let parsed = selector
-        .parse::<u32>()
-        .map_err(|_| BridgeError::InvalidWorkpieceSlotReference {
-            slot: render_slot_reference(carrier, selectors),
-            details: format!("slot selector '{selector}' must be '*' or an integer"),
-        })?;
+    let parsed =
+        selector
+            .parse::<u32>()
+            .map_err(|_| BridgeError::InvalidWorkpieceSlotReference {
+                slot: render_slot_reference(carrier, selectors),
+                details: format!("slot selector '{selector}' must be '*' or an integer"),
+            })?;
     if parsed >= bound {
         return Err(BridgeError::InvalidWorkpieceSlotReference {
             slot: render_slot_reference(carrier, selectors),
@@ -2805,18 +2806,14 @@ fn convert_workpiece_effect(
                 from: validate_runtime_effect_endpoint(from, &workpiece_ctx.carrier_layouts)?,
             })
         }
-        crate::ir::WorkpieceEffect::Transfer { from, to } => {
-            Ok(Action::WorkpieceTransfer {
-                from: validate_runtime_effect_endpoint(from, &workpiece_ctx.carrier_layouts)?,
-                to: validate_runtime_effect_endpoint(to, &workpiece_ctx.carrier_layouts)?,
-            })
-        }
-        crate::ir::WorkpieceEffect::Finish { at, terminal_state } => {
-            Ok(Action::WorkpieceFinish {
-                at: validate_runtime_effect_endpoint(at, &workpiece_ctx.carrier_layouts)?,
-                terminal_state: Box::leak(terminal_state.clone().into_boxed_str()),
-            })
-        }
+        crate::ir::WorkpieceEffect::Transfer { from, to } => Ok(Action::WorkpieceTransfer {
+            from: validate_runtime_effect_endpoint(from, &workpiece_ctx.carrier_layouts)?,
+            to: validate_runtime_effect_endpoint(to, &workpiece_ctx.carrier_layouts)?,
+        }),
+        crate::ir::WorkpieceEffect::Finish { at, terminal_state } => Ok(Action::WorkpieceFinish {
+            at: validate_runtime_effect_endpoint(at, &workpiece_ctx.carrier_layouts)?,
+            terminal_state: Box::leak(terminal_state.clone().into_boxed_str()),
+        }),
         crate::ir::WorkpieceEffect::Mount {
             workpiece_type,
             slot,
@@ -2839,7 +2836,18 @@ fn convert_workpiece_effect(
                 frame: Box::leak(frame.clone().into_boxed_str()),
             })
         }
-        crate::ir::WorkpieceEffect::Split { .. } | crate::ir::WorkpieceEffect::Merge { .. } => {
+        crate::ir::WorkpieceEffect::Split {
+            source_type,
+            target_type,
+            count,
+            consumed,
+        } => Ok(Action::WorkpieceSplit {
+            source_type: Box::leak(source_type.clone().into_boxed_str()),
+            target_type: Box::leak(target_type.clone().into_boxed_str()),
+            count: *count,
+            consumed: *consumed,
+        }),
+        crate::ir::WorkpieceEffect::Merge { .. } => {
             Err(BridgeError::UnsupportedWorkpieceEffect {
                 state: state_name.to_string(),
                 effect: render_workpiece_effect(effect),

@@ -1,0 +1,28 @@
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(slice)]
+}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(slice, slice)]
+}
+
+[constraints]
+
+[tasks]
+
+task process:
+    step cut:
+        effect: split rod into slice count 4 consumed
+    step assemble:
+        effect: merge [slice_a, slice_b] into module consumed_inputs
+        goto sink
+
+task sink:
+    step idle:
+        action: log "done"
