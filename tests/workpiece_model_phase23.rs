@@ -85,37 +85,6 @@ task sink:
         action: log "done"
 "#;
 
-const PLC_WORKPIECE_SPLIT_MERGE: &str = r#"
-[topology]
-
-workpiece rod: workpiece_type {
-    allows: [split_into(slice)]
-}
-
-workpiece slice: workpiece_type {
-    derived_from: [rod]
-}
-
-workpiece module: workpiece_type {
-    derived_from: [merge(slice, slice)]
-}
-
-[constraints]
-
-[tasks]
-
-task process:
-    step cut:
-        effect: split rod into slice count 4 consumed
-    step assemble:
-        effect: merge [slice_a, slice_b] into module consumed_inputs
-        goto sink
-
-task sink:
-    step idle:
-        action: log "done"
-"#;
-
 const PLC_WORKPIECE_SPLIT_RUNTIME: &str = r#"
 [topology]
 
@@ -829,6 +798,38 @@ fn workpiece_carrier_slot_transfer_builds_ir_and_verifies() {
 }
 
 #[test]
+fn runtime_executes_workpiece_carrier_slot_transfer_example_end_to_end() {
+    let source = read_example_source("workpiece_carrier_slot_transfer.plc");
+    let program = parse_plc(&source).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge should lower carrier slot example");
+
+    let mut io = MemIo::new();
+    let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
+    runtime
+        .tick(&mut io)
+        .expect("carrier slot example should execute");
+
+    assert_eq!(runtime.workpiece_tokens().active_tokens(), 0);
+    let finished = runtime
+        .workpiece_tokens()
+        .token(0)
+        .expect("seeded token should remain traceable after finish");
+    assert_eq!(finished.current_location, "outfeed");
+    assert_eq!(finished.mounted_slot, None);
+    assert!(!finished.active);
+    assert_eq!(
+        finished.terminal_status,
+        Some(WorkpieceTerminalStatus::TerminalState { state: "finished" })
+    );
+}
+
+#[test]
 fn workpiece_mount_unmount_and_transform_lower_into_ir() {
     let program = parse_plc(PLC_WORKPIECE_MOUNT_UNMOUNT).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
@@ -1092,8 +1093,52 @@ fn runtime_bridge_rejects_invalid_slot_reference_explicitly() {
 }
 
 #[test]
-fn workpiece_split_merge_contracts_lower_into_ir() {
-    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE).expect("fixture should parse");
+fn runtime_bridge_lowers_workpiece_split_merge_example_into_runtime_actions() {
+    let source = read_example_source("workpiece_split_merge.plc");
+    let program = parse_plc(&source).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge should lower split/merge example");
+    let actions = collect_runtime_actions(&runtime_program);
+
+    assert!(actions.iter().any(|action| {
+        matches!(
+            action,
+            Action::WorkpieceSplit {
+                source_type,
+                target_type,
+                count,
+                consumed
+            } if *source_type == "rod"
+                && *target_type == "slice"
+                && *count == 4
+                && *consumed
+        )
+    }));
+    assert!(actions.iter().any(|action| {
+        matches!(
+            action,
+            Action::WorkpieceMerge {
+                input_refs,
+                input_types,
+                target_type,
+                consumed_inputs,
+            } if input_refs == &["slice_a", "slice_b"]
+                && input_types == &["slice", "slice"]
+                && *target_type == "module"
+                && *consumed_inputs
+        )
+    }));
+}
+
+#[test]
+fn workpiece_split_merge_example_lowers_into_ir_and_fails_exact_safety_without_source_seeding() {
+    let source = read_example_source("workpiece_split_merge.plc");
+    let program = parse_plc(&source).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");

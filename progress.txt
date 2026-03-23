@@ -19,6 +19,7 @@ Started: 2026-03-23 01:07:00 CST
 - Phase 3 `split` is still type-level in IR. Runtime must consume exactly one active token of `source_type` globally and let child tokens inherit the source token's `current_location` and `mounted_slot`; if future stories need endpoint-level routing, add that data to IR instead of guessing in bridge/runtime.
 - Phase 3 `merge` is also still type-level in IR. `inputs` are only DSL refs, so `runtime_bridge` must resolve the concrete input-type multiset from the target `merge(...)` derivation and lower both refs and types into `runtime-core`; runtime should then reject duplicate consumed refs or arity drift explicitly instead of guessing hidden instance metadata.
 - Phase 3 verification fixtures now need real source seeding too: abstract split/merge-only programs with no ingress-backed instance should fail exact safety on the first `split`/`merge`, so tests that need later-phase assertions should use runtime-style ingress (`plate.slot[*]`, `acquire/transfer`, etc.) or mutate lowered constraints/state machines after build.
+- Canonical workpiece regression coverage should read `examples/workpiece_*.plc` directly for compile, bridge, and verification checks; keep inline PLC fixtures only when the example intentionally lacks prerequisites for runtime execution, such as source seeding or terminal cleanup.
 
 ## [2026-03-23 01:40:23 +08:00] - US-001
 Thread: https://ampcode.com/threads/unknown
@@ -226,4 +227,19 @@ Thread: https://ampcode.com/threads/unknown
   - Phase 3 safety should mirror runtime instance semantics, not fallback warning heuristics: if a test wants to exercise merge or terminal behavior, it must first seed a real source instance that can survive through split/unmount paths.
   - Reusing `PLC_WORKPIECE_SPLIT_MERGE_RUNTIME` plus targeted constraint/state-machine mutation is a practical way to test exact split/merge safety without adding more long DSL fixtures.
   - `examples/workpiece_split_merge.plc` is still a contract-only regression input; until a later story gives it real source seeding and terminal cleanup, it should remain a negative safety fixture rather than a verified end-to-end example.
+---
+## [2026-03-23 09:26:09 +08:00] - US-012
+Thread: https://ampcode.com/threads/unknown
+- Expanded the canonical workpiece example gate so `tests/workpiece_model_phase23.rs` now reuses `examples/workpiece_carrier_slot_transfer.plc` for end-to-end runtime execution and `examples/workpiece_split_merge.plc` for bridge lowering plus exact-safety regression.
+- Removed the duplicated inline split/merge contract fixture where the canonical example already covers the same semantics, while keeping the separate runtime-only mirrored fixtures for cases that still need source seeding and terminal cleanup.
+- Preserved the reusable regression pattern in `AGENTS.md`: prefer direct `examples/*.plc` coverage for compile, bridge, and verification, and fall back to inline fixtures only when the example deliberately omits required runtime prerequisites.
+- Files changed
+- `AGENTS.md`
+- `prd.json`
+- `progress.txt`
+- `tests/workpiece_model_phase23.rs`
+- **Learnings for future iterations:**
+  - `examples/workpiece_carrier_slot_transfer.plc` is now suitable for runtime end-to-end regression, not just compile and bridge checks, because its slot ingress flow already seeds a real instance and terminates cleanly.
+  - `examples/workpiece_split_merge.plc` should stay the canonical compile/bridge/verification-negative fixture, while runtime execution should continue to use the mirrored seeded fixture until the canonical example gains a real source path.
+  - When a canonical example and an inline fixture drift toward identical semantics, delete the duplicate fixture and move the assertions onto the example instead of maintaining two copies.
 ---

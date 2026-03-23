@@ -459,6 +459,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - 一个 verification 测试
 - 一个 examples 回归输入
 - 若语义由示例承载（尤其是 blocking/pending 行为），优先同时补 `tests/examples_integration.rs`（编译回归）与 `tests/runtime_bridge_us006.rs`（运行时行为回归）
+- For canonical example-backed semantics (especially workpiece flows), prefer driving compile/runtime bridge/verification regressions directly from `examples/*.plc`; only keep minimal inline fixtures when the canonical example intentionally omits prerequisites such as source seeding or terminal cleanup.
 
 ## 文档分层
 
