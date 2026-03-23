@@ -450,94 +450,6 @@ task process:
         action: log "noop"
 "#;
 
-const PLC_WORKPIECE_VERIFY_MERGE_AFTER_INSUFFICIENT_SPLIT: &str = r#"
-[topology]
-
-workpiece rod: workpiece_type {
-    allows: [split_into(slice)]
-}
-
-workpiece slice: workpiece_type {
-    derived_from: [rod]
-}
-
-workpiece module: workpiece_type {
-    derived_from: [merge(slice, slice)]
-}
-
-[constraints]
-
-[tasks]
-
-task process:
-    step cut:
-        effect: split rod into slice count 1 consumed
-    step assemble:
-        effect: merge [slice_a, slice_b] into module consumed_inputs
-    step done:
-        action: log "noop"
-"#;
-
-const PLC_WORKPIECE_VERIFY_DOUBLE_MERGE_AFTER_SINGLE_SPLIT: &str = r#"
-[topology]
-
-workpiece rod: workpiece_type {
-    allows: [split_into(slice)]
-}
-
-workpiece slice: workpiece_type {
-    derived_from: [rod]
-}
-
-workpiece module: workpiece_type {
-    derived_from: [merge(slice, slice)]
-}
-
-[constraints]
-
-[tasks]
-
-task process:
-    step cut:
-        effect: split rod into slice count 2 consumed
-    step assemble_a:
-        effect: merge [slice_a, slice_b] into module consumed_inputs
-    step assemble_b:
-        effect: merge [slice_c, slice_d] into module consumed_inputs
-    step done:
-        action: log "noop"
-"#;
-
-const PLC_WORKPIECE_VERIFY_DOUBLE_MERGE_AFTER_WIDE_SPLIT: &str = r#"
-[topology]
-
-workpiece rod: workpiece_type {
-    allows: [split_into(slice)]
-}
-
-workpiece slice: workpiece_type {
-    derived_from: [rod]
-}
-
-workpiece module: workpiece_type {
-    derived_from: [merge(slice, slice)]
-}
-
-[constraints]
-
-[tasks]
-
-task process:
-    step cut:
-        effect: split rod into slice count 4 consumed
-    step assemble_a:
-        effect: merge [slice_a, slice_b] into module consumed_inputs
-    step assemble_b:
-        effect: merge [slice_c, slice_d] into module consumed_inputs
-    step done:
-        action: log "noop"
-"#;
-
 const PLC_WORKPIECE_INVALID_DUPLICATE_TERMINAL_STATE: &str = r#"
 [topology]
 
@@ -1212,27 +1124,13 @@ fn workpiece_split_merge_contracts_lower_into_ir() {
             .any(|effect| matches!(effect, rust_plc::ir::WorkpieceEffect::Merge { inputs, .. } if inputs.len() == 2))
     }));
 
-    let summary = verify_all(&program, &topology, &constraints, &state_machine)
-        .expect("split/merge fixture should still verify with warnings");
-    assert!(summary.safety.warnings.iter().any(|warning| {
-        warning.level == WarningLevel::Warn
-            && warning
-                .message
-                .contains("split at process.cut consumes source type 'rod'")
-    }));
-    assert!(
-        !summary
-            .safety
-            .warnings
-            .iter()
-            .any(|warning| { warning.message.contains("merge at process.assemble") })
-    );
-    assert!(summary.safety.warnings.iter().any(|warning| {
-        warning.level == WarningLevel::Warn
-            && warning.message.contains(
-                "reachable terminal state sink.idle may still retain unconsumed workpiece types",
-            )
-            && warning.message.contains("module")
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error
+                .reason
+                .contains("requires a valid active source token of type 'rod'")
     }));
 }
 
@@ -1701,93 +1599,231 @@ fn verify_all_rejects_unmount_from_empty_slot() {
 }
 
 #[test]
-fn verify_all_warns_when_split_source_type_has_no_prior_introduction() {
+fn verify_all_rejects_split_without_a_valid_source_token_instance() {
     let program =
         parse_plc(PLC_WORKPIECE_VERIFY_SPLIT_WITHOUT_SOURCE_INTRO).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let summary =
-        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
-    assert!(summary.safety.warnings.iter().any(|warning| {
-        warning.level == WarningLevel::Warn
-            && warning
-                .message
-                .contains("split at process.cut consumes source type 'rod'")
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error
+                .reason
+                .contains("requires a valid active source token of type 'rod'")
     }));
 }
 
 #[test]
-fn verify_all_warns_when_merge_inputs_have_no_prior_introduction() {
+fn verify_all_rejects_merge_without_declared_input_instances() {
     let program =
         parse_plc(PLC_WORKPIECE_VERIFY_MERGE_WITHOUT_INPUT_INTRO).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let summary =
-        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
-    assert!(summary.safety.warnings.iter().any(|warning| {
-        warning.level == WarningLevel::Warn
-            && warning
-                .message
-                .contains("merge at process.assemble into 'module' requires prior reachable inputs")
-            && warning.message.contains("2x cell")
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error
+                .reason
+                .contains("requires the declared legal input set [cell, cell]")
+            && error.reason.contains("2x cell")
     }));
 }
 
 #[test]
-fn verify_all_warns_when_split_outputs_are_insufficient_for_merge() {
-    let program = parse_plc(PLC_WORKPIECE_VERIFY_MERGE_AFTER_INSUFFICIENT_SPLIT)
-        .expect("fixture should parse");
+fn verify_all_rejects_merge_when_split_produces_too_few_instances() {
+    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE_RUNTIME).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
-    let constraints = build_constraint_set(&program).expect("constraints should build");
-    let state_machine = build_state_machine(&program).expect("state machine should build");
+    let mut constraints = build_constraint_set(&program).expect("constraints should build");
+    constraints.workpiece_types[0].ingress_sites = vec!["plate.slot[*]".to_string()];
+    let mut state_machine = build_state_machine(&program).expect("state machine should build");
+    let split = state_machine
+        .transitions
+        .iter_mut()
+        .find_map(|transition| {
+            transition.effects.iter_mut().find_map(|effect| match effect {
+                rust_plc::ir::WorkpieceEffect::Split { count, .. } => Some(count),
+                _ => None,
+            })
+        })
+        .expect("split effect should exist");
+    *split = 1;
 
-    let summary =
-        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
-    assert!(summary.safety.warnings.iter().any(|warning| {
-        warning.level == WarningLevel::Warn
-            && warning
-                .message
-                .contains("merge at process.assemble into 'module' requires prior reachable inputs")
-            && warning.message.contains("1x slice")
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error
+                .reason
+                .contains("requires the declared legal input set [slice, slice]")
+            && error.reason.contains("1x slice")
     }));
 }
 
 #[test]
-fn verify_all_warns_when_consumed_merge_inputs_are_reused_later() {
-    let program = parse_plc(PLC_WORKPIECE_VERIFY_DOUBLE_MERGE_AFTER_SINGLE_SPLIT)
-        .expect("fixture should parse");
+fn verify_all_rejects_reusing_consumed_merge_input_instances() {
+    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE_RUNTIME).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
-    let constraints = build_constraint_set(&program).expect("constraints should build");
-    let state_machine = build_state_machine(&program).expect("state machine should build");
+    let mut constraints = build_constraint_set(&program).expect("constraints should build");
+    constraints.workpiece_types[0].ingress_sites = vec!["plate.slot[*]".to_string()];
+    let mut state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let summary =
-        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
-    assert!(summary.safety.warnings.iter().any(|warning| {
-        warning.level == WarningLevel::Warn
-            && warning.message.contains(
-                "merge at process.assemble_b into 'module' requires prior reachable inputs",
-            )
-            && warning.message.contains("2x slice")
+    let split = state_machine
+        .transitions
+        .iter_mut()
+        .find_map(|transition| {
+            transition.effects.iter_mut().find_map(|effect| match effect {
+                rust_plc::ir::WorkpieceEffect::Split { count, .. } => Some(count),
+                _ => None,
+            })
+        })
+        .expect("split effect should exist");
+    *split = 2;
+
+    let assemble_state = rust_plc::ir::State {
+        task_name: "process".to_string(),
+        step_name: "assemble_b".to_string(),
+    };
+    state_machine.states.push(assemble_state.clone());
+    let merge_effect = state_machine
+        .transitions
+        .iter()
+        .find_map(|transition| {
+            transition.effects.iter().find_map(|effect| match effect {
+                rust_plc::ir::WorkpieceEffect::Merge { .. } => Some(effect.clone()),
+                _ => None,
+            })
+        })
+        .expect("merge effect should exist");
+    let merge_transition = state_machine
+        .transitions
+        .iter_mut()
+        .find(|transition| transition.from.task_name == "process" && transition.from.step_name == "assemble")
+        .expect("assemble transition should exist");
+    merge_transition.to = assemble_state.clone();
+    state_machine.transitions.push(rust_plc::ir::Transition {
+        from: assemble_state,
+        to: rust_plc::ir::State {
+            task_name: "sink".to_string(),
+            step_name: "idle".to_string(),
+        },
+        guard: rust_plc::ir::TransitionGuard::Always,
+        actions: Vec::new(),
+        effects: vec![merge_effect],
+        timers: Vec::new(),
+    });
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error
+                .reason
+                .contains("requires the declared legal input set [slice, slice]")
+            && error.reason.contains("2x slice")
     }));
 }
 
 #[test]
-fn verify_all_does_not_warn_when_wide_split_covers_two_merges() {
-    let program = parse_plc(PLC_WORKPIECE_VERIFY_DOUBLE_MERGE_AFTER_WIDE_SPLIT)
-        .expect("fixture should parse");
+fn verify_all_tracks_wide_split_instances_without_false_merge_underflow() {
+    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE_RUNTIME).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
-    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let mut constraints = build_constraint_set(&program).expect("constraints should build");
+    constraints.workpiece_types[0].ingress_sites = vec!["plate.slot[*]".to_string()];
+    let mut state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let assemble_state = rust_plc::ir::State {
+        task_name: "process".to_string(),
+        step_name: "assemble_b".to_string(),
+    };
+    state_machine.states.push(assemble_state.clone());
+    let merge_effect = state_machine
+        .transitions
+        .iter()
+        .find_map(|transition| {
+            transition.effects.iter().find_map(|effect| match effect {
+                rust_plc::ir::WorkpieceEffect::Merge { .. } => Some(effect.clone()),
+                _ => None,
+            })
+        })
+        .expect("merge effect should exist");
+    let merge_transition = state_machine
+        .transitions
+        .iter_mut()
+        .find(|transition| transition.from.task_name == "process" && transition.from.step_name == "assemble")
+        .expect("assemble transition should exist");
+    merge_transition.to = assemble_state.clone();
+    state_machine.transitions.push(rust_plc::ir::Transition {
+        from: assemble_state,
+        to: rust_plc::ir::State {
+            task_name: "sink".to_string(),
+            step_name: "idle".to_string(),
+        },
+        guard: rust_plc::ir::TransitionGuard::Always,
+        actions: Vec::new(),
+        effects: vec![merge_effect],
+        timers: Vec::new(),
+    });
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(!errors.iter().any(|error| {
+        error.checker == "safety"
+            && error
+                .reason
+                .contains("requires the declared legal input set [slice, slice]")
+    }));
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety" && error.reason.contains("still holds workpieces")
+    }));
+}
+
+#[test]
+fn verify_all_rejects_merge_when_declared_input_set_does_not_match_produced_instances() {
+    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE_RUNTIME).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let mut constraints = build_constraint_set(&program).expect("constraints should build");
+    constraints.workpiece_types[0].ingress_sites = vec!["plate.slot[*]".to_string()];
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let summary =
-        verify_all(&program, &topology, &constraints, &state_machine).expect("must succeed");
-    assert!(!summary.safety.warnings.iter().any(|warning| {
-        warning
-            .message
-            .contains("merge at process.assemble_b into 'module'")
+    let module = constraints
+        .workpiece_types
+        .iter_mut()
+        .find(|workpiece| workpiece.name == "module")
+        .expect("module type should exist");
+    module.derived_from = vec![rust_plc::ir::WorkpieceDerivationDef::Merge {
+        inputs: vec!["rod".to_string(), "rod".to_string()],
+    }];
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error
+                .reason
+                .contains("requires the declared legal input set [rod, rod]")
+            && error.reason.contains("2x rod")
+    }));
+}
+
+#[test]
+fn verify_all_rejects_terminal_states_that_still_hold_split_merge_instances() {
+    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE_RUNTIME).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let mut constraints = build_constraint_set(&program).expect("constraints should build");
+    constraints.workpiece_types[0].ingress_sites = vec!["plate.slot[*]".to_string()];
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error.reason.contains("reachable terminal state still holds workpieces")
+            && error.reason.contains("cut_zone")
     }));
 }

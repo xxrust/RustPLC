@@ -897,9 +897,6 @@ fn verify_workpiece_flow(
     }
 
     let registry = WorkpieceFlowRegistry::from_constraints(constraints);
-    if registry.endpoints.names.is_empty() {
-        return Vec::new();
-    }
 
     let Some((state_index, outgoing, initial_state_idx)) = workpiece_state_graph(state_machine)
     else {
@@ -1133,15 +1130,6 @@ fn collect_workpiece_contract_warnings(
         }
     }
 
-    warnings.extend(collect_workpiece_type_flow_warnings(
-        constraints,
-        state_machine,
-        &state_index,
-        &outgoing,
-        initial_state_idx,
-        &reachable_transition_indices,
-    ));
-
     warnings
 }
 
@@ -1198,466 +1186,6 @@ fn collect_reachable_workpiece_transition_indices(
     }
 
     reachable_transitions
-}
-
-#[derive(Debug, Clone)]
-struct WorkpieceTypeRegistry {
-    names: Vec<String>,
-    caps: Vec<u16>,
-    index: HashMap<String, usize>,
-}
-
-impl WorkpieceTypeRegistry {
-    fn from_constraints(
-        constraints: &ConstraintSet,
-        state_machine: &StateMachine,
-        reachable_transition_indices: &HashSet<usize>,
-    ) -> Self {
-        let mut names = Vec::new();
-        let mut caps = Vec::new();
-        let mut index = HashMap::new();
-
-        for workpiece in &constraints.workpiece_types {
-            index.insert(workpiece.name.clone(), names.len());
-            names.push(workpiece.name.clone());
-            caps.push(workpiece_type_warning_cap(
-                constraints,
-                state_machine,
-                reachable_transition_indices,
-                &workpiece.name,
-            ));
-        }
-
-        Self { names, caps, index }
-    }
-}
-
-fn workpiece_type_warning_cap(
-    constraints: &ConstraintSet,
-    state_machine: &StateMachine,
-    reachable_transition_indices: &HashSet<usize>,
-    workpiece_name: &str,
-) -> u16 {
-    let mut cap = 1u16;
-    for workpiece in &constraints.workpiece_types {
-        for rule in &workpiece.derived_from {
-            let crate::ir::WorkpieceDerivationDef::Merge { inputs } = rule else {
-                continue;
-            };
-            let multiplicity = inputs
-                .iter()
-                .filter(|input| input.as_str() == workpiece_name)
-                .count() as u16;
-            cap = cap.max(multiplicity);
-        }
-    }
-
-    for (transition_idx, transition) in state_machine.transitions.iter().enumerate() {
-        if !reachable_transition_indices.contains(&transition_idx) {
-            continue;
-        }
-        for effect in &transition.effects {
-            match effect {
-                WorkpieceEffect::Mount { workpiece_type, .. }
-                | WorkpieceEffect::Unmount { workpiece_type, .. }
-                    if workpiece_type == workpiece_name =>
-                {
-                    cap = cap.saturating_add(1);
-                }
-                WorkpieceEffect::Split {
-                    target_type, count, ..
-                } if target_type == workpiece_name => {
-                    cap = cap.saturating_add((*count).min(u16::MAX as u32) as u16);
-                }
-                WorkpieceEffect::Merge {
-                    inputs,
-                    target_type,
-                    ..
-                } if target_type == workpiece_name
-                    && resolve_merge_input_types(constraints, target_type, inputs.len())
-                        .is_some() =>
-                {
-                    cap = cap.saturating_add(1);
-                }
-                WorkpieceEffect::Acquire { from, .. } | WorkpieceEffect::Transfer { from, .. }
-                    if constraints.workpiece_types.len() == 1
-                        && constraints.workpiece_types[0].name == workpiece_name
-                        && constraints.workpiece_types[0]
-                            .ingress_sites
-                            .iter()
-                            .any(|pattern| workpiece_endpoint_matches_pattern(from, pattern)) =>
-                {
-                    cap = cap.saturating_add(1);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    cap
-}
-
-fn collect_workpiece_type_flow_warnings(
-    constraints: &ConstraintSet,
-    state_machine: &StateMachine,
-    state_index: &HashMap<(String, String), usize>,
-    outgoing: &[Vec<usize>],
-    initial_state_idx: usize,
-    reachable_transition_indices: &HashSet<usize>,
-) -> Vec<String> {
-    let registry = WorkpieceTypeRegistry::from_constraints(
-        constraints,
-        state_machine,
-        reachable_transition_indices,
-    );
-    if registry.names.is_empty() {
-        return Vec::new();
-    }
-
-    let available_before = compute_available_workpiece_type_counts(
-        constraints,
-        state_machine,
-        state_index,
-        outgoing,
-        initial_state_idx,
-        reachable_transition_indices,
-        &registry,
-    );
-    let mut warnings = Vec::new();
-
-    for transition_idx in reachable_transition_indices {
-        let Some(transition) = state_machine.transitions.get(*transition_idx) else {
-            continue;
-        };
-        let Some(from_state_idx) = state_index
-            .get(&workpiece_state_key(&transition.from))
-            .copied()
-        else {
-            continue;
-        };
-        let counts = &available_before[from_state_idx];
-
-        for effect in &transition.effects {
-            match effect {
-                WorkpieceEffect::Split {
-                    source_type,
-                    target_type: _,
-                    ..
-                } => {
-                    let available = registry
-                        .index
-                        .get(source_type)
-                        .and_then(|idx| counts.get(*idx))
-                        .copied()
-                        .unwrap_or(0);
-                    if available == 0 {
-                        warnings.push(format!(
-                            "WARNING: split at {} consumes source type '{}', but no prior reachable effect introduces that type",
-                            state_name(&transition.from),
-                            source_type
-                        ));
-                    }
-                }
-                WorkpieceEffect::Merge {
-                    inputs,
-                    target_type,
-                    ..
-                } => {
-                    let Some(required_inputs) =
-                        resolve_merge_input_types(constraints, target_type, inputs.len())
-                    else {
-                        continue;
-                    };
-                    let deficits = workpiece_type_deficits(&required_inputs, &registry, counts);
-                    if deficits.is_empty() {
-                        continue;
-                    }
-                    warnings.push(format!(
-                        "WARNING: merge at {} into '{}' requires prior reachable inputs {}, but the current flow never introduces enough of them",
-                        state_name(&transition.from),
-                        target_type,
-                        deficits.join(", ")
-                    ));
-                }
-                _ => {}
-            }
-        }
-    }
-
-    if constraints.workpiece_types.len() > 1 {
-        for (state_idx, transitions) in outgoing.iter().enumerate() {
-            if !transitions.is_empty() {
-                continue;
-            }
-            let retained = registry
-                .names
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, workpiece_type)| {
-                    let count = available_before[state_idx].get(idx).copied().unwrap_or(0);
-                    (count > 0).then_some(format!("{count}x {workpiece_type}"))
-                })
-                .collect::<Vec<_>>();
-            if retained.is_empty() {
-                continue;
-            }
-            warnings.push(format!(
-                "WARNING: reachable terminal state {} may still retain unconsumed workpiece types {}",
-                state_name(&state_machine.states[state_idx]),
-                retained.join(", ")
-            ));
-        }
-    }
-
-    warnings
-}
-
-fn compute_available_workpiece_type_counts(
-    constraints: &ConstraintSet,
-    state_machine: &StateMachine,
-    state_index: &HashMap<(String, String), usize>,
-    outgoing: &[Vec<usize>],
-    initial_state_idx: usize,
-    reachable_transition_indices: &HashSet<usize>,
-    registry: &WorkpieceTypeRegistry,
-) -> Vec<Vec<u16>> {
-    let mut available_before = vec![vec![0u16; registry.names.len()]; state_machine.states.len()];
-    available_before[initial_state_idx] = initial_workpiece_type_counts(
-        constraints,
-        state_machine,
-        reachable_transition_indices,
-        registry,
-    );
-
-    let mut queue = VecDeque::from([initial_state_idx]);
-    let mut queued = HashSet::from([initial_state_idx]);
-
-    while let Some(state_idx) = queue.pop_front() {
-        queued.remove(&state_idx);
-        let current = available_before[state_idx].clone();
-
-        for transition_idx in outgoing.get(state_idx).into_iter().flatten() {
-            if !reachable_transition_indices.contains(transition_idx) {
-                continue;
-            }
-            let Some(transition) = state_machine.transitions.get(*transition_idx) else {
-                continue;
-            };
-            let Some(next_state_idx) = state_index
-                .get(&workpiece_state_key(&transition.to))
-                .copied()
-            else {
-                continue;
-            };
-
-            let mut propagated = current.clone();
-            apply_workpiece_type_flow_effects(constraints, transition, registry, &mut propagated);
-            if join_workpiece_type_counts(&mut available_before[next_state_idx], &propagated)
-                && queued.insert(next_state_idx)
-            {
-                queue.push_back(next_state_idx);
-            }
-        }
-    }
-
-    available_before
-}
-
-fn initial_workpiece_type_counts(
-    constraints: &ConstraintSet,
-    state_machine: &StateMachine,
-    reachable_transition_indices: &HashSet<usize>,
-    registry: &WorkpieceTypeRegistry,
-) -> Vec<u16> {
-    let mut counts = vec![0u16; registry.names.len()];
-    if constraints.workpiece_types.len() != 1 {
-        return counts;
-    }
-
-    let workpiece = &constraints.workpiece_types[0];
-    let Some(type_idx) = registry.index.get(&workpiece.name).copied() else {
-        return counts;
-    };
-
-    for (transition_idx, transition) in state_machine.transitions.iter().enumerate() {
-        if !reachable_transition_indices.contains(&transition_idx) {
-            continue;
-        }
-        let introduced = transition.effects.iter().any(|effect| {
-            workpiece_ingress_source(effect).is_some_and(|source| {
-                workpiece
-                    .ingress_sites
-                    .iter()
-                    .any(|pattern| workpiece_endpoint_matches_pattern(&source, pattern))
-            })
-        });
-        if introduced {
-            counts[type_idx] = counts[type_idx].max(1);
-        }
-    }
-
-    counts
-}
-
-fn apply_workpiece_type_flow_effects(
-    constraints: &ConstraintSet,
-    transition: &Transition,
-    registry: &WorkpieceTypeRegistry,
-    counts: &mut [u16],
-) {
-    for effect in &transition.effects {
-        match effect {
-            WorkpieceEffect::Mount { workpiece_type, .. } => {
-                increment_workpiece_type_count(registry, counts, workpiece_type, 1);
-            }
-            WorkpieceEffect::Unmount { workpiece_type, .. } => {
-                increment_workpiece_type_count(registry, counts, workpiece_type, 1);
-            }
-            WorkpieceEffect::Split {
-                source_type,
-                target_type,
-                count,
-                ..
-            } => {
-                if matches!(effect, WorkpieceEffect::Split { consumed: true, .. }) {
-                    decrement_workpiece_type_count(registry, counts, source_type, 1);
-                }
-                increment_workpiece_type_count(registry, counts, target_type, *count as u16);
-            }
-            WorkpieceEffect::Merge {
-                inputs,
-                target_type,
-                consumed_inputs,
-            } => {
-                if let Some(required_inputs) =
-                    resolve_merge_input_types(constraints, target_type, inputs.len())
-                {
-                    if *consumed_inputs {
-                        decrement_required_workpiece_types(registry, counts, &required_inputs);
-                    }
-                    increment_workpiece_type_count(registry, counts, target_type, 1);
-                }
-            }
-            WorkpieceEffect::Finish { .. } => {
-                if constraints.workpiece_types.len() == 1 {
-                    decrement_workpiece_type_count(
-                        registry,
-                        counts,
-                        &constraints.workpiece_types[0].name,
-                        1,
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn increment_workpiece_type_count(
-    registry: &WorkpieceTypeRegistry,
-    counts: &mut [u16],
-    workpiece_type: &str,
-    amount: u16,
-) {
-    let Some(type_idx) = registry.index.get(workpiece_type).copied() else {
-        return;
-    };
-    let cap = registry.caps[type_idx].max(1);
-    let next = counts[type_idx].saturating_add(amount).min(cap);
-    counts[type_idx] = next;
-}
-
-fn decrement_workpiece_type_count(
-    registry: &WorkpieceTypeRegistry,
-    counts: &mut [u16],
-    workpiece_type: &str,
-    amount: u16,
-) {
-    let Some(type_idx) = registry.index.get(workpiece_type).copied() else {
-        return;
-    };
-    counts[type_idx] = counts[type_idx].saturating_sub(amount);
-}
-
-fn decrement_required_workpiece_types(
-    registry: &WorkpieceTypeRegistry,
-    counts: &mut [u16],
-    required_inputs: &[String],
-) {
-    let mut requirements = HashMap::<String, u16>::new();
-    for input in required_inputs {
-        *requirements.entry(input.clone()).or_default() += 1;
-    }
-    for (workpiece_type, amount) in requirements {
-        decrement_workpiece_type_count(registry, counts, &workpiece_type, amount);
-    }
-}
-
-fn join_workpiece_type_counts(target: &mut [u16], incoming: &[u16]) -> bool {
-    let mut changed = false;
-    for (target_count, incoming_count) in target.iter_mut().zip(incoming.iter()) {
-        if *incoming_count > *target_count {
-            *target_count = *incoming_count;
-            changed = true;
-        }
-    }
-    changed
-}
-
-fn resolve_merge_input_types(
-    constraints: &ConstraintSet,
-    target_type: &str,
-    input_count: usize,
-) -> Option<Vec<String>> {
-    let workpiece = constraints
-        .workpiece_types
-        .iter()
-        .find(|candidate| candidate.name == target_type)?;
-    let matches = workpiece
-        .derived_from
-        .iter()
-        .filter_map(|rule| match rule {
-            crate::ir::WorkpieceDerivationDef::Merge { inputs } if inputs.len() == input_count => {
-                Some(inputs.clone())
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    if matches.len() == 1 {
-        matches.into_iter().next()
-    } else {
-        None
-    }
-}
-
-fn workpiece_type_deficits(
-    required_inputs: &[String],
-    registry: &WorkpieceTypeRegistry,
-    counts: &[u16],
-) -> Vec<String> {
-    let mut requirements = HashMap::<String, u16>::new();
-    for input in required_inputs {
-        *requirements.entry(input.clone()).or_default() += 1;
-    }
-
-    let mut deficits = requirements
-        .into_iter()
-        .filter_map(|(workpiece_type, required)| {
-            let available = registry
-                .index
-                .get(&workpiece_type)
-                .and_then(|idx| counts.get(*idx))
-                .copied()
-                .unwrap_or(0);
-            (available < required).then_some(format!(
-                "{}x {}",
-                required.saturating_sub(available),
-                workpiece_type
-            ))
-        })
-        .collect::<Vec<_>>();
-    deficits.sort();
-    deficits
 }
 
 #[derive(Debug, Clone)]
@@ -1825,11 +1353,24 @@ impl WorkpieceFlowRegistry {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct WorkpieceFlowToken {
     workpiece_type_idx: usize,
     endpoint_idx: usize,
     mounted_endpoint_idx: Option<usize>,
+    provenance: WorkpieceFlowTokenProvenance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum WorkpieceFlowTokenProvenance {
+    Ingress,
+    MountIngress,
+    Split {
+        source_type_idx: usize,
+    },
+    Merge {
+        input_type_indices: Vec<usize>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -1840,7 +1381,6 @@ struct WorkpieceFlowState {
 impl WorkpieceFlowState {
     fn canonicalize(&mut self) {
         self.tokens.sort_unstable();
-        self.tokens.dedup();
     }
 
     fn occupancy(&self, endpoint_idx: usize) -> usize {
@@ -1848,6 +1388,14 @@ impl WorkpieceFlowState {
             .iter()
             .filter(|token| token.endpoint_idx == endpoint_idx)
             .count()
+    }
+
+    fn active_token_indices_of_type(&self, workpiece_type_idx: usize) -> Vec<usize> {
+        self.tokens
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, token)| (token.workpiece_type_idx == workpiece_type_idx).then_some(idx))
+            .collect()
     }
 
     fn unique_token_index_at(&self, endpoint_idx: usize, mounted: Option<bool>) -> Result<usize, usize> {
@@ -1905,6 +1453,7 @@ fn initial_workpiece_flow_state(
     reachable_transition_indices: &HashSet<usize>,
 ) -> WorkpieceFlowState {
     let mut flow_state = WorkpieceFlowState::default();
+    let mut seeded = HashSet::new();
 
     for (transition_idx, transition) in state_machine.transitions.iter().enumerate() {
         if !reachable_transition_indices.contains(&transition_idx) {
@@ -1923,16 +1472,18 @@ fn initial_workpiece_flow_state(
                     .iter()
                     .any(|pattern| workpiece_endpoint_matches_pattern(&source, pattern))
                 {
-                    flow_state.tokens.push(WorkpieceFlowToken {
+                    seeded.insert(WorkpieceFlowToken {
                         workpiece_type_idx,
                         endpoint_idx,
                         mounted_endpoint_idx: None,
+                        provenance: WorkpieceFlowTokenProvenance::Ingress,
                     });
                 }
             }
         }
     }
 
+    flow_state.tokens.extend(seeded);
     flow_state.canonicalize();
     flow_state
 }
@@ -2051,9 +1602,45 @@ fn apply_workpiece_effects(
                     return Some(diag);
                 }
             }
-            WorkpieceEffect::Split { .. }
-            | WorkpieceEffect::Merge { .. }
-            | WorkpieceEffect::TransformCarrier { .. } => {}
+            WorkpieceEffect::Split {
+                source_type,
+                target_type,
+                count,
+                consumed,
+            } => {
+                if let Some(diag) = split_workpiece(
+                    program,
+                    transition,
+                    registry,
+                    flow_state,
+                    source_type,
+                    target_type,
+                    *count,
+                    *consumed,
+                    path,
+                ) {
+                    return Some(diag);
+                }
+            }
+            WorkpieceEffect::Merge {
+                inputs,
+                target_type,
+                consumed_inputs,
+            } => {
+                if let Some(diag) = merge_workpiece(
+                    program,
+                    transition,
+                    registry,
+                    flow_state,
+                    inputs,
+                    target_type,
+                    *consumed_inputs,
+                    path,
+                ) {
+                    return Some(diag);
+                }
+            }
+            WorkpieceEffect::TransformCarrier { .. } => {}
         }
     }
 
@@ -2307,8 +1894,308 @@ fn mount_workpiece(
         workpiece_type_idx,
         endpoint_idx: slot_idx,
         mounted_endpoint_idx: Some(slot_idx),
+        provenance: WorkpieceFlowTokenProvenance::MountIngress,
     });
     None
+}
+
+fn split_workpiece(
+    program: &PlcProgram,
+    transition: &Transition,
+    registry: &WorkpieceFlowRegistry,
+    flow_state: &mut WorkpieceFlowState,
+    source_type: &str,
+    target_type: &str,
+    count: u32,
+    consumed: bool,
+    path: &[String],
+) -> Option<SafetyDiagnostic> {
+    let Some(source_type_idx) = registry.workpiece_index.get(source_type).copied() else {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!("split references undeclared source workpiece type '{}'", source_type),
+            violation_path: extend_path(path, transition),
+            suggestion: "declare the split source workpiece type before using it in effects"
+                .to_string(),
+        });
+    };
+    let Some(target_type_idx) = registry.workpiece_index.get(target_type).copied() else {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!("split references undeclared target workpiece type '{}'", target_type),
+            violation_path: extend_path(path, transition),
+            suggestion: "declare the split target workpiece type before using it in effects"
+                .to_string(),
+        });
+    };
+
+    let source_candidates = flow_state.active_token_indices_of_type(source_type_idx);
+    let source_idx = match source_candidates.as_slice() {
+        [idx] => *idx,
+        [] => {
+            return Some(SafetyDiagnostic {
+                line: find_state_line(program, &transition.from),
+                constraint: "workpiece_flow".to_string(),
+                reason: format!(
+                    "split into '{}' requires a valid active source token of type '{}', but no reachable token instance is available",
+                    target_type, source_type
+                ),
+                violation_path: extend_path(path, transition),
+                suggestion:
+                    "introduce exactly one reachable source token instance before splitting it"
+                        .to_string(),
+            });
+        }
+        matches => {
+            return Some(SafetyDiagnostic {
+                line: find_state_line(program, &transition.from),
+                constraint: "workpiece_flow".to_string(),
+                reason: format!(
+                    "split into '{}' requires a unique active source token of type '{}', but reachable state has {} instances",
+                    target_type,
+                    source_type,
+                    matches.len()
+                ),
+                violation_path: extend_path(path, transition),
+                suggestion:
+                    "disambiguate the split source so exactly one active token instance matches the source type"
+                        .to_string(),
+            });
+        }
+    };
+
+    let source = flow_state.tokens[source_idx].clone();
+    let capacity = registry.endpoints.capacities[source.endpoint_idx] as usize;
+    let occupancy = flow_state.occupancy(source.endpoint_idx);
+    let final_occupancy = occupancy
+        .saturating_sub(usize::from(consumed))
+        .saturating_add(count as usize);
+    if final_occupancy > capacity {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!(
+                "split into '{}' would exceed capacity at endpoint '{}' (capacity={})",
+                target_type, registry.endpoints.names[source.endpoint_idx], capacity
+            ),
+            violation_path: extend_path(path, transition),
+            suggestion:
+                "move or finish workpieces before splitting so the destination endpoint has enough capacity"
+                    .to_string(),
+        });
+    }
+
+    if consumed {
+        flow_state.tokens.remove(source_idx);
+    }
+    for _ in 0..count {
+        flow_state.tokens.push(WorkpieceFlowToken {
+            workpiece_type_idx: target_type_idx,
+            endpoint_idx: source.endpoint_idx,
+            mounted_endpoint_idx: source.mounted_endpoint_idx,
+            provenance: WorkpieceFlowTokenProvenance::Split { source_type_idx },
+        });
+    }
+
+    None
+}
+
+fn merge_workpiece(
+    program: &PlcProgram,
+    transition: &Transition,
+    registry: &WorkpieceFlowRegistry,
+    flow_state: &mut WorkpieceFlowState,
+    inputs: &[String],
+    target_type: &str,
+    consumed_inputs: bool,
+    path: &[String],
+) -> Option<SafetyDiagnostic> {
+    let Some(target_type_idx) = registry.workpiece_index.get(target_type).copied() else {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!("merge references undeclared target workpiece type '{}'", target_type),
+            violation_path: extend_path(path, transition),
+            suggestion: "declare the merge target workpiece type before using it in effects"
+                .to_string(),
+        });
+    };
+
+    let Some(required_input_names) = resolve_merge_input_types_from_registry(
+        &registry.workpiece_types,
+        target_type,
+        inputs.len(),
+    ) else {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!(
+                "merge into '{}' has no unique declared input derivation matching {} inputs",
+                target_type,
+                inputs.len()
+            ),
+            violation_path: extend_path(path, transition),
+            suggestion:
+                "keep exactly one merge(...) derivation for the target type and match the effect arity to it"
+                    .to_string(),
+        });
+    };
+
+    let mut required_input_indices = Vec::with_capacity(required_input_names.len());
+    for required_name in &required_input_names {
+        let Some(required_type_idx) = registry.workpiece_index.get(required_name).copied() else {
+            return Some(SafetyDiagnostic {
+                line: find_state_line(program, &transition.from),
+                constraint: "workpiece_flow".to_string(),
+                reason: format!(
+                    "merge into '{}' declares undeclared input workpiece type '{}'",
+                    target_type, required_name
+                ),
+                violation_path: extend_path(path, transition),
+                suggestion:
+                    "declare every merge input workpiece type before using the derivation in verification"
+                        .to_string(),
+            });
+        };
+        required_input_indices.push(required_type_idx);
+    }
+
+    let mut selected_indices = Vec::with_capacity(required_input_indices.len());
+    for required_type_idx in &required_input_indices {
+        let selected = flow_state
+            .tokens
+            .iter()
+            .enumerate()
+            .find_map(|(idx, token)| {
+                (token.workpiece_type_idx == *required_type_idx
+                    && !selected_indices.contains(&idx))
+                .then_some(idx)
+            });
+        let Some(selected) = selected else {
+            let missing = missing_merge_inputs(flow_state, registry, &required_input_indices);
+            return Some(SafetyDiagnostic {
+                line: find_state_line(program, &transition.from),
+                constraint: "workpiece_flow".to_string(),
+                reason: format!(
+                    "merge into '{}' requires the declared legal input set [{}], but reachable state is missing {}",
+                    target_type,
+                    required_input_names.join(", "),
+                    missing.join(", ")
+                ),
+                violation_path: extend_path(path, transition),
+                suggestion:
+                    "produce the declared merge inputs as distinct active token instances before consuming them"
+                        .to_string(),
+            });
+        };
+        selected_indices.push(selected);
+    }
+
+    let output_location = flow_state.tokens[selected_indices[0]].endpoint_idx;
+    let output_slot = flow_state.tokens[selected_indices[0]].mounted_endpoint_idx;
+    let capacity = registry.endpoints.capacities[output_location] as usize;
+    let removed_here = if consumed_inputs {
+        selected_indices
+            .iter()
+            .filter(|idx| flow_state.tokens[**idx].endpoint_idx == output_location)
+            .count()
+    } else {
+        0
+    };
+    let final_occupancy = flow_state
+        .occupancy(output_location)
+        .saturating_sub(removed_here)
+        .saturating_add(1);
+    if final_occupancy > capacity {
+        return Some(SafetyDiagnostic {
+            line: find_state_line(program, &transition.from),
+            constraint: "workpiece_flow".to_string(),
+            reason: format!(
+                "merge into '{}' would exceed capacity at endpoint '{}' (capacity={})",
+                target_type, registry.endpoints.names[output_location], capacity
+            ),
+            violation_path: extend_path(path, transition),
+            suggestion:
+                "drain the destination endpoint before materializing the merge output token"
+                    .to_string(),
+        });
+    }
+
+    if consumed_inputs {
+        selected_indices.sort_unstable();
+        for idx in selected_indices.into_iter().rev() {
+            flow_state.tokens.remove(idx);
+        }
+    }
+
+    required_input_indices.sort_unstable();
+    flow_state.tokens.push(WorkpieceFlowToken {
+        workpiece_type_idx: target_type_idx,
+        endpoint_idx: output_location,
+        mounted_endpoint_idx: output_slot,
+        provenance: WorkpieceFlowTokenProvenance::Merge {
+            input_type_indices: required_input_indices,
+        },
+    });
+
+    None
+}
+
+fn missing_merge_inputs(
+    flow_state: &WorkpieceFlowState,
+    registry: &WorkpieceFlowRegistry,
+    required_input_indices: &[usize],
+) -> Vec<String> {
+    let mut requirements = HashMap::<usize, usize>::new();
+    for input_idx in required_input_indices {
+        *requirements.entry(*input_idx).or_default() += 1;
+    }
+
+    let mut available = HashMap::<usize, usize>::new();
+    for token in &flow_state.tokens {
+        *available.entry(token.workpiece_type_idx).or_default() += 1;
+    }
+
+    let mut missing = requirements
+        .into_iter()
+        .filter_map(|(workpiece_type_idx, required)| {
+            let actual = available.get(&workpiece_type_idx).copied().unwrap_or(0);
+            (actual < required).then_some(format!(
+                "{}x {}",
+                required - actual,
+                registry.workpiece_types[workpiece_type_idx].name
+            ))
+        })
+        .collect::<Vec<_>>();
+    missing.sort();
+    missing
+}
+
+fn resolve_merge_input_types_from_registry(
+    workpiece_types: &[crate::ir::WorkpieceTypeDef],
+    target_type: &str,
+    input_count: usize,
+) -> Option<Vec<String>> {
+    let workpiece = workpiece_types
+        .iter()
+        .find(|candidate| candidate.name == target_type)?;
+    let matches = workpiece
+        .derived_from
+        .iter()
+        .filter_map(|rule| match rule {
+            crate::ir::WorkpieceDerivationDef::Merge { inputs } if inputs.len() == input_count => {
+                Some(inputs.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        matches.into_iter().next()
+    } else {
+        None
+    }
 }
 
 fn unique_active_workpiece(

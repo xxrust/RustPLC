@@ -18,6 +18,7 @@ Started: 2026-03-23 01:07:00 CST
 - Phase 2 safety verification must mirror runtime token semantics: track `mounted_slot` separately, let `mount` reuse a same-type free-standing token already at the slot, treat `acquire/transfer/finish` as free-standing-only, and keep mounted association intact across `transform carrier`.
 - Phase 3 `split` is still type-level in IR. Runtime must consume exactly one active token of `source_type` globally and let child tokens inherit the source token's `current_location` and `mounted_slot`; if future stories need endpoint-level routing, add that data to IR instead of guessing in bridge/runtime.
 - Phase 3 `merge` is also still type-level in IR. `inputs` are only DSL refs, so `runtime_bridge` must resolve the concrete input-type multiset from the target `merge(...)` derivation and lower both refs and types into `runtime-core`; runtime should then reject duplicate consumed refs or arity drift explicitly instead of guessing hidden instance metadata.
+- Phase 3 verification fixtures now need real source seeding too: abstract split/merge-only programs with no ingress-backed instance should fail exact safety on the first `split`/`merge`, so tests that need later-phase assertions should use runtime-style ingress (`plate.slot[*]`, `acquire/transfer`, etc.) or mutate lowered constraints/state machines after build.
 
 ## [2026-03-23 01:40:23 +08:00] - US-001
 Thread: https://ampcode.com/threads/unknown
@@ -208,4 +209,21 @@ Thread: https://ampcode.com/threads/unknown
   - Runtime merge cannot recover input types from DSL input refs alone; that mapping has to be frozen in bridge metadata from the target type's `merge(...)` derivation before runtime executes.
   - Merge output capacity checks must use the eventual output location, not the declarative target type, because the current IR still omits an explicit output endpoint.
   - Type-level merge selection is deterministic but still not instance-addressed; if a later story needs input-instance legality, add explicit instance/source metadata to IR rather than pushing more heuristics into runtime.
+---
+## [2026-03-23 09:17:51 +08:00] - US-011
+Thread: https://ampcode.com/threads/unknown
+- Replaced Phase 3 split/merge safety approximation in `src/verification/safety.rs` with exact reachable token-instance execution: split now requires one concrete active source instance, merge consumes distinct active inputs from the declared multiset, and terminal-state checks run on concrete active tokens instead of type-count warnings.
+- Added negative verification coverage in `tests/workpiece_model_phase23.rs` for missing split source instances, missing/illegal merge input sets, repeated merge-input consumption, and dangling split/merge instances at terminal states; kept the public verification summary shape unchanged.
+- Updated `tests/examples_integration.rs` so `examples/workpiece_split_merge.plc` is asserted as a safety failure rather than a verified compile success, because it is currently a type-contract example without any ingress-backed source instance.
+- Files changed
+- `AGENTS.md`
+- `prd.json`
+- `progress.txt`
+- `src/verification/safety.rs`
+- `tests/examples_integration.rs`
+- `tests/workpiece_model_phase23.rs`
+- **Learnings for future iterations:**
+  - Phase 3 safety should mirror runtime instance semantics, not fallback warning heuristics: if a test wants to exercise merge or terminal behavior, it must first seed a real source instance that can survive through split/unmount paths.
+  - Reusing `PLC_WORKPIECE_SPLIT_MERGE_RUNTIME` plus targeted constraint/state-machine mutation is a practical way to test exact split/merge safety without adding more long DSL fixtures.
+  - `examples/workpiece_split_merge.plc` is still a contract-only regression input; until a later story gives it real source seeding and terminal cleanup, it should remain a negative safety fixture rather than a verified end-to-end example.
 ---
