@@ -148,6 +148,44 @@ task sink:
         action: log "done"
 "#;
 
+const PLC_WORKPIECE_SPLIT_MERGE_RUNTIME: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    allows: [split_into(slice)]
+}
+
+workpiece slice: workpiece_type {
+    derived_from: [rod]
+}
+
+workpiece module: workpiece_type {
+    derived_from: [merge(slice, slice)]
+}
+
+carrier plate: workpiece_carrier { slots: 1 }
+location cut_zone: workpiece_location { capacity: 4 }
+
+[constraints]
+
+[tasks]
+
+task process:
+    step load:
+        effect: mount rod on plate.slot[0]
+    step unload:
+        effect: unmount rod from plate.slot[0] to cut_zone
+    step cut:
+        effect: split rod into slice count 4 consumed
+    step assemble:
+        effect: merge [slice_a, slice_b] into module consumed_inputs
+        goto sink
+
+task sink:
+    step idle:
+        action: log "done"
+"#;
+
 const PLC_WORKPIECE_INVALID_SLOT_ARITY: &str = r#"
 [topology]
 
@@ -1045,19 +1083,62 @@ fn runtime_executes_split_action_end_to_end() {
 }
 
 #[test]
-fn runtime_bridge_still_rejects_merge_effect_with_effect_level_error() {
-    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE).expect("fixture should parse");
+fn runtime_bridge_lowers_merge_effect_into_runtime_action() {
+    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE_RUNTIME).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let err = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
-        .expect_err("runtime bridge should still reject unsupported merge effects");
-    assert!(matches!(
-        err,
-        BridgeError::UnsupportedWorkpieceEffect { ref effect, .. }
-            if effect == "merge [slice_a, slice_b] into module consumed_inputs"
-    ));
+    let runtime_program = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+        .expect("runtime bridge should lower merge effects");
+
+    assert!(collect_runtime_actions(&runtime_program).iter().any(|action| {
+        matches!(
+            action,
+            Action::WorkpieceMerge {
+                input_refs,
+                input_types,
+                target_type,
+                consumed_inputs,
+            }
+                if *input_refs == ["slice_a", "slice_b"]
+                    && *input_types == ["slice", "slice"]
+                    && *target_type == "module"
+                    && *consumed_inputs
+        )
+    }));
+}
+
+#[test]
+fn runtime_executes_merge_action_end_to_end() {
+    let program = parse_plc(PLC_WORKPIECE_SPLIT_MERGE_RUNTIME).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let runtime_program = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+        .expect("runtime bridge should lower merge actions");
+
+    let mut io = MemIo::new();
+    let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
+    runtime.tick(&mut io).expect("split/merge flow should execute");
+
+    assert_eq!(runtime.workpiece_tokens().active_tokens(), 3);
+    let module = runtime
+        .workpiece_tokens()
+        .token(5)
+        .expect("merge output should stay traceable");
+    assert_eq!(module.workpiece_type, "module");
+    assert_eq!(module.current_location, "cut_zone");
+    assert!(module.active);
+    assert_eq!(
+        runtime
+            .workpiece_lineage()
+            .merge_inputs_of(5)
+            .map(|record| record.source_token_id)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
 }
 
 #[test]

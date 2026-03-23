@@ -337,6 +337,24 @@ pub enum RuntimeError {
         capacity: u32,
         occupancy: usize,
     },
+    WorkpieceMergeInputUnderflow {
+        target_type: &'static str,
+        input_ref: &'static str,
+        required_type: &'static str,
+    },
+    WorkpieceDuplicateConsumedMergeInput {
+        input_ref: &'static str,
+    },
+    WorkpieceMergeArityMismatch {
+        target_type: &'static str,
+        input_refs: usize,
+        input_types: usize,
+    },
+    WorkpieceMergeOverflow {
+        target_type: &'static str,
+        capacity: u32,
+        occupancy: usize,
+    },
     WorkpieceEndpointUndefined {
         endpoint: &'static str,
     },
@@ -441,6 +459,12 @@ pub enum Action {
         target_type: &'static str,
         count: u32,
         consumed: bool,
+    },
+    WorkpieceMerge {
+        input_refs: &'static [&'static str],
+        input_types: &'static [&'static str],
+        target_type: &'static str,
+        consumed_inputs: bool,
     },
     Extend {
         output: DigitalOutputId,
@@ -1810,6 +1834,118 @@ impl<'a> Runtime<'a> {
         Ok(())
     }
 
+    fn execute_workpiece_merge(
+        &mut self,
+        input_refs: &'static [&'static str],
+        input_types: &'static [&'static str],
+        target_type: &'static str,
+        consumed_inputs: bool,
+    ) -> Result<(), RuntimeError> {
+        if input_refs.len() != input_types.len() {
+            return Err(RuntimeError::WorkpieceMergeArityMismatch {
+                target_type,
+                input_refs: input_refs.len(),
+                input_types: input_types.len(),
+            });
+        }
+
+        let mut selected_tokens = [None; MAX_WORKPIECE_TOKENS];
+        let mut selected_count = 0usize;
+        let mut output_location = None;
+        let mut output_slot = None;
+
+        for (idx, (&input_ref, &required_type)) in input_refs.iter().zip(input_types.iter()).enumerate() {
+            if consumed_inputs && input_refs[..idx].contains(&input_ref) {
+                return Err(RuntimeError::WorkpieceDuplicateConsumedMergeInput { input_ref });
+            }
+
+            let mut selected = None;
+            for candidate in self.workpiece_tokens.tokens.iter().flatten() {
+                if !candidate.active || candidate.workpiece_type != required_type {
+                    continue;
+                }
+                if selected_tokens[..selected_count]
+                    .iter()
+                    .flatten()
+                    .any(|token_id| *token_id == candidate.token_id)
+                {
+                    continue;
+                }
+                selected = Some(*candidate);
+                break;
+            }
+
+            let Some(token) = selected else {
+                return Err(RuntimeError::WorkpieceMergeInputUnderflow {
+                    target_type,
+                    input_ref,
+                    required_type,
+                });
+            };
+
+            if output_location.is_none() {
+                output_location = Some(token.current_location);
+                output_slot = token.mounted_slot;
+            }
+            selected_tokens[selected_count] = Some(token.token_id);
+            selected_count = selected_count.saturating_add(1);
+        }
+
+        let Some(output_location) = output_location else {
+            return Err(RuntimeError::WorkpieceMergeArityMismatch {
+                target_type,
+                input_refs: input_refs.len(),
+                input_types: input_types.len(),
+            });
+        };
+
+        self.ensure_workpiece_token_capacity_for_new_tokens(1)?;
+        self.ensure_workpiece_lineage_capacity_for_new_records(selected_count)?;
+        let capacity = self
+            .workpiece_endpoint_capacity(output_location)
+            .ok_or(RuntimeError::WorkpieceStoreInvariantViolation {
+                token_id: selected_tokens[0].unwrap_or_default(),
+            })?;
+        let occupancy = self.workpiece_tokens.active_tokens_at(output_location);
+        let final_occupancy = occupancy
+            .saturating_sub(if consumed_inputs { selected_count } else { 0 })
+            .saturating_add(1);
+        if final_occupancy > capacity as usize {
+            return Err(RuntimeError::WorkpieceMergeOverflow {
+                target_type,
+                capacity,
+                occupancy,
+            });
+        }
+
+        if consumed_inputs {
+            for token_id in selected_tokens[..selected_count].iter().flatten() {
+                self.finish_workpiece_token(*token_id, WorkpieceTerminalStatus::Consumed)?;
+            }
+        }
+
+        let output_token_id = self.create_workpiece_token(target_type, output_location, output_slot)?;
+        for token_id in selected_tokens[..selected_count].iter().flatten() {
+            self.workpiece_lineage
+                .record_merge_input(*token_id, output_token_id)
+                .map_err(|error| match error {
+                    WorkpieceLineageStoreError::CapacityExceeded { max } => {
+                        RuntimeError::WorkpieceLineageCapacityExceeded {
+                            required: self.workpiece_lineage.len().saturating_add(1),
+                            max,
+                        }
+                    }
+                    WorkpieceLineageStoreError::DuplicateRelation { .. } => {
+                        RuntimeError::WorkpieceStoreInvariantViolation {
+                            token_id: *token_id,
+                        }
+                    }
+                })?;
+        }
+
+        Ok(())
+    }
+
     fn write_digital_output<IO: Io>(&mut self, io: &mut IO, id: DigitalOutputId, value: bool) {
         io.write_digital_output(id, value);
         if let Some(slot) = self.digital_output_shadow.get_mut(id.0 as usize) {
@@ -2478,6 +2614,19 @@ impl<'a> Runtime<'a> {
                                         target_type,
                                         count,
                                         consumed,
+                                    )
+                                    .map_err(RuntimeTickError::Core)?,
+                                Action::WorkpieceMerge {
+                                    input_refs,
+                                    input_types,
+                                    target_type,
+                                    consumed_inputs,
+                                } => self
+                                    .execute_workpiece_merge(
+                                        input_refs,
+                                        input_types,
+                                        target_type,
+                                        consumed_inputs,
                                     )
                                     .map_err(RuntimeTickError::Core)?,
                                 Action::Log {
@@ -4958,6 +5107,470 @@ mod tests {
                 workpiece_type: "rod",
                 capacity: 3,
                 occupancy: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_executes_merge_and_records_lineage() {
+        static ACTIONS_MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+        }];
+        static ACTIONS_UNMOUNT: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+            to: "cut_zone",
+        }];
+        static ACTIONS_SPLIT: [Action; 1] = [Action::WorkpieceSplit {
+            source_type: "rod",
+            target_type: "slice",
+            count: 4,
+            consumed: true,
+        }];
+        static MERGE_INPUT_REFS: [&str; 2] = ["slice_a", "slice_b"];
+        static MERGE_INPUT_TYPES: [&str; 2] = ["slice", "slice"];
+        static ACTIONS_MERGE: [Action; 1] = [Action::WorkpieceMerge {
+            input_refs: &MERGE_INPUT_REFS,
+            input_types: &MERGE_INPUT_TYPES,
+            target_type: "module",
+            consumed_inputs: true,
+        }];
+        static STEPS: [Step<'static>; 5] = [
+            Step {
+                name: "load",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "unload",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "cut",
+                instr: Instr::Action {
+                    actions: &ACTIONS_SPLIT,
+                    next: StepId(3),
+                },
+            },
+            Step {
+                name: "assemble",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MERGE,
+                    next: StepId(4),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 3] = [
+            WorkpieceTypeDef {
+                name: "rod",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "module",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "cut_zone",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 4,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        rt.tick(&mut io).expect("merge flow should succeed");
+
+        assert_eq!(rt.workpiece_tokens().active_tokens(), 3);
+        assert_eq!(rt.workpiece_lineage().len(), 6);
+
+        let module = rt
+            .workpiece_tokens()
+            .token(5)
+            .expect("merge output should be stored");
+        assert_eq!(module.workpiece_type, "module");
+        assert_eq!(module.current_location, "cut_zone");
+        assert!(module.active);
+
+        assert_eq!(
+            rt.workpiece_lineage()
+                .merge_inputs_of(5)
+                .map(|record| record.source_token_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        for consumed_id in [1, 2] {
+            let consumed = rt
+                .workpiece_tokens()
+                .token(consumed_id)
+                .expect("consumed merge input should stay traceable");
+            assert_eq!(
+                consumed.terminal_status,
+                Some(WorkpieceTerminalStatus::Consumed)
+            );
+            assert!(!consumed.active);
+        }
+    }
+
+    #[test]
+    fn runtime_rejects_merge_without_required_inputs() {
+        static MERGE_INPUT_REFS: [&str; 2] = ["slice_a", "slice_b"];
+        static MERGE_INPUT_TYPES: [&str; 2] = ["slice", "slice"];
+        static ACTIONS_MERGE: [Action; 1] = [Action::WorkpieceMerge {
+            input_refs: &MERGE_INPUT_REFS,
+            input_types: &MERGE_INPUT_TYPES,
+            target_type: "module",
+            consumed_inputs: true,
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "assemble",
+            instr: Instr::Action {
+                actions: &ACTIONS_MERGE,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "module",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 1] = [WorkpieceSiteDef {
+            name: "cut_zone",
+            kind: WorkpieceSiteKind::WorkpieceLocation,
+            capacity: 4,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt.tick(&mut io).expect_err("missing merge input should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceMergeInputUnderflow {
+                target_type: "module",
+                input_ref: "slice_a",
+                required_type: "slice",
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_merge_with_duplicate_consumed_input_refs() {
+        static ACTIONS_MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "slice",
+            slot: "plate.slot[0]",
+        }];
+        static ACTIONS_UNMOUNT: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "slice",
+            slot: "plate.slot[0]",
+            to: "cut_zone",
+        }];
+        static ACTIONS_MOUNT_B: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "slice",
+            slot: "plate.slot[1]",
+        }];
+        static ACTIONS_UNMOUNT_B: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "slice",
+            slot: "plate.slot[1]",
+            to: "cut_zone_b",
+        }];
+        static MERGE_INPUT_REFS: [&str; 2] = ["slice_a", "slice_a"];
+        static MERGE_INPUT_TYPES: [&str; 2] = ["slice", "slice"];
+        static ACTIONS_MERGE: [Action; 1] = [Action::WorkpieceMerge {
+            input_refs: &MERGE_INPUT_REFS,
+            input_types: &MERGE_INPUT_TYPES,
+            target_type: "module",
+            consumed_inputs: true,
+        }];
+        static STEPS: [Step<'static>; 5] = [
+            Step {
+                name: "load_a",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "unload_a",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "load_b",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT_B,
+                    next: StepId(3),
+                },
+            },
+            Step {
+                name: "unload_b",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT_B,
+                    next: StepId(4),
+                },
+            },
+            Step {
+                name: "assemble",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MERGE,
+                    next: StepId(4),
+                },
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "module",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 4] = [
+            WorkpieceSiteDef {
+                name: "plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "plate.slot[1]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "cut_zone",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 2,
+            },
+            WorkpieceSiteDef {
+                name: "cut_zone_b",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 2,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("duplicate merge input ref should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceDuplicateConsumedMergeInput {
+                input_ref: "slice_a",
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_merge_with_input_arity_mismatch() {
+        static ACTIONS_MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "slice",
+            slot: "plate.slot[0]",
+        }];
+        static ACTIONS_UNMOUNT: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "slice",
+            slot: "plate.slot[0]",
+            to: "cut_zone",
+        }];
+        static MERGE_INPUT_REFS: [&str; 2] = ["slice_a", "slice_b"];
+        static MERGE_INPUT_TYPES: [&str; 1] = ["slice"];
+        static ACTIONS_MERGE: [Action; 1] = [Action::WorkpieceMerge {
+            input_refs: &MERGE_INPUT_REFS,
+            input_types: &MERGE_INPUT_TYPES,
+            target_type: "module",
+            consumed_inputs: true,
+        }];
+        static STEPS: [Step<'static>; 3] = [
+            Step {
+                name: "load",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "unload",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "assemble",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MERGE,
+                    next: StepId(2),
+                },
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "module",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "cut_zone",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 2,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt.tick(&mut io).expect_err("merge arity mismatch should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceMergeArityMismatch {
+                target_type: "module",
+                input_refs: 2,
+                input_types: 1,
             }
         );
     }

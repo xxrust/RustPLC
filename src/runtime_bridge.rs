@@ -698,6 +698,7 @@ enum BridgeCarrierLayout {
 
 struct WorkpieceBridgeContext {
     carrier_layouts: HashMap<String, BridgeCarrierLayout>,
+    merge_input_types: HashMap<(String, usize), &'static [&'static str]>,
     phase1_workpiece_type: Option<&'static str>,
     runtime_types: &'static [RtWorkpieceTypeDef<'static>],
     runtime_sites: &'static [RtWorkpieceSiteDef<'static>],
@@ -729,6 +730,7 @@ impl WorkpieceBridgeContext {
 
         Ok(Self {
             carrier_layouts: carrier_layouts.clone(),
+            merge_input_types: collect_workpiece_merge_input_types(&constraints.workpiece_types),
             phase1_workpiece_type,
             runtime_types: leak_workpiece_types(&constraints.workpiece_types, &carrier_layouts)?,
             runtime_sites: leak_workpiece_sites(
@@ -738,6 +740,24 @@ impl WorkpieceBridgeContext {
             runtime_holders: leak_workpiece_holders(&constraints.workpiece_holders),
         })
     }
+}
+
+fn collect_workpiece_merge_input_types(
+    workpiece_types: &[crate::ir::WorkpieceTypeDef],
+) -> HashMap<(String, usize), &'static [&'static str]> {
+    let mut merge_input_types = HashMap::new();
+    for workpiece in workpiece_types {
+        for rule in &workpiece.derived_from {
+            let crate::ir::WorkpieceDerivationDef::Merge { inputs } = rule else {
+                continue;
+            };
+            merge_input_types.insert(
+                (workpiece.name.clone(), inputs.len()),
+                leak_str_slice(inputs),
+            );
+        }
+    }
+    merge_input_types
 }
 
 fn leak_workpiece_types(
@@ -2847,10 +2867,25 @@ fn convert_workpiece_effect(
             count: *count,
             consumed: *consumed,
         }),
-        crate::ir::WorkpieceEffect::Merge { .. } => {
-            Err(BridgeError::UnsupportedWorkpieceEffect {
-                state: state_name.to_string(),
-                effect: render_workpiece_effect(effect),
+        crate::ir::WorkpieceEffect::Merge {
+            inputs,
+            target_type,
+            consumed_inputs,
+        } => {
+            let Some(&input_types) = workpiece_ctx
+                .merge_input_types
+                .get(&(target_type.clone(), inputs.len()))
+            else {
+                return Err(BridgeError::UnsupportedWorkpieceEffect {
+                    state: state_name.to_string(),
+                    effect: render_workpiece_effect(effect),
+                });
+            };
+            Ok(Action::WorkpieceMerge {
+                input_refs: leak_str_slice(inputs),
+                input_types,
+                target_type: Box::leak(target_type.clone().into_boxed_str()),
+                consumed_inputs: *consumed_inputs,
             })
         }
     }

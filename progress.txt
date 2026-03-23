@@ -17,6 +17,7 @@ Started: 2026-03-23 01:07:00 CST
 - Carrier-slot bridge lowering must expand `carrier.slot[*]` / grid selectors into concrete runtime ingress-egress endpoints and synthesized carrier `workpiece_sites`; otherwise runtime seeding and slot-addressed actions drift apart even when IR is correct.
 - Phase 2 safety verification must mirror runtime token semantics: track `mounted_slot` separately, let `mount` reuse a same-type free-standing token already at the slot, treat `acquire/transfer/finish` as free-standing-only, and keep mounted association intact across `transform carrier`.
 - Phase 3 `split` is still type-level in IR. Runtime must consume exactly one active token of `source_type` globally and let child tokens inherit the source token's `current_location` and `mounted_slot`; if future stories need endpoint-level routing, add that data to IR instead of guessing in bridge/runtime.
+- Phase 3 `merge` is also still type-level in IR. `inputs` are only DSL refs, so `runtime_bridge` must resolve the concrete input-type multiset from the target `merge(...)` derivation and lower both refs and types into `runtime-core`; runtime should then reject duplicate consumed refs or arity drift explicitly instead of guessing hidden instance metadata.
 
 ## [2026-03-23 01:40:23 +08:00] - US-001
 Thread: https://ampcode.com/threads/unknown
@@ -186,4 +187,25 @@ Thread: https://ampcode.com/threads/unknown
   - `split` currently has no endpoint or instance selector in IR, so runtime must reject `source_type` multiplicity instead of guessing which token to consume.
   - Split children should inherit the source token's location/mounted association; otherwise carrier-mounted and in-place process semantics drift between bridge, runtime, and later verification.
   - Because consumed source tokens stay in `WorkpieceTokenStore`, split capacity checks must use `slots_used + count`, not `active_tokens + count`.
+---
+## [2026-03-23 08:10:32 +08:00] - US-010
+Thread: https://ampcode.com/threads/unknown
+- Implemented `merge` end-to-end for WPM-v1: `src/runtime_bridge.rs` now lowers `WorkpieceEffect::Merge` into `runtime_core::Action::WorkpieceMerge` with preserved DSL input refs, resolved input types, target type, and `consumed_inputs` metadata.
+- Added runtime-core merge execution in `crates/runtime-core/src/lib.rs` with deterministic token selection by resolved input-type multiset, input consumption to `Consumed`, output-token creation, and merge-lineage recording from every consumed input to the new output token.
+- Added explicit runtime failures for missing merge inputs, duplicate consumed input refs, merge arity mismatch, and merge-output overflow; updated downstream action exhaustiveness in `src/main.rs`, `src/sim_regress.rs`, and `crates/codegen/src/lib.rs`.
+- Added merge regressions in `tests/workpiece_model_phase23.rs` and runtime-core unit tests covering lowering, successful execution, and failure paths.
+- Files changed
+- `AGENTS.md`
+- `crates/codegen/src/lib.rs`
+- `crates/runtime-core/src/lib.rs`
+- `prd.json`
+- `progress.txt`
+- `src/main.rs`
+- `src/runtime_bridge.rs`
+- `src/sim_regress.rs`
+- `tests/workpiece_model_phase23.rs`
+- **Learnings for future iterations:**
+  - Runtime merge cannot recover input types from DSL input refs alone; that mapping has to be frozen in bridge metadata from the target type's `merge(...)` derivation before runtime executes.
+  - Merge output capacity checks must use the eventual output location, not the declarative target type, because the current IR still omits an explicit output endpoint.
+  - Type-level merge selection is deterministic but still not instance-addressed; if a later story needs input-instance legality, add explicit instance/source metadata to IR rather than pushing more heuristics into runtime.
 ---

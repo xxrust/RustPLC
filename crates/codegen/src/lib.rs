@@ -311,6 +311,15 @@ fn format_action(a: &Action) -> String {
             "Action::WorkpieceSplit {{ source_type: {:?}, target_type: {:?}, count: {}, consumed: {:?} }}",
             source_type, target_type, count, consumed
         ),
+        Action::WorkpieceMerge {
+            input_refs,
+            input_types,
+            target_type,
+            consumed_inputs,
+        } => format!(
+            "Action::WorkpieceMerge {{ input_refs: {:?}, input_types: {:?}, target_type: {:?}, consumed_inputs: {:?} }}",
+            input_refs, input_types, target_type, consumed_inputs
+        ),
         Action::Extend { output } => {
             format!("Action::Extend {{ output: DigitalOutputId({}) }}", output.0)
         }

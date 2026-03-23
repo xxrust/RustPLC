@@ -6551,7 +6551,8 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                             | Action::WorkpieceMount { .. }
                             | Action::WorkpieceUnmount { .. }
                             | Action::WorkpieceTransformCarrier { .. }
-                            | Action::WorkpieceSplit { .. } => {}
+                            | Action::WorkpieceSplit { .. }
+                            | Action::WorkpieceMerge { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
@@ -6733,7 +6734,8 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                             | Action::WorkpieceMount { .. }
                             | Action::WorkpieceUnmount { .. }
                             | Action::WorkpieceTransformCarrier { .. }
-                            | Action::WorkpieceSplit { .. } => {}
+                            | Action::WorkpieceSplit { .. }
+                            | Action::WorkpieceMerge { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
@@ -9764,7 +9766,8 @@ fn io_sizes_for_program_and_scenario(
                             | Action::WorkpieceMount { .. }
                             | Action::WorkpieceUnmount { .. }
                             | Action::WorkpieceTransformCarrier { .. }
-                            | Action::WorkpieceSplit { .. } => {}
+                            | Action::WorkpieceSplit { .. }
+                            | Action::WorkpieceMerge { .. } => {}
                             Action::Log { .. } => {}
                         }
                     }
