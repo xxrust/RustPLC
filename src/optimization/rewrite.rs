@@ -156,8 +156,8 @@ fn merge_adjacent_delay_steps(
     if second_idx != first_idx + 1 {
         return None;
     }
-    let merged_delay =
-        total_delay_ms(&task.steps[first_idx]).saturating_add(total_delay_ms(&task.steps[second_idx]));
+    let merged_delay = total_delay_ms(&task.steps[first_idx])
+        .saturating_add(total_delay_ms(&task.steps[second_idx]));
     task.steps[first_idx].statements = vec![StepStatement::Delay {
         duration_ms: merged_delay,
     }];

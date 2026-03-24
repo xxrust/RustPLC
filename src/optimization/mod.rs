@@ -4,14 +4,14 @@ pub mod ranker;
 pub mod rewrite;
 pub mod timing;
 
-use crate::ast::PlcProgram;
+use crate::ast::{PlcProgram, StepStatement};
 use crate::error::PlcError;
 use crate::parser::parse_plc;
 use crate::semantic::{
     build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
 };
 use crate::verification::timing::ProgramTimingEstimate;
-use crate::verification::{VerificationIssue, verify_all};
+use crate::verification::{verify_all, VerificationIssue};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -90,8 +90,8 @@ pub struct OptimizationContext {
 
 impl OptimizationContext {
     pub fn from_source(source: &str) -> Result<Self, OptimizationBuildError> {
-        let original_program =
-            parse_plc(source).map_err(|err| OptimizationBuildError::Parse(vec![err.to_string()]))?;
+        let original_program = parse_plc(source)
+            .map_err(|err| OptimizationBuildError::Parse(vec![err.to_string()]))?;
         let expanded_program = preprocess_program(&original_program)
             .map_err(|errors| OptimizationBuildError::Semantic(render_plc_errors(errors)))?;
 
@@ -150,10 +150,125 @@ pub(crate) fn recheck_source_legality(
         .map_err(|errors| OptimizationLegalityError::Semantic(render_plc_errors(errors)))?;
     let state_machine = build_state_machine(&expanded)
         .map_err(|errors| OptimizationLegalityError::Semantic(render_plc_errors(errors)))?;
-    verify_all(&expanded, &topology, &constraints, &state_machine)
-        .map_err(|errors| OptimizationLegalityError::Verification(render_verification_errors(errors)))?;
+    verify_all(&expanded, &topology, &constraints, &state_machine).map_err(|errors| {
+        OptimizationLegalityError::Verification(render_verification_errors(errors))
+    })?;
     let estimate =
         crate::verification::timing::estimate_program_timing(&expanded, &topology, &state_machine);
 
     Ok((expanded, estimate))
+}
+
+pub fn optimize_plc_source(
+    source: &str,
+) -> Result<Vec<OptimizationCandidate>, OptimizationBuildError> {
+    let context = OptimizationContext::from_source(source)?;
+    let opportunities = analyzer::analyze_optimization_opportunities(&context.expanded_program);
+    let generated = rewrite::generate_candidate_rewrites(&context.expanded_program, &opportunities);
+    let mut candidates = Vec::new();
+
+    for (index, (rewrite, candidate_program)) in generated.into_iter().enumerate() {
+        let timing = timing::evaluate_candidate_timing(&candidate_program)
+            .map_err(OptimizationBuildError::Semantic)?;
+        let legality = emitter::recheck_candidate_legality(&candidate_program);
+        let source = emitter::emit_optimized_plc(&context.original_source, &candidate_program)
+            .map_err(|error| OptimizationBuildError::Semantic(vec![error]))?;
+        let change_cost = rewrite.affected_steps.len().max(1);
+        candidates.push(OptimizationCandidate {
+            id: format!("candidate_{:03}", index + 1),
+            rewrite,
+            timing,
+            legality,
+            wait_points_after: count_wait_points(&candidate_program),
+            change_cost,
+            source,
+        });
+    }
+
+    ranker::rank_candidates(&mut candidates);
+    Ok(candidates)
+}
+
+fn count_wait_points(program: &PlcProgram) -> usize {
+    program
+        .tasks
+        .tasks
+        .iter()
+        .flat_map(|task| task.steps.iter())
+        .map(|step| count_wait_points_in_statements(&step.statements))
+        .sum()
+}
+
+fn count_wait_points_in_statements(statements: &[StepStatement]) -> usize {
+    statements
+        .iter()
+        .map(|statement| match statement {
+            StepStatement::Wait(_)
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::AllowIndefiniteWait(_) => 1,
+            StepStatement::Action(_)
+            | StepStatement::Effect(_)
+            | StepStatement::Goto(_)
+            | StepStatement::IfElse { .. } => 0,
+            StepStatement::Repeat { body, .. } => count_wait_points_in_statements(body),
+            StepStatement::Parallel(block) => block
+                .branches
+                .iter()
+                .map(|branch| count_wait_points_in_statements(&branch.statements))
+                .sum(),
+            StepStatement::Race(block) => block
+                .branches
+                .iter()
+                .map(|branch| count_wait_points_in_statements(&branch.statements))
+                .sum(),
+        })
+        .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::optimize_plc_source;
+
+    #[test]
+    fn optimize_plc_source_returns_ranked_parseable_candidates() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device Y1: digital_output
+
+[constraints]
+
+[tasks]
+
+task main:
+    step prep_a:
+        action: set Y0 on
+    step prep_b:
+        action: set Y1 on
+    step wait_sensor:
+        wait: sensor_ready == true
+        timeout: 200ms -> goto fault
+    step wait_sensor_again:
+        wait: sensor_ready == true
+        timeout: 200ms -> goto fault
+
+task fault:
+    step safe_stop:
+        delay: 20ms
+"#;
+
+        let candidates = optimize_plc_source(source).expect("optimize");
+        assert!(!candidates.is_empty(), "expected optimization candidates");
+        assert!(candidates
+            .windows(2)
+            .all(|pair| { pair[0].legality.is_legal >= pair[1].legality.is_legal }));
+        assert!(candidates
+            .iter()
+            .all(|candidate| !candidate.source.is_empty()));
+        assert!(candidates
+            .iter()
+            .all(|candidate| candidate.source.contains("[tasks]")));
+    }
 }

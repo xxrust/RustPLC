@@ -1,5 +1,5 @@
 use crate::ast::PlcProgram;
-use crate::optimization::{CandidateTimingSummary, render_plc_errors, summarize_program_timing};
+use crate::optimization::{render_plc_errors, summarize_program_timing, CandidateTimingSummary};
 use crate::semantic::{build_state_machine, build_topology_graph};
 use crate::verification::timing::estimate_program_timing;
 

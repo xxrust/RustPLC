@@ -32,7 +32,10 @@ pub fn analyze_optimization_opportunities(program: &PlcProgram) -> Vec<Optimizat
 
             if can_reorder_or_parallelize(&first_profile, &second_profile) {
                 let shared_details = vec![
-                    format!("{} 与 {} 都是非阻塞 immediate step", first.name, second.name),
+                    format!(
+                        "{} 与 {} 都是非阻塞 immediate step",
+                        first.name, second.name
+                    ),
                     "两步没有 wait/delay/timeout/goto/parallel/race/axis.move".to_string(),
                     "两步动作/资源目标集合互不重叠".to_string(),
                 ];
@@ -405,16 +408,12 @@ task fast_fault:
             item.summary.contains("prep_a / prep_b")
                 && item.kind == OptimizationOpportunityKind::ParallelizeIndependentSteps
         }));
-        assert!(
-            opportunities
-                .iter()
-                .any(|item| item.kind == OptimizationOpportunityKind::MergeRedundantWait)
-        );
-        assert!(
-            opportunities
-                .iter()
-                .any(|item| item.kind == OptimizationOpportunityKind::MergeAdjacentDelay)
-        );
+        assert!(opportunities
+            .iter()
+            .any(|item| item.kind == OptimizationOpportunityKind::MergeRedundantWait));
+        assert!(opportunities
+            .iter()
+            .any(|item| item.kind == OptimizationOpportunityKind::MergeAdjacentDelay));
         assert!(opportunities.iter().any(|item| {
             item.kind == OptimizationOpportunityKind::ReplaceRecoveryRoute
                 && item.summary.contains("slow_fault -> fast_fault")
