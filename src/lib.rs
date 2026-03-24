@@ -17,6 +17,7 @@ pub mod error;
 pub mod extern_functions;
 pub mod iec_address;
 pub mod io_map;
+pub mod optimization;
 pub mod ir;
 pub mod parser;
 pub mod plc_port;

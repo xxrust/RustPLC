@@ -33,26 +33,34 @@ struct DeviceTimingProfile {
     ramp_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default)]
-struct StepTimingEstimate {
-    action_max_ms: u64,
-    pending_action_max_ms: u64,
-    delay_max_ms: u64,
-    timeout_max_ms: u64,
-    nominal_ms: u64,
-    worst_case_ms: u64,
-    action_details: Vec<String>,
-    pending_action_details: Vec<String>,
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StepTimingEstimate {
+    pub action_max_ms: u64,
+    pub pending_action_max_ms: u64,
+    pub delay_max_ms: u64,
+    pub timeout_max_ms: u64,
+    pub nominal_ms: u64,
+    pub worst_case_ms: u64,
+    pub action_details: Vec<String>,
+    pub pending_action_details: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
-struct ConcurrentTimingSummary {
-    active_nominal_by_task: Vec<(String, u64)>,
-    active_worst_by_task: Vec<(String, u64)>,
-    global_nominal_ms: u64,
-    global_worst_case_ms: u64,
-    sequential_nominal_ms: u64,
-    sequential_worst_case_ms: u64,
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConcurrentTimingSummary {
+    pub active_nominal_by_task: Vec<(String, u64)>,
+    pub active_worst_by_task: Vec<(String, u64)>,
+    pub global_nominal_ms: u64,
+    pub global_worst_case_ms: u64,
+    pub sequential_nominal_ms: u64,
+    pub sequential_worst_case_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProgramTimingEstimate {
+    pub step_estimates: HashMap<String, StepTimingEstimate>,
+    pub task_nominal_case: HashMap<String, u64>,
+    pub task_worst_case: HashMap<String, u64>,
+    pub concurrent_summary: ConcurrentTimingSummary,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -68,12 +76,11 @@ pub fn verify_timing(
     constraints: &ConstraintSet,
     state_machine: &StateMachine,
 ) -> Result<(), Vec<TimingDiagnostic>> {
-    let context = TimingContext::from_inputs(program, topology);
-    let step_estimates = build_step_estimates(program, &context, state_machine);
-    let task_nominal_case = build_task_nominal_case(program, &step_estimates);
-    let task_worst_case = build_task_worst_case(program, &step_estimates);
-    let concurrent_summary =
-        build_concurrent_timing_summary(state_machine, &task_nominal_case, &task_worst_case);
+    let estimate = estimate_program_timing(program, topology, state_machine);
+    let step_estimates = &estimate.step_estimates;
+    let task_nominal_case = &estimate.task_nominal_case;
+    let task_worst_case = &estimate.task_worst_case;
+    let concurrent_summary = &estimate.concurrent_summary;
 
     let mut diagnostics = Vec::new();
 
@@ -225,6 +232,26 @@ pub fn verify_timing(
         Ok(())
     } else {
         Err(diagnostics)
+    }
+}
+
+pub fn estimate_program_timing(
+    program: &PlcProgram,
+    topology: &TopologyGraph,
+    state_machine: &StateMachine,
+) -> ProgramTimingEstimate {
+    let context = TimingContext::from_inputs(program, topology);
+    let step_estimates = build_step_estimates(program, &context, state_machine);
+    let task_nominal_case = build_task_nominal_case(program, &step_estimates);
+    let task_worst_case = build_task_worst_case(program, &step_estimates);
+    let concurrent_summary =
+        build_concurrent_timing_summary(state_machine, &task_nominal_case, &task_worst_case);
+
+    ProgramTimingEstimate {
+        step_estimates,
+        task_nominal_case,
+        task_worst_case,
+        concurrent_summary,
     }
 }
 
