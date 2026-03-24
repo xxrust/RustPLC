@@ -1,6 +1,6 @@
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use runtime_core::{Action, Instr, Runtime, WorkpieceTerminalStatus};
-use rust_plc::codegen::st::{StCodegenConfig, StCodegenError, generate_st};
+use rust_plc::codegen::st::{StCodegenConfig, generate_st};
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::semantic::{build_constraint_set, build_state_machine, build_topology_graph};
@@ -237,22 +237,21 @@ fn runtime_executes_phase1_example_end_to_end() {
 }
 
 #[test]
-fn st_codegen_rejects_workpiece_model_for_now() {
+fn st_codegen_erases_workpiece_semantics_and_generates_control_only_output() {
     let program = parse_plc(PLC_WORKPIECE_PHASE1).expect("fixture should parse");
     let topology = build_topology_graph(&program).expect("topology should build");
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let errors = generate_st(
+    let st = generate_st(
         &topology,
         &constraints,
         &state_machine,
         &StCodegenConfig::default(),
     )
-    .expect_err("ST backend should reject workpiece model");
-    assert!(
-        errors
-            .iter()
-            .any(|error| matches!(error, StCodegenError::WorkpieceModelUnsupported))
-    );
+    .expect("ST backend should erase workpiece semantics and still generate output");
+    assert!(st.contains("Workpiece verification semantics erased before ST codegen"));
+    assert!(st.contains("PROGRAM Main"));
+    assert!(!st.contains("acquire holder arm from infeed"));
+    assert!(!st.contains("finish workpiece at outfeed as finished"));
 }

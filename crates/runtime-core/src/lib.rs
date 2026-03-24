@@ -1795,7 +1795,9 @@ impl<'a> Runtime<'a> {
             .ok_or(RuntimeError::WorkpieceStoreInvariantViolation {
                 token_id: source.token_id,
             })?;
-        let occupancy = self.workpiece_tokens.active_tokens_at(source.current_location);
+        let occupancy = self
+            .workpiece_tokens
+            .active_tokens_at(source.current_location);
         let final_occupancy = occupancy
             .saturating_sub(if consumed { 1 } else { 0 })
             .saturating_add(output_count);
@@ -1812,8 +1814,11 @@ impl<'a> Runtime<'a> {
         }
 
         for _ in 0..count {
-            let child_id =
-                self.create_workpiece_token(target_type, source.current_location, source.mounted_slot)?;
+            let child_id = self.create_workpiece_token(
+                target_type,
+                source.current_location,
+                source.mounted_slot,
+            )?;
             self.workpiece_lineage
                 .record_split_child(source.token_id, child_id)
                 .map_err(|error| match error {
@@ -1854,7 +1859,9 @@ impl<'a> Runtime<'a> {
         let mut output_location = None;
         let mut output_slot = None;
 
-        for (idx, (&input_ref, &required_type)) in input_refs.iter().zip(input_types.iter()).enumerate() {
+        for (idx, (&input_ref, &required_type)) in
+            input_refs.iter().zip(input_types.iter()).enumerate()
+        {
             if consumed_inputs && input_refs[..idx].contains(&input_ref) {
                 return Err(RuntimeError::WorkpieceDuplicateConsumedMergeInput { input_ref });
             }
@@ -1901,11 +1908,11 @@ impl<'a> Runtime<'a> {
 
         self.ensure_workpiece_token_capacity_for_new_tokens(1)?;
         self.ensure_workpiece_lineage_capacity_for_new_records(selected_count)?;
-        let capacity = self
-            .workpiece_endpoint_capacity(output_location)
-            .ok_or(RuntimeError::WorkpieceStoreInvariantViolation {
+        let capacity = self.workpiece_endpoint_capacity(output_location).ok_or(
+            RuntimeError::WorkpieceStoreInvariantViolation {
                 token_id: selected_tokens[0].unwrap_or_default(),
-            })?;
+            },
+        )?;
         let occupancy = self.workpiece_tokens.active_tokens_at(output_location);
         let final_occupancy = occupancy
             .saturating_sub(if consumed_inputs { selected_count } else { 0 })
@@ -1924,7 +1931,8 @@ impl<'a> Runtime<'a> {
             }
         }
 
-        let output_token_id = self.create_workpiece_token(target_type, output_location, output_slot)?;
+        let output_token_id =
+            self.create_workpiece_token(target_type, output_location, output_slot)?;
         for token_id in selected_tokens[..selected_count].iter().flatten() {
             self.workpiece_lineage
                 .record_merge_input(*token_id, output_token_id)
@@ -3881,7 +3889,9 @@ mod tests {
             vec![child_a, child_b]
         );
         assert_eq!(
-            tokens.token(1).expect("source token should remain traceable"),
+            tokens
+                .token(1)
+                .expect("source token should remain traceable"),
             WorkpieceToken {
                 token_id: 1,
                 workpiece_type: "rod",
@@ -4787,7 +4797,10 @@ mod tests {
             .expect("source token should remain traceable");
         assert_eq!(consumed.workpiece_type, "rod");
         assert_eq!(consumed.current_location, "cut_zone");
-        assert_eq!(consumed.terminal_status, Some(WorkpieceTerminalStatus::Consumed));
+        assert_eq!(
+            consumed.terminal_status,
+            Some(WorkpieceTerminalStatus::Consumed)
+        );
         assert!(!consumed.active);
 
         for child_id in 1..=4 {
@@ -4866,7 +4879,9 @@ mod tests {
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
-        let err = rt.tick(&mut io).expect_err("missing split source should fail");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("missing split source should fail");
         assert_eq!(
             err,
             RuntimeError::WorkpieceTypeSourceUnderflow {
@@ -4999,7 +5014,9 @@ mod tests {
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
-        let err = rt.tick(&mut io).expect_err("ambiguous split source should fail");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("ambiguous split source should fail");
         assert_eq!(
             err,
             RuntimeError::WorkpieceTypeSourceAmbiguity {
@@ -5323,7 +5340,9 @@ mod tests {
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
-        let err = rt.tick(&mut io).expect_err("missing merge input should fail");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("missing merge input should fail");
         assert_eq!(
             err,
             RuntimeError::WorkpieceMergeInputUnderflow {
@@ -5564,7 +5583,9 @@ mod tests {
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
-        let err = rt.tick(&mut io).expect_err("merge arity mismatch should fail");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("merge arity mismatch should fail");
         assert_eq!(
             err,
             RuntimeError::WorkpieceMergeArityMismatch {

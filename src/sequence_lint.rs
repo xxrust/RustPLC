@@ -186,6 +186,7 @@ fn collect_wait_facts(statements: &[StepStatement], facts: &mut WaitFacts) {
                 }
             }
             StepStatement::Action(_)
+            | StepStatement::Effect(_)
             | StepStatement::IfElse { .. }
             | StepStatement::Delay { .. }
             | StepStatement::Goto(_) => {}

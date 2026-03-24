@@ -13,7 +13,9 @@ use rust_plc::extern_functions::{
 use rust_plc::ir::{ExternFunctionContract, TopologyGraph, VariableType};
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
-use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
+use rust_plc::semantic::{
+    build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
+};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -24,8 +26,9 @@ fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'
     // Keep preprocessing in the pipeline so repeat expansion (etc.) stays consistent.
     let expanded = preprocess_program(&program).expect("preprocess");
     let topology = build_topology_graph(&expanded).expect("topology");
+    let constraints = build_constraint_set(&expanded).expect("constraints");
     let sm = build_state_machine(&expanded).expect("state machine");
-    state_machine_to_runtime_program(&topology, &sm, tick_ms).expect("bridge")
+    state_machine_to_runtime_program(&topology, &constraints, &sm, tick_ms).expect("bridge")
 }
 
 fn compile_to_runtime_result(
@@ -35,8 +38,9 @@ fn compile_to_runtime_result(
     let program = parse_plc(plc_source).expect("parse plc");
     let expanded = preprocess_program(&program).expect("preprocess");
     let topology = build_topology_graph(&expanded).expect("topology");
+    let constraints = build_constraint_set(&expanded).expect("constraints");
     let sm = build_state_machine(&expanded).expect("state machine");
-    state_machine_to_runtime_program(&topology, &sm, tick_ms)
+    state_machine_to_runtime_program(&topology, &constraints, &sm, tick_ms)
 }
 
 fn compile_runtime_and_topology(
@@ -46,9 +50,10 @@ fn compile_runtime_and_topology(
     let program = parse_plc(plc_source).expect("parse plc");
     let expanded = preprocess_program(&program).expect("preprocess");
     let topology = build_topology_graph(&expanded).expect("topology");
+    let constraints = build_constraint_set(&expanded).expect("constraints");
     let sm = build_state_machine(&expanded).expect("state machine");
     let runtime_program =
-        state_machine_to_runtime_program(&topology, &sm, tick_ms).expect("bridge");
+        state_machine_to_runtime_program(&topology, &constraints, &sm, tick_ms).expect("bridge");
     (runtime_program, topology)
 }
 
@@ -802,10 +807,11 @@ fn bridge_rejects_axis_move_when_axis_profile_is_missing() {
     let program = parse_plc(PLC_AXIS_BRIDGE_FIXTURE).expect("parse plc");
     let expanded = preprocess_program(&program).expect("preprocess");
     let mut topology = build_topology_graph(&expanded).expect("topology");
+    let constraints = build_constraint_set(&expanded).expect("constraints");
     let sm = build_state_machine(&expanded).expect("state machine");
     topology.axis_profiles.clear();
 
-    let err = state_machine_to_runtime_program(&topology, &sm, 10)
+    let err = state_machine_to_runtime_program(&topology, &constraints, &sm, 10)
         .expect_err("missing axis profile should fail at bridge");
     assert!(matches!(
         err,
@@ -2145,4 +2151,160 @@ fn runtime_tick_with_extern_propagates_quadratic_fit_runtime_error() {
         }
         other => panic!("unexpected tick error variant: {other:?}"),
     }
+}
+
+const PLC_SRI_STATE_CONFLICT_FIXTURE: &str = r#"
+[topology]
+
+device Y0: digital_output
+device valve_feed: solenoid_valve
+device cyl_feed: cylinder
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+
+relation { from: Y0.out, to: valve_feed.coil, via: driven_by }
+relation { from: valve_feed.out, to: cyl_feed.cmd, via: driven_by }
+
+resource slide_pick_zone: semantic_resource { mode: exclusive }
+
+[constraints]
+
+claim: cyl_feed.extended occupies slide_pick_zone
+claim: action_tag arm_pick_to_slide occupies slide_pick_zone
+
+[tasks]
+
+task feeder:
+    step extend:
+        action: extend cyl_feed
+    step hold:
+        action: log "hold"
+
+task arm:
+    step move:
+        action: axis.move_relative(axis_x, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+            semantic_tag: arm_pick_to_slide
+    step done:
+        action: log "done"
+
+task fault:
+    step timeout:
+        action: log "timeout"
+    step reject:
+        action: log "reject"
+    step motion_fault:
+        action: log "motion"
+    step safety_fault:
+        action: log "safety"
+"#;
+
+const PLC_SRI_PENDING_CONFLICT_FIXTURE: &str = r#"
+[topology]
+
+device axis_a: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+device axis_b: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
+
+resource slide_pick_zone: semantic_resource { mode: exclusive }
+
+[constraints]
+
+claim: action_tag arm_pick_to_slide_a occupies slide_pick_zone
+claim: action_tag arm_pick_to_slide_b occupies slide_pick_zone
+
+[tasks]
+
+task arm_a:
+    step move:
+        action: axis.move_relative(axis_a, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout_a
+            on_reject -> fault.reject_a
+            on_motion_fault -> fault.motion_fault_a
+            on_safety_fault -> fault.safety_fault_a
+            semantic_tag: arm_pick_to_slide_a
+    step done:
+        action: log "done_a"
+
+task arm_b:
+    step move:
+        action: axis.move_relative(axis_b, distance: 5, speed: 10)
+            timeout: 100ms -> fault.timeout_b
+            on_reject -> fault.reject_b
+            on_motion_fault -> fault.motion_fault_b
+            on_safety_fault -> fault.safety_fault_b
+            semantic_tag: arm_pick_to_slide_b
+    step done:
+        action: log "done_b"
+
+task fault:
+    step timeout_a:
+        action: log "timeout_a"
+    step reject_a:
+        action: log "reject_a"
+    step motion_fault_a:
+        action: log "motion_a"
+    step safety_fault_a:
+        action: log "safety_a"
+    step timeout_b:
+        action: log "timeout_b"
+    step reject_b:
+        action: log "reject_b"
+    step motion_fault_b:
+        action: log "motion_b"
+    step safety_fault_b:
+        action: log "safety_b"
+"#;
+
+#[test]
+fn runtime_routes_axis_move_to_safety_fault_when_state_claim_occupies_resource() {
+    let program = compile_to_runtime(PLC_SRI_STATE_CONFLICT_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(0, 1, 0, 0);
+    let mut motion_calls = 0usize;
+
+    rt.tick_with_axis(&mut io, |_| {
+        motion_calls += 1;
+        AxisMotionResult::Done
+    })
+    .expect("runtime tick should route instead of failing");
+
+    assert_eq!(
+        motion_calls, 0,
+        "conflicted axis move should be blocked before handler"
+    );
+    assert_eq!(task_step_name(&rt, &program, 0), "feeder.hold");
+    assert_eq!(task_step_name(&rt, &program, 1), "fault.safety_fault");
+}
+
+#[test]
+fn runtime_keeps_action_tag_claim_active_while_axis_move_is_pending() {
+    let program = compile_to_runtime(PLC_SRI_PENDING_CONFLICT_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(0, 0, 0, 0);
+    let mut seen_tags = Vec::new();
+
+    rt.tick_with_axis(&mut io, |command| {
+        seen_tags.push(command.semantic_tag.map(str::to_string));
+        if command.target == "axis_a" {
+            AxisMotionResult::Pending
+        } else {
+            AxisMotionResult::Done
+        }
+    })
+    .expect("tick should succeed with safety routing");
+
+    assert_eq!(
+        seen_tags.len(),
+        1,
+        "second axis should be blocked by pending claim"
+    );
+    assert_eq!(seen_tags[0].as_deref(), Some("arm_pick_to_slide_a"));
+    assert_eq!(task_step_name(&rt, &program, 0), "arm_a.move");
+    assert_eq!(task_step_name(&rt, &program, 1), "fault.safety_fault_b");
+
+    rt.tick_with_axis(&mut io, |_command| AxisMotionResult::Done)
+        .expect("pending axis should complete on polling tick");
+    assert_eq!(task_step_name(&rt, &program, 0), "arm_a.done");
 }

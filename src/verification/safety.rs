@@ -1365,12 +1365,8 @@ struct WorkpieceFlowToken {
 enum WorkpieceFlowTokenProvenance {
     Ingress,
     MountIngress,
-    Split {
-        source_type_idx: usize,
-    },
-    Merge {
-        input_type_indices: Vec<usize>,
-    },
+    Split { source_type_idx: usize },
+    Merge { input_type_indices: Vec<usize> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -1394,11 +1390,17 @@ impl WorkpieceFlowState {
         self.tokens
             .iter()
             .enumerate()
-            .filter_map(|(idx, token)| (token.workpiece_type_idx == workpiece_type_idx).then_some(idx))
+            .filter_map(|(idx, token)| {
+                (token.workpiece_type_idx == workpiece_type_idx).then_some(idx)
+            })
             .collect()
     }
 
-    fn unique_token_index_at(&self, endpoint_idx: usize, mounted: Option<bool>) -> Result<usize, usize> {
+    fn unique_token_index_at(
+        &self,
+        endpoint_idx: usize,
+        mounted: Option<bool>,
+    ) -> Result<usize, usize> {
         let matches = self
             .tokens
             .iter()
@@ -1439,7 +1441,9 @@ impl WorkpieceFlowState {
                 return None;
             }
             Some((
-                registry.workpiece_types[token.workpiece_type_idx].name.clone(),
+                registry.workpiece_types[token.workpiece_type_idx]
+                    .name
+                    .clone(),
                 registry.endpoints.names[mounted_endpoint_idx].clone(),
                 registry.endpoints.names[token.endpoint_idx].clone(),
             ))
@@ -1879,13 +1883,7 @@ fn mount_workpiece(
     }
 
     if let Some(diag) = ensure_workpiece_destination(
-        program,
-        transition,
-        registry,
-        flow_state,
-        slot,
-        path,
-        "mount",
+        program, transition, registry, flow_state, slot, path, "mount",
     ) {
         return Some(diag);
     }
@@ -1914,7 +1912,10 @@ fn split_workpiece(
         return Some(SafetyDiagnostic {
             line: find_state_line(program, &transition.from),
             constraint: "workpiece_flow".to_string(),
-            reason: format!("split references undeclared source workpiece type '{}'", source_type),
+            reason: format!(
+                "split references undeclared source workpiece type '{}'",
+                source_type
+            ),
             violation_path: extend_path(path, transition),
             suggestion: "declare the split source workpiece type before using it in effects"
                 .to_string(),
@@ -1924,7 +1925,10 @@ fn split_workpiece(
         return Some(SafetyDiagnostic {
             line: find_state_line(program, &transition.from),
             constraint: "workpiece_flow".to_string(),
-            reason: format!("split references undeclared target workpiece type '{}'", target_type),
+            reason: format!(
+                "split references undeclared target workpiece type '{}'",
+                target_type
+            ),
             violation_path: extend_path(path, transition),
             suggestion: "declare the split target workpiece type before using it in effects"
                 .to_string(),
@@ -2016,7 +2020,10 @@ fn merge_workpiece(
         return Some(SafetyDiagnostic {
             line: find_state_line(program, &transition.from),
             constraint: "workpiece_flow".to_string(),
-            reason: format!("merge references undeclared target workpiece type '{}'", target_type),
+            reason: format!(
+                "merge references undeclared target workpiece type '{}'",
+                target_type
+            ),
             violation_path: extend_path(path, transition),
             suggestion: "declare the merge target workpiece type before using it in effects"
                 .to_string(),
@@ -2069,9 +2076,8 @@ fn merge_workpiece(
             .iter()
             .enumerate()
             .find_map(|(idx, token)| {
-                (token.workpiece_type_idx == *required_type_idx
-                    && !selected_indices.contains(&idx))
-                .then_some(idx)
+                (token.workpiece_type_idx == *required_type_idx && !selected_indices.contains(&idx))
+                    .then_some(idx)
             });
         let Some(selected) = selected else {
             let missing = missing_merge_inputs(flow_state, registry, &required_input_indices);

@@ -371,6 +371,8 @@ pub enum TransitionAction {
         on_motion_fault_routes: Vec<AxisFaultRouteBranch>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         on_safety_fault_routes: Vec<AxisFaultRouteBranch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        semantic_tag: Option<String>,
     },
     AxisMoveAbsolute {
         target: String,
@@ -389,6 +391,8 @@ pub enum TransitionAction {
         on_motion_fault_routes: Vec<AxisFaultRouteBranch>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         on_safety_fault_routes: Vec<AxisFaultRouteBranch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        semantic_tag: Option<String>,
     },
     Log {
         message: String,
@@ -551,6 +555,8 @@ pub struct Transition {
     pub to: State,
     pub guard: TransitionGuard,
     pub actions: Vec<TransitionAction>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<WorkpieceEffect>,
     pub timers: Vec<TimerOperation>,
 }
 
@@ -581,6 +587,8 @@ pub struct PendingActionContext {
     pub action_kind: ActionKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_tag: Option<String>,
     #[serde(default)]
     pub active: bool,
 }
@@ -659,6 +667,35 @@ pub struct SafetyRule {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum SemanticResourceMode {
+    Exclusive,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SemanticResource {
+    pub name: String,
+    pub mode: SemanticResourceMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ResourceClaimSource {
+    State(StateExpr),
+    ActionTag { tag: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResourceClaimRule {
+    pub source: ResourceClaimSource,
+    pub resource: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum TimingScope {
     Task { task: String },
     Step { task: String, step: String },
@@ -689,6 +726,18 @@ pub struct CausalityChain {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ConstraintSet {
     pub safety: Vec<SafetyRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workpiece_types: Vec<WorkpieceTypeDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workpiece_sites: Vec<WorkpieceSiteDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workpiece_holders: Vec<WorkpieceHolderDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workpiece_carriers: Vec<WorkpieceCarrierDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub semantic_resources: Vec<SemanticResource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resource_claims: Vec<ResourceClaimRule>,
     pub timing: Vec<TimingRule>,
     pub causality: Vec<CausalityChain>,
 }
@@ -710,6 +759,128 @@ pub enum ActionKind {
     AxisMoveRelative,
     AxisMoveAbsolute,
     Log,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkpieceTypeDef {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<WorkpiecePropertyDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub normal_terminal_states: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abnormal_terminal_states: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ingress_sites: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub normal_egress_sites: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abnormal_egress_sites: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allows: Vec<WorkpieceAllowDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<WorkpieceDerivationDef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkpiecePropertyDef {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub property_type: WorkpiecePropertyTypeDef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkpiecePropertyTypeDef {
+    Bool,
+    Enum { values: Vec<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkpieceSiteDef {
+    pub name: String,
+    pub kind: WorkpieceSiteKind,
+    pub capacity: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkpieceSiteKind {
+    WorkpieceLocation,
+    CarrierLocation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkpieceHolderDef {
+    pub name: String,
+    pub capacity: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkpieceCarrierDef {
+    pub name: String,
+    pub layout: WorkpieceCarrierLayoutDef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkpieceCarrierLayoutDef {
+    Slots { count: u32 },
+    Grid { rows: u32, cols: u32 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "allow", rename_all = "snake_case")]
+pub enum WorkpieceAllowDef {
+    SplitInto { target: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum WorkpieceDerivationDef {
+    WorkpieceType { workpiece_type: String },
+    Merge { inputs: Vec<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "effect", rename_all = "snake_case")]
+pub enum WorkpieceEffect {
+    Acquire {
+        holder: String,
+        from: String,
+    },
+    Transfer {
+        from: String,
+        to: String,
+    },
+    Finish {
+        at: String,
+        terminal_state: String,
+    },
+    Mount {
+        workpiece_type: String,
+        slot: String,
+    },
+    Unmount {
+        workpiece_type: String,
+        slot: String,
+        to: String,
+    },
+    Split {
+        source_type: String,
+        target_type: String,
+        count: u32,
+        consumed: bool,
+    },
+    Merge {
+        inputs: Vec<String>,
+        target_type: String,
+        consumed_inputs: bool,
+    },
+    TransformCarrier {
+        carrier: String,
+        frame: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -849,6 +1020,7 @@ mod tests {
                         port: "self".to_string(),
                         distance_raw: "10".to_string(),
                         speed_raw: "2".to_string(),
+                        semantic_tag: None,
                         timeout: AxisTimeoutBranch {
                             duration_ms: 500,
                             target_task: "fault".to_string(),
@@ -888,6 +1060,7 @@ mod tests {
                         binding: ExternCallBinding::Single("sum".to_string()),
                     },
                 ],
+                effects: vec![],
                 timers: vec![TimerOperation {
                     timer_name: "extend_A_timeout".to_string(),
                     operation: TimerOperationKind::Start,
@@ -926,6 +1099,7 @@ mod tests {
                     },
                     action_kind: ActionKind::AxisMoveRelative,
                     target: Some("axis_x".to_string()),
+                    semantic_tag: None,
                     active: false,
                 }],
             }],
@@ -947,6 +1121,12 @@ mod tests {
                 reason: Some("避免机械冲突".to_string()),
                 source: None,
             }],
+            workpiece_types: vec![],
+            workpiece_sites: vec![],
+            workpiece_holders: vec![],
+            workpiece_carriers: vec![],
+            semantic_resources: vec![],
+            resource_claims: vec![],
             timing: vec![TimingRule {
                 scope: TimingScope::Task {
                     task: "extend_cycle".to_string(),
@@ -1035,6 +1215,7 @@ mod tests {
                         source_state: loader_entry,
                         action_kind: ActionKind::AxisMoveAbsolute,
                         target: Some("axis_x".to_string()),
+                        semantic_tag: None,
                         active: true,
                     }],
                 },

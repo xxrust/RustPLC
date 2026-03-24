@@ -1,70 +1,1378 @@
 [topology]
 
+variable orient_reject_streak: float = 0.0
+variable transfer_attempt_count: float = 0.0
+variable drop_total: float = 0.0
+variable consecutive_drop_count: float = 0.0
+variable axis_recover_attempts: float = 0.0
+variable drop_rate_exceeded: bool = false
+
 device plc_main: plc {
-    purpose: "Wafer loader PLC I/O"
+    purpose: "测角机上料器控制器本体与占位 I/O 映射",
     ports: [
-        Y0:digital:producer
+        Y0:digital:producer,
+        Y1:digital:producer,
+        Y2:digital:producer,
+        Y3:digital:producer,
+        Y4:digital:producer,
+        Y5:digital:producer,
+        Y6:digital:producer,
+        Y7:digital:producer,
+        Y8:digital:producer,
+        Y9:digital:producer,
+        X0:digital:consumer,
+        X1:digital:consumer,
+        X2:digital:consumer,
+        X3:digital:consumer,
+        X4:digital:consumer,
+        X5:digital:consumer,
+        X6:digital:consumer,
+        X7:digital:consumer,
+        X8:digital:consumer,
+        X9:digital:consumer,
+        X10:digital:consumer,
+        X11:digital:consumer,
+        X12:digital:consumer,
+        X13:digital:consumer,
+        X14:digital:consumer,
+        X15:digital:consumer,
+        X16:digital:consumer,
+        X17:digital:consumer
     ]
 }
 
-device axis_arm: stepper_motor {
-    purpose: "Wafer loader rotary arm axis"
-    model_ref: stepper_generic
-    config_ref: stepper_default
+device start_button: sensor {
+    purpose: "自动模式启动按钮，占位接线，产线接入后可替换为 HMI 启动信号",
+    subtype: "push_button",
+    debounce: 20ms
 }
 
-relation { from: plc_main.Y0, to: axis_arm.enable, via: driven_by }
+device refresh_button: sensor {
+    purpose: "维修后刷新状态按钮，用于气缸/磁开关告警恢复",
+    subtype: "push_button",
+    debounce: 20ms
+}
+
+device stop_button: sensor {
+    purpose: "正常停机按钮，触发停止引入新片并等待当前节拍排空",
+    subtype: "push_button",
+    debounce: 20ms
+}
+
+device mode_auto: digital_input {
+    purpose: "自动模式选择输入，true 表示设备处于自动模式"
+}
+
+device mode_manual: digital_input {
+    purpose: "手动模式选择输入，true 表示设备处于手动点动模式"
+}
+
+device mode_step: digital_input {
+    purpose: "单步模式选择输入，true 表示设备处于单步调试模式"
+}
+
+device mode_maintenance: digital_input {
+    purpose: "维护模式选择输入，true 表示设备处于维护/检修模式"
+}
+
+device manual_feed_forward: digital_input {
+    purpose: "手动模式下请求出料气缸前进"
+}
+
+device manual_feed_back: digital_input {
+    purpose: "手动模式下请求出料气缸后退"
+}
+
+device manual_arm_pick: digital_input {
+    purpose: "手动模式下请求旋臂移动到滑轨取片位"
+}
+
+device manual_arm_middle: digital_input {
+    purpose: "手动模式下请求旋臂移动到中间安全位"
+}
+
+device manual_arm_orient: digital_input {
+    purpose: "手动模式下请求旋臂移动到辨相台位"
+}
+
+device manual_orient_flip: digital_input {
+    purpose: "手动模式下请求辨相台翻转 180 度"
+}
+
+device manual_orient_home: digital_input {
+    purpose: "手动模式下请求辨相台回原位"
+}
+
+device manual_swing_down: digital_input {
+    purpose: "手动模式下请求摆缸下摆"
+}
+
+device manual_swing_up: digital_input {
+    purpose: "手动模式下请求摆缸上摆"
+}
+
+device manual_lift_down: digital_input {
+    purpose: "手动模式下请求摆缸下移"
+}
+
+device manual_lift_up: digital_input {
+    purpose: "手动模式下请求摆缸上移"
+}
+
+device manual_transfer_front: digital_input {
+    purpose: "手动模式下请求摆缸前移到测片台"
+}
+
+device manual_transfer_back: digital_input {
+    purpose: "手动模式下请求摆缸后退回待机位"
+}
+
+device manual_vac_feed_on: digital_input {
+    purpose: "手动模式下打开出料盒真空"
+}
+
+device manual_vac_feed_off: digital_input {
+    purpose: "手动模式下关闭出料盒真空"
+}
+
+device manual_vac_arm_on: digital_input {
+    purpose: "手动模式下打开旋臂真空"
+}
+
+device manual_vac_arm_off: digital_input {
+    purpose: "手动模式下关闭旋臂真空"
+}
+
+device manual_vac_orient_on: digital_input {
+    purpose: "手动模式下打开辨相台真空"
+}
+
+device manual_vac_orient_off: digital_input {
+    purpose: "手动模式下关闭辨相台真空"
+}
+
+device manual_vac_transfer_on: digital_input {
+    purpose: "手动模式下打开摆缸真空"
+}
+
+device manual_vac_transfer_off: digital_input {
+    purpose: "手动模式下关闭摆缸真空"
+}
+
+device step_feed_cycle: digital_input {
+    purpose: "单步模式下执行一次出片准备节拍"
+}
+
+device step_orient_cycle: digital_input {
+    purpose: "单步模式下执行一次取片与辨相节拍"
+}
+
+device step_transfer_cycle: digital_input {
+    purpose: "单步模式下执行一次摆缸转运节拍"
+}
+
+device maintenance_safe_pose: digital_input {
+    purpose: "维护模式下请求所有机构回安全位"
+}
+
+device maintenance_home_arm: digital_input {
+    purpose: "维护模式下请求旋臂回零"
+}
+
+device maintenance_clear_counters: digital_input {
+    purpose: "维护模式下清零辨相异常与掉片计数"
+}
+
+device measure_stage_ready: digital_input {
+    purpose: "测片台就绪信号，true 表示允许摆缸送片"
+}
+
+device wafer_on_slide: digital_input {
+    purpose: "滑轨取片位有片检测，true 表示旋臂可以去滑轨取片"
+}
+
+device wafer_on_orient: digital_input {
+    purpose: "辨相台有片检测，true 表示摆缸可以去辨相台取片"
+}
+
+device wafer_drop_detect: digital_input {
+    purpose: "途中掉片检测信号，true 表示当前转运过程检测到掉片"
+}
+
+device orient_side_a_ok: digital_input {
+    purpose: "辨相第一次检测结果，1 表示当前朝向可接受且优先保留"
+}
+
+device orient_side_b_ok: digital_input {
+    purpose: "辨相翻转后检测结果，1 表示翻转朝向优于第一次朝向"
+}
+
+device vac_feed_cmd: digital_output {
+    purpose: "出料盒真空控制输出"
+}
+
+device vac_arm_cmd: digital_output {
+    purpose: "小旋臂取片真空控制输出"
+}
+
+device vac_orient_cmd: digital_output {
+    purpose: "辨相台吸附真空控制输出"
+}
+
+device vac_transfer_cmd: digital_output {
+    purpose: "摆缸转运吸嘴真空控制输出"
+}
+
+device arm_home_cmd: digital_output {
+    purpose: "旋臂回零请求输出，占位表示驱动层原点搜索命令"
+}
+
+device valve_feed: solenoid_valve {
+    purpose: "驱动出料气缸前进/后退的电磁阀",
+    response_time: 20ms
+}
+
+device cyl_feed: cylinder {
+    purpose: "出料气缸，负责将片盒送到滑轨取片位并退回安全位",
+    stroke_time: 350ms,
+    retract_time: 350ms
+}
+
+device sensor_feed_ext: sensor {
+    purpose: "检测出料气缸前进到位",
+    subtype: "limit_switch"
+}
+
+device sensor_feed_ret: sensor {
+    purpose: "检测出料气缸后退到位",
+    subtype: "limit_switch"
+}
+
+device sensor_feed_vac_ok: digital_input {
+    purpose: "出料盒真空检测，true 表示当前已吸住单片晶片"
+}
+
+device axis_arm: stepper_motor {
+    purpose: "小旋臂步进轴，负责滑轨取片、辨相台放片与回中间位",
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+device sensor_arm_home: digital_input {
+    purpose: "旋臂原点传感器，位于逆时针极限方向，用于上电回零"
+}
+
+device sensor_arm_vac_ok: digital_input {
+    purpose: "旋臂吸片真空检测，true 表示旋臂已吸住晶片"
+}
+
+device valve_orient_rotate: solenoid_valve {
+    purpose: "驱动辨相台 180 度翻转气缸的电磁阀",
+    response_time: 20ms
+}
+
+device cyl_orient_rotate: cylinder {
+    purpose: "辨相台翻转气缸，缩回为原位，伸出为翻转 180 度位",
+    stroke_time: 250ms,
+    retract_time: 250ms
+}
+
+device sensor_orient_ext: sensor {
+    purpose: "检测辨相台已翻转到 180 度位",
+    subtype: "limit_switch"
+}
+
+device sensor_orient_ret: sensor {
+    purpose: "检测辨相台已回原位",
+    subtype: "limit_switch"
+}
+
+device sensor_orient_vac_ok: digital_input {
+    purpose: "辨相台真空检测，true 表示晶片已被辨相台吸附"
+}
+
+device valve_swing: solenoid_valve {
+    purpose: "驱动摆缸下摆/上摆的电磁阀",
+    response_time: 20ms
+}
+
+device cyl_swing: cylinder {
+    purpose: "摆缸摆动气缸，伸出为下摆取料位，缩回为上摆安全位",
+    stroke_time: 250ms,
+    retract_time: 250ms
+}
+
+device sensor_swing_down: sensor {
+    purpose: "检测摆缸已下摆到取料姿态",
+    subtype: "limit_switch"
+}
+
+device sensor_swing_up: sensor {
+    purpose: "检测摆缸已上摆到安全姿态",
+    subtype: "limit_switch"
+}
+
+device valve_lift: solenoid_valve {
+    purpose: "驱动摆缸上下移动的电磁阀",
+    response_time: 20ms
+}
+
+device cyl_lift: cylinder {
+    purpose: "摆缸升降气缸，伸出为下移取料位，缩回为上移安全位",
+    stroke_time: 250ms,
+    retract_time: 250ms
+}
+
+device sensor_lift_down: sensor {
+    purpose: "检测摆缸已下移到取料高度",
+    subtype: "limit_switch"
+}
+
+device sensor_lift_up: sensor {
+    purpose: "检测摆缸已上移回安全高度",
+    subtype: "limit_switch"
+}
+
+device valve_transfer: solenoid_valve {
+    purpose: "驱动摆缸前移/后移的电磁阀",
+    response_time: 20ms
+}
+
+device cyl_transfer: cylinder {
+    purpose: "摆缸前后移动气缸，伸出为送片到测片台，缩回为后退待机位",
+    stroke_time: 300ms,
+    retract_time: 300ms
+}
+
+device sensor_transfer_front: sensor {
+    purpose: "检测摆缸已前移到测片台上方",
+    subtype: "limit_switch"
+}
+
+device sensor_transfer_back: sensor {
+    purpose: "检测摆缸已后退回待机位",
+    subtype: "limit_switch"
+}
+
+device sensor_transfer_vac_ok: digital_input {
+    purpose: "摆缸真空检测，true 表示摆缸已吸住晶片"
+}
+
+relation { from: start_button.out, to: plc_main.X15, via: reports_to }
+relation { from: refresh_button.out, to: plc_main.X16, via: reports_to }
+relation { from: stop_button.out, to: plc_main.X17, via: reports_to }
+
+relation { from: plc_main.Y0, to: valve_feed.coil, via: driven_by }
+relation { from: valve_feed.out, to: cyl_feed.cmd, via: driven_by }
+relation { from: cyl_feed.extended, to: sensor_feed_ext.sense, via: detects }
+relation { from: sensor_feed_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_feed.retracted, to: sensor_feed_ret.sense, via: detects }
+relation { from: sensor_feed_ret.out, to: plc_main.X1, via: reports_to }
+
+relation { from: plc_main.Y1, to: axis_arm.enable, via: driven_by }
+
+relation { from: plc_main.Y2, to: valve_orient_rotate.coil, via: driven_by }
+relation { from: valve_orient_rotate.out, to: cyl_orient_rotate.cmd, via: driven_by }
+relation { from: cyl_orient_rotate.extended, to: sensor_orient_ext.sense, via: detects }
+relation { from: sensor_orient_ext.out, to: plc_main.X2, via: reports_to }
+relation { from: cyl_orient_rotate.retracted, to: sensor_orient_ret.sense, via: detects }
+relation { from: sensor_orient_ret.out, to: plc_main.X3, via: reports_to }
+
+relation { from: plc_main.Y3, to: valve_swing.coil, via: driven_by }
+relation { from: valve_swing.out, to: cyl_swing.cmd, via: driven_by }
+relation { from: cyl_swing.extended, to: sensor_swing_down.sense, via: detects }
+relation { from: sensor_swing_down.out, to: plc_main.X4, via: reports_to }
+relation { from: cyl_swing.retracted, to: sensor_swing_up.sense, via: detects }
+relation { from: sensor_swing_up.out, to: plc_main.X5, via: reports_to }
+
+relation { from: plc_main.Y4, to: valve_lift.coil, via: driven_by }
+relation { from: valve_lift.out, to: cyl_lift.cmd, via: driven_by }
+relation { from: cyl_lift.extended, to: sensor_lift_down.sense, via: detects }
+relation { from: sensor_lift_down.out, to: plc_main.X6, via: reports_to }
+relation { from: cyl_lift.retracted, to: sensor_lift_up.sense, via: detects }
+relation { from: sensor_lift_up.out, to: plc_main.X7, via: reports_to }
+
+relation { from: plc_main.Y5, to: valve_transfer.coil, via: driven_by }
+relation { from: valve_transfer.out, to: cyl_transfer.cmd, via: driven_by }
+relation { from: cyl_transfer.extended, to: sensor_transfer_front.sense, via: detects }
+relation { from: sensor_transfer_front.out, to: plc_main.X8, via: reports_to }
+relation { from: cyl_transfer.retracted, to: sensor_transfer_back.sense, via: detects }
+relation { from: sensor_transfer_back.out, to: plc_main.X9, via: reports_to }
+
+resource slide_feed_zone: semantic_resource {
+    mode: exclusive
+    purpose: "滑轨取片位与出料气缸前进之间的冲突区"
+}
+
+resource slide_swing_zone: semantic_resource {
+    mode: exclusive
+    purpose: "滑轨取片位与摆缸下摆之间的冲突区"
+}
 
 [constraints]
 
+claim: cyl_feed.extended occupies slide_feed_zone
+claim: cyl_swing.extended occupies slide_swing_zone
+claim: action_tag arm_turn_to_slide occupies slide_feed_zone
+claim: action_tag arm_turn_to_slide occupies slide_swing_zone
+
+safety: mode_auto.on conflicts_with mode_manual.on
+    reason: "自动模式与手动模式必须互斥"
+
+safety: mode_auto.on conflicts_with mode_step.on
+    reason: "自动模式与单步模式必须互斥"
+
+safety: mode_auto.on conflicts_with mode_maintenance.on
+    reason: "自动模式与维护模式必须互斥"
+
+safety: mode_manual.on conflicts_with mode_step.on
+    reason: "手动模式与单步模式必须互斥"
+
+safety: mode_manual.on conflicts_with mode_maintenance.on
+    reason: "手动模式与维护模式必须互斥"
+
+safety: mode_step.on conflicts_with mode_maintenance.on
+    reason: "单步模式与维护模式必须互斥"
+
 [tasks]
 
-task cycle:
-    step enable_axis:
+task supervisor:
+    step wait_start:
+        wait: mode_auto == true AND start_button == true
+        allow_indefinite_wait: true
+
+    step init_defaults:
+        action: compute axis_recover_attempts = 0.0
+        action: compute orient_reject_streak = 0.0
+        action: compute transfer_attempt_count = 0.0
+        action: compute drop_total = 0.0
+        action: compute consecutive_drop_count = 0.0
+        action: set vac_feed_cmd off
+        action: set vac_arm_cmd off
+        action: set vac_orient_cmd off
+        action: set vac_transfer_cmd off
+        action: retract cyl_feed
+        action: retract cyl_orient_rotate
+        action: retract cyl_swing
+        action: retract cyl_lift
+        action: retract cyl_transfer
+
+    step wait_safe_pose:
+        wait: sensor_feed_ret == true AND sensor_orient_ret == true AND sensor_swing_up == true AND sensor_lift_up == true AND sensor_transfer_back == true
+        timeout: 3000ms -> goto startup_warning.init_pose_warn
+
+    step enable_arm_axis:
         action: set axis_arm.enable on
-    step arm_move_pick:
-        action: axis.move_relative(axis_arm, distance: 170, speed: 20)
-            timeout: 500ms -> arm_motion_abort.arm_motion_timeout
-            on_reject -> arm_motion_abort.arm_motion_reject
-            on_motion_fault -> arm_motion_abort.arm_motion_drive_fault
-            on_safety_fault -> arm_motion_abort.arm_motion_safety_trip
-    step arm_move_orient:
-        action: axis.move_relative(axis_arm, distance: 220, speed: 20)
-            timeout: 500ms -> arm_motion_abort.arm_motion_timeout
-            on_reject -> arm_motion_abort.arm_motion_reject
-            on_motion_fault -> arm_motion_abort.arm_motion_drive_fault
-            on_safety_fault -> arm_motion_abort.arm_motion_safety_trip
-    step arm_move_to_ir_box:
-        action: axis.move_relative(axis_arm, distance: 180, speed: 20)
-            timeout: 500ms -> arm_motion_abort.arm_motion_timeout
-            on_reject -> arm_motion_abort.arm_motion_reject
-            on_motion_fault -> arm_motion_abort.arm_motion_drive_fault
-            on_safety_fault -> arm_motion_abort.arm_motion_safety_trip
-    step cycle_gate:
-        wait: axis_arm.enable == on
-        timeout: 20ms -> goto wafer_loader_fault.safe_stop
-    step cycle_done:
-        action: log "wafer loader cycle finished"
-    on_complete: goto cycle
 
-task arm_motion_abort:
-    step arm_motion_timeout:
-        action: log "arm motion timeout"
-        goto wafer_loader_fault.safe_stop
-    step arm_motion_reject:
-        action: log "arm motion reject"
-        goto wafer_loader_fault.safe_stop
-    step arm_motion_drive_fault:
-        action: log "arm motion drive fault"
-        goto wafer_loader_fault.safe_stop
-    step arm_motion_safety_trip:
-        action: log "arm motion safety trip"
-        goto wafer_loader_fault.safe_stop
+    step request_arm_home:
+        action: set arm_home_cmd on
 
-task wafer_loader_fault:
-    step safe_stop:
-        action: set axis_arm.pulse idle
-        action: set axis_arm.enable off
-    step fault_report:
-        action: log "wafer loader entered safe stop"
-    on_complete: goto cycle
+    step wait_arm_home:
+        wait: sensor_arm_home == true
+        timeout: 5000ms -> goto startup_fault.arm_home_timeout
+
+    step finish_arm_home:
+        action: set arm_home_cmd off
+
+    step move_arm_to_middle:
+        action: axis.move_absolute(axis_arm, position: 45, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> startup_fault.arm_move_timeout
+            on_reject -> startup_fault.arm_move_reject
+            on_motion_fault -> startup_fault.arm_move_motion_fault
+            on_safety_fault -> startup_fault.arm_move_safety_fault
+
+    step auto_ready:
+        action: log "wafer loader auto cycle ready"
+
+    step monitor_stop:
+        wait: stop_button == true OR mode_auto == false
+        allow_indefinite_wait: true
+
+    step stop_to_safe_pose:
+        action: set vac_feed_cmd off
+        action: set vac_arm_cmd off
+        action: set vac_orient_cmd off
+        action: set vac_transfer_cmd off
+        action: retract cyl_feed
+        action: retract cyl_orient_rotate
+        action: retract cyl_swing
+        action: retract cyl_lift
+        action: retract cyl_transfer
+        action: log "wafer loader stopped after cleanup request"
+
+    on_complete: goto supervisor.wait_start
+
+task feed_prep:
+    step wait_ready:
+        wait: mode_auto == true AND start_button == true AND stop_button == false AND wafer_on_slide == false AND sensor_feed_ret == true
+        allow_indefinite_wait: true
+
+    step feed_forward:
+        action: extend cyl_feed
+
+    step wait_feed_forward:
+        wait: sensor_feed_ext == true
+        timeout: 800ms -> goto feed_warning.feed_cyl_warn
+
+    step feed_vacuum_on:
+        action: set vac_feed_cmd on
+
+    step wait_feed_vacuum:
+        wait: sensor_feed_vac_ok == true
+        timeout: 1000ms -> goto feed_fault.feed_vacuum_timeout
+
+    step feed_back:
+        action: retract cyl_feed
+
+    step wait_feed_back:
+        wait: sensor_feed_ret == true
+        timeout: 800ms -> goto feed_warning.feed_cyl_warn
+
+    step publish_slide_ready:
+        action: set vac_feed_cmd off
+
+    on_complete: goto feed_prep.wait_ready
+
+task orient_stage:
+    step wait_slide:
+        wait: mode_auto == true AND start_button == true AND wafer_on_slide == true
+        allow_indefinite_wait: true
+
+    step move_to_pick:
+        action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+            semantic_tag: arm_turn_to_slide
+
+    step arm_vacuum_on:
+        action: set vac_arm_cmd on
+
+    step wait_arm_vacuum:
+        wait: sensor_arm_vac_ok == true
+        timeout: 1000ms -> goto orient_fault.arm_pick_timeout
+
+    step consume_slide_slot:
+        action: set vac_feed_cmd off
+
+    step move_to_orient:
+        action: axis.move_absolute(axis_arm, position: 90, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step orient_vacuum_on:
+        action: set vac_orient_cmd on
+
+    step wait_orient_vacuum:
+        wait: sensor_orient_vac_ok == true
+        timeout: 800ms -> goto orient_fault.orient_vacuum_timeout
+
+    step release_arm_to_orient:
+        action: set vac_arm_cmd off
+
+    step rotate_orient_180:
+        action: extend cyl_orient_rotate
+
+    step wait_orient_180:
+        wait: sensor_orient_ext == true
+        timeout: 600ms -> goto orient_warning.orient_cyl_warn
+
+    step check_orient_valid:
+        if: orient_side_a_ok == true
+            goto orient_stage.choose_orientation
+        else:
+            goto orient_stage.check_orient_side_b
+
+    step check_orient_side_b:
+        if: orient_side_b_ok == true
+            goto orient_stage.choose_orientation
+        else:
+            goto orient_stage.reject_to_ir
+
+    step choose_orientation:
+        if: orient_side_b_ok == true
+            goto orient_stage.keep_flipped
+        else:
+            goto orient_stage.return_original
+
+    step keep_flipped:
+        action: compute orient_reject_streak = 0.0
+
+    step move_back_to_middle_flipped:
+        action: axis.move_absolute(axis_arm, position: 45, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step return_original:
+        action: retract cyl_orient_rotate
+
+    step wait_orient_home:
+        wait: sensor_orient_ret == true
+        timeout: 600ms -> goto orient_warning.orient_cyl_warn
+
+    step publish_transfer_request:
+        action: compute orient_reject_streak = 0.0
+
+    step move_back_to_middle_normal:
+        action: axis.move_absolute(axis_arm, position: 45, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step reject_to_ir:
+        action: set vac_orient_cmd off
+        action: compute orient_reject_streak = orient_reject_streak + 1.0
+
+    step move_back_to_middle_reject:
+        action: axis.move_absolute(axis_arm, position: 45, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step decide_reject_streak:
+        if: orient_reject_streak >= 3
+            goto orient_fault.orient_reject_streak_fault
+        else:
+            goto orient_stage.wait_slide
+
+    on_complete: goto orient_stage.wait_slide
+
+task transfer_to_measure:
+    step wait_transfer:
+        wait: mode_auto == true AND start_button == true AND wafer_on_orient == true AND measure_stage_ready == true
+        allow_indefinite_wait: true
+
+    step count_transfer_attempt:
+        action: compute transfer_attempt_count = transfer_attempt_count + 1.0
+
+    step swing_down:
+        action: extend cyl_swing
+
+    step wait_swing_down:
+        wait: sensor_swing_down == true
+        timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step lift_down:
+        action: extend cyl_lift
+
+    step wait_lift_down:
+        wait: sensor_lift_down == true
+        timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step transfer_vacuum_on:
+        action: set vac_transfer_cmd on
+
+    step wait_transfer_vacuum:
+        wait: sensor_transfer_vac_ok == true
+        timeout: 1000ms -> goto transfer_to_measure.record_drop
+
+    step release_orient_vacuum:
+        action: set vac_orient_cmd off
+
+    step lift_up:
+        action: retract cyl_lift
+
+    step wait_lift_up:
+        wait: sensor_lift_up == true
+        timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step swing_up:
+        action: retract cyl_swing
+
+    step wait_swing_up:
+        wait: sensor_swing_up == true
+        timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step move_to_measure:
+        action: extend cyl_transfer
+
+    step wait_measure_position:
+        wait: sensor_transfer_front == true
+        timeout: 900ms -> goto transfer_warning.transfer_cyl_warn
+
+    step check_drop_before_place:
+        if: wafer_drop_detect == true
+            goto transfer_to_measure.record_drop
+        else:
+            goto transfer_to_measure.place_to_measure
+
+    step place_to_measure:
+        action: set vac_transfer_cmd off
+
+    step move_back_home:
+        action: retract cyl_transfer
+
+    step wait_transfer_home:
+        wait: sensor_transfer_back == true
+        timeout: 900ms -> goto transfer_warning.transfer_cyl_warn
+
+    step clear_transfer_handoff:
+        action: compute consecutive_drop_count = 0.0
+
+    step record_drop:
+        action: set vac_transfer_cmd off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: compute drop_total = drop_total + 1.0
+        action: compute consecutive_drop_count = consecutive_drop_count + 1.0
+
+    step wait_drop_safe_pose:
+        wait: sensor_lift_up == true AND sensor_swing_up == true AND sensor_transfer_back == true
+        timeout: 3000ms -> goto transfer_warning.transfer_cyl_warn
+
+    step check_drop_streak:
+        if: consecutive_drop_count >= 2
+            goto transfer_fault.drop_consecutive_fault
+        else:
+            goto transfer_to_measure.check_drop_rate
+
+    step check_drop_rate:
+        action: compute drop_rate_exceeded = transfer_attempt_count >= 1000 AND drop_total * 1000 > transfer_attempt_count
+
+    step branch_drop_rate:
+        if: drop_rate_exceeded == true
+            goto transfer_fault.drop_rate_fault
+        else:
+            goto transfer_to_measure.wait_transfer
+
+    on_complete: goto transfer_to_measure.wait_transfer
+
+task startup_warning:
+    step init_pose_warn:
+        action: log "startup warning: cylinders did not return to safe pose, repair hardware and press refresh"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_start
+
+task feed_warning:
+    step feed_cyl_warn:
+        action: set vac_feed_cmd off
+        action: retract cyl_feed
+        action: log "feed warning: feed cylinder or magnetic switch not in position, press refresh after repair"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto feed_prep.wait_ready
+
+task orient_warning:
+    step orient_cyl_warn:
+        action: retract cyl_orient_rotate
+        action: log "orient warning: orient cylinder or magnetic switch not in position, press refresh after repair"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto orient_stage.wait_slide
+
+task transfer_warning:
+    step transfer_cyl_warn:
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: set vac_transfer_cmd off
+        action: log "transfer warning: transfer cylinder or magnetic switch not in position, press refresh after repair"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto transfer_to_measure.wait_transfer
+
+task startup_fault:
+    step arm_home_timeout:
+        action: set arm_home_cmd off
+        action: log "startup fault: arm homing timeout"
+
+    step arm_move_timeout:
+        action: log "startup fault: arm failed to move to middle position"
+
+    step arm_move_reject:
+        action: log "startup fault: arm move rejected during initialization"
+
+    step arm_move_motion_fault:
+        action: log "startup fault: arm motion fault during initialization"
+
+    step arm_move_safety_fault:
+        action: log "startup fault: arm safety fault during initialization"
+
+    step stop_cleanup_timeout:
+        action: set vac_feed_cmd off
+        action: set vac_arm_cmd off
+        action: set vac_orient_cmd off
+        action: set vac_transfer_cmd off
+        action: log "startup fault: stop cleanup timed out"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_start
+
+task feed_fault:
+    step feed_vacuum_timeout:
+        action: set vac_feed_cmd off
+        action: retract cyl_feed
+        action: log "feed fault: vacuum did not pick wafer within 1 second"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto feed_prep.wait_ready
+
+task orient_fault:
+    step arm_pick_timeout:
+        action: set vac_arm_cmd off
+        action: set vac_orient_cmd off
+        action: log "orient fault: arm vacuum did not pick wafer within 1 second"
+
+    step orient_vacuum_timeout:
+        action: set vac_arm_cmd off
+        action: set vac_orient_cmd off
+        action: log "orient fault: orient stage vacuum did not confirm hold"
+
+    step orient_reject_streak_fault:
+        action: set vac_arm_cmd off
+        action: set vac_orient_cmd off
+        action: log "orient fault: three consecutive wafers rejected to IR box"
+
+    step arm_axis_unrecoverable:
+        action: set vac_arm_cmd off
+        action: set vac_orient_cmd off
+        action: log "orient fault: arm axis could not recover after limited retries"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto orient_stage.wait_slide
+
+task orient_axis_fault:
+    step move_timeout:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    step move_reject:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    step move_motion_fault:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    step move_safety_fault:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    step decide_retry:
+        if: axis_recover_attempts <= 2
+            goto orient_axis_fault.retry_reset
+        else:
+            goto orient_fault.arm_axis_unrecoverable
+
+    step retry_reset:
+        action: set vac_arm_cmd off
+        action: set vac_orient_cmd off
+
+    step retry_pause:
+        delay: 200ms
+
+    step retry_enable:
+        action: set axis_arm.enable on
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto orient_stage.wait_slide
+
+task transfer_fault:
+    step drop_consecutive_fault:
+        action: set vac_transfer_cmd off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: log "transfer fault: wafer dropped in transit twice consecutively"
+
+    step drop_rate_fault:
+        action: set vac_transfer_cmd off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: log "transfer fault: wafer drop rate exceeded 1/1000"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto transfer_to_measure.wait_transfer
+
+task mode_service:
+    step wait_mode:
+        wait: mode_manual == true OR mode_step == true OR mode_maintenance == true
+        allow_indefinite_wait: true
+
+    step choose_manual_mode:
+        if: mode_manual == true goto mode_service.enable_axis_manual else: goto mode_service.choose_step_mode
+
+    step choose_step_mode:
+        if: mode_step == true goto mode_service.enable_axis_step else: goto mode_service.enable_axis_maintenance
+
+    step enable_axis_manual:
+        action: set axis_arm.enable on
+
+    step manual_choose_feed_forward:
+        if: manual_feed_forward == true goto mode_service.manual_feed_forward else: goto mode_service.manual_choose_feed_back
+
+    step manual_choose_feed_back:
+        if: manual_feed_back == true goto mode_service.manual_feed_back else: goto mode_service.manual_choose_arm_pick
+
+    step manual_choose_arm_pick:
+        if: manual_arm_pick == true goto mode_service.manual_arm_pick else: goto mode_service.manual_choose_arm_middle
+
+    step manual_choose_arm_middle:
+        if: manual_arm_middle == true goto mode_service.manual_arm_middle else: goto mode_service.manual_choose_arm_orient
+
+    step manual_choose_arm_orient:
+        if: manual_arm_orient == true goto mode_service.manual_arm_orient else: goto mode_service.manual_choose_orient_flip
+
+    step manual_choose_orient_flip:
+        if: manual_orient_flip == true goto mode_service.manual_orient_flip else: goto mode_service.manual_choose_orient_home
+
+    step manual_choose_orient_home:
+        if: manual_orient_home == true goto mode_service.manual_orient_home else: goto mode_service.manual_choose_swing_down
+
+    step manual_choose_swing_down:
+        if: manual_swing_down == true goto mode_service.manual_swing_down else: goto mode_service.manual_choose_swing_up
+
+    step manual_choose_swing_up:
+        if: manual_swing_up == true goto mode_service.manual_swing_up else: goto mode_service.manual_choose_lift_down
+
+    step manual_choose_lift_down:
+        if: manual_lift_down == true goto mode_service.manual_lift_down else: goto mode_service.manual_choose_lift_up
+
+    step manual_choose_lift_up:
+        if: manual_lift_up == true goto mode_service.manual_lift_up else: goto mode_service.manual_choose_transfer_front
+
+    step manual_choose_transfer_front:
+        if: manual_transfer_front == true goto mode_service.manual_transfer_front else: goto mode_service.manual_choose_transfer_back
+
+    step manual_choose_transfer_back:
+        if: manual_transfer_back == true goto mode_service.manual_transfer_back else: goto mode_service.manual_choose_vac_feed_on
+
+    step manual_choose_vac_feed_on:
+        if: manual_vac_feed_on == true goto mode_service.manual_vac_feed_on else: goto mode_service.manual_choose_vac_feed_off
+
+    step manual_choose_vac_feed_off:
+        if: manual_vac_feed_off == true goto mode_service.manual_vac_feed_off else: goto mode_service.manual_choose_vac_arm_on
+
+    step manual_choose_vac_arm_on:
+        if: manual_vac_arm_on == true goto mode_service.manual_vac_arm_on else: goto mode_service.manual_choose_vac_arm_off
+
+    step manual_choose_vac_arm_off:
+        if: manual_vac_arm_off == true goto mode_service.manual_vac_arm_off else: goto mode_service.manual_choose_vac_orient_on
+
+    step manual_choose_vac_orient_on:
+        if: manual_vac_orient_on == true goto mode_service.manual_vac_orient_on else: goto mode_service.manual_choose_vac_orient_off
+
+    step manual_choose_vac_orient_off:
+        if: manual_vac_orient_off == true goto mode_service.manual_vac_orient_off else: goto mode_service.manual_choose_vac_transfer_on
+
+    step manual_choose_vac_transfer_on:
+        if: manual_vac_transfer_on == true goto mode_service.manual_vac_transfer_on else: goto mode_service.manual_choose_vac_transfer_off
+
+    step manual_choose_vac_transfer_off:
+        if: manual_vac_transfer_off == true goto mode_service.manual_vac_transfer_off else: goto mode_service.manual_idle
+
+    step manual_feed_forward:
+        action: extend cyl_feed
+        goto mode_service.wait_mode
+
+    step manual_feed_back:
+        action: retract cyl_feed
+        goto mode_service.wait_mode
+
+    step manual_arm_pick:
+        action: retract cyl_feed
+        action: retract cyl_swing
+
+    step manual_arm_pick_wait_window:
+        wait: sensor_feed_ret == true AND sensor_swing_up == true
+        timeout: 100ms -> goto mode_service.wait_mode
+
+    step manual_arm_pick_move:
+        action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+            semantic_tag: arm_turn_to_slide
+
+    step manual_arm_pick_done:
+        delay: 20ms
+        goto mode_service.wait_mode
+
+    step manual_arm_middle:
+        action: retract cyl_feed
+        action: retract cyl_swing
+
+    step manual_arm_middle_wait_window:
+        wait: sensor_feed_ret == true AND sensor_swing_up == true
+        timeout: 100ms -> goto mode_service.wait_mode
+
+    step manual_arm_middle_move:
+        action: axis.move_absolute(axis_arm, position: 45, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step manual_arm_middle_done:
+        delay: 20ms
+        goto mode_service.wait_mode
+
+    step manual_arm_orient:
+        action: retract cyl_feed
+        action: retract cyl_swing
+
+    step manual_arm_orient_wait_window:
+        wait: sensor_feed_ret == true AND sensor_swing_up == true
+        timeout: 100ms -> goto mode_service.wait_mode
+
+    step manual_arm_orient_move:
+        action: axis.move_absolute(axis_arm, position: 90, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step manual_arm_orient_done:
+        delay: 20ms
+        goto mode_service.wait_mode
+
+    step manual_orient_flip:
+        action: extend cyl_orient_rotate
+        goto mode_service.wait_mode
+
+    step manual_orient_home:
+        action: retract cyl_orient_rotate
+        goto mode_service.wait_mode
+
+    step manual_swing_down:
+        action: extend cyl_swing
+        goto mode_service.wait_mode
+
+    step manual_swing_up:
+        action: retract cyl_swing
+        goto mode_service.wait_mode
+
+    step manual_lift_down:
+        action: extend cyl_lift
+        goto mode_service.wait_mode
+
+    step manual_lift_up:
+        action: retract cyl_lift
+        goto mode_service.wait_mode
+
+    step manual_transfer_front:
+        action: extend cyl_transfer
+        goto mode_service.wait_mode
+
+    step manual_transfer_back:
+        action: retract cyl_transfer
+        goto mode_service.wait_mode
+
+    step manual_vac_feed_on:
+        action: set vac_feed_cmd on
+        goto mode_service.wait_mode
+
+    step manual_vac_feed_off:
+        action: set vac_feed_cmd off
+        goto mode_service.wait_mode
+
+    step manual_vac_arm_on:
+        action: set vac_arm_cmd on
+        goto mode_service.wait_mode
+
+    step manual_vac_arm_off:
+        action: set vac_arm_cmd off
+        goto mode_service.wait_mode
+
+    step manual_vac_orient_on:
+        action: set vac_orient_cmd on
+        goto mode_service.wait_mode
+
+    step manual_vac_orient_off:
+        action: set vac_orient_cmd off
+        goto mode_service.wait_mode
+
+    step manual_vac_transfer_on:
+        action: set vac_transfer_cmd on
+        goto mode_service.wait_mode
+
+    step manual_vac_transfer_off:
+        action: set vac_transfer_cmd off
+        goto mode_service.wait_mode
+
+    step manual_idle:
+        delay: 50ms
+        goto mode_service.wait_mode
+
+    step enable_axis_step:
+        action: set axis_arm.enable on
+
+    step step_choose_feed_cycle:
+        if: step_feed_cycle == true goto mode_service.step_feed_forward else: goto mode_service.step_choose_orient_cycle
+
+    step step_choose_orient_cycle:
+        if: step_orient_cycle == true goto mode_service.step_orient_pick else: goto mode_service.step_choose_transfer_cycle
+
+    step step_choose_transfer_cycle:
+        if: step_transfer_cycle == true goto mode_service.step_transfer_down else: goto mode_service.step_idle
+
+    step step_feed_forward:
+        action: extend cyl_feed
+
+    step step_feed_wait_forward:
+        wait: sensor_feed_ext == true
+        timeout: 800ms -> goto feed_warning.feed_cyl_warn
+
+    step step_feed_vacuum_on:
+        action: set vac_feed_cmd on
+
+    step step_feed_wait_vacuum:
+        wait: sensor_feed_vac_ok == true
+        timeout: 1000ms -> goto feed_fault.feed_vacuum_timeout
+
+    step step_feed_back:
+        action: retract cyl_feed
+
+    step step_feed_wait_back:
+        wait: sensor_feed_ret == true
+        timeout: 800ms -> goto feed_warning.feed_cyl_warn
+
+    step step_feed_done:
+        action: set vac_feed_cmd off
+        goto mode_service.wait_mode
+
+    step step_orient_pick:
+        action: retract cyl_feed
+        action: retract cyl_swing
+
+    step step_orient_pick_wait_window:
+        wait: sensor_feed_ret == true AND sensor_swing_up == true
+        timeout: 100ms -> goto mode_service.wait_mode
+
+    step step_orient_pick_move:
+        action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+            semantic_tag: arm_turn_to_slide
+
+    step step_orient_arm_vacuum_on:
+        action: set vac_arm_cmd on
+
+    step step_orient_wait_arm_vacuum:
+        wait: sensor_arm_vac_ok == true
+        timeout: 1000ms -> goto orient_fault.arm_pick_timeout
+
+    step step_orient_move_to_stage:
+        action: retract cyl_feed
+        action: retract cyl_swing
+
+    step step_orient_move_to_stage_wait_window:
+        wait: sensor_feed_ret == true AND sensor_swing_up == true
+        timeout: 100ms -> goto mode_service.wait_mode
+
+    step step_orient_move_to_stage_cmd:
+        action: axis.move_absolute(axis_arm, position: 90, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step step_orient_stage_vacuum_on:
+        action: set vac_orient_cmd on
+
+    step step_orient_wait_stage_vacuum:
+        wait: sensor_orient_vac_ok == true
+        timeout: 800ms -> goto orient_fault.orient_vacuum_timeout
+
+    step step_orient_release_arm:
+        action: set vac_arm_cmd off
+
+    step step_orient_decide_flip:
+        if: orient_side_b_ok == true goto mode_service.step_orient_flip else: goto mode_service.step_orient_return_middle
+
+    step step_orient_flip:
+        action: extend cyl_orient_rotate
+
+    step step_orient_wait_flip:
+        wait: sensor_orient_ext == true
+        timeout: 600ms -> goto orient_warning.orient_cyl_warn
+
+    step step_orient_return_middle_after_flip:
+        action: retract cyl_feed
+        action: retract cyl_swing
+
+    step step_orient_return_middle_after_flip_wait_window:
+        wait: sensor_feed_ret == true AND sensor_swing_up == true
+        timeout: 100ms -> goto mode_service.wait_mode
+
+    step step_orient_return_middle_after_flip_cmd:
+        action: axis.move_absolute(axis_arm, position: 45, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step step_orient_done_after_flip:
+        delay: 20ms
+        goto mode_service.wait_mode
+
+    step step_orient_return_middle:
+        action: retract cyl_feed
+        action: retract cyl_swing
+
+    step step_orient_return_middle_wait_window:
+        wait: sensor_feed_ret == true AND sensor_swing_up == true
+        timeout: 100ms -> goto mode_service.wait_mode
+
+    step step_orient_return_middle_cmd:
+        action: axis.move_absolute(axis_arm, position: 45, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step step_orient_done:
+        delay: 20ms
+        goto mode_service.wait_mode
+
+    step step_transfer_down:
+        action: extend cyl_swing
+
+    step step_transfer_wait_down:
+        wait: sensor_swing_down == true
+        timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step step_transfer_lift_down:
+        action: extend cyl_lift
+
+    step step_transfer_wait_lift_down:
+        wait: sensor_lift_down == true
+        timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step step_transfer_vacuum_on:
+        action: set vac_transfer_cmd on
+
+    step step_transfer_wait_vacuum:
+        wait: sensor_transfer_vac_ok == true
+        timeout: 1000ms -> goto transfer_to_measure.record_drop
+
+    step step_transfer_lift_up:
+        action: retract cyl_lift
+
+    step step_transfer_wait_lift_up:
+        wait: sensor_lift_up == true
+        timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step step_transfer_swing_up:
+        action: retract cyl_swing
+
+    step step_transfer_wait_swing_up:
+        wait: sensor_swing_up == true
+        timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step step_transfer_move_front:
+        action: extend cyl_transfer
+
+    step step_transfer_wait_front:
+        wait: sensor_transfer_front == true
+        timeout: 900ms -> goto transfer_warning.transfer_cyl_warn
+
+    step step_transfer_place:
+        action: set vac_transfer_cmd off
+
+    step step_transfer_back:
+        action: retract cyl_transfer
+
+    step step_transfer_wait_back:
+        wait: sensor_transfer_back == true
+        timeout: 900ms -> goto transfer_warning.transfer_cyl_warn
+
+    step step_transfer_done:
+        goto mode_service.wait_mode
+
+    step step_idle:
+        delay: 50ms
+        goto mode_service.wait_mode
+
+    step enable_axis_maintenance:
+        action: set axis_arm.enable on
+
+    step maintenance_choose_safe_pose:
+        if: maintenance_safe_pose == true goto mode_service.maintenance_safe_pose else: goto mode_service.maintenance_choose_home_arm
+
+    step maintenance_choose_home_arm:
+        if: maintenance_home_arm == true goto mode_service.maintenance_request_home else: goto mode_service.maintenance_choose_clear_counters
+
+    step maintenance_choose_clear_counters:
+        if: maintenance_clear_counters == true goto mode_service.maintenance_clear_counters else: goto mode_service.maintenance_idle
+
+    step maintenance_safe_pose:
+        action: set vac_feed_cmd off
+        action: set vac_arm_cmd off
+        action: set vac_orient_cmd off
+        action: set vac_transfer_cmd off
+        action: retract cyl_feed
+        action: retract cyl_orient_rotate
+        action: retract cyl_swing
+        action: retract cyl_lift
+        action: retract cyl_transfer
+        goto mode_service.wait_mode
+
+    step maintenance_request_home:
+        action: retract cyl_feed
+        action: retract cyl_swing
+
+    step maintenance_request_home_wait_window:
+        wait: sensor_feed_ret == true AND sensor_swing_up == true
+        timeout: 100ms -> goto mode_service.wait_mode
+
+    step maintenance_request_home_cmd:
+        action: set arm_home_cmd on
+
+    step maintenance_wait_home:
+        wait: sensor_arm_home == true
+        timeout: 5000ms -> goto startup_fault.arm_home_timeout
+
+    step maintenance_finish_home:
+        action: set arm_home_cmd off
+        goto mode_service.wait_mode
+
+    step maintenance_clear_counters:
+        action: compute axis_recover_attempts = 0.0
+        action: compute orient_reject_streak = 0.0
+        action: compute transfer_attempt_count = 0.0
+        action: compute drop_total = 0.0
+        action: compute consecutive_drop_count = 0.0
+        action: compute drop_rate_exceeded = false
+        goto mode_service.wait_mode
+
+    step maintenance_idle:
+        delay: 50ms
+        goto mode_service.wait_mode

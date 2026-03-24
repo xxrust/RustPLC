@@ -4,13 +4,17 @@ use crate::ast::{
     AxisStopMode, BinaryOperator, Branch, CamPoint, CamTableDeclaration, CamTableMode,
     CausalityConstraint, ComparisonOperator, ConditionExpression, ConstraintsSection,
     DeviceAttributes, DeviceDeclaration, DevicePort, DeviceTags, DeviceType, DurationValue,
-    Expression, ExternCallBinding, ExternFunctionContract, ExternFunctionDeclaration,
-    ExternFunctionParameter, GotoDirective, LiteralValue, MeasuredValue, OnCompleteDirective,
-    ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch, SafetyConstraint,
-    SafetyOperand, SafetyRelation, StateReference, StepDeclaration, StepStatement, TaskDeclaration,
-    TasksSection, TimeUnit, TimeoutDirective, TimingConstraint, TimingRelation, TimingTarget,
-    TopologyConnection, TopologyRelation, TopologySection, VariableDeclaration, VariableType,
-    WaitCondition, WaitStatement,
+    EffectKind, EffectStatement, Expression, ExternCallBinding, ExternFunctionContract,
+    ExternFunctionDeclaration, ExternFunctionParameter, GotoDirective, LiteralValue, MeasuredValue,
+    OnCompleteDirective, ParallelBlock, PlcProgram, PortRole, PortType, RaceBlock, RaceBranch,
+    ResourceClaimConstraint, ResourceClaimSource, SafetyConstraint, SafetyOperand, SafetyRelation,
+    SemanticResourceDeclaration, SemanticResourceMode, StateReference, StepDeclaration,
+    StepStatement, TaskDeclaration, TasksSection, TimeUnit, TimeoutDirective, TimingConstraint,
+    TimingRelation, TimingTarget, TopologyConnection, TopologyRelation, TopologySection,
+    VariableDeclaration, VariableType, WaitCondition, WaitStatement, WorkpieceAllowDeclaration,
+    WorkpieceCarrierDeclaration, WorkpieceCarrierLayout, WorkpieceDerivationDeclaration,
+    WorkpieceHolderDeclaration, WorkpiecePropertyDeclaration, WorkpiecePropertyType,
+    WorkpieceSiteDeclaration, WorkpieceSiteKind, WorkpieceTypeDeclaration,
 };
 use crate::error::PlcError;
 use pest::Parser;
@@ -125,6 +129,7 @@ fn reject_extern_calls_in_statements(
             StepStatement::Action(action) => {
                 reject_extern_calls_in_action(action, extern_names, line, task_name, step_name)?;
             }
+            StepStatement::Effect(_) => {}
             StepStatement::Wait(wait) => {
                 reject_extern_calls_in_wait(wait, extern_names, line, task_name, step_name)?;
             }
@@ -287,6 +292,11 @@ fn reject_extern_calls_in_expression(
 
 fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError> {
     let mut devices = Vec::new();
+    let mut workpiece_types = Vec::new();
+    let mut workpiece_sites = Vec::new();
+    let mut workpiece_holders = Vec::new();
+    let mut workpiece_carriers = Vec::new();
+    let mut semantic_resources = Vec::new();
     let mut explicit_connections = Vec::new();
     let mut variables = Vec::new();
     let mut cam_tables = Vec::new();
@@ -296,6 +306,21 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
     for entry in pair.into_inner() {
         match entry.as_rule() {
             Rule::device_declaration => devices.push(parse_device_declaration(entry)?),
+            Rule::workpiece_type_declaration => {
+                workpiece_types.push(parse_workpiece_type_declaration(entry)?);
+            }
+            Rule::workpiece_site_declaration => {
+                workpiece_sites.push(parse_workpiece_site_declaration(entry)?);
+            }
+            Rule::workpiece_holder_declaration => {
+                workpiece_holders.push(parse_workpiece_holder_declaration(entry)?);
+            }
+            Rule::workpiece_carrier_declaration => {
+                workpiece_carriers.push(parse_workpiece_carrier_declaration(entry)?);
+            }
+            Rule::semantic_resource_declaration => {
+                semantic_resources.push(parse_semantic_resource_declaration(entry)?);
+            }
             Rule::relation_declaration => {
                 explicit_connections.push(parse_relation_declaration(entry)?);
             }
@@ -313,12 +338,599 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
 
     Ok(TopologySection {
         devices,
+        workpiece_types,
+        workpiece_sites,
+        workpiece_holders,
+        workpiece_carriers,
+        semantic_resources,
         connections: explicit_connections,
         variables,
         cam_tables,
         extern_functions,
         axis_fault_contracts,
     })
+}
+
+fn parse_workpiece_type_declaration(
+    pair: Pair<Rule>,
+) -> Result<WorkpieceTypeDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut properties = Vec::new();
+    let mut normal_terminal_states = Vec::new();
+    let mut abnormal_terminal_states = Vec::new();
+    let mut ingress_sites = Vec::new();
+    let mut normal_egress_sites = Vec::new();
+    let mut abnormal_egress_sites = Vec::new();
+    let mut allows = Vec::new();
+    let mut derived_from = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::workpiece_type_block => {
+                for entry in part.into_inner() {
+                    if entry.as_rule() != Rule::workpiece_type_entry {
+                        continue;
+                    }
+                    let entry_line = line_of(&entry);
+                    let mut inner = entry.into_inner();
+                    let field = inner
+                        .next()
+                        .ok_or_else(|| PlcError::parse(entry_line, "workpiece 字段缺少名称"))?
+                        .as_str()
+                        .to_string();
+                    let value = inner.next().ok_or_else(|| {
+                        PlcError::parse(entry_line, format!("workpiece 字段 {field} 缺少值"))
+                    })?;
+                    let value_inner = first_inner(value, entry_line, "workpiece 字段值")?;
+                    match field.as_str() {
+                        "properties" => properties = parse_workpiece_property_list(value_inner)?,
+                        "normal_terminal_states" => {
+                            normal_terminal_states = expect_workpiece_identifier_list(
+                                value_inner,
+                                "normal_terminal_states",
+                            )?
+                        }
+                        "abnormal_terminal_states" => {
+                            abnormal_terminal_states = expect_workpiece_identifier_list(
+                                value_inner,
+                                "abnormal_terminal_states",
+                            )?
+                        }
+                        "ingress_sites" => {
+                            ingress_sites =
+                                expect_workpiece_reference_list(value_inner, "ingress_sites")?
+                        }
+                        "normal_egress_sites" => {
+                            normal_egress_sites =
+                                expect_workpiece_reference_list(value_inner, "normal_egress_sites")?
+                        }
+                        "abnormal_egress_sites" => {
+                            abnormal_egress_sites = expect_workpiece_reference_list(
+                                value_inner,
+                                "abnormal_egress_sites",
+                            )?
+                        }
+                        "allows" => {
+                            allows = parse_workpiece_allow_rule_list(value_inner, entry_line)?
+                        }
+                        "derived_from" => {
+                            derived_from =
+                                parse_workpiece_derivation_rule_list(value_inner, entry_line)?
+                        }
+                        _ => {
+                            return Err(PlcError::parse(
+                                entry_line,
+                                format!("不支持的 workpiece 字段: {field}"),
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(WorkpieceTypeDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "workpiece 声明缺少名称"))?,
+        properties,
+        normal_terminal_states,
+        abnormal_terminal_states,
+        ingress_sites,
+        normal_egress_sites,
+        abnormal_egress_sites,
+        allows,
+        derived_from,
+    })
+}
+
+fn parse_workpiece_property_list(
+    pair: Pair<Rule>,
+) -> Result<Vec<WorkpiecePropertyDeclaration>, PlcError> {
+    let line = line_of(&pair);
+    let list = if pair.as_rule() == Rule::workpiece_property_list {
+        pair
+    } else {
+        first_inner(pair, line, "properties")?
+    };
+    if list.as_rule() != Rule::workpiece_property_list {
+        return Err(PlcError::parse(line, "properties 需要属性列表"));
+    }
+
+    list.into_inner()
+        .filter(|part| part.as_rule() == Rule::workpiece_property)
+        .map(parse_workpiece_property)
+        .collect()
+}
+
+fn expect_workpiece_reference_list(
+    pair: Pair<Rule>,
+    field_name: &str,
+) -> Result<Vec<String>, PlcError> {
+    let line = line_of(&pair);
+    if pair.as_rule() != Rule::workpiece_reference_list {
+        return Err(PlcError::parse(
+            line,
+            format!("{field_name} requires a workpiece reference list"),
+        ));
+    }
+
+    let values = pair
+        .into_inner()
+        .filter(|part| part.as_rule() == Rule::workpiece_reference)
+        .map(|part| part.as_str().to_string())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Err(PlcError::parse(
+            line,
+            format!("{field_name} must contain at least one reference"),
+        ));
+    }
+    Ok(values)
+}
+
+fn expect_workpiece_identifier_list(
+    pair: Pair<Rule>,
+    field_name: &str,
+) -> Result<Vec<String>, PlcError> {
+    if pair.as_rule() == Rule::identifier_list {
+        return expect_identifier_list(pair, field_name);
+    }
+    let line = line_of(&pair);
+    if pair.as_rule() != Rule::workpiece_reference_list {
+        return Err(PlcError::parse(
+            line,
+            format!("{field_name} requires an identifier list"),
+        ));
+    }
+    let values = pair
+        .into_inner()
+        .filter(|part| part.as_rule() == Rule::workpiece_reference)
+        .map(|part| part.as_str().to_string())
+        .collect::<Vec<_>>();
+    if values.iter().any(|value| value.contains(".slot[")) {
+        return Err(PlcError::parse(
+            line,
+            format!("{field_name} only accepts bare identifier entries"),
+        ));
+    }
+    if values.is_empty() {
+        return Err(PlcError::parse(
+            line,
+            format!("{field_name} must contain at least one identifier"),
+        ));
+    }
+    Ok(values)
+}
+
+fn parse_workpiece_allow_rule_list(
+    pair: Pair<Rule>,
+    line: usize,
+) -> Result<Vec<WorkpieceAllowDeclaration>, PlcError> {
+    if pair.as_rule() != Rule::workpiece_allow_rule_list {
+        return Err(PlcError::parse(line, "allows list expected"));
+    }
+    pair.into_inner()
+        .filter(|part| part.as_rule() == Rule::workpiece_allow_rule)
+        .map(parse_workpiece_allow_rule)
+        .collect()
+}
+
+fn parse_workpiece_allow_rule(pair: Pair<Rule>) -> Result<WorkpieceAllowDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let target = pair
+        .into_inner()
+        .find(|part| part.as_rule() == Rule::identifier)
+        .ok_or_else(|| PlcError::parse(line, "split_into target missing"))?
+        .as_str()
+        .to_string();
+    Ok(WorkpieceAllowDeclaration::SplitInto { target })
+}
+
+fn parse_workpiece_derivation_rule_list(
+    pair: Pair<Rule>,
+    line: usize,
+) -> Result<Vec<WorkpieceDerivationDeclaration>, PlcError> {
+    if pair.as_rule() == Rule::identifier_list {
+        return Ok(pair
+            .into_inner()
+            .filter(|part| part.as_rule() == Rule::identifier)
+            .map(|part| WorkpieceDerivationDeclaration::WorkpieceType {
+                workpiece_type: part.as_str().to_string(),
+            })
+            .collect());
+    }
+    if pair.as_rule() == Rule::workpiece_reference_list {
+        let mut out = Vec::new();
+        for part in pair.into_inner() {
+            if part.as_rule() != Rule::workpiece_reference {
+                continue;
+            }
+            let raw = part.as_str();
+            if raw.contains(".slot[") {
+                return Err(PlcError::parse(
+                    line,
+                    "derived_from only accepts workpiece type names or merge(...)",
+                ));
+            }
+            out.push(WorkpieceDerivationDeclaration::WorkpieceType {
+                workpiece_type: raw.to_string(),
+            });
+        }
+        return Ok(out);
+    }
+    if pair.as_rule() != Rule::workpiece_derivation_rule_list {
+        return Err(PlcError::parse(line, "derived_from list expected"));
+    }
+    pair.into_inner()
+        .filter(|part| part.as_rule() == Rule::workpiece_derivation_rule)
+        .map(parse_workpiece_derivation_rule)
+        .collect()
+}
+
+fn parse_workpiece_derivation_rule(
+    pair: Pair<Rule>,
+) -> Result<WorkpieceDerivationDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let raw = pair.as_str().trim();
+    if raw.starts_with("merge(") && raw.ends_with(')') {
+        let inner = &raw["merge(".len()..raw.len() - 1];
+        let inputs = inner
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if inputs.len() < 2 {
+            return Err(PlcError::parse(
+                line,
+                "merge derivation needs at least two inputs",
+            ));
+        }
+        return Ok(WorkpieceDerivationDeclaration::Merge { inputs });
+    }
+
+    if raw.is_empty() {
+        return Err(PlcError::parse(line, "derived_from source missing"));
+    }
+    Ok(WorkpieceDerivationDeclaration::WorkpieceType {
+        workpiece_type: raw.to_string(),
+    })
+}
+
+fn parse_workpiece_property(pair: Pair<Rule>) -> Result<WorkpiecePropertyDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut inner = pair.into_inner();
+    let name = inner
+        .next()
+        .ok_or_else(|| PlcError::parse(line, "workpiece property 缺少名称"))?
+        .as_str()
+        .to_string();
+    let property_type = parse_workpiece_property_type(
+        inner
+            .next()
+            .ok_or_else(|| PlcError::parse(line, "workpiece property 缺少类型"))?,
+    )?;
+    Ok(WorkpiecePropertyDeclaration {
+        name,
+        property_type,
+    })
+}
+
+fn parse_workpiece_property_type(pair: Pair<Rule>) -> Result<WorkpiecePropertyType, PlcError> {
+    let line = line_of(&pair);
+    let raw = pair.as_str().trim();
+    if raw == "bool" {
+        return Ok(WorkpiecePropertyType::Bool);
+    }
+    if raw.starts_with("enum(") && raw.ends_with(')') {
+        let values = raw[5..raw.len() - 1]
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if values.is_empty() {
+            return Err(PlcError::parse(line, "enum 属性至少需要一个候选值"));
+        }
+        return Ok(WorkpiecePropertyType::Enum { values });
+    }
+    Err(PlcError::parse(
+        line,
+        format!("不支持的 workpiece property 类型: {raw}"),
+    ))
+}
+
+fn parse_workpiece_site_declaration(
+    pair: Pair<Rule>,
+) -> Result<WorkpieceSiteDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut kind = None;
+    let mut capacity = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::workpiece_site_kind => kind = Some(parse_workpiece_site_kind(part)?),
+            Rule::workpiece_site_block => {
+                let raw = part.as_str();
+                let value = raw
+                    .split(':')
+                    .nth(1)
+                    .map(str::trim)
+                    .ok_or_else(|| PlcError::parse(line, "site capacity 缺少值"))?;
+                capacity = Some(parse_u32_from_str(line, value, "capacity")?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(WorkpieceSiteDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "site 声明缺少名称"))?,
+        kind: kind.ok_or_else(|| PlcError::parse(line, "site 声明缺少类型"))?,
+        capacity: capacity.ok_or_else(|| PlcError::parse(line, "site 声明缺少 capacity"))?,
+    })
+}
+
+fn parse_workpiece_site_kind(pair: Pair<Rule>) -> Result<WorkpieceSiteKind, PlcError> {
+    let line = line_of(&pair);
+    match pair.as_str() {
+        "workpiece_location" => Ok(WorkpieceSiteKind::WorkpieceLocation),
+        "carrier_location" => Ok(WorkpieceSiteKind::CarrierLocation),
+        other => Err(PlcError::parse(
+            line,
+            format!("不支持的 site 类型: {other}"),
+        )),
+    }
+}
+
+fn parse_workpiece_holder_declaration(
+    pair: Pair<Rule>,
+) -> Result<WorkpieceHolderDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut capacity = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::workpiece_holder_block => {
+                let raw = part.as_str();
+                let value = raw
+                    .split(':')
+                    .nth(1)
+                    .map(str::trim)
+                    .ok_or_else(|| PlcError::parse(line, "holder capacity 缺少值"))?;
+                capacity = Some(parse_u32_from_str(line, value, "capacity")?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(WorkpieceHolderDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "holder 声明缺少名称"))?,
+        capacity: capacity.ok_or_else(|| PlcError::parse(line, "holder 声明缺少 capacity"))?,
+    })
+}
+
+fn parse_workpiece_carrier_declaration(
+    pair: Pair<Rule>,
+) -> Result<WorkpieceCarrierDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut slots = None;
+    let mut layout = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::workpiece_carrier_block => {
+                for entry in part.into_inner() {
+                    if entry.as_rule() != Rule::workpiece_carrier_entry {
+                        continue;
+                    }
+                    let entry_line = line_of(&entry);
+                    let mut inner = entry.into_inner();
+                    let field = inner
+                        .next()
+                        .ok_or_else(|| PlcError::parse(entry_line, "carrier field name missing"))?
+                        .as_str()
+                        .to_string();
+                    let value = inner.next().ok_or_else(|| {
+                        PlcError::parse(entry_line, "carrier field value missing")
+                    })?;
+                    match field.as_str() {
+                        "slots" => {
+                            slots = Some(parse_u32_from_str(entry_line, value.as_str(), "slots")?)
+                        }
+                        "layout" => {
+                            layout = Some(parse_workpiece_carrier_layout(first_inner(
+                                value, entry_line, "layout",
+                            )?)?)
+                        }
+                        _ => {
+                            return Err(PlcError::parse(
+                                entry_line,
+                                format!("unsupported carrier field: {field}"),
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let layout = match (slots, layout) {
+        (Some(count), None) => WorkpieceCarrierLayout::Slots { count },
+        (None, Some(layout)) => layout,
+        (Some(_), Some(_)) => {
+            return Err(PlcError::parse(
+                line,
+                "workpiece_carrier cannot declare both slots and layout",
+            ));
+        }
+        (None, None) => {
+            return Err(PlcError::parse(
+                line,
+                "workpiece_carrier requires slots or layout",
+            ));
+        }
+    };
+
+    Ok(WorkpieceCarrierDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "carrier name missing"))?,
+        layout,
+    })
+}
+
+fn parse_workpiece_carrier_layout(pair: Pair<Rule>) -> Result<WorkpieceCarrierLayout, PlcError> {
+    let line = line_of(&pair);
+    if pair.as_rule() != Rule::workpiece_carrier_layout {
+        return Err(PlcError::parse(
+            line,
+            "layout requires grid(rows: m, cols: n)",
+        ));
+    }
+
+    let raw = pair.as_str().trim();
+    let inner = raw
+        .strip_prefix("grid(")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .ok_or_else(|| PlcError::parse(line, "unsupported carrier layout"))?;
+    let mut rows = None;
+    let mut cols = None;
+    for item in inner.split(',') {
+        let Some((key, value)) = item.split_once(':') else {
+            return Err(PlcError::parse(
+                line,
+                format!("invalid layout item: {item}"),
+            ));
+        };
+        match key.trim() {
+            "rows" => rows = Some(parse_u32_from_str(line, value, "rows")?),
+            "cols" => cols = Some(parse_u32_from_str(line, value, "cols")?),
+            other => {
+                return Err(PlcError::parse(
+                    line,
+                    format!("unsupported grid dimension: {other}"),
+                ));
+            }
+        }
+    }
+
+    Ok(WorkpieceCarrierLayout::Grid {
+        rows: rows.ok_or_else(|| PlcError::parse(line, "grid rows missing"))?,
+        cols: cols.ok_or_else(|| PlcError::parse(line, "grid cols missing"))?,
+    })
+}
+
+fn parse_semantic_resource_declaration(
+    pair: Pair<Rule>,
+) -> Result<SemanticResourceDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut mode = None;
+    let mut purpose = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::semantic_resource_block => {
+                for entry in part.into_inner() {
+                    if entry.as_rule() != Rule::semantic_resource_entry {
+                        continue;
+                    }
+                    let entry_line = line_of(&entry);
+                    let mut inner = entry.into_inner();
+                    let field = inner
+                        .next()
+                        .ok_or_else(|| {
+                            PlcError::parse(entry_line, "semantic_resource 字段缺少名称")
+                        })?
+                        .as_str()
+                        .to_string();
+                    let value = inner.next().ok_or_else(|| {
+                        PlcError::parse(
+                            entry_line,
+                            format!("semantic_resource 字段 {field} 缺少值"),
+                        )
+                    })?;
+                    match field.as_str() {
+                        "mode" => {
+                            if mode.is_some() {
+                                return Err(PlcError::parse(
+                                    entry_line,
+                                    "semantic_resource 字段 mode 重复声明",
+                                ));
+                            }
+                            mode = Some(parse_semantic_resource_mode(value)?);
+                        }
+                        "purpose" => {
+                            if purpose.is_some() {
+                                return Err(PlcError::parse(
+                                    entry_line,
+                                    "semantic_resource 字段 purpose 重复声明",
+                                ));
+                            }
+                            purpose = Some(parse_string_literal(value)?);
+                        }
+                        _ => {
+                            return Err(PlcError::parse(
+                                entry_line,
+                                format!("不支持的 semantic_resource 字段: {field}"),
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(SemanticResourceDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "resource 声明缺少名称"))?,
+        mode: mode.ok_or_else(|| PlcError::parse(line, "resource 声明缺少 mode"))?,
+        purpose,
+    })
+}
+
+fn parse_semantic_resource_mode(pair: Pair<Rule>) -> Result<SemanticResourceMode, PlcError> {
+    let line = line_of(&pair);
+    match pair.as_str() {
+        "exclusive" => Ok(SemanticResourceMode::Exclusive),
+        other => Err(PlcError::parse(
+            line,
+            format!("不支持的 semantic_resource mode: {other}"),
+        )),
+    }
 }
 
 fn parse_axis_fault_contract_declaration(
@@ -1281,6 +1893,7 @@ fn legacy_topology_attribute_error(line: usize, col: usize, attr_name: &str) -> 
 
 fn parse_constraints_section(pair: Pair<Rule>) -> Result<ConstraintsSection, PlcError> {
     let mut safety = Vec::new();
+    let mut claims = Vec::new();
     let mut timing = Vec::new();
     let mut causality = Vec::new();
 
@@ -1293,6 +1906,9 @@ fn parse_constraints_section(pair: Pair<Rule>) -> Result<ConstraintsSection, Plc
         let constraint = first_inner(item, line, "约束声明")?;
         match constraint.as_rule() {
             Rule::safety_constraint => safety.push(parse_safety_constraint(constraint)?),
+            Rule::resource_claim_constraint => {
+                claims.push(parse_resource_claim_constraint(constraint)?)
+            }
             Rule::timing_constraint => timing.push(parse_timing_constraint(constraint)?),
             Rule::causality_constraint => causality.push(parse_causality_constraint(constraint)?),
             _ => {}
@@ -1301,6 +1917,7 @@ fn parse_constraints_section(pair: Pair<Rule>) -> Result<ConstraintsSection, Plc
 
     Ok(ConstraintsSection {
         safety,
+        claims,
         timing,
         causality,
     })
@@ -1331,6 +1948,55 @@ fn parse_safety_constraint(pair: Pair<Rule>) -> Result<SafetyConstraint, PlcErro
         reason,
         source: None,
     })
+}
+
+fn parse_resource_claim_constraint(pair: Pair<Rule>) -> Result<ResourceClaimConstraint, PlcError> {
+    let line = line_of(&pair);
+    let mut source = None;
+    let mut resource = None;
+    let mut reason = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::resource_claim_source => {
+                source = Some(parse_resource_claim_source(part)?);
+            }
+            Rule::identifier => {
+                if resource.is_none() {
+                    resource = Some(part.as_str().to_string());
+                }
+            }
+            Rule::reason_clause => {
+                reason = Some(parse_reason_clause(part)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ResourceClaimConstraint {
+        line,
+        source: source.ok_or_else(|| PlcError::parse(line, "claim 缺少来源"))?,
+        resource: resource.ok_or_else(|| PlcError::parse(line, "claim 缺少 resource"))?,
+        reason,
+    })
+}
+
+fn parse_resource_claim_source(pair: Pair<Rule>) -> Result<ResourceClaimSource, PlcError> {
+    let line = line_of(&pair);
+    let mut inner = pair.into_inner();
+    let first = inner
+        .next()
+        .ok_or_else(|| PlcError::parse(line, "claim source 缺少内容"))?;
+    match first.as_rule() {
+        Rule::state_reference => Ok(ResourceClaimSource::State(parse_state_reference(first)?)),
+        Rule::identifier => Ok(ResourceClaimSource::ActionTag {
+            tag: first.as_str().to_string(),
+        }),
+        _ => Err(PlcError::parse(
+            line,
+            format!("不支持的 claim source: {:?}", first.as_rule()),
+        )),
+    }
 }
 
 fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
@@ -1561,6 +2227,7 @@ fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
     match pair.as_rule() {
         Rule::axis_move_statement => Ok(StepStatement::Action(parse_axis_move_statement(pair)?)),
         Rule::action_statement => Ok(StepStatement::Action(parse_action_statement(pair)?)),
+        Rule::effect_statement => Ok(StepStatement::Effect(parse_effect_statement_v2(pair)?)),
         Rule::wait_statement => Ok(StepStatement::Wait(parse_wait_statement(pair)?)),
         Rule::if_else_statement => Ok(parse_if_else_statement(pair)?),
         Rule::delay_statement => Ok(StepStatement::Delay {
@@ -1582,6 +2249,218 @@ fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
             format!("不支持的 step 语句: {rule:?}"),
         )),
     }
+}
+
+#[allow(dead_code)]
+fn parse_effect_statement(pair: Pair<Rule>) -> Result<EffectStatement, PlcError> {
+    let line = line_of(&pair);
+    let command_wrapper = first_inner(pair, line, "effect 语句")?;
+    let command = first_inner(command_wrapper, line, "effect 具体语义")?;
+
+    let kind = match command.as_rule() {
+        Rule::effect_acquire => {
+            let parts = command.as_str().split_whitespace().collect::<Vec<_>>();
+            let holder = parts
+                .get(2)
+                .ok_or_else(|| PlcError::parse(line, "acquire 缺少 holder"))?
+                .to_string();
+            let from = parts
+                .get(4)
+                .ok_or_else(|| PlcError::parse(line, "acquire 缺少来源"))?
+                .to_string();
+            EffectKind::Acquire { holder, from }
+        }
+        Rule::effect_transfer => {
+            let parts = command.as_str().split_whitespace().collect::<Vec<_>>();
+            let from = parts
+                .get(2)
+                .ok_or_else(|| PlcError::parse(line, "transfer 缺少 from"))?
+                .to_string();
+            let to = parts
+                .get(4)
+                .ok_or_else(|| PlcError::parse(line, "transfer 缺少 to"))?
+                .to_string();
+            EffectKind::Transfer { from, to }
+        }
+        Rule::effect_finish => {
+            let parts = command.as_str().split_whitespace().collect::<Vec<_>>();
+            let at = parts
+                .get(3)
+                .ok_or_else(|| PlcError::parse(line, "finish 缺少 site"))?
+                .to_string();
+            let terminal_state = parts
+                .get(5)
+                .ok_or_else(|| PlcError::parse(line, "finish 缺少 terminal state"))?
+                .to_string();
+            EffectKind::Finish { at, terminal_state }
+        }
+        rule => {
+            return Err(PlcError::parse(
+                line,
+                format!("不支持的 effect 语句: {rule:?}"),
+            ));
+        }
+    };
+
+    Ok(EffectStatement { line, kind })
+}
+
+fn parse_effect_statement_v2(pair: Pair<Rule>) -> Result<EffectStatement, PlcError> {
+    let line = line_of(&pair);
+    let command_wrapper = first_inner(pair, line, "effect")?;
+    let command = first_inner(command_wrapper, line, "effect command")?;
+
+    let kind = match command.as_rule() {
+        Rule::effect_acquire => {
+            let mut inner = command.into_inner();
+            let holder = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "acquire holder missing"))?
+                .as_str()
+                .to_string();
+            let from = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "acquire source missing"))?
+                .as_str()
+                .to_string();
+            EffectKind::Acquire { holder, from }
+        }
+        Rule::effect_transfer => {
+            let mut inner = command.into_inner();
+            let from = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "transfer source missing"))?
+                .as_str()
+                .to_string();
+            let to = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "transfer target missing"))?
+                .as_str()
+                .to_string();
+            EffectKind::Transfer { from, to }
+        }
+        Rule::effect_finish => {
+            let mut inner = command.into_inner();
+            let at = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "finish site missing"))?
+                .as_str()
+                .to_string();
+            let terminal_state = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "finish terminal state missing"))?
+                .as_str()
+                .to_string();
+            EffectKind::Finish { at, terminal_state }
+        }
+        Rule::effect_mount => {
+            let mut inner = command.into_inner();
+            let workpiece_type = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "mount workpiece type missing"))?
+                .as_str()
+                .to_string();
+            let slot = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "mount slot missing"))?
+                .as_str()
+                .to_string();
+            EffectKind::Mount {
+                workpiece_type,
+                slot,
+            }
+        }
+        Rule::effect_unmount => {
+            let mut inner = command.into_inner();
+            let workpiece_type = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "unmount workpiece type missing"))?
+                .as_str()
+                .to_string();
+            let slot = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "unmount slot missing"))?
+                .as_str()
+                .to_string();
+            let to = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "unmount target missing"))?
+                .as_str()
+                .to_string();
+            EffectKind::Unmount {
+                workpiece_type,
+                slot,
+                to,
+            }
+        }
+        Rule::effect_split => {
+            let mut inner = command.into_inner();
+            let source_type = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "split source type missing"))?
+                .as_str()
+                .to_string();
+            let target_type = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "split target type missing"))?
+                .as_str()
+                .to_string();
+            let count = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "split count missing"))?
+                .as_str()
+                .parse::<u32>()
+                .map_err(|_| PlcError::parse(line, "split count must be an unsigned integer"))?;
+            EffectKind::Split {
+                source_type,
+                target_type,
+                count,
+                consumed: true,
+            }
+        }
+        Rule::effect_merge => {
+            let mut inner = command.into_inner();
+            let inputs = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "merge inputs missing"))?
+                .into_inner()
+                .filter(|part| part.as_rule() == Rule::identifier)
+                .map(|part| part.as_str().to_string())
+                .collect::<Vec<_>>();
+            let target_type = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "merge target type missing"))?
+                .as_str()
+                .to_string();
+            EffectKind::Merge {
+                inputs,
+                target_type,
+                consumed_inputs: true,
+            }
+        }
+        Rule::effect_transform_carrier => {
+            let mut inner = command.into_inner();
+            let carrier = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "transform carrier missing"))?
+                .as_str()
+                .to_string();
+            let frame = inner
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "transform frame missing"))?
+                .as_str()
+                .to_string();
+            EffectKind::TransformCarrier { carrier, frame }
+        }
+        rule => {
+            return Err(PlcError::parse(
+                line,
+                format!("unsupported effect statement: {rule:?}"),
+            ));
+        }
+    };
+
+    Ok(EffectStatement { line, kind })
 }
 
 fn parse_if_else_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
@@ -1833,6 +2712,7 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
     let mut on_reject_routes = Vec::<AxisFaultRouteDirective>::new();
     let mut on_motion_fault_routes = Vec::<AxisFaultRouteDirective>::new();
     let mut on_safety_fault_routes = Vec::<AxisFaultRouteDirective>::new();
+    let mut semantic_tag = None::<String>;
     let mut is_relative = None::<bool>;
 
     for part in pair.into_inner() {
@@ -1887,6 +2767,12 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
                     &mut on_safety_fault_routes,
                 )?;
             }
+            Rule::axis_semantic_tag_branch => {
+                if semantic_tag.is_some() {
+                    return Err(PlcError::parse(line, "semantic_tag 重复声明"));
+                }
+                semantic_tag = Some(parse_axis_semantic_tag_branch(part)?);
+            }
             _ => {}
         }
     }
@@ -1909,6 +2795,7 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
             on_reject_routes,
             on_motion_fault_routes,
             on_safety_fault_routes,
+            semantic_tag,
         }),
         Some(false) => Ok(ActionStatement::AxisMoveAbsolute {
             target,
@@ -1925,12 +2812,21 @@ fn parse_axis_move_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcErr
             on_reject_routes,
             on_motion_fault_routes,
             on_safety_fault_routes,
+            semantic_tag,
         }),
         None => Err(PlcError::parse(
             line,
             "axis.move 语句必须是 axis.move_relative 或 axis.move_absolute",
         )),
     }
+}
+
+fn parse_axis_semantic_tag_branch(pair: Pair<Rule>) -> Result<String, PlcError> {
+    let line = line_of(&pair);
+    pair.into_inner()
+        .find(|part| part.as_rule() == Rule::identifier)
+        .map(|part| part.as_str().to_string())
+        .ok_or_else(|| PlcError::parse(line, "semantic_tag 缺少标记名"))
 }
 
 fn push_axis_fault_branch(
@@ -3243,6 +4139,20 @@ fn expect_identifier_list(pair: Pair<Rule>, field_name: &str) -> Result<Vec<Stri
     }
 
     Ok(values)
+}
+
+fn parse_u32_from_str(line: usize, raw: &str, field_name: &str) -> Result<u32, PlcError> {
+    let cleaned = raw
+        .trim()
+        .trim_end_matches('}')
+        .trim_end_matches(',')
+        .trim();
+    cleaned.parse::<u32>().map_err(|_| {
+        PlcError::parse(
+            line,
+            format!("{field_name} 需要无符号整数，当前为: {cleaned}"),
+        )
+    })
 }
 
 fn expect_port_list(pair: Pair<Rule>, field_name: &str) -> Result<Vec<DevicePort>, PlcError> {
@@ -5276,6 +6186,7 @@ task fault:
                 on_reject_routes,
                 on_motion_fault_routes,
                 on_safety_fault_routes,
+                semantic_tag: _,
             }) => {
                 assert_eq!(target.device, "axis_x");
                 assert_eq!(params.as_deref(), Some("stepper_default_fast"));
@@ -5316,6 +6227,52 @@ task fault:
             &step.statements[1],
             StepStatement::Action(ActionStatement::AxisMoveAbsolute { .. })
         ));
+    }
+
+    #[test]
+    fn parses_semantic_resource_claims_and_axis_semantic_tag() {
+        let input = r#"
+[topology]
+device axis_x: stepper_motor
+device cyl_feed: cylinder
+
+resource slide_pick_zone: semantic_resource {
+    mode: exclusive
+    purpose: "slide pick area"
+}
+
+[constraints]
+
+claim: cyl_feed.extended occupies slide_pick_zone
+claim: action_tag arm_pick_to_slide occupies slide_pick_zone
+
+[tasks]
+task motion:
+    step start:
+        action: axis.move_relative(axis_x, distance: 10, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+            semantic_tag: arm_pick_to_slide
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+"#;
+
+        let ast = parse_plc(input).expect("fixture should parse");
+        assert_eq!(ast.topology.semantic_resources.len(), 1);
+        assert_eq!(ast.topology.semantic_resources[0].name, "slide_pick_zone");
+        assert_eq!(ast.constraints.claims.len(), 2);
+
+        match &ast.tasks.tasks[0].steps[0].statements[0] {
+            StepStatement::Action(ActionStatement::AxisMoveRelative { semantic_tag, .. }) => {
+                assert_eq!(semantic_tag.as_deref(), Some("arm_pick_to_slide"));
+            }
+            other => panic!("expected AxisMoveRelative, got {other:?}"),
+        }
     }
 
     #[test]

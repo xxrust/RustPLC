@@ -2,14 +2,17 @@ use io_traits::{DigitalInputId, DigitalOutputId, Tick};
 use runtime_core::Runtime;
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
-use rust_plc::semantic::{build_state_machine, build_topology_graph, preprocess_program};
+use rust_plc::semantic::{
+    build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
+};
 
 fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'static> {
     let program = parse_plc(plc_source).expect("parse plc");
     let expanded = preprocess_program(&program).expect("preprocess");
     let topology = build_topology_graph(&expanded).expect("topology");
+    let constraints = build_constraint_set(&expanded).expect("constraints");
     let sm = build_state_machine(&expanded).expect("state machine");
-    state_machine_to_runtime_program(&topology, &sm, tick_ms).expect("bridge")
+    state_machine_to_runtime_program(&topology, &constraints, &sm, tick_ms).expect("bridge")
 }
 
 fn current_step_name<'a>(rt: &Runtime<'a>, program: &'a runtime_core::Program<'a>) -> &'a str {

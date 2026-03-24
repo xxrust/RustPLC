@@ -943,8 +943,9 @@ fn runtime_bridge_lowers_split_effect_into_runtime_action() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
-        .expect("runtime bridge should lower split actions");
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge should lower split actions");
 
     assert!(runtime_program.tasks.iter().any(|task| {
         task.steps.iter().any(|step| {
@@ -976,8 +977,9 @@ fn runtime_executes_split_action_end_to_end() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
-        .expect("runtime bridge should lower split actions");
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge should lower split actions");
 
     let mut io = MemIo::new();
     let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
@@ -990,7 +992,10 @@ fn runtime_executes_split_action_end_to_end() {
         .expect("source token should remain traceable");
     assert_eq!(source.workpiece_type, "rod");
     assert_eq!(source.current_location, "cut_zone");
-    assert_eq!(source.terminal_status, Some(WorkpieceTerminalStatus::Consumed));
+    assert_eq!(
+        source.terminal_status,
+        Some(WorkpieceTerminalStatus::Consumed)
+    );
     assert!(!source.active);
     assert_eq!(runtime.workpiece_lineage().len(), 4);
 }
@@ -1002,24 +1007,29 @@ fn runtime_bridge_lowers_merge_effect_into_runtime_action() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
-        .expect("runtime bridge should lower merge effects");
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge should lower merge effects");
 
-    assert!(collect_runtime_actions(&runtime_program).iter().any(|action| {
-        matches!(
-            action,
-            Action::WorkpieceMerge {
-                input_refs,
-                input_types,
-                target_type,
-                consumed_inputs,
-            }
-                if *input_refs == ["slice_a", "slice_b"]
-                    && *input_types == ["slice", "slice"]
-                    && *target_type == "module"
-                    && *consumed_inputs
-        )
-    }));
+    assert!(
+        collect_runtime_actions(&runtime_program)
+            .iter()
+            .any(|action| {
+                matches!(
+                    action,
+                    Action::WorkpieceMerge {
+                        input_refs,
+                        input_types,
+                        target_type,
+                        consumed_inputs,
+                    }
+                        if *input_refs == ["slice_a", "slice_b"]
+                            && *input_types == ["slice", "slice"]
+                            && *target_type == "module"
+                            && *consumed_inputs
+                )
+            })
+    );
 }
 
 #[test]
@@ -1029,12 +1039,15 @@ fn runtime_executes_merge_action_end_to_end() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
-        .expect("runtime bridge should lower merge actions");
+    let runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge should lower merge actions");
 
     let mut io = MemIo::new();
     let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
-    runtime.tick(&mut io).expect("split/merge flow should execute");
+    runtime
+        .tick(&mut io)
+        .expect("split/merge flow should execute");
 
     assert_eq!(runtime.workpiece_tokens().active_tokens(), 3);
     let module = runtime
@@ -1510,7 +1523,9 @@ fn verify_all_rejects_consuming_mounted_workpiece_after_transform() {
         verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
     assert!(errors.iter().any(|error| {
         error.checker == "safety"
-            && error.reason.contains("before any free-standing workpiece is available")
+            && error
+                .reason
+                .contains("before any free-standing workpiece is available")
             && error.reason.contains("plate.slot[0]")
     }));
 }
@@ -1691,10 +1706,13 @@ fn verify_all_rejects_merge_when_split_produces_too_few_instances() {
         .transitions
         .iter_mut()
         .find_map(|transition| {
-            transition.effects.iter_mut().find_map(|effect| match effect {
-                rust_plc::ir::WorkpieceEffect::Split { count, .. } => Some(count),
-                _ => None,
-            })
+            transition
+                .effects
+                .iter_mut()
+                .find_map(|effect| match effect {
+                    rust_plc::ir::WorkpieceEffect::Split { count, .. } => Some(count),
+                    _ => None,
+                })
         })
         .expect("split effect should exist");
     *split = 1;
@@ -1722,10 +1740,13 @@ fn verify_all_rejects_reusing_consumed_merge_input_instances() {
         .transitions
         .iter_mut()
         .find_map(|transition| {
-            transition.effects.iter_mut().find_map(|effect| match effect {
-                rust_plc::ir::WorkpieceEffect::Split { count, .. } => Some(count),
-                _ => None,
-            })
+            transition
+                .effects
+                .iter_mut()
+                .find_map(|effect| match effect {
+                    rust_plc::ir::WorkpieceEffect::Split { count, .. } => Some(count),
+                    _ => None,
+                })
         })
         .expect("split effect should exist");
     *split = 2;
@@ -1748,7 +1769,9 @@ fn verify_all_rejects_reusing_consumed_merge_input_instances() {
     let merge_transition = state_machine
         .transitions
         .iter_mut()
-        .find(|transition| transition.from.task_name == "process" && transition.from.step_name == "assemble")
+        .find(|transition| {
+            transition.from.task_name == "process" && transition.from.step_name == "assemble"
+        })
         .expect("assemble transition should exist");
     merge_transition.to = assemble_state.clone();
     state_machine.transitions.push(rust_plc::ir::Transition {
@@ -1800,7 +1823,9 @@ fn verify_all_tracks_wide_split_instances_without_false_merge_underflow() {
     let merge_transition = state_machine
         .transitions
         .iter_mut()
-        .find(|transition| transition.from.task_name == "process" && transition.from.step_name == "assemble")
+        .find(|transition| {
+            transition.from.task_name == "process" && transition.from.step_name == "assemble"
+        })
         .expect("assemble transition should exist");
     merge_transition.to = assemble_state.clone();
     state_machine.transitions.push(rust_plc::ir::Transition {
@@ -1868,7 +1893,9 @@ fn verify_all_rejects_terminal_states_that_still_hold_split_merge_instances() {
         verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
     assert!(errors.iter().any(|error| {
         error.checker == "safety"
-            && error.reason.contains("reachable terminal state still holds workpieces")
+            && error
+                .reason
+                .contains("reachable terminal state still holds workpieces")
             && error.reason.contains("cut_zone")
     }));
 }
