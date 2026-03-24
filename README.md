@@ -341,7 +341,37 @@ cargo run --release -- release-bundle examples/assembly_station.plc \
 - 🔬 [Verification Engines](https://github.com/xxrust/RustPLC/wiki/Verification-Engines) - 深入了解四大形式化引擎
 - 🤖 [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) - AI 辅助编码流程
 
+本仓库同时维护可离线阅读的 repo-local wiki 草稿，新增定位页：
+
+- 🚀 `docs/wiki/AI-for-AI-Platform-Vision.md` - RustPLC 如何从 AI 辅助 PLC 编译器演进为面向 AI 系统本身的工程平台
+- 🧩 `docs/workpiece_to_st_codegen_policy.md` - 工件语义进入 ST 时的擦除策略与边界
+
 > **📎 进阶开发者提示**：在本地 `docs/已实现/` 目录中，可查阅场景系统、在线变量控制、元件库以及 Subtype 规范等数十份详细的底层设计白皮书。
+
+---
+
+## 🌍 AI for AI 方向
+
+RustPLC 的下一阶段目标，不只是“让 AI 帮人写 PLC”，而是把整个系统推进为一个 `AI for AI` 软件平台：
+
+- AI 负责生成控制意图、拓扑、约束、场景和回归资产
+- 编译器负责把这些内容收敛为统一 IR，并做形式化验证
+- runtime / simulation / codegen 负责把结果转成可执行、可审计、可交付的工件
+- 人类工程师从“手写细节”转向“定义边界、审核证据、批准发布”
+
+这条路线要求系统满足四件事：
+
+- AI 产物必须能进入统一语义模型，而不是停留在 prompt 文本
+- AI 生成结果必须能被 verification、simulation、traceability 严格约束
+- 代码生成不能静默丢语义，必须明确哪些语义保留、哪些语义擦除
+- release bundle 必须能让另一个 AI 或另一位工程师复现整个决策链
+
+如果目标是做一个真正能惊艳全球的 `AI for AI` 软件，RustPLC 的差异化不在于“又一个生成器”，而在于：
+
+- 让 AI 生成的工业控制系统具备可验证性
+- 让 AI 生成结果具备可执行性
+- 让 AI 生成工件具备可追责性
+- 让 AI 协作流程具备工程闭环
 
 ---
 

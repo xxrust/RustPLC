@@ -12,6 +12,16 @@ pub struct PlcProgram {
 pub struct TopologySection {
     pub devices: Vec<DeviceDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workpiece_types: Vec<WorkpieceTypeDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workpiece_sites: Vec<WorkpieceSiteDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workpiece_holders: Vec<WorkpieceHolderDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workpiece_carriers: Vec<WorkpieceCarrierDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub semantic_resources: Vec<SemanticResourceDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connections: Vec<TopologyConnection>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variables: Vec<VariableDeclaration>,
@@ -38,6 +48,111 @@ pub struct VariableDeclaration {
     pub name: String,
     pub var_type: VariableType,
     pub initial_value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SemanticResourceDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub mode: SemanticResourceMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticResourceMode {
+    Exclusive,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkpieceTypeDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<WorkpiecePropertyDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub normal_terminal_states: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abnormal_terminal_states: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ingress_sites: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub normal_egress_sites: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abnormal_egress_sites: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allows: Vec<WorkpieceAllowDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<WorkpieceDerivationDeclaration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkpiecePropertyDeclaration {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub property_type: WorkpiecePropertyType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkpiecePropertyType {
+    Bool,
+    Enum { values: Vec<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkpieceSiteDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub kind: WorkpieceSiteKind,
+    pub capacity: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkpieceSiteKind {
+    WorkpieceLocation,
+    CarrierLocation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkpieceHolderDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub capacity: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkpieceCarrierDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub layout: WorkpieceCarrierLayout,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkpieceCarrierLayout {
+    Slots { count: u32 },
+    Grid { rows: u32, cols: u32 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "allow", rename_all = "snake_case")]
+pub enum WorkpieceAllowDeclaration {
+    SplitInto { target: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum WorkpieceDerivationDeclaration {
+    WorkpieceType { workpiece_type: String },
+    Merge { inputs: Vec<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -332,6 +447,8 @@ fn default_port() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConstraintsSection {
     pub safety: Vec<SafetyConstraint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claims: Vec<ResourceClaimConstraint>,
     pub timing: Vec<TimingConstraint>,
     pub causality: Vec<CausalityConstraint>,
 }
@@ -366,6 +483,22 @@ pub enum SafetyOperand {
 pub enum SafetyRelation {
     ConflictsWith,
     Requires,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceClaimConstraint {
+    #[serde(default)]
+    pub line: usize,
+    pub source: ResourceClaimSource,
+    pub resource: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ResourceClaimSource {
+    State(StateReference),
+    ActionTag { tag: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -429,6 +562,7 @@ pub struct StepDeclaration {
 #[serde(tag = "statement", rename_all = "snake_case")]
 pub enum StepStatement {
     Action(ActionStatement),
+    Effect(EffectStatement),
     Wait(WaitStatement),
     IfElse {
         condition: ConditionExpression,
@@ -447,6 +581,54 @@ pub enum StepStatement {
     Parallel(ParallelBlock),
     Race(RaceBlock),
     AllowIndefiniteWait(bool),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EffectStatement {
+    #[serde(default)]
+    pub line: usize,
+    pub kind: EffectKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "effect", rename_all = "snake_case")]
+pub enum EffectKind {
+    Acquire {
+        holder: String,
+        from: String,
+    },
+    Transfer {
+        from: String,
+        to: String,
+    },
+    Finish {
+        at: String,
+        terminal_state: String,
+    },
+    Mount {
+        workpiece_type: String,
+        slot: String,
+    },
+    Unmount {
+        workpiece_type: String,
+        slot: String,
+        to: String,
+    },
+    Split {
+        source_type: String,
+        target_type: String,
+        count: u32,
+        consumed: bool,
+    },
+    Merge {
+        inputs: Vec<String>,
+        target_type: String,
+        consumed_inputs: bool,
+    },
+    TransformCarrier {
+        carrier: String,
+        frame: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -540,6 +722,8 @@ pub enum ActionStatement {
         on_motion_fault_routes: Vec<AxisFaultRouteDirective>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         on_safety_fault_routes: Vec<AxisFaultRouteDirective>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        semantic_tag: Option<String>,
     },
     AxisMoveAbsolute {
         target: ActionTarget,
@@ -562,6 +746,8 @@ pub enum ActionStatement {
         on_motion_fault_routes: Vec<AxisFaultRouteDirective>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         on_safety_fault_routes: Vec<AxisFaultRouteDirective>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        semantic_tag: Option<String>,
     },
     Log {
         message: String,
@@ -766,6 +952,11 @@ mod tests {
                     device_type: DeviceType::DigitalOutput,
                     attributes: DeviceAttributes::default(),
                 }],
+                workpiece_types: Vec::new(),
+                workpiece_sites: Vec::new(),
+                workpiece_holders: Vec::new(),
+                workpiece_carriers: Vec::new(),
+                semantic_resources: Vec::new(),
                 connections: Vec::new(),
                 variables: Vec::new(),
                 cam_tables: Vec::new(),

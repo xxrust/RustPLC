@@ -1,0 +1,32 @@
+[topology]
+
+workpiece part: workpiece_type {
+    properties: [inspected: bool]
+    normal_terminal_states: [finished]
+    abnormal_terminal_states: [rejected]
+    ingress_sites: [infeed]
+    normal_egress_sites: [outfeed]
+    abnormal_egress_sites: [reject_bin]
+}
+
+location infeed: workpiece_location { capacity: 1 }
+location outfeed: workpiece_location { capacity: 1 }
+location reject_bin: workpiece_location { capacity: 1 }
+holder arm: workpiece_holder { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task transfer_part:
+    step pick:
+        effect: acquire holder arm from infeed
+    step place:
+        effect: transfer from arm to outfeed
+    step done:
+        effect: finish workpiece at outfeed as finished
+    on_complete: goto sink
+
+task sink:
+    step idle:
+        action: log "done"

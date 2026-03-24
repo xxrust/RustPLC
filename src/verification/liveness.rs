@@ -552,7 +552,7 @@ fn collect_step_wait_profile_from_statements(
                     collect_step_wait_profile_from_statements(&branch.statements, profile);
                 }
             }
-            StepStatement::IfElse { .. } | StepStatement::Goto(_) => {}
+            StepStatement::IfElse { .. } | StepStatement::Goto(_) | StepStatement::Effect(_) => {}
         }
     }
 }
@@ -640,6 +640,7 @@ fn collect_statement_write_signals(statements: &[StepStatement], writes: &mut Ha
                 }
             }
             StepStatement::Wait(_)
+            | StepStatement::Effect(_)
             | StepStatement::IfElse { .. }
             | StepStatement::Delay { .. }
             | StepStatement::Timeout(_)
@@ -692,6 +693,7 @@ fn collect_wait_signals(statements: &[StepStatement], signals: &mut HashSet<Stri
                 }
             }
             StepStatement::Action(_)
+            | StepStatement::Effect(_)
             | StepStatement::IfElse { .. }
             | StepStatement::Delay { .. }
             | StepStatement::Timeout(_)
@@ -779,7 +781,7 @@ fn collect_step_liveness_facts(statements: &[StepStatement], facts: &mut StepLiv
                     collect_step_liveness_facts(&branch.statements, facts);
                 }
             }
-            StepStatement::Action(_) | StepStatement::Goto(_) => {}
+            StepStatement::Action(_) | StepStatement::Goto(_) | StepStatement::Effect(_) => {}
         }
     }
 }
@@ -824,6 +826,7 @@ fn summarize_statements(statements: &[StepStatement], completion_is_jump: bool) 
                 }
             }
             StepStatement::Action(_)
+            | StepStatement::Effect(_)
             | StepStatement::Delay { .. }
             | StepStatement::AllowIndefiniteWait(_) => {}
         }

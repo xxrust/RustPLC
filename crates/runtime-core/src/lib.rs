@@ -262,6 +262,11 @@ pub enum RuntimeError {
     InvalidCamIndex {
         cam_index: u16,
     },
+    InvalidSemanticResourceIndex {
+        claim_index: usize,
+        resource_index: u16,
+        resource_count: usize,
+    },
     ExternCallRequiresHandler {
         function: &'static str,
     },
@@ -303,6 +308,69 @@ pub enum RuntimeError {
     AxisFault {
         target: &'static str,
         fault: AxisFault,
+    },
+    WorkpieceSourceUnderflow {
+        endpoint: &'static str,
+    },
+    WorkpieceDuplicateOccupancy {
+        endpoint: &'static str,
+        count: usize,
+    },
+    WorkpieceOverflow {
+        endpoint: &'static str,
+        capacity: u32,
+        occupancy: usize,
+    },
+    WorkpieceDuplicateMount {
+        slot: &'static str,
+        token_id: WorkpieceTokenId,
+    },
+    WorkpieceTypeSourceUnderflow {
+        workpiece_type: &'static str,
+    },
+    WorkpieceTypeSourceAmbiguity {
+        workpiece_type: &'static str,
+        count: usize,
+    },
+    WorkpieceSplitOverflow {
+        workpiece_type: &'static str,
+        capacity: u32,
+        occupancy: usize,
+    },
+    WorkpieceMergeInputUnderflow {
+        target_type: &'static str,
+        input_ref: &'static str,
+        required_type: &'static str,
+    },
+    WorkpieceDuplicateConsumedMergeInput {
+        input_ref: &'static str,
+    },
+    WorkpieceMergeArityMismatch {
+        target_type: &'static str,
+        input_refs: usize,
+        input_types: usize,
+    },
+    WorkpieceMergeOverflow {
+        target_type: &'static str,
+        capacity: u32,
+        occupancy: usize,
+    },
+    WorkpieceEndpointUndefined {
+        endpoint: &'static str,
+    },
+    WorkpieceTokenCapacityExceeded {
+        required: usize,
+        max: usize,
+    },
+    WorkpieceLineageCapacityExceeded {
+        required: usize,
+        max: usize,
+    },
+    WorkpieceStoreInvariantViolation {
+        token_id: WorkpieceTokenId,
+    },
+    UnsupportedWorkpieceEffect {
+        effect: &'static str,
     },
 }
 
@@ -360,6 +428,44 @@ pub enum Action {
     AxisMove {
         command: AxisMotionCommand,
     },
+    WorkpieceAcquire {
+        workpiece_type: &'static str,
+        holder: &'static str,
+        from: &'static str,
+    },
+    WorkpieceTransfer {
+        from: &'static str,
+        to: &'static str,
+    },
+    WorkpieceFinish {
+        at: &'static str,
+        terminal_state: &'static str,
+    },
+    WorkpieceMount {
+        workpiece_type: &'static str,
+        slot: &'static str,
+    },
+    WorkpieceUnmount {
+        workpiece_type: &'static str,
+        slot: &'static str,
+        to: &'static str,
+    },
+    WorkpieceTransformCarrier {
+        carrier: &'static str,
+        frame: &'static str,
+    },
+    WorkpieceSplit {
+        source_type: &'static str,
+        target_type: &'static str,
+        count: u32,
+        consumed: bool,
+    },
+    WorkpieceMerge {
+        input_refs: &'static [&'static str],
+        input_types: &'static [&'static str],
+        target_type: &'static str,
+        consumed_inputs: bool,
+    },
     Extend {
         output: DigitalOutputId,
     },
@@ -385,9 +491,33 @@ pub struct AxisMotionCommand {
     pub kind: AxisMoveKind,
     pub value: f32,
     pub speed: f32,
+    pub semantic_tag: Option<&'static str>,
     pub require_homed: bool,
     pub timeout: Option<Timeout>,
     pub fault_routing: Option<AxisFaultRouting>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticResourceMode {
+    Exclusive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SemanticResource<'a> {
+    pub name: &'a str,
+    pub mode: SemanticResourceMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceClaimSource<'a> {
+    DigitalOutputState { id: DigitalOutputId, value: bool },
+    ActionTag { tag: &'a str },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourceClaimRule<'a> {
+    pub source: ResourceClaimSource<'a>,
+    pub resource_index: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -704,6 +834,35 @@ pub struct Task<'a> {
     pub entry: StepId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkpieceSiteKind {
+    WorkpieceLocation,
+    CarrierLocation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceTypeDef<'a> {
+    pub name: &'a str,
+    pub normal_terminal_states: &'a [&'a str],
+    pub abnormal_terminal_states: &'a [&'a str],
+    pub ingress_sites: &'a [&'a str],
+    pub normal_egress_sites: &'a [&'a str],
+    pub abnormal_egress_sites: &'a [&'a str],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceSiteDef<'a> {
+    pub name: &'a str,
+    pub kind: WorkpieceSiteKind,
+    pub capacity: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceHolderDef<'a> {
+    pub name: &'a str,
+    pub capacity: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Program<'a> {
     pub tasks: &'a [Task<'a>],
@@ -712,6 +871,315 @@ pub struct Program<'a> {
     pub cam_configs: &'a [CamCouplingConfig],
     pub cam_tables: &'a [CamTableData],
     pub axis_fault_policies: &'a [AxisFaultPolicy<'a>],
+    pub semantic_resources: &'a [SemanticResource<'a>],
+    pub resource_claims: &'a [ResourceClaimRule<'a>],
+    pub workpiece_types: &'a [WorkpieceTypeDef<'a>],
+    pub workpiece_sites: &'a [WorkpieceSiteDef<'a>],
+    pub workpiece_holders: &'a [WorkpieceHolderDef<'a>],
+}
+
+pub type WorkpieceTokenId = u32;
+pub type WorkpieceLineageRecordId = u32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkpieceTerminalStatus<'a> {
+    TerminalState { state: &'a str },
+    Consumed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceToken<'a> {
+    pub token_id: WorkpieceTokenId,
+    pub workpiece_type: &'a str,
+    pub current_location: &'a str,
+    pub mounted_slot: Option<&'a str>,
+    pub active: bool,
+    pub terminal_status: Option<WorkpieceTerminalStatus<'a>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkpieceTokenStoreError {
+    DuplicateTokenId { token_id: WorkpieceTokenId },
+    TokenNotFound { token_id: WorkpieceTokenId },
+    TokenInactive { token_id: WorkpieceTokenId },
+    CapacityExceeded { max: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceTokenStore<'a> {
+    tokens: [Option<WorkpieceToken<'a>>; MAX_WORKPIECE_TOKENS],
+    slots_used: usize,
+    active_tokens: usize,
+}
+
+impl<'a> WorkpieceTokenStore<'a> {
+    pub const fn new() -> Self {
+        Self {
+            tokens: [None; MAX_WORKPIECE_TOKENS],
+            slots_used: 0,
+            active_tokens: 0,
+        }
+    }
+
+    pub fn slots_used(&self) -> usize {
+        self.slots_used
+    }
+
+    pub fn active_tokens(&self) -> usize {
+        self.active_tokens
+    }
+
+    pub fn token(&self, token_id: WorkpieceTokenId) -> Option<WorkpieceToken<'a>> {
+        self.find_index(token_id)
+            .and_then(|idx| self.tokens[idx].as_ref().copied())
+    }
+
+    pub fn active_tokens_at(&self, location: &str) -> usize {
+        self.tokens
+            .iter()
+            .flatten()
+            .filter(|token| token.active && token.current_location == location)
+            .count()
+    }
+
+    pub fn create_token(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        workpiece_type: &'a str,
+        current_location: &'a str,
+    ) -> Result<WorkpieceToken<'a>, WorkpieceTokenStoreError> {
+        if self.find_index(token_id).is_some() {
+            return Err(WorkpieceTokenStoreError::DuplicateTokenId { token_id });
+        }
+        let Some(slot_idx) = self.tokens.iter().position(Option::is_none) else {
+            return Err(WorkpieceTokenStoreError::CapacityExceeded {
+                max: MAX_WORKPIECE_TOKENS,
+            });
+        };
+
+        let token = WorkpieceToken {
+            token_id,
+            workpiece_type,
+            current_location,
+            mounted_slot: None,
+            active: true,
+            terminal_status: None,
+        };
+        self.tokens[slot_idx] = Some(token);
+        self.slots_used += 1;
+        self.active_tokens += 1;
+        Ok(token)
+    }
+
+    pub fn move_token(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        new_location: &'a str,
+    ) -> Result<WorkpieceToken<'a>, WorkpieceTokenStoreError> {
+        let idx = self
+            .find_index(token_id)
+            .ok_or(WorkpieceTokenStoreError::TokenNotFound { token_id })?;
+        let Some(token) = self.tokens[idx].as_mut() else {
+            return Err(WorkpieceTokenStoreError::TokenNotFound { token_id });
+        };
+        if !token.active {
+            return Err(WorkpieceTokenStoreError::TokenInactive { token_id });
+        }
+        token.current_location = new_location;
+        Ok(*token)
+    }
+
+    pub fn finish_token(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        terminal_status: WorkpieceTerminalStatus<'a>,
+    ) -> Result<WorkpieceToken<'a>, WorkpieceTokenStoreError> {
+        let idx = self
+            .find_index(token_id)
+            .ok_or(WorkpieceTokenStoreError::TokenNotFound { token_id })?;
+        let Some(token) = self.tokens[idx].as_mut() else {
+            return Err(WorkpieceTokenStoreError::TokenNotFound { token_id });
+        };
+        if !token.active {
+            return Err(WorkpieceTokenStoreError::TokenInactive { token_id });
+        }
+        token.active = false;
+        token.mounted_slot = None;
+        token.terminal_status = Some(terminal_status);
+        self.active_tokens = self.active_tokens.saturating_sub(1);
+        Ok(*token)
+    }
+
+    pub fn set_mounted_slot(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        mounted_slot: Option<&'a str>,
+    ) -> Result<WorkpieceToken<'a>, WorkpieceTokenStoreError> {
+        let idx = self
+            .find_index(token_id)
+            .ok_or(WorkpieceTokenStoreError::TokenNotFound { token_id })?;
+        let Some(token) = self.tokens[idx].as_mut() else {
+            return Err(WorkpieceTokenStoreError::TokenNotFound { token_id });
+        };
+        if !token.active {
+            return Err(WorkpieceTokenStoreError::TokenInactive { token_id });
+        }
+        token.mounted_slot = mounted_slot;
+        Ok(*token)
+    }
+
+    fn find_index(&self, token_id: WorkpieceTokenId) -> Option<usize> {
+        self.tokens
+            .iter()
+            .position(|entry| entry.is_some_and(|token| token.token_id == token_id))
+    }
+}
+
+impl<'a> Default for WorkpieceTokenStore<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkpieceLineageKind {
+    SplitParentToChild,
+    MergeInputToOutput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceLineageRecord {
+    pub record_id: WorkpieceLineageRecordId,
+    pub relation: WorkpieceLineageKind,
+    pub source_token_id: WorkpieceTokenId,
+    pub target_token_id: WorkpieceTokenId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkpieceLineageStoreError {
+    DuplicateRelation {
+        relation: WorkpieceLineageKind,
+        source_token_id: WorkpieceTokenId,
+        target_token_id: WorkpieceTokenId,
+    },
+    CapacityExceeded {
+        max: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkpieceLineageStore {
+    records: [Option<WorkpieceLineageRecord>; MAX_WORKPIECE_LINEAGE_RECORDS],
+    records_used: usize,
+    next_record_id: WorkpieceLineageRecordId,
+}
+
+impl WorkpieceLineageStore {
+    pub const fn new() -> Self {
+        Self {
+            records: [None; MAX_WORKPIECE_LINEAGE_RECORDS],
+            records_used: 0,
+            next_record_id: 0,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.records_used
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.records_used == 0
+    }
+
+    pub fn record_split_child(
+        &mut self,
+        parent_token_id: WorkpieceTokenId,
+        child_token_id: WorkpieceTokenId,
+    ) -> Result<WorkpieceLineageRecord, WorkpieceLineageStoreError> {
+        self.record_relation(
+            WorkpieceLineageKind::SplitParentToChild,
+            parent_token_id,
+            child_token_id,
+        )
+    }
+
+    pub fn record_merge_input(
+        &mut self,
+        input_token_id: WorkpieceTokenId,
+        output_token_id: WorkpieceTokenId,
+    ) -> Result<WorkpieceLineageRecord, WorkpieceLineageStoreError> {
+        self.record_relation(
+            WorkpieceLineageKind::MergeInputToOutput,
+            input_token_id,
+            output_token_id,
+        )
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = WorkpieceLineageRecord> + '_ {
+        self.records.iter().flatten().copied()
+    }
+
+    pub fn split_children_of(
+        &self,
+        parent_token_id: WorkpieceTokenId,
+    ) -> impl Iterator<Item = WorkpieceLineageRecord> + '_ {
+        self.iter().filter(move |record| {
+            record.relation == WorkpieceLineageKind::SplitParentToChild
+                && record.source_token_id == parent_token_id
+        })
+    }
+
+    pub fn merge_inputs_of(
+        &self,
+        output_token_id: WorkpieceTokenId,
+    ) -> impl Iterator<Item = WorkpieceLineageRecord> + '_ {
+        self.iter().filter(move |record| {
+            record.relation == WorkpieceLineageKind::MergeInputToOutput
+                && record.target_token_id == output_token_id
+        })
+    }
+
+    fn record_relation(
+        &mut self,
+        relation: WorkpieceLineageKind,
+        source_token_id: WorkpieceTokenId,
+        target_token_id: WorkpieceTokenId,
+    ) -> Result<WorkpieceLineageRecord, WorkpieceLineageStoreError> {
+        if self.iter().any(|record| {
+            record.relation == relation
+                && record.source_token_id == source_token_id
+                && record.target_token_id == target_token_id
+        }) {
+            return Err(WorkpieceLineageStoreError::DuplicateRelation {
+                relation,
+                source_token_id,
+                target_token_id,
+            });
+        }
+
+        let Some(slot_idx) = self.records.iter().position(Option::is_none) else {
+            return Err(WorkpieceLineageStoreError::CapacityExceeded {
+                max: MAX_WORKPIECE_LINEAGE_RECORDS,
+            });
+        };
+
+        let record = WorkpieceLineageRecord {
+            record_id: self.next_record_id,
+            relation,
+            source_token_id,
+            target_token_id,
+        };
+        self.records[slot_idx] = Some(record);
+        self.records_used += 1;
+        self.next_record_id = self.next_record_id.saturating_add(1);
+        Ok(record)
+    }
+}
+
+impl Default for WorkpieceLineageStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<'a> Program<'a> {
@@ -761,6 +1229,7 @@ pub enum TaskPendingActionState {
     AxisMotion {
         target: &'static str,
         action_index: usize,
+        semantic_tag: Option<&'static str>,
     },
     ExternCall {
         function: &'static str,
@@ -804,6 +1273,10 @@ pub struct Runtime<'a> {
     pid_states: [PidState; MAX_PID_LOOPS],
     variables: [f32; MAX_VARIABLES],
     cam_states: [CamState; MAX_CAM_COUPLINGS],
+    digital_output_shadow: [bool; MAX_TRACKED_DIGITAL_OUTPUTS],
+    workpiece_tokens: WorkpieceTokenStore<'a>,
+    workpiece_lineage: WorkpieceLineageStore,
+    next_workpiece_token_id: WorkpieceTokenId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -865,6 +1338,15 @@ impl<'a> Runtime<'a> {
                 });
             }
         }
+        for (claim_index, claim) in program.resource_claims.iter().enumerate() {
+            if claim.resource_index as usize >= program.semantic_resources.len() {
+                return Err(RuntimeError::InvalidSemanticResourceIndex {
+                    claim_index,
+                    resource_index: claim.resource_index,
+                    resource_count: program.semantic_resources.len(),
+                });
+            }
+        }
 
         let mut task_contexts = [TaskRuntimeContext::default(); MAX_ACTIVE_TASKS];
         for (task_idx, task) in program.tasks.iter().enumerate() {
@@ -880,6 +1362,8 @@ impl<'a> Runtime<'a> {
             cam_states[idx].active_table = cfg.table_index;
             cam_states[idx].phase_offset = cfg.initial_phase_offset;
         }
+        let (workpiece_tokens, next_workpiece_token_id) = Self::seed_workpiece_tokens(program)?;
+
         Ok(Self {
             program,
             active_task: 0,
@@ -891,6 +1375,10 @@ impl<'a> Runtime<'a> {
             pid_states: [PidState::default(); MAX_PID_LOOPS],
             variables,
             cam_states,
+            digital_output_shadow: [false; MAX_TRACKED_DIGITAL_OUTPUTS],
+            workpiece_tokens,
+            workpiece_lineage: WorkpieceLineageStore::new(),
+            next_workpiece_token_id,
         })
     }
 
@@ -959,6 +1447,605 @@ impl<'a> Runtime<'a> {
 
     pub fn cam_states(&self) -> &[CamState; MAX_CAM_COUPLINGS] {
         &self.cam_states
+    }
+
+    pub fn workpiece_tokens(&self) -> &WorkpieceTokenStore<'a> {
+        &self.workpiece_tokens
+    }
+
+    pub fn workpiece_lineage(&self) -> &WorkpieceLineageStore {
+        &self.workpiece_lineage
+    }
+
+    fn seed_workpiece_tokens(
+        program: &'a Program<'a>,
+    ) -> Result<(WorkpieceTokenStore<'a>, WorkpieceTokenId), RuntimeError> {
+        let mut store = WorkpieceTokenStore::new();
+        let mut next_token_id = 0u32;
+
+        for workpiece_type in program.workpiece_types {
+            for &ingress in workpiece_type.ingress_sites {
+                if !Self::program_consumes_ingress_source(program, ingress) {
+                    continue;
+                }
+                store
+                    .create_token(next_token_id, workpiece_type.name, ingress)
+                    .map_err(|error| match error {
+                        WorkpieceTokenStoreError::CapacityExceeded { max } => {
+                            RuntimeError::WorkpieceTokenCapacityExceeded {
+                                required: store.slots_used().saturating_add(1),
+                                max,
+                            }
+                        }
+                        _ => RuntimeError::WorkpieceStoreInvariantViolation {
+                            token_id: next_token_id,
+                        },
+                    })?;
+                next_token_id = next_token_id.saturating_add(1);
+            }
+        }
+
+        Ok((store, next_token_id))
+    }
+
+    fn program_consumes_ingress_source(program: &Program<'a>, ingress: &str) -> bool {
+        program.tasks.iter().any(|task| {
+            task.steps.iter().any(|step| {
+                let Instr::Action { actions, .. } = step.instr else {
+                    return false;
+                };
+                actions.iter().any(|action| match action {
+                    Action::WorkpieceAcquire { from, .. }
+                    | Action::WorkpieceTransfer { from, .. } => *from == ingress,
+                    _ => false,
+                })
+            })
+        })
+    }
+
+    fn workpiece_endpoint_capacity(&self, endpoint: &str) -> Option<u32> {
+        self.program
+            .workpiece_sites
+            .iter()
+            .find(|site| site.name == endpoint)
+            .map(|site| site.capacity)
+            .or_else(|| {
+                self.program
+                    .workpiece_holders
+                    .iter()
+                    .find(|holder| holder.name == endpoint)
+                    .map(|holder| holder.capacity)
+            })
+    }
+
+    fn unique_active_token_id_at(
+        &self,
+        endpoint: &'static str,
+        mounted: Option<bool>,
+    ) -> Result<WorkpieceTokenId, RuntimeError> {
+        if self.workpiece_endpoint_capacity(endpoint).is_none() {
+            return Err(RuntimeError::WorkpieceEndpointUndefined { endpoint });
+        }
+
+        let mut token_id = None;
+        let mut count = 0usize;
+        for token in self.workpiece_tokens.tokens.iter().flatten() {
+            let mount_matches = match mounted {
+                Some(true) => token.mounted_slot == Some(endpoint),
+                Some(false) => token.mounted_slot.is_none(),
+                None => true,
+            };
+            if token.active && token.current_location == endpoint && mount_matches {
+                count = count.saturating_add(1);
+                token_id.get_or_insert(token.token_id);
+                if count > 1 {
+                    return Err(RuntimeError::WorkpieceDuplicateOccupancy { endpoint, count });
+                }
+            }
+        }
+
+        token_id.ok_or(RuntimeError::WorkpieceSourceUnderflow { endpoint })
+    }
+
+    fn unique_active_token_of_type(
+        &self,
+        workpiece_type: &'static str,
+    ) -> Result<WorkpieceToken<'a>, RuntimeError> {
+        let mut token = None;
+        let mut count = 0usize;
+        for candidate in self.workpiece_tokens.tokens.iter().flatten() {
+            if candidate.active && candidate.workpiece_type == workpiece_type {
+                count = count.saturating_add(1);
+                token.get_or_insert(*candidate);
+                if count > 1 {
+                    return Err(RuntimeError::WorkpieceTypeSourceAmbiguity {
+                        workpiece_type,
+                        count,
+                    });
+                }
+            }
+        }
+
+        token.ok_or(RuntimeError::WorkpieceTypeSourceUnderflow { workpiece_type })
+    }
+
+    fn ensure_workpiece_destination_capacity(
+        &self,
+        endpoint: &'static str,
+    ) -> Result<(), RuntimeError> {
+        let Some(capacity) = self.workpiece_endpoint_capacity(endpoint) else {
+            return Err(RuntimeError::WorkpieceEndpointUndefined { endpoint });
+        };
+
+        let occupancy = self.workpiece_tokens.active_tokens_at(endpoint);
+        if occupancy >= capacity as usize {
+            return Err(RuntimeError::WorkpieceOverflow {
+                endpoint,
+                capacity,
+                occupancy,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn relocate_workpiece_token(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        to: &'a str,
+        mounted_slot: Option<&'a str>,
+    ) -> Result<(), RuntimeError> {
+        self.workpiece_tokens
+            .move_token(token_id, to)
+            .and_then(|_| {
+                self.workpiece_tokens
+                    .set_mounted_slot(token_id, mounted_slot)
+            })
+            .map(|_| ())
+            .map_err(|_| RuntimeError::WorkpieceStoreInvariantViolation { token_id })
+    }
+
+    fn finish_workpiece_token(
+        &mut self,
+        token_id: WorkpieceTokenId,
+        terminal_status: WorkpieceTerminalStatus<'a>,
+    ) -> Result<(), RuntimeError> {
+        self.workpiece_tokens
+            .finish_token(token_id, terminal_status)
+            .map(|_| ())
+            .map_err(|_| RuntimeError::WorkpieceStoreInvariantViolation { token_id })
+    }
+
+    fn execute_workpiece_acquire(
+        &mut self,
+        _workpiece_type: &'static str,
+        holder: &'static str,
+        from: &'static str,
+    ) -> Result<(), RuntimeError> {
+        let token_id = self.unique_active_token_id_at(from, Some(false))?;
+        self.ensure_workpiece_destination_capacity(holder)?;
+        self.relocate_workpiece_token(token_id, holder, None)
+    }
+
+    fn execute_workpiece_transfer(
+        &mut self,
+        from: &'static str,
+        to: &'static str,
+    ) -> Result<(), RuntimeError> {
+        if from == to {
+            return Ok(());
+        }
+
+        let token_id = self.unique_active_token_id_at(from, Some(false))?;
+        self.ensure_workpiece_destination_capacity(to)?;
+        self.relocate_workpiece_token(token_id, to, None)
+    }
+
+    fn execute_workpiece_finish(
+        &mut self,
+        at: &'static str,
+        terminal_state: &'static str,
+    ) -> Result<(), RuntimeError> {
+        let token_id = self.unique_active_token_id_at(at, Some(false))?;
+        self.finish_workpiece_token(
+            token_id,
+            WorkpieceTerminalStatus::TerminalState {
+                state: terminal_state,
+            },
+        )
+    }
+
+    fn create_workpiece_token(
+        &mut self,
+        workpiece_type: &'a str,
+        location: &'a str,
+        mounted_slot: Option<&'a str>,
+    ) -> Result<WorkpieceTokenId, RuntimeError> {
+        let token_id = self.next_workpiece_token_id;
+        self.workpiece_tokens
+            .create_token(token_id, workpiece_type, location)
+            .map_err(|error| match error {
+                WorkpieceTokenStoreError::CapacityExceeded { max } => {
+                    RuntimeError::WorkpieceTokenCapacityExceeded {
+                        required: self.workpiece_tokens.slots_used().saturating_add(1),
+                        max,
+                    }
+                }
+                _ => RuntimeError::WorkpieceStoreInvariantViolation { token_id },
+            })?;
+        self.workpiece_tokens
+            .set_mounted_slot(token_id, mounted_slot)
+            .map_err(|_| RuntimeError::WorkpieceStoreInvariantViolation { token_id })?;
+        self.next_workpiece_token_id = self.next_workpiece_token_id.saturating_add(1);
+        Ok(token_id)
+    }
+
+    fn ensure_workpiece_token_capacity_for_new_tokens(
+        &self,
+        additional_tokens: usize,
+    ) -> Result<(), RuntimeError> {
+        let required = self
+            .workpiece_tokens
+            .slots_used()
+            .saturating_add(additional_tokens);
+        if required > MAX_WORKPIECE_TOKENS {
+            return Err(RuntimeError::WorkpieceTokenCapacityExceeded {
+                required,
+                max: MAX_WORKPIECE_TOKENS,
+            });
+        }
+        Ok(())
+    }
+
+    fn ensure_workpiece_lineage_capacity_for_new_records(
+        &self,
+        additional_records: usize,
+    ) -> Result<(), RuntimeError> {
+        let required = self
+            .workpiece_lineage
+            .len()
+            .saturating_add(additional_records);
+        if required > MAX_WORKPIECE_LINEAGE_RECORDS {
+            return Err(RuntimeError::WorkpieceLineageCapacityExceeded {
+                required,
+                max: MAX_WORKPIECE_LINEAGE_RECORDS,
+            });
+        }
+        Ok(())
+    }
+
+    fn execute_workpiece_mount(
+        &mut self,
+        workpiece_type: &'static str,
+        slot: &'static str,
+    ) -> Result<(), RuntimeError> {
+        if self.workpiece_endpoint_capacity(slot).is_none() {
+            return Err(RuntimeError::WorkpieceEndpointUndefined { endpoint: slot });
+        }
+
+        let mut free_token_id = None;
+        for token in self.workpiece_tokens.tokens.iter().flatten() {
+            if !token.active || token.current_location != slot {
+                continue;
+            }
+            if token.mounted_slot == Some(slot) {
+                return Err(RuntimeError::WorkpieceDuplicateMount {
+                    slot,
+                    token_id: token.token_id,
+                });
+            }
+            if token.mounted_slot.is_none() && token.workpiece_type == workpiece_type {
+                free_token_id = Some(token.token_id);
+            }
+        }
+
+        if let Some(token_id) = free_token_id {
+            self.workpiece_tokens
+                .set_mounted_slot(token_id, Some(slot))
+                .map(|_| ())
+                .map_err(|_| RuntimeError::WorkpieceStoreInvariantViolation { token_id })
+        } else {
+            self.ensure_workpiece_destination_capacity(slot)?;
+            self.create_workpiece_token(workpiece_type, slot, Some(slot))
+                .map(|_| ())
+        }
+    }
+
+    fn execute_workpiece_unmount(
+        &mut self,
+        _workpiece_type: &'static str,
+        slot: &'static str,
+        to: &'static str,
+    ) -> Result<(), RuntimeError> {
+        let token_id = self.unique_active_token_id_at(slot, Some(true))?;
+        if slot == to {
+            return self
+                .workpiece_tokens
+                .set_mounted_slot(token_id, None)
+                .map(|_| ())
+                .map_err(|_| RuntimeError::WorkpieceStoreInvariantViolation { token_id });
+        }
+
+        self.ensure_workpiece_destination_capacity(to)?;
+        self.relocate_workpiece_token(token_id, to, None)
+    }
+
+    fn execute_workpiece_transform_carrier(
+        &mut self,
+        _carrier: &'static str,
+        _frame: &'static str,
+    ) {
+        // Carrier transforms only change the carrier reference frame in this phase.
+        // Mounted token association is preserved by keeping the slot binding intact.
+    }
+
+    fn execute_workpiece_split(
+        &mut self,
+        source_type: &'static str,
+        target_type: &'static str,
+        count: u32,
+        consumed: bool,
+    ) -> Result<(), RuntimeError> {
+        let source = self.unique_active_token_of_type(source_type)?;
+        let output_count = count as usize;
+        self.ensure_workpiece_token_capacity_for_new_tokens(output_count)?;
+        self.ensure_workpiece_lineage_capacity_for_new_records(output_count)?;
+        let capacity = self
+            .workpiece_endpoint_capacity(source.current_location)
+            .ok_or(RuntimeError::WorkpieceStoreInvariantViolation {
+                token_id: source.token_id,
+            })?;
+        let occupancy = self
+            .workpiece_tokens
+            .active_tokens_at(source.current_location);
+        let final_occupancy = occupancy
+            .saturating_sub(if consumed { 1 } else { 0 })
+            .saturating_add(output_count);
+        if final_occupancy > capacity as usize {
+            return Err(RuntimeError::WorkpieceSplitOverflow {
+                workpiece_type: source_type,
+                capacity,
+                occupancy,
+            });
+        }
+
+        if consumed {
+            self.finish_workpiece_token(source.token_id, WorkpieceTerminalStatus::Consumed)?;
+        }
+
+        for _ in 0..count {
+            let child_id = self.create_workpiece_token(
+                target_type,
+                source.current_location,
+                source.mounted_slot,
+            )?;
+            self.workpiece_lineage
+                .record_split_child(source.token_id, child_id)
+                .map_err(|error| match error {
+                    WorkpieceLineageStoreError::CapacityExceeded { max } => {
+                        RuntimeError::WorkpieceLineageCapacityExceeded {
+                            required: self.workpiece_lineage.len().saturating_add(1),
+                            max,
+                        }
+                    }
+                    WorkpieceLineageStoreError::DuplicateRelation { .. } => {
+                        RuntimeError::WorkpieceStoreInvariantViolation {
+                            token_id: source.token_id,
+                        }
+                    }
+                })?;
+        }
+
+        Ok(())
+    }
+
+    fn execute_workpiece_merge(
+        &mut self,
+        input_refs: &'static [&'static str],
+        input_types: &'static [&'static str],
+        target_type: &'static str,
+        consumed_inputs: bool,
+    ) -> Result<(), RuntimeError> {
+        if input_refs.len() != input_types.len() {
+            return Err(RuntimeError::WorkpieceMergeArityMismatch {
+                target_type,
+                input_refs: input_refs.len(),
+                input_types: input_types.len(),
+            });
+        }
+
+        let mut selected_tokens = [None; MAX_WORKPIECE_TOKENS];
+        let mut selected_count = 0usize;
+        let mut output_location = None;
+        let mut output_slot = None;
+
+        for (idx, (&input_ref, &required_type)) in
+            input_refs.iter().zip(input_types.iter()).enumerate()
+        {
+            if consumed_inputs && input_refs[..idx].contains(&input_ref) {
+                return Err(RuntimeError::WorkpieceDuplicateConsumedMergeInput { input_ref });
+            }
+
+            let mut selected = None;
+            for candidate in self.workpiece_tokens.tokens.iter().flatten() {
+                if !candidate.active || candidate.workpiece_type != required_type {
+                    continue;
+                }
+                if selected_tokens[..selected_count]
+                    .iter()
+                    .flatten()
+                    .any(|token_id| *token_id == candidate.token_id)
+                {
+                    continue;
+                }
+                selected = Some(*candidate);
+                break;
+            }
+
+            let Some(token) = selected else {
+                return Err(RuntimeError::WorkpieceMergeInputUnderflow {
+                    target_type,
+                    input_ref,
+                    required_type,
+                });
+            };
+
+            if output_location.is_none() {
+                output_location = Some(token.current_location);
+                output_slot = token.mounted_slot;
+            }
+            selected_tokens[selected_count] = Some(token.token_id);
+            selected_count = selected_count.saturating_add(1);
+        }
+
+        let Some(output_location) = output_location else {
+            return Err(RuntimeError::WorkpieceMergeArityMismatch {
+                target_type,
+                input_refs: input_refs.len(),
+                input_types: input_types.len(),
+            });
+        };
+
+        self.ensure_workpiece_token_capacity_for_new_tokens(1)?;
+        self.ensure_workpiece_lineage_capacity_for_new_records(selected_count)?;
+        let capacity = self.workpiece_endpoint_capacity(output_location).ok_or(
+            RuntimeError::WorkpieceStoreInvariantViolation {
+                token_id: selected_tokens[0].unwrap_or_default(),
+            },
+        )?;
+        let occupancy = self.workpiece_tokens.active_tokens_at(output_location);
+        let final_occupancy = occupancy
+            .saturating_sub(if consumed_inputs { selected_count } else { 0 })
+            .saturating_add(1);
+        if final_occupancy > capacity as usize {
+            return Err(RuntimeError::WorkpieceMergeOverflow {
+                target_type,
+                capacity,
+                occupancy,
+            });
+        }
+
+        if consumed_inputs {
+            for token_id in selected_tokens[..selected_count].iter().flatten() {
+                self.finish_workpiece_token(*token_id, WorkpieceTerminalStatus::Consumed)?;
+            }
+        }
+
+        let output_token_id =
+            self.create_workpiece_token(target_type, output_location, output_slot)?;
+        for token_id in selected_tokens[..selected_count].iter().flatten() {
+            self.workpiece_lineage
+                .record_merge_input(*token_id, output_token_id)
+                .map_err(|error| match error {
+                    WorkpieceLineageStoreError::CapacityExceeded { max } => {
+                        RuntimeError::WorkpieceLineageCapacityExceeded {
+                            required: self.workpiece_lineage.len().saturating_add(1),
+                            max,
+                        }
+                    }
+                    WorkpieceLineageStoreError::DuplicateRelation { .. } => {
+                        RuntimeError::WorkpieceStoreInvariantViolation {
+                            token_id: *token_id,
+                        }
+                    }
+                })?;
+        }
+
+        Ok(())
+    }
+
+    fn write_digital_output<IO: Io>(&mut self, io: &mut IO, id: DigitalOutputId, value: bool) {
+        io.write_digital_output(id, value);
+        if let Some(slot) = self.digital_output_shadow.get_mut(id.0 as usize) {
+            *slot = value;
+        }
+    }
+
+    fn active_action_tag_holders(
+        &self,
+        tag: &str,
+        ignore_axis_motion: Option<(usize, usize)>,
+    ) -> usize {
+        let mut holders = 0usize;
+        for task_idx in 0..self.active_task_count {
+            let TaskPendingActionState::AxisMotion {
+                action_index,
+                semantic_tag: Some(active_tag),
+                ..
+            } = self.task_contexts[task_idx].pending_action_state
+            else {
+                continue;
+            };
+            if active_tag != tag {
+                continue;
+            }
+            if ignore_axis_motion.is_some_and(|(ignore_task, ignore_action_index)| {
+                ignore_task == task_idx && ignore_action_index == action_index
+            }) {
+                continue;
+            }
+            holders = holders.saturating_add(1);
+        }
+        holders
+    }
+
+    fn claim_holders(
+        &self,
+        resource_index: usize,
+        ignore_axis_motion: Option<(usize, usize)>,
+    ) -> usize {
+        let mut holders = 0usize;
+        for claim in self.program.resource_claims {
+            if claim.resource_index as usize != resource_index {
+                continue;
+            }
+            match claim.source {
+                ResourceClaimSource::DigitalOutputState { id, value } => {
+                    if self
+                        .digital_output_shadow
+                        .get(id.0 as usize)
+                        .copied()
+                        .unwrap_or(false)
+                        == value
+                    {
+                        holders = holders.saturating_add(1);
+                    }
+                }
+                ResourceClaimSource::ActionTag { tag } => {
+                    holders = holders
+                        .saturating_add(self.active_action_tag_holders(tag, ignore_axis_motion));
+                }
+            }
+            if holders > 1 {
+                break;
+            }
+        }
+        holders
+    }
+
+    fn semantic_resource_conflict_for_axis_motion(
+        &self,
+        task_idx: usize,
+        action_index: usize,
+        command: AxisMotionCommand,
+    ) -> Option<AxisFault> {
+        let tag = command.semantic_tag?;
+        for claim in self.program.resource_claims {
+            let ResourceClaimSource::ActionTag { tag: claim_tag } = claim.source else {
+                continue;
+            };
+            if claim_tag != tag {
+                continue;
+            }
+            let resource_index = claim.resource_index as usize;
+            let resource = self.program.semantic_resources.get(resource_index)?;
+            if matches!(resource.mode, SemanticResourceMode::Exclusive)
+                && self.claim_holders(resource_index, Some((task_idx, action_index))) > 0
+            {
+                return Some(AxisFault::safety(SEMANTIC_RESOURCE_CONFLICT_ERROR_CODE));
+            }
+        }
+        None
     }
 
     pub fn tick<IO: Io>(&mut self, io: &mut IO) -> Result<(), RuntimeError> {
@@ -1273,6 +2360,7 @@ impl<'a> Runtime<'a> {
                         if let TaskPendingActionState::AxisMotion {
                             target,
                             action_index,
+                            semantic_tag: _,
                         } = self.task_contexts[task_idx].pending_action_state
                         {
                             if let Some(Action::AxisMove { command }) = actions.get(action_index) {
@@ -1291,7 +2379,7 @@ impl<'a> Runtime<'a> {
                         {
                             match *a {
                                 Action::SetDigital { id, value } => {
-                                    io.write_digital_output(id, value)
+                                    self.write_digital_output(io, id, value)
                                 }
                                 Action::SetAnalog { id, value } => {
                                     io.write_analog_output(id, value)
@@ -1367,6 +2455,28 @@ impl<'a> Runtime<'a> {
                                         ));
                                     }
 
+                                    if let Some(fault) = self
+                                        .semantic_resource_conflict_for_axis_motion(
+                                            task_idx,
+                                            action_index,
+                                            command,
+                                        )
+                                    {
+                                        if let Some(routing) = command.fault_routing {
+                                            action_transition_override = Some((
+                                                routing.resolve_target(fault),
+                                                TransitionReason::Action,
+                                            ));
+                                            break;
+                                        }
+                                        return Err(RuntimeTickError::Core(
+                                            RuntimeError::AxisFault {
+                                                target: command.target,
+                                                fault,
+                                            },
+                                        ));
+                                    }
+
                                     let result = match on_axis_motion(command) {
                                         Ok(result) => result,
                                         Err(err) => {
@@ -1381,6 +2491,7 @@ impl<'a> Runtime<'a> {
                                                 TaskPendingActionState::AxisMotion {
                                                     target: command.target,
                                                     action_index,
+                                                    semantic_tag: command.semantic_tag,
                                                 };
                                             if let Some(timeout) = command.timeout
                                                 && elapsed >= timeout.after_ticks
@@ -1465,10 +2576,67 @@ impl<'a> Runtime<'a> {
                                         }
                                     }
                                 }
-                                Action::Extend { output } => io.write_digital_output(output, true),
-                                Action::Retract { output } => {
-                                    io.write_digital_output(output, false)
+                                Action::Extend { output } => {
+                                    self.write_digital_output(io, output, true)
                                 }
+                                Action::Retract { output } => {
+                                    self.write_digital_output(io, output, false)
+                                }
+                                Action::WorkpieceAcquire {
+                                    workpiece_type,
+                                    holder,
+                                    from,
+                                } => self
+                                    .execute_workpiece_acquire(workpiece_type, holder, from)
+                                    .map_err(RuntimeTickError::Core)?,
+                                Action::WorkpieceTransfer { from, to } => self
+                                    .execute_workpiece_transfer(from, to)
+                                    .map_err(RuntimeTickError::Core)?,
+                                Action::WorkpieceFinish { at, terminal_state } => self
+                                    .execute_workpiece_finish(at, terminal_state)
+                                    .map_err(RuntimeTickError::Core)?,
+                                Action::WorkpieceMount {
+                                    workpiece_type,
+                                    slot,
+                                } => self
+                                    .execute_workpiece_mount(workpiece_type, slot)
+                                    .map_err(RuntimeTickError::Core)?,
+                                Action::WorkpieceUnmount {
+                                    workpiece_type,
+                                    slot,
+                                    to,
+                                } => self
+                                    .execute_workpiece_unmount(workpiece_type, slot, to)
+                                    .map_err(RuntimeTickError::Core)?,
+                                Action::WorkpieceTransformCarrier { carrier, frame } => {
+                                    self.execute_workpiece_transform_carrier(carrier, frame)
+                                }
+                                Action::WorkpieceSplit {
+                                    source_type,
+                                    target_type,
+                                    count,
+                                    consumed,
+                                } => self
+                                    .execute_workpiece_split(
+                                        source_type,
+                                        target_type,
+                                        count,
+                                        consumed,
+                                    )
+                                    .map_err(RuntimeTickError::Core)?,
+                                Action::WorkpieceMerge {
+                                    input_refs,
+                                    input_types,
+                                    target_type,
+                                    consumed_inputs,
+                                } => self
+                                    .execute_workpiece_merge(
+                                        input_refs,
+                                        input_types,
+                                        target_type,
+                                        consumed_inputs,
+                                    )
+                                    .map_err(RuntimeTickError::Core)?,
                                 Action::Log {
                                     message_id,
                                     message,
@@ -2223,6 +3391,10 @@ pub const MAX_CAM_COUPLINGS: usize = 8;
 pub const MAX_AXIS_HOMING_TARGETS: usize = 32;
 pub const MAX_EXTERN_ARGS: usize = 16;
 pub const MAX_EXTERN_RETURNS: usize = 8;
+pub const MAX_TRACKED_DIGITAL_OUTPUTS: usize = 1024;
+pub const MAX_WORKPIECE_TOKENS: usize = 256;
+pub const MAX_WORKPIECE_LINEAGE_RECORDS: usize = MAX_WORKPIECE_TOKENS * 4;
+pub const SEMANTIC_RESOURCE_CONFLICT_ERROR_CODE: i32 = -32_001;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PidState {
@@ -2602,6 +3774,1829 @@ mod tests {
     }
 
     #[test]
+    fn workpiece_token_store_creates_tokens_with_active_occupancy() {
+        let mut store = WorkpieceTokenStore::new();
+
+        let created = store
+            .create_token(1, "part", "infeed")
+            .expect("create token should succeed");
+
+        assert_eq!(created.token_id, 1);
+        assert_eq!(created.workpiece_type, "part");
+        assert_eq!(created.current_location, "infeed");
+        assert_eq!(created.mounted_slot, None);
+        assert!(created.active);
+        assert_eq!(created.terminal_status, None);
+        assert_eq!(store.slots_used(), 1);
+        assert_eq!(store.active_tokens(), 1);
+        assert_eq!(store.active_tokens_at("infeed"), 1);
+        assert_eq!(store.token(1), Some(created));
+    }
+
+    #[test]
+    fn workpiece_token_store_moves_tokens_between_locations() {
+        let mut store = WorkpieceTokenStore::new();
+        store
+            .create_token(7, "part", "infeed")
+            .expect("create token should succeed");
+
+        let moved = store
+            .move_token(7, "arm")
+            .expect("move token should succeed");
+
+        assert_eq!(moved.current_location, "arm");
+        assert_eq!(moved.mounted_slot, None);
+        assert_eq!(store.active_tokens_at("infeed"), 0);
+        assert_eq!(store.active_tokens_at("arm"), 1);
+    }
+
+    #[test]
+    fn workpiece_token_store_finishes_tokens_and_retains_terminal_status() {
+        let mut store = WorkpieceTokenStore::new();
+        store
+            .create_token(9, "part", "outfeed")
+            .expect("create token should succeed");
+
+        let finished = store
+            .finish_token(
+                9,
+                WorkpieceTerminalStatus::TerminalState { state: "finished" },
+            )
+            .expect("finish token should succeed");
+
+        assert!(!finished.active);
+        assert_eq!(finished.mounted_slot, None);
+        assert_eq!(
+            finished.terminal_status,
+            Some(WorkpieceTerminalStatus::TerminalState { state: "finished" })
+        );
+        assert_eq!(store.active_tokens(), 0);
+        assert_eq!(store.active_tokens_at("outfeed"), 0);
+        assert_eq!(store.token(9), Some(finished));
+        assert_eq!(
+            store.move_token(9, "reject_bin"),
+            Err(WorkpieceTokenStoreError::TokenInactive { token_id: 9 })
+        );
+    }
+
+    #[test]
+    fn workpiece_token_store_rejects_capacity_overflow() {
+        let mut store = WorkpieceTokenStore::new();
+        for token_id in 0..MAX_WORKPIECE_TOKENS as WorkpieceTokenId {
+            store
+                .create_token(token_id, "part", "buffer")
+                .expect("capacity fill should succeed");
+        }
+
+        assert_eq!(store.slots_used(), MAX_WORKPIECE_TOKENS);
+        assert_eq!(store.active_tokens(), MAX_WORKPIECE_TOKENS);
+        assert_eq!(
+            store.create_token(MAX_WORKPIECE_TOKENS as WorkpieceTokenId, "part", "buffer"),
+            Err(WorkpieceTokenStoreError::CapacityExceeded {
+                max: MAX_WORKPIECE_TOKENS,
+            })
+        );
+    }
+
+    #[test]
+    fn workpiece_lineage_store_tracks_split_children_after_source_is_consumed() {
+        let mut tokens = WorkpieceTokenStore::new();
+        tokens
+            .create_token(1, "rod", "cut_station")
+            .expect("source token should exist");
+        tokens
+            .create_token(2, "slice", "tray_a")
+            .expect("child token a should exist");
+        tokens
+            .create_token(3, "slice", "tray_b")
+            .expect("child token b should exist");
+
+        let mut lineage = WorkpieceLineageStore::new();
+        let child_a = lineage
+            .record_split_child(1, 2)
+            .expect("first split child should record");
+        let child_b = lineage
+            .record_split_child(1, 3)
+            .expect("second split child should record");
+
+        tokens
+            .finish_token(1, WorkpieceTerminalStatus::Consumed)
+            .expect("split source should be consumable");
+
+        assert_eq!(lineage.len(), 2);
+        assert_eq!(
+            lineage.split_children_of(1).collect::<Vec<_>>(),
+            vec![child_a, child_b]
+        );
+        assert_eq!(
+            tokens
+                .token(1)
+                .expect("source token should remain traceable"),
+            WorkpieceToken {
+                token_id: 1,
+                workpiece_type: "rod",
+                current_location: "cut_station",
+                mounted_slot: None,
+                active: false,
+                terminal_status: Some(WorkpieceTerminalStatus::Consumed),
+            }
+        );
+    }
+
+    #[test]
+    fn workpiece_lineage_store_tracks_merge_inputs_after_inputs_are_consumed() {
+        let mut tokens = WorkpieceTokenStore::new();
+        tokens
+            .create_token(10, "cell", "buffer_a")
+            .expect("merge input a should exist");
+        tokens
+            .create_token(11, "cell", "buffer_b")
+            .expect("merge input b should exist");
+        tokens
+            .create_token(12, "module", "assembly")
+            .expect("merge output should exist");
+
+        let mut lineage = WorkpieceLineageStore::new();
+        let input_a = lineage
+            .record_merge_input(10, 12)
+            .expect("first merge input should record");
+        let input_b = lineage
+            .record_merge_input(11, 12)
+            .expect("second merge input should record");
+
+        tokens
+            .finish_token(10, WorkpieceTerminalStatus::Consumed)
+            .expect("merge input a should be consumable");
+        tokens
+            .finish_token(11, WorkpieceTerminalStatus::Consumed)
+            .expect("merge input b should be consumable");
+
+        assert_eq!(lineage.len(), 2);
+        assert_eq!(
+            lineage.merge_inputs_of(12).collect::<Vec<_>>(),
+            vec![input_a, input_b]
+        );
+        assert_eq!(
+            tokens
+                .token(10)
+                .expect("consumed merge input should stay inspectable")
+                .terminal_status,
+            Some(WorkpieceTerminalStatus::Consumed)
+        );
+        assert_eq!(
+            tokens
+                .token(11)
+                .expect("consumed merge input should stay inspectable")
+                .terminal_status,
+            Some(WorkpieceTerminalStatus::Consumed)
+        );
+    }
+
+    #[test]
+    fn workpiece_lineage_store_rejects_capacity_overflow() {
+        let mut lineage = WorkpieceLineageStore::new();
+        for relation_id in 0..MAX_WORKPIECE_LINEAGE_RECORDS as WorkpieceTokenId {
+            lineage
+                .record_split_child(relation_id, relation_id.saturating_add(10_000))
+                .expect("capacity fill should succeed");
+        }
+
+        assert_eq!(lineage.len(), MAX_WORKPIECE_LINEAGE_RECORDS);
+        assert_eq!(
+            lineage.record_merge_input(99_001, 99_002),
+            Err(WorkpieceLineageStoreError::CapacityExceeded {
+                max: MAX_WORKPIECE_LINEAGE_RECORDS,
+            })
+        );
+    }
+
+    #[test]
+    fn runtime_executes_phase1_workpiece_flow_across_site_holder_site_and_finish() {
+        static PICK: [Action; 1] = [Action::WorkpieceAcquire {
+            workpiece_type: "part",
+            holder: "arm",
+            from: "infeed",
+        }];
+        static PLACE: [Action; 1] = [Action::WorkpieceTransfer {
+            from: "arm",
+            to: "outfeed",
+        }];
+        static FINISH: [Action; 1] = [Action::WorkpieceFinish {
+            at: "outfeed",
+            terminal_state: "finished",
+        }];
+        static STEPS: [Step<'static>; 6] = [
+            Step {
+                name: "pick",
+                instr: Instr::Action {
+                    actions: &PICK,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "after_pick",
+                instr: Instr::Delay {
+                    ticks: 1,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "place",
+                instr: Instr::Action {
+                    actions: &PLACE,
+                    next: StepId(3),
+                },
+            },
+            Step {
+                name: "after_place",
+                instr: Instr::Delay {
+                    ticks: 1,
+                    next: StepId(4),
+                },
+            },
+            Step {
+                name: "finish",
+                instr: Instr::Action {
+                    actions: &FINISH,
+                    next: StepId(5),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 1] = [WorkpieceTypeDef {
+            name: "part",
+            normal_terminal_states: &["finished"],
+            abnormal_terminal_states: &["rejected"],
+            ingress_sites: &["infeed"],
+            normal_egress_sites: &["outfeed"],
+            abnormal_egress_sites: &["reject_bin"],
+        }];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 3] = [
+            WorkpieceSiteDef {
+                name: "infeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "reject_bin",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static WORKPIECE_HOLDERS: [WorkpieceHolderDef<'static>; 1] = [WorkpieceHolderDef {
+            name: "arm",
+            capacity: 1,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &WORKPIECE_HOLDERS,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should seed ingress token");
+
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("infeed"), 1);
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("arm"), 0);
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("outfeed"), 0);
+
+        rt.tick(&mut io).expect("pick tick should succeed");
+        assert_eq!(
+            rt.task_context(0).expect("task context").current_step,
+            StepId(1)
+        );
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("infeed"), 0);
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("arm"), 1);
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("outfeed"), 0);
+
+        rt.tick(&mut io).expect("place tick should succeed");
+        assert_eq!(
+            rt.task_context(0).expect("task context").current_step,
+            StepId(3)
+        );
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("arm"), 0);
+        assert_eq!(rt.workpiece_tokens().active_tokens_at("outfeed"), 1);
+
+        rt.tick(&mut io).expect("finish tick should succeed");
+        assert_eq!(
+            rt.task_context(0).expect("task context").current_step,
+            StepId(5)
+        );
+        assert_eq!(rt.workpiece_tokens().active_tokens(), 0);
+        let finished = rt
+            .workpiece_tokens()
+            .token(0)
+            .expect("seeded token should remain traceable");
+        assert_eq!(finished.current_location, "outfeed");
+        assert!(!finished.active);
+        assert_eq!(
+            finished.terminal_status,
+            Some(WorkpieceTerminalStatus::TerminalState { state: "finished" })
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_workpiece_source_underflow() {
+        static ACTIONS: [Action; 1] = [Action::WorkpieceTransfer {
+            from: "arm",
+            to: "outfeed",
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "transfer_without_part",
+            instr: Instr::Action {
+                actions: &ACTIONS,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 1] = [WorkpieceTypeDef {
+            name: "part",
+            normal_terminal_states: &["finished"],
+            abnormal_terminal_states: &[],
+            ingress_sites: &["infeed"],
+            normal_egress_sites: &["outfeed"],
+            abnormal_egress_sites: &[],
+        }];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "infeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static WORKPIECE_HOLDERS: [WorkpieceHolderDef<'static>; 1] = [WorkpieceHolderDef {
+            name: "arm",
+            capacity: 1,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &WORKPIECE_HOLDERS,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt.tick(&mut io).expect_err("empty source should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceSourceUnderflow { endpoint: "arm" }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_workpiece_duplicate_source_occupancy() {
+        static ACTIONS: [Action; 1] = [Action::WorkpieceAcquire {
+            workpiece_type: "part_a",
+            holder: "arm",
+            from: "infeed",
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "pick_ambiguous_source",
+            instr: Instr::Action {
+                actions: &ACTIONS,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "part_a",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &["infeed"],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "part_b",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &["infeed"],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "infeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 2,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static WORKPIECE_HOLDERS: [WorkpieceHolderDef<'static>; 1] = [WorkpieceHolderDef {
+            name: "arm",
+            capacity: 1,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &WORKPIECE_HOLDERS,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should seed both ingress parts");
+        let err = rt.tick(&mut io).expect_err("ambiguous source should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceDuplicateOccupancy {
+                endpoint: "infeed",
+                count: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_workpiece_destination_overflow() {
+        static ACTIONS_PICK: [Action; 1] = [Action::WorkpieceAcquire {
+            workpiece_type: "incoming_part",
+            holder: "arm",
+            from: "infeed",
+        }];
+        static ACTIONS_SEED_HOLDER: [Action; 1] = [Action::WorkpieceTransfer {
+            from: "arm",
+            to: "arm",
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "pick_into_full_holder",
+                instr: Instr::Action {
+                    actions: &ACTIONS_PICK,
+                    next: StepId(0),
+                },
+            },
+            Step {
+                name: "seed_holder_source",
+                instr: Instr::Action {
+                    actions: &ACTIONS_SEED_HOLDER,
+                    next: StepId(1),
+                },
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "incoming_part",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &["infeed"],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "holder_part",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &["arm"],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "infeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static WORKPIECE_HOLDERS: [WorkpieceHolderDef<'static>; 1] = [WorkpieceHolderDef {
+            name: "arm",
+            capacity: 1,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &WORKPIECE_HOLDERS,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should seed source and holder");
+        let err = rt.tick(&mut io).expect_err("full destination should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceOverflow {
+                endpoint: "arm",
+                capacity: 1,
+                occupancy: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_executes_phase2_mount_transform_unmount_flow() {
+        static ACTIONS_MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "steel_plate.slot[0]",
+        }];
+        static ACTIONS_TRANSFORM: [Action; 1] = [Action::WorkpieceTransformCarrier {
+            carrier: "steel_plate",
+            frame: "cut_height",
+        }];
+        static ACTIONS_UNMOUNT: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "rod",
+            slot: "steel_plate.slot[0]",
+            to: "outfeed",
+        }];
+        static ACTIONS_FINISH: [Action; 1] = [Action::WorkpieceFinish {
+            at: "outfeed",
+            terminal_state: "finished",
+        }];
+        static STEPS: [Step<'static>; 5] = [
+            Step {
+                name: "mount",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "raise",
+                instr: Instr::Action {
+                    actions: &ACTIONS_TRANSFORM,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "unmount",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT,
+                    next: StepId(3),
+                },
+            },
+            Step {
+                name: "finish",
+                instr: Instr::Action {
+                    actions: &ACTIONS_FINISH,
+                    next: StepId(4),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 1] = [WorkpieceTypeDef {
+            name: "rod",
+            normal_terminal_states: &["finished"],
+            abnormal_terminal_states: &[],
+            ingress_sites: &[],
+            normal_egress_sites: &["outfeed"],
+            abnormal_egress_sites: &[],
+        }];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "steel_plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+
+        rt.tick(&mut io).expect("phase2 flow should succeed");
+        let finished = rt
+            .workpiece_tokens()
+            .token(0)
+            .expect("finished token should remain traceable");
+        assert_eq!(finished.current_location, "outfeed");
+        assert_eq!(finished.mounted_slot, None);
+        assert!(!finished.active);
+    }
+
+    #[test]
+    fn runtime_rejects_unmount_from_empty_phase2_slot() {
+        static ACTIONS: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "rod",
+            slot: "steel_plate.slot[0]",
+            to: "outfeed",
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "unmount",
+            instr: Instr::Action {
+                actions: &ACTIONS,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 1] = [WorkpieceTypeDef {
+            name: "rod",
+            normal_terminal_states: &["finished"],
+            abnormal_terminal_states: &[],
+            ingress_sites: &[],
+            normal_egress_sites: &["outfeed"],
+            abnormal_egress_sites: &[],
+        }];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "steel_plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt.tick(&mut io).expect_err("empty slot should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceSourceUnderflow {
+                endpoint: "steel_plate.slot[0]",
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_duplicate_phase2_mount() {
+        static ACTIONS: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "steel_plate.slot[0]",
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "mount_a",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "mount_b",
+                instr: Instr::Action {
+                    actions: &ACTIONS,
+                    next: StepId(1),
+                },
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 1] = [WorkpieceTypeDef {
+            name: "rod",
+            normal_terminal_states: &["finished"],
+            abnormal_terminal_states: &[],
+            ingress_sites: &[],
+            normal_egress_sites: &["outfeed"],
+            abnormal_egress_sites: &[],
+        }];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "steel_plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt.tick(&mut io).expect_err("duplicate mount should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceDuplicateMount {
+                slot: "steel_plate.slot[0]",
+                token_id: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_phase2_slot_overflow() {
+        static ACTIONS_MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "steel_plate.slot[0]",
+        }];
+        static ACTIONS_SEED_SLOT: [Action; 1] = [Action::WorkpieceAcquire {
+            workpiece_type: "seeded",
+            holder: "arm",
+            from: "steel_plate.slot[0]",
+        }];
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "mount_into_full_slot",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT,
+                    next: StepId(0),
+                },
+            },
+            Step {
+                name: "seed_slot_source",
+                instr: Instr::Action {
+                    actions: &ACTIONS_SEED_SLOT,
+                    next: StepId(1),
+                },
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "rod",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "seeded",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &["steel_plate.slot[0]"],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "steel_plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static WORKPIECE_HOLDERS: [WorkpieceHolderDef<'static>; 1] = [WorkpieceHolderDef {
+            name: "arm",
+            capacity: 1,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &WORKPIECE_HOLDERS,
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt.tick(&mut io).expect_err("full slot should fail mount");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceOverflow {
+                endpoint: "steel_plate.slot[0]",
+                capacity: 1,
+                occupancy: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_executes_split_and_records_lineage() {
+        static ACTIONS_MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+        }];
+        static ACTIONS_UNMOUNT: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+            to: "cut_zone",
+        }];
+        static ACTIONS_SPLIT: [Action; 1] = [Action::WorkpieceSplit {
+            source_type: "rod",
+            target_type: "slice",
+            count: 4,
+            consumed: true,
+        }];
+        static STEPS: [Step<'static>; 4] = [
+            Step {
+                name: "load",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "unload",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "cut",
+                instr: Instr::Action {
+                    actions: &ACTIONS_SPLIT,
+                    next: StepId(3),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "rod",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 3] = [
+            WorkpieceSiteDef {
+                name: "plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "cut_zone",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 4,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 4,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        rt.tick(&mut io).expect("split flow should succeed");
+
+        assert_eq!(rt.workpiece_tokens().active_tokens(), 4);
+        let consumed = rt
+            .workpiece_tokens()
+            .token(0)
+            .expect("source token should remain traceable");
+        assert_eq!(consumed.workpiece_type, "rod");
+        assert_eq!(consumed.current_location, "cut_zone");
+        assert_eq!(
+            consumed.terminal_status,
+            Some(WorkpieceTerminalStatus::Consumed)
+        );
+        assert!(!consumed.active);
+
+        for child_id in 1..=4 {
+            let child = rt
+                .workpiece_tokens()
+                .token(child_id)
+                .expect("split child should be stored");
+            assert_eq!(child.workpiece_type, "slice");
+            assert_eq!(child.current_location, "cut_zone");
+            assert_eq!(child.mounted_slot, None);
+            assert!(child.active);
+            assert_eq!(child.terminal_status, None);
+        }
+
+        assert_eq!(rt.workpiece_lineage().len(), 4);
+        assert_eq!(
+            rt.workpiece_lineage()
+                .split_children_of(0)
+                .map(|record| record.target_token_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_split_without_available_source_type() {
+        static ACTIONS_SPLIT: [Action; 1] = [Action::WorkpieceSplit {
+            source_type: "rod",
+            target_type: "slice",
+            count: 2,
+            consumed: true,
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "cut",
+            instr: Instr::Action {
+                actions: &ACTIONS_SPLIT,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "rod",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &[],
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("missing split source should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceTypeSourceUnderflow {
+                workpiece_type: "rod",
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_split_when_source_type_is_ambiguous() {
+        static ACTIONS_MOUNT_A: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+        }];
+        static ACTIONS_UNMOUNT_A: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+            to: "cut_a",
+        }];
+        static ACTIONS_MOUNT_B: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "plate.slot[1]",
+        }];
+        static ACTIONS_UNMOUNT_B: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "rod",
+            slot: "plate.slot[1]",
+            to: "cut_b",
+        }];
+        static ACTIONS_SPLIT: [Action; 1] = [Action::WorkpieceSplit {
+            source_type: "rod",
+            target_type: "slice",
+            count: 2,
+            consumed: true,
+        }];
+        static STEPS: [Step<'static>; 5] = [
+            Step {
+                name: "load_a",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT_A,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "unload_a",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT_A,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "load_b",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT_B,
+                    next: StepId(3),
+                },
+            },
+            Step {
+                name: "unload_b",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT_B,
+                    next: StepId(4),
+                },
+            },
+            Step {
+                name: "cut",
+                instr: Instr::Action {
+                    actions: &ACTIONS_SPLIT,
+                    next: StepId(4),
+                },
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "rod",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 4] = [
+            WorkpieceSiteDef {
+                name: "plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "plate.slot[1]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "cut_a",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "cut_b",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("ambiguous split source should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceTypeSourceAmbiguity {
+                workpiece_type: "rod",
+                count: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_split_when_outputs_overflow_destination() {
+        static ACTIONS_MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+        }];
+        static ACTIONS_UNMOUNT: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+            to: "cut_zone",
+        }];
+        static ACTIONS_SPLIT: [Action; 1] = [Action::WorkpieceSplit {
+            source_type: "rod",
+            target_type: "slice",
+            count: 4,
+            consumed: true,
+        }];
+        static STEPS: [Step<'static>; 3] = [
+            Step {
+                name: "load",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "unload",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "cut",
+                instr: Instr::Action {
+                    actions: &ACTIONS_SPLIT,
+                    next: StepId(2),
+                },
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "rod",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "cut_zone",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 3,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt.tick(&mut io).expect_err("split overflow should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceSplitOverflow {
+                workpiece_type: "rod",
+                capacity: 3,
+                occupancy: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_executes_merge_and_records_lineage() {
+        static ACTIONS_MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+        }];
+        static ACTIONS_UNMOUNT: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+            to: "cut_zone",
+        }];
+        static ACTIONS_SPLIT: [Action; 1] = [Action::WorkpieceSplit {
+            source_type: "rod",
+            target_type: "slice",
+            count: 4,
+            consumed: true,
+        }];
+        static MERGE_INPUT_REFS: [&str; 2] = ["slice_a", "slice_b"];
+        static MERGE_INPUT_TYPES: [&str; 2] = ["slice", "slice"];
+        static ACTIONS_MERGE: [Action; 1] = [Action::WorkpieceMerge {
+            input_refs: &MERGE_INPUT_REFS,
+            input_types: &MERGE_INPUT_TYPES,
+            target_type: "module",
+            consumed_inputs: true,
+        }];
+        static STEPS: [Step<'static>; 5] = [
+            Step {
+                name: "load",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "unload",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "cut",
+                instr: Instr::Action {
+                    actions: &ACTIONS_SPLIT,
+                    next: StepId(3),
+                },
+            },
+            Step {
+                name: "assemble",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MERGE,
+                    next: StepId(4),
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 3] = [
+            WorkpieceTypeDef {
+                name: "rod",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "module",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "cut_zone",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 4,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        rt.tick(&mut io).expect("merge flow should succeed");
+
+        assert_eq!(rt.workpiece_tokens().active_tokens(), 3);
+        assert_eq!(rt.workpiece_lineage().len(), 6);
+
+        let module = rt
+            .workpiece_tokens()
+            .token(5)
+            .expect("merge output should be stored");
+        assert_eq!(module.workpiece_type, "module");
+        assert_eq!(module.current_location, "cut_zone");
+        assert!(module.active);
+
+        assert_eq!(
+            rt.workpiece_lineage()
+                .merge_inputs_of(5)
+                .map(|record| record.source_token_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        for consumed_id in [1, 2] {
+            let consumed = rt
+                .workpiece_tokens()
+                .token(consumed_id)
+                .expect("consumed merge input should stay traceable");
+            assert_eq!(
+                consumed.terminal_status,
+                Some(WorkpieceTerminalStatus::Consumed)
+            );
+            assert!(!consumed.active);
+        }
+    }
+
+    #[test]
+    fn runtime_rejects_merge_without_required_inputs() {
+        static MERGE_INPUT_REFS: [&str; 2] = ["slice_a", "slice_b"];
+        static MERGE_INPUT_TYPES: [&str; 2] = ["slice", "slice"];
+        static ACTIONS_MERGE: [Action; 1] = [Action::WorkpieceMerge {
+            input_refs: &MERGE_INPUT_REFS,
+            input_types: &MERGE_INPUT_TYPES,
+            target_type: "module",
+            consumed_inputs: true,
+        }];
+        static STEPS: [Step<'static>; 1] = [Step {
+            name: "assemble",
+            instr: Instr::Action {
+                actions: &ACTIONS_MERGE,
+                next: StepId(0),
+            },
+        }];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "module",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 1] = [WorkpieceSiteDef {
+            name: "cut_zone",
+            kind: WorkpieceSiteKind::WorkpieceLocation,
+            capacity: 4,
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("missing merge input should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceMergeInputUnderflow {
+                target_type: "module",
+                input_ref: "slice_a",
+                required_type: "slice",
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_merge_with_duplicate_consumed_input_refs() {
+        static ACTIONS_MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "slice",
+            slot: "plate.slot[0]",
+        }];
+        static ACTIONS_UNMOUNT: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "slice",
+            slot: "plate.slot[0]",
+            to: "cut_zone",
+        }];
+        static ACTIONS_MOUNT_B: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "slice",
+            slot: "plate.slot[1]",
+        }];
+        static ACTIONS_UNMOUNT_B: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "slice",
+            slot: "plate.slot[1]",
+            to: "cut_zone_b",
+        }];
+        static MERGE_INPUT_REFS: [&str; 2] = ["slice_a", "slice_a"];
+        static MERGE_INPUT_TYPES: [&str; 2] = ["slice", "slice"];
+        static ACTIONS_MERGE: [Action; 1] = [Action::WorkpieceMerge {
+            input_refs: &MERGE_INPUT_REFS,
+            input_types: &MERGE_INPUT_TYPES,
+            target_type: "module",
+            consumed_inputs: true,
+        }];
+        static STEPS: [Step<'static>; 5] = [
+            Step {
+                name: "load_a",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "unload_a",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "load_b",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT_B,
+                    next: StepId(3),
+                },
+            },
+            Step {
+                name: "unload_b",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT_B,
+                    next: StepId(4),
+                },
+            },
+            Step {
+                name: "assemble",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MERGE,
+                    next: StepId(4),
+                },
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "module",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 4] = [
+            WorkpieceSiteDef {
+                name: "plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "plate.slot[1]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "cut_zone",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 2,
+            },
+            WorkpieceSiteDef {
+                name: "cut_zone_b",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 2,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("duplicate merge input ref should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceDuplicateConsumedMergeInput {
+                input_ref: "slice_a",
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_merge_with_input_arity_mismatch() {
+        static ACTIONS_MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "slice",
+            slot: "plate.slot[0]",
+        }];
+        static ACTIONS_UNMOUNT: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "slice",
+            slot: "plate.slot[0]",
+            to: "cut_zone",
+        }];
+        static MERGE_INPUT_REFS: [&str; 2] = ["slice_a", "slice_b"];
+        static MERGE_INPUT_TYPES: [&str; 1] = ["slice"];
+        static ACTIONS_MERGE: [Action; 1] = [Action::WorkpieceMerge {
+            input_refs: &MERGE_INPUT_REFS,
+            input_types: &MERGE_INPUT_TYPES,
+            target_type: "module",
+            consumed_inputs: true,
+        }];
+        static STEPS: [Step<'static>; 3] = [
+            Step {
+                name: "load",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MOUNT,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "unload",
+                instr: Instr::Action {
+                    actions: &ACTIONS_UNMOUNT,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "assemble",
+                instr: Instr::Action {
+                    actions: &ACTIONS_MERGE,
+                    next: StepId(2),
+                },
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static WORKPIECE_TYPES: [WorkpieceTypeDef<'static>; 2] = [
+            WorkpieceTypeDef {
+                name: "slice",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+            WorkpieceTypeDef {
+                name: "module",
+                normal_terminal_states: &["finished"],
+                abnormal_terminal_states: &[],
+                ingress_sites: &[],
+                normal_egress_sites: &["outfeed"],
+                abnormal_egress_sites: &[],
+            },
+        ];
+        static WORKPIECE_SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "cut_zone",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 2,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &WORKPIECE_TYPES,
+            workpiece_sites: &WORKPIECE_SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("merge arity mismatch should fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceMergeArityMismatch {
+                target_type: "module",
+                input_refs: 2,
+                input_types: 1,
+            }
+        );
+    }
+
+    #[test]
     fn runtime_initializes_independent_task_contexts() {
         static TASK0_STEPS: [Step<'static>; 2] = [
             Step {
@@ -2641,6 +5636,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
@@ -2727,6 +5727,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -2846,6 +5851,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -2908,6 +5918,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -2959,6 +5974,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3047,6 +6067,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3114,6 +6139,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3181,6 +6211,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3235,6 +6270,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3288,6 +6328,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3315,23 +6360,23 @@ mod tests {
         let wrapped_over = linear_interpolate(&periodic, 250.0);
         assert!(
             (wrapped_neg - 50.0).abs() < 1e-5,
-            "periodic wrap(-50) 期望约 50，实际 {wrapped_neg}"
+            "periodic wrap(-50) should resolve to 50, got {wrapped_neg}"
         );
         assert!(
             (wrapped_over - 50.0).abs() < 1e-5,
-            "periodic wrap(250) 期望约 50，实际 {wrapped_over}"
+            "periodic wrap(250) should resolve to 50, got {wrapped_over}"
         );
 
         let oneshot = build_cam_table(false, &[(0.0, 0.0), (100.0, 100.0)]);
         assert_eq!(
             linear_interpolate(&oneshot, -10.0),
             0.0,
-            "oneshot 应在左侧钳制"
+            "oneshot should clamp on the left edge"
         );
         assert_eq!(
             linear_interpolate(&oneshot, 150.0),
             100.0,
-            "oneshot 应在右侧钳制"
+            "oneshot should clamp on the right edge"
         );
     }
 
@@ -3341,22 +6386,22 @@ mod tests {
         assert_eq!(
             binary_search_interval(&table, 0.0),
             0,
-            "表首边界应定位到首段"
+            "lower boundary should map to the first segment"
         );
         assert_eq!(
             binary_search_interval(&table, 40.0),
             0,
-            "区间内点应定位到对应段"
+            "midpoint should map to the matching segment"
         );
         assert_eq!(
             binary_search_interval(&table, 100.0),
             1,
-            "精确命中中间节点时应定位到右侧段"
+            "exact midpoint hit should advance to the right segment"
         );
         assert_eq!(
             binary_search_interval(&table, 200.0),
             1,
-            "表尾边界应钉在最后一段"
+            "upper boundary should clamp to the last segment"
         );
     }
 
@@ -3366,7 +6411,7 @@ mod tests {
         let y = linear_interpolate(&table, 5.0);
         assert!(
             (y - 10.0).abs() < 1e-6,
-            "线性插值中值误差应小于 1e-6，实际 {y}"
+            "linear interpolation midpoint error should stay below 1e-6, got {y}"
         );
     }
 
@@ -3382,7 +6427,7 @@ mod tests {
         let out = cubic_interpolate(&table, 2.0);
         assert!(
             (out - 49.0).abs() < 1e-6,
-            "Horner 多项式应为 49，实际 {out}"
+            "Horner polynomial should evaluate to 49, got {out}"
         );
     }
 
@@ -3404,7 +6449,7 @@ mod tests {
 
         assert!(
             (analytical - finite_diff).abs() < 1e-3,
-            "cubic_derivative 应与有限差分近似一致，解析={analytical}, 差分={finite_diff}"
+            "cubic_derivative should match the finite difference estimate, analytical={analytical}, finite_diff={finite_diff}"
         );
     }
 
@@ -3469,6 +6514,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3518,6 +6568,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3548,6 +6603,7 @@ mod tests {
                 value: 10.0,
                 speed: 2.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3577,11 +6633,18 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
-        let err = rt.tick(&mut io).expect_err("未提供 axis handler 应报错");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("missing axis handler should fail");
         assert_eq!(
             err,
             RuntimeError::AxisMotionRequiresHandler { target: "axis_x" }
@@ -3598,6 +6661,7 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3627,6 +6691,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3636,7 +6705,7 @@ mod tests {
             assert_eq!(command.kind, AxisMoveKind::Absolute);
             AxisMotionResult::Done
         })
-        .expect("axis handler 返回 done 应继续执行");
+        .expect("axis handler done should continue execution");
         assert_eq!(rt.location().step, StepId(1));
         assert_eq!(io.tick(), Tick(1));
     }
@@ -3656,6 +6725,7 @@ mod tests {
                     value: 10.0,
                     speed: 2.0,
                     require_homed: false,
+                    semantic_tag: None,
                     timeout: None,
                     fault_routing: None,
                 },
@@ -3686,6 +6756,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3712,6 +6787,7 @@ mod tests {
             TaskPendingActionState::AxisMotion {
                 target: "axis_x",
                 action_index: 1,
+                semantic_tag: None,
             }
         );
         assert_eq!(
@@ -3755,6 +6831,7 @@ mod tests {
                 value: 10.0,
                 speed: 2.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3784,6 +6861,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3799,6 +6881,7 @@ mod tests {
             TaskPendingActionState::AxisMotion {
                 target: "axis_x",
                 action_index: 0,
+                semantic_tag: None,
             }
         );
 
@@ -3835,6 +6918,7 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3864,6 +6948,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -3874,7 +6963,7 @@ mod tests {
                 invoked = true;
                 AxisMotionResult::Done
             })
-            .expect_err("未回零时 absolute 应被 runtime 拦截");
+            .expect_err("absolute move should fail while the axis is not homed");
         assert_eq!(err, RuntimeError::AxisNotHomed { target: "axis_x" });
         assert!(
             !invoked,
@@ -3892,6 +6981,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3904,6 +6994,7 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3940,14 +7031,19 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         rt.tick_with_axis(&mut io, |_| AxisMotionResult::Done)
-            .expect("relative 应设置 homing 谓词");
+            .expect("relative motion should mark the axis as homed");
         rt.tick_with_axis(&mut io, |_| AxisMotionResult::Done)
-            .expect("已回零后 absolute 应允许执行");
+            .expect("absolute motion should run after homing");
         assert_eq!(rt.location().step, StepId(2));
     }
 
@@ -3961,6 +7057,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -3973,6 +7070,7 @@ mod tests {
                 value: 120.0,
                 speed: 5.0,
                 require_homed: true,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4009,6 +7107,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4023,7 +7126,7 @@ mod tests {
                     AxisMotionResult::motion_fault(77)
                 }
             })
-            .expect_err("fault 应中断 absolute 并清空 homing 谓词");
+            .expect_err("fault should stop absolute move and clear homing");
         assert_eq!(
             call_count, 2,
             "single tick should execute relative then absolute"
@@ -4042,9 +7145,9 @@ mod tests {
                 invoked = true;
                 AxisMotionResult::Done
             })
-            .expect_err("fault 后重试 absolute 应被未回零拦截");
+            .expect_err("after fault absolute move should be rejected until re-homed");
         assert_eq!(err, RuntimeError::AxisNotHomed { target: "axis_x" });
-        assert!(!invoked, "homing guard 应在 handler 前触发");
+        assert!(!invoked, "homing guard should trigger before the handler");
     }
 
     #[test]
@@ -4057,6 +7160,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4086,13 +7190,18 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
             .tick_with_axis(&mut io, |_| AxisMotionResult::reject(11))
-            .expect_err("reject 应返回分类错误");
+            .expect_err("reject fault should be classified");
         assert_eq!(
             err,
             RuntimeError::AxisFault {
@@ -4112,6 +7221,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4141,13 +7251,18 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
             .tick_with_axis(&mut io, |_| AxisMotionResult::motion_fault(21))
-            .expect_err("motion_fault 应返回分类错误");
+            .expect_err("motion fault should be classified");
         assert_eq!(
             err,
             RuntimeError::AxisFault {
@@ -4167,6 +7282,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4196,13 +7312,18 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&PROGRAM).unwrap();
         let err = rt
             .tick_with_axis(&mut io, |_| AxisMotionResult::safety_fault(31))
-            .expect_err("safety_fault 应返回分类错误");
+            .expect_err("safety fault should be classified");
         assert_eq!(
             err,
             RuntimeError::AxisFault {
@@ -4222,6 +7343,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4280,6 +7402,11 @@ mod tests {
                 cam_configs: &[],
                 cam_tables: &[],
                 axis_fault_policies: &policies,
+                semantic_resources: &[],
+                resource_claims: &[],
+                workpiece_types: &[],
+                workpiece_sites: &[],
+                workpiece_holders: &[],
             };
 
             let expected_fault = match axis_result {
@@ -4396,6 +7523,7 @@ mod tests {
                 value: 5.0,
                 speed: 1.0,
                 require_homed: false,
+                semantic_tag: None,
                 timeout: None,
                 fault_routing: None,
             },
@@ -4435,6 +7563,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &policies,
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4519,6 +7652,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -4568,7 +7706,10 @@ mod tests {
         ops[6] = ExprOp::CallClamp;
         let expr = ExprProgram { ops, len: 7 };
         let out = eval_expr(&expr, &vars);
-        assert!((out - 9.0).abs() < 1e-6, "clamp(pow(abs(x),2),0,9) 应为 9");
+        assert!(
+            (out - 9.0).abs() < 1e-6,
+            "clamp(pow(abs(x),2),0,9) should evaluate to 9"
+        );
 
         let mut ops2 = [ExprOp::PushLiteral(0.0); MAX_EXPR_OPS];
         ops2[0] = ExprOp::PushLiteral(3.0);
@@ -4582,7 +7723,7 @@ mod tests {
         let out2 = eval_expr(&expr2, &vars);
         assert!(
             (out2 - 1.0).abs() < 1e-6,
-            "max(fmod(3,2), cos(sin(0))) 应为 1"
+            "max(fmod(3,2), cos(sin(0))) should evaluate to 1"
         );
     }
 
@@ -4607,7 +7748,7 @@ mod tests {
         let out = eval_expr(&expr, &vars);
         assert!(
             (out - 1.0).abs() < 1e-6,
-            "NOT(false) OR (true AND 0.5 > 0) 应为 true"
+            "NOT(false) OR (true AND 0.5 > 0) should evaluate to true"
         );
 
         vars[0] = 1.0; // a = true
@@ -4616,7 +7757,7 @@ mod tests {
         let out2 = eval_expr(&expr, &vars);
         assert!(
             (out2 - 0.0).abs() < 1e-6,
-            "NOT(true) OR (false AND -0.5 > 0) 应为 false"
+            "NOT(true) OR (false AND -0.5 > 0) should evaluate to false"
         );
     }
 
@@ -4639,13 +7780,22 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
-        let rt = Runtime::new(&PROGRAM).expect("runtime 创建应成功");
+        let rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
         assert_eq!(rt.variables()[0], 1.5);
         assert_eq!(rt.variables()[1], 2.0);
         assert_eq!(rt.variables()[2], 0.0);
-        assert_eq!(rt.variables()[3], 0.0, "未初始化槽位应保持 0");
+        assert_eq!(
+            rt.variables()[3],
+            0.0,
+            "uninitialized variable slots should stay zero"
+        );
     }
 
     #[test]
@@ -4667,10 +7817,15 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let err = match Runtime::new(&PROGRAM) {
-            Ok(_) => panic!("超过变量上限应报错"),
+            Ok(_) => panic!("too many variables should fail"),
             Err(err) => err,
         };
         assert_eq!(
@@ -4720,10 +7875,15 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let err = match Runtime::new(&program) {
-            Ok(_) => panic!("超过 cam coupling 上限应报错"),
+            Ok(_) => panic!("too many cam couplings should fail"),
             Err(err) => err,
         };
         assert_eq!(
@@ -4770,10 +7930,15 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let err = match Runtime::new(&program) {
-            Ok(_) => panic!("初始化 table_index 越界应报错"),
+            Ok(_) => panic!("invalid initial table_index should fail"),
             Err(err) => err,
         };
         assert_eq!(
@@ -4854,11 +8019,16 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&program).expect("runtime init");
-        let err = rt.tick(&mut io).expect_err("非法 cam_index 应报错");
+        let err = rt.tick(&mut io).expect_err("invalid cam_index should fail");
         assert_eq!(err, RuntimeError::InvalidCamIndex { cam_index: 1 });
     }
 
@@ -4908,11 +8078,16 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&program).expect("runtime init");
-        let err = rt.tick(&mut io).expect_err("非法 cam_index 应报错");
+        let err = rt.tick(&mut io).expect_err("invalid cam_index should fail");
         assert_eq!(err, RuntimeError::InvalidCamIndex { cam_index: 2 });
     }
 
@@ -4958,11 +8133,18 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
         let mut rt = Runtime::new(&program).expect("runtime init");
-        let err = rt.tick(&mut io).expect_err("非法 table_index 应报错");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("invalid table_index should fail");
         assert_eq!(
             err,
             RuntimeError::InvalidCamTableIndex {
@@ -5039,6 +8221,11 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -5054,26 +8241,26 @@ mod tests {
         let after_switch = io.ao[0];
         assert!(
             (after_switch - before_switch).abs() < 1e-4,
-            "切表瞬间输出应连续，before={before_switch}, after={after_switch}"
+            "switch output should stay continuous, before={before_switch}, after={after_switch}"
         );
         assert_eq!(
             rt.cam_states()[0].switch_decay_ticks,
             99,
-            "切表后应进入衰减路径"
+            "switch should enter decay tracking"
         );
 
         let adjusted_master = io.ai[0] * 2.0 + 30.0;
         let switched_base = linear_interpolate(&cam_tables[1], adjusted_master);
         assert!(
             (after_switch - switched_base).abs() > 1e-3,
-            "刚切表时应仍含 switch_offset 补偿"
+            "switch offset compensation should remain active on the first tick"
         );
 
         rt.tick(&mut io).expect("tick3 decay continues");
         assert_eq!(rt.cam_states()[0].switch_decay_ticks, 98);
         assert!(
             (io.ao[0] - after_switch).abs() > 1e-4,
-            "衰减推进后输出应发生变化"
+            "output should change while switch decay progresses"
         );
     }
 
@@ -5158,6 +8345,11 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();
@@ -5222,6 +8414,11 @@ mod tests {
             cam_configs,
             cam_tables,
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let mut io = MemIo::new();

@@ -116,6 +116,70 @@ fn parses_two_cylinder_example_into_verified_ir_json() {
 }
 
 #[test]
+fn parses_workpiece_phase1_example_into_verified_ir_json() {
+    let source = read_example("workpiece_phase1_transfer.plc");
+    let ir_json = compile_source_to_json(&source).expect("workpiece phase1 example should compile");
+
+    assert_eq!(
+        ir_json["constraints"]["workpiece_types"]
+            .as_array()
+            .expect("constraints should include workpiece_types")
+            .len(),
+        1
+    );
+    assert!(
+        ir_json["state_machine"]["transitions"]
+            .as_array()
+            .expect("state machine should include transitions")
+            .iter()
+            .any(|transition| {
+                transition["effects"]
+                    .as_array()
+                    .is_some_and(|effects| !effects.is_empty())
+            }),
+        "state machine should retain workpiece effects in IR"
+    );
+}
+
+#[test]
+fn parses_workpiece_carrier_slot_transfer_example_into_verified_ir_json() {
+    let source = read_example("workpiece_carrier_slot_transfer.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("workpiece carrier slot example should compile");
+
+    assert_eq!(
+        ir_json["constraints"]["workpiece_carriers"]
+            .as_array()
+            .expect("constraints should include workpiece_carriers")
+            .len(),
+        1
+    );
+    assert!(
+        ir_json["state_machine"]["transitions"]
+            .as_array()
+            .expect("state machine should include transitions")
+            .iter()
+            .any(|transition| {
+                transition["effects"].as_array().is_some_and(|effects| {
+                    effects.iter().any(|effect| effect["effect"] == "acquire")
+                })
+            }),
+        "carrier slot example should retain acquire effect in IR"
+    );
+}
+
+#[test]
+fn parses_workpiece_split_merge_example_into_verified_ir_json() {
+    let source = read_example("workpiece_split_merge.plc");
+    let errors = compile_source_to_json(&source)
+        .expect_err("workpiece split merge example should now fail exact safety verification");
+
+    assert!(errors.iter().any(|error| {
+        error.contains("split into 'slice' requires a valid active source token of type 'rod'")
+    }));
+}
+
+#[test]
 fn parses_flying_shear_example_into_verified_ir_json() {
     let source = read_example("flying_shear.plc");
     let ir_json = compile_source_to_json(&source).expect("flying_shear example should compile");

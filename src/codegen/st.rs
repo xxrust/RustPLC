@@ -1,6 +1,6 @@
 use crate::ir::{
-    BinaryValue, ExternCallBinding, State, StateMachine, TimerOperationKind, TopologyGraph,
-    Transition, TransitionAction, TransitionGuard, VariableType,
+    BinaryValue, ConstraintSet, ExternCallBinding, State, StateMachine, TimerOperationKind,
+    TopologyGraph, Transition, TransitionAction, TransitionGuard, VariableType,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -44,6 +44,7 @@ pub enum StCodegenError {
     ExpressionNotSupported {
         expr: String,
     },
+    SemanticResourceInterlockUnsupported,
 }
 
 impl fmt::Display for StCodegenError {
@@ -68,6 +69,10 @@ impl fmt::Display for StCodegenError {
             StCodegenError::ExpressionNotSupported { expr } => {
                 write!(f, "expression is not supported in phase 1: {expr}")
             }
+            StCodegenError::SemanticResourceInterlockUnsupported => write!(
+                f,
+                "semantic resource interlock is not supported by the ST backend"
+            ),
         }
     }
 }
@@ -131,20 +136,44 @@ enum ConditionValue {
 
 pub fn generate_st(
     topology: &TopologyGraph,
+    constraints: &ConstraintSet,
     state_machine: &StateMachine,
     config: &StCodegenConfig,
 ) -> Result<String, Vec<StCodegenError>> {
+    let workpiece_semantics_erased = has_workpiece_semantics(constraints, state_machine);
+    let erased_constraints = erase_workpiece_semantics_from_constraints(constraints);
+    let erased_state_machine = erase_workpiece_semantics_from_state_machine(state_machine);
+
     let mut errors = Vec::new();
-    if state_machine.states.is_empty() {
+    if erased_state_machine.states.is_empty() {
         errors.push(StCodegenError::EmptyStateMachine);
     }
+    if !erased_constraints.semantic_resources.is_empty()
+        || !erased_constraints.resource_claims.is_empty()
+        || erased_state_machine.transitions.iter().any(|transition| {
+            transition.actions.iter().any(|action| {
+                matches!(
+                    action,
+                    TransitionAction::AxisMoveRelative {
+                        semantic_tag: Some(_),
+                        ..
+                    } | TransitionAction::AxisMoveAbsolute {
+                        semantic_tag: Some(_),
+                        ..
+                    }
+                )
+            })
+        })
+    {
+        errors.push(StCodegenError::SemanticResourceInterlockUnsupported);
+    }
 
-    let state_ids = assign_state_ids(state_machine);
-    validate_state_references(state_machine, &state_ids, &mut errors);
+    let state_ids = assign_state_ids(&erased_state_machine);
+    validate_state_references(&erased_state_machine, &state_ids, &mut errors);
 
     let mut variable_candidates = collect_variable_candidates_from_topology(topology);
     collect_variable_candidates_from_transitions(
-        state_machine,
+        &erased_state_machine,
         &mut variable_candidates,
         &mut errors,
     );
@@ -161,13 +190,13 @@ pub fn generate_st(
         }
     };
 
-    let initial_id = state_id_of(&state_machine.initial, &state_ids)
+    let initial_id = state_id_of(&erased_state_machine.initial, &state_ids)
         .expect("initial state must exist when all state references are valid");
-    let transitions_by_state = collect_transitions_by_state(state_machine, &state_ids);
-    let timers = collect_timers(state_machine, &state_ids);
+    let transitions_by_state = collect_transitions_by_state(&erased_state_machine, &state_ids);
+    let timers = collect_timers(&erased_state_machine, &state_ids);
 
     let mut out = String::new();
-    emit_header(&mut out, config);
+    emit_header(&mut out, config, workpiece_semantics_erased);
     out.push_str(&format!("PROGRAM {}\n", config.program_name));
     emit_var_block(
         &mut out,
@@ -175,11 +204,11 @@ pub fn generate_st(
         &timers,
         &resolved_variables.declarations,
     );
-    emit_state_constants_comment(&mut out, state_machine, &state_ids);
+    emit_state_constants_comment(&mut out, &erased_state_machine, &state_ids);
     emit_timer_calls(&mut out, &timers);
     emit_case_block(
         &mut out,
-        state_machine,
+        &erased_state_machine,
         &state_ids,
         &transitions_by_state,
         &resolved_variables,
@@ -187,6 +216,34 @@ pub fn generate_st(
     out.push_str("END_PROGRAM\n");
 
     Ok(out)
+}
+
+fn has_workpiece_semantics(constraints: &ConstraintSet, state_machine: &StateMachine) -> bool {
+    !constraints.workpiece_types.is_empty()
+        || !constraints.workpiece_sites.is_empty()
+        || !constraints.workpiece_holders.is_empty()
+        || !constraints.workpiece_carriers.is_empty()
+        || state_machine
+            .transitions
+            .iter()
+            .any(|transition| !transition.effects.is_empty())
+}
+
+fn erase_workpiece_semantics_from_constraints(constraints: &ConstraintSet) -> ConstraintSet {
+    let mut erased = constraints.clone();
+    erased.workpiece_types.clear();
+    erased.workpiece_sites.clear();
+    erased.workpiece_holders.clear();
+    erased.workpiece_carriers.clear();
+    erased
+}
+
+fn erase_workpiece_semantics_from_state_machine(state_machine: &StateMachine) -> StateMachine {
+    let mut erased = state_machine.clone();
+    for transition in &mut erased.transitions {
+        transition.effects.clear();
+    }
+    erased
 }
 
 fn assign_state_ids(state_machine: &StateMachine) -> HashMap<(String, String), i32> {
@@ -480,10 +537,15 @@ fn collect_timers(
     out
 }
 
-fn emit_header(out: &mut String, config: &StCodegenConfig) {
+fn emit_header(out: &mut String, config: &StCodegenConfig, workpiece_semantics_erased: bool) {
     out.push_str("(* Generated by RustPLC ST Codegen *)\n");
     if !config.source_file.is_empty() {
         out.push_str(&format!("(* Source: {} *)\n", config.source_file));
+    }
+    if workpiece_semantics_erased {
+        out.push_str(
+            "(* Workpiece verification semantics erased before ST codegen; executable control semantics only. *)\n",
+        );
     }
     if config.include_verification_summary {
         out.push_str("(* Verification: produced by RustPLC semantic + verification pipeline *)\n");
@@ -696,6 +758,7 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             distance_raw,
             speed_raw,
             port: _,
+            semantic_tag: _,
             timeout,
             on_reject,
             on_motion_fault,
@@ -723,6 +786,7 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             speed_raw,
             require_homed: _,
             port: _,
+            semantic_tag: _,
             timeout,
             on_reject,
             on_motion_fault,
@@ -1138,8 +1202,11 @@ fn state_id_of(state: &State, state_ids: &HashMap<(String, String), i32>) -> Opt
 mod tests {
     use super::*;
     use crate::ir::{
-        AxisFaultBranch, AxisFaultCategory, AxisFaultKind, AxisTimeoutBranch, StateMachine,
-        TimerOperation, Transition, TransitionAction, TransitionGuard,
+        AxisFaultBranch, AxisFaultCategory, AxisFaultKind, AxisTimeoutBranch, ConstraintSet,
+        StateMachine, TimerOperation, Transition, TransitionAction, TransitionGuard,
+        WorkpieceCarrierDef, WorkpieceCarrierLayoutDef, WorkpieceEffect, WorkpieceHolderDef,
+        WorkpiecePropertyDef, WorkpiecePropertyTypeDef, WorkpieceSiteDef, WorkpieceSiteKind,
+        WorkpieceTypeDef,
     };
     use std::collections::BTreeMap;
 
@@ -1166,6 +1233,7 @@ mod tests {
                 to: s1.clone(),
                 guard: TransitionGuard::Always,
                 actions: vec![],
+                effects: vec![],
                 timers: vec![],
             }],
             initial: s1.clone(),
@@ -1182,8 +1250,13 @@ mod tests {
                 .all(|id| *id != RESERVED_INTERNAL_ERROR_STATE_ID)
         );
 
-        let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect("codegen should succeed");
+        let st = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("codegen should succeed");
         assert!(st.contains("_state: INT := 10;"));
         assert!(st.contains("main.s0 = 0"));
         assert!(st.contains("main.s1 = 10"));
@@ -1214,6 +1287,7 @@ mod tests {
                         value: BinaryValue::Off,
                     },
                 ],
+                effects: vec![],
                 timers: vec![],
             }],
             initial: state("main", "idle"),
@@ -1221,8 +1295,13 @@ mod tests {
             task_contexts: vec![],
         };
 
-        let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect("codegen should succeed");
+        let st = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("codegen should succeed");
         assert!(st.contains("_if: BOOL := FALSE;"));
         assert!(st.contains("_u_state: BOOL := FALSE;"));
         assert!(st.contains("valve_a: BOOL := FALSE;"));
@@ -1250,6 +1329,7 @@ mod tests {
                         value: BinaryValue::Off,
                     },
                 ],
+                effects: vec![],
                 timers: vec![],
             }],
             initial: state("main", "idle"),
@@ -1257,8 +1337,13 @@ mod tests {
             task_contexts: vec![],
         };
 
-        let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect_err("must fail");
+        let errors = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect_err("must fail");
         assert!(errors.iter().any(|e| {
             matches!(
                 e,
@@ -1291,6 +1376,7 @@ mod tests {
                         value_raw: "1.0".to_string(),
                     },
                 ],
+                effects: vec![],
                 timers: vec![],
             }],
             initial: state("main", "idle"),
@@ -1298,8 +1384,13 @@ mod tests {
             task_contexts: vec![],
         };
 
-        let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect_err("must fail");
+        let errors = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect_err("must fail");
         assert!(
             errors
                 .iter()
@@ -1320,6 +1411,7 @@ mod tests {
                     target: "flag".to_string(),
                     expr_raw: "1".to_string(),
                 }],
+                effects: vec![],
                 timers: vec![],
             }],
             initial: state("main", "idle"),
@@ -1335,8 +1427,13 @@ mod tests {
             index: 0,
         });
 
-        let st = generate_st(&topology, &sm, &StCodegenConfig::default())
-            .expect("codegen should succeed");
+        let st = generate_st(
+            &topology,
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("codegen should succeed");
         assert!(st.contains("flag: BOOL := FALSE;"));
         assert!(st.contains("flag := TRUE;"));
     }
@@ -1354,6 +1451,7 @@ mod tests {
                     target: "flag".to_string(),
                     expr_raw: "NOT(a) OR (b==1)".to_string(),
                 }],
+                effects: vec![],
                 timers: vec![],
             }],
             initial: state("main", "idle"),
@@ -1381,8 +1479,13 @@ mod tests {
             index: 2,
         });
 
-        let st = generate_st(&topology, &sm, &StCodegenConfig::default())
-            .expect("codegen should succeed");
+        let st = generate_st(
+            &topology,
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("codegen should succeed");
         assert!(
             st.contains("flag := NOT(a) OR (b=1);") || st.contains("flag := (NOT(a) OR (b=1));")
         );
@@ -1405,6 +1508,7 @@ mod tests {
                     expression: "sensor_a >= 1".to_string(),
                 },
                 actions: vec![],
+                effects: vec![],
                 timers: vec![],
             }],
             initial: state("main", "idle"),
@@ -1412,8 +1516,13 @@ mod tests {
             task_contexts: vec![],
         };
 
-        let errors = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect_err("must fail");
+        let errors = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect_err("must fail");
         assert!(errors.iter().any(|e| {
             matches!(
                 e,
@@ -1433,6 +1542,7 @@ mod tests {
                 to: s1,
                 guard: TransitionGuard::Timeout { duration_ms: 500 },
                 actions: vec![],
+                effects: vec![],
                 timers: vec![TimerOperation {
                     timer_name: "phase_timer".to_string(),
                     operation: TimerOperationKind::Cancel,
@@ -1444,8 +1554,13 @@ mod tests {
             task_contexts: vec![],
         };
 
-        let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect("codegen should succeed");
+        let st = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("codegen should succeed");
         let timer_pos = st
             .find("_timer_0(IN := _state = 0, PT := T#500ms);")
             .expect("timer call should exist");
@@ -1471,6 +1586,7 @@ mod tests {
                         target: "Valve-A".to_string(),
                         port: "self".to_string(),
                     }],
+                    effects: vec![],
                     timers: vec![],
                 },
                 Transition {
@@ -1484,6 +1600,7 @@ mod tests {
                         port: "self".to_string(),
                         value_raw: "6.2".to_string(),
                     }],
+                    effects: vec![],
                     timers: vec![],
                 },
             ],
@@ -1492,8 +1609,13 @@ mod tests {
             task_contexts: vec![],
         };
 
-        let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect("codegen should succeed");
+        let st = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("codegen should succeed");
         assert!(st.contains("valve_a: BOOL := FALSE;"));
         assert!(st.contains("sensor_a_ext: BOOL := FALSE;"));
         assert!(st.contains("pressure_in: REAL := 0.0;"));
@@ -1511,6 +1633,7 @@ mod tests {
                 to: race.clone(),
                 guard: TransitionGuard::Always,
                 actions: vec![],
+                effects: vec![],
                 timers: vec![],
             }],
             initial: parallel,
@@ -1518,8 +1641,13 @@ mod tests {
             task_contexts: vec![],
         };
 
-        let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect("codegen should succeed");
+        let st = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("codegen should succeed");
         assert!(st.contains("CASE _state OF"));
     }
 
@@ -1542,6 +1670,7 @@ mod tests {
                         target: "Valve-A".to_string(),
                         port: "self".to_string(),
                     }],
+                    effects: vec![],
                     timers: vec![],
                 },
                 Transition {
@@ -1549,6 +1678,7 @@ mod tests {
                     to: s2.clone(),
                     guard: TransitionGuard::Timeout { duration_ms: 500 },
                     actions: vec![],
+                    effects: vec![],
                     timers: vec![],
                 },
                 Transition {
@@ -1558,6 +1688,7 @@ mod tests {
                     actions: vec![TransitionAction::Log {
                         message: "trip".to_string(),
                     }],
+                    effects: vec![],
                     timers: vec![],
                 },
             ],
@@ -1566,8 +1697,13 @@ mod tests {
             task_contexts: vec![],
         };
 
-        let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect("codegen should succeed");
+        let st = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("codegen should succeed");
 
         assert!(st.contains("PROGRAM Main"));
         assert!(st.contains("VAR"));
@@ -1596,6 +1732,7 @@ mod tests {
                     port: "self".to_string(),
                     distance_raw: "10".to_string(),
                     speed_raw: "2".to_string(),
+                    semantic_tag: None,
                     timeout: AxisTimeoutBranch {
                         duration_ms: 500,
                         target_task: "fault".to_string(),
@@ -1629,6 +1766,7 @@ mod tests {
                     on_motion_fault_routes: vec![],
                     on_safety_fault_routes: vec![],
                 }],
+                effects: vec![],
                 timers: vec![],
             }],
             initial: s0,
@@ -1636,13 +1774,126 @@ mod tests {
             task_contexts: vec![],
         };
 
-        let st = generate_st(&empty_topology(), &sm, &StCodegenConfig::default())
-            .expect("axis move codegen should succeed");
+        let st = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("axis move codegen should succeed");
         assert!(st.contains("AXIS_MOVE_RELATIVE axis_x distance=10 speed=2"));
         assert!(st.contains("timeout=500ms->fault.timeout"));
         assert!(st.contains("on_reject->fault.reject[AXIS_REJECT]"));
         assert!(st.contains("on_motion_fault->fault.motion_fault[AXIS_MOTION]"));
         assert!(st.contains("on_safety_fault->fault.safety_fault[AXIS_SAFETY]"));
         assert!(st.contains("routes:-|-|-"));
+    }
+
+    #[test]
+    fn generate_st_rejects_semantic_resource_interlock() {
+        let s0 = state("motion", "run");
+        let sm = StateMachine {
+            states: vec![s0.clone()],
+            transitions: vec![],
+            initial: s0,
+            analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
+        };
+        let constraints = ConstraintSet {
+            safety: vec![],
+            workpiece_types: vec![],
+            workpiece_sites: vec![],
+            workpiece_holders: vec![],
+            workpiece_carriers: vec![],
+            semantic_resources: vec![crate::ir::SemanticResource {
+                name: "slide_pick_zone".to_string(),
+                mode: crate::ir::SemanticResourceMode::Exclusive,
+                purpose: None,
+            }],
+            resource_claims: vec![],
+            timing: vec![],
+            causality: vec![],
+        };
+
+        let errors = generate_st(
+            &empty_topology(),
+            &constraints,
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect_err("SRI should be rejected by ST backend");
+        assert!(errors.iter().any(|error| {
+            matches!(error, StCodegenError::SemanticResourceInterlockUnsupported)
+        }));
+    }
+
+    #[test]
+    fn generate_st_erases_workpiece_semantics_before_codegen() {
+        let s0 = state("transfer", "pick");
+        let s1 = state("transfer", "place");
+        let sm = StateMachine {
+            states: vec![s0.clone(), s1.clone()],
+            transitions: vec![Transition {
+                from: s0.clone(),
+                to: s1.clone(),
+                guard: TransitionGuard::Always,
+                actions: vec![],
+                effects: vec![WorkpieceEffect::Acquire {
+                    holder: "arm".to_string(),
+                    from: "infeed".to_string(),
+                }],
+                timers: vec![],
+            }],
+            initial: s0,
+            analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
+        };
+        let constraints = ConstraintSet {
+            safety: vec![],
+            workpiece_types: vec![WorkpieceTypeDef {
+                name: "part".to_string(),
+                properties: vec![WorkpiecePropertyDef {
+                    name: "inspected".to_string(),
+                    property_type: WorkpiecePropertyTypeDef::Bool,
+                }],
+                normal_terminal_states: vec!["finished".to_string()],
+                abnormal_terminal_states: vec!["rejected".to_string()],
+                ingress_sites: vec!["infeed".to_string()],
+                normal_egress_sites: vec!["outfeed".to_string()],
+                abnormal_egress_sites: vec!["reject_bin".to_string()],
+                allows: vec![],
+                derived_from: vec![],
+            }],
+            workpiece_sites: vec![WorkpieceSiteDef {
+                name: "infeed".to_string(),
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            }],
+            workpiece_holders: vec![WorkpieceHolderDef {
+                name: "arm".to_string(),
+                capacity: 1,
+            }],
+            workpiece_carriers: vec![WorkpieceCarrierDef {
+                name: "tray".to_string(),
+                layout: WorkpieceCarrierLayoutDef::Slots { count: 4 },
+            }],
+            semantic_resources: vec![],
+            resource_claims: vec![],
+            timing: vec![],
+            causality: vec![],
+        };
+
+        let st = generate_st(
+            &empty_topology(),
+            &constraints,
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("workpiece verification semantics should be erased for ST codegen");
+
+        assert!(st.contains("Workpiece verification semantics erased before ST codegen"));
+        assert!(st.contains("transfer.pick = 0"));
+        assert!(st.contains("transfer.place = 10"));
+        assert!(!st.contains("acquire holder arm from infeed"));
     }
 }

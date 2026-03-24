@@ -181,7 +181,7 @@ pub fn generate_program_module(
 
     if program.pid_loops.is_empty() {
         out.push_str(
-            "  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[], var_init: &[], cam_configs: &[], cam_tables: &[], axis_fault_policies: &[] };\n",
+            "  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &[], var_init: &[], cam_configs: &[], cam_tables: &[], axis_fault_policies: &[], semantic_resources: &[], resource_claims: &[], workpiece_types: &[], workpiece_sites: &[], workpiece_holders: &[] };\n",
         );
     } else {
         out.push_str(&format!(
@@ -194,7 +194,7 @@ pub fn generate_program_module(
             out.push_str(",\n");
         }
         out.push_str("  ];\n\n");
-        out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &PID_LOOPS, var_init: &[], cam_configs: &[], cam_tables: &[], axis_fault_policies: &[] };\n");
+        out.push_str("  pub static PROGRAM: Program<'static> = Program { tasks: &TASKS, pid_loops: &PID_LOOPS, var_init: &[], cam_configs: &[], cam_tables: &[], axis_fault_policies: &[], semantic_resources: &[], resource_claims: &[], workpiece_types: &[], workpiece_sites: &[], workpiece_holders: &[] };\n");
     }
     out.push_str("}\n");
 
@@ -266,6 +266,59 @@ fn format_action(a: &Action) -> String {
             command.require_homed,
             format_axis_timeout(command.timeout),
             format_axis_fault_routing(command.fault_routing),
+        ),
+        Action::WorkpieceAcquire {
+            workpiece_type,
+            holder,
+            from,
+        } => format!(
+            "Action::WorkpieceAcquire {{ workpiece_type: {:?}, holder: {:?}, from: {:?} }}",
+            workpiece_type, holder, from
+        ),
+        Action::WorkpieceTransfer { from, to } => format!(
+            "Action::WorkpieceTransfer {{ from: {:?}, to: {:?} }}",
+            from, to
+        ),
+        Action::WorkpieceFinish { at, terminal_state } => format!(
+            "Action::WorkpieceFinish {{ at: {:?}, terminal_state: {:?} }}",
+            at, terminal_state
+        ),
+        Action::WorkpieceMount {
+            workpiece_type,
+            slot,
+        } => format!(
+            "Action::WorkpieceMount {{ workpiece_type: {:?}, slot: {:?} }}",
+            workpiece_type, slot
+        ),
+        Action::WorkpieceUnmount {
+            workpiece_type,
+            slot,
+            to,
+        } => format!(
+            "Action::WorkpieceUnmount {{ workpiece_type: {:?}, slot: {:?}, to: {:?} }}",
+            workpiece_type, slot, to
+        ),
+        Action::WorkpieceTransformCarrier { carrier, frame } => format!(
+            "Action::WorkpieceTransformCarrier {{ carrier: {:?}, frame: {:?} }}",
+            carrier, frame
+        ),
+        Action::WorkpieceSplit {
+            source_type,
+            target_type,
+            count,
+            consumed,
+        } => format!(
+            "Action::WorkpieceSplit {{ source_type: {:?}, target_type: {:?}, count: {}, consumed: {:?} }}",
+            source_type, target_type, count, consumed
+        ),
+        Action::WorkpieceMerge {
+            input_refs,
+            input_types,
+            target_type,
+            consumed_inputs,
+        } => format!(
+            "Action::WorkpieceMerge {{ input_refs: {:?}, input_types: {:?}, target_type: {:?}, consumed_inputs: {:?} }}",
+            input_refs, input_types, target_type, consumed_inputs
         ),
         Action::Extend { output } => {
             format!("Action::Extend {{ output: DigitalOutputId({}) }}", output.0)
@@ -673,6 +726,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let src = generate_program_module(&PROGRAM, "gen").expect("codegen ok");

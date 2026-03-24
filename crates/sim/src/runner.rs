@@ -167,6 +167,11 @@ mod tests {
             cam_configs: &[],
             cam_tables: &[],
             axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
         };
 
         let yaml = r#"

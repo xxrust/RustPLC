@@ -5,6 +5,9 @@ COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
 identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
 number = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
 integer = @{ ASCII_DIGIT+ }
+slot_selector = @{ "*" | integer | identifier }
+slot_reference = @{ identifier ~ ".slot[" ~ slot_selector ~ ("," ~ slot_selector)* ~ "]" }
+workpiece_reference = @{ slot_reference | identifier }
 
 string_literal = @{ "\"" ~ ("\\\"" | !"\"" ~ ANY)* ~ "\"" }
 state_reference = @{ identifier ~ "." ~ identifier ~ ("." ~ identifier)? }
@@ -12,6 +15,9 @@ duration_value = @{ number ~ ("ms" | "s") }
 measured_value = @{ number ~ ASCII_ALPHA+ }
 boolean_value = { "true" | "false" }
 identifier_list = { "[" ~ identifier ~ ("," ~ identifier)* ~ ","? ~ "]" }
+workpiece_reference_list = {
+    "[" ~ workpiece_reference ~ ("," ~ workpiece_reference)* ~ ","? ~ "]"
+}
 
 section_topology = { "[" ~ "topology" ~ "]" }
 section_constraints = { "[" ~ "constraints" ~ "]" }
@@ -175,11 +181,95 @@ relation_field = { relation_field_name ~ ":" ~ relation_field_value }
 relation_declaration = { "relation" ~ "{" ~ relation_field ~ ((","? ~ relation_field))* ~ ","? ~ "}" }
 topology_entry = _{
     device_declaration
+    | workpiece_type_declaration
+    | workpiece_site_declaration
+    | workpiece_holder_declaration
+    | workpiece_carrier_declaration
+    | semantic_resource_declaration
     | relation_declaration
     | variable_declaration
     | cam_table_declaration
     | extern_function_declaration
     | axis_fault_contract_declaration
+}
+
+semantic_resource_mode = { "exclusive" }
+semantic_resource_entry_name = { "mode" | "purpose" }
+semantic_resource_entry_value = { semantic_resource_mode | string_literal }
+semantic_resource_entry = {
+    semantic_resource_entry_name ~ ":" ~ semantic_resource_entry_value
+}
+semantic_resource_block = { "{" ~ semantic_resource_entry* ~ "}" }
+semantic_resource_declaration = {
+    "resource" ~ identifier ~ ":" ~ "semantic_resource" ~ semantic_resource_block?
+}
+
+workpiece_property_type = {
+    "bool"
+    | ("enum" ~ "(" ~ identifier ~ ("," ~ identifier)* ~ ","? ~ ")")
+}
+workpiece_property = { identifier ~ ":" ~ workpiece_property_type }
+workpiece_property_list = {
+    "[" ~ workpiece_property ~ ("," ~ workpiece_property)* ~ ","? ~ "]"
+}
+workpiece_type_entry_name = {
+    "properties"
+    | "normal_terminal_states"
+    | "abnormal_terminal_states"
+    | "ingress_sites"
+    | "normal_egress_sites"
+    | "abnormal_egress_sites"
+    | "allows"
+    | "derived_from"
+}
+workpiece_allow_rule = { "split_into" ~ "(" ~ identifier ~ ")" }
+workpiece_allow_rule_list = {
+    "[" ~ workpiece_allow_rule ~ ("," ~ workpiece_allow_rule)* ~ ","? ~ "]"
+}
+workpiece_derivation_rule = {
+    ("merge" ~ "(" ~ identifier ~ ("," ~ identifier)+ ~ ")")
+    | identifier
+}
+workpiece_derivation_rule_list = {
+    "[" ~ workpiece_derivation_rule ~ ("," ~ workpiece_derivation_rule)* ~ ","? ~ "]"
+}
+workpiece_type_entry_value = {
+    workpiece_property_list
+    | workpiece_reference_list
+    | workpiece_allow_rule_list
+    | workpiece_derivation_rule_list
+    | identifier_list
+}
+workpiece_type_entry = { workpiece_type_entry_name ~ ":" ~ workpiece_type_entry_value }
+workpiece_type_block = { "{" ~ workpiece_type_entry* ~ "}" }
+workpiece_type_declaration = {
+    "workpiece" ~ identifier ~ ":" ~ "workpiece_type" ~ workpiece_type_block?
+}
+
+workpiece_site_kind = { "workpiece_location" | "carrier_location" }
+workpiece_site_entry = { "capacity" ~ ":" ~ integer }
+workpiece_site_block = { "{" ~ workpiece_site_entry* ~ "}" }
+workpiece_site_declaration = {
+    ("site" | "location") ~ identifier ~ ":" ~ workpiece_site_kind ~ workpiece_site_block?
+}
+
+workpiece_holder_entry = { "capacity" ~ ":" ~ integer }
+workpiece_holder_block = { "{" ~ workpiece_holder_entry* ~ "}" }
+workpiece_holder_declaration = {
+    "holder" ~ identifier ~ ":" ~ "workpiece_holder" ~ workpiece_holder_block?
+}
+
+workpiece_carrier_layout = {
+    "grid" ~ "(" ~ "rows" ~ ":" ~ integer ~ "," ~ "cols" ~ ":" ~ integer ~ ")"
+}
+workpiece_carrier_entry_name = { "slots" | "layout" }
+workpiece_carrier_entry_value = { integer | workpiece_carrier_layout }
+workpiece_carrier_entry = {
+    workpiece_carrier_entry_name ~ ":" ~ workpiece_carrier_entry_value
+}
+workpiece_carrier_block = { "{" ~ workpiece_carrier_entry* ~ "}" }
+workpiece_carrier_declaration = {
+    "carrier" ~ identifier ~ ":" ~ "workpiece_carrier" ~ workpiece_carrier_block?
 }
 
 topology_section = { section_topology ~ topology_entry* }
@@ -190,6 +280,10 @@ analog_condition = { (state_reference | identifier) ~ comparison_operator ~ (mea
 safety_operand = { analog_condition | state_reference }
 safety_constraint = {
     "safety" ~ ":" ~ safety_operand ~ safety_relation ~ safety_operand ~ reason_clause?
+}
+resource_claim_source = { state_reference | ("action_tag" ~ identifier) }
+resource_claim_constraint = {
+    "claim" ~ ":" ~ resource_claim_source ~ "occupies" ~ identifier ~ reason_clause?
 }
 
 timing_scope = { "task" ~ "." ~ identifier ~ ("." ~ identifier)? }
@@ -206,6 +300,7 @@ reason_clause = { "reason" ~ ":" ~ string_literal }
 
 constraint_declaration = {
     safety_constraint
+    | resource_claim_constraint
     | timing_constraint
     | causality_constraint
 }
@@ -313,6 +408,31 @@ condition_value = {
 }
 
 action_statement = { "action" ~ ":" ~ action_command }
+effect_endpoint = { workpiece_reference }
+effect_acquire = { "acquire" ~ "holder" ~ identifier ~ "from" ~ effect_endpoint }
+effect_transfer = { "transfer" ~ "from" ~ effect_endpoint ~ "to" ~ effect_endpoint }
+effect_finish = { "finish" ~ "workpiece" ~ "at" ~ identifier ~ "as" ~ identifier }
+effect_mount = { "mount" ~ identifier ~ "on" ~ slot_reference }
+effect_unmount = { "unmount" ~ identifier ~ "from" ~ slot_reference ~ "to" ~ effect_endpoint }
+effect_split = { "split" ~ identifier ~ "into" ~ identifier ~ "count" ~ integer ~ "consumed" }
+effect_merge_input_list = { "[" ~ identifier ~ ("," ~ identifier)+ ~ ","? ~ "]" }
+effect_merge = {
+    "merge" ~ effect_merge_input_list ~ "into" ~ identifier ~ "consumed_inputs"
+}
+effect_transform_carrier = {
+    "transform" ~ "carrier" ~ identifier ~ "to" ~ "frame" ~ identifier
+}
+effect_command = {
+    effect_acquire
+    | effect_transfer
+    | effect_finish
+    | effect_mount
+    | effect_unmount
+    | effect_split
+    | effect_merge
+    | effect_transform_carrier
+}
+effect_statement = { "effect" ~ ":" ~ effect_command }
 condition_expr = { expr_add ~ comparison_operator ~ expr_add }
 simple_condition = { condition_operand ~ comparison_operator ~ condition_value | condition_expr }
 logical_operator = { "AND" | "OR" }
@@ -339,6 +459,7 @@ axis_fault_route_matcher = {
 axis_on_reject_branch = { "on_reject" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
 axis_on_motion_fault_branch = { "on_motion_fault" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
 axis_on_safety_fault_branch = { "on_safety_fault" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
+axis_semantic_tag_branch = { "semantic_tag" ~ ":" ~ identifier }
 axis_move_statement = {
     "action"
     ~ ":"
@@ -347,6 +468,7 @@ axis_move_statement = {
     ~ axis_on_reject_branch*
     ~ axis_on_motion_fault_branch*
     ~ axis_on_safety_fault_branch*
+    ~ axis_semantic_tag_branch?
 }
 
 repeat_block = { "repeat" ~ integer ~ ":" ~ step_statement+ }
@@ -355,6 +477,7 @@ if_else_statement = { "if" ~ ":" ~ simple_condition ~ goto_statement ~ "else" ~ 
 
 parallel_branch_statement = {
     action_statement
+    | effect_statement
     | wait_statement
     | delay_statement
     | timeout_statement
@@ -368,6 +491,7 @@ parallel_statement = { "parallel" ~ ":" ~ parallel_branch+ }
 
 race_branch_statement = {
     action_statement
+    | effect_statement
     | wait_statement
     | delay_statement
     | timeout_statement
@@ -382,6 +506,7 @@ race_statement = { "race" ~ ":" ~ race_branch+ }
 step_statement = {
     axis_move_statement
     | action_statement
+    | effect_statement
     | wait_statement
     | delay_statement
     | timeout_statement

@@ -309,11 +309,38 @@ Full documentation available on **[GitHub Wiki](https://github.com/xxrust/RustPL
 | [Contributing](https://github.com/xxrust/RustPLC/wiki/Contributing) | Development guide |
 
 **Local Documentation (in repo):**
+- Platform vision: [`docs/wiki/AI-for-AI-Platform-Vision.md`](docs/wiki/AI-for-AI-Platform-Vision.md)
+- Workpiece-to-ST policy: [`docs/workpiece_to_st_codegen_policy.md`](docs/workpiece_to_st_codegen_policy.md)
 - Scenario system: [`docs/scenario_playbook.md`](docs/scenario_playbook.md), [`docs/scenario_minimization.md`](docs/scenario_minimization.md)
 - No-board delivery: [`docs/no_board_playbook.md`](docs/no_board_playbook.md)
 - Motion control: [`docs/stepper_ab_encoder.md`](docs/stepper_ab_encoder.md)
 - Recovery templates: [`docs/recovery_templates_sequence_lint.md`](docs/recovery_templates_sequence_lint.md)
 - Topology refactor: [`docs/topology_perf_baseline.md`](docs/topology_perf_baseline.md), [`docs/testing_inventory_matrix.md`](docs/testing_inventory_matrix.md)
+
+---
+
+## AI for AI Direction
+
+RustPLC is not just moving toward "AI helps humans write PLC programs." The stronger direction is to become an `AI for AI` engineering platform:
+
+- AI agents generate control intent, topology, constraints, scenarios, and regression assets
+- the compiler collapses those artifacts into one IR and proves key properties on it
+- runtime, simulation, and codegen turn the result into executable and auditable deliverables
+- human engineers move up the stack: define boundaries, review evidence, approve release
+
+That direction only works if four contracts stay intact:
+
+- AI-generated artifacts must enter a unified semantic model instead of staying as prompt text
+- generated results must be constrained by verification, simulation, and traceability
+- code generation must be explicit about preserved semantics versus erased semantics
+- release bundles must be reproducible by another AI system or another engineer
+
+The differentiator is not "yet another generator." It is an engineering loop where AI output is:
+
+- verifiable
+- executable
+- auditable
+- repeatable
 
 ---
 

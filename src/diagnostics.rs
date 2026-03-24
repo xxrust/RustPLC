@@ -413,7 +413,8 @@ impl PlcEvidence {
             StepStatement::IfElse { .. }
             | StepStatement::Delay { .. }
             | StepStatement::Goto(_)
-            | StepStatement::AllowIndefiniteWait(_) => {}
+            | StepStatement::AllowIndefiniteWait(_)
+            | StepStatement::Effect(_) => {}
         }
     }
 
