@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 def register_prompt_templates(mcp: FastMCP):
 
     @mcp.prompt()
-    def generate_plc_from_description(description: str) -> str:
+    def generate_plc_from_requirements(description: str) -> str:
         """
         从自然语言工艺描述生成 RustPLC DSL 程序。
         按照 SKILL.md 的四阶段流程执行，多轮确认后生成可验证的 .plc 文件。

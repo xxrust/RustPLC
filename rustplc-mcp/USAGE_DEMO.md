@@ -39,7 +39,7 @@
 
 **Claude Code 执行流程：**
 
-1. **调用 `get_plc_generation_guide` 工具**
+1. **调用 `get_rustplc_skill_guide` 工具**
    - 获取完整的 SKILL.md 内容
    - 了解四阶段生成流程
 
@@ -338,8 +338,8 @@ task done:
 
 ### 访问生成指引
 ```
-@rustplc://skill/plc-gen              # 完整指引
-@rustplc://skill/plc-gen/summary      # 简要摘要
+@rustplc://skill/rustplc              # 统一 skill 指引
+@rustplc://skill/rustplc/summary      # 简要摘要
 ```
 
 ## 调试技巧

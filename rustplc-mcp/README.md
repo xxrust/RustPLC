@@ -6,7 +6,7 @@
 
 ### Tools（可执行工具）
 
-- **get_plc_generation_guide** - 获取完整的 DSL 生成指引（SKILL.md）
+- **get_rustplc_skill_guide** - 获取统一的 RustPLC skill 指引（SKILL.md）
 - **validate_plc** - 验证 .plc 文件是否通过四大验证引擎（Safety/Liveness/Timing/Causality）
 - **compile_plc** - 编译 .plc 文件并返回 IR JSON 和验证报告
 
@@ -14,11 +14,11 @@
 
 - **rustplc://examples/\*** - 访问所有示例 .plc 文件
 - **rustplc://docs/\*** - 访问技术文档
-- **rustplc://skill/plc-gen** - 访问完整的生成指引
+- **rustplc://skill/rustplc** - 访问统一的 RustPLC skill 指引
 
 ### Prompts（可复用模板）
 
-- **generate_plc_from_description** - 从自然语言生成 .plc 程序
+- **generate_plc_from_requirements** - 从需求生成 .plc 程序
 - **two_cylinder_template** - 双气缸顺序动作模板
 - **extern_function_template** - Extern 函数声明模板
 - **pid_control_template** - PID 闭环控制模板
@@ -83,7 +83,7 @@ claude mcp add --transport stdio rustplc -- python -m rustplc_mcp
 用户: "帮我生成一个双缸顺序动作的 PLC 程序"
 
 Claude Code 会：
-1. 调用 get_plc_generation_guide 获取生成指引
+1. 调用 get_rustplc_skill_guide 获取生成指引
 2. 执行四阶段流程（.system.md → 理解工艺 → 推理拓扑 → 推导约束 → 生成 DSL）
 3. 每个阶段都会等待你确认
 4. 最终生成 .plc 文件并自动调用 validate_plc 验证
@@ -149,16 +149,16 @@ Claude Code 会：
 ### 生成指引
 
 ```
-@rustplc://skill/plc-gen         # 完整的生成指引（SKILL.md）
-@rustplc://skill/plc-gen/summary # 简要摘要
+@rustplc://skill/rustplc         # 统一的 RustPLC skill 指引
+@rustplc://skill/rustplc/summary # 简要摘要
 ```
 
 ## 可用 Prompts
 
-### generate_plc_from_description
+### generate_plc_from_requirements
 
 ```
-/mcp__rustplc__generate_plc_from_description "推料缸把工件推到位，传感器检测到后压紧缸下压"
+/mcp__rustplc__generate_plc_from_requirements "推料缸把工件推到位，传感器检测到后压紧缸下压"
 ```
 
 ### two_cylinder_template
@@ -283,8 +283,8 @@ def my_template(param: str) -> str:
 
 ### Phase 1: MVP（已完成）
 - [x] Python FastMCP 服务器框架
-- [x] Tool: get_plc_generation_guide, validate_plc, compile_plc
-- [x] Resource: examples/\*, docs/\*, skill/plc-gen
+- [x] Tool: get_rustplc_skill_guide, validate_plc, compile_plc
+- [x] Resource: examples/\*, docs/\*, skill/rustplc
 - [x] Prompt: 4 个常见场景模板
 - [x] Stdio 传输支持
 - [x] 基础文档

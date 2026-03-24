@@ -59,7 +59,7 @@ All tests passed! MCP server is ready.
 你: "帮我生成一个双缸顺序动作的 PLC 程序"
 
 Claude Code 会：
-1. 调用 get_plc_generation_guide 获取生成指引
+1. 调用 get_rustplc_skill_guide 获取生成指引
 2. 执行四阶段流程（.system.md → 理解工艺 → 推理拓扑 → 推导约束 → 生成 DSL）
 3. 每个阶段都会等待你确认
 4. 最终生成 .plc 文件并自动调用 validate_plc 验证
@@ -100,17 +100,17 @@ Claude Code 会：
 ## 可用工具
 
 ### Tools
-- `get_plc_generation_guide` - 获取完整的 DSL 生成指引
+- `get_rustplc_skill_guide` - 获取统一的 RustPLC skill 指引
 - `validate_plc` - 验证 .plc 文件
 - `compile_plc` - 编译并返回 IR JSON
 
 ### Resources
 - `@rustplc://examples/<filename>` - 访问示例文件
 - `@rustplc://docs/<filename>` - 访问技术文档
-- `@rustplc://skill/plc-gen` - 访问生成指引
+- `@rustplc://skill/rustplc` - 访问统一 skill 指引
 
 ### Prompts
-- `/mcp__rustplc__generate_plc_from_description <描述>`
+- `/mcp__rustplc__generate_plc_from_requirements <描述>`
 - `/mcp__rustplc__two_cylinder_template <start_mode> <cycle_mode>`
 - `/mcp__rustplc__extern_function_template <参数>`
 - `/mcp__rustplc__pid_control_template <参数>`

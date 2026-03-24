@@ -2,9 +2,9 @@
 RustPLC MCP Server
 
 Exposes RustPLC compiler capabilities as MCP primitives:
-- Tools: generate_plc, validate_plc, compile_plc
-- Resources: examples/*.plc, docs/*.md, skill/plc-gen
-- Prompts: common scenario templates
+- Tools: skill guide access, validate_plc, compile_plc
+- Resources: examples/*.plc, docs/*.md, skill/rustplc
+- Prompts: requirement-to-code templates
 """
 
 from mcp.server.fastmcp import FastMCP
