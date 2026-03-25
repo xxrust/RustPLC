@@ -1,450 +1,131 @@
 ---
 name: plc-system
-description: "Generate system semantic description (.system.md) from natural language descriptions of industrial control scenarios. This is the first step before generating PLC code. Use when a user wants to analyze requirements, define project scope, or create a system description. Triggers on: 生成系统描述, 写system.md, 分析plc项目, create system description, analyze plc requirements."
+description: "Generate or repair a RustPLC system semantic description (.system.md) before PLC code generation. Use when the user wants to analyze PLC requirements, define project scope, create main.system.md, or turn process intent into a stable system contract."
 ---
 
-# RustPLC System Description Generator
+# plc-system
 
-从工程师的自然语言工艺描述，通过多轮对话确认，生成项目顶层语义描述（`.system.md`）。这是 PLC 代码生成的第一步，定义了"这是什么系统、为谁服务、安全等级多高、核心工艺意图是什么"。
+Generate a confirmed `.system.md` that downstream PLC generation can trust.
 
-## Gate-A 语义基线（并发 task + 阻塞 step）
+Keep the skill narrow:
+- define system identity, safety level, process intent, task boundaries, and key constraints
+- do not generate `.plc` here
+- do not dump a questionnaire
 
-- 涉及 task/step 的语义，以 `docs/architecture/signal-direction.md` 为唯一来源。
-- `.system.md` 必须明确并发 task 划分、blocking step 预期和阻塞隔离边界，供后续 `plc-gen` 映射到 IR/runtime/verification。
-- “单执行点在 task.step 间跳转”的表述只能用于迁移差异说明，不能作为新项目语义目标。
+## Required Semantics
 
-## 核心理念
+Treat `docs/architecture/signal-direction.md` as the source of truth for:
+- concurrent tasks
+- blocking steps
+- blocking isolation
 
-工程师通常会说：
+Model the system in terms that can later enter:
+- semantic checks
+- runtime
+- safety / liveness / timing / causality verification
 
-> "推料缸把工件推到位，传感器检测到后，压紧缸下压，压紧到位后冲压缸动作，完成后全部缩回。"
+Do not describe the system as a single execution pointer jumping across `task.step`.
 
-你的工作是从这段描述中提取：
-1. **项目定位** — 这是什么项目？部署在哪？谁用？
-2. **安全等级** — 失效后果是什么？需要什么级别的保护？
-3. **工艺流程** — 完整的动作序列、异常处理、特殊工况
-4. **启动停机** — 如何初始化？如何安全停机？
-5. **测试策略** — 如何调试？需要什么测试模式？
+## Default Workflow
 
-整个过程需要与工程师多轮确认，不要一次性生成最终结果。
+1. Read the requirement and propose a concrete system interpretation first.
+2. Ask only 1 to 3 blocking questions if safety, task boundaries, or fault handling are still ambiguous.
+3. Produce a `.system.md` with stable sections.
+4. Get confirmation or note explicit assumptions.
+5. Hand off to PLC generation.
 
----
-
-## 建议优先规则
-
-在向用户提问之前，先完成一次最小化工程判断：基于用户已提供的信息、典型工业场景、风险等级、常见 PLC 设计约束，判断当前问题是否已经足以给出**有责任边界的建议方案**。
-
-- 如果可以给出建议：必须先给建议，再让用户确认或修正，不能只抛空问题。
-- 如果存在多个合理方案：必须给出推荐方案、说明推荐理由，并列出 1~2 个备选方向的适用条件。
-- 如果信息不足以负责任地建议：必须明确说明“缺什么信息、为什么缺了就不能建议”，然后再要求用户回答。
-- 不允许输出长串无优先级问卷；只追问那些会实质影响安全等级、task 划分、blocking step 语义、关键 I/O 契约、初始化/停机策略的问题。
-
-建议式提问统一采用下面结构：
+Use this response shape when information is mostly clear:
 
 ```text
-当前建议：...
-理由：...
-请确认是否采用；如果不采用，请告诉我你的实际约束/偏好：...
+Current recommendation: ...
+Reason: ...
+Please confirm. If not, state the real constraint.
 ```
 
-如果完全无法建议，统一采用下面结构：
+Use this response shape only when responsible advice is impossible:
 
 ```text
-这里我暂时不能负责任地给建议，因为还缺少：...
-这个信息会直接影响：...
-请你先回答：...
+I cannot make a responsible recommendation yet because I still need: ...
+This directly affects: ...
+Please confirm: ...
 ```
 
----
+## Preferred Output Sections
 
-## 工作流程
+Always include:
+- project identity
+- system mission
+- safety and reliability level
+- operating environment
+- normal process flow
+- abnormal handling
+- concurrent task partition
+- blocking step expectations
+- startup and stop flow
+- testing and maintenance modes
+- key constraints
+- AI generation guidance
 
-### 第一步：理解项目背景
+Add an axis section when motion axes exist:
+- parameter layering (`model_ref` / `config_ref` / `motion_param_set`)
+- homing / soft limits
+- fault policy
+- propagation scope
 
-收到工程师的描述后，先自行判断哪些问题已经可以给出建议，优先用“建议 + 理由 + 请确认/修正”的方式确认；只有在无法负责任建议时，才直接要求工程师补充信息。
+## Task and Blocking Rules
 
-推荐优先级：
+The `.system.md` must state:
+- which activities should become separate tasks
+- which waits are blocking steps
+- which tasks must continue while another task is blocked
+- which resources are shared or mutually exclusive
 
-1. 先判断安全等级和失效后果能否给出初步建议
-2. 再判断部署场景、最终用户、监管约束能否给出分类建议
-3. 最后再追问运行环境、控制器、通信等实现细节
+At minimum, call out:
+- `wait`
+- `delay`
+- `timeout`
+- `axis.move_*`
+- human confirmation waits
+- external feedback waits
 
-例如，不要只问“属于什么行业”，而应优先写成：
+## High-Impact Topics
+
+Prioritize these questions or recommendations:
+- system safety class and failure consequence
+- start mode and cycle mode
+- startup / reset / e-stop policy
+- manual intervention points
+- task partition and blocking isolation
+- shared-resource conflicts
+- timeout and fault routing expectations
+
+Do not spend the first turn on low-impact details like exact I/O numbering.
+
+## Scaffold Rule
+
+If the request is for a full project rather than a standalone artifact, prefer the scaffold layout:
+
+```bash
+cargo run --release --bin rust_plc -- new my_plc_project
+```
+
+Then place the generated system file at:
+- `plc/main.system.md`
+
+If working without scaffold, keep `.system.md` next to the target `.plc`.
+
+## Handoff Contract to plc-gen
+
+The finished `.system.md` should let PLC generation decide:
+- topology shape
+- safety constraints
+- task structure
+- timeout strategy
+- failure tasks
+- scenario and validation baseline
+
+End with a concise handoff note:
 
 ```text
-当前建议：这更像一个教学演示或低风险实验台项目，而不是正式量产线。
-理由：你描述里强调动作演示和流程验证，没有提到产能、节拍、追溯或合规约束。
-请确认是否如此；如果不是，请告诉我是量产线、实验设备还是其他场景。
+The system contract is confirmed. Proceed to `.plc` generation.
 ```
-
-在此基础上，再覆盖以下信息点：
-
-**项目身份：**
-- "这个系统叫什么名字？"
-- "属于什么行业？（半导体/汽车/食品/教学演示...）"
-- "部署在哪里？（生产线/实验室/教学台...）"
-- "最终用户是谁？（操作员/工程师/学生...）"
-- "有监管要求吗？（FDA/CE/核安全/无）"
-
-**安全等级：**
-- "如果这个系统失效，会导致什么后果？"
-  - 人身伤害（高风险）
-  - 财产损失（中风险）
-  - 演示失败（低风险）
-- "需要什么级别的安全保护？"
-  - SIL 等级（SIL1/2/3/4）
-  - 行业标准（ISO 13849、IEC 61508）
-  - 常规工业防护
-- "是否需要冗余传感器/双通道互锁？"
-
-**运行环境：**
-- "使用什么介质？（气动/液压/电动）"
-- "气源压力多少？电源规格？"
-- "使用什么 PLC 控制器？"
-- "有通信需求吗？（Modbus/EtherCAT/无）"
-- "环境条件如何？（温度/湿度/粉尘）"
-
-### 第二步：理解工艺流程
-
-用自己的话复述工艺流程，整理成清晰的动作时序表：
-
-```
-动作序列：
-1. [推料缸] 伸出 → 等待 [推料到位传感器]
-2. [压紧缸] 下压 → 等待 [压紧到位传感器]
-3. [冲压缸] 伸出 → 等待 [冲压到位传感器]
-4. [冲压缸] 缩回 → 等待 [冲压缩回传感器]
-5. [压紧缸] 缩回 → 等待 [压紧缩回传感器]
-6. [推料缸] 缩回 → 等待 [推料缩回传感器]
-
-触发方式：按钮启动
-循环模式：单次循环，完成后等待再次启动
-```
-
-然后向工程师确认：
-- 先给出你对动作顺序、可并行点、blocking step、共享资源边界的**当前建议版理解**
-- 对每个高影响判断，补一句理由
-- 再请工程师确认或修正以下问题：
-  - "我建议的动作顺序对吗？如果不对，差异在哪一步？"
-  - "我当前建议把哪些动作并发执行；你确认这些动作可以同时进行吗？"
-  - "我当前建议把哪些等待视为 blocking step；这些等待发生时，其他工位是否必须继续推进？"
-  - "我当前建议哪些资源应视为共享互斥；有没有遗漏的互锁或依赖关系？"
-  - "我当前建议的异常处理是否足够？还缺哪些超时/故障/急停路径？"
-  - "我当前建议的特殊工况范围是否完整？是否还需要手动模式、维护模式、测试模式或单步模式？"
-
-### 第三步：理解启动与停机流程
-
-对初始化、正常停止、急停，不要只逐项发问。先根据场景给出一个最低可行建议，例如“上电先回安全位、完成自检后再允许自动启动”“急停立即切断危险动作且需人工复位”，然后让工程师确认差异。
-
-**初始化流程：**
-- "上电后需要初始化吗？"
-- "步进电机/伺服电机如何找原点？"
-  - 原点传感器在哪个位置？
-  - 向哪个方向运动找原点？
-  - 找到原点后如何确认？
-- "气缸如何复位到安全位？"
-  - 全部缩回？还是特定位置？
-  - 复位顺序有要求吗？
-- "是否需要设备自检？"
-  - 检查哪些机构？
-  - 自检失败如何处理？
-
-**停止流程：**
-- "正常停止和急停有什么区别？"
-  - 正常停止：完成当前节拍？还是立即停止？
-  - 急停：立即停止所有动作？
-- "停止后在制品如何处理？"
-  - 放入缓存区/IR盒？
-  - 保持原位？
-  - 人工取出？
-- "是否有独立的停止按钮/信号？"
-- "停止后如何恢复？（复位按钮/重新启动）"
-
-### 第四步：理解测试与调试策略
-
-如果项目目标、风险等级和使用人群已基本明确，应先建议测试模式组合，再请用户删减，而不是反过来让用户从零定义。
-
-**手动测试：**
-- "是否需要手动测试模式？"
-  - 单独测试每个气缸/电机/真空？
-  - 如何触发？（测试按钮/模式选择开关）
-  - 测试模式下是否禁用某些安全检查？
-
-**自动测试：**
-- "是否需要自动化测试流程？"
-  - 遍历所有动作？
-  - 记录测试结果？
-  - 测试失败如何处理？
-
-**单步模式：**
-- "是否需要单步执行模式？"
-  - 每步需要人工确认？
-  - 用于调试？
-
-**维护模式：**
-- "是否需要维护模式？"
-  - 允许人工干预时禁用某些安全检查？
-  - 如何进入/退出维护模式？
-
-### 第五步：理解关键约束
-
-这里优先给出你推断出的关键约束草案，例如“压紧前必须推料到位”“冲压动作与人工干预互斥”“整个循环建议有总超时预算”，再让工程师修正。
-
-**安全规则：**
-- "哪些动作不能同时进行？（物理干涉）"
-- "哪些动作有先后顺序要求？（依赖关系）"
-- "有没有压力/温度/速度限制？"
-
-**时序要求：**
-- "整个循环有周期时间要求吗？（比如必须在10秒内完成）"
-- "某个动作有时间限制吗？（比如加热必须持续5秒）"
-
-**互锁关系：**
-- "哪些传感器必须同时满足才能继续？"
-- "哪些状态是互斥的？"
-
-### 第五步补充：轴运动与故障策略（有 axis 时必问）
-
-当项目包含 `stepper_motor` / `servo_drive` 或需要定位控制时，追加以下问题：
-
-这里默认要先给建议，不允许只问参数。至少先输出：
-
-- 你建议采用哪一层参数复用（`model_ref` / `config_ref` / `motion_param_set`）
-- 你建议故障传播范围是 `self/group/all/followers/custom` 中哪一种
-- 你建议 `on_reject/on_motion_fault/on_safety_fault` 分别走什么处理路线
-- 如果无法建议，必须明确是因为缺少运动拓扑、负载、垂直轴约束、安全等级或恢复策略中的哪类信息
-
-**参数分层：**
-- "轴型号、配置和默认参数集分别是什么？（`model_ref/config_ref/motion_param_set`）"
-- "现场是否允许动作内覆盖 speed/acc/dec？覆盖边界由谁维护？"
-- "是否需要软限位（min/max）和垂直轴制动约束？"
-
-**故障策略矩阵：**
-- "轴故障严重级别是什么（recoverable/non_recoverable/safety_critical）？"
-- "停机策略采用 controlled / quick / immediate 哪一种？"
-- "是否需要人工确认（manual_ack_required）和自动复位策略（auto_reset_policy）？"
-
-**传播范围：**
-- "故障传播范围是 self/group/all/followers/custom 哪一种？"
-- "若是 custom，目标轴名单是什么？"
-- "若是 followers，主从轴 cam coupling 链是否明确？"
-
-### 第六步：生成 .system.md 文件
-
-基于以上确认的信息，生成 `.system.md` 文件，包含以下章节：
-
-```markdown
-# [项目名称] 系统语义描述
-
-## 项目身份
-- **项目名称**：[名称]
-- **所属行业**：[行业]
-- **部署场所**：[场所]
-- **最终用户**：[用户]
-- **监管要求**：[要求或"无"]
-
-## 系统使命
-[用 2~3 句话说清楚这套系统要干什么，以及它的失效会导致什么后果]
-
-## 安全与可靠性定位
-- **安全等级**：[SIL 等级 / 行业标准 / 常规工业防护]
-- **故障后果**：[人身伤害 / 财产损失 / 演示失败]
-- **容错策略**：[冗余传感器 / 双通道互锁 / 单一超时保护]
-
-## 运行环境
-- **介质**：[气动 / 液压 / 电动]
-- **气源**：[压力规格，如 0.5-0.7 MPa]
-- **电源**：[电压规格，如 DC 24V]
-- **控制器**：[PLC 型号]
-- **通信**：[协议或"无"]
-- **环境条件**：[温度范围、湿度、粉尘等级]
-
-## 核心工艺意图
-
-### 正常流程
-[用自然语言描述完整的工艺流程，包括动作序列、等待条件、并行动作]
-
-### 异常处理
-[描述超时、传感器故障、急停等异常情况的处理流程]
-
-### 特殊工况
-[描述手动模式、维护模式、测试模式等特殊工况]
-
-## 并发与阻塞语义假设
-- **并发 task 划分**：[哪些工位/流程应作为独立 task]
-- **blocking step 清单**：[wait / delay / timeout 等待 / axis.move_* / 外部反馈动作]
-- **阻塞隔离预期**：[某 task 阻塞时，哪些 task 仍需推进]
-- **共享资源边界**：[跨 task 的互斥资源与依赖关系]
-
-## 启动与停机流程
-
-### 上电初始化
-[描述初始化步骤：找原点、传感器自检、执行器复位到安全位]
-
-### 正常停止
-[描述正常停止流程：完成当前节拍、安全复位、停在何处]
-
-### 急停流程
-[描述急停流程：立即停止、安全状态、如何恢复]
-
-## 调试与测试策略
-
-### 手动测试
-[描述手动测试模式：如何触发、测试哪些机构、是否禁用安全检查]
-
-### 自动测试
-[描述自动化测试流程：遍历所有动作、记录结果、失败处理]
-
-### 单步模式
-[描述单步执行模式：是否需要、如何使用]
-
-### 维护模式
-[描述维护模式：是否需要、权限控制、安全考虑]
-
-## 关键约束
-
-### 安全规则
-[列出物理干涉、依赖关系、压力/温度/速度限制]
-
-### 时序要求
-[列出周期时间要求、动作时间限制]
-
-### 互锁关系
-[列出传感器组合条件、互斥状态]
-
-## 轴运动补充（如适用）
-- **参数层级**：`model_ref/config_ref/motion_param_set` 选择依据
-- **动作覆盖策略**：是否允许 `speed/acc/dec` inline 覆盖与审批规则
-- **故障策略矩阵**：severity / stop_mode / auto_reset_policy / manual_ack_required
-- **传播策略**：`propagation_scope` 与（若 custom）`propagation_targets`
-- **回零与软限位**：是否要求 homing 前置、软限位范围与越界处理
-
-## 设计偏好
-- **命名语言**：[中文 / 英文 / 拼音]
-- **代码风格**：[简洁 / 详细注释]
-- **时序参数策略**：[保守 / 激进]
-- **扩展预期**：[是否预留扩展接口]
-
-## 对 AI 的指引
-基于以上背景，在生成 PLC 代码时应遵循以下决策倾向：
-- [根据安全等级决定超时值、冗余策略]
-- [根据工艺特点决定并行/顺序控制]
-- [根据测试需求决定是否生成测试任务]
-- [遵守 `docs/architecture/signal-direction.md`：按并发 task + blocking step 组织任务语义，不回退单执行点假设]
-- [输出必须可进入 safety/liveness/timing/causality 四类验证闭环]
-```
-
-### 第七步：展示并确认
-
-将生成的 `.system.md` 文件展示给工程师，询问：
-- "项目定位和安全等级对吗？"
-- "系统使命的描述准确吗？"
-- "工艺流程完整吗？有没有遗漏的工况或约束？"
-- "启动停机流程清晰吗？"
-- "测试策略符合你的需求吗？"
-
-**等待工程师确认后，告知下一步：**
-> "`.system.md` 已生成并确认。接下来可以使用 `plc-gen` skill 基于这个系统描述生成 `.plc` 代码。"
-
----
-
-## 文件命名规则
-
-`.system.md` 文件应与未来的 `.plc` 文件同名，放在同一目录。
-
-例如：
-- `examples/wafer_loader.system.md`
-- `examples/wafer_loader.plc`（后续由 plc-gen skill 生成）
-
----
-
-## 参考样板
-
-项目中已有的 `.system.md` 样板：
-- `examples/two_cylinder.system.md` — 教学演示台（低安全等级）
-- `examples/nuclear_coolant_isolation.system.md` — 核电站隔离阀（SIL3 高安全等级）
-
-生成前可以参考这些样板了解不同安全等级的描述风格。
-
----
-
-## 注意事项
-
-1. **不要跳过提问**：即使工程师描述很详细，也要逐项确认，避免遗漏
-2. **不要静默假设默认值**：安全等级、初始化流程、测试需求等高影响项可以提出“建议默认值”，但必须明确写出这是建议、说明理由，并要求用户确认或修正
-3. **不要一次性生成**：分步确认，每个章节都要得到工程师认可
-4. **不要编造信息**：如果工程师没有提供某些信息，明确标注"待确认"或"无"
-5. **使用工程语言**：描述要准确、专业，避免模糊表述
-6. **优先给建议，不要做纯问卷**：只要能给出有责任边界的建议方案，就必须先建议；只有在无法负责任建议时，才要求用户直接回答
-
----
-
-## 输出检查清单
-
-生成 `.system.md` 后，对照以下清单确认：
-
-- [ ] 是否包含所有必需章节？（项目身份、系统使命、安全定位、运行环境、工艺意图、启动停机、测试策略、关键约束、设计偏好、AI 指引）
-- [ ] 安全等级是否明确？（不能是"待定"或"未知"）
-- [ ] 工艺流程是否完整？（正常流程、异常处理、特殊工况）
-- [ ] 启动停机流程是否清晰？（初始化步骤、正常停止、急停）
-- [ ] 测试策略是否明确？（手动测试、自动测试、单步模式、维护模式）
-- [ ] 关键约束是否列出？（安全规则、时序要求、互锁关系）
-- [ ] 是否明确并发 task 划分与阻塞隔离预期？
-- [ ] 是否列出 blocking step 假设（至少覆盖 `wait/delay/axis.move_*` 与外部反馈等待）？
-- [ ] 若包含轴运动，是否明确参数层级（`model_ref/config_ref/motion_param_set`）？
-- [ ] 若包含轴运动，是否明确 fault policy（severity/stop_mode/ack/auto_reset）？
-- [ ] 若包含轴运动，是否明确传播范围（`self/group/all/followers/custom`）及 custom 目标？
-- [ ] 是否有"对 AI 的指引"章节？（指导后续代码生成）
-- [ ] AI 指引是否要求四类验证闭环（safety/liveness/timing/causality）？
-- [ ] 文件命名是否符合规则？（与未来的 .plc 文件同名）
-- [ ] 是否已经过工程师确认？
-- [ ] 每个高影响未决项，是否都先给过建议方案；若没给，是否明确说明了为什么当前无法建议？
-
----
-
-## 常见场景示例
-
-### 场景 1：教学演示台（低安全等级）
-- 安全等级：常规工业防护
-- 故障后果：演示失败，无人身伤害风险
-- 容错策略：单一超时保护
-- 测试策略：需要手动测试模式（学生学习用）
-
-### 场景 2：生产线装配站（中安全等级）
-- 安全等级：ISO 13849 Cat 3
-- 故障后果：财产损失（工件报废、设备损坏）
-- 容错策略：关键位置双传感器确认
-- 测试策略：需要自动测试流程（日常维护用）
-
-### 场景 3：核电站隔离阀（高安全等级）
-- 安全等级：SIL3 / 核安全 1E 级
-- 故障后果：人身伤害、环境污染
-- 容错策略：双冗余传感器、双通道互锁、10秒硬限
-- 测试策略：需要完整的测试和维护模式（监管要求）
-
----
-
-## 与 plc-gen skill 的协作
-
-本 skill 生成的 `.system.md` 文件是 `plc-gen` skill 的输入。
-
-**工作流程：**
-```
-用户描述工艺
-  → plc-system skill 生成 .system.md
-  → 用户确认
-  → plc-gen skill 读取 .system.md
-  → 生成 .plc 文件
-```
-
-**关键信息传递：**
-- 安全等级 → 决定超时值、冗余策略、约束严格程度
-- 工艺流程 → 决定任务结构、动作序列
-- 启动停机 → 决定 init/stop 任务的实现
-- 测试策略 → 决定是否生成 manual_test/auto_test 任务
-- 设计偏好 → 决定命名风格、注释详细程度
-- 并发与阻塞语义假设 → 决定 task 拆分、step completion 预期与阻塞隔离边界
-- 轴参数层级 → 决定 `axis.move_*` 的 params 引用与覆盖策略
-- 轴故障策略 → 决定 `axis_fault_contract` 与 `on_reject/on_motion_fault/on_safety_fault` 路由设计
-
-确保 `.system.md` 中的"对 AI 的指引"章节清晰明确，这将直接影响后续代码生成的质量。
