@@ -35,7 +35,7 @@ flowchart TD
 git clone https://github.com/xxrust/RustPLC.git
 cd RustPLC
 cargo build --release
-cargo run --release -- examples/two_cylinder.plc --no-print-ir
+cargo run --release --bin rust_plc -- examples/two_cylinder.plc --no-print-ir
 ```
 
 ```
@@ -226,7 +226,7 @@ task cycle:
 ### 2. Compile & Verify
 
 ```bash
-cargo run --release -- your_file.plc --no-print-ir
+cargo run --release --bin rust_plc -- your_file.plc --no-print-ir
 ```
 
 ### 2.5. Rank Optimization Candidates (Library API)
@@ -254,22 +254,35 @@ for candidate in candidates.iter().take(3) {
 
 ```bash
 # Initialize scenario skeleton
-cargo run --release -- scenario-init examples/assembly_station.plc \
+cargo run --release --bin rust_plc -- scenario-init examples/assembly_station.plc \
   --out scenarios/normal.yaml --preset normal
 
 # SIL simulation
-cargo run --release -- sim-plc examples/assembly_station.plc \
+cargo run --release --bin rust_plc -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
 
 # Batch regression
-cargo run --release -- sim-regress --plc-dir examples --scenario-dir scenarios
+cargo run --release --bin rust_plc -- sim-regress --plc-dir examples --scenario-dir scenarios
+```
+
+### CLI Help
+
+- `cargo run --release --bin rust_plc -- --help`: show the top-level command index.
+- `cargo run --release --bin rust_plc -- help <command>`: show the full help page for one command.
+- `cargo run --release --bin rust_plc -- <command> --help`: equivalent shortcut when you are already typing the command.
+- The default compile-and-verify mode also has a help page: `cargo run --release --bin rust_plc -- help compile`
+- Examples:
+
+```bash
+cargo run --release --bin rust_plc -- help sim-plc
+cargo run --release --bin rust_plc -- scenario-validate --help
 ```
 
 ### 4. No-Board Gate
 
 ```bash
 # SIL vs virtual-board comparison + real-time threshold check
-cargo run --release -- no-board-gate examples/assembly_station.plc \
+cargo run --release --bin rust_plc -- no-board-gate examples/assembly_station.plc \
   --scenario scenarios/normal.yaml \
   --out-dir out/gate \
   --max-p99-exec-us 500 \
@@ -280,27 +293,27 @@ cargo run --release -- no-board-gate examples/assembly_station.plc \
 
 ```bash
 # Generate firmware build inputs
-cargo run --release -- build-rp2040 examples/assembly_station.plc --out out/rp2040
+cargo run --release --bin rust_plc -- build-rp2040 examples/assembly_station.plc --out out/rp2040
 
 # Fill I/O mapping
 cp out/rp2040/io_map.template.toml out/rp2040/io_map.toml
 # Edit io_map.toml to fill GPIO pins
 
 # One-step UF2 firmware build
-cargo run --release -- build-rp2040 examples/assembly_station.plc \
+cargo run --release --bin rust_plc -- build-rp2040 examples/assembly_station.plc \
   --out out/rp2040 \
   --io-map out/rp2040/io_map.toml \
   --emit-uf2 out/firmware.uf2
 
 # Flash to Pico
-cargo run --release -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP2
+cargo run --release --bin rust_plc -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP2
 ```
 
 ### 6. Release Delivery
 
 ```bash
 # Package auditable release artifacts (with SHA manifest, git metadata, real-time evidence)
-cargo run --release -- release-bundle examples/assembly_station.plc \
+cargo run --release --bin rust_plc -- release-bundle examples/assembly_station.plc \
   --scenario scenarios/normal.yaml \
   --out-dir out/release \
   --max-p99-exec-us 500 \
