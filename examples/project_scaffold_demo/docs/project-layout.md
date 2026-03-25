@@ -13,19 +13,22 @@
 推荐命令：
 
 ```bash
-cargo run --release --bin rust_plc -- scenario-validate \
+rust_plc scenario-validate \
   plc/main.plc --scenario scenarios/nominal/normal.yaml --output human
 
-cargo run --release --bin rust_plc -- sim-plc \
-  plc/main.plc --scenario scenarios/nominal/normal.yaml --out out/sim/normal/trace.jsonl
+rust_plc scenario-doctor \
+  plc/main.plc --scenario scenarios/nominal/normal.yaml --output human
 
-cargo run --release --bin rust_plc -- no-board-gate \
+rust_plc no-board-gate \
   plc/main.plc --scenario scenarios/nominal/normal.yaml \
   --out-dir out/gate/no_board/normal --output human
 
-cargo run --release --bin rust_plc -- gen-st \
+rust_plc sim-plc \
+  plc/main.plc --scenario scenarios/nominal/normal.yaml --out out/sim/normal/trace.jsonl
+
+rust_plc gen-st \
   plc/main.plc --out out/codegen/st/main.st
 
-cargo run --release --bin rust_plc -- build-rp2040 \
+rust_plc build-rp2040 \
   plc/main.plc --out out/rp2040 --io-map config/io_map.toml
 ```

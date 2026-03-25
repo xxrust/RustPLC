@@ -19,7 +19,7 @@ Keep the skill lean. If a blocker is better solved by a public artifact or code 
 ## Agent 2: No-Source Operator
 
 ```text
-Use the target skill at <TARGET_SKILL_PATH> to complete this real task:
+Use the target skill copy at <PUBLIC_SKILL_PATH> to complete this real task:
 <TASK>
 
 You must stay inside this public workspace:
