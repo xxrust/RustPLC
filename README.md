@@ -46,7 +46,7 @@ cd RustPLC
 cargo build --release
 
 # 运行基础示例
-cargo run --release --bin rust_plc -- examples/two_cylinder.plc --no-print-ir
+cargo run --release -- examples/two_cylinder.plc --no-print-ir
 ```
 
 <details>
@@ -81,7 +81,7 @@ cargo run --release --bin rust_plc -- examples/two_cylinder.plc --no-print-ir
 如果你不想把 `.system.md`、`.plc`、场景、I/O 映射和中间产物散落在各处，推荐直接生成完整项目骨架：
 
 ```bash
-cargo run --release --bin rust_plc -- new out/my_plc_project
+cargo run --release -- new my_plc_project
 ```
 
 生成后的项目结构：
@@ -123,17 +123,14 @@ my_plc_project/
 推荐第一天命令：
 
 ```bash
-cargo run --release --bin rust_plc -- scenario-validate plc/main.plc \
+cargo run --release -- scenario-validate plc/main.plc \
   --scenario scenarios/nominal/normal.yaml --output human
 
-cargo run --release --bin rust_plc -- scenario-doctor plc/main.plc \
-  --scenario scenarios/nominal/normal.yaml --output human
-
-cargo run --release --bin rust_plc -- no-board-gate plc/main.plc \
+cargo run --release -- no-board-gate plc/main.plc \
   --scenario scenarios/nominal/normal.yaml \
   --out-dir out/gate/no_board/normal --output human
 
-cargo run --release --bin rust_plc -- gen-st plc/main.plc \
+cargo run --release -- gen-st plc/main.plc \
   --out out/codegen/st/main.st
 ```
 
@@ -308,11 +305,11 @@ task cycle:
 ### 2. 仿真与验证
 ```bash
 # 场景仿真：录制波形并生成回归 Trace
-cargo run --release --bin rust_plc -- sim-plc examples/assembly_station.plc \
+cargo run --release -- sim-plc examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
 
 # 无板交付门禁：校验实时性能与时序表现
-cargo run --release --bin rust_plc -- no-board-gate examples/assembly_station.plc \
+cargo run --release -- no-board-gate examples/assembly_station.plc \
   --scenario scenarios/normal.yaml \
   --out-dir out/gate \
   --max-p99-exec-us 500 \
@@ -346,11 +343,11 @@ for candidate in candidates.iter().take(3) {
 ### 3. 硬件部署与发布交付
 ```bash
 # 一键编译 RP2040 固件并烧录
-cargo run --release --bin rust_plc -- build-rp2040 examples/assembly_station.plc \
+cargo run --release -- build-rp2040 examples/assembly_station.plc \
   --out out/rp2040 --io-map io_map.toml --emit-uf2 out/firmware.uf2
 
 # 自动化发行包生成
-cargo run --release --bin rust_plc -- release-bundle examples/assembly_station.plc \
+cargo run --release -- release-bundle examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out-dir out/release
 ```
 
