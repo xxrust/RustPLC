@@ -1,4 +1,0 @@
-interface:
-  display_name: "RustPLC Project Builder"
-  short_description: "Create validated RustPLC projects, PLC code, and command flows."
-  default_prompt: "Use  to turn my process requirements into a validated RustPLC project or PLC artifact with exact runnable commands."

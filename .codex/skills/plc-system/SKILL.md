@@ -12,6 +12,16 @@ Keep the skill narrow:
 - do not generate `.plc` here
 - do not dump a questionnaire
 
+Keep this file lean.
+Load only the reference file you need:
+
+- `references/workflow.md`
+  Use for the system-confirmation flow and blocking-question policy.
+- `references/sections.md`
+  Use when drafting or repairing `main.system.md`.
+- `references/handoff.md`
+  Use to produce a clean downstream handoff to `plc-gen`.
+
 ## Required Semantics
 
 Treat `docs/architecture/signal-direction.md` as the source of truth for:

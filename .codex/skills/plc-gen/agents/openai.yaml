@@ -1,0 +1,7 @@
+interface:
+  display_name: "PLC Generator"
+  short_description: "Generate validated RustPLC PLC code and runnable commands."
+  default_prompt: "Use $plc-gen to generate or repair a validated RustPLC PLC program with the exact commands I should run next."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+interface:
+  display_name: "PLC System Planner"
+  short_description: "Turn process requirements into a confirmed RustPLC system contract."
+  default_prompt: "Use $plc-system to draft or repair a confirmed RustPLC main.system.md before PLC generation."
+
+policy:
+  allow_implicit_invocation: true
