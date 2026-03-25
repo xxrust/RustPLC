@@ -1,0 +1,138 @@
+use std::fs;
+use std::path::PathBuf;
+use std::process::{Command, Output};
+
+fn temp_dir(prefix: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "{prefix}_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock works")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    dir
+}
+
+fn run_cli(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .args(args)
+        .output()
+        .expect("run rust_plc")
+}
+
+#[test]
+fn root_help_lists_help_entry_and_command_sections() {
+    let output = run_cli(&["--help"]);
+    assert!(
+        output.status.success(),
+        "root --help should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage:"));
+    assert!(stderr.contains("help [command]"));
+    assert!(stderr.contains("Commands:"));
+    assert!(stderr.contains("Core:"));
+    assert!(stderr.contains("Simulation:"));
+    assert!(stderr.contains("sim-plc"));
+    assert!(stderr.contains("new"));
+}
+
+#[test]
+fn help_subcommand_prints_target_command_usage() {
+    let output = run_cli(&["help", "new"]);
+    assert!(
+        output.status.success(),
+        "help new should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage:"));
+    assert!(stderr.contains("new <project_dir> [--force]"));
+    assert!(stderr.contains("Create a RustPLC project scaffold"));
+    assert!(stderr.contains("Options:"));
+    assert!(stderr.contains("--force"));
+    assert!(stderr.contains("Examples:"));
+    assert!(stderr.contains("rust_plc new demo_project"));
+}
+
+#[test]
+fn new_help_does_not_create_literal_help_directory() {
+    let cwd = temp_dir("rust_plc_new_help");
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .current_dir(&cwd)
+        .arg("new")
+        .arg("--help")
+        .output()
+        .expect("run rust_plc new --help");
+
+    assert!(
+        output.status.success(),
+        "new --help should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !cwd.join("--help").exists(),
+        "new --help must not create a project directory named --help"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage:"));
+    assert!(stderr.contains("new <project_dir> [--force]"));
+}
+
+#[test]
+fn positional_subcommand_help_short_circuits_before_reading_inputs() {
+    let output = run_cli(&["scenario-validate", "--help"]);
+    assert!(
+        output.status.success(),
+        "scenario-validate --help should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("scenario-validate <file.plc> --scenario <scenario.yaml>"));
+    assert!(stderr.contains("Validate one scenario YAML against a PLC file."));
+    assert!(stderr.contains("Options:"));
+    assert!(stderr.contains("--scenario <scenario.yaml>"));
+}
+
+#[test]
+fn compile_mode_help_short_circuits_before_touching_input_path() {
+    let output = run_cli(&["missing_input.txt", "--help"]);
+    assert!(
+        output.status.success(),
+        "compile-mode --help should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("<file.plc>"));
+    assert!(stderr.contains("Core options:"));
+    assert!(stderr.contains("Examples:"));
+    assert!(!stderr.contains("Failed to read"));
+    assert!(!stderr.contains("Expected a .plc file path"));
+}
+
+#[test]
+fn detailed_help_for_sim_plc_includes_examples_and_notes() {
+    let output = run_cli(&["help", "sim-plc"]);
+    assert!(
+        output.status.success(),
+        "help sim-plc should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>"));
+    assert!(stderr.contains("Options:"));
+    assert!(stderr.contains("--enable-online-force-dev"));
+    assert!(stderr.contains("Notes:"));
+    assert!(stderr.contains("Online force and online variable controls"));
+    assert!(stderr.contains("Examples:"));
+    assert!(stderr.contains("rust_plc sim-plc examples/assembly_station.plc"));
+}

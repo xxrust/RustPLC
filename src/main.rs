@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
 use std::ffi::OsStr;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -1447,6 +1448,645 @@ fn format_resolve_scenario_yaml_error(
     msg
 }
 
+struct CliCommandHelp {
+    section: &'static str,
+    name: &'static str,
+    summary: &'static str,
+    usage_template: &'static str,
+}
+
+const COMPILE_USAGE_TEMPLATE: &str = "Usage: {program} <file.plc> [--report <verification_report.json>] [--deny-warnings] [--no-print-ir] [--ir-out <ir_bundle.json>] [--budget-... <value>]";
+
+const CLI_COMMANDS: &[CliCommandHelp] = &[
+    CliCommandHelp {
+        section: "Core",
+        name: "help",
+        summary: "Show the top-level help screen or the usage for one command.",
+        usage_template: "Usage: {program} help [command]",
+    },
+    CliCommandHelp {
+        section: "Core",
+        name: "new",
+        summary: "Create a RustPLC project scaffold with starter PLC, scenarios, and VS Code tasks.",
+        usage_template: "Usage: {program} new <project_dir> [--force]",
+    },
+    CliCommandHelp {
+        section: "Simulation",
+        name: "sim",
+        summary: "Run the built-in runtime-core demo program against a scenario YAML.",
+        usage_template: "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]",
+    },
+    CliCommandHelp {
+        section: "Simulation",
+        name: "sim-plc",
+        summary: "Compile a PLC file and execute it against a scenario with trace and audit outputs.",
+        usage_template: "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>] [--io-snapshot-out <io_snapshot.json>]",
+    },
+    CliCommandHelp {
+        section: "Simulation",
+        name: "sim-regress",
+        summary: "Batch-run PLC and scenario directories and emit a regression summary.",
+        usage_template: "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]",
+    },
+    CliCommandHelp {
+        section: "Simulation",
+        name: "sim-pid-kpi",
+        summary: "Run the PID KPI flow for a PLC file and a KPI scenario definition.",
+        usage_template: "Usage: {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]",
+    },
+    CliCommandHelp {
+        section: "Deployment",
+        name: "build-rp2040",
+        summary: "Build an RP2040 deployment bundle from a PLC file and optional I/O maps.",
+        usage_template: "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Deployment",
+        name: "release-bundle",
+        summary: "Assemble a no-board release bundle with scenario, build, and timing artifacts.",
+        usage_template: "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]",
+    },
+    CliCommandHelp {
+        section: "Deployment",
+        name: "flash-rp2040",
+        summary: "Copy a UF2 image to a mounted RP2040 board path.",
+        usage_template: "Usage: {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]",
+    },
+    CliCommandHelp {
+        section: "Deployment",
+        name: "board-parse",
+        summary: "Normalize board logs into structured artifacts for analysis.",
+        usage_template: "Usage: {program} board-parse --in <board.log> --out-dir <dir>",
+    },
+    CliCommandHelp {
+        section: "Deployment",
+        name: "no-board-gate",
+        summary: "Run the no-board regression gate and emit release diagnostics.",
+        usage_template: "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Deployment",
+        name: "commissioning-run",
+        summary: "Generate a commissioning run bundle for a PLC file.",
+        usage_template: "Usage: {program} commissioning-run <file.plc> --out-dir <dir> [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Deployment",
+        name: "pil-run",
+        summary: "Run a PLC file against a PIL scenario.",
+        usage_template: "Usage: {program} pil-run <file.plc> --scenario <scenario.yaml>",
+    },
+    CliCommandHelp {
+        section: "Deployment",
+        name: "virtual-board",
+        summary: "Produce virtual-board artifacts from a PLC file and scenario.",
+        usage_template: "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
+        name: "trace-diff",
+        summary: "Compare SIL and board traces and emit a mismatch report.",
+        usage_template: "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
+        name: "trace-doctor",
+        summary: "Correlate trace, diff, timing, and snapshot artifacts into diagnosis output.",
+        usage_template: "Usage: {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--io-snapshot <io_snapshot.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
+        name: "timing-report",
+        summary: "Convert tick timing JSONL into a timing summary report.",
+        usage_template: "Usage: {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
+        name: "io-map-normalize",
+        summary: "Normalize an IO map TOML file into the canonical form.",
+        usage_template: "Usage: {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>",
+    },
+    CliCommandHelp {
+        section: "Components",
+        name: "component-topology-validate",
+        summary: "Validate a component topology JSON and optionally write a normalized copy.",
+        usage_template: "Usage: {program} component-topology-validate <topology.json> [--output <human|json>] [--normalized-out <normalized_topology.json>]",
+    },
+    CliCommandHelp {
+        section: "Components",
+        name: "component-topology-diff",
+        summary: "Diff two normalized component topology snapshots.",
+        usage_template: "Usage: {program} component-topology-diff <before_topology.json> <after_topology.json> --out <semantic_diff.json> [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Components",
+        name: "component-scenario-validate",
+        summary: "Validate a component scenario JSON and optionally write a normalized copy.",
+        usage_template: "Usage: {program} component-scenario-validate <scenario.json> [--output <human|json>] [--normalized-out <normalized_scenario.json>]",
+    },
+    CliCommandHelp {
+        section: "Components",
+        name: "component-sim",
+        summary: "Simulate a component topology with optional trace, diagnosis, and audit outputs.",
+        usage_template: "Usage: {program} component-sim <topology.json> --scenario <scenario.json> [--out <component_trace.jsonl>] [--fault-audit-out <fault_audit.jsonl>] [--diagnosis-out <component_diagnosis.json>] [--keypoints-out <component_keypoints.json>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Scenarios",
+        name: "scenario-init",
+        summary: "Generate a starter scenario YAML from a PLC file.",
+        usage_template: "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]",
+    },
+    CliCommandHelp {
+        section: "Scenarios",
+        name: "scenario-validate",
+        summary: "Validate one scenario YAML against a PLC file.",
+        usage_template: "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml> [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Scenarios",
+        name: "scenario-doctor",
+        summary: "Diagnose one PLC and scenario pair and optionally preview fixes.",
+        usage_template: "Usage: {program} scenario-doctor <file.plc> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Scenarios",
+        name: "scenario-expand",
+        summary: "Expand one scenario YAML into the resolved form used by simulation.",
+        usage_template: "Usage: {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>",
+    },
+    CliCommandHelp {
+        section: "Scenarios",
+        name: "scenario-gen",
+        summary: "Generate scenario suites from a PLC file and a generation config.",
+        usage_template: "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir> [--coverage-mode <pairwise|boundary-first|risk-first>] [--dry-run] [--template-library <metadata.json>]",
+    },
+    CliCommandHelp {
+        section: "Utilities",
+        name: "sequence-lint",
+        summary: "Lint critical wait recovery patterns in a PLC program.",
+        usage_template: "Usage: {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]",
+    },
+    CliCommandHelp {
+        section: "Utilities",
+        name: "gen-st",
+        summary: "Generate IEC 61131-3 ST output from a PLC file.",
+        usage_template: "Usage: {program} gen-st <file.plc> [--out <output.st>] [--program-name <Main>] [--no-verification-summary]",
+    },
+];
+
+fn is_help_flag(arg: &str) -> bool {
+    matches!(arg, "-h" | "--help")
+}
+
+fn cli_command_help(name: &str) -> Option<&'static CliCommandHelp> {
+    CLI_COMMANDS.iter().find(|command| command.name == name)
+}
+
+fn command_usage(program: &str, command: &str) -> String {
+    cli_command_help(command)
+        .map(|entry| entry.usage_template.replace("{program}", program))
+        .unwrap_or_else(|| format!("Usage: {program} {command}"))
+}
+
+fn command_help_options(command: &str) -> &'static [&'static str] {
+    match command {
+        "help" => &["[command]                  Show detailed help for one command."],
+        "new" => {
+            &["--force                    Overwrite known scaffold files in a non-empty directory."]
+        }
+        "sim" => &[
+            "--out <trace.jsonl>          Write runtime trace JSONL.",
+            "--vcd-out <wave.vcd>         Write digital waveform VCD output.",
+            "--analog-out <analog.csv>    Write analog output samples as CSV.",
+            "--report-out <report.json>   Write the simulation summary JSON.",
+        ],
+        "sim-plc" => &[
+            "--scenario <scenario.yaml>   Scenario YAML to execute.",
+            "--out <trace.jsonl>          Required runtime trace output.",
+            "--retain-config <retain.toml> Load and persist retain channels.",
+            "--retain-state <state.json>  Override the retain state path.",
+            "--enable-online-force-dev    Enable dev-only online force and variable controls.",
+            "--online-force-script <script.jsonl> Inject online force commands.",
+            "--online-var-script <script.jsonl> Inject online variable commands.",
+            "--online-var-bindings <bindings.toml> Map script keys to runtime channels.",
+            "--alarm-audit-out <events.ndjson>    Write runtime alarm events.",
+            "--alarm-hmi-ws <ws://...>    Mirror alarm events to a websocket endpoint.",
+            "--io-snapshot-out <io_snapshot.json> Capture per-tick IO snapshots.",
+        ],
+        "sim-regress" => &[
+            "--plc-dir <dir>              Directory of PLC inputs.",
+            "--scenario-dir <dir>         Directory of scenario YAMLs.",
+            "--artifacts-dir <dir>        Output directory for traces and failures.",
+            "--summary-out <summary.json> Write the regression summary JSON.",
+            "--minimize-failure           Attempt scenario minimization for failures.",
+        ],
+        "sim-pid-kpi" => &[
+            "--scenario <pid_scenario.yaml> PID plant and KPI configuration.",
+            "--out <kpi.json>             Destination KPI report JSON.",
+        ],
+        "build-rp2040" => &[
+            "--out <dir>                  Required build output directory.",
+            "--io-map <file>              Validate and embed an explicit IO map.",
+            "--analog-calibration <file>  Apply analog scaling/offset calibration.",
+            "--emit-uf2 <file.uf2>        Produce a flashable UF2 image.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "release-bundle" => &[
+            "--scenario <scenario.yaml>   Scenario used for gate and bundle artifacts.",
+            "--out-dir <dir>              Required release bundle directory.",
+            "--io-map <file>              Include an explicit IO map in the bundle.",
+            "--max-p99-exec-us <us>       Realtime threshold for p99 execution.",
+            "--max-overrun-count <n>      Realtime threshold for overruns.",
+        ],
+        "flash-rp2040" => &[
+            "--uf2 <file.uf2>             UF2 image to copy.",
+            "--mount <path>               Mounted RP2040 mass-storage path.",
+            "--dry-run                    Print the planned copy without writing.",
+        ],
+        "board-parse" => &[
+            "--in <board.log>             Input board log file.",
+            "--out-dir <dir>              Output directory for normalized artifacts.",
+        ],
+        "no-board-gate" => &[
+            "--scenario <scenario.yaml>   Shared scenario for both SIL and virtual-board legs.",
+            "--sil-scenario <scenario.yaml> Override the SIL scenario.",
+            "--board-scenario <scenario.yaml> Override the virtual-board scenario.",
+            "--out-dir <dir>              Required gate artifact directory.",
+            "--context <n>                Mismatch context window for trace diff.",
+            "--max-p99-exec-us <us>       Realtime threshold for p99 execution.",
+            "--max-overrun-count <n>      Realtime threshold for overruns.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "commissioning-run" => &[
+            "--out-dir <dir>              Required commissioning artifact directory.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "pil-run" => &["--scenario <scenario.yaml>   Scenario YAML to replay against the runtime."],
+        "virtual-board" => &[
+            "--scenario <scenario.yaml>   Scenario YAML to replay.",
+            "--out-dir <dir>              Required output directory for board-like artifacts.",
+        ],
+        "trace-diff" => &[
+            "--sil <trace.jsonl>          SIL trace JSONL input.",
+            "--board <trace.jsonl>        Board or virtual-board trace JSONL input.",
+            "--out <report.json>          Required diff report JSON.",
+            "--context <n>                Context window around mismatches.",
+            "--fail-on-mismatch           Exit non-zero when traces diverge.",
+        ],
+        "trace-doctor" => &[
+            "--scenario <scenario.yaml>   Scenario used to interpret artifacts.",
+            "--trace <trace.jsonl>        Optional runtime trace input.",
+            "--diff <diff_report.json>    Optional trace diff input.",
+            "--timing-report <report.json> Optional timing report input.",
+            "--io-snapshot <snapshot.json> Optional IO snapshot input.",
+            "--evidence-source <...>      Label the artifact origin in diagnosis output.",
+            "--top <n>                    Limit the human report to the top N candidates.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "timing-report" => &[
+            "--in <tick_timing.jsonl>     Required timing JSONL input.",
+            "--out <timing_report.json>   Override the output report path.",
+        ],
+        "io-map-normalize" => &[
+            "--in <io_map.toml>           Required source IO map.",
+            "--out <normalized.toml>      Required normalized output path.",
+        ],
+        "component-topology-validate" => &[
+            "--output <human|json>        Select CLI output format.",
+            "--normalized-out <file>      Write the normalized topology JSON.",
+        ],
+        "component-topology-diff" => &[
+            "--out <semantic_diff.json>   Required semantic diff output path.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "component-scenario-validate" => &[
+            "--output <human|json>        Select CLI output format.",
+            "--normalized-out <file>      Write the normalized scenario JSON.",
+        ],
+        "component-sim" => &[
+            "--scenario <scenario.json>   Required component scenario input.",
+            "--out <component_trace.jsonl> Write per-tick trace JSONL.",
+            "--fault-audit-out <fault_audit.jsonl> Write fault audit JSONL.",
+            "--diagnosis-out <component_diagnosis.json> Write diagnosis JSON.",
+            "--keypoints-out <component_keypoints.json> Write keypoint artifact JSON.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "scenario-init" => &[
+            "--out <scenario.yaml>        Override the generated scenario path.",
+            "--preset <minimal|normal|timeout|sensor_stuck|bounce> Choose the template preset.",
+        ],
+        "scenario-validate" => &[
+            "--scenario <scenario.yaml>   Required scenario YAML to validate.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "scenario-doctor" => &[
+            "--scenario <scenario.yaml>   Required scenario YAML to diagnose.",
+            "--fix-preview                Include suggested fixes in the report.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "scenario-expand" => &[
+            "--scenario <scenario.yaml>   Required source scenario YAML.",
+            "--out <expanded.yaml>        Required resolved scenario output.",
+        ],
+        "scenario-gen" => &[
+            "--plc <file.plc>             Required PLC input.",
+            "--config <gen.yaml>          Required scenario generation config.",
+            "--out-dir <dir>              Required output directory.",
+            "--coverage-mode <pairwise|boundary-first|risk-first> Scenario selection strategy.",
+            "--dry-run                    Print the plan without writing files.",
+            "--template-library <metadata.json> Optional template metadata input.",
+        ],
+        "sequence-lint" => &[
+            "--critical-wait-level <warn|error> Severity for critical wait findings.",
+            "--critical-wait-exempt <task.step|task.*> Exempt a task or step pattern.",
+        ],
+        "gen-st" => &[
+            "--out <output.st>            Write ST output to a file instead of stdout.",
+            "--program-name <Main>        Override the emitted ST program name.",
+            "--no-verification-summary    Omit verification comments from ST output.",
+        ],
+        _ => &[],
+    }
+}
+
+fn command_help_notes(command: &str) -> &'static [&'static str] {
+    match command {
+        "help" => {
+            &["`help compile` shows the detailed page for the default compile-and-verify mode."]
+        }
+        "sim" => &["This command runs the built-in demo program, not a user PLC file."],
+        "sim-plc" => &[
+            "Online force and online variable controls stay disabled unless `--enable-online-force-dev` is present.",
+        ],
+        "build-rp2040" => {
+            &["`--emit-uf2` requires `--io-map` so the board pin contract is explicit."]
+        }
+        "release-bundle" => &[
+            "The bundle reuses compile, simulation, timing, and gate artifacts instead of inventing a parallel flow.",
+        ],
+        "flash-rp2040" => &["The target mount path must already exist and be writable."],
+        "no-board-gate" => &[
+            "If `--sil-scenario` or `--board-scenario` is omitted, the shared `--scenario` path is reused.",
+        ],
+        "trace-doctor" => &["At least one of `--trace` or `--diff` is required."],
+        "component-sim" => {
+            &["Topology and scenario inputs are validated before simulation starts."]
+        }
+        "scenario-init" => {
+            &["The default output path is derived from the PLC path when `--out` is omitted."]
+        }
+        "scenario-expand" => &[
+            "Expansion resolves device-name aliases and writes the canonical scenario form used by runtime tools.",
+        ],
+        "scenario-gen" => &[
+            "Generated scenario cases are selected from the config according to the chosen coverage mode.",
+        ],
+        "gen-st" => &[
+            "`gen-st` compiles the PLC first, so semantic or verification failures still stop the command.",
+        ],
+        _ => &[],
+    }
+}
+
+fn command_help_examples(command: &str) -> &'static [&'static str] {
+    match command {
+        "help" => &["rust_plc help sim-plc", "rust_plc help compile"],
+        "new" => &[
+            "rust_plc new demo_project",
+            "rust_plc new demo_project --force",
+        ],
+        "sim" => &["rust_plc sim scenarios/basic.yaml --out out/sim/trace.jsonl"],
+        "sim-plc" => &[
+            "rust_plc sim-plc examples/assembly_station.plc --scenario scenarios/normal.yaml --out out/sim/trace.jsonl",
+        ],
+        "sim-regress" => &[
+            "rust_plc sim-regress --plc-dir examples --scenario-dir scenarios --summary-out out/sim-regress/summary.json",
+        ],
+        "sim-pid-kpi" => &[
+            "rust_plc sim-pid-kpi examples/pid_loop.plc --scenario examples/pid_kpi_scenario.yaml --out out/pid/kpi.json",
+        ],
+        "build-rp2040" => &[
+            "rust_plc build-rp2040 examples/rp2040_motion_minimal.plc --out out/rp2040 --io-map examples/rp2040_motion_minimal.io_map.toml",
+        ],
+        "release-bundle" => &[
+            "rust_plc release-bundle examples/assembly_station.plc --scenario scenarios/normal.yaml --out-dir out/release/assembly_station",
+        ],
+        "flash-rp2040" => &["rust_plc flash-rp2040 --uf2 out/rp2040/app.uf2 --mount E:\\"],
+        "board-parse" => &["rust_plc board-parse --in board.log --out-dir out/board_parse"],
+        "no-board-gate" => &[
+            "rust_plc no-board-gate examples/assembly_station.plc --scenario scenarios/normal.yaml --out-dir out/gate/no_board/assembly_station --output json",
+        ],
+        "commissioning-run" => &[
+            "rust_plc commissioning-run examples/assembly_station.plc --out-dir out/commissioning/assembly_station",
+        ],
+        "pil-run" => {
+            &["rust_plc pil-run examples/assembly_station.plc --scenario scenarios/normal.yaml"]
+        }
+        "virtual-board" => &[
+            "rust_plc virtual-board examples/assembly_station.plc --scenario scenarios/normal.yaml --out-dir out/virtual_board/assembly_station",
+        ],
+        "trace-diff" => &[
+            "rust_plc trace-diff --sil out/sil_trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json --fail-on-mismatch",
+        ],
+        "trace-doctor" => &[
+            "rust_plc trace-doctor examples/assembly_station.plc --scenario scenarios/normal.yaml --trace out/sim/trace.jsonl --diff out/diff_report.json --output human",
+        ],
+        "timing-report" => {
+            &["rust_plc timing-report --in out/tick_timing.jsonl --out out/timing_report.json"]
+        }
+        "io-map-normalize" => {
+            &["rust_plc io-map-normalize --in config/io_map.toml --out out/io_map.normalized.toml"]
+        }
+        "component-topology-validate" => &[
+            "rust_plc component-topology-validate examples/component_model/topology.json --normalized-out out/topology.normalized.json",
+        ],
+        "component-topology-diff" => &[
+            "rust_plc component-topology-diff before.json after.json --out out/topology.diff.json",
+        ],
+        "component-scenario-validate" => &[
+            "rust_plc component-scenario-validate examples/component_model/scenario_normal.json --output json",
+        ],
+        "component-sim" => &[
+            "rust_plc component-sim examples/component_model/topology.json --scenario examples/component_model/scenario_normal.json --out out/component_trace.jsonl",
+        ],
+        "scenario-init" => &[
+            "rust_plc scenario-init examples/assembly_station.plc --preset normal --out scenarios/generated/assembly_station.normal.yaml",
+        ],
+        "scenario-validate" => &[
+            "rust_plc scenario-validate examples/assembly_station.plc --scenario scenarios/normal.yaml --output json",
+        ],
+        "scenario-doctor" => &[
+            "rust_plc scenario-doctor examples/assembly_station.plc --scenario scenarios/normal.yaml --fix-preview --output human",
+        ],
+        "scenario-expand" => &[
+            "rust_plc scenario-expand examples/assembly_station.plc --scenario scenarios/normal.yaml --out out/scenario.expanded.yaml",
+        ],
+        "scenario-gen" => &[
+            "rust_plc scenario-gen --plc examples/assembly_station.plc --config examples/scenario_gen/basic.yaml --out-dir out/scenario_gen",
+        ],
+        "sequence-lint" => &[
+            "rust_plc sequence-lint examples/recovery_templates/power_loss_recovery.plc --critical-wait-level error",
+        ],
+        "gen-st" => {
+            &["rust_plc gen-st examples/assembly_station.plc --out out/codegen/assembly_station.st"]
+        }
+        _ => &[],
+    }
+}
+
+fn write_help_section(msg: &mut String, title: &str, lines: &[&str]) {
+    if lines.is_empty() {
+        return;
+    }
+    writeln!(msg).expect("write help section");
+    writeln!(msg, "{title}:").expect("write help section");
+    for line in lines {
+        writeln!(msg, "  {line}").expect("write help section");
+    }
+}
+
+fn render_compile_help(program: &str) -> String {
+    let mut msg = String::new();
+    writeln!(
+        &mut msg,
+        "{}",
+        COMPILE_USAGE_TEMPLATE.replace("{program}", program)
+    )
+    .expect("write compile help");
+    writeln!(&mut msg).expect("write compile help");
+    writeln!(
+        &mut msg,
+        "Parse, verify, and emit IR JSON for a PLC file when no explicit subcommand is given."
+    )
+    .expect("write compile help");
+    writeln!(&mut msg).expect("write compile help");
+    writeln!(&mut msg, "Core options:").expect("write compile help");
+    writeln!(
+        &mut msg,
+        "  --report <verification_report.json>  Write the verification report JSON."
+    )
+    .expect("write compile help");
+    writeln!(
+        &mut msg,
+        "  --deny-warnings                      Exit non-zero when blocking warnings are present."
+    )
+    .expect("write compile help");
+    writeln!(
+        &mut msg,
+        "  --no-print-ir                        Suppress the default IR JSON stdout output."
+    )
+    .expect("write compile help");
+    writeln!(
+        &mut msg,
+        "  --ir-out <ir_bundle.json>            Write the IR bundle JSON to a file."
+    )
+    .expect("write compile help");
+    writeln!(&mut msg).expect("write compile help");
+    writeln!(&mut msg, "Budget options (also configurable via env vars):")
+        .expect("write compile help");
+    writeln!(&mut msg, "  --budget-max-actions-per-transition <n>").expect("write compile help");
+    writeln!(&mut msg, "  --budget-max-actions-per-tick <n>").expect("write compile help");
+    writeln!(&mut msg, "  --budget-max-parallel-branches <n>").expect("write compile help");
+    writeln!(&mut msg, "  --budget-max-race-branches <n>").expect("write compile help");
+    writeln!(&mut msg, "  --budget-warn-on-same-tick-cycle <true|false>")
+        .expect("write compile help");
+    writeln!(&mut msg, "  --budget-action-cost-us <n>").expect("write compile help");
+    writeln!(&mut msg, "  --budget-transition-cost-us <n>").expect("write compile help");
+    writeln!(&mut msg, "  --budget-parallel-expand-cost-us <n>").expect("write compile help");
+    writeln!(&mut msg, "  --budget-max-time-estimate-us <n>").expect("write compile help");
+    write_help_section(
+        &mut msg,
+        "Examples",
+        &[
+            "rust_plc examples/assembly_station.plc --report out/verification_report.json",
+            "rust_plc examples/assembly_station.plc --ir-out out/ir_bundle.json --no-print-ir",
+        ],
+    );
+    msg.trim_end().to_string()
+}
+
+fn render_command_help(program: &str, command: &str) -> Option<String> {
+    if command == "compile" {
+        return Some(render_compile_help(program));
+    }
+
+    let entry = cli_command_help(command)?;
+    let mut msg = String::new();
+    writeln!(
+        &mut msg,
+        "{}",
+        entry.usage_template.replace("{program}", program)
+    )
+    .expect("write command help");
+    writeln!(&mut msg).expect("write command help");
+    writeln!(&mut msg, "{}", entry.summary).expect("write command help");
+    write_help_section(&mut msg, "Options", command_help_options(command));
+    write_help_section(&mut msg, "Notes", command_help_notes(command));
+    write_help_section(&mut msg, "Examples", command_help_examples(command));
+    writeln!(&mut msg).expect("write command help");
+    writeln!(&mut msg, "Run `{program} help` to list all commands.").expect("write command help");
+    Some(msg.trim_end().to_string())
+}
+
+fn render_root_help(program: &str) -> String {
+    let mut msg = String::new();
+    writeln!(&mut msg, "Usage:").expect("write root help");
+    writeln!(
+        &mut msg,
+        "  {}",
+        COMPILE_USAGE_TEMPLATE
+            .replace("{program}", program)
+            .trim_start_matches("Usage: ")
+    )
+    .expect("write root help");
+    writeln!(&mut msg, "  {program} <command> [options]").expect("write root help");
+    writeln!(&mut msg, "  {program} help [command]").expect("write root help");
+    writeln!(&mut msg).expect("write root help");
+    writeln!(
+        &mut msg,
+        "Default action: compile and verify a PLC file when no subcommand is given."
+    )
+    .expect("write root help");
+    writeln!(&mut msg).expect("write root help");
+    writeln!(&mut msg, "Commands:").expect("write root help");
+
+    let mut current_section = "";
+    for entry in CLI_COMMANDS {
+        if entry.section != current_section {
+            current_section = entry.section;
+            writeln!(&mut msg, "  {current_section}:").expect("write root help");
+        }
+        writeln!(&mut msg, "    {:<28} {}", entry.name, entry.summary).expect("write root help");
+    }
+
+    writeln!(&mut msg).expect("write root help");
+    writeln!(
+        &mut msg,
+        "Use `{program} help <command>` or `{program} <command> --help` for command details."
+    )
+    .expect("write root help");
+    msg.trim_end().to_string()
+}
+
+fn help_requested_for_invocation(_first: &str, remaining: &[String]) -> bool {
+    remaining.iter().any(|arg| is_help_flag(arg))
+}
+
+fn print_command_help_and_exit(program: &str, command: &str, exit_code: i32) -> ! {
+    match render_command_help(program, command) {
+        Some(help) => {
+            eprintln!("{help}");
+            std::process::exit(exit_code);
+        }
+        None => {
+            eprintln!("Unknown command: {command}");
+            eprintln!();
+            print_usage(program);
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() {
     let mut args = env::args();
     let program = args.next().unwrap_or_else(|| "rust_plc".to_string());
@@ -1456,197 +2096,239 @@ fn main() {
         std::process::exit(1);
     };
 
+    let remaining: Vec<String> = args.collect();
+
+    if is_help_flag(&first) {
+        print_usage(&program);
+        std::process::exit(0);
+    }
+
+    if first == "help" {
+        match remaining.as_slice() {
+            [] => {
+                print_usage(&program);
+                std::process::exit(0);
+            }
+            [command] if is_help_flag(command) => {
+                print_usage(&program);
+                std::process::exit(0);
+            }
+            [command] => print_command_help_and_exit(&program, command, 0),
+            _ => {
+                eprintln!("{}", command_usage(&program, "help"));
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if help_requested_for_invocation(&first, &remaining) {
+        let command = if cli_command_help(&first).is_some() {
+            first.as_str()
+        } else {
+            "compile"
+        };
+        print_command_help_and_exit(&program, command, 0);
+    }
+
     if first == "sim" {
-        if let Err(msg) = run_sim_subcommand(&program, args) {
+        if let Err(msg) = run_sim_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "sim-regress" {
-        if let Err(msg) = run_sim_regress_subcommand(&program, args) {
+        if let Err(msg) = run_sim_regress_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "sim-pid-kpi" {
-        if let Err(msg) = run_sim_pid_kpi_subcommand(&program, args) {
+        if let Err(msg) = run_sim_pid_kpi_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "sim-plc" {
-        if let Err(msg) = run_sim_plc_subcommand(&program, args) {
+        if let Err(msg) = run_sim_plc_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "build-rp2040" {
-        if let Err(msg) = run_build_rp2040_subcommand(&program, args) {
+        if let Err(msg) = run_build_rp2040_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("[BLD-000] {msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "release-bundle" {
-        if let Err(msg) = run_release_bundle_subcommand(&program, args) {
+        if let Err(msg) = run_release_bundle_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "flash-rp2040" {
-        if let Err(msg) = run_flash_rp2040_subcommand(&program, args) {
+        if let Err(msg) = run_flash_rp2040_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "board-parse" {
-        if let Err(msg) = run_board_parse_subcommand(&program, args) {
+        if let Err(msg) = run_board_parse_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "trace-diff" {
-        if let Err(msg) = run_trace_diff_subcommand(&program, args) {
+        if let Err(msg) = run_trace_diff_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "trace-doctor" {
-        if let Err(msg) = run_trace_doctor_subcommand(&program, args) {
+        if let Err(msg) = run_trace_doctor_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("[AXF-000] {msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "timing-report" {
-        if let Err(msg) = run_timing_report_subcommand(&program, args) {
+        if let Err(msg) = run_timing_report_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "io-map-normalize" {
-        if let Err(msg) = run_io_map_normalize_subcommand(&program, args) {
+        if let Err(msg) = run_io_map_normalize_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "component-topology-validate" {
-        if let Err(msg) = run_component_topology_validate_subcommand(&program, args) {
+        if let Err(msg) =
+            run_component_topology_validate_subcommand(&program, remaining.clone().into_iter())
+        {
             eprintln!("[CTOP-000] {msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "component-topology-diff" {
-        if let Err(msg) = run_component_topology_diff_subcommand(&program, args) {
+        if let Err(msg) =
+            run_component_topology_diff_subcommand(&program, remaining.clone().into_iter())
+        {
             eprintln!("[CTOPDIFF-000] {msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "component-scenario-validate" {
-        if let Err(msg) = run_component_scenario_validate_subcommand(&program, args) {
+        if let Err(msg) =
+            run_component_scenario_validate_subcommand(&program, remaining.clone().into_iter())
+        {
             eprintln!("[CSCN-000] {msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "component-sim" {
-        if let Err(msg) = run_component_sim_subcommand(&program, args) {
+        if let Err(msg) = run_component_sim_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("[CSIM-000] {msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "no-board-gate" {
-        if let Err(msg) = run_no_board_gate_subcommand(&program, args) {
+        if let Err(msg) = run_no_board_gate_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("[GATE-000] {msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "commissioning-run" {
-        if let Err(msg) = run_commissioning_run_subcommand(&program, args) {
+        if let Err(msg) = run_commissioning_run_subcommand(&program, remaining.clone().into_iter())
+        {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "pil-run" {
-        if let Err(msg) = run_pil_run_subcommand(&program, args) {
+        if let Err(msg) = run_pil_run_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "virtual-board" {
-        if let Err(msg) = run_virtual_board_subcommand(&program, args) {
+        if let Err(msg) = run_virtual_board_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "sequence-lint" {
-        if let Err(msg) = run_sequence_lint_subcommand(&program, args) {
+        if let Err(msg) = run_sequence_lint_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "scenario-init" {
-        if let Err(msg) = run_scenario_init_subcommand(&program, args) {
+        if let Err(msg) = run_scenario_init_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "scenario-validate" {
-        if let Err(msg) = run_scenario_validate_subcommand(&program, args) {
+        if let Err(msg) = run_scenario_validate_subcommand(&program, remaining.clone().into_iter())
+        {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "scenario-doctor" {
-        if let Err(msg) = run_scenario_doctor_subcommand(&program, args) {
+        if let Err(msg) = run_scenario_doctor_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "scenario-expand" {
-        if let Err(msg) = run_scenario_expand_subcommand(&program, args) {
+        if let Err(msg) = run_scenario_expand_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "scenario-gen" {
-        if let Err(msg) = run_scenario_gen_subcommand(&program, args) {
+        if let Err(msg) = run_scenario_gen_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "gen-st" {
-        if let Err(msg) = run_gen_st_subcommand(&program, args) {
+        if let Err(msg) = run_gen_st_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("[STGEN-000] {msg}");
             std::process::exit(1);
         }
         return;
     }
     if first == "new" {
-        if let Err(msg) = run_new_subcommand(&program, args) {
+        if let Err(msg) = run_new_subcommand(&program, remaining.clone().into_iter()) {
             eprintln!("{msg}");
             std::process::exit(1);
         }
@@ -1654,6 +2336,7 @@ fn main() {
     }
 
     let path = first;
+    let mut args = remaining.into_iter();
     let mut report_path: Option<PathBuf> = None;
     let mut no_print_ir = false;
     let mut ir_out_path: Option<PathBuf> = None;
@@ -1887,89 +2570,7 @@ fn main() {
 }
 
 fn print_usage(program: &str) {
-    eprintln!("Usage:");
-    eprintln!(
-        "  {program} <file.plc> [--report <verification_report.json>] [--deny-warnings] [--no-print-ir] [--ir-out <ir_bundle.json>] [--budget-... <value>]"
-    );
-    eprintln!(
-        "  {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
-    );
-    eprintln!(
-        "  {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>] [--io-snapshot-out <io_snapshot.json>]"
-    );
-    eprintln!(
-        "  {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
-    );
-    eprintln!(
-        "  {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]"
-    );
-    eprintln!(
-        "  {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]"
-    );
-    eprintln!(
-        "  {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
-    );
-    eprintln!("  {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]");
-    eprintln!("  {program} board-parse --in <board.log> --out-dir <dir>");
-    eprintln!(
-        "  {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
-    );
-    eprintln!(
-        "  {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--io-snapshot <io_snapshot.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]"
-    );
-    eprintln!("  {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]");
-    eprintln!("  {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>");
-    eprintln!(
-        "  {program} component-topology-validate <topology.json> [--output <human|json>] [--normalized-out <normalized_topology.json>]"
-    );
-    eprintln!(
-        "  {program} component-topology-diff <before_topology.json> <after_topology.json> --out <semantic_diff.json> [--output <human|json>]"
-    );
-    eprintln!(
-        "  {program} component-scenario-validate <scenario.json> [--output <human|json>] [--normalized-out <normalized_scenario.json>]"
-    );
-    eprintln!(
-        "  {program} component-sim <topology.json> --scenario <scenario.json> [--out <component_trace.jsonl>] [--fault-audit-out <fault_audit.jsonl>] [--diagnosis-out <component_diagnosis.json>] [--keypoints-out <component_keypoints.json>] [--output <human|json>]"
-    );
-    eprintln!(
-        "  {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]"
-    );
-    eprintln!("  {program} commissioning-run <file.plc> --out-dir <dir> [--output <human|json>]");
-    eprintln!("  {program} new <project_dir> [--force]");
-    eprintln!("  {program} pil-run <file.plc> --scenario <scenario.yaml>");
-    eprintln!("  {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>");
-    eprintln!(
-        "  {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]"
-    );
-    eprintln!(
-        "  {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]"
-    );
-    eprintln!(
-        "  {program} scenario-validate <file.plc> --scenario <scenario.yaml> [--output <human|json>]"
-    );
-    eprintln!(
-        "  {program} scenario-doctor <file.plc> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]"
-    );
-    eprintln!(
-        "  {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>"
-    );
-    eprintln!(
-        "  {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir> [--coverage-mode <pairwise|boundary-first|risk-first>] [--dry-run] [--template-library <metadata.json>]"
-    );
-    eprintln!(
-        "  {program} gen-st <file.plc> [--out <output.st>] [--program-name <Main>] [--no-verification-summary]"
-    );
-    eprintln!();
-    eprintln!("Budget options (also configurable via env vars):");
-    eprintln!("  --budget-max-actions-per-transition <n>");
-    eprintln!("  --budget-max-actions-per-tick <n>");
-    eprintln!("  --budget-max-parallel-branches <n>");
-    eprintln!("  --budget-max-race-branches <n>");
-    eprintln!("  --budget-warn-on-same-tick-cycle <true|false>");
-    eprintln!("  --budget-action-cost-us <n>");
-    eprintln!("  --budget-transition-cost-us <n>");
-    eprintln!("  --budget-parallel-expand-cost-us <n>");
-    eprintln!("  --budget-max-time-estimate-us <n>");
+    eprintln!("{}", render_root_help(program));
 }
 
 fn write_scaffold_file(path: &Path, content: &str, force: bool) -> Result<(), String> {
@@ -1992,9 +2593,7 @@ fn run_gen_st_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
-    let usage = format!(
-        "Usage: {program} gen-st <file.plc> [--out <output.st>] [--program-name <Main>] [--no-verification-summary]"
-    );
+    let usage = command_usage(program, "gen-st");
 
     let Some(plc_path) = args.next() else {
         return Err(usage);
@@ -2102,7 +2701,7 @@ fn prettify_project_name(raw: &str) -> String {
 }
 
 fn run_new_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
-    let usage = format!("Usage: {program} new <project_dir> [--force]");
+    let usage = command_usage(program, "new");
     let Some(project_dir) = args.next() else {
         return Err(usage);
     };
@@ -2215,10 +2814,9 @@ fn run_sequence_lint_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "sequence-lint");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]"
-        ));
+        return Err(usage);
     };
 
     let mut config = SequenceLintConfig::default();
@@ -2240,9 +2838,7 @@ fn run_sequence_lint_subcommand(
                 config.critical_wait_exemptions.push(exemption);
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]"
-                ));
+                return Err(usage.clone());
             }
             other => {
                 return Err(format!("Unknown argument for sequence-lint: {other}"));
@@ -2284,10 +2880,9 @@ fn run_scenario_init_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "scenario-init");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]"
-        ));
+        return Err(usage);
     };
 
     let mut out_path: Option<PathBuf> = None;
@@ -2310,9 +2905,7 @@ fn run_scenario_init_subcommand(
                 })?;
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]"
-                ));
+                return Err(usage.clone());
             }
             other => {
                 return Err(format!("Unknown argument for scenario-init: {other}"));
@@ -2353,10 +2946,9 @@ fn run_scenario_validate_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "scenario-validate");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml> [--output <human|json>]"
-        ));
+        return Err(usage);
     };
 
     let mut scenario_path: Option<PathBuf> = None;
@@ -2378,9 +2970,7 @@ fn run_scenario_validate_subcommand(
                 })?;
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml> [--output <human|json>]"
-                ));
+                return Err(usage.clone());
             }
             other => {
                 return Err(format!("Unknown argument for scenario-validate: {other}"));
@@ -2652,10 +3242,9 @@ fn run_scenario_doctor_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "scenario-doctor");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} scenario-doctor <file.plc> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]"
-        ));
+        return Err(usage);
     };
 
     let mut scenario_path: Option<PathBuf> = None;
@@ -2681,9 +3270,7 @@ fn run_scenario_doctor_subcommand(
                 })?;
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} scenario-doctor <file.plc> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for scenario-doctor: {other}")),
         }
@@ -2815,10 +3402,9 @@ fn run_scenario_expand_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "scenario-expand");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>"
-        ));
+        return Err(usage);
     };
 
     let mut scenario_path: Option<PathBuf> = None;
@@ -2838,24 +3424,14 @@ fn run_scenario_expand_subcommand(
                     })?));
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for scenario-expand: {other}")),
         }
     }
 
-    let scenario_path = scenario_path.ok_or_else(|| {
-        format!(
-            "Usage: {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>"
-        )
-    })?;
-    let out_path = out_path.ok_or_else(|| {
-        format!(
-            "Usage: {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>"
-        )
-    })?;
+    let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
+    let out_path = out_path.ok_or_else(|| usage.clone())?;
 
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -3243,9 +3819,7 @@ fn run_scenario_gen_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
-    let usage = format!(
-        "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir> [--coverage-mode <pairwise|boundary-first|risk-first>] [--dry-run] [--template-library <metadata.json>]"
-    );
+    let usage = command_usage(program, "scenario-gen");
     let mut plc_path: Option<PathBuf> = None;
     let mut config_path: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
@@ -4823,10 +5397,9 @@ fn capture_retain_payload(config: &RetainConfig, io: &sim::SimIo) -> RetainState
 }
 
 fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
+    let usage = command_usage(program, "sim");
     let Some(scenario_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
-        ));
+        return Err(usage);
     };
 
     let mut out_path: Option<String> = None;
@@ -4860,9 +5433,7 @@ fn run_sim_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
                     })?);
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} sim <scenario.yaml> [--out <trace.jsonl>] [--vcd-out <wave.vcd>] [--analog-out <analog.csv>] [--report-out <report.json>]"
-                ));
+                return Err(usage.clone());
             }
             other => {
                 return Err(format!("Unknown argument for sim: {other}"));
@@ -4937,9 +5508,7 @@ fn run_sim_plc_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
-    let usage = format!(
-        "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>] [--io-snapshot-out <io_snapshot.json>]"
-    );
+    let usage = command_usage(program, "sim-plc");
     let Some(plc_path) = args.next() else {
         return Err(usage);
     };
@@ -5320,6 +5889,7 @@ fn run_sim_regress_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "sim-regress");
     let mut plc_dir: Option<PathBuf> = None;
     let mut scenario_dir: Option<PathBuf> = None;
     let mut artifacts_dir: Option<PathBuf> = None;
@@ -5355,9 +5925,7 @@ fn run_sim_regress_subcommand(
                 minimize_failure = true;
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
-                ));
+                return Err(usage.clone());
             }
             other => {
                 return Err(format!("Unknown argument for sim-regress: {other}"));
@@ -5365,16 +5933,8 @@ fn run_sim_regress_subcommand(
         }
     }
 
-    let plc_dir = plc_dir.ok_or_else(|| {
-        format!(
-            "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
-        )
-    })?;
-    let scenario_dir = scenario_dir.ok_or_else(|| {
-        format!(
-            "Usage: {program} sim-regress --plc-dir <dir> --scenario-dir <dir> [--artifacts-dir <dir>] [--summary-out <summary.json>] [--minimize-failure]"
-        )
-    })?;
+    let plc_dir = plc_dir.ok_or_else(|| usage.clone())?;
+    let scenario_dir = scenario_dir.ok_or_else(|| usage.clone())?;
 
     let artifacts_dir = artifacts_dir.unwrap_or_else(|| PathBuf::from("out/sim-regress"));
     let summary_out = summary_out.unwrap_or_else(|| artifacts_dir.join("summary.json"));
@@ -5407,10 +5967,9 @@ fn run_sim_pid_kpi_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "sim-pid-kpi");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]"
-        ));
+        return Err(usage);
     };
 
     let mut scenario_path: Option<PathBuf> = None;
@@ -5430,19 +5989,13 @@ fn run_sim_pid_kpi_subcommand(
                     })?));
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for sim-pid-kpi: {other}")),
         }
     }
 
-    let scenario_path = scenario_path.ok_or_else(|| {
-        format!(
-            "Usage: {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]"
-        )
-    })?;
+    let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
     let out_path = out_path.unwrap_or_else(|| PathBuf::from("out/pid_kpi.json"));
 
     if let Some(parent) = out_path.parent() {
@@ -5602,10 +6155,9 @@ fn run_build_rp2040_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "build-rp2040");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]"
-        ));
+        return Err(usage);
     };
 
     let mut out_dir: Option<PathBuf> = None;
@@ -5648,19 +6200,13 @@ fn run_build_rp2040_subcommand(
                 })?;
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for build-rp2040: {other}")),
         }
     }
 
-    let out_dir = out_dir.ok_or_else(|| {
-        format!(
-            "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]"
-        )
-    })?;
+    let out_dir = out_dir.ok_or_else(|| usage.clone())?;
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
 
@@ -5843,10 +6389,9 @@ fn run_release_bundle_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "release-bundle");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
-        ));
+        return Err(usage);
     };
 
     let mut scenario_path: Option<PathBuf> = None;
@@ -5891,24 +6436,14 @@ fn run_release_bundle_subcommand(
                 })?);
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for release-bundle: {other}")),
         }
     }
 
-    let scenario_path = scenario_path.ok_or_else(|| {
-        format!(
-            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
-        )
-    })?;
-    let out_dir = out_dir.ok_or_else(|| {
-        format!(
-            "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]"
-        )
-    })?;
+    let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
+    let out_dir = out_dir.ok_or_else(|| usage.clone())?;
 
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
@@ -6871,6 +7406,7 @@ fn run_flash_rp2040_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "flash-rp2040");
     let mut uf2: Option<PathBuf> = None;
     let mut mount: Option<PathBuf> = None;
     let mut dry_run = false;
@@ -6891,20 +7427,14 @@ fn run_flash_rp2040_subcommand(
             }
             "--dry-run" => dry_run = true,
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for flash-rp2040: {other}")),
         }
     }
 
-    let uf2 = uf2.ok_or_else(|| {
-        format!("Usage: {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]")
-    })?;
-    let mount = mount.ok_or_else(|| {
-        format!("Usage: {program} flash-rp2040 --uf2 <file.uf2> --mount <path> [--dry-run]")
-    })?;
+    let uf2 = uf2.ok_or_else(|| usage.clone())?;
+    let mount = mount.ok_or_else(|| usage.clone())?;
 
     if !uf2.exists() {
         return Err(format!("UF2 file does not exist: {uf2:?}"));
@@ -6936,6 +7466,7 @@ fn run_board_parse_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "board-parse");
     let mut input: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
 
@@ -6954,18 +7485,14 @@ fn run_board_parse_subcommand(
                     })?));
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} board-parse --in <board.log> --out-dir <dir>"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for board-parse: {other}")),
         }
     }
 
-    let input = input
-        .ok_or_else(|| format!("Usage: {program} board-parse --in <board.log> --out-dir <dir>"))?;
-    let out_dir = out_dir
-        .ok_or_else(|| format!("Usage: {program} board-parse --in <board.log> --out-dir <dir>"))?;
+    let input = input.ok_or_else(|| usage.clone())?;
+    let out_dir = out_dir.ok_or_else(|| usage.clone())?;
 
     let text = fs::read_to_string(&input)
         .map_err(|err| format!("Failed to read board log {input:?}: {err}"))?;
@@ -7000,6 +7527,7 @@ fn run_trace_diff_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "trace-diff");
     let mut sil: Option<PathBuf> = None;
     let mut board: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
@@ -7033,23 +7561,15 @@ fn run_trace_diff_subcommand(
             }
             "--fail-on-mismatch" => fail_on_mismatch = true,
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for trace-diff: {other}")),
         }
     }
 
-    let sil = sil.ok_or_else(|| format!(
-        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
-    ))?;
-    let board = board.ok_or_else(|| format!(
-        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
-    ))?;
-    let out = out.ok_or_else(|| format!(
-        "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]"
-    ))?;
+    let sil = sil.ok_or_else(|| usage.clone())?;
+    let board = board.ok_or_else(|| usage.clone())?;
+    let out = out.ok_or_else(|| usage.clone())?;
 
     let sil_text = fs::read_to_string(&sil)
         .map_err(|err| format!("Failed to read SIL trace {sil:?}: {err}"))?;
@@ -7088,9 +7608,7 @@ fn run_trace_doctor_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
-    let usage = format!(
-        "Usage: {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--io-snapshot <io_snapshot.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]"
-    );
+    let usage = command_usage(program, "trace-doctor");
 
     let Some(plc_path) = args.next() else {
         return Err(usage);
@@ -7282,6 +7800,7 @@ fn run_timing_report_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "timing-report");
     let mut input: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
 
@@ -7298,19 +7817,13 @@ fn run_timing_report_subcommand(
                 })?));
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for timing-report: {other}")),
         }
     }
 
-    let input = input.ok_or_else(|| {
-        format!(
-            "Usage: {program} timing-report --in <tick_timing.jsonl> [--out <timing_report.json>]"
-        )
-    })?;
+    let input = input.ok_or_else(|| usage.clone())?;
 
     let out = out.unwrap_or_else(|| {
         input
@@ -7357,6 +7870,7 @@ fn run_io_map_normalize_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "io-map-normalize");
     let mut input: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
 
@@ -7374,20 +7888,14 @@ fn run_io_map_normalize_subcommand(
                 })?));
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for io-map-normalize: {other}")),
         }
     }
 
-    let input = input.ok_or_else(|| {
-        format!("Usage: {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>")
-    })?;
-    let out = out.ok_or_else(|| {
-        format!("Usage: {program} io-map-normalize --in <io_map.toml> --out <normalized.toml>")
-    })?;
+    let input = input.ok_or_else(|| usage.clone())?;
+    let out = out.ok_or_else(|| usage.clone())?;
 
     let text =
         fs::read_to_string(&input).map_err(|err| format!("Failed to read {input:?}: {err}"))?;
@@ -7413,9 +7921,7 @@ fn run_component_topology_validate_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
-    let usage = format!(
-        "Usage: {program} component-topology-validate <topology.json> [--output <human|json>] [--normalized-out <normalized_topology.json>]"
-    );
+    let usage = command_usage(program, "component-topology-validate");
     let Some(topology_path) = args.next() else {
         return Err(usage);
     };
@@ -7533,9 +8039,7 @@ fn run_component_topology_diff_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
-    let usage = format!(
-        "Usage: {program} component-topology-diff <before_topology.json> <after_topology.json> --out <semantic_diff.json> [--output <human|json>]"
-    );
+    let usage = command_usage(program, "component-topology-diff");
     let Some(before_path) = args.next() else {
         return Err(usage);
     };
@@ -7663,9 +8167,7 @@ fn run_component_scenario_validate_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
-    let usage = format!(
-        "Usage: {program} component-scenario-validate <scenario.json> [--output <human|json>] [--normalized-out <normalized_scenario.json>]"
-    );
+    let usage = command_usage(program, "component-scenario-validate");
     let Some(scenario_path) = args.next() else {
         return Err(usage);
     };
@@ -7799,9 +8301,7 @@ fn run_component_sim_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
-    let usage = format!(
-        "Usage: {program} component-sim <topology.json> --scenario <scenario.json> [--out <component_trace.jsonl>] [--fault-audit-out <fault_audit.jsonl>] [--diagnosis-out <component_diagnosis.json>] [--keypoints-out <component_keypoints.json>] [--output <human|json>]"
-    );
+    let usage = command_usage(program, "component-sim");
     let Some(topology_path) = args.next() else {
         return Err(usage);
     };
@@ -7854,7 +8354,7 @@ fn run_component_sim_subcommand(
         }
     }
 
-    let scenario_path = scenario_path.ok_or(usage)?;
+    let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
     let topology_text = fs::read_to_string(&topology_path)
         .map_err(|err| format!("Failed to read {}: {err}", topology_path.display()))?;
     let topology = parse_component_topology_json(&topology_text)
@@ -8483,9 +8983,7 @@ fn run_commissioning_run_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
-    let usage = format!(
-        "Usage: {program} commissioning-run <file.plc> --out-dir <dir> [--output <human|json>]"
-    );
+    let usage = command_usage(program, "commissioning-run");
     let Some(plc_path_raw) = args.next() else {
         return Err(usage);
     };
@@ -8510,12 +9008,12 @@ fn run_commissioning_run_subcommand(
                     format!("Invalid --output value `{raw}` (expected `human` or `json`)")
                 })?;
             }
-            "-h" | "--help" => return Err(usage),
+            "-h" | "--help" => return Err(usage.clone()),
             other => return Err(format!("Unknown argument for commissioning-run: {other}")),
         }
     }
 
-    let out_dir = out_dir.ok_or(usage)?;
+    let out_dir = out_dir.ok_or_else(|| usage.clone())?;
     fs::create_dir_all(&out_dir).map_err(|err| {
         format!(
             "Failed to create commissioning output directory {}: {err}",
@@ -9050,10 +9548,9 @@ fn run_no_board_gate_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "no-board-gate");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]"
-        ));
+        return Err(usage);
     };
 
     let mut scenario_path: Option<PathBuf> = None;
@@ -9122,25 +9619,20 @@ fn run_no_board_gate_subcommand(
                 })?;
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for no-board-gate: {other}")),
         }
     }
 
-    let out_dir = out_dir.ok_or_else(|| {
-        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]")
-    })?;
+    let out_dir = out_dir.ok_or_else(|| usage.clone())?;
 
-    let sil_scenario_path = sil_scenario_path.or_else(|| scenario_path.clone()).ok_or_else(|| {
-        format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]")
-    })?;
-    let board_scenario_path =
-        board_scenario_path.or_else(|| scenario_path.clone()).ok_or_else(|| {
-            format!("Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]")
-        })?;
+    let sil_scenario_path = sil_scenario_path
+        .or_else(|| scenario_path.clone())
+        .ok_or_else(|| usage.clone())?;
+    let board_scenario_path = board_scenario_path
+        .or_else(|| scenario_path.clone())
+        .ok_or_else(|| usage.clone())?;
 
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create output directory {out_dir:?}: {err}"))?;
@@ -9380,10 +9872,9 @@ fn run_pil_run_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "pil-run");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} pil-run <file.plc> --scenario <scenario.yaml>"
-        ));
+        return Err(usage);
     };
 
     let mut scenario_path: Option<PathBuf> = None;
@@ -9396,16 +9887,13 @@ fn run_pil_run_subcommand(
                     })?));
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} pil-run <file.plc> --scenario <scenario.yaml>"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for pil-run: {other}")),
         }
     }
 
-    let scenario_path = scenario_path
-        .ok_or_else(|| format!("Usage: {program} pil-run <file.plc> --scenario <scenario.yaml>"))?;
+    let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
 
     let plc_source =
         fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
@@ -9617,10 +10105,9 @@ fn run_virtual_board_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
+    let usage = command_usage(program, "virtual-board");
     let Some(plc_path) = args.next() else {
-        return Err(format!(
-            "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>"
-        ));
+        return Err(usage);
     };
 
     let mut scenario_path: Option<PathBuf> = None;
@@ -9640,24 +10127,14 @@ fn run_virtual_board_subcommand(
                     })?));
             }
             "-h" | "--help" => {
-                return Err(format!(
-                    "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>"
-                ));
+                return Err(usage.clone());
             }
             other => return Err(format!("Unknown argument for virtual-board: {other}")),
         }
     }
 
-    let scenario_path = scenario_path.ok_or_else(|| {
-        format!(
-            "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>"
-        )
-    })?;
-    let out_dir = out_dir.ok_or_else(|| {
-        format!(
-            "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>"
-        )
-    })?;
+    let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
+    let out_dir = out_dir.ok_or_else(|| usage.clone())?;
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create output directory {out_dir:?}: {err}"))?;
 
