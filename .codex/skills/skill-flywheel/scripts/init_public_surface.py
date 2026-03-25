@@ -20,8 +20,6 @@ PROFILE_INCLUDES = {
         "examples",
         "devices",
         "scenarios",
-        ".codex/skills/plc-gen",
-        ".codex/skills/plc-system",
     ]
 }
 
@@ -129,18 +127,6 @@ def normalize_path_string(path: Path) -> str:
     return str(path.resolve())
 
 
-def resolve_blind_skill_path(repo_root: Path, public_root: Path, target_skill_path: Path) -> Path:
-    try:
-        relative = target_skill_path.resolve().relative_to(repo_root)
-    except ValueError:
-        return target_skill_path
-
-    public_copy = public_root / relative
-    if public_copy.exists():
-        return public_copy
-    return target_skill_path
-
-
 def render_boundary_readme(project_name: str, cycle: CyclePaths, repo_root: Path, manifest_path: Path) -> str:
     return f"""# Public Boundary
 
@@ -150,8 +136,8 @@ Cycle dir: {normalize_path_string(cycle.root)}
 Manifest: {normalize_path_string(manifest_path)}
 
 Allowed:
+- the real target skill path referenced in the prompts
 - files under this `public/` directory
-- the target skill path referenced in the prompts
 
 Forbidden for the blind operator:
 - project source outside this `public/` directory
@@ -218,11 +204,15 @@ Keep the skill lean. If a blocker is better solved by a public artifact or code 
 """
 
 
-def render_agent2_prompt(public_dir: Path, blind_skill_path: Path, task: str, logs_dir: Path) -> str:
-    return f"""Use the target skill at {normalize_path_string(blind_skill_path)} to complete this real task:
+def render_agent2_prompt(public_dir: Path, target_skill_path: Path, task: str, logs_dir: Path) -> str:
+    return f"""Use the real target skill at {normalize_path_string(target_skill_path)} to complete this real task:
 {task}
 
-You must stay inside this public workspace:
+You may read only:
+- {normalize_path_string(target_skill_path)}
+- {normalize_path_string(public_dir)}
+
+Public workspace:
 {normalize_path_string(public_dir)}
 
 Do not read project source or other protected repo paths. This boundary is procedural; honor it strictly.
@@ -278,8 +268,6 @@ def main() -> int:
         copy_public_path(repo_root, cycle.public, rel_path, blocked_segments)
         for rel_path in include_paths
     ]
-    blind_skill_path = resolve_blind_skill_path(repo_root, cycle.public, target_skill_path)
-
     manifest_path = cycle.root / "manifest.json"
     manifest = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -307,7 +295,7 @@ def main() -> int:
     )
     write_text(
         cycle.prompts / "agent2.md",
-        render_agent2_prompt(cycle.public, blind_skill_path, args.task, cycle.logs),
+        render_agent2_prompt(cycle.public, target_skill_path, args.task, cycle.logs),
     )
     write_text(
         cycle.prompts / "agent3.md",

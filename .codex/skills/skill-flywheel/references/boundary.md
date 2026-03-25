@@ -25,9 +25,10 @@ unless the blind agent truly runs in a separate workspace, container, or permiss
 
 For the no-source operator:
 
-1. Only read files under the generated `public/` directory.
-2. Do not inspect `src/`, `crates/`, or any other protected repo path.
-3. If required information is missing, log the blocker instead of crossing the boundary.
+1. Read the real target skill under test.
+2. Read files under the generated `public/` directory.
+3. Do not inspect `src/`, `crates/`, or any other protected repo path.
+4. If required information is missing, log the blocker instead of crossing the boundary.
 
 For the source-aware analyst:
 
@@ -39,4 +40,4 @@ For the source-aware analyst:
 
 ## Stronger Isolation
 
-If you need actual isolation, move Agent 2 into a separate workspace that only contains the generated `public/` bundle and the target skill. This skill supports that flow, but cannot enforce it by itself.
+If you need actual isolation, move Agent 2 into a separate workspace that contains only the real target skill plus the generated `public/` bundle. This skill supports that flow, but cannot enforce it by itself.

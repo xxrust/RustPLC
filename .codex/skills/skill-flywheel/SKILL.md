@@ -32,6 +32,7 @@ Load only the references you need:
 5. Prefer stable exported artifacts, commands, manifests, diagnostics, and examples over embedding private reasoning into the skill.
 6. Keep the target skill lean. Repeated missing facts belong in the public surface or the codebase if they can be exported mechanically.
 7. Record each loop in a cycle directory so later iterations can reuse the evidence without re-reading the whole repo.
+8. Test the real target skill directly. Do not create or rely on a copied skill under `public/`.
 
 ## Default Workflow
 

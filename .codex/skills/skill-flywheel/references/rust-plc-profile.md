@@ -14,10 +14,8 @@ The bootstrap script exposes these paths by default for profile `rust-plc`:
 - `examples/`
 - `devices/`
 - `scenarios/`
-- `.codex/skills/plc-gen/`
-- `.codex/skills/plc-system/`
 
-This keeps the blind operator on public contracts, examples, and already-exposed skills while excluding private implementation directories such as `src/` and `crates/`.
+This keeps the blind operator on public contracts and examples while excluding private implementation directories such as `src/` and `crates/`. The target skill is tested from its real path, not from a copied bundle.
 
 ## Typical Targets
 

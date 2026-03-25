@@ -19,11 +19,12 @@ Keep the skill lean. If a blocker is better solved by a public artifact or code 
 ## Agent 2: No-Source Operator
 
 ```text
-Use the target skill copy at <PUBLIC_SKILL_PATH> to complete this real task:
+Use the real target skill at <TARGET_SKILL_PATH> to complete this real task:
 <TASK>
 
-You must stay inside this public workspace:
-<PUBLIC_DIR>
+You may read only:
+- <TARGET_SKILL_PATH>
+- <PUBLIC_DIR>
 
 Do not read project source or other protected repo paths. This boundary is procedural; honor it strictly.
 
