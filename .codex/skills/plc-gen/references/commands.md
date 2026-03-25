@@ -1,21 +1,21 @@
 # plc-gen Commands
 
-Use this file when the caller needs exact runnable commands.
+当调用方需要可直接运行的精确命令时，使用本文件。
 
 ## Launcher Rule
 
-Choose one launcher and keep it consistent:
+先选定一种 launcher，并保持一致：
 
-- installed binary mode: `rust_plc`
-- source workspace mode: `cargo run --release --bin rust_plc --`
+- 已安装 binary 模式：`rust_plc`
+- source workspace 模式：`cargo run --release --bin rust_plc --`
 
-Do not use `cargo run --release -- ...`.
+不要使用 `cargo run --release -- ...`。
 
 ## Command Discovery Rule
 
-Do not depend on top-level `--help`.
-Current CLI behavior does not provide a generic top-level help screen.
-Give exact subcommand syntax instead.
+不要依赖顶层 `--help`。
+当前 CLI 不会提供通用顶层帮助界面。
+直接给出精确 subcommand 语法。
 
 ## Day-1 Commands
 
@@ -25,7 +25,7 @@ Give exact subcommand syntax instead.
 <run> new my_plc_project
 ```
 
-Overwrite only when intended:
+只有在确实要覆盖时才加：
 
 ```bash
 <run> new my_plc_project --force
@@ -37,8 +37,8 @@ Overwrite only when intended:
 <run> scenario-init plc/main.plc --out scenarios/nominal/normal.yaml --preset normal
 ```
 
-Use this only when the scenario file does not already exist.
-Do not recommend it right after `new`, because the scaffold already creates `scenarios/nominal/normal.yaml`.
+只有在 scenario 文件尚不存在时才使用这个命令。
+不要在 `new` 之后立刻推荐它，因为 scaffold 已经创建了 `scenarios/nominal/normal.yaml`。
 
 ### Validate the PLC Against the Scenario
 

@@ -1,175 +1,175 @@
 ---
 name: plc-gen
-description: "Generate validated RustPLC DSL (.plc) from a confirmed system description or equivalent industrial control requirements. Use when the user wants a RustPLC program, wants main.plc filled inside a scaffolded project, wants an existing .plc validated or repaired, or needs exact RustPLC scaffold and CLI commands without assuming repository knowledge."
+description: "基于已确认的系统描述或等价工业控制需求，生成可通过验证的 RustPLC DSL（`.plc`）。当用户需要 RustPLC 程序、需要在 scaffold 项目中填充 `main.plc`、需要验证或修复现有 `.plc`，或在不了解仓库细节时需要精确的 RustPLC scaffold 与 CLI 命令时使用。"
 ---
 
 # plc-gen
 
-Generate RustPLC DSL that survives the real pipeline.
+生成能够通过真实流水线的 RustPLC DSL。
 
-The skill is successful only when the produced `.plc` is validated by current RustPLC tooling.
+只有当产出的 `.plc` 通过当前 RustPLC 工具链验证时，这个 skill 才算完成。
 
-Keep this file lean.
-Load only the reference file you need:
+保持本文件精简。
+按需加载对应 reference 文件：
 
 - `references/workflow.md`
-  Use for the end-to-end generation and validation path.
+  用于端到端生成与验证流程。
 - `references/commands.md`
-  Use for exact CLI invocations and launcher selection.
+  用于精确 CLI 命令与 launcher 选择。
 - `references/project-layout.md`
-  Use when scaffolding a project or telling the caller which files to edit.
+  用于 scaffold 后指导用户先改哪些文件。
 - `references/output-contract.md`
-  Use to shape the final response and delivery contract.
+  用于约束最终交付格式与结果状态。
 - `references/troubleshooting.md`
-  Use when command discovery fails or the environment is unclear.
+  用于命令发现失败或环境不清晰时排障。
 
 ## Source of Truth
 
-Use these project rules:
+遵循以下项目规则：
 - `AGENTS.md`
 - `docs/architecture/signal-direction.md`
 
-Do not invent a second semantics model.
-Generate code that matches the existing parser, semantic gate, runtime bridge, and verification chain.
+不要发明第二套语义模型。
+生成的代码必须匹配现有 parser、semantic gate、runtime bridge 与 verification 链路。
 
 ## Input Contract
 
-Preferred input:
-- a confirmed `.system.md`
+优先输入：
+- 已确认的 `.system.md`
 
-If the user skips `.system.md`, derive a minimal internal system model only when the remaining ambiguity is small.
-If ambiguity changes safety, task partition, or fault handling, stop and ask only the missing blocking questions.
+如果用户没有提供 `.system.md`，只在剩余歧义很小的情况下才内部补一个最小 system model。
+如果歧义会影响 safety、task 划分或 fault handling，只问最少的阻塞问题。
 
 ## Default Workflow
 
-1. Read the confirmed system intent.
-2. Prefer a scaffolded project when the request is broader than a single file.
-3. Build topology, constraints, tasks, and failure paths.
-4. Prefer conservative task and timeout design.
-5. Validate with the real RustPLC tooling.
-5. Repair until the program passes or a real contract gap remains.
+1. 先读取已确认的系统意图。
+2. 只要请求不止是单文件，就优先走 scaffold 项目。
+3. 构建 topology、constraints、tasks 与 failure path。
+4. 默认采用保守的 task 与 timeout 设计。
+5. 用真实 RustPLC 工具链验证。
+6. 反复修复，直到程序通过，或明确存在真实 contract 缺口。
 
 ## Scaffold Rule
 
-When the user wants a full project or asks to validate end to end, use the scaffold first:
+当用户需要完整项目，或要求端到端验证时，先使用 scaffold：
 
 ```bash
 cargo run --release --bin rust_plc -- new my_plc_project
 ```
 
-Then write artifacts into:
+然后将产物写入：
 - `plc/main.system.md`
 - `plc/main.plc`
 - `scenarios/nominal/normal.yaml`
 
-If not using scaffold, keep the generated `.plc` near its paired `.system.md`.
+如果不走 scaffold，生成的 `.plc` 要与配套 `.system.md` 放在一起。
 
-Treat RustPLC as having two launcher modes:
+将 RustPLC 视为两种 launcher 模式：
 
-- installed binary mode: `rust_plc ...`
-- source workspace mode: `cargo run --release --bin rust_plc -- ...`
+- 已安装 binary 模式：`rust_plc ...`
+- source workspace 模式：`cargo run --release --bin rust_plc -- ...`
 
-Never suggest `cargo run --release -- ...` without `--bin rust_plc`.
-This workspace has multiple binaries, so the short form is unreliable.
+不要给出不带 `--bin rust_plc` 的 `cargo run --release -- ...`。
+这个 workspace 有多个 binary，短写法不可靠。
 
 ## Generation Rules
 
-Always enforce:
-- every device has `purpose`
-- topology uses explicit `relation { from, to, via }`
-- task semantics follow concurrent-task plus blocking-step rules
-- human waits use `allow_indefinite_wait: true`
-- non-human waits get explicit timeout routes
-- failure routes are concrete tasks, not vague comments
+始终强制：
+- 每个 device 都有 `purpose`
+- topology 使用显式 `relation { from, to, via }`
+- task 语义遵循 concurrent-task 与 blocking-step 规则
+- 人工等待使用 `allow_indefinite_wait: true`
+- 非人工等待必须有明确 timeout route
+- failure route 必须是具体 task，不能只是含糊注释
 
-Prefer this task skeleton unless the process clearly needs something else:
+除非工艺明显需要其他结构，否则优先使用这一类 task 骨架：
 - `ready`
 - `cycle`
-- one or more `fail_*` tasks
+- 一个或多个 `fail_*` task
 
 ## Concurrency and Blocking
 
-Treat these as blocking by default:
+默认把以下语句视为 blocking：
 - `wait`
 - `delay`
 - `timeout`
 - `axis.move_relative`
 - `axis.move_absolute`
-- waits on external feedback
+- 对外部反馈的等待
 
-If an action must happen after an axis move completes, split it into a later step.
+如果某个 action 必须在 axis move 完成后发生，就把它拆到后续 step。
 
-When independent workstations can progress while another waits, model them as separate tasks instead of flattening everything into one cycle task.
+如果独立工位可以在另一个工位等待时继续推进，就建模成独立 task，不要把所有逻辑压扁到单个 `cycle` task。
 
 ## Device and Constraint Heuristics
 
-Prefer:
+优先：
 - `plc_main: plc { ports: [...] }`
-- cylinders with paired `_ext` / `_ret` feedback when realistic
-- explicit `requires` for dependency constraints
-- `conflicts_with` only for true state coexistence conflicts
+- 在真实场景下，为 cylinder 配套 `_ext` / `_ret` feedback
+- 用显式 `requires` 表达依赖约束
+- `conflicts_with` 仅用于真正的状态共存冲突
 
-Do not use `conflicts_with` to encode mere execution order.
+不要用 `conflicts_with` 编码纯执行顺序。
 
-## Analog, PID, and Axis Rules
+## Analog、PID、Axis Rules
 
-For analog signals:
-- use `analog_input` / `analog_output`
-- always declare `range` and `unit`
-- avoid exact `==` thresholds when a range is safer
+对于 analog signal：
+- 使用 `analog_input` / `analog_output`
+- 始终声明 `range` 与 `unit`
+- 当范围判断更安全时，避免精确 `==` threshold
 
-For PID:
-- keep `pv` and `out` naming aligned with actual analog device names
+对于 PID：
+- `pv` 与 `out` 命名要和真实 analog device 名称一致
 
-For axis motion:
-- prefer `axis.move_relative` / `axis.move_absolute`
-- include `timeout`
-- include `on_reject`
-- include `on_motion_fault`
-- include `on_safety_fault`
+对于 axis motion：
+- 优先 `axis.move_relative` / `axis.move_absolute`
+- 必须包含 `timeout`
+- 必须包含 `on_reject`
+- 必须包含 `on_motion_fault`
+- 必须包含 `on_safety_fault`
 
 ## Validation Loop
 
-Do not rely on top-level `--help`.
-Give the exact subcommand syntax instead.
+不要依赖顶层 `--help`。
+直接给出准确的 subcommand 语法。
 
-Validate generated code with the real toolchain whenever available.
+只要环境允许，就用真实 toolchain 验证生成结果。
 
-If the caller has an installed binary, prefer:
+如果调用方有已安装 binary，优先：
 
 ```bash
 rust_plc scenario-validate plc/main.plc --scenario scenarios/nominal/normal.yaml --output human
 ```
 
-If you are in a source workspace, prefer:
+如果你在 source workspace 中，优先：
 
 ```bash
 cargo run --release --bin rust_plc -- scenario-validate plc/main.plc --scenario scenarios/nominal/normal.yaml --output human
 ```
 
-Also run:
+同时运行：
 
 ```bash
 cargo run --release --bin rust_plc -- scenario-doctor plc/main.plc --scenario scenarios/nominal/normal.yaml --output human
 ```
 
-Use `no-board-gate` when the request is project-level and the scenario is ready.
+当请求是项目级交付且 scenario 已准备好时，补跑 `no-board-gate`。
 
 ## Fixture Discipline
 
-This skill has fixture-backed regression coverage under:
+这个 skill 的 fixture 回归位于：
 - `.codex/skills/plc-gen/fixtures/valid/*.plc`
 
-When changing the skill rules materially:
-- update or add a representative fixture
-- run `cargo test --test plc_gen_skill_fixtures`
+当 skill 规则发生实质变化时：
+- 更新或新增一个有代表性的 fixture
+- 运行 `cargo test --test plc_gen_skill_fixtures`
 
 ## Output Style
 
-Default response:
-1. short result
-2. generated `.plc`
+默认输出顺序：
+1. 简短结果
+2. 生成的 `.plc`
 3. assumptions
-4. validation status
+4. validation 状态
 
-Keep explanations short unless the user asks for the reasoning.
+除非用户明确要求展开，否则解释保持简短。

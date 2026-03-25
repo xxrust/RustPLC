@@ -1,6 +1,6 @@
 # plc-gen Project Layout
 
-Use this file when the caller asks which files they should edit after scaffolding.
+当调用方询问 scaffold 后应该先修改哪些文件时，使用本文件。
 
 ## Scaffold Command
 
@@ -8,34 +8,34 @@ Use this file when the caller asks which files they should edit after scaffoldin
 <run> new my_plc_project
 ```
 
-## Files the Caller Should Care About
+## 调用方首先应关注的文件
 
 - `plc/main.system.md`
-  confirmed system contract
+  已确认的 system contract
 - `plc/main.plc`
-  executable RustPLC DSL
+  可执行 RustPLC DSL
 - `scenarios/nominal/normal.yaml`
-  nominal validation scenario already created by the scaffold
+  scaffold 已创建好的 nominal validation scenario
 - `config/io_map.toml`
   deployment I/O mapping
 - `config/retain.toml`
   retain baseline
 - `rustplc.project.toml`
-  manifest and default path contract
+  manifest 与默认路径 contract
 
 ## Edit Order
 
-For a fresh project:
+对于全新项目：
 
-1. confirm `plc/main.system.md`
-2. write or repair `plc/main.plc`
-3. update `scenarios/nominal/normal.yaml`
-4. run validation commands
-5. only then produce codegen or deployment artifacts
+1. 先确认 `plc/main.system.md`
+2. 再编写或修复 `plc/main.plc`
+3. 然后更新 `scenarios/nominal/normal.yaml`
+4. 接着运行验证命令
+5. 最后才生成 codegen 或 deployment artifact
 
 ## Output Folders
 
-Treat these as generated artifacts:
+以下目录都视为可重建的生成产物：
 
 - `out/ir/`
 - `out/sim/`

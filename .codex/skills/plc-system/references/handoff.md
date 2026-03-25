@@ -1,20 +1,20 @@
 # plc-system Handoff
 
-Use this file when handing the confirmed contract to `plc-gen`.
+当把已确认的 contract 交给 `plc-gen` 时，使用本文件。
 
-## The finished `.system.md` must let PLC generation decide:
+## 完成后的 `.system.md` 必须让 PLC generation 明确决定：
 
 - topology shape
 - safety constraints
 - task structure
 - timeout strategy
 - failure tasks
-- scenario and validation baseline
+- scenario 与 validation baseline
 
-## End State
+## 结束状态
 
-Finish with this concise note:
+结尾附上这句简短说明：
 
 ```text
-The system contract is confirmed. Proceed to `.plc` generation.
+系统 contract 已确认。继续进行 `.plc` generation。
 ```

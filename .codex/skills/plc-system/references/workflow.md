@@ -1,47 +1,47 @@
 # plc-system Workflow
 
-Use this file when the caller needs a stable `.system.md` before PLC generation.
+当调用方在 PLC generation 之前需要一个稳定 `.system.md` 时，使用本文件。
 
 ## Goal
 
-Produce a confirmed system contract that downstream PLC generation can trust.
+产出一个经确认、可供下游 PLC generation 信任的 system contract。
 
 ## Flow
 
-1. read the requirement and propose a concrete interpretation first
-2. ask only 1 to 3 blocking questions if safety, task partition, or fault handling remain ambiguous
-3. produce `main.system.md` with stable sections
-4. record explicit assumptions when the user has not yet confirmed details
-5. end with a clean handoff to `plc-gen`
+1. 先读需求，并先给出一个具体解释
+2. 只有在 safety、task 划分或 fault handling 仍不清晰时，才问 1 到 3 个阻塞问题
+3. 产出结构稳定的 `main.system.md`
+4. 当用户尚未确认细节时，显式记录 assumptions
+5. 以干净的 handoff 交给 `plc-gen`
 
 ## Response Discipline
 
-Do not send back a shopping list of everything the user forgot.
-Default to a concrete recommendation first, then ask at most 3 pointed confirmations.
+不要把用户缺失的信息列成一长串购物清单再丢回去。
+默认先给出一个具体建议，再补最多 3 个尖锐确认问题。
 
-Use this shape when information is incomplete but still actionable:
+当信息不完整但仍能推进时，使用这种形态：
 
 ```text
-Current recommendation: ...
-Reason: ...
-Please confirm:
+当前建议：...
+原因：...
+请确认：
 1. ...
 2. ...
 3. ...
 ```
 
-Only refuse to draft when a responsible recommendation is impossible even with conservative defaults.
+只有在即便采用保守默认值也无法负责任地起草时，才拒绝直接起草。
 
 ## Blocking Topics
 
-Treat these as high-impact:
+以下属于高影响事项：
 
-- safety class and failure consequence
-- start mode and cycle mode
-- startup, reset, and e-stop policy
-- manual intervention points
-- task partition and blocking isolation
-- shared-resource conflicts
-- timeout and fault routing expectations
+- safety class 与 failure consequence
+- start mode 与 cycle mode
+- startup、reset 与 e-stop policy
+- manual intervention point
+- task partition 与 blocking isolation
+- shared-resource conflict
+- timeout 与 fault routing expectation
 
-Do not spend the first turn on exact I/O numbering.
+第一轮不要纠缠精确 I/O 编号。

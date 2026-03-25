@@ -1,68 +1,68 @@
 ---
 name: plc-system
-description: "Generate or repair a RustPLC system semantic description (.system.md) before PLC code generation. Use when the user wants to analyze PLC requirements, define project scope, create main.system.md, or turn process intent into a stable system contract."
+description: "在 PLC code generation 之前，生成或修复 RustPLC 系统语义描述（`.system.md`）。当用户需要分析 PLC 需求、定义项目范围、创建 `main.system.md`，或把工艺意图收敛成稳定 system contract 时使用。"
 ---
 
 # plc-system
 
-Generate a confirmed `.system.md` that downstream PLC generation can trust.
+生成一个经过确认、可供下游 PLC generation 信任的 `.system.md`。
 
-Keep the skill narrow:
-- define system identity, safety level, process intent, task boundaries, and key constraints
-- do not generate `.plc` here
-- do not dump a questionnaire
+保持这个 skill 的边界清晰：
+- 只定义 system identity、safety level、process intent、task 边界与关键约束
+- 不在这里生成 `.plc`
+- 不要输出一整套问卷
 
-Keep this file lean.
-Load only the reference file you need:
+保持本文件精简。
+按需加载对应 reference 文件：
 
 - `references/workflow.md`
-  Use for the system-confirmation flow and blocking-question policy.
+  用于系统确认流程与阻塞问题策略。
 - `references/sections.md`
-  Use when drafting or repairing `main.system.md`.
+  用于起草或修复 `main.system.md`。
 - `references/handoff.md`
-  Use to produce a clean downstream handoff to `plc-gen`.
+  用于生成干净的下游 `plc-gen` 交接说明。
 
 ## Required Semantics
 
-Treat `docs/architecture/signal-direction.md` as the source of truth for:
+把 `docs/architecture/signal-direction.md` 视为以下语义的 source of truth：
 - concurrent tasks
 - blocking steps
 - blocking isolation
 
-Model the system in terms that can later enter:
+系统描述必须能进入以下链路：
 - semantic checks
 - runtime
 - safety / liveness / timing / causality verification
 
-Do not describe the system as a single execution pointer jumping across `task.step`.
+不要把系统描述成“单一执行指针在 `task.step` 间跳转”。
 
 ## Default Workflow
 
-1. Read the requirement and propose a concrete system interpretation first.
-2. Ask only 1 to 3 blocking questions if safety, task boundaries, or fault handling are still ambiguous.
-3. Produce a `.system.md` with stable sections.
-4. Get confirmation or note explicit assumptions.
-5. Hand off to PLC generation.
+1. 先读需求，再先给出一个具体系统解释。
+2. 只有在 safety、task 边界或 fault handling 仍有歧义时，才问 1 到 3 个阻塞问题。
+3. 产出结构稳定的 `.system.md`。
+4. 获取确认，或明确记录 assumptions。
+5. 将结果交给 PLC generation。
 
-Use this response shape when information is mostly clear:
+当信息大体清晰时，优先使用这种响应形态：
 
 ```text
-Current recommendation: ...
-Reason: ...
-Please confirm. If not, state the real constraint.
+当前建议：...
+原因：...
+请确认。如果不对，请直接给出真实约束。
 ```
 
-Use this response shape only when responsible advice is impossible:
+只有在无法负责任地给出建议时，才使用这种响应形态：
 
 ```text
-I cannot make a responsible recommendation yet because I still need: ...
-This directly affects: ...
-Please confirm: ...
+我现在还不能负责任地给出建议，因为我仍缺少：...
+这会直接影响：...
+请确认：...
 ```
 
 ## Preferred Output Sections
 
-Always include:
+默认总是包含：
 - project identity
 - system mission
 - safety and reliability level
@@ -76,66 +76,66 @@ Always include:
 - key constraints
 - AI generation guidance
 
-Add an axis section when motion axes exist:
-- parameter layering (`model_ref` / `config_ref` / `motion_param_set`)
+当存在 motion axis 时，补充 axis section：
+- parameter layering（`model_ref` / `config_ref` / `motion_param_set`）
 - homing / soft limits
 - fault policy
 - propagation scope
 
 ## Task and Blocking Rules
 
-The `.system.md` must state:
-- which activities should become separate tasks
-- which waits are blocking steps
-- which tasks must continue while another task is blocked
-- which resources are shared or mutually exclusive
+`.system.md` 必须明确：
+- 哪些活动应拆成独立 task
+- 哪些等待属于 blocking step
+- 哪些 task 必须在其他 task 阻塞时继续运行
+- 哪些资源共享或互斥
 
-At minimum, call out:
+至少明确指出：
 - `wait`
 - `delay`
 - `timeout`
 - `axis.move_*`
-- human confirmation waits
-- external feedback waits
+- 人工确认等待
+- 外部反馈等待
 
 ## High-Impact Topics
 
-Prioritize these questions or recommendations:
-- system safety class and failure consequence
-- start mode and cycle mode
+优先处理以下问题或建议：
+- system safety class 与 failure consequence
+- start mode 与 cycle mode
 - startup / reset / e-stop policy
-- manual intervention points
-- task partition and blocking isolation
-- shared-resource conflicts
-- timeout and fault routing expectations
+- manual intervention point
+- task partition 与 blocking isolation
+- shared-resource conflict
+- timeout 与 fault routing expectation
 
-Do not spend the first turn on low-impact details like exact I/O numbering.
+第一轮不要把时间花在精确 I/O 编号这种低影响细节上。
 
 ## Scaffold Rule
 
-If the request is for a full project rather than a standalone artifact, prefer the scaffold layout:
+如果请求是完整项目而不是单独 artifact，优先使用 scaffold 布局：
 
 ```bash
 cargo run --release --bin rust_plc -- new my_plc_project
 ```
 
-Then place the generated system file at:
+然后把 system 文件写到：
 - `plc/main.system.md`
 
-If working without scaffold, keep `.system.md` next to the target `.plc`.
+如果不走 scaffold，就把 `.system.md` 放在目标 `.plc` 旁边。
 
 ## Handoff Contract to plc-gen
 
-The finished `.system.md` should let PLC generation decide:
+完成后的 `.system.md` 应该能让 PLC generation 明确决定：
 - topology shape
 - safety constraints
 - task structure
 - timeout strategy
 - failure tasks
-- scenario and validation baseline
+- scenario 与 validation baseline
 
-End with a concise handoff note:
+结尾附上一句简短 handoff：
 
 ```text
-The system contract is confirmed. Proceed to `.plc` generation.
+系统 contract 已确认。继续进行 `.plc` generation。
 ```

@@ -1,7 +1,7 @@
 interface:
-  display_name: "PLC System Planner"
-  short_description: "Turn process requirements into a confirmed RustPLC system contract."
-  default_prompt: "Use $plc-system to draft or repair a confirmed RustPLC main.system.md before PLC generation."
+  display_name: "PLC 系统规划器"
+  short_description: "把工艺需求收敛成已确认的 RustPLC system contract。"
+  default_prompt: "Use $plc-system 在 PLC generation 之前为我起草或修复已确认的 RustPLC main.system.md。"
 
 policy:
   allow_implicit_invocation: true

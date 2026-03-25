@@ -1,8 +1,8 @@
 # plc-system Sections
 
-Use this file when drafting `main.system.md`.
+当起草 `main.system.md` 时，使用本文件。
 
-## Always Include
+## 始终包含
 
 - project identity
 - system mission
@@ -17,7 +17,7 @@ Use this file when drafting `main.system.md`.
 - key constraints
 - AI generation guidance
 
-## Add When Motion Exists
+## 存在 motion 时补充
 
 - parameter layering
 - homing and soft limits
@@ -26,9 +26,9 @@ Use this file when drafting `main.system.md`.
 
 ## Blocking Semantics
 
-The system document must state:
+system 文档必须明确：
 
-- which activities should become separate tasks
-- which waits are blocking steps
-- which tasks must continue while another task is blocked
-- which resources are shared or mutually exclusive
+- 哪些活动应拆成独立 task
+- 哪些等待属于 blocking step
+- 哪些 task 必须在其他 task 阻塞时继续运行
+- 哪些资源共享或互斥

@@ -1,33 +1,33 @@
 # plc-gen Output Contract
 
-Use this file to shape the final response.
+用本文件约束最终响应形式。
 
-## Minimum Deliverables
+## 最低交付要求
 
-Always return:
+始终返回：
 
-- the generated or repaired `.plc`
-- a short assumptions list
-- the exact launcher and commands used or recommended
-- a validation result
+- 生成或修复后的 `.plc`
+- 简短的 assumptions 列表
+- 实际使用或推荐的 launcher 与命令
+- validation 结果
 
-## For Project-Level Requests
+## 项目级请求时
 
-Return when relevant:
+按需返回：
 
 - `plc/main.system.md`
 - `plc/main.plc`
 - `scenarios/nominal/normal.yaml`
-- the smallest command sequence needed to validate and deliver
-- the current validation state
+- 最小可执行验证命令链
+- 当前 validation 状态
 
-## Validation States
+## Validation 状态
 
-Use one of these explicitly:
+明确使用以下状态之一：
 
 - `validated`
 - `validated with warnings`
 - `blocked by missing contract`
 - `failed validation`
 
-Do not imply success without a real tool run.
+没有真实 tool 运行结果时，不要暗示成功。
