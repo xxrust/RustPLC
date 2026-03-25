@@ -1,27 +1,28 @@
 # plc-gen Output Contract
 
-用本文件约束最终响应形式。
+本文件约束最终回答应该长什么样。
 
-## 最低交付要求
+## 最低输出
 
 始终返回：
 
+- 结果摘要
 - 生成或修复后的 `.plc`
-- 简短的 assumptions 列表
-- 实际使用或推荐的 launcher 与命令
-- validation 结果
+- assumptions
+- 实际使用或推荐的 launcher / 命令
+- validation 状态
 
-## 项目级请求时
+## 项目级请求时额外返回
 
-按需返回：
+按需补充：
 
 - `plc/main.system.md`
 - `plc/main.plc`
 - `scenarios/nominal/normal.yaml`
-- 最小可执行验证命令链
-- 当前 validation 状态
+- 最小验证命令链
+- 当前 gate / codegen / build 状态
 
-## Validation 状态
+## 状态词
 
 明确使用以下状态之一：
 
@@ -30,4 +31,13 @@
 - `blocked by missing contract`
 - `failed validation`
 
-没有真实 tool 运行结果时，不要暗示成功。
+没有真实工具运行结果时，不要暗示 `validated`。
+
+## optimization 请求时
+
+如果用户问 optimization，输出里必须明确：
+
+- 当前是 library API，不是 CLI
+- 支持哪些 candidate rewrite kind
+- 当前是否真的运行了 API
+- 是否只是说明能力边界而未执行

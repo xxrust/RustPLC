@@ -1,49 +1,65 @@
 # plc-gen Troubleshooting
 
-当调用方在真正开始 PLC generation 之前就卡住时，使用本文件。
+当用户还没开始真正生成 `.plc` 就卡住时，用本文件排障。
 
-## Problem: `cargo run --release -- new ...` Fails
+## 1. `cargo run --release -- new ...` 失败
 
 原因：
 
 - 这个 workspace 有多个 binary
 
-修复方式：
+正确写法：
 
 ```bash
 cargo run --release --bin rust_plc -- new my_plc_project
 ```
 
-## Problem: Top-Level `--help` Is Not Usable
+## 1.5 `cd my_plc_project` 后再跑 `cargo run ...` 失败
 
 原因：
 
-- 当前 CLI 没有暴露通用顶层帮助界面
+- scaffold 目录本身不是 Cargo 项目
 
 修复方式：
 
-- 不要让调用方依赖顶层 `--help` 自行摸索
-- 直接给出 `references/commands.md` 中的精确 subcommand 语法
+- 如果用户装了 `rust_plc` binary，就直接在 scaffold 目录里运行 `rust_plc ...`
+- 如果用户仍在 RustPLC 源码仓里运行 `cargo run --release --bin rust_plc -- ...`，就回到仓库根目录，并把 scaffold 文件路径写全
 
-## Problem: The Caller Does Not Have Source Code
+## 2. 顶层 `--help` 不好用
 
-修复方式：
+原因：
 
-- 把命令从 `cargo run --release --bin rust_plc -- ...` 切换为 `rust_plc ...`
-- 其余参数保持不变
+- 当前 CLI 不是一个稳定的总帮助入口
 
-## Problem: No Scenario Exists Yet
+做法：
 
-修复方式：
+- 不让用户自己靠 `--help` 猜
+- 直接给出精确 subcommand 命令
+
+## 3. 用户没有源码，只有安装好的工具
+
+做法：
+
+- 把 `cargo run --release --bin rust_plc -- ...` 切成 `rust_plc ...`
+- 其他参数不变
+
+这是对 scaffold 用户最省事的路径。
+
+## 4. scenario 文件缺失
+
+只在文件确实不存在时推荐：
 
 ```bash
 <run> scenario-init plc/main.plc --out scenarios/nominal/normal.yaml --preset normal
 ```
 
-然后运行：
+如果项目来自 `new`，先检查 `scenarios/nominal/normal.yaml` 是否已经存在。
 
-```bash
-<run> scenario-validate plc/main.plc --scenario scenarios/nominal/normal.yaml --output human
-```
+## 5. 用户要求“优化命令”
 
-如果项目来自 `new`，先检查 `scenarios/nominal/normal.yaml` 是否已经存在，再决定是否需要重新生成。
+不要编造 CLI。
+直接说明：
+
+- 当前没有 optimization subcommand
+- 现有 optimization 能力在 Rust library API：`rust_plc::optimization`
+- 如需准确说明，读 `references/optimization.md`

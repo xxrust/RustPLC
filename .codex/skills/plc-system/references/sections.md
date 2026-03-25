@@ -1,8 +1,8 @@
 # plc-system Sections
 
-当起草 `main.system.md` 时，使用本文件。
+起草 `main.system.md` 时，优先保持这些稳定章节。
 
-## 始终包含
+## 基础章节
 
 - project identity
 - system mission
@@ -10,25 +10,29 @@
 - operating environment
 - normal process flow
 - abnormal handling
-- concurrent task partition
-- blocking step expectations
 - startup and stop flow
 - testing and maintenance modes
+
+## 生成 `.plc` 所必需的章节
+
+- concurrent task partition
+- blocking step expectations
 - key constraints
 - AI generation guidance
 
-## 存在 motion 时补充
+## 有 axis 时必须补充的章节
 
 - parameter layering
-- homing and soft limits
+- homing / soft limits
 - fault policy
 - propagation scope
 
-## Blocking Semantics
+## 写章节时的判断标准
 
-system 文档必须明确：
+每一节都要回答一个下游可执行问题，而不是写成行业背景介绍。
 
-- 哪些活动应拆成独立 task
-- 哪些等待属于 blocking step
-- 哪些 task 必须在其他 task 阻塞时继续运行
-- 哪些资源共享或互斥
+例如：
+
+- task partition 是为了让 `.plc` 知道怎么拆 task
+- blocking step expectations 是为了让 `.plc` 知道哪些 step 必须等待
+- key constraints 是为了让 verification 知道要证明什么

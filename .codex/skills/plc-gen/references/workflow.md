@@ -1,88 +1,108 @@
 # plc-gen Workflow
 
-当调用方需要面向产品的 RustPLC 生成流程，而不是仓库内部导览时，使用本文件。
+本文件回答三个问题：
 
-## 1. Pick the Launch Mode
+1. 什么时候走 scaffold 项目
+2. 什么时候只修单个 `.plc`
+3. 生成后必须经过哪些验证
 
-先确定 launcher 前缀：
+## 1. 先判断交付形态
 
-- 已安装 binary 模式：`rust_plc`
-- source workspace 模式：`cargo run --release --bin rust_plc --`
+出现以下任一情况时，优先 scaffold：
 
-不要使用 `cargo run --release -- ...`。
-这个 workspace 有多个 binary。
+- 新 machine / 新 station
+- 用户明确要“项目”“脚手架”“完整工程”“交付包”
+- 需要 scenario、no-board gate、ST 导出、RP2040 构建
+- 用户没有 repo 细节，需要一步步说明先改什么文件
 
-## 2. Pick the Delivery Shape
+只有在以下场景才优先单文件：
 
-当用户有以下需求时，使用 scaffold 项目：
+- 修复现有 `.plc`
+- 验证现有 `.plc`
+- 解释某个编译或 verification 报错
 
-- 新 machine 或 station
-- 面向客户交付的项目
-- 端到端验证
-- scenario validation 或 no-board gate
-- 需要明确的目录与文件指导
+## 2. 项目级默认路径
 
-只有在请求非常收敛时，才走单文件流程：
+对一个全新项目，默认顺序是：
 
-- 修复单个 `.plc`
-- 验证单个 `.plc`
-- 解释单个 compiler 或 validation 失败
-
-## 3. Recommended Generation Path
-
-对于新项目：
-
-1. 先 scaffold 项目
-2. 直接把 scaffold 自带的 `scenarios/nominal/normal.yaml` 作为 nominal scenario 起点
-3. 确认或编写 `plc/main.system.md`
-4. 生成或修复 `plc/main.plc`
-5. 调整 `scenarios/nominal/normal.yaml`
-6. 运行 `scenario-validate`
-7. 运行 `scenario-doctor`
-8. 如果是项目级交付，再运行 `no-board-gate`
-9. 只有在要求 ST 输出时，才运行 `gen-st`
-
-对于现有 PLC：
-
-1. 先看需求或当前失败现象
-2. 修复 `main.plc`
-3. 用 `scenario-validate` 验证
-4. 用 `scenario-doctor` 诊断
-5. 如有需要再导出 ST
+1. scaffold 项目
+2. 确认 `plc/main.system.md`
+3. 生成或修复 `plc/main.plc`
+4. 调整 `scenarios/nominal/normal.yaml`
+5. 运行 `scenario-validate`
+6. 运行 `scenario-doctor`
+7. 项目级请求再运行 `no-board-gate`
+8. 需要 ST 时再运行 `gen-st`
+9. 需要板级交付时再运行 `build-rp2040` 或 `release-bundle`
 
 不要在 `new` 之后立刻推荐 `scenario-init`。
-scaffold 已经自带 `scenarios/nominal/normal.yaml`。
-只有当 scenario 文件缺失，或调用方希望从独立 `.plc` 重新生成 scenario skeleton 时，才使用 `scenario-init`。
+scaffold 已经生成 `scenarios/nominal/normal.yaml`。
 
-## 4. Blocking Questions Only
+## 3. 先判断运行环境
 
-把以下事项视为真正的阻塞项：
+### 已安装 `rust_plc`
+
+这种情况下，用户可以直接：
+
+1. `rust_plc new my_plc_project`
+2. `cd my_plc_project`
+3. 继续运行 `rust_plc scenario-validate ...`
+
+### 仍在 RustPLC 源码仓中
+
+这种情况下：
+
+- `cargo run --release --bin rust_plc -- ...` 必须从 RustPLC 仓库根目录执行
+- scaffold 项目路径要写成仓库根目录可解析的路径
+- 不要让用户 `cd` 进 scaffold 目录后再运行 `cargo run ...`
+
+也就是说，source workspace 模式下应写成：
+
+```bash
+cargo run --release --bin rust_plc -- scenario-validate out/my_plc_project/plc/main.plc --scenario out/my_plc_project/scenarios/nominal/normal.yaml --output human
+```
+
+## 4. 单文件默认路径
+
+对一个现有 `.plc`，默认顺序是：
+
+1. 修复 DSL 与语义问题
+2. 运行 `scenario-validate`
+3. 运行 `scenario-doctor`
+4. 如有需要，导出 ST 或继续做项目级 gate
+
+## 5. 阻塞问题只问关键项
+
+以下属于真正会改变代码结构的阻塞项：
 
 - start mode
 - cycle mode
-- 关键 actuator 与 sensor 是否存在
-- 某个 wait 是 indefinite 还是 timed
-- timeout 与 fault routing expectation
-- 独立工作是否应拆成独立 task
+- task 划分
+- 哪些等待是 manual wait，哪些必须 timeout
+- 关键 actuator / sensor 是否存在
+- fault route 应该怎么走
 
-除非用户明确在意，否则以下内容采用保守默认值：
+以下内容通常可以先保守默认：
 
-- placeholder I/O name
+- 占位 I/O 名称
 - 中性的 device 名称
-- 初始 timeout 值
-- nominal scenario 的 timing 值
+- 初始 timeout 数值
+- nominal scenario 的起始 timing
 
-## 5. Concurrency and Blocking
+## 6. 验证门槛
 
-按当前产品语义建模 RustPLC：
+`plc-gen` 交付不是“生成完就结束”。
 
-- task 可以并发运行
-- blocking step 只阻塞自己的 task
-- `wait`、`delay`、`timeout` 与 motion wait 默认都是 blocking
-- 如果一个 station 等待时另一个 station 仍应继续运行，就拆成独立 task
+最少验证：
 
-不要因为描述方便，就把独立工作压扁成单一串行 task。
+- `scenario-validate`
+- `scenario-doctor`
 
-## 6. Completion Rule
+项目级推荐验证：
 
-只有在真实 RustPLC 工具链通过，或已经明确识别出精确 contract 缺口时，生成才算完成。
+- `scenario-validate`
+- `scenario-doctor`
+- `no-board-gate`
+
+如果请求是“优化现有 PLC”，也不要跳过验证。
+无论是普通生成还是 optimization candidate，最终都必须经过既有语义与 verification 链路。
