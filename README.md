@@ -316,6 +316,28 @@ cargo run --release -- no-board-gate examples/assembly_station.plc \
   --max-overrun-count 0
 ```
 
+### 2.5 PLC Optimization (library API)
+
+当前优化能力以库 API 形式提供，不是独立 CLI 子命令。它直接复用现有 semantic、timing 和 verification 流水线，不额外发明一套 legality 规则。
+详细说明见 `docs/wiki/PLC-Optimization-Pipeline.md`。
+
+```rust
+use rust_plc::optimization::optimize_plc_source;
+
+let source = std::fs::read_to_string("examples/two_cylinder.plc")?;
+let candidates = optimize_plc_source(&source)?;
+
+for candidate in candidates.iter().take(3) {
+    println!(
+        "{} legal={} nominal_ms={} rewrite={}",
+        candidate.id,
+        candidate.legality.is_legal,
+        candidate.timing.global_nominal_ms,
+        candidate.rewrite.summary
+    );
+}
+```
+
 <br>
 
 ### 3. 硬件部署与发布交付

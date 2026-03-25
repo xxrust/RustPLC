@@ -152,6 +152,7 @@ Verification passed:
 |------------|-------------|
 | **📝 ST Code Generation** | `gen-st` compiles verified IR to IEC 61131-3 Structured Text; vendored `iec2c` validates syntax in CI |
 | **🔬 Formal Verification** | Four engines (Safety / Liveness / Timing / Causality) with compile-time mathematical proofs |
+| **⚙️ PLC Optimization** | Conservative candidate generation over preprocessed tasks, with timing reuse, legality recheck, stable ranking, and `[tasks]`-only emission |
 | **🤖 AI-Assisted Generation** | Natural language → AI multi-turn dialogue → `.plc` generation → auto-verification |
 | **🧪 SIL Simulation** | Scenario-driven deterministic simulation, fault injection, waveform export, batch regression |
 | **📋 Scenario Engineering** | Scenario init, validation, expansion, batch generation, failure minimization |
@@ -226,6 +227,27 @@ task cycle:
 
 ```bash
 cargo run --release -- your_file.plc --no-print-ir
+```
+
+### 2.5. Rank Optimization Candidates (Library API)
+
+Optimization currently ships as a library pipeline instead of a CLI subcommand. It reuses the existing semantic, timing, and verification chain rather than inventing a parallel ruleset.
+
+```rust
+use rust_plc::optimization::optimize_plc_source;
+
+let source = std::fs::read_to_string("examples/two_cylinder.plc")?;
+let candidates = optimize_plc_source(&source)?;
+
+for candidate in candidates.iter().take(3) {
+    println!(
+        "{} legal={} nominal_ms={} rewrite={}",
+        candidate.id,
+        candidate.legality.is_legal,
+        candidate.timing.global_nominal_ms,
+        candidate.rewrite.summary
+    );
+}
 ```
 
 ### 3. Scenario Simulation
@@ -309,6 +331,7 @@ Full documentation available on **[GitHub Wiki](https://github.com/xxrust/RustPL
 | [Contributing](https://github.com/xxrust/RustPLC/wiki/Contributing) | Development guide |
 
 **Local Documentation (in repo):**
+- Optimization pipeline: [`docs/wiki/PLC-Optimization-Pipeline.md`](docs/wiki/PLC-Optimization-Pipeline.md)
 - Platform vision: [`docs/wiki/AI-for-AI-Platform-Vision.md`](docs/wiki/AI-for-AI-Platform-Vision.md)
 - Workpiece-to-ST policy: [`docs/workpiece_to_st_codegen_policy.md`](docs/workpiece_to_st_codegen_policy.md)
 - Scenario system: [`docs/scenario_playbook.md`](docs/scenario_playbook.md), [`docs/scenario_minimization.md`](docs/scenario_minimization.md)
@@ -353,6 +376,7 @@ The differentiator is not "yet another generator." It is an engineering loop whe
 - ✅ Four formal verification engines (Safety / Liveness / Timing / Causality)
 - ✅ Structured error reporting (line numbers + fix suggestions)
 - ✅ DSL v2 (delay / repeat / wait AND|OR / if-else / goto task.step / custom states)
+- ✅ PLC optimization pipeline (`analyze -> rewrite -> timing -> legality -> ranking -> emitter`)
 - ✅ AI-assisted generation (plc-gen skill)
 
 **I/O & Control:**
