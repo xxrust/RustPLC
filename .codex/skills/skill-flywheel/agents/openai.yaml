@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Flywheel"
+  short_description: "Three-agent skill evolution loop"
+  default_prompt: "Use $skill-flywheel to evolve a project skill with a source-aware editor, a blind operator, and a root-cause analyst."
