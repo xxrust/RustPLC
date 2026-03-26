@@ -20,7 +20,7 @@ fn write_fixture_plc(path: &Path) {
     let plc = r#"[topology]
 device plc_main: plc {
     purpose: "AXF snapshot fixture",
-    ports: [X0:digital:consumer, Y0:digital:producer]
+    model_ref: openplc_softplc
 }
 
 [constraints]

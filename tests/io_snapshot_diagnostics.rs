@@ -22,7 +22,7 @@ fn write_fixture_plc(path: &Path) {
 [topology]
 device plc_main: plc {
     purpose: "IO 快照诊断测试控制器",
-    ports: [X0:digital:consumer, Y0:digital:producer]
+    model_ref: openplc_softplc
 }
 
 [constraints]

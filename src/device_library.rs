@@ -38,6 +38,14 @@ pub struct PortDef {
     pub direction: String,
     #[serde(default)]
     pub port_type: String,
+    #[serde(default)]
+    pub range_min: Option<f64>,
+    #[serde(default)]
+    pub range_max: Option<f64>,
+    #[serde(default)]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub external: bool,
 }
 
 fn default_state_default() -> String {

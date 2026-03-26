@@ -2,6 +2,7 @@ use crate::ast::{
     DeviceDeclaration, DevicePort, DeviceType, PortRole, PortType, TopologyConnection,
     TopologyRelation, TopologySection,
 };
+use crate::device_library::DeviceDef;
 use crate::device_subtype::{
     normalize_subtype, subtype_compatible_base_types, subtype_matches_device_type,
 };
@@ -9,6 +10,10 @@ use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::fs;
+use std::path::Path;
+
+const CONTROLLER_PROFILES_DIR: &str = "devices/controllers";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -29,6 +34,8 @@ pub enum TopologySemanticCode {
     Sem107PurposeMissing,
     #[serde(rename = "SEM-108")]
     Sem108LegacyIoModelRemoved,
+    #[serde(rename = "SEM-109")]
+    Sem109VirtualSignalDeviceRemoved,
 }
 
 impl TopologySemanticCode {
@@ -42,6 +49,7 @@ impl TopologySemanticCode {
             Self::Sem106SubtypeIncompatible => "SEM-106",
             Self::Sem107PurposeMissing => "SEM-107",
             Self::Sem108LegacyIoModelRemoved => "SEM-108",
+            Self::Sem109VirtualSignalDeviceRemoved => "SEM-109",
         }
     }
 }
@@ -110,6 +118,7 @@ pub fn validate_topology_semantics(
     topology: &TopologySection,
 ) -> Result<(), TopologySemanticGateError> {
     let mut issues = validate_device_subtypes(topology);
+    issues.extend(collect_virtual_signal_device_issues(topology));
     let mut devices = HashMap::<String, GateDevice>::new();
     for device in &topology.devices {
         devices.insert(
@@ -283,7 +292,9 @@ pub fn collect_topology_deprecation_warnings(topology: &TopologySection) -> Vec<
 pub fn validate_removed_legacy_io_model(
     topology: &TopologySection,
 ) -> Result<(), TopologySemanticGateError> {
-    let issues = collect_removed_legacy_io_model_issues(topology);
+    let mut issues = collect_removed_legacy_io_model_issues(topology);
+    issues.extend(collect_non_device_type_issues(topology));
+    issues.extend(collect_inline_plc_port_issues(topology));
     if issues.is_empty() {
         Ok(())
     } else {
@@ -292,6 +303,74 @@ pub fn validate_removed_legacy_io_model(
             issues,
         })
     }
+}
+
+fn collect_non_device_type_issues(topology: &TopologySection) -> Vec<TopologySemanticIssue> {
+    let mut issues = Vec::new();
+    for device in &topology.devices {
+        if !is_scalar_io_device_type(&device.device_type) {
+            continue;
+        }
+
+        let message = if let Some(port) = parse_physical_plc_port_ref(&device.name) {
+            format!(
+                "source DSL forbids declaring IO port `{}` as a `{}` device",
+                device.name,
+                match port.kind {
+                    PlcPortKind::DigitalInput => "digital_input",
+                    PlcPortKind::DigitalOutput => "digital_output",
+                    PlcPortKind::AnalogInput => "analog_input",
+                    PlcPortKind::AnalogOutput => "analog_output",
+                }
+            )
+        } else {
+            format!(
+                "source DSL forbids declaring `{}` as a `{}` device; `device` is reserved for real hardware equipment, not ports, points, signals, or aliases",
+                device.name,
+                device_type_name(&device.device_type)
+            )
+        };
+
+        issues.push(TopologySemanticIssue {
+            code: TopologySemanticCode::Sem108LegacyIoModelRemoved,
+            line: device.line.max(1),
+            relation: None,
+            from: Some(device.name.clone()),
+            to: None,
+            from_port: None,
+            to_port: None,
+            message,
+            suggestion: "declare only real hardware as `device`; model IO as ports on a device and connect hardware to those ports via relation".to_string(),
+        });
+    }
+
+    issues
+}
+
+fn collect_inline_plc_port_issues(topology: &TopologySection) -> Vec<TopologySemanticIssue> {
+    let mut issues = Vec::new();
+    for device in &topology.devices {
+        if !matches!(device.device_type, DeviceType::Plc) || device.attributes.ports.is_empty() {
+            continue;
+        }
+
+        issues.push(TopologySemanticIssue {
+            code: TopologySemanticCode::Sem108LegacyIoModelRemoved,
+            line: device.line.max(1),
+            relation: None,
+            from: Some(device.name.clone()),
+            to: None,
+            from_port: None,
+            to_port: None,
+            message: format!(
+                "source DSL forbids inline controller port inventory on `{}`; controller IO must come from a controller profile",
+                device.name
+            ),
+            suggestion: "replace inline `ports: [...]` with `model_ref: <controller_profile>` and define the controller IO inventory under `devices/controllers/*.toml`".to_string(),
+        });
+    }
+
+    issues
 }
 
 fn collect_removed_legacy_io_model_issues(
@@ -330,7 +409,7 @@ fn collect_removed_legacy_io_model_issues(
             from_port: None,
             to_port: None,
             message: format!("旧版 PLC IO 设备建模 `{}` 已移除", device.name),
-            suggestion: "请声明 `device plc_main: plc { ports: [X0:digital:consumer, Y0:digital:producer, AI0:analog:consumer, AO0:analog:producer] }`，并在 relation 中使用 `plc_main.<port>` 连接".to_string(),
+            suggestion: "请声明 `device plc_main: plc { model_ref: openplc_softplc }`，并在 relation 中使用 `plc_main.<port>` 连接".to_string(),
         });
     }
 
@@ -449,6 +528,69 @@ fn validate_device_subtypes(topology: &TopologySection) -> Vec<TopologySemanticI
     issues
 }
 
+fn collect_virtual_signal_device_issues(topology: &TopologySection) -> Vec<TopologySemanticIssue> {
+    let mut connected_devices = HashSet::<String>::new();
+    for connection in semantic_connections(topology) {
+        connected_devices.insert(connection.from);
+        connected_devices.insert(connection.to);
+    }
+
+    let mut issues = Vec::new();
+    for device in &topology.devices {
+        if !is_scalar_io_device_type(&device.device_type) {
+            continue;
+        }
+        if parse_physical_plc_port_ref(&device.name).is_some() {
+            continue;
+        }
+        if connected_devices.contains(&device.name) {
+            continue;
+        }
+        if allows_standalone_hardware_scalar_io(device) {
+            continue;
+        }
+
+        issues.push(TopologySemanticIssue {
+            code: TopologySemanticCode::Sem109VirtualSignalDeviceRemoved,
+            line: device.line.max(1),
+            relation: None,
+            from: Some(device.name.clone()),
+            to: None,
+            from_port: None,
+            to_port: None,
+            message: format!(
+                "设备 `{}` 以 `{}` 声明，但未参与任何物理拓扑连接；这类悬空 IO device 易把逻辑信号、HMI 命令或语义别名伪装成硬件设备",
+                device.name,
+                device_type_name(&device.device_type)
+            ),
+            suggestion: "请改为真实硬件建模（如 sensor/solenoid_valve/外部设备接口并通过 relation 接到 plc_main.X*/Y*），不要把纯逻辑信号直接声明成 digital_input/digital_output/analog_input/analog_output device".to_string(),
+        });
+    }
+
+    issues
+}
+
+fn is_scalar_io_device_type(device_type: &DeviceType) -> bool {
+    matches!(
+        device_type,
+        DeviceType::DigitalInput
+            | DeviceType::DigitalOutput
+            | DeviceType::AnalogInput
+            | DeviceType::AnalogOutput
+    )
+}
+
+fn allows_standalone_hardware_scalar_io(device: &DeviceDeclaration) -> bool {
+    let Some(subtype) = device.attributes.subtype.as_deref() else {
+        return false;
+    };
+
+    matches!(
+        normalize_subtype(subtype).as_str(),
+        "push_button" | "e_stop_button" | "selector_switch" | "indicator_light"
+    )
+}
+
 fn subtype_known(subtype: &str) -> bool {
     subtype_compatible_base_types(subtype).is_some()
 }
@@ -479,7 +621,58 @@ fn resolved_device_ports(device: &DeviceDeclaration) -> Vec<GatePort> {
             .collect();
     }
 
+    if matches!(device.device_type, DeviceType::Plc) {
+        if let Some(profile_id) = device.attributes.model_ref.as_deref() {
+            return load_controller_profile_ports(profile_id);
+        }
+    }
+
     implicit_ports_for_type(&device.device_type)
+}
+
+fn load_controller_profile_ports(profile_id: &str) -> Vec<GatePort> {
+    let path = Path::new(CONTROLLER_PROFILES_DIR).join(format!("{profile_id}.toml"));
+    let Ok(content) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(profile) = toml::from_str::<DeviceDef>(&content) else {
+        return Vec::new();
+    };
+    if profile.identity.device_type.trim() != "plc" {
+        return Vec::new();
+    }
+
+    profile
+        .interfaces
+        .ports
+        .iter()
+        .filter_map(controller_profile_port_to_gate_port)
+        .collect()
+}
+
+fn controller_profile_port_to_gate_port(port: &crate::device_library::PortDef) -> Option<GatePort> {
+    let parsed = parse_physical_plc_port_ref(&port.name)?;
+    Some(GatePort {
+        id: port.name.clone(),
+        port_type: gate_plc_port_type(parsed.kind),
+        role: gate_plc_port_role(parsed.kind),
+        semantic_role: None,
+        explicit: true,
+    })
+}
+
+fn gate_plc_port_type(kind: PlcPortKind) -> PortType {
+    match kind {
+        PlcPortKind::DigitalInput | PlcPortKind::DigitalOutput => PortType::Digital,
+        PlcPortKind::AnalogInput | PlcPortKind::AnalogOutput => PortType::Analog,
+    }
+}
+
+fn gate_plc_port_role(kind: PlcPortKind) -> PortRole {
+    match kind {
+        PlcPortKind::DigitalInput | PlcPortKind::AnalogInput => PortRole::Consumer,
+        PlcPortKind::DigitalOutput | PlcPortKind::AnalogOutput => PortRole::Producer,
+    }
 }
 
 fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
@@ -1118,10 +1311,91 @@ task main:
     }
 
     #[test]
+    fn gate_rejects_scalar_io_device_even_with_plc_present() {
+        let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device mode_step: digital_input { purpose: "单步模式位" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err =
+            validate_removed_legacy_io_model(&program.topology).expect_err("gate should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&"SEM-108"),
+            "scalar io device should be rejected even when plc device exists"
+        );
+    }
+
+    #[test]
+    fn gate_rejects_virtual_signal_output_device_in_source_dsl() {
+        let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device vac_arm_cmd: digital_output { purpose: "旋臂真空输出位" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err =
+            validate_removed_legacy_io_model(&program.topology).expect_err("gate should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&"SEM-108"),
+            "virtual signal output device should be rejected in source dsl"
+        );
+    }
+
+    #[test]
+    fn gate_rejects_inline_plc_port_inventory() {
+        let input = r#"
+[topology]
+device plc_main: plc { ports: [Y0:digital:producer, X0:digital:consumer] }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err =
+            validate_removed_legacy_io_model(&program.topology).expect_err("gate should fail");
+        let rendered = err
+            .issues
+            .iter()
+            .map(|issue| issue.message.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("inline controller port inventory"),
+            "inline plc port inventory should be rejected"
+        );
+    }
+
+    #[test]
     fn gate_accepts_basic_digital_to_valve_to_cylinder_chain() {
         let input = r#"
 [topology]
-device plc_main: plc { ports: [Y0:digital:producer] }
+device plc_main: plc { model_ref: openplc_softplc }
 device valve_A: solenoid_valve { response_time: 15ms }
 device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms }
 relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
@@ -1138,10 +1412,10 @@ task main:
     }
 
     #[test]
-    fn gate_accepts_plc_device_with_explicit_ports() {
+    fn gate_accepts_plc_device_with_profile_backed_ports() {
         let input = r#"
 [topology]
-device plc_main: plc { ports: [Y0:digital:producer, X0:digital:consumer] }
+device plc_main: plc { model_ref: openplc_softplc }
 device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
 device sensor_A: sensor { ports: [out:digital:producer] }
 
@@ -1163,7 +1437,7 @@ task main:
     fn gate_accepts_dual_input_valve_with_explicit_ports() {
         let input = r#"
 [topology]
-device plc_main: plc { ports: [Y5:digital:producer, Y6:digital:producer] }
+device plc_main: plc { model_ref: openplc_softplc }
 device valve_eject: solenoid_valve {
     ports: [coil_extend:digital:consumer, coil_retract:digital:consumer, out:pneumatic:producer]
 }
@@ -1213,7 +1487,7 @@ task main:
     fn gate_accepts_multi_io_motor_with_explicit_ports() {
         let input = r#"
 [topology]
-device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer, X0:digital:consumer, X1:digital:consumer] }
+device plc_main: plc { model_ref: openplc_softplc }
 device axis_feed: motor {
     ports: [cmd_fwd:digital:consumer, cmd_rev:digital:consumer, speed_ok:logical:producer, alarm:logical:producer]
 }
@@ -1330,10 +1604,62 @@ task main:
     }
 
     #[test]
-    fn gate_keeps_unknown_subtype_as_warning_only() {
+    fn gate_rejects_standalone_virtual_signal_input_device() {
         let input = r#"
 [topology]
-device mystery: digital_input { subtype: "future_custom_sensor" }
+device plc_main: plc { model_ref: openplc_softplc }
+device mode_step: digital_input { purpose: "单步模式逻辑信号" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err = validate_topology_semantics(&program.topology).expect_err("gate should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&"SEM-109"),
+            "should reject standalone virtual signal input device"
+        );
+    }
+
+    #[test]
+    fn gate_rejects_standalone_virtual_signal_output_device() {
+        let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device vac_arm_cmd: digital_output { purpose: "旋臂真空逻辑输出位" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err = validate_topology_semantics(&program.topology).expect_err("gate should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&"SEM-109"),
+            "should reject standalone virtual signal output device"
+        );
+    }
+
+    #[test]
+    fn gate_keeps_unknown_sensor_subtype_as_warning_only() {
+        let input = r#"
+[topology]
+device mystery: sensor { subtype: "future_custom_sensor" }
 
 [constraints]
 

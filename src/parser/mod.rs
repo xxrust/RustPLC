@@ -4552,10 +4552,10 @@ task main:
     }
 
     #[test]
-    fn parses_plc_controller_device_type_and_ports() {
+    fn parses_plc_controller_device_type_and_model_ref() {
         let input = r#"
 [topology]
-device plc_main: plc { ports: [Y0:digital:producer, X0:digital:consumer] }
+device plc_main: plc { model_ref: openplc_softplc }
 device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
 relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 
@@ -4574,7 +4574,7 @@ task main:
             .find(|d| d.name == "plc_main")
             .expect("应包含 plc_main");
         assert!(matches!(plc.device_type, DeviceType::Plc));
-        assert_eq!(plc.attributes.ports.len(), 2);
+        assert_eq!(plc.attributes.model_ref.as_deref(), Some("openplc_softplc"));
         assert_eq!(
             program.topology.connections[0].from_port.as_deref(),
             Some("Y0")

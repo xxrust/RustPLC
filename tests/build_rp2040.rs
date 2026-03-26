@@ -5,15 +5,9 @@ const PLC_FIXTURE: &str = r#"
 [topology]
 
 device plc_main: plc {
-    purpose: "测试主控器",
-    ports: [Y0:digital:producer, X0:digital:consumer, AI0:analog:consumer, AO0:analog:producer]
+    purpose: "测试主控制器",
+    model_ref: rp2040_softplc
 }
-
-device Y0: digital_output { purpose: "测试数字输出通道" }
-device X0: digital_input { purpose: "测试数字输入通道" }
-
-device AI0: analog_input { purpose: "测试压力采样输入", range: 0..100, unit: "bar" }
-device AO0: analog_output { purpose: "测试模拟控制输出", range: 0..10, ramp_time: 500ms, unit: "V" }
 
 device valve_A: solenoid_valve { purpose: "测试电磁阀执行器" }
 
@@ -21,10 +15,10 @@ device cyl_A: cylinder { purpose: "测试气缸执行机构" }
 
 device sensor_ext: sensor { purpose: "测试到位传感器" }
 
-relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
-relation { from: sensor_ext.out, to: X0.in, via: reports_to }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
 
 [constraints]
 
@@ -38,22 +32,26 @@ task main:
         wait: X0 == true
         timeout: 50ms -> goto fault
 
-    step dwell:
-        delay: 20ms
+    step sample_analog:
+        wait: AI0 >= 0.0
+        allow_indefinite_wait: true
 
-    step retract:
+    step drive_analog:
+        action: set_analog AO0 0.5
+
+    step done:
+        action: log "build_rp2040_fixture_done"
         action: retract cyl_A
 
-    on_complete: goto done
+    on_complete: goto done_task
 
 task fault:
-    step retract_fault:
+    step stop:
         action: retract cyl_A
-    step alarm:
-        action: log "fault timeout"
-    on_complete: goto done
 
-task done:
+    on_complete: goto done_task
+
+task done_task:
     step halt:
 "#;
 
@@ -457,6 +455,12 @@ di0 = 2
 
 [digital_outputs]
 do0 = 16
+
+[analog_inputs]
+ai0 = "virtual"
+
+[analog_outputs]
+ao0 = "virtual"
 "#,
     )
     .expect("write io map");

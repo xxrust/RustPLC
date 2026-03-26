@@ -358,7 +358,7 @@ fn bridge_supports_analog_wait_guard_mapped_to_regions() {
 const PLC_STEPPER_PORT_FIXTURE: &str = r#"
 [topology]
 
-device plc_main: plc { ports: [Y0:digital:producer, Y1:digital:producer] }
+device plc_main: plc { model_ref: openplc_softplc }
 device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
 
 relation { from: plc_main.Y0, to: axis_x.enable, via: driven_by }

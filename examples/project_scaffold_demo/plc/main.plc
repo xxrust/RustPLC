@@ -2,7 +2,7 @@
 
 device plc_main: plc {
     purpose: "控制器本体与数字I/O端口映射",
-    ports: [X0:digital:consumer, Y0:digital:producer]
+    model_ref: openplc_softplc
 }
 
 [constraints]

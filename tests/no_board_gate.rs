@@ -20,7 +20,7 @@ fn write_fixture_plc(path: &std::path::Path) {
 [topology]
 device plc_main: plc {
     purpose: "no-board gate 测试用控制器",
-    ports: [X0:digital:consumer, Y0:digital:producer]
+    model_ref: openplc_softplc
 }
 
 [constraints]

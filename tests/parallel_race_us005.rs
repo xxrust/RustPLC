@@ -32,7 +32,7 @@ fn parallel_lowering_uses_branch_active_and_done_states() {
 
 device plc_main: plc {
     purpose: "并行分支状态机命名验证",
-    ports: [X0:digital:consumer, X1:digital:consumer]
+    model_ref: openplc_softplc
 }
 
 device sensor_a: sensor {
@@ -112,7 +112,7 @@ fn parallel_branches_can_start_outputs_same_tick() {
 
 device plc_main: plc {
     purpose: "并行双轴同 tick 启动验证",
-    ports: [Y0:digital:producer, Y1:digital:producer]
+    model_ref: openplc_softplc
 }
 
 device motor_x: motor {
@@ -172,7 +172,7 @@ fn race_prefers_first_ready_branch_deterministically() {
 
 device plc_main: plc {
     purpose: "race 先完成分支确定性验证",
-    ports: [X0:digital:consumer, X1:digital:consumer]
+    model_ref: openplc_softplc
 }
 
 device sensor_a: sensor {
@@ -225,7 +225,7 @@ fn parallel_waits_for_slower_branch_before_join() {
 
 device plc_main: plc {
     purpose: "A/B 分支先后完成回归",
-    ports: [X0:digital:consumer, X1:digital:consumer]
+    model_ref: openplc_softplc
 }
 
 device sensor_a: sensor {

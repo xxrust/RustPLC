@@ -187,7 +187,7 @@ AI will generate a complete `.plc` file through multi-turn dialogue and auto-ver
 [topology]
 device plc_main: plc {
     purpose: "Controller body and process I/O port mapping",
-    ports: [Y0:digital:producer, X0:digital:consumer]
+    model_ref: openplc_softplc
 }
 device valve_A: solenoid_valve {
     purpose: "Drive the main pneumatic path for cylinder A",
@@ -219,7 +219,7 @@ task cycle:
 
 > **Note**: Legacy device attributes `driven_by/reports_to/detects` are removed. Use `relation { from, to, via }` only. Use explicit `plc_main.<port>` endpoint references in new topology.
 >
-> **Recommended modeling (since February 23, 2026)**: Prefer `device plc_main: plc { ports: [...] }` for controller ports. The old `device X*/Y*/AI*/AO*` style remains in a compatibility window (**February 23, 2026 ~ June 30, 2026**) with WARN-level notices.
+> **Recommended modeling (since March 26, 2026)**: Prefer `device plc_main: plc { model_ref: openplc_softplc }` or another controller profile from `devices/controllers/*.toml`. For RP2040 builds, use `model_ref: rp2040_softplc`. Controller IO inventory belongs to the controller profile, not to inline `ports: [...]` in business DSL.
 >
 > **Mandatory review rule (effective February 24, 2026)**: every `device` must declare `purpose`; missing `purpose` fails semantic gate review.
 

@@ -42,7 +42,7 @@ fn write_no_board_gate_fixture_plc(path: &Path) {
 [topology]
 device plc_main: plc {
     purpose: "诊断 JSON 输出测试控制器",
-    ports: [X0:digital:consumer, Y0:digital:producer]
+    model_ref: rp2040_softplc
 }
 
 [constraints]

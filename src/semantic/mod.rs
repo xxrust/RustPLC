@@ -23,6 +23,7 @@ use crate::ast::{
     WorkpieceTypeDeclaration as AstWorkpieceTypeDeclaration,
 };
 use crate::axis_profile::resolve_axis_profiles;
+use crate::device_library::{DeviceDef, PortDef};
 use crate::error::PlcError;
 use crate::ir::{
     ActionKind, ActionRef, ActionTiming, AxisAutoResetPolicy as IrAxisAutoResetPolicy,
@@ -57,6 +58,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+const CONTROLLER_PROFILES_DIR: &str = "devices/controllers";
+
 #[derive(Debug, Clone)]
 struct DeviceNode {
     index: NodeIndex,
@@ -77,7 +80,10 @@ pub fn preprocess_program_with_library(
     device_library: Option<&crate::device_library::DeviceLibrary>,
 ) -> Result<PlcProgram, Vec<PlcError>> {
     let expanded_tasks = expand_repeat_blocks(&program.tasks)?;
-    let expanded_topology = expand_plc_controller_devices(&program.topology)?;
+    let used_controller_ports =
+        collect_used_controller_port_ids(&program.topology, &program.constraints, &expanded_tasks);
+    let expanded_topology =
+        expand_plc_controller_devices(&program.topology, &used_controller_ports)?;
     let mut rewritten = program.clone();
     rewritten.tasks = expanded_tasks;
     rewritten.topology = expanded_topology;
@@ -502,8 +508,257 @@ struct ResolvedPlcEndpoint {
     name: String,
 }
 
+#[derive(Debug, Clone)]
+struct ResolvedControllerPort {
+    port: crate::ast::DevicePort,
+    analog_range: Option<crate::ast::AnalogRange>,
+    unit: Option<String>,
+    external: bool,
+}
+
+fn collect_used_controller_port_ids(
+    topology: &TopologySection,
+    constraints: &ConstraintsSection,
+    tasks: &TasksSection,
+) -> HashSet<String> {
+    let plc_names = topology
+        .devices
+        .iter()
+        .filter(|device| matches!(device.device_type, DeviceType::Plc))
+        .map(|device| device.name.clone())
+        .collect::<HashSet<_>>();
+    let mut used = HashSet::new();
+
+    for connection in &topology.connections {
+        collect_used_controller_port_from_relation_endpoint(
+            &connection.from,
+            connection.from_port.as_deref(),
+            &plc_names,
+            &mut used,
+        );
+        collect_used_controller_port_from_relation_endpoint(
+            &connection.to,
+            connection.to_port.as_deref(),
+            &plc_names,
+            &mut used,
+        );
+    }
+
+    for rule in &constraints.safety {
+        collect_used_controller_port_from_safety_operand(&rule.left, &plc_names, &mut used);
+        collect_used_controller_port_from_safety_operand(&rule.right, &plc_names, &mut used);
+    }
+
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            collect_used_controller_port_ids_from_statements(
+                &step.statements,
+                &plc_names,
+                &mut used,
+            );
+        }
+    }
+
+    used
+}
+
+fn collect_used_controller_port_from_relation_endpoint(
+    device: &str,
+    port: Option<&str>,
+    plc_names: &HashSet<String>,
+    used: &mut HashSet<String>,
+) {
+    if let Some(port) = port {
+        if plc_names.contains(device) {
+            collect_used_controller_port_reference(port, plc_names, used);
+        }
+        return;
+    }
+
+    collect_used_controller_port_reference(device, plc_names, used);
+}
+
+fn collect_used_controller_port_from_safety_operand(
+    operand: &SafetyOperand,
+    plc_names: &HashSet<String>,
+    used: &mut HashSet<String>,
+) {
+    match operand {
+        SafetyOperand::State(state) => {
+            if plc_names.contains(&state.device) {
+                collect_used_controller_port_reference(&state.port, plc_names, used);
+            } else {
+                collect_used_controller_port_reference(&state.device, plc_names, used);
+            }
+        }
+        SafetyOperand::Threshold { device, .. } => {
+            collect_used_controller_port_reference(device, plc_names, used);
+        }
+    }
+}
+
+fn collect_used_controller_port_ids_from_statements(
+    statements: &[StepStatement],
+    plc_names: &HashSet<String>,
+    used: &mut HashSet<String>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(action) => {
+                collect_used_controller_port_from_action(action, plc_names, used);
+            }
+            StepStatement::Wait(wait) => {
+                let conditions = match &wait.condition {
+                    WaitCondition::Single(condition) => vec![condition],
+                    WaitCondition::And(conditions) | WaitCondition::Or(conditions) => {
+                        conditions.iter().collect::<Vec<_>>()
+                    }
+                };
+                for condition in conditions {
+                    if let Some((left_expr, right_expr)) = condition.expression_pair() {
+                        collect_used_controller_port_from_expression(left_expr, plc_names, used);
+                        collect_used_controller_port_from_expression(right_expr, plc_names, used);
+                    } else {
+                        collect_used_controller_port_reference(&condition.left, plc_names, used);
+                    }
+                }
+            }
+            StepStatement::IfElse { condition, .. } => {
+                if let Some((left_expr, right_expr)) = condition.expression_pair() {
+                    collect_used_controller_port_from_expression(left_expr, plc_names, used);
+                    collect_used_controller_port_from_expression(right_expr, plc_names, used);
+                } else {
+                    collect_used_controller_port_reference(&condition.left, plc_names, used);
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                collect_used_controller_port_ids_from_statements(body, plc_names, used);
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    collect_used_controller_port_ids_from_statements(
+                        &branch.statements,
+                        plc_names,
+                        used,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    collect_used_controller_port_ids_from_statements(
+                        &branch.statements,
+                        plc_names,
+                        used,
+                    );
+                }
+            }
+            StepStatement::Effect(_)
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn collect_used_controller_port_from_action(
+    action: &ActionStatement,
+    plc_names: &HashSet<String>,
+    used: &mut HashSet<String>,
+) {
+    match action {
+        ActionStatement::Extend { target }
+        | ActionStatement::Retract { target }
+        | ActionStatement::Set { target, .. }
+        | ActionStatement::SetAnalog { target, .. }
+        | ActionStatement::SetAnalogExpr { target, .. }
+        | ActionStatement::AxisMoveRelative { target, .. }
+        | ActionStatement::AxisMoveAbsolute { target, .. } => {
+            if plc_names.contains(&target.device) {
+                collect_used_controller_port_reference(&target.port, plc_names, used);
+            } else {
+                collect_used_controller_port_reference(&target.device, plc_names, used);
+            }
+        }
+        ActionStatement::Compute { target, expr } => {
+            collect_used_controller_port_reference(target, plc_names, used);
+            collect_used_controller_port_from_expression(expr, plc_names, used);
+        }
+        ActionStatement::Call { args, binding, .. } => {
+            for arg in args {
+                collect_used_controller_port_from_expression(arg, plc_names, used);
+            }
+            match binding {
+                AstExternCallBinding::Single(target) => {
+                    collect_used_controller_port_reference(target, plc_names, used);
+                }
+                AstExternCallBinding::Tuple(targets) => {
+                    for target in targets {
+                        collect_used_controller_port_reference(target, plc_names, used);
+                    }
+                }
+            }
+        }
+        ActionStatement::CamEngage { target }
+        | ActionStatement::CamDisengage { target }
+        | ActionStatement::CamSwitch { target, .. } => {
+            collect_used_controller_port_reference(target, plc_names, used);
+        }
+        ActionStatement::CamPhase { target, offset } => {
+            collect_used_controller_port_reference(target, plc_names, used);
+            collect_used_controller_port_from_expression(offset, plc_names, used);
+        }
+        ActionStatement::Log { .. } => {}
+    }
+}
+
+fn collect_used_controller_port_from_expression(
+    expr: &AstExpression,
+    plc_names: &HashSet<String>,
+    used: &mut HashSet<String>,
+) {
+    match expr {
+        AstExpression::Variable(name) => {
+            collect_used_controller_port_reference(name, plc_names, used);
+        }
+        AstExpression::UnaryNeg(inner) | AstExpression::UnaryNot(inner) => {
+            collect_used_controller_port_from_expression(inner, plc_names, used);
+        }
+        AstExpression::BinaryOp { left, right, .. } => {
+            collect_used_controller_port_from_expression(left, plc_names, used);
+            collect_used_controller_port_from_expression(right, plc_names, used);
+        }
+        AstExpression::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_used_controller_port_from_expression(arg, plc_names, used);
+            }
+        }
+        AstExpression::Literal(_) | AstExpression::Boolean(_) => {}
+    }
+}
+
+fn collect_used_controller_port_reference(
+    reference: &str,
+    plc_names: &HashSet<String>,
+    used: &mut HashSet<String>,
+) {
+    if let Some(port_ref) = parse_plc_port_ref(reference) {
+        used.insert(canonical_physical_device_name(port_ref.kind, port_ref.id));
+        return;
+    }
+
+    if let Some((device, port)) = reference.split_once('.') {
+        if plc_names.contains(device) {
+            if let Some(port_ref) = parse_plc_port_ref(port) {
+                used.insert(canonical_physical_device_name(port_ref.kind, port_ref.id));
+            }
+        }
+    }
+}
+
 fn expand_plc_controller_devices(
     topology: &TopologySection,
+    used_controller_ports: &HashSet<String>,
 ) -> Result<TopologySection, Vec<PlcError>> {
     let mut errors = Vec::<PlcError>::new();
     let mut rewritten_devices = topology
@@ -530,33 +785,31 @@ fn expand_plc_controller_devices(
     let mut synthetic_declarations = HashMap::<String, DeviceDeclaration>::new();
 
     for plc in plc_devices {
-        if plc.attributes.ports.is_empty() {
-            errors.push(PlcError::semantic_with_reason(
-                plc.line.max(1),
-                format!("PLC 设备 {} 必须声明 ports", plc.name),
-                "请在 plc 设备上声明端口，例如 ports: [Y0:digital:producer, X0:digital:consumer]",
-            ));
-            continue;
-        }
-
+        let plc_ports = match resolve_plc_ports(plc) {
+            Ok(ports) => ports,
+            Err(mut local_errors) => {
+                errors.append(&mut local_errors);
+                continue;
+            }
+        };
         let mut seen_ports = BTreeSet::<String>::new();
-        for port in &plc.attributes.ports {
-            if !seen_ports.insert(port.id.clone()) {
+        for port in &plc_ports {
+            if !seen_ports.insert(port.port.id.clone()) {
                 errors.push(PlcError::duplicate_definition_with_reason(
                     plc.line.max(1),
                     "端口",
-                    &format!("{}.{}", plc.name, port.id),
+                    &format!("{}.{}", plc.name, port.port.id),
                     "PLC 设备的端口 id 不能重复",
                 ));
                 continue;
             }
 
-            let Some(port_ref) = parse_plc_port_ref(&port.id) else {
+            let Some(port_ref) = parse_plc_port_ref(&port.port.id) else {
                 errors.push(PlcError::semantic_with_reason(
                     plc.line.max(1),
                     format!(
                         "PLC 设备 {} 的端口 {} 不是有效 PLC 通道（支持 X*/Y*/AI*/AO*/DI*/DO*）",
-                        plc.name, port.id
+                        plc.name, port.port.id
                     ),
                     "请将 plc 端口命名为 X0/Y0/AI0/AO0 或 DI0/DO0 形式",
                 ));
@@ -564,24 +817,24 @@ fn expand_plc_controller_devices(
             };
 
             let expected_type = expected_plc_port_type(port_ref.kind);
-            if port.port_type != expected_type {
+            if port.port.port_type != expected_type {
                 errors.push(PlcError::type_mismatch_with_reason(
                     plc.line.max(1),
                     port_type_name(&expected_type),
-                    port_type_name(&port.port_type),
-                    format!("PLC 端口 {}.{}", plc.name, port.id),
+                    port_type_name(&port.port.port_type),
+                    format!("PLC 端口 {}.{}", plc.name, port.port.id),
                     "请修正 plc 端口类型，使其与端口编号前缀一致（X/DI=Digital, Y/DO=Digital, AI=Analog, AO=Analog）",
                 ));
                 continue;
             }
 
             let expected_role = expected_plc_port_role(port_ref.kind);
-            if port.role != expected_role && port.role != PortRole::Bidirectional {
+            if port.port.role != expected_role && port.port.role != PortRole::Bidirectional {
                 errors.push(PlcError::type_mismatch_with_reason(
                     plc.line.max(1),
                     port_role_name(&expected_role),
-                    port_role_name(&port.role),
-                    format!("PLC 端口 {}.{}", plc.name, port.id),
+                    port_role_name(&port.port.role),
+                    format!("PLC 端口 {}.{}", plc.name, port.port.id),
                     "请修正 plc 端口方向：输入端口应为 consumer，输出端口应为 producer",
                 ));
                 continue;
@@ -589,16 +842,25 @@ fn expand_plc_controller_devices(
 
             let synthetic_name = canonical_physical_device_name(port_ref.kind, port_ref.id);
             let synthetic_type = plc_port_device_type(port_ref.kind);
+            port_lookup.insert(
+                (plc.name.clone(), port.port.id.clone()),
+                ResolvedPlcEndpoint {
+                    name: synthetic_name.clone(),
+                },
+            );
+            if !used_controller_ports.contains(&synthetic_name) {
+                continue;
+            }
             if let Some(existing_type) = existing_names.get(&synthetic_name) {
                 if *existing_type != synthetic_type {
                     errors.push(PlcError::type_mismatch_with_reason(
                         plc.line.max(1),
                         device_type_name(&synthetic_type),
                         device_type_name(existing_type),
-                        format!("PLC 端口 {}.{}", plc.name, port.id),
+                        format!("PLC 端口 {}.{}", plc.name, port.port.id),
                         format!(
                             "端口 {} 映射到内部节点 {}，但该节点已被声明为不同类型",
-                            port.id, synthetic_name
+                            port.port.id, synthetic_name
                         ),
                     ));
                     continue;
@@ -609,30 +871,35 @@ fn expand_plc_controller_devices(
                         plc.line.max(1),
                         device_type_name(&synthetic_type),
                         device_type_name(&existing_decl.device_type),
-                        format!("PLC 端口 {}.{}", plc.name, port.id),
+                        format!("PLC 端口 {}.{}", plc.name, port.port.id),
                         "多个 plc 端口映射到同一内部节点但类型冲突",
                     ));
                     continue;
                 }
             } else {
+                let mut attributes = DeviceAttributes::default();
+                if matches!(
+                    synthetic_type,
+                    DeviceType::AnalogInput | DeviceType::AnalogOutput
+                ) {
+                    attributes.range = port
+                        .analog_range
+                        .clone()
+                        .or(Some(crate::ast::AnalogRange { min: 0.0, max: 1.0 }));
+                    attributes.unit = port.unit.clone().or(Some("raw".to_string()));
+                }
+                attributes.external = port.external.then_some(true);
                 synthetic_declarations.insert(
                     synthetic_name.clone(),
                     DeviceDeclaration {
                         line: plc.line,
                         name: synthetic_name.clone(),
                         device_type: synthetic_type.clone(),
-                        attributes: DeviceAttributes::default(),
+                        attributes,
                     },
                 );
                 existing_names.insert(synthetic_name.clone(), synthetic_type.clone());
             }
-
-            port_lookup.insert(
-                (plc.name.clone(), port.id.clone()),
-                ResolvedPlcEndpoint {
-                    name: synthetic_name,
-                },
-            );
         }
     }
 
@@ -669,6 +936,196 @@ fn expand_plc_controller_devices(
     })
 }
 
+fn resolve_plc_ports(
+    plc: &DeviceDeclaration,
+) -> Result<Vec<ResolvedControllerPort>, Vec<PlcError>> {
+    if !plc.attributes.ports.is_empty() {
+        return Err(vec![PlcError::semantic_with_reason(
+            plc.line.max(1),
+            format!(
+                "controller device {} may not declare inline ports",
+                plc.name
+            ),
+            format!(
+                "move the controller IO inventory into {CONTROLLER_PROFILES_DIR}/<profile>.toml and reference it with model_ref"
+            ),
+        )]);
+    }
+
+    let Some(profile_id) = plc.attributes.model_ref.as_deref() else {
+        return Err(vec![PlcError::semantic_with_reason(
+            plc.line.max(1),
+            format!("controller device {} is missing model_ref", plc.name),
+            "declare a controller profile, for example `model_ref: openplc_softplc`".to_string(),
+        )]);
+    };
+
+    let profile = load_controller_profile(profile_id).map_err(|err| vec![err])?;
+    controller_profile_to_ports(plc, profile_id, &profile)
+}
+
+fn load_controller_profile(profile_id: &str) -> Result<DeviceDef, PlcError> {
+    let path = Path::new(CONTROLLER_PROFILES_DIR).join(format!("{profile_id}.toml"));
+    let content = fs::read_to_string(&path).map_err(|err| {
+        PlcError::semantic_with_reason(
+            1,
+            format!("failed to load controller profile `{profile_id}`"),
+            format!(
+                "define the profile at {CONTROLLER_PROFILES_DIR}/{}.toml or fix model_ref ({})",
+                profile_id, err
+            ),
+        )
+    })?;
+
+    let profile: DeviceDef = toml::from_str(&content).map_err(|err| {
+        PlcError::semantic_with_reason(
+            1,
+            format!("failed to parse controller profile `{profile_id}`"),
+            format!("fix the TOML structure in {} ({})", path.display(), err),
+        )
+    })?;
+
+    if profile.identity.device_type.trim() != "plc" {
+        return Err(PlcError::semantic_with_reason(
+            1,
+            format!(
+                "controller profile `{profile_id}` must use type `plc`, got `{}`",
+                profile.identity.device_type
+            ),
+            "set `[identity].type = \"plc\"` in the controller profile".to_string(),
+        ));
+    }
+
+    Ok(profile)
+}
+
+fn controller_profile_to_ports(
+    plc: &DeviceDeclaration,
+    profile_id: &str,
+    profile: &DeviceDef,
+) -> Result<Vec<ResolvedControllerPort>, Vec<PlcError>> {
+    if profile.interfaces.ports.is_empty() {
+        return Err(vec![PlcError::semantic_with_reason(
+            plc.line.max(1),
+            format!("controller profile `{profile_id}` declares no ports"),
+            "declare controller IO ports in `[[interfaces.ports]]`".to_string(),
+        )]);
+    }
+
+    let mut errors = Vec::new();
+    let mut ports = Vec::new();
+    for port in &profile.interfaces.ports {
+        match controller_profile_port_to_ast(plc, profile_id, port) {
+            Ok(ast_port) => ports.push(ast_port),
+            Err(err) => errors.push(err),
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(ports)
+    } else {
+        Err(errors)
+    }
+}
+
+fn controller_profile_port_to_ast(
+    plc: &DeviceDeclaration,
+    profile_id: &str,
+    port: &PortDef,
+) -> Result<ResolvedControllerPort, PlcError> {
+    let Some(port_ref) = parse_plc_port_ref(&port.name) else {
+        return Err(PlcError::semantic_with_reason(
+            plc.line.max(1),
+            format!(
+                "controller profile `{profile_id}` contains invalid controller port `{}`",
+                port.name
+            ),
+            "use controller port ids like X0, Y0, AI0, AO0, DI0, or DO0".to_string(),
+        ));
+    };
+
+    let port_type = match port.port_type.trim() {
+        "digital" => PortType::Digital,
+        "analog" => PortType::Analog,
+        "pneumatic" => PortType::Pneumatic,
+        "logical" => PortType::Logical,
+        "generic" => PortType::Generic,
+        other => {
+            return Err(PlcError::semantic_with_reason(
+                plc.line.max(1),
+                format!(
+                    "controller profile `{profile_id}` uses unsupported port_type `{other}` on `{}`",
+                    port.name
+                ),
+                "use one of: digital, analog, logical, generic".to_string(),
+            ));
+        }
+    };
+
+    let role = match port.direction.trim() {
+        "input" => PortRole::Consumer,
+        "output" => PortRole::Producer,
+        "bidirectional" => PortRole::Bidirectional,
+        other => {
+            return Err(PlcError::semantic_with_reason(
+                plc.line.max(1),
+                format!(
+                    "controller profile `{profile_id}` uses unsupported direction `{other}` on `{}`",
+                    port.name
+                ),
+                "use one of: input, output, bidirectional".to_string(),
+            ));
+        }
+    };
+
+    let expected_type = expected_plc_port_type(port_ref.kind);
+    if port_type != expected_type {
+        return Err(PlcError::semantic_with_reason(
+            plc.line.max(1),
+            format!(
+                "controller profile `{profile_id}` assigns the wrong type to `{}`",
+                port.name
+            ),
+            format!(
+                "use port type `{}` for controller port `{}`",
+                port_type_name(&expected_type),
+                port.name
+            ),
+        ));
+    }
+
+    let expected_role = expected_plc_port_role(port_ref.kind);
+    if role != expected_role && role != PortRole::Bidirectional {
+        return Err(PlcError::semantic_with_reason(
+            plc.line.max(1),
+            format!(
+                "controller profile `{profile_id}` assigns the wrong direction to `{}`",
+                port.name
+            ),
+            format!(
+                "use direction `{}` for controller port `{}`",
+                port_role_name(&expected_role),
+                port.name
+            ),
+        ));
+    }
+
+    Ok(ResolvedControllerPort {
+        port: crate::ast::DevicePort {
+            id: port.name.clone(),
+            port_type,
+            role,
+            states: port.states.clone(),
+            default_state: port.default_state.clone(),
+        },
+        analog_range: match (port.range_min, port.range_max) {
+            (Some(min), Some(max)) => Some(crate::ast::AnalogRange { min, max }),
+            _ => None,
+        },
+        unit: port.unit.clone(),
+        external: port.external,
+    })
+}
 fn rewrite_plc_connection(
     connection: &TopologyConnection,
     port_lookup: &HashMap<(String, String), ResolvedPlcEndpoint>,
@@ -9047,7 +9504,7 @@ mod tests {
     fn preprocess_expands_plc_device_ports_into_internal_io_nodes() {
         let input = r#"
 [topology]
-device plc_main: plc { ports: [Y0:digital:producer, X0:digital:consumer] }
+device plc_main: plc { model_ref: openplc_softplc }
 device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
 device start_button: sensor { ports: [out:digital:producer] }
 
@@ -9087,6 +9544,60 @@ task main:
                 && c.to_port.as_deref() == Some("coil")
         });
         assert!(y0_edge_exists, "plc_main.Y0 应改写为 Y0 -> valve_A.coil");
+    }
+
+    #[test]
+    fn preprocess_rejects_inline_plc_port_inventory() {
+        let input = r#"
+[topology]
+device plc_main: plc { ports: [Y0:digital:producer, X0:digital:consumer] }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let errors = preprocess_program(&program).expect_err("inline plc ports should be rejected");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("inline ports") && rendered.contains("model_ref"),
+            "expected inline port inventory rejection, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_rejects_plc_missing_model_ref() {
+        let input = r#"
+[topology]
+device plc_main: plc
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let errors = preprocess_program(&program).expect_err("plc without model_ref should fail");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("missing model_ref"),
+            "expected missing model_ref error, got: {rendered}"
+        );
     }
 
     #[test]
@@ -9353,7 +9864,7 @@ task main:
     fn preprocess_rejects_plc_endpoint_without_explicit_port() {
         let input = r#"
 [topology]
-device plc_main: plc { ports: [Y0:digital:producer] }
+device plc_main: plc { model_ref: openplc_softplc }
 device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
 relation { from: plc_main, to: valve_A.coil, via: driven_by }
 
