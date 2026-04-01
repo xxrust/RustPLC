@@ -309,6 +309,10 @@ pub enum RuntimeError {
         target: &'static str,
         fault: AxisFault,
     },
+    CylinderFeedbackFault {
+        target: &'static str,
+        fault: CylinderFeedbackFault,
+    },
     WorkpieceSourceUnderflow {
         endpoint: &'static str,
     },
@@ -372,6 +376,12 @@ pub enum RuntimeError {
     UnsupportedWorkpieceEffect {
         effect: &'static str,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CylinderFeedbackFault {
+    OppositeFeedback,
+    ContradictoryFeedback,
 }
 
 #[derive(Debug, PartialEq)]
@@ -471,6 +481,14 @@ pub enum Action {
     },
     Retract {
         output: DigitalOutputId,
+    },
+    CylinderMotion {
+        target: &'static str,
+        output: DigitalOutputId,
+        expect_extended: bool,
+        confirm_inputs: &'static [DigitalInputId],
+        opposing_inputs: &'static [DigitalInputId],
+        timeout: Option<Timeout>,
     },
     Log {
         message_id: u16,
@@ -777,6 +795,11 @@ pub enum Instr<'a> {
         actions: &'a [Action],
         next: StepId,
     },
+    WaitAllDigital {
+        conditions: &'a [DigitalCondition],
+        next: StepId,
+        timeout: Option<Timeout>,
+    },
     WaitDigital {
         id: DigitalInputId,
         equals: bool,
@@ -825,6 +848,12 @@ pub enum Instr<'a> {
 pub struct Step<'a> {
     pub name: &'a str,
     pub instr: Instr<'a>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DigitalCondition {
+    pub id: DigitalInputId,
+    pub equals: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1230,6 +1259,11 @@ pub enum TaskPendingActionState {
         target: &'static str,
         action_index: usize,
         semantic_tag: Option<&'static str>,
+    },
+    CylinderMotion {
+        target: &'static str,
+        action_index: usize,
+        opposing_cleared_once: bool,
     },
     ExternCall {
         function: &'static str,
@@ -2357,23 +2391,47 @@ impl<'a> Runtime<'a> {
                         let mut action_transition_override: Option<(StepId, TransitionReason)> =
                             None;
                         let mut action_start_index = 0usize;
-                        if let TaskPendingActionState::AxisMotion {
-                            target,
-                            action_index,
-                            semantic_tag: _,
-                        } = self.task_contexts[task_idx].pending_action_state
-                        {
-                            if let Some(Action::AxisMove { command }) = actions.get(action_index) {
-                                if command.target == target {
-                                    action_start_index = action_index;
+                        match self.task_contexts[task_idx].pending_action_state {
+                            TaskPendingActionState::AxisMotion {
+                                target,
+                                action_index,
+                                semantic_tag: _,
+                            } => {
+                                if let Some(Action::AxisMove { command }) = actions.get(action_index)
+                                {
+                                    if command.target == target {
+                                        action_start_index = action_index;
+                                    } else {
+                                        self.task_contexts[task_idx].pending_action_state =
+                                            TaskPendingActionState::Idle;
+                                    }
                                 } else {
                                     self.task_contexts[task_idx].pending_action_state =
                                         TaskPendingActionState::Idle;
                                 }
-                            } else {
-                                self.task_contexts[task_idx].pending_action_state =
-                                    TaskPendingActionState::Idle;
                             }
+                            TaskPendingActionState::CylinderMotion {
+                                target,
+                                action_index,
+                                opposing_cleared_once: _,
+                            } => {
+                                if let Some(Action::CylinderMotion {
+                                    target: action_target,
+                                    ..
+                                }) = actions.get(action_index)
+                                {
+                                    if *action_target == target {
+                                        action_start_index = action_index;
+                                    } else {
+                                        self.task_contexts[task_idx].pending_action_state =
+                                            TaskPendingActionState::Idle;
+                                    }
+                                } else {
+                                    self.task_contexts[task_idx].pending_action_state =
+                                        TaskPendingActionState::Idle;
+                                }
+                            }
+                            TaskPendingActionState::Idle | TaskPendingActionState::ExternCall { .. } => {}
                         }
                         for (action_index, a) in actions.iter().enumerate().skip(action_start_index)
                         {
@@ -2582,6 +2640,76 @@ impl<'a> Runtime<'a> {
                                 Action::Retract { output } => {
                                     self.write_digital_output(io, output, false)
                                 }
+                                Action::CylinderMotion {
+                                    target,
+                                    output,
+                                    expect_extended,
+                                    confirm_inputs,
+                                    opposing_inputs,
+                                    timeout,
+                                } => {
+                                    self.write_digital_output(io, output, expect_extended);
+                                    let opposing_cleared_once = match self.task_contexts[task_idx]
+                                        .pending_action_state
+                                    {
+                                        TaskPendingActionState::CylinderMotion {
+                                            opposing_cleared_once,
+                                            ..
+                                        } => opposing_cleared_once,
+                                        _ => false,
+                                    };
+                                    let confirm_active = confirm_inputs
+                                        .iter()
+                                        .all(|id| io.read_digital_input(*id));
+                                    let opposing_active = opposing_inputs
+                                        .iter()
+                                        .any(|id| io.read_digital_input(*id));
+
+                                    if confirm_active && opposing_active {
+                                        self.task_contexts[task_idx].pending_action_state =
+                                            TaskPendingActionState::Idle;
+                                        return Err(RuntimeTickError::Core(
+                                            RuntimeError::CylinderFeedbackFault {
+                                                target,
+                                                fault: CylinderFeedbackFault::ContradictoryFeedback,
+                                            },
+                                        ));
+                                    }
+                                    if confirm_active {
+                                        self.task_contexts[task_idx].pending_action_state =
+                                            TaskPendingActionState::Idle;
+                                    } else if opposing_active && opposing_cleared_once {
+                                        self.task_contexts[task_idx].pending_action_state =
+                                            TaskPendingActionState::Idle;
+                                        return Err(RuntimeTickError::Core(
+                                            RuntimeError::CylinderFeedbackFault {
+                                                target,
+                                                fault: CylinderFeedbackFault::OppositeFeedback,
+                                            },
+                                        ));
+                                    } else {
+                                        self.task_contexts[task_idx].pending_action_state =
+                                            TaskPendingActionState::CylinderMotion {
+                                                target,
+                                                action_index,
+                                                opposing_cleared_once: opposing_cleared_once
+                                                    || !opposing_active,
+                                            };
+                                        if let Some(timeout) = timeout
+                                            && elapsed >= timeout.after_ticks
+                                        {
+                                            self.task_contexts[task_idx].pending_action_state =
+                                                TaskPendingActionState::Idle;
+                                            action_transition_override = Some((
+                                                timeout.target,
+                                                TransitionReason::Timeout,
+                                            ));
+                                            break;
+                                        }
+                                        action_completion = ActionCompletionState::Pending;
+                                        break;
+                                    }
+                                }
                                 Action::WorkpieceAcquire {
                                     workpiece_type,
                                     holder,
@@ -2673,6 +2801,23 @@ impl<'a> Runtime<'a> {
                     }
                     Instr::Delay { ticks, next } => {
                         match Self::delay_completion_decision(elapsed, ticks, next) {
+                            StepCompletionDecision::ContinueWith { target, reason } => {
+                                self.transition(task_idx, now, target, reason, on_event)
+                                    .map_err(RuntimeTickError::Core)?;
+                                continue;
+                            }
+                            StepCompletionDecision::StayOnStep => break,
+                        }
+                    }
+                    Instr::WaitAllDigital {
+                        conditions,
+                        next,
+                        timeout,
+                    } => {
+                        let satisfied = conditions.iter().all(|condition| {
+                            io.read_digital_input(condition.id) == condition.equals
+                        });
+                        match Self::wait_completion_decision(satisfied, elapsed, timeout, next) {
                             StepCompletionDecision::ContinueWith { target, reason } => {
                                 self.transition(task_idx, now, target, reason, on_event)
                                     .map_err(RuntimeTickError::Core)?;
@@ -2852,7 +2997,8 @@ impl<'a> Runtime<'a> {
         let ctx = &mut self.task_contexts[task];
         ctx.wait_state = match instr {
             Instr::Delay { .. } => TaskWaitState::Delay,
-            Instr::WaitDigital { .. }
+            Instr::WaitAllDigital { .. }
+            | Instr::WaitDigital { .. }
             | Instr::WaitAnalog { .. }
             | Instr::WaitExpr { .. }
             | Instr::WaitCamDigital { .. }
@@ -2861,7 +3007,11 @@ impl<'a> Runtime<'a> {
         };
 
         ctx.timeout_state = match instr {
-            Instr::WaitDigital {
+            Instr::WaitAllDigital {
+                timeout: Some(timeout),
+                ..
+            }
+            | Instr::WaitDigital {
                 timeout: Some(timeout),
                 ..
             }

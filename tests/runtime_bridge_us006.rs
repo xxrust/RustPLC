@@ -3,7 +3,8 @@ use runtime_core::{
     AXIS_FAULT_POLICY_LOG_MESSAGE, AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE,
     AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE, AxisAutoResetPolicy, AxisFault, AxisFaultKind,
     AxisFaultPropagationScope, AxisFaultSeverity, AxisMotionResult, AxisMoveKind, AxisStopMode,
-    AxisStopState, AxisStopTransitionPhase, Runtime, RuntimeError, RuntimeTickError,
+    AxisStopState, AxisStopTransitionPhase, CylinderFeedbackFault, Instr, Runtime, RuntimeError,
+    RuntimeTickError,
     axis_fault_policy_log_message_id, axis_stop_transition_log_message_id,
 };
 use rust_plc::extern_functions::{
@@ -110,17 +111,7 @@ device X0: digital_input
 
 device start_button: sensor
 
-device valve_A: solenoid_valve
-
-device cyl_A: cylinder
-
-device sensor_ext: sensor
-
 relation { from: start_button.out, to: X0.in, via: reports_to }
-relation { from: Y0.out, to: valve_A.coil, via: driven_by }
-relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
-relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
-relation { from: sensor_ext.out, to: X0.in, via: reports_to }
 
 [constraints]
 
@@ -128,7 +119,7 @@ relation { from: sensor_ext.out, to: X0.in, via: reports_to }
 
 task main:
     step extend:
-        action: extend cyl_A
+        action: set Y0 on
 
     step wait_button:
         wait: start_button == true
@@ -138,13 +129,13 @@ task main:
         delay: 20ms
 
     step retract:
-        action: retract cyl_A
+        action: set Y0 off
 
     on_complete: goto done
 
 task fault:
     step retract_fault:
-        action: retract cyl_A
+        action: set Y0 off
     on_complete: goto done
 
 task done:
@@ -338,6 +329,256 @@ task done:
     step halt:
 "#;
 
+const PLC_CYLINDER_STATE_WAIT_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc {
+    model_ref: openplc_softplc
+}
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+device sensor_ret: sensor
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step extend:
+        action: extend cyl_A
+
+    step wait_extended:
+        wait: cyl_A.extended == true
+        timeout: 50ms -> goto fault
+
+    step done:
+        goto done.halt
+
+task fault:
+    step halt:
+
+task done:
+    step halt:
+"#;
+
+const PLC_CYLINDER_STATE_FALSE_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc {
+    model_ref: openplc_softplc
+}
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+device sensor_ret: sensor
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_not_retracted:
+        wait: cyl_A.retracted == false
+        timeout: 50ms -> goto done
+
+    step halt:
+
+task done:
+    step halt:
+"#;
+
+const PLC_CYLINDER_SENSOR_WAIT_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc {
+    model_ref: openplc_softplc
+}
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+device sensor_ret: sensor
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_sensor:
+        wait: sensor_ext == true
+        timeout: 50ms -> goto done
+
+    step halt:
+
+task done:
+    step halt:
+"#;
+
+const PLC_CYLINDER_INPUT_WAIT_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc {
+    model_ref: openplc_softplc
+}
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+device sensor_ret: sensor
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_input:
+        wait: plc_main.X0 == true
+        timeout: 50ms -> goto done
+
+    step halt:
+
+task done:
+    step halt:
+"#;
+
+const PLC_CYLINDER_INPUT_ALIAS_WAIT_FIXTURE: &str = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device X1: digital_input
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+device sensor_ret: sensor
+
+relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: X1.in, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_input_alias:
+        wait: X0 == true
+        timeout: 50ms -> goto done
+
+    step halt:
+
+task done:
+    step halt:
+"#;
+
+const PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc {
+    model_ref: openplc_softplc
+}
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+device sensor_ret: sensor
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step extend:
+        action: extend cyl_A
+        timeout: 50ms -> goto fault
+
+    step done:
+        goto done.halt
+
+task fault:
+    step halt:
+
+task done:
+    step halt:
+"#;
+
+const PLC_CYLINDER_PARTIAL_FEEDBACK_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc {
+    model_ref: openplc_softplc
+}
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step extend:
+        action: extend cyl_A
+        timeout: 50ms -> goto fault
+
+    step done:
+        goto done.halt
+
+task fault:
+    step halt:
+
+task done:
+    step halt:
+"#;
+
 #[test]
 fn bridge_supports_analog_wait_guard_mapped_to_regions() {
     let program = compile_to_runtime(PLC_ANALOG_WAIT_FIXTURE, 1);
@@ -352,6 +593,202 @@ fn bridge_supports_analog_wait_guard_mapped_to_regions() {
     assert!(
         out.contains("\"reason\":\"wait_satisfied\""),
         "expected analog wait to satisfy immediately, got: {out}"
+    );
+}
+
+#[test]
+fn bridge_rejects_cylinder_state_true_guard_now_that_feedback_is_action_owned() {
+    let err = compile_to_runtime_result(PLC_CYLINDER_STATE_WAIT_FIXTURE, 10)
+        .expect_err("cylinder state == true guard should be rejected");
+    assert!(
+        matches!(
+            err,
+            BridgeError::UnsupportedGuardExpression { ref expression, .. }
+            if expression == "cyl_A.extended == true"
+        ),
+        "expected unsupported guard error, got {err:?}"
+    );
+}
+
+#[test]
+fn bridge_lowers_closed_loop_cylinder_action_timeout_into_pending_motion() {
+    let program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let extend_step = program.tasks[0]
+        .steps
+        .iter()
+        .find(|step| step.name == "main.extend")
+        .expect("extend step exists");
+
+    match extend_step.instr {
+        Instr::Action { actions, .. } => match actions {
+            [runtime_core::Action::CylinderMotion {
+                target,
+                expect_extended,
+                confirm_inputs,
+                opposing_inputs,
+                timeout: Some(timeout),
+                ..
+            }] => {
+                assert_eq!(*target, "cyl_A");
+                assert!(*expect_extended);
+                assert_eq!(*confirm_inputs, [DigitalInputId(0)]);
+                assert_eq!(*opposing_inputs, [DigitalInputId(1)]);
+                assert_eq!(timeout.after_ticks, 5);
+            }
+            other => panic!("expected single cylinder motion action, got {other:?}"),
+        },
+        other => panic!("expected Action instr, got {other:?}"),
+    }
+}
+
+#[test]
+fn bridge_rejects_cylinder_state_false_guard_until_semantics_are_closed() {
+    let err = compile_to_runtime_result(PLC_CYLINDER_STATE_FALSE_FIXTURE, 10)
+        .expect_err("state == false should be rejected for cylinders");
+    assert!(
+        matches!(
+            err,
+            BridgeError::UnsupportedGuardExpression { ref expression, .. }
+            if expression == "cyl_A.retracted == false"
+        ),
+        "expected unsupported guard error, got {err:?}"
+    );
+}
+
+#[test]
+fn bridge_rejects_raw_sensor_wait_for_cylinder_end_feedback() {
+    let err = compile_to_runtime_result(PLC_CYLINDER_SENSOR_WAIT_FIXTURE, 10)
+        .expect_err("raw sensor wait should be rejected for cylinder end feedback");
+    assert!(
+        matches!(
+            err,
+            BridgeError::UnsupportedGuardExpression { ref expression, .. }
+            if expression == "sensor_ext == true"
+        ),
+        "expected unsupported guard error, got {err:?}"
+    );
+}
+
+#[test]
+fn bridge_rejects_raw_plc_input_wait_for_cylinder_end_feedback() {
+    let err = compile_to_runtime_result(PLC_CYLINDER_INPUT_WAIT_FIXTURE, 10)
+        .expect_err("raw plc input wait should be rejected for cylinder end feedback");
+    assert!(
+        matches!(
+            err,
+            BridgeError::UnsupportedGuardExpression { ref expression, .. }
+            if expression == "plc_main.X0"
+        ),
+        "expected unsupported guard error, got {err:?}"
+    );
+}
+
+#[test]
+fn bridge_rejects_raw_input_alias_wait_for_cylinder_end_feedback() {
+    let err = compile_to_runtime_result(PLC_CYLINDER_INPUT_ALIAS_WAIT_FIXTURE, 10)
+        .expect_err("raw digital_input alias wait should be rejected for cylinder end feedback");
+    assert!(
+        matches!(
+            err,
+            BridgeError::UnsupportedGuardExpression { ref expression, .. }
+            if expression == "X0 == true"
+        ),
+        "expected unsupported guard error, got {err:?}"
+    );
+}
+
+#[test]
+fn runtime_completes_closed_loop_cylinder_action_via_feedback_without_explicit_wait() {
+    let program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 1, 0, 0);
+
+    io.schedule_digital_input(Tick(1), DigitalInputId(0), true);
+    io.schedule_digital_input(Tick(1), DigitalInputId(1), false);
+
+    rt.tick(&mut io).expect("tick extend");
+    rt.tick(&mut io).expect("tick complete");
+
+    assert_eq!(
+        io.digital_output_edges(),
+        &[sim::DigitalEdge {
+            tick: Tick(0),
+            id: DigitalOutputId(0),
+            value: true,
+        }]
+    );
+    assert_eq!(current_step_name(&rt, &program), "done.halt");
+}
+
+#[test]
+fn runtime_rejects_contradictory_cylinder_feedback_for_closed_loop_action() {
+    let program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 1, 0, 0);
+    io.schedule_digital_input(Tick(1), DigitalInputId(0), true);
+    io.schedule_digital_input(Tick(1), DigitalInputId(1), true);
+
+    rt.tick(&mut io).expect("tick pending action start");
+    let err = rt.tick(&mut io).expect_err("contradictory feedback should fault at action layer");
+    assert_eq!(
+        err,
+        RuntimeError::CylinderFeedbackFault {
+            target: "cyl_A",
+            fault: CylinderFeedbackFault::ContradictoryFeedback,
+        }
+    );
+}
+
+#[test]
+fn runtime_rejects_reasserted_opposing_feedback_for_closed_loop_action() {
+    let program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 1, 0, 0);
+    io.schedule_digital_input(Tick(0), DigitalInputId(1), true);
+    io.schedule_digital_input(Tick(1), DigitalInputId(1), false);
+    io.schedule_digital_input(Tick(2), DigitalInputId(1), true);
+
+    rt.tick(&mut io).expect("tick start while still on opposing end");
+    rt.tick(&mut io).expect("tick after opposing feedback clears");
+    let err = rt
+        .tick(&mut io)
+        .expect_err("reasserted opposing feedback should fault after motion leaves start end");
+    assert_eq!(
+        err,
+        RuntimeError::CylinderFeedbackFault {
+            target: "cyl_A",
+            fault: CylinderFeedbackFault::OppositeFeedback,
+        }
+    );
+}
+
+#[test]
+fn runtime_times_out_closed_loop_cylinder_action_without_feedback() {
+    let program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 1, 0, 0);
+    let mut trace = sim::JsonlTraceRecorder::new();
+
+    for _ in 0..7 {
+        rt.tick_with_trace(&mut io, |event| trace.record(event))
+            .expect("tick");
+    }
+
+    let out = trace.into_string();
+    assert!(
+        out.contains("\"reason\":\"timeout\""),
+        "missing cylinder feedback should trigger action timeout, got trace: {out}"
+    );
+    assert_eq!(current_step_name(&rt, &program), "fault.halt");
+}
+
+#[test]
+fn bridge_rejects_partially_wired_closed_loop_cylinder_motion() {
+    let err = compile_to_runtime_result(PLC_CYLINDER_PARTIAL_FEEDBACK_FIXTURE, 10)
+        .expect_err("partially wired cylinder feedback should not silently degrade");
+    assert!(
+        matches!(err, BridgeError::IncompleteClosedLoopCylinderMotion { .. }),
+        "expected incomplete closed-loop cylinder motion error, got {err:?}"
     );
 }
 

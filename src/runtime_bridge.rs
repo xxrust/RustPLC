@@ -16,14 +16,14 @@ use runtime_core::{
     AxisFaultRouteKind as RtAxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting,
     AxisFaultSeverity as RtAxisFaultSeverity, AxisMotionCommand, AxisMoveKind,
     AxisStopMode as RtAxisStopMode, CamAnalogField, CamCouplingConfig, CamDigitalField,
-    CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, ExprOp, ExprProgram, Instr,
-    MAX_CAM_POINTS, MAX_TRACKED_DIGITAL_OUTPUTS, MAX_TRANSITIONS_PER_TASK_PER_TICK, PidConfig,
-    Program, ResourceClaimRule as RtResourceClaimRule,
-    ResourceClaimSource as RtResourceClaimSource, SemanticResource as RtSemanticResource,
-    SemanticResourceMode as RtSemanticResourceMode, SplineCoeff as RtSplineCoeff, Step, StepId,
-    Task, Timeout, WorkpieceHolderDef as RtWorkpieceHolderDef,
-    WorkpieceSiteDef as RtWorkpieceSiteDef, WorkpieceSiteKind as RtWorkpieceSiteKind,
-    WorkpieceTypeDef as RtWorkpieceTypeDef,
+    CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, DigitalCondition, ExprOp,
+    ExprProgram, Instr, MAX_CAM_POINTS, MAX_TRACKED_DIGITAL_OUTPUTS,
+    MAX_TRANSITIONS_PER_TASK_PER_TICK, PidConfig, Program,
+    ResourceClaimRule as RtResourceClaimRule, ResourceClaimSource as RtResourceClaimSource,
+    SemanticResource as RtSemanticResource, SemanticResourceMode as RtSemanticResourceMode,
+    SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
+    WorkpieceHolderDef as RtWorkpieceHolderDef, WorkpieceSiteDef as RtWorkpieceSiteDef,
+    WorkpieceSiteKind as RtWorkpieceSiteKind, WorkpieceTypeDef as RtWorkpieceTypeDef,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -50,6 +50,15 @@ pub enum BridgeError {
 
     #[error("unsupported guard expression in {state}: {expression}")]
     UnsupportedGuardExpression { state: String, expression: String },
+
+    #[error(
+        "closed-loop cylinder {device} in {state} is missing required complementary feedback for action state {requested_state}"
+    )]
+    IncompleteClosedLoopCylinderMotion {
+        state: String,
+        device: String,
+        requested_state: String,
+    },
 
     #[error("unsupported action in {state}: {action}")]
     UnsupportedAction { state: String, action: String },
@@ -1493,6 +1502,7 @@ fn convert_single_transition(
                     cam_indices,
                     cam_table_indices,
                     extern_signatures,
+                    None,
                 )?;
                 Ok(Instr::Action {
                     actions,
@@ -1526,6 +1536,7 @@ fn convert_single_transition(
                     cam_indices,
                     cam_table_indices,
                     extern_signatures,
+                    None,
                 )?;
                 Ok(Instr::Delay {
                     ticks,
@@ -1555,6 +1566,7 @@ fn convert_single_transition(
                     cam_indices,
                     cam_table_indices,
                     extern_signatures,
+                    None,
                 )?
             };
             if let Some((device, ranges)) = parse_analog_region_guard(expr) {
@@ -1570,29 +1582,15 @@ fn convert_single_transition(
             } else if let Some(cam_guard) = parse_cam_wait_guard(expr, cam_indices) {
                 Ok(cam_guard.into_instr(next, None))
             } else if let Ok((lhs, equals)) = parse_single_bool_guard(state_name, expr) {
-                if variable_indices.contains_key(&lhs) {
-                    let left = compile_guard_expr_program(state_name, &lhs, variable_indices)?;
-                    let right = compile_guard_expr_program(
-                        state_name,
-                        if equals { "1.0" } else { "0.0" },
-                        variable_indices,
-                    )?;
-                    Ok(Instr::WaitExpr {
-                        left,
-                        op: CompareOp::Eq,
-                        right,
-                        next,
-                        timeout: None,
-                    })
-                } else {
-                    let id = resolver.resolve_digital_input_id(state_name, &lhs)?;
-                    Ok(Instr::WaitDigital {
-                        id,
-                        equals,
-                        next,
-                        timeout: None,
-                    })
-                }
+                bool_guard_to_instr(
+                    resolver,
+                    state_name,
+                    lhs,
+                    equals,
+                    variable_indices,
+                    next,
+                    None,
+                )
             } else if let Some((left_raw, op, right_raw)) = parse_compare_guard(expr) {
                 let left = compile_guard_expr_program(state_name, &left_raw, variable_indices)?;
                 let right = compile_guard_expr_program(state_name, &right_raw, variable_indices)?;
@@ -1649,22 +1647,30 @@ fn convert_two_transitions(
         }
         _ => None,
     } {
-        let _ = timeout;
-        return convert_single_transition(
+        let TransitionGuard::Timeout { duration_ms } = &timeout.guard else {
+            unreachable!();
+        };
+        let next = lookup_target_step(state_name, &always.to, state_to_step)?;
+        let timeout_target = lookup_target_step(state_name, &timeout.to, state_to_step)?;
+        let actions = leak_actions(
             resolver,
             state_name,
-            always,
+            &always.actions,
+            &always.effects,
             workpiece_ctx,
             state_to_step,
             task_entry_steps,
-            steps,
-            sm,
             tick_ms,
             variable_indices,
             cam_indices,
             cam_table_indices,
             extern_signatures,
-        );
+            Some(Timeout {
+                after_ticks: ms_to_ticks(state_name, *duration_ms, tick_ms)?,
+                target: timeout_target,
+            }),
+        )?;
+        return Ok(Instr::Action { actions, next });
     }
 
     let (cond, fallback_transition, after_ticks) = if let Some((cond, timeout)) = match pair {
@@ -1737,6 +1743,7 @@ fn convert_two_transitions(
             cam_indices,
             cam_table_indices,
             extern_signatures,
+            None,
         )?
     };
 
@@ -1761,6 +1768,7 @@ fn convert_two_transitions(
                 cam_indices,
                 cam_table_indices,
                 extern_signatures,
+                None,
             )?
         };
 
@@ -1804,29 +1812,15 @@ fn condition_to_wait_instr(
     } else if let Some(cam_guard) = parse_cam_wait_guard(expr, cam_indices) {
         Ok(cam_guard.into_instr(cond_next, timeout))
     } else if let Ok((lhs, equals)) = parse_single_bool_guard(state_name, expr) {
-        if variable_indices.contains_key(&lhs) {
-            let left = compile_guard_expr_program(state_name, &lhs, variable_indices)?;
-            let right = compile_guard_expr_program(
-                state_name,
-                if equals { "1.0" } else { "0.0" },
-                variable_indices,
-            )?;
-            Ok(Instr::WaitExpr {
-                left,
-                op: CompareOp::Eq,
-                right,
-                next: cond_next,
-                timeout,
-            })
-        } else {
-            let id = resolver.resolve_digital_input_id(state_name, &lhs)?;
-            Ok(Instr::WaitDigital {
-                id,
-                equals,
-                next: cond_next,
-                timeout,
-            })
-        }
+        bool_guard_to_instr(
+            resolver,
+            state_name,
+            lhs,
+            equals,
+            variable_indices,
+            cond_next,
+            timeout,
+        )
     } else if let Some((left_raw, op, right_raw)) = parse_compare_guard(expr) {
         let left = compile_guard_expr_program(state_name, &left_raw, variable_indices)?;
         let right = compile_guard_expr_program(state_name, &right_raw, variable_indices)?;
@@ -1945,6 +1939,18 @@ impl CamWaitGuard {
     }
 }
 
+enum BoolGuardOperand {
+    Identifier(String),
+    PlcPort(String),
+    StateRef(StateGuardRef),
+}
+
+struct StateGuardRef {
+    device: String,
+    port: String,
+    state: String,
+}
+
 fn parse_cam_wait_guard(expr: &str, cam_indices: &HashMap<String, u16>) -> Option<CamWaitGuard> {
     let (left_raw, op, right_raw) = parse_compare_guard(expr)?;
     let mut parts = left_raw.split('.');
@@ -2040,10 +2046,130 @@ fn is_single_bool_guard_shape(expr: &str) -> bool {
     let lhs = parts[0].trim();
     let op = parts[1].trim();
     let rhs = parts[2].trim();
-    !lhs.is_empty()
-        && !lhs.contains('.')
+    parse_bool_guard_operand(lhs).is_some()
         && (op == "==" || op == "!=")
         && (rhs == "true" || rhs == "false")
+}
+
+fn parse_bool_guard_operand(raw: &str) -> Option<BoolGuardOperand> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if !raw.contains('.') {
+        return Some(BoolGuardOperand::Identifier(raw.to_string()));
+    }
+
+    let parts = raw.split('.').map(str::trim).collect::<Vec<_>>();
+    if let [_, port] = parts.as_slice()
+        && parse_physical_plc_port_ref(port).is_some()
+    {
+        return Some(BoolGuardOperand::PlcPort(raw.to_string()));
+    }
+    match parts.as_slice() {
+        [device, state] if !device.is_empty() && !state.is_empty() => {
+            Some(BoolGuardOperand::StateRef(StateGuardRef {
+                device: (*device).to_string(),
+                port: "self".to_string(),
+                state: (*state).to_string(),
+            }))
+        }
+        [device, port, state] if !device.is_empty() && !port.is_empty() && !state.is_empty() => {
+            Some(BoolGuardOperand::StateRef(StateGuardRef {
+                device: (*device).to_string(),
+                port: (*port).to_string(),
+                state: (*state).to_string(),
+            }))
+        }
+        _ => None,
+    }
+}
+
+fn bool_guard_to_instr(
+    resolver: &TopologyResolver,
+    state_name: &str,
+    lhs: BoolGuardOperand,
+    equals: bool,
+    variable_indices: &HashMap<String, u16>,
+    next: StepId,
+    timeout: Option<Timeout>,
+) -> Result<Instr<'static>, BridgeError> {
+    match lhs {
+        BoolGuardOperand::Identifier(name) => {
+            if variable_indices.contains_key(&name) {
+                let left = compile_guard_expr_program(state_name, &name, variable_indices)?;
+                let right = compile_guard_expr_program(
+                    state_name,
+                    if equals { "1.0" } else { "0.0" },
+                    variable_indices,
+                )?;
+                Ok(Instr::WaitExpr {
+                    left,
+                    op: CompareOp::Eq,
+                    right,
+                    next,
+                    timeout,
+                })
+            } else {
+                if resolver.sensor_is_cylinder_end_feedback(&name) {
+                    return Err(BridgeError::UnsupportedGuardExpression {
+                        state: state_name.to_string(),
+                        expression: format!("{name} == {equals}"),
+                    });
+                }
+                let id = resolver.resolve_digital_input_id(state_name, &name)?;
+                if resolver.digital_input_is_cylinder_end_feedback(id) {
+                    return Err(BridgeError::UnsupportedGuardExpression {
+                        state: state_name.to_string(),
+                        expression: format!("{name} == {equals}"),
+                    });
+                }
+                Ok(Instr::WaitDigital {
+                    id,
+                    equals,
+                    next,
+                    timeout,
+                })
+            }
+        }
+        BoolGuardOperand::PlcPort(raw) => {
+            let port = raw
+                .split('.')
+                .next_back()
+                .and_then(parse_physical_plc_port_ref)
+                .ok_or_else(|| BridgeError::UnsupportedGuardExpression {
+                    state: state_name.to_string(),
+                    expression: raw.clone(),
+                })?;
+            if !matches!(port.kind, PlcPortKind::DigitalInput) {
+                return Err(BridgeError::UnsupportedGuardExpression {
+                    state: state_name.to_string(),
+                    expression: raw,
+                });
+            }
+            if resolver.digital_input_is_cylinder_end_feedback(DigitalInputId(port.id)) {
+                return Err(BridgeError::UnsupportedGuardExpression {
+                    state: state_name.to_string(),
+                    expression: raw,
+                });
+            }
+            Ok(Instr::WaitDigital {
+                id: DigitalInputId(port.id),
+                equals,
+                next,
+                timeout,
+            })
+        }
+        BoolGuardOperand::StateRef(state_ref) => {
+            if !equals {
+                return Err(BridgeError::UnsupportedGuardExpression {
+                    state: state_name.to_string(),
+                    expression: format!("{}.{} == false", state_ref.device, state_ref.state),
+                });
+            }
+            resolver.resolve_state_guard_instr(state_name, &state_ref, next, timeout)
+        }
+    }
 }
 
 fn ranges_to_analog_ranges(
@@ -2176,7 +2302,7 @@ fn leak_axis_fault_route_rules(
 fn parse_single_bool_guard(
     state_name: &str,
     expression: &str,
-) -> Result<(String, bool), BridgeError> {
+) -> Result<(BoolGuardOperand, bool), BridgeError> {
     let expr = expression.trim();
 
     if expr.contains(" AND ") || expr.contains(" OR ") || expr.contains("NOT(") {
@@ -2198,12 +2324,12 @@ fn parse_single_bool_guard(
     let op = parts[1].trim();
     let rhs = parts[2].trim();
 
-    if lhs.is_empty() || lhs.contains('.') {
+    let Some(lhs) = parse_bool_guard_operand(lhs) else {
         return Err(BridgeError::UnsupportedGuardExpression {
             state: state_name.to_string(),
             expression: expr.to_string(),
         });
-    }
+    };
 
     let rhs_bool = match rhs {
         "true" => true,
@@ -2227,7 +2353,7 @@ fn parse_single_bool_guard(
         }
     };
 
-    Ok((lhs.to_string(), equals))
+    Ok((lhs, equals))
 }
 
 fn compile_guard_expr_program(
@@ -2259,6 +2385,7 @@ fn push_action_step(
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
+    action_timeout: Option<Timeout>,
 ) -> Result<StepId, BridgeError> {
     let leaked_name: &'static str = Box::leak(name.to_string().into_boxed_str());
     let leaked_actions = leak_actions(
@@ -2274,6 +2401,7 @@ fn push_action_step(
         cam_indices,
         cam_table_indices,
         extern_signatures,
+        action_timeout,
     )?;
     let id = StepId(steps.len() as u16);
     steps.push(Step {
@@ -2299,6 +2427,7 @@ fn leak_actions(
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
+    action_timeout: Option<Timeout>,
 ) -> Result<&'static [Action], BridgeError> {
     let mut out: Vec<Action> = Vec::with_capacity(actions.len() + effects.len());
     for a in actions {
@@ -2314,6 +2443,7 @@ fn leak_actions(
             cam_indices,
             cam_table_indices,
             extern_signatures,
+            action_timeout,
         )?);
     }
     for effect in effects {
@@ -2329,6 +2459,7 @@ fn leak_actions(
             cam_indices,
             cam_table_indices,
             extern_signatures,
+            action_timeout,
         )?);
     }
     Ok(Box::leak(out.into_boxed_slice()))
@@ -2351,16 +2482,43 @@ fn convert_action(
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
+    action_timeout: Option<Timeout>,
 ) -> Result<Action, BridgeError> {
     match runtime_action {
         RuntimeActionRef::Transition(a) => match a {
             TransitionAction::Extend { target, port } => {
-                let output = resolver.resolve_digital_output_id(state_name, target, port)?;
-                Ok(Action::Extend { output })
+                if let Some(motion) =
+                    resolver.resolve_cylinder_motion(state_name, target, port, true)?
+                {
+                    Ok(Action::CylinderMotion {
+                        target: motion.target,
+                        output: motion.output,
+                        expect_extended: true,
+                        confirm_inputs: motion.confirm_inputs,
+                        opposing_inputs: motion.opposing_inputs,
+                        timeout: action_timeout,
+                    })
+                } else {
+                    let output = resolver.resolve_digital_output_id(state_name, target, port)?;
+                    Ok(Action::Extend { output })
+                }
             }
             TransitionAction::Retract { target, port } => {
-                let output = resolver.resolve_digital_output_id(state_name, target, port)?;
-                Ok(Action::Retract { output })
+                if let Some(motion) =
+                    resolver.resolve_cylinder_motion(state_name, target, port, false)?
+                {
+                    Ok(Action::CylinderMotion {
+                        target: motion.target,
+                        output: motion.output,
+                        expect_extended: false,
+                        confirm_inputs: motion.confirm_inputs,
+                        opposing_inputs: motion.opposing_inputs,
+                        timeout: action_timeout,
+                    })
+                } else {
+                    let output = resolver.resolve_digital_output_id(state_name, target, port)?;
+                    Ok(Action::Retract { output })
+                }
             }
             TransitionAction::Set {
                 target,
@@ -3374,6 +3532,13 @@ struct TopologyResolver<'a> {
     by_name: HashMap<&'a str, NodeIndex>,
 }
 
+struct CylinderMotionResolution {
+    target: &'static str,
+    output: DigitalOutputId,
+    confirm_inputs: &'static [DigitalInputId],
+    opposing_inputs: &'static [DigitalInputId],
+}
+
 impl<'a> TopologyResolver<'a> {
     fn new(topology: &'a TopologyGraph) -> Self {
         let mut by_name = HashMap::new();
@@ -3486,6 +3651,106 @@ impl<'a> TopologyResolver<'a> {
         })
     }
 
+    fn resolve_cylinder_motion(
+        &self,
+        state_name: &str,
+        device: &str,
+        port: &str,
+        expect_extended: bool,
+    ) -> Result<Option<CylinderMotionResolution>, BridgeError> {
+        let start =
+            self.by_name
+                .get(device)
+                .copied()
+                .ok_or_else(|| BridgeError::UnknownDevice {
+                    state: state_name.to_string(),
+                    device: device.to_string(),
+                })?;
+        if self.topology.graph[start].kind != DeviceKind::Cylinder {
+            return Ok(None);
+        }
+
+        let requested_port = state_port_key(
+            port,
+            if expect_extended {
+                "extended"
+            } else {
+                "retracted"
+            },
+        );
+        let defined_state_ports = self.cylinder_detect_state_ports(device);
+        if defined_state_ports.is_empty() {
+            return Ok(None);
+        }
+        let confirm_ids = self.resolve_detect_state_input_ids(device, &requested_port);
+        let opposing_port = cylinder_complementary_state_port(&requested_port).ok_or_else(|| {
+            BridgeError::UnsupportedGuardExpression {
+                state: state_name.to_string(),
+                expression: format!(
+                    "closed-loop cylinder action requires complementary end-state for {device}.{requested_port}"
+                ),
+            }
+        })?;
+        let opposing_ids = self.resolve_detect_state_input_ids(device, &opposing_port);
+        if confirm_ids.is_empty() || opposing_ids.is_empty() {
+            return Err(BridgeError::IncompleteClosedLoopCylinderMotion {
+                state: state_name.to_string(),
+                device: device.to_string(),
+                requested_state: requested_port,
+            });
+        }
+
+        Ok(Some(CylinderMotionResolution {
+            target: Box::leak(device.to_string().into_boxed_str()),
+            output: self.resolve_digital_output_id(state_name, device, port)?,
+            confirm_inputs: leak_digital_input_ids(confirm_ids),
+            opposing_inputs: leak_digital_input_ids(opposing_ids),
+        }))
+    }
+
+    fn resolve_state_guard_instr(
+        &self,
+        state_name: &str,
+        state_ref: &StateGuardRef,
+        next: StepId,
+        timeout: Option<Timeout>,
+    ) -> Result<Instr<'static>, BridgeError> {
+        let start = self
+            .by_name
+            .get(state_ref.device.as_str())
+            .copied()
+            .ok_or_else(|| BridgeError::UnknownDevice {
+                state: state_name.to_string(),
+                device: state_ref.device.clone(),
+            })?;
+        let device_kind = &self.topology.graph[start].kind;
+        if *device_kind == DeviceKind::Cylinder {
+            return Err(BridgeError::UnsupportedGuardExpression {
+                state: state_name.to_string(),
+                expression: format!("{}.{} == true", state_ref.device, state_ref.state),
+            });
+        }
+        let requested_port = state_port_key(&state_ref.port, &state_ref.state);
+        let target_ids = self.resolve_detect_state_input_ids(&state_ref.device, &requested_port);
+        if target_ids.is_empty() {
+            return Err(BridgeError::UnresolvableDigitalInput {
+                state: state_name.to_string(),
+                device: format!("{}.{}", state_ref.device, state_ref.state),
+            });
+        }
+
+        let mut conditions = Vec::new();
+        conditions.extend(target_ids.iter().copied().map(|id| DigitalCondition {
+            id: DigitalInputId(id),
+            equals: true,
+        }));
+        Ok(Instr::WaitAllDigital {
+            conditions: leak_digital_conditions(conditions),
+            next,
+            timeout,
+        })
+    }
+
     fn axis_profile(&self, device: &str) -> Option<&crate::ir::AxisProfile> {
         self.topology.axis_profiles.get(device)
     }
@@ -3507,6 +3772,13 @@ impl<'a> TopologyResolver<'a> {
             let device = &self.topology.graph[n];
             if device.kind == kind {
                 if let Some(id) = parse(&device.name) {
+                    out.push(id);
+                }
+            }
+            for link in self.topology.links.iter().filter(|link| {
+                link.to == device.name && matches_physical_output_kind(&kind, &link.kind)
+            }) {
+                if let Some(id) = parse_link_source_physical_id(link, parse) {
                     out.push(id);
                 }
             }
@@ -3537,7 +3809,7 @@ impl<'a> TopologyResolver<'a> {
                 if port != "self" && link.to_port.as_deref() != Some(port) {
                     return None;
                 }
-                parse_y_id(&link.from)
+                parse_link_source_physical_id(link, parse_y_id)
             })
             .collect::<Vec<_>>();
         ids.sort_unstable();
@@ -3560,7 +3832,7 @@ impl<'a> TopologyResolver<'a> {
                 if port != "self" && link.to_port.as_deref() != Some(port) {
                     return None;
                 }
-                parse_ao_id(&link.from)
+                parse_link_source_physical_id(link, parse_ao_id)
             })
             .collect::<Vec<_>>();
         ids.sort_unstable();
@@ -3591,6 +3863,13 @@ impl<'a> TopologyResolver<'a> {
                     out.push(id);
                 }
             }
+            for link in self.topology.links.iter().filter(|link| {
+                link.from == device.name && matches_physical_input_kind(&kind, &link.kind)
+            }) {
+                if let Some(id) = parse_link_target_physical_id(link, parse) {
+                    out.push(id);
+                }
+            }
 
             for pred in self
                 .topology
@@ -3618,6 +3897,186 @@ impl<'a> TopologyResolver<'a> {
 
         out
     }
+
+    fn resolve_detect_state_input_ids(&self, device: &str, state_port: &str) -> Vec<u16> {
+        let mut ids = Vec::new();
+        for sensor in self.detect_sensors_for_state_port(device, state_port) {
+            ids.extend(self.sensor_reported_digital_input_ids(sensor));
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    fn cylinder_detect_state_ports(&self, device: &str) -> Vec<String> {
+        let mut state_ports = self
+            .topology
+            .links
+            .iter()
+            .filter_map(|link| {
+                if link.from != device || link.kind != crate::ir::ConnectionType::Logical {
+                    return None;
+                }
+                let port = link.from_port.as_deref()?;
+                is_cylinder_end_state_port(port).then(|| port.to_string())
+            })
+            .collect::<Vec<_>>();
+        state_ports.sort();
+        state_ports.dedup();
+        state_ports
+    }
+
+    fn detect_sensors_for_state_port(&self, device: &str, state_port: &str) -> Vec<&str> {
+        let mut sensors = self
+            .topology
+            .links
+            .iter()
+            .filter_map(|link| {
+                if link.from != device || link.kind != crate::ir::ConnectionType::Logical {
+                    return None;
+                }
+                if !state_port_matches(link.from_port.as_deref(), state_port) {
+                    return None;
+                }
+                Some(link.to.as_str())
+            })
+            .collect::<Vec<_>>();
+        sensors.sort_unstable();
+        sensors.dedup();
+        sensors
+    }
+
+    fn sensor_reported_digital_input_ids(&self, sensor: &str) -> Vec<u16> {
+        let mut ids = self
+            .topology
+            .links
+            .iter()
+            .filter_map(|link| {
+                if link.from != sensor || link.kind != crate::ir::ConnectionType::Logical {
+                    return None;
+                }
+                parse_link_target_physical_id(link, parse_x_id)
+            })
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    fn sensor_is_cylinder_end_feedback(&self, sensor: &str) -> bool {
+        self.topology.links.iter().any(|link| {
+            link.to == sensor
+                && link.kind == crate::ir::ConnectionType::Logical
+                && link
+                    .from_port
+                    .as_deref()
+                    .is_some_and(is_cylinder_end_state_port)
+                && self
+                    .by_name
+                    .get(link.from.as_str())
+                    .is_some_and(|idx| self.topology.graph[*idx].kind == DeviceKind::Cylinder)
+        })
+    }
+
+    fn digital_input_is_cylinder_end_feedback(&self, id: DigitalInputId) -> bool {
+        self.topology
+            .graph
+            .node_indices()
+            .filter(|idx| self.topology.graph[*idx].kind == DeviceKind::Sensor)
+            .map(|idx| self.topology.graph[idx].name.as_str())
+            .filter(|sensor| self.sensor_is_cylinder_end_feedback(sensor))
+            .any(|sensor| {
+                self.sensor_reported_digital_input_ids(sensor)
+                    .into_iter()
+                    .any(|candidate| candidate == id.0)
+            })
+    }
+}
+
+fn leak_digital_input_ids(ids: Vec<u16>) -> &'static [DigitalInputId] {
+    let leaked = ids
+        .into_iter()
+        .map(DigitalInputId)
+        .collect::<Vec<DigitalInputId>>();
+    Box::leak(leaked.into_boxed_slice())
+}
+
+fn leak_digital_conditions(conditions: Vec<DigitalCondition>) -> &'static [DigitalCondition] {
+    Box::leak(conditions.into_boxed_slice())
+}
+
+fn state_port_key(port: &str, state: &str) -> String {
+    if port == "self" {
+        state.to_string()
+    } else {
+        format!("{port}.{state}")
+    }
+}
+
+fn state_port_matches(actual: Option<&str>, requested: &str) -> bool {
+    matches!(actual, Some(port) if port == requested)
+}
+
+fn cylinder_complementary_state_port(requested: &str) -> Option<String> {
+    requested
+        .strip_suffix(".extended")
+        .map(|prefix| state_port_key(prefix, "retracted"))
+        .or_else(|| {
+            requested
+                .strip_suffix(".retracted")
+                .map(|prefix| state_port_key(prefix, "extended"))
+        })
+        .or_else(|| match requested {
+            "extended" => Some("retracted".to_string()),
+            "retracted" => Some("extended".to_string()),
+            _ => None,
+        })
+}
+
+fn is_cylinder_end_state_port(port: &str) -> bool {
+    matches!(port, "extended" | "retracted")
+        || port.ends_with(".extended")
+        || port.ends_with(".retracted")
+}
+
+fn matches_physical_output_kind(kind: &DeviceKind, link_kind: &crate::ir::ConnectionType) -> bool {
+    matches!(
+        (kind, link_kind),
+        (
+            &DeviceKind::DigitalOutput,
+            crate::ir::ConnectionType::Electrical
+        ) | (&DeviceKind::AnalogOutput, crate::ir::ConnectionType::Analog)
+    )
+}
+
+fn matches_physical_input_kind(kind: &DeviceKind, link_kind: &crate::ir::ConnectionType) -> bool {
+    matches!(
+        (kind, link_kind),
+        (
+            &DeviceKind::DigitalInput,
+            crate::ir::ConnectionType::Logical
+        ) | (&DeviceKind::AnalogInput, crate::ir::ConnectionType::Analog)
+    )
+}
+
+fn parse_link_source_physical_id(
+    link: &crate::ir::TopologyLink,
+    parse: fn(&str) -> Option<u16>,
+) -> Option<u16> {
+    link.from_port
+        .as_deref()
+        .and_then(parse)
+        .or_else(|| parse(&link.from))
+}
+
+fn parse_link_target_physical_id(
+    link: &crate::ir::TopologyLink,
+    parse: fn(&str) -> Option<u16>,
+) -> Option<u16> {
+    link.to_port
+        .as_deref()
+        .and_then(parse)
+        .or_else(|| parse(&link.to))
 }
 
 fn unique_physical_id(mut ids: Vec<u16>) -> Result<u16, ()> {
@@ -3654,5 +4113,53 @@ fn parse_ai_id(name: &str) -> Option<u16> {
     match parse_physical_plc_port_ref(name) {
         Some(port) if matches!(port.kind, PlcPortKind::AnalogInput) => Some(port.id),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cylinder_complementary_state_port, is_cylinder_end_state_port};
+
+    #[test]
+    fn cylinder_complementary_state_port_maps_default_end_states() {
+        assert_eq!(
+            cylinder_complementary_state_port("extended").as_deref(),
+            Some("retracted")
+        );
+        assert_eq!(
+            cylinder_complementary_state_port("retracted").as_deref(),
+            Some("extended")
+        );
+    }
+
+    #[test]
+    fn cylinder_complementary_state_port_preserves_port_scope() {
+        assert_eq!(
+            cylinder_complementary_state_port("rod_a.extended").as_deref(),
+            Some("rod_a.retracted")
+        );
+        assert_eq!(
+            cylinder_complementary_state_port("rod_a.retracted").as_deref(),
+            Some("rod_a.extended")
+        );
+        assert_eq!(cylinder_complementary_state_port("mid"), None);
+    }
+
+    #[test]
+    fn cylinder_end_state_port_detection_matches_only_terminal_feedback() {
+        assert!(is_cylinder_end_state_port("extended"));
+        assert!(is_cylinder_end_state_port("retracted"));
+        assert!(is_cylinder_end_state_port("rod_a.extended"));
+        assert!(is_cylinder_end_state_port("rod_a.retracted"));
+        assert!(!is_cylinder_end_state_port("sense"));
+        assert!(!is_cylinder_end_state_port("mid"));
+    }
+
+    #[test]
+    fn state_port_match_requires_exact_port_scope() {
+        assert!(super::state_port_matches(Some("extended"), "extended"));
+        assert!(super::state_port_matches(Some("rod_a.extended"), "rod_a.extended"));
+        assert!(!super::state_port_matches(Some("extended"), "rod_a.extended"));
+        assert!(!super::state_port_matches(Some("rod_a.extended"), "extended"));
     }
 }
