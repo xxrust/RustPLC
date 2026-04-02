@@ -14,7 +14,10 @@ device loop_pressure: pid {
     limit: 0..100
 }
 
-device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [AI0:analog:consumer, AO0:analog:producer] }
+device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
+    model_ref: openplc_softplc
+}
 [constraints]
 
 [tasks]

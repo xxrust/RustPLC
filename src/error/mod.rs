@@ -242,6 +242,60 @@ impl PlcError {
             | Self::DuplicateDefinition { location, .. } => location,
         }
     }
+
+    pub fn with_location(self, location: SourceLocation) -> Self {
+        match self {
+            Self::ParseError {
+                message, reason, ..
+            } => Self::ParseError {
+                location,
+                message,
+                reason,
+            },
+            Self::SemanticError {
+                message, reason, ..
+            } => Self::SemanticError {
+                location,
+                message,
+                reason,
+            },
+            Self::UndefinedReference {
+                reference_type,
+                name,
+                reason,
+                ..
+            } => Self::UndefinedReference {
+                location,
+                reference_type,
+                name,
+                reason,
+            },
+            Self::TypeMismatch {
+                expected,
+                found,
+                context,
+                reason,
+                ..
+            } => Self::TypeMismatch {
+                location,
+                expected,
+                found,
+                context,
+                reason,
+            },
+            Self::DuplicateDefinition {
+                definition_type,
+                name,
+                reason,
+                ..
+            } => Self::DuplicateDefinition {
+                location,
+                definition_type,
+                name,
+                reason,
+            },
+        }
+    }
 }
 
 impl fmt::Display for PlcError {

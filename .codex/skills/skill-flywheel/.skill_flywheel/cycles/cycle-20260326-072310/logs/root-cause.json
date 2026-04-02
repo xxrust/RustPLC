@@ -1,0 +1,18 @@
+{
+  "task": "让 `skill-flywheel` 像 Ralph 一样，通过外壳层驱动的 fresh-process 循环持续迭代自己。\n\n今晚的目标只有两件事：\n\n1. 学会像 Ralph 一样用外壳开启迭代，而不是只在单次会话里人工编排。\n2. 让外层 runner 至少连续推进 5 轮外层迭代；除非出现硬阻塞，否则不要在第 5 轮之前提前收敛。\n\n执行要求：\n\n1. 优先修 shell runner、后台启动脚本、磁盘状态、进度日志和 stop condition。\n2. 每轮都要把真正的研究判断落到 cycle 工件里，不要只写 runner 日志。\n3. 每轮只做一个最小 next action，不要把整套系统重写成大工程。\n4. 如果本轮只是 `weak-blind`，必须明确标记，不能伪装成 `clean-room`。\n5. 如果连续两轮没有新证据，允许提前停止，但必须把原因写进 `runner_state.json`、`progress.txt` 和本轮 cycle 的 `decision`。\n",
+  "hypothesis_status": "partial",
+  "findings": [
+    {
+      "pain_point": "盲测执行者无法只靠当前任务导出的公开工件判断 shell runner 是否真的推进了 5 轮。",
+      "classification": "public-surface-gap",
+      "cause": "当前只导出了 autonomous-self-improve-command.txt，没有 task-specific checklist；同时 profile 仍强调最小 cycle，和今晚的 5 轮目标冲突。",
+      "minimal_fix": "本轮先不同时改公开工件和代码；下一轮在进度编号稳定后补 autonomous-self-improve checklist 并对齐 profile。"
+    },
+    {
+      "pain_point": "progress.txt 无法反映 fresh-process 外层迭代次数。",
+      "classification": "code-gap",
+      "cause": "flywheel.ps1 重复调用 flywheel_runner.py --max-iterations 1 时，runner 会把 iteration_count 重置为局部循环编号，导致多次调用都记成 Iteration 1。",
+      "minimal_fix": "让 flywheel_runner.py 跨 fresh-process 累积 session 级 iteration_count，并新增 dry-run 回归测试验证 iter_001/iter_002 连续推进。"
+    }
+  ]
+}

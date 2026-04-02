@@ -1,0 +1,32 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "控制器本体与数字I/O端口映射",
+    ports: [X0:digital:consumer, Y0:digital:producer]
+}
+
+[constraints]
+
+[tasks]
+
+task main:
+    step wait_start:
+        wait: X0 == true
+        timeout: 100ms -> goto fault
+
+    step run:
+        action: set Y0 on
+        delay: 20ms
+
+    step stop:
+        action: set Y0 off
+
+    on_complete: goto done
+
+task fault:
+    step safe_stop:
+        action: set Y0 off
+    on_complete: goto done
+
+task done:
+    step halt:

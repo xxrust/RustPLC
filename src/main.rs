@@ -6,6 +6,10 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program, preprocess_program_with_library,
 };
+use rust_plc::source_bundle::{
+    LoadedPlcSource, is_supported_plc_source_path, load_plc_source, plc_source_stem,
+    remap_plc_error,
+};
 use rust_plc::topology_semantic_gate::{
     collect_topology_deprecation_warnings, validate_device_purpose_required,
     validate_removed_legacy_io_model, validate_topology_semantics,
@@ -434,44 +438,20 @@ struct ScenarioInitInputHints {
 
 fn default_scenario_init_out_path(plc_path: &Path) -> PathBuf {
     let parent = plc_path.parent().unwrap_or_else(|| Path::new("."));
-    let stem = plc_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .filter(|s| !s.is_empty())
-        .unwrap_or("scenario");
+    let stem = plc_source_stem(plc_path);
     parent.join(format!("{stem}.scenario.yaml"))
 }
 
-fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHints, String> {
-    let program = parse_plc_with_required_purpose(plc_source)?;
-    let expanded = preprocess_program(&program).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
-    let topology = build_topology_graph(&expanded).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
-    let state_machine = build_state_machine(&expanded).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
-    let constraints = build_constraint_set(&expanded).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
+fn collect_scenario_init_hints(input: &LoadedPlcSource) -> Result<ScenarioInitInputHints, String> {
+    let program = parse_plc_with_required_purpose(input)?;
+    let expanded = preprocess_program(&program)
+        .map_err(|errors| format_plc_errors(errors, input).join("\n"))?;
+    let topology = build_topology_graph(&expanded)
+        .map_err(|errors| format_plc_errors(errors, input).join("\n"))?;
+    let state_machine = build_state_machine(&expanded)
+        .map_err(|errors| format_plc_errors(errors, input).join("\n"))?;
+    let constraints = build_constraint_set(&expanded)
+        .map_err(|errors| format_plc_errors(errors, input).join("\n"))?;
     let runtime = state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
         .map_err(|e| e.to_string())?;
 
@@ -480,16 +460,16 @@ fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHint
     for task in runtime.tasks {
         for step in task.steps {
             match step.instr {
+                Instr::WaitAllDigital { conditions, .. } => {
+                    for condition in conditions {
+                        used_di.insert(condition.id.0);
+                    }
+                }
                 Instr::WaitDigital { id, .. } => {
                     used_di.insert(id.0);
                 }
                 Instr::WaitAnalog { id, .. } => {
                     used_ai.insert(id.0);
-                }
-                Instr::WaitAllDigital { conditions, .. } => {
-                    for condition in conditions {
-                        used_di.insert(condition.id.0);
-                    }
                 }
                 Instr::WaitExpr { .. }
                 | Instr::WaitCamDigital { .. }
@@ -1460,7 +1440,7 @@ struct CliCommandHelp {
     usage_template: &'static str,
 }
 
-const COMPILE_USAGE_TEMPLATE: &str = "Usage: {program} <file.plc> [--report <verification_report.json>] [--deny-warnings] [--no-print-ir] [--ir-out <ir_bundle.json>] [--budget-... <value>]";
+const COMPILE_USAGE_TEMPLATE: &str = "Usage: {program} <source.plc|source.bundle.toml> [--report <verification_report.json>] [--deny-warnings] [--no-print-ir] [--ir-out <ir_bundle.json>] [--budget-... <value>]";
 
 const CLI_COMMANDS: &[CliCommandHelp] = &[
     CliCommandHelp {
@@ -1485,7 +1465,7 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Simulation",
         name: "sim-plc",
         summary: "Compile a PLC file and execute it against a scenario with trace and audit outputs.",
-        usage_template: "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>] [--io-snapshot-out <io_snapshot.json>]",
+        usage_template: "Usage: {program} sim-plc <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>] [--io-snapshot-out <io_snapshot.json>]",
     },
     CliCommandHelp {
         section: "Simulation",
@@ -1497,19 +1477,19 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Simulation",
         name: "sim-pid-kpi",
         summary: "Run the PID KPI flow for a PLC file and a KPI scenario definition.",
-        usage_template: "Usage: {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]",
+        usage_template: "Usage: {program} sim-pid-kpi <source.plc|source.bundle.toml> --scenario <pid_scenario.yaml> [--out <kpi.json>]",
     },
     CliCommandHelp {
         section: "Deployment",
         name: "build-rp2040",
         summary: "Build an RP2040 deployment bundle from a PLC file and optional I/O maps.",
-        usage_template: "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]",
+        usage_template: "Usage: {program} build-rp2040 <source.plc|source.bundle.toml> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Deployment",
         name: "release-bundle",
         summary: "Assemble a no-board release bundle with scenario, build, and timing artifacts.",
-        usage_template: "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]",
+        usage_template: "Usage: {program} release-bundle <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]",
     },
     CliCommandHelp {
         section: "Deployment",
@@ -1527,25 +1507,31 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Deployment",
         name: "no-board-gate",
         summary: "Run the no-board regression gate and emit release diagnostics.",
-        usage_template: "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]",
+        usage_template: "Usage: {program} no-board-gate <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Deployment",
+        name: "project-check",
+        summary: "Run the project verification chain and aggregate the results into one report.",
+        usage_template: "Usage: {program} project-check <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Deployment",
         name: "commissioning-run",
         summary: "Generate a commissioning run bundle for a PLC file.",
-        usage_template: "Usage: {program} commissioning-run <file.plc> --out-dir <dir> [--output <human|json>]",
+        usage_template: "Usage: {program} commissioning-run <source.plc|source.bundle.toml> --out-dir <dir> [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Deployment",
         name: "pil-run",
         summary: "Run a PLC file against a PIL scenario.",
-        usage_template: "Usage: {program} pil-run <file.plc> --scenario <scenario.yaml>",
+        usage_template: "Usage: {program} pil-run <source.plc|source.bundle.toml> --scenario <scenario.yaml>",
     },
     CliCommandHelp {
         section: "Deployment",
         name: "virtual-board",
         summary: "Produce virtual-board artifacts from a PLC file and scenario.",
-        usage_template: "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>",
+        usage_template: "Usage: {program} virtual-board <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir>",
     },
     CliCommandHelp {
         section: "Diagnostics",
@@ -1557,7 +1543,7 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Diagnostics",
         name: "trace-doctor",
         summary: "Correlate trace, diff, timing, and snapshot artifacts into diagnosis output.",
-        usage_template: "Usage: {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--io-snapshot <io_snapshot.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]",
+        usage_template: "Usage: {program} trace-doctor <source.plc|source.bundle.toml> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--io-snapshot <io_snapshot.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Diagnostics",
@@ -1599,43 +1585,43 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Scenarios",
         name: "scenario-init",
         summary: "Generate a starter scenario YAML from a PLC file.",
-        usage_template: "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]",
+        usage_template: "Usage: {program} scenario-init <source.plc|source.bundle.toml> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]",
     },
     CliCommandHelp {
         section: "Scenarios",
         name: "scenario-validate",
         summary: "Validate one scenario YAML against a PLC file.",
-        usage_template: "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml> [--output <human|json>]",
+        usage_template: "Usage: {program} scenario-validate <source.plc|source.bundle.toml> --scenario <scenario.yaml> [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Scenarios",
         name: "scenario-doctor",
         summary: "Diagnose one PLC and scenario pair and optionally preview fixes.",
-        usage_template: "Usage: {program} scenario-doctor <file.plc> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]",
+        usage_template: "Usage: {program} scenario-doctor <source.plc|source.bundle.toml> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Scenarios",
         name: "scenario-expand",
         summary: "Expand one scenario YAML into the resolved form used by simulation.",
-        usage_template: "Usage: {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>",
+        usage_template: "Usage: {program} scenario-expand <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out <expanded.yaml>",
     },
     CliCommandHelp {
         section: "Scenarios",
         name: "scenario-gen",
         summary: "Generate scenario suites from a PLC file and a generation config.",
-        usage_template: "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir> [--coverage-mode <pairwise|boundary-first|risk-first>] [--dry-run] [--template-library <metadata.json>]",
+        usage_template: "Usage: {program} scenario-gen --plc <source.plc|source.bundle.toml> --config <gen.yaml> --out-dir <dir> [--coverage-mode <pairwise|boundary-first|risk-first>] [--dry-run] [--template-library <metadata.json>]",
     },
     CliCommandHelp {
         section: "Utilities",
         name: "sequence-lint",
         summary: "Lint critical wait recovery patterns in a PLC program.",
-        usage_template: "Usage: {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]",
+        usage_template: "Usage: {program} sequence-lint <source.plc|source.bundle.toml> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]",
     },
     CliCommandHelp {
         section: "Utilities",
         name: "gen-st",
         summary: "Generate IEC 61131-3 ST output from a PLC file.",
-        usage_template: "Usage: {program} gen-st <file.plc> [--out <output.st>] [--program-name <Main>] [--no-verification-summary]",
+        usage_template: "Usage: {program} gen-st <source.plc|source.bundle.toml> [--out <output.st>] [--program-name <Main>] [--no-verification-summary]",
     },
 ];
 
@@ -1722,6 +1708,13 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--max-overrun-count <n>      Realtime threshold for overruns.",
             "--output <human|json>        Select CLI output format.",
         ],
+        "project-check" => &[
+            "--scenario <scenario.yaml>   Required scenario YAML used by doctor and gate checks.",
+            "--out-dir <dir>              Required output directory for logs and aggregated reports.",
+            "--max-p99-exec-us <us>       Realtime threshold passed through to no-board-gate.",
+            "--max-overrun-count <n>      Overrun threshold passed through to no-board-gate.",
+            "--output <human|json>        Select CLI output format.",
+        ],
         "commissioning-run" => &[
             "--out-dir <dir>              Required commissioning artifact directory.",
             "--output <human|json>        Select CLI output format.",
@@ -1794,7 +1787,7 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--out <expanded.yaml>        Required resolved scenario output.",
         ],
         "scenario-gen" => &[
-            "--plc <file.plc>             Required PLC input.",
+            "--plc <source.plc|source.bundle.toml>  Required PLC input.",
             "--config <gen.yaml>          Required scenario generation config.",
             "--out-dir <dir>              Required output directory.",
             "--coverage-mode <pairwise|boundary-first|risk-first> Scenario selection strategy.",
@@ -1832,6 +1825,9 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
         "flash-rp2040" => &["The target mount path must already exist and be writable."],
         "no-board-gate" => &[
             "If `--sil-scenario` or `--board-scenario` is omitted, the shared `--scenario` path is reused.",
+        ],
+        "project-check" => &[
+            "project-check reuses the existing compile/verify, sequence-lint, scenario-doctor, and no-board-gate commands instead of inventing a second verification path.",
         ],
         "trace-doctor" => &["At least one of `--trace` or `--diff` is required."],
         "component-sim" => {
@@ -1880,6 +1876,9 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         "board-parse" => &["rust_plc board-parse --in board.log --out-dir out/board_parse"],
         "no-board-gate" => &[
             "rust_plc no-board-gate examples/assembly_station.plc --scenario scenarios/normal.yaml --out-dir out/gate/no_board/assembly_station --output json",
+        ],
+        "project-check" => &[
+            "rust_plc project-check examples/realtime_stress/stress_case.plc --scenario examples/realtime_stress/scenarios/safe.yaml --out-dir out/project_check/realtime_stress --output json",
         ],
         "commissioning-run" => &[
             "rust_plc commissioning-run examples/assembly_station.plc --out-dir out/commissioning/assembly_station",
@@ -2260,6 +2259,13 @@ fn main() {
         }
         return;
     }
+    if first == "project-check" {
+        if let Err(msg) = run_project_check_subcommand(&program, remaining.clone().into_iter()) {
+            eprintln!("[PROJCHECK-000] {msg}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if first == "commissioning-run" {
         if let Err(msg) = run_commissioning_run_subcommand(&program, remaining.clone().into_iter())
         {
@@ -2481,20 +2487,20 @@ fn main() {
         }
     }
 
-    if Path::new(&path).extension().and_then(|ext| ext.to_str()) != Some("plc") {
-        eprintln!("Expected a .plc file path, got: {path}");
+    if !is_supported_plc_source_path(Path::new(&path)) {
+        eprintln!("Expected a .plc or .bundle.toml path, got: {path}");
         std::process::exit(1);
     }
 
-    let source = match fs::read_to_string(&path) {
+    let loaded = match load_plc_source(Path::new(&path)) {
         Ok(contents) => contents,
         Err(err) => {
-            eprintln!("Failed to read PLC file {path}: {err}");
+            eprintln!("{err}");
             std::process::exit(1);
         }
     };
 
-    let ir_bundle = match compile_pipeline(&source) {
+    let ir_bundle = match compile_pipeline(&loaded) {
         Ok(ir_bundle) => ir_bundle,
         Err(errors) => {
             for (index, error) in errors.iter().enumerate() {
@@ -2632,17 +2638,14 @@ fn run_gen_st_subcommand(
         }
     }
 
-    if Path::new(&plc_path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        != Some("plc")
-    {
-        return Err(format!("gen-st expects a .plc file path, got: {plc_path}"));
+    if !is_supported_plc_source_path(Path::new(&plc_path)) {
+        return Err(format!(
+            "gen-st expects a .plc or .bundle.toml path, got: {plc_path}"
+        ));
     }
 
-    let source = fs::read_to_string(&plc_path)
-        .map_err(|err| format!("Failed to read PLC file {plc_path}: {err}"))?;
-    let ir_bundle = compile_pipeline(&source).map_err(|errors| errors.join("\n"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
+    let ir_bundle = compile_pipeline(&loaded).map_err(|errors| errors.join("\n"))?;
 
     let config = StCodegenConfig {
         program_name,
@@ -2751,7 +2754,7 @@ fn run_new_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
     let project_title = prettify_project_name(&project_slug);
 
     let readme = format!(
-        "# {project_title}\n\n## Project Identity\n\n- Project slug: `{project_slug}`\n- Manifest: `rustplc.project.toml`\n\n## Project Layout\n\n- `plc/main.system.md`: human/AI confirmed system intent\n- `plc/main.plc`: executable RustPLC DSL\n- `scenarios/nominal/normal.yaml`: nominal regression scenario\n- `config/io_map.toml`: deployment I/O mapping\n- `config/retain.toml`: retain/persistence baseline\n- `out/`: all generated artifacts (sim/gate/codegen/build/release)\n\n## Quick Start Checklist\n\n1. Validate scenario contract:\n\n```bash\ncargo run --release --bin rust_plc -- scenario-validate plc/main.plc --scenario scenarios/nominal/normal.yaml --output human\n```\n\n2. Run diagnostic pre-check (`scenario-doctor`):\n\n```bash\ncargo run --release --bin rust_plc -- scenario-doctor plc/main.plc --scenario scenarios/nominal/normal.yaml --output human\n```\n\n3. Run no-board regression gate:\n\n```bash\ncargo run --release --bin rust_plc -- no-board-gate plc/main.plc --scenario scenarios/nominal/normal.yaml --out-dir out/gate/no_board/normal --output human\n```\n\n4. Generate ST code (optional):\n\n```bash\ncargo run --release --bin rust_plc -- gen-st plc/main.plc --out out/codegen/st/main.st\n```\n\n5. Optional RP2040 build baseline:\n\n```bash\ncargo run --release --bin rust_plc -- build-rp2040 plc/main.plc --out out/rp2040 --io-map config/io_map.toml\n```\n\n## VS Code\n\n- Open Command Palette and run `Tasks: Run Task`.\n- Use prefixed tasks (`RustPLC: ...`) from `.vscode/tasks.json`.\n- See `.vscode/README.md` for troubleshooting.\n"
+        "# {project_title}\n\n## Project Identity\n\n- Project slug: `{project_slug}`\n- Manifest: `rustplc.project.toml`\n\n## Project Layout\n\n- `plc/main.system.md`: human/AI confirmed system intent\n- `plc/main.plc`: executable RustPLC DSL\n- `scenarios/nominal/normal.yaml`: nominal regression scenario\n- `config/io_map.toml`: deployment I/O mapping\n- `config/retain.toml`: retain/persistence baseline\n- `out/`: all generated artifacts (sim/gate/codegen/build/release/project_check)\n\n## Quick Start Checklist\n\n1. Run the unified project check:\n\n```bash\ncargo run --release --bin rust_plc -- project-check plc/main.plc --scenario scenarios/nominal/normal.yaml --out-dir out/project_check/normal --output human\n```\n\n2. Validate the scenario contract directly when editing the YAML:\n\n```bash\ncargo run --release --bin rust_plc -- scenario-validate plc/main.plc --scenario scenarios/nominal/normal.yaml --output human\n```\n\n3. Run no-board regression gate directly when debugging timing or diff artifacts:\n\n```bash\ncargo run --release --bin rust_plc -- no-board-gate plc/main.plc --scenario scenarios/nominal/normal.yaml --out-dir out/gate/no_board/normal --output human\n```\n\n4. Generate ST code (optional):\n\n```bash\ncargo run --release --bin rust_plc -- gen-st plc/main.plc --out out/codegen/st/main.st\n```\n\n5. Optional RP2040 build baseline:\n\n```bash\ncargo run --release --bin rust_plc -- build-rp2040 plc/main.plc --out out/rp2040 --io-map config/io_map.toml\n```\n\n## VS Code\n\n- Open Command Palette and run `Tasks: Run Task`.\n- Use prefixed tasks (`RustPLC: ...`) from `.vscode/tasks.json`.\n- See `.vscode/README.md` for troubleshooting.\n"
     );
     let gitignore = "/out/**\n!/out/\n!/out/**/\n!/out/**/.gitkeep\n";
     let system = format!(
@@ -2766,10 +2769,10 @@ fn run_new_subcommand(program: &str, mut args: impl Iterator<Item = String>) -> 
         "schema_version = 1\n\n[project]\nname = \"{project_title}\"\nslug = \"{project_slug}\"\n\n[entry]\nsystem = \"plc/main.system.md\"\nplc = \"plc/main.plc\"\nscenario = \"scenarios/nominal/normal.yaml\"\nio_map = \"config/io_map.toml\"\nretain = \"config/retain.toml\"\n\n[out]\nir = \"out/ir\"\nsim = \"out/sim\"\ngate = \"out/gate\"\ncodegen = \"out/codegen\"\nrp2040 = \"out/rp2040\"\nrelease = \"out/release\"\n"
     );
     let project_layout = format!(
-        "# Project Layout\n\n这个脚手架采用固定的 RustPLC 项目目录约定：\n\n- `rustplc.project.toml`：项目清单，声明主入口与默认路径\n- `plc/`：系统语义与 DSL 源码\n- `scenarios/`：版本化场景输入\n- `config/`：I/O 与运行配置\n- `out/`：所有可重建产物\n\n当前项目：`{project_slug}` / `{project_title}`\n\n推荐命令：\n\n```bash\ncargo run --release --bin rust_plc -- scenario-validate \\\n  plc/main.plc --scenario scenarios/nominal/normal.yaml --output human\n\ncargo run --release --bin rust_plc -- sim-plc \\\n  plc/main.plc --scenario scenarios/nominal/normal.yaml --out out/sim/normal/trace.jsonl\n\ncargo run --release --bin rust_plc -- no-board-gate \\\n  plc/main.plc --scenario scenarios/nominal/normal.yaml \\\n  --out-dir out/gate/no_board/normal --output human\n\ncargo run --release --bin rust_plc -- gen-st \\\n  plc/main.plc --out out/codegen/st/main.st\n\ncargo run --release --bin rust_plc -- build-rp2040 \\\n  plc/main.plc --out out/rp2040 --io-map config/io_map.toml\n```\n"
+        "# Project Layout\n\n这个脚手架采用固定的 RustPLC 项目目录约定：\n\n- `rustplc.project.toml`：项目清单，声明主入口与默认路径\n- `plc/`：系统语义与 DSL 源码\n- `scenarios/`：版本化场景输入\n- `config/`：I/O 与运行配置\n- `out/`：所有可重建产物\n\n当前项目：`{project_slug}` / `{project_title}`\n\n推荐命令：\n\n```bash\ncargo run --release --bin rust_plc -- project-check \\\n  plc/main.plc --scenario scenarios/nominal/normal.yaml \\\n  --out-dir out/project_check/normal --output human\n\ncargo run --release --bin rust_plc -- scenario-validate \\\n  plc/main.plc --scenario scenarios/nominal/normal.yaml --output human\n\ncargo run --release --bin rust_plc -- sim-plc \\\n  plc/main.plc --scenario scenarios/nominal/normal.yaml --out out/sim/normal/trace.jsonl\n\ncargo run --release --bin rust_plc -- no-board-gate \\\n  plc/main.plc --scenario scenarios/nominal/normal.yaml \\\n  --out-dir out/gate/no_board/normal --output human\n\ncargo run --release --bin rust_plc -- gen-st \\\n  plc/main.plc --out out/codegen/st/main.st\n\ncargo run --release --bin rust_plc -- build-rp2040 \\\n  plc/main.plc --out out/rp2040 --io-map config/io_map.toml\n```\n"
     );
-    let workflow = "name: rustplc-no-board-gate\n\non:\n  push:\n  pull_request:\n\njobs:\n  no-board-gate:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: dtolnay/rust-toolchain@stable\n      - name: Scenario validate\n        run: cargo run --release --bin rust_plc -- scenario-validate plc/main.plc --scenario scenarios/nominal/normal.yaml --output json\n      - name: No-board gate\n        run: cargo run --release --bin rust_plc -- no-board-gate plc/main.plc --scenario scenarios/nominal/normal.yaml --out-dir out/gate/no_board/normal --output json\n";
-    let vscode_tasks = "{\n  \"version\": \"2.0.0\",\n  \"tasks\": [\n    {\n      \"label\": \"RustPLC: scenario-init (normal)\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- scenario-init plc/main.plc --preset normal --out scenarios/nominal/normal.yaml\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: scenario-validate\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- scenario-validate plc/main.plc --scenario scenarios/nominal/normal.yaml --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: scenario-doctor\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- scenario-doctor plc/main.plc --scenario scenarios/nominal/normal.yaml --fix-preview --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: sim-plc\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- sim-plc plc/main.plc --scenario scenarios/nominal/normal.yaml --out out/sim/normal/trace.jsonl\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: no-board-gate\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- no-board-gate plc/main.plc --scenario scenarios/nominal/normal.yaml --out-dir out/gate/no_board/normal --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: gen-st\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- gen-st plc/main.plc --out out/codegen/st/main.st\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: build-rp2040\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- build-rp2040 plc/main.plc --out out/rp2040 --io-map config/io_map.toml\",\n      \"problemMatcher\": []\n    }\n  ]\n}\n";
+    let workflow = "name: rustplc-no-board-gate\n\non:\n  push:\n  pull_request:\n\njobs:\n  no-board-gate:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: dtolnay/rust-toolchain@stable\n      - name: Project check\n        run: cargo run --release --bin rust_plc -- project-check plc/main.plc --scenario scenarios/nominal/normal.yaml --out-dir out/project_check/normal --output json\n";
+    let vscode_tasks = "{\n  \"version\": \"2.0.0\",\n  \"tasks\": [\n    {\n      \"label\": \"RustPLC: project-check\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- project-check plc/main.plc --scenario scenarios/nominal/normal.yaml --out-dir out/project_check/normal --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: scenario-init (normal)\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- scenario-init plc/main.plc --preset normal --out scenarios/nominal/normal.yaml\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: scenario-validate\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- scenario-validate plc/main.plc --scenario scenarios/nominal/normal.yaml --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: scenario-doctor\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- scenario-doctor plc/main.plc --scenario scenarios/nominal/normal.yaml --fix-preview --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: sim-plc\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- sim-plc plc/main.plc --scenario scenarios/nominal/normal.yaml --out out/sim/normal/trace.jsonl\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: no-board-gate\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- no-board-gate plc/main.plc --scenario scenarios/nominal/normal.yaml --out-dir out/gate/no_board/normal --output human\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: gen-st\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- gen-st plc/main.plc --out out/codegen/st/main.st\",\n      \"problemMatcher\": []\n    },\n    {\n      \"label\": \"RustPLC: build-rp2040\",\n      \"type\": \"shell\",\n      \"command\": \"cargo run --release --bin rust_plc -- build-rp2040 plc/main.plc --out out/rp2040 --io-map config/io_map.toml\",\n      \"problemMatcher\": []\n    }\n  ]\n}\n";
     let vscode_settings = "{\n  \"files.associations\": {\n    \"*.plc\": \"ini\"\n  },\n  \"editor.tabSize\": 4,\n  \"editor.insertSpaces\": true,\n  \"editor.detectIndentation\": false\n}\n";
     let vscode_extensions = "{\n  \"recommendations\": [\n    \"rust-lang.rust-analyzer\",\n    \"redhat.vscode-yaml\",\n    \"tamasfe.even-better-toml\",\n    \"streetsidesoftware.code-spell-checker\"\n  ]\n}\n";
     let vscode_snippets = "{\n  \"RustPLC: PLC Skeleton\": {\n    \"scope\": \"ini\",\n    \"prefix\": \"plc-skeleton\",\n    \"body\": [\n      \"[topology]\",\n      \"\",\n      \"device plc_main: plc {\",\n      \"    purpose: \\\"控制器本体与数字I/O端口映射\\\",\",\n      \"    model_ref: openplc_softplc\",\n      \"}\",\n      \"\",\n      \"[constraints]\",\n      \"\",\n      \"[tasks]\",\n      \"\",\n      \"task main:\",\n      \"    step wait_start:\",\n      \"        wait: X0 == true\",\n      \"\",\n      \"    step run:\",\n      \"        action: set Y0 on\",\n      \"\",\n      \"    on_complete: goto done\",\n      \"\",\n      \"task done:\",\n      \"    step halt:\"\n    ],\n    \"description\": \"Insert a minimal RustPLC file skeleton\"\n  },\n  \"RustPLC: Wait With Timeout\": {\n    \"scope\": \"ini\",\n    \"prefix\": \"plc-wait-timeout\",\n    \"body\": [\n      \"wait: ${1:X0} == ${2:true}\",\n      \"timeout: ${3:100ms} -> goto ${4:fault}\"\n    ],\n    \"description\": \"Insert wait+timeout pair\"\n  }\n}\n";
@@ -2851,16 +2854,10 @@ fn run_sequence_lint_subcommand(
         }
     }
 
-    let source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
-    let parsed = parse_plc_with_required_purpose(&source)?;
-    let expanded = preprocess_program(&parsed).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
+    let parsed = parse_plc_with_required_purpose(&loaded)?;
+    let expanded = preprocess_program(&parsed)
+        .map_err(|errors| format_plc_errors(errors, &loaded).join("\n"))?;
 
     let findings = lint_critical_wait_recovery(&expanded, &config);
     if findings.is_empty() {
@@ -2919,8 +2916,7 @@ fn run_scenario_init_subcommand(
     }
 
     let plc_path = PathBuf::from(plc_path);
-    let plc_source = fs::read_to_string(&plc_path)
-        .map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
 
     let out_path = out_path.unwrap_or_else(|| default_scenario_init_out_path(&plc_path));
     if let Some(parent) = out_path.parent() {
@@ -2934,7 +2930,7 @@ fn run_scenario_init_subcommand(
         }
     }
 
-    let hints = collect_scenario_init_hints(&plc_source)?;
+    let hints = collect_scenario_init_hints(&loaded)?;
     let yaml = render_scenario_init_yaml(&plc_path, preset, &hints);
     fs::write(&out_path, yaml).map_err(|err| {
         format!(
@@ -2988,12 +2984,11 @@ fn run_scenario_validate_subcommand(
     };
 
     let plc_path = PathBuf::from(plc_path);
-    let plc_source = fs::read_to_string(&plc_path)
-        .map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
 
     let raw_scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
     let scenario_yaml =
-        resolve_scenario_yaml_for_plc(&plc_source, &raw_scenario_yaml).map_err(|e| {
+        resolve_scenario_yaml_for_plc(&loaded.source, &raw_scenario_yaml).map_err(|e| {
             format_resolve_scenario_yaml_error(
                 plc_path.to_string_lossy().as_ref(),
                 &scenario_path,
@@ -3003,7 +2998,7 @@ fn run_scenario_validate_subcommand(
         })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
-    let hints = collect_scenario_init_hints(&plc_source)?;
+    let hints = collect_scenario_init_hints(&loaded)?;
     let mut findings = validate_scenario_against_plc(&plc_path, &scenario_path, &scenario, &hints);
 
     // If the scenario was generated by `scenario-init`, it includes a header we can sanity-check.
@@ -3035,8 +3030,8 @@ fn run_scenario_validate_subcommand(
         .any(|f| f.severity == ScenarioValidateSeverity::Error);
 
     if !has_error {
-        let runtime_program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)
-            .map_err(|e| {
+        let runtime_program =
+            compile_plc_to_runtime_program(&loaded, scenario.tick_ms).map_err(|e| {
                 format!("scenario-validate: failed to compile PLC to runtime program: {e}")
             })?;
         let (num_di, num_do, num_ai, num_ao) =
@@ -3168,6 +3163,31 @@ struct ScenarioDoctorReport {
     issues: Vec<ScenarioDoctorIssue>,
 }
 
+#[derive(Debug, Serialize)]
+struct SelfCheckStepReport {
+    name: &'static str,
+    command: Vec<String>,
+    status: &'static str,
+    exit_code: Option<i32>,
+    stdout_log: String,
+    stderr_log: String,
+    report_json: Option<String>,
+    artifacts_dir: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SelfCheckReport {
+    schema_version: u32,
+    command: &'static str,
+    output: &'static str,
+    source_plc: String,
+    scenario: String,
+    out_dir: String,
+    status: &'static str,
+    failed_steps: usize,
+    steps: Vec<SelfCheckStepReport>,
+}
+
 fn doctor_category_from_tag(tag: &str) -> &'static str {
     if tag.ends_with(".at_ms") || tag == "duration_ms" {
         return "tick_alignment";
@@ -3286,8 +3306,7 @@ fn run_scenario_doctor_subcommand(
     };
 
     let plc_path = PathBuf::from(plc_path);
-    let plc_source = fs::read_to_string(&plc_path)
-        .map_err(|err| format!("[SCN-DOCTOR-001] Failed to read {plc_path:?}: {err}"))?;
+    let loaded = load_plc_source(&plc_path).map_err(|err| format!("[SCN-DOCTOR-001] {err}"))?;
     let raw_scenario_yaml =
         read_scenario_yaml_file(&scenario_path).map_err(|err| format!("[SCN-DOCTOR-002] {err}"))?;
 
@@ -3322,7 +3341,7 @@ fn run_scenario_doctor_subcommand(
         }
     }
 
-    let resolved = match resolve_scenario_yaml_for_plc(&plc_source, &raw_scenario_yaml) {
+    let resolved = match resolve_scenario_yaml_for_plc(&loaded.source, &raw_scenario_yaml) {
         Ok(v) => Some(v),
         Err(err) => {
             issues.push(ScenarioDoctorIssue {
@@ -3349,7 +3368,7 @@ fn run_scenario_doctor_subcommand(
     if let Some(resolved_yaml) = resolved {
         match parse_scenario_yaml(&resolved_yaml) {
             Ok(scenario) => {
-                let hints = collect_scenario_init_hints(&plc_source)
+                let hints = collect_scenario_init_hints(&loaded)
                     .map_err(|err| format!("[SCN-DOCTOR-003] {err}"))?;
                 let findings =
                     validate_scenario_against_plc(&plc_path, &scenario_path, &scenario, &hints);
@@ -3403,6 +3422,278 @@ fn run_scenario_doctor_subcommand(
     Ok(())
 }
 
+fn run_project_check_child(
+    executable: &Path,
+    step_name: &'static str,
+    args: &[String],
+    step_dir: &Path,
+    stdout_report_name: Option<&str>,
+) -> Result<SelfCheckStepReport, String> {
+    fs::create_dir_all(step_dir).map_err(|err| {
+        format!(
+            "Failed to create project-check step directory {}: {err}",
+            step_dir.display()
+        )
+    })?;
+
+    let output = Command::new(executable)
+        .args(args)
+        .output()
+        .map_err(|err| format!("Failed to run project-check step `{step_name}`: {err}"))?;
+
+    let stdout_log_path = step_dir.join("stdout.log");
+    fs::write(&stdout_log_path, &output.stdout).map_err(|err| {
+        format!(
+            "Failed to write project-check stdout log {}: {err}",
+            stdout_log_path.display()
+        )
+    })?;
+    let stderr_log_path = step_dir.join("stderr.log");
+    fs::write(&stderr_log_path, &output.stderr).map_err(|err| {
+        format!(
+            "Failed to write project-check stderr log {}: {err}",
+            stderr_log_path.display()
+        )
+    })?;
+
+    let report_json = stdout_report_name.and_then(|name| {
+        let report_path = step_dir.join(name);
+        if output.stdout.is_empty() {
+            return None;
+        }
+        fs::write(&report_path, &output.stdout).ok()?;
+        Some(display_path_relative_to_cwd(&report_path))
+    });
+
+    let mut command = Vec::with_capacity(args.len() + 1);
+    command.push(display_path_relative_to_cwd(executable));
+    command.extend(args.iter().cloned());
+
+    Ok(SelfCheckStepReport {
+        name: step_name,
+        command,
+        status: if output.status.success() {
+            "pass"
+        } else {
+            "fail"
+        },
+        exit_code: output.status.code(),
+        stdout_log: display_path_relative_to_cwd(&stdout_log_path),
+        stderr_log: display_path_relative_to_cwd(&stderr_log_path),
+        report_json,
+        artifacts_dir: None,
+    })
+}
+
+fn run_project_check_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = command_usage(program, "project-check");
+    let Some(plc_path) = args.next() else {
+        return Err(usage);
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    let mut out_dir: Option<PathBuf> = None;
+    let mut output_mode = CliOutputMode::Human;
+    let mut max_p99_exec_us: Option<u64> = None;
+    let mut max_overrun_count: Option<u64> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
+            }
+            "--out-dir" => {
+                out_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out-dir <dir>".to_string()
+                    })?));
+            }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
+            "--max-p99-exec-us" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --max-p99-exec-us <us>".to_string())?;
+                max_p99_exec_us = Some(
+                    raw.parse::<u64>()
+                        .map_err(|_| format!("Invalid integer for --max-p99-exec-us: {raw}"))?,
+                );
+            }
+            "--max-overrun-count" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --max-overrun-count <n>".to_string())?;
+                max_overrun_count = Some(
+                    raw.parse::<u64>()
+                        .map_err(|_| format!("Invalid integer for --max-overrun-count: {raw}"))?,
+                );
+            }
+            "-h" | "--help" => {
+                return Err(usage.clone());
+            }
+            other => return Err(format!("Unknown argument for project-check: {other}")),
+        }
+    }
+
+    let scenario_path = scenario_path
+        .ok_or_else(|| "Missing required argument: --scenario <scenario.yaml>".to_string())?;
+    let out_dir =
+        out_dir.ok_or_else(|| "Missing required argument: --out-dir <dir>".to_string())?;
+
+    fs::create_dir_all(&out_dir).map_err(|err| {
+        format!(
+            "Failed to create project-check output directory {}: {err}",
+            out_dir.display()
+        )
+    })?;
+
+    let executable =
+        env::current_exe().map_err(|err| format!("Failed to resolve current executable: {err}"))?;
+    let plc_path_buf = PathBuf::from(&plc_path);
+    let plc_arg = plc_path_buf.to_string_lossy().into_owned();
+    let scenario_arg = scenario_path.to_string_lossy().into_owned();
+
+    let compile_dir = out_dir.join("compile_verify");
+    let compile_report_path = compile_dir.join("verification_report.json");
+    let compile_args = vec![
+        plc_arg.clone(),
+        "--report".to_string(),
+        compile_report_path.to_string_lossy().into_owned(),
+        "--no-print-ir".to_string(),
+    ];
+    let mut compile_step = run_project_check_child(
+        &executable,
+        "compile_verify",
+        &compile_args,
+        &compile_dir,
+        None,
+    )?;
+    compile_step.report_json = Some(display_path_relative_to_cwd(&compile_report_path));
+
+    let lint_dir = out_dir.join("sequence_lint");
+    let lint_args = vec![
+        "sequence-lint".to_string(),
+        plc_arg.clone(),
+        "--critical-wait-level".to_string(),
+        "error".to_string(),
+    ];
+    let lint_step =
+        run_project_check_child(&executable, "sequence_lint", &lint_args, &lint_dir, None)?;
+
+    let doctor_dir = out_dir.join("scenario_doctor");
+    let doctor_args = vec![
+        "scenario-doctor".to_string(),
+        plc_arg.clone(),
+        "--scenario".to_string(),
+        scenario_arg.clone(),
+        "--output".to_string(),
+        "json".to_string(),
+    ];
+    let doctor_step = run_project_check_child(
+        &executable,
+        "scenario_doctor",
+        &doctor_args,
+        &doctor_dir,
+        Some("report.json"),
+    )?;
+
+    let gate_dir = out_dir.join("no_board_gate");
+    let gate_artifacts_dir = gate_dir.join("artifacts");
+    let mut gate_args = vec![
+        "no-board-gate".to_string(),
+        plc_arg,
+        "--scenario".to_string(),
+        scenario_arg,
+        "--out-dir".to_string(),
+        gate_artifacts_dir.to_string_lossy().into_owned(),
+        "--output".to_string(),
+        "json".to_string(),
+    ];
+    if let Some(limit) = max_p99_exec_us {
+        gate_args.push("--max-p99-exec-us".to_string());
+        gate_args.push(limit.to_string());
+    }
+    if let Some(limit) = max_overrun_count {
+        gate_args.push("--max-overrun-count".to_string());
+        gate_args.push(limit.to_string());
+    }
+    let mut gate_step = run_project_check_child(
+        &executable,
+        "no_board_gate",
+        &gate_args,
+        &gate_dir,
+        Some("report.json"),
+    )?;
+    gate_step.artifacts_dir = Some(display_path_relative_to_cwd(&gate_artifacts_dir));
+
+    let steps = vec![compile_step, lint_step, doctor_step, gate_step];
+    let failed_steps = steps.iter().filter(|step| step.status == "fail").count();
+    let status = if failed_steps == 0 { "pass" } else { "fail" };
+    let report = SelfCheckReport {
+        schema_version: 1,
+        command: "project-check",
+        output: output_mode.as_str(),
+        source_plc: display_path_relative_to_cwd(&plc_path_buf),
+        scenario: display_path_relative_to_cwd(&scenario_path),
+        out_dir: display_path_relative_to_cwd(&out_dir),
+        status,
+        failed_steps,
+        steps,
+    };
+
+    let report_path = out_dir.join("project_check_report.json");
+    write_json_pretty(&report_path, &report)?;
+
+    if output_mode == CliOutputMode::Json {
+        let mut json = serde_json::to_string_pretty(&report)
+            .map_err(|err| format!("Failed to serialize project-check JSON output: {err}"))?;
+        json.push('\n');
+        print!("{json}");
+    } else {
+        if failed_steps == 0 {
+            eprintln!("project-check: PASS ({} steps)", report.steps.len());
+        } else {
+            eprintln!(
+                "project-check: FAIL ({} of {} steps failed)",
+                failed_steps,
+                report.steps.len()
+            );
+        }
+        eprintln!("  report: {}", report_path.display());
+        for step in &report.steps {
+            eprintln!("  [{}] {}", step.status.to_ascii_uppercase(), step.name);
+            eprintln!("    stderr_log: {}", step.stderr_log);
+            if let Some(path) = &step.report_json {
+                eprintln!("    report_json: {path}");
+            }
+            if let Some(path) = &step.artifacts_dir {
+                eprintln!("    artifacts_dir: {path}");
+            }
+        }
+    }
+
+    if failed_steps > 0 {
+        return Err(format!(
+            "project-check failed: {failed_steps} step(s) failed (see {})",
+            report_path.display()
+        ));
+    }
+
+    Ok(())
+}
+
 fn run_scenario_expand_subcommand(
     program: &str,
     mut args: impl Iterator<Item = String>,
@@ -3445,10 +3736,9 @@ fn run_scenario_expand_subcommand(
         }
     }
 
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
-    let resolved = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
+    let resolved = resolve_scenario_yaml_for_plc(&loaded.source, &scenario_yaml).map_err(|e| {
         format!(
             "Failed to resolve/expand scenario {}:\n{e}",
             scenario_path.display()
@@ -3835,10 +4125,9 @@ fn run_scenario_gen_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--plc" => {
-                plc_path =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --plc <file.plc>".to_string()
-                    })?));
+                plc_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --plc <source.plc|source.bundle.toml>".to_string()
+                })?));
             }
             "--config" => {
                 config_path =
@@ -3880,8 +4169,7 @@ fn run_scenario_gen_subcommand(
     let template_library_path =
         template_library_path.unwrap_or_else(scenario_gen_default_template_library_path);
 
-    let plc_source = fs::read_to_string(&plc_path)
-        .map_err(|err| format!("Failed to read {}: {err}", plc_path.display()))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
     let config_yaml = fs::read_to_string(&config_path)
         .map_err(|err| format!("Failed to read {}: {err}", config_path.display()))?;
     let config: ScenarioGenConfig = serde_yaml::from_str(&config_yaml).map_err(|err| {
@@ -3900,7 +4188,7 @@ fn run_scenario_gen_subcommand(
         )
     })?;
 
-    let hints = collect_scenario_init_hints(&plc_source)?;
+    let hints = collect_scenario_init_hints(&loaded)?;
     let (start_id, sensor_ids) = discover_start_and_sensor_ids(&hints);
 
     let seed_base = config.seed_base_value();
@@ -5687,11 +5975,10 @@ fn run_sim_plc_subcommand(
         }
     }
 
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
     let scenario_yaml =
-        resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
+        resolve_scenario_yaml_for_plc(&loaded.source, &scenario_yaml).map_err(|e| {
             format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "sim-plc", &e)
         })?;
     let mut scenario = parse_scenario_yaml(&scenario_yaml)?;
@@ -5801,7 +6088,7 @@ fn run_sim_plc_subcommand(
         write_online_variable_audit(path, &variable_audit)?;
     }
 
-    let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
+    let program = compile_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
 
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
@@ -5838,7 +6125,7 @@ fn run_sim_plc_subcommand(
             .collect::<Vec<_>>();
         if !timeout_events.is_empty() {
             let diagnosis = diagnose(DiagnosisInput {
-                plc_source: &plc_source,
+                plc_source: &loaded.source,
                 scenario: &scenario,
                 trace_events: Some(trace_events.as_slice()),
                 diff_report: None,
@@ -6010,8 +6297,7 @@ fn run_sim_pid_kpi_subcommand(
         }
     }
 
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
     let pid_example = "Example:\n\
 tick_ms: 100\n\
 duration_ms: 10000\n\
@@ -6029,7 +6315,7 @@ model:\n\
     })?;
     let scenario = sim::PidControlScenario::from_yaml_str(&scenario_yaml)
         .map_err(|err| format!("Failed to parse PID scenario YAML: {err}\n\n{pid_example}"))?;
-    let runtime_program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
+    let runtime_program = compile_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
     let report = sim::run_pid_kpi(&runtime_program, &scenario)
         .map_err(|err| format!("Failed to run PID KPI simulation: {err}"))?;
 
@@ -6215,18 +6501,15 @@ fn run_build_rp2040_subcommand(
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
 
-    if Path::new(&plc_path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        != Some("plc")
-    {
-        return Err(format!("Expected a .plc file path, got: {plc_path}"));
+    if !is_supported_plc_source_path(Path::new(&plc_path)) {
+        return Err(format!(
+            "Expected a .plc or .bundle.toml path, got: {plc_path}"
+        ));
     }
 
-    let plc_bytes =
-        fs::read(&plc_path).map_err(|err| format!("Failed to read PLC file {plc_path}: {err}"))?;
-    let plc_source = String::from_utf8(plc_bytes.clone())
-        .map_err(|err| format!("PLC file is not valid UTF-8: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
+    let plc_source = loaded.source.clone();
+    let plc_bytes = plc_source.as_bytes().to_vec();
 
     let sha256 = {
         let mut h = Sha256::new();
@@ -6234,7 +6517,7 @@ fn run_build_rp2040_subcommand(
         hex::encode(h.finalize())
     };
 
-    let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
+    let ir_bundle = compile_pipeline(&loaded).map_err(|errors| errors.join("\n\n"))?;
 
     // For build artifacts we use 1ms ticks so ms-based DSL durations are always aligned.
     let runtime_program = state_machine_to_runtime_program(
@@ -6288,7 +6571,7 @@ Start from the generated `io_map.template.toml` under `--out <dir>` and fill in 
     fs::write(&iomap_path, iomap)
         .map_err(|err| format!("Failed to write {iomap_path:?}: {err}"))?;
 
-    let mut analog_contract = build_analog_contract(&plc_source)?;
+    let mut analog_contract = build_analog_contract(&loaded)?;
     if let Some(path) = analog_calibration_path.as_ref() {
         let calibration_toml = fs::read_to_string(path)
             .map_err(|err| format!("Failed to read analog calibration file {path:?}: {err}"))?;
@@ -6453,18 +6736,15 @@ fn run_release_bundle_subcommand(
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
 
-    if Path::new(&plc_path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        != Some("plc")
-    {
-        return Err(format!("Expected a .plc file path, got: {plc_path}"));
+    if !is_supported_plc_source_path(Path::new(&plc_path)) {
+        return Err(format!(
+            "Expected a .plc or .bundle.toml path, got: {plc_path}"
+        ));
     }
 
-    let plc_bytes =
-        fs::read(&plc_path).map_err(|err| format!("Failed to read PLC file {plc_path}: {err}"))?;
-    let plc_source = String::from_utf8(plc_bytes.clone())
-        .map_err(|err| format!("PLC file is not valid UTF-8: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
+    let plc_source = loaded.source.clone();
+    let plc_bytes = plc_source.as_bytes().to_vec();
 
     let plc_sha256 = sha256_hex(&plc_bytes);
 
@@ -6475,7 +6755,7 @@ fn run_release_bundle_subcommand(
         })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
-    let ir_bundle = compile_pipeline(&plc_source).map_err(|errors| errors.join("\n\n"))?;
+    let ir_bundle = compile_pipeline(&loaded).map_err(|errors| errors.join("\n\n"))?;
 
     // Board-oriented program generation uses 1ms ticks to align with firmware build artifacts.
     let board_program = state_machine_to_runtime_program(
@@ -6847,16 +7127,11 @@ fn emit_rp2040_uf2(
     Ok(())
 }
 
-fn build_analog_contract(plc_source: &str) -> Result<AnalogContract, String> {
-    let parsed = parse_plc_with_required_purpose(plc_source)
+fn build_analog_contract(input: &LoadedPlcSource) -> Result<AnalogContract, String> {
+    let parsed = parse_plc_with_required_purpose(input)
         .map_err(|err| format!("Failed to parse PLC source: {err}"))?;
-    let expanded = preprocess_program(&parsed).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
+    let expanded = preprocess_program(&parsed)
+        .map_err(|errors| format_plc_errors(errors, input).join("\n"))?;
 
     let mut analog_inputs = BTreeMap::<String, AnalogInputContractEntry>::new();
     let mut analog_outputs = BTreeMap::<String, AnalogOutputContractEntry>::new();
@@ -7057,16 +7332,16 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
     for task in program.tasks {
         for step in task.steps {
             match step.instr {
+                Instr::WaitAllDigital { conditions, .. } => {
+                    for condition in conditions {
+                        dis.insert(condition.id.0);
+                    }
+                }
                 Instr::WaitDigital { id, .. } => {
                     dis.insert(id.0);
                 }
                 Instr::WaitAnalog { id, .. } => {
                     ais.insert(id.0);
-                }
-                Instr::WaitAllDigital { conditions, .. } => {
-                    for condition in conditions {
-                        dis.insert(condition.id.0);
-                    }
                 }
                 Instr::Action { actions, .. } => {
                     for a in actions {
@@ -7074,22 +7349,10 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                             Action::SetDigital { id, .. } => {
                                 dos.insert(id.0);
                             }
-                            Action::Extend { output } | Action::Retract { output } => {
+                            Action::Extend { output }
+                            | Action::Retract { output }
+                            | Action::CylinderMotion { output, .. } => {
                                 dos.insert(output.0);
-                            }
-                            Action::CylinderMotion {
-                                output,
-                                confirm_inputs,
-                                opposing_inputs,
-                                ..
-                            } => {
-                                dos.insert(output.0);
-                                for id in confirm_inputs {
-                                    dis.insert(id.0);
-                                }
-                                for id in opposing_inputs {
-                                    dis.insert(id.0);
-                                }
                             }
                             Action::SetAnalog { id, .. } => {
                                 aos.insert(id.0);
@@ -7259,16 +7522,16 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
     for task in program.tasks {
         for step in task.steps {
             match step.instr {
+                Instr::WaitAllDigital { conditions, .. } => {
+                    for condition in conditions {
+                        dis.insert(condition.id.0);
+                    }
+                }
                 Instr::WaitDigital { id, .. } => {
                     dis.insert(id.0);
                 }
                 Instr::WaitAnalog { id, .. } => {
                     ais.insert(id.0);
-                }
-                Instr::WaitAllDigital { conditions, .. } => {
-                    for condition in conditions {
-                        dis.insert(condition.id.0);
-                    }
                 }
                 Instr::Action { actions, .. } => {
                     for a in actions {
@@ -7276,22 +7539,10 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                             Action::SetDigital { id, .. } => {
                                 dos.insert(id.0);
                             }
-                            Action::Extend { output } | Action::Retract { output } => {
+                            Action::Extend { output }
+                            | Action::Retract { output }
+                            | Action::CylinderMotion { output, .. } => {
                                 dos.insert(output.0);
-                            }
-                            Action::CylinderMotion {
-                                output,
-                                confirm_inputs,
-                                opposing_inputs,
-                                ..
-                            } => {
-                                dos.insert(output.0);
-                                for id in confirm_inputs {
-                                    dis.insert(id.0);
-                                }
-                                for id in opposing_inputs {
-                                    dis.insert(id.0);
-                                }
                             }
                             Action::SetAnalog { id, .. } => {
                                 aos.insert(id.0);
@@ -7738,11 +7989,10 @@ fn run_trace_doctor_subcommand(
         );
     }
 
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
     let scenario_yaml =
-        resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
+        resolve_scenario_yaml_for_plc(&loaded.source, &scenario_yaml).map_err(|e| {
             format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "trace-doctor", &e)
         })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
@@ -7796,7 +8046,7 @@ fn run_trace_doctor_subcommand(
     };
 
     let diagnosis = diagnose(DiagnosisInput {
-        plc_source: &plc_source,
+        plc_source: &loaded.source,
         scenario: &scenario,
         trace_events: trace_events.as_deref(),
         diff_report: diff_report.as_ref(),
@@ -9680,15 +9930,14 @@ fn run_no_board_gate_subcommand(
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create output directory {out_dir:?}: {err}"))?;
 
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
 
     let sil_yaml = read_scenario_yaml_file(&sil_scenario_path)?;
     let board_yaml = read_scenario_yaml_file(&board_scenario_path)?;
-    let sil_yaml = resolve_scenario_yaml_for_plc(&plc_source, &sil_yaml).map_err(|e| {
+    let sil_yaml = resolve_scenario_yaml_for_plc(&loaded.source, &sil_yaml).map_err(|e| {
         format_resolve_scenario_yaml_error(&plc_path, &sil_scenario_path, "no-board-gate", &e)
     })?;
-    let board_yaml = resolve_scenario_yaml_for_plc(&plc_source, &board_yaml).map_err(|e| {
+    let board_yaml = resolve_scenario_yaml_for_plc(&loaded.source, &board_yaml).map_err(|e| {
         format_resolve_scenario_yaml_error(&plc_path, &board_scenario_path, "no-board-gate", &e)
     })?;
 
@@ -9702,7 +9951,7 @@ fn run_no_board_gate_subcommand(
         ));
     }
 
-    let program = compile_plc_to_runtime_program(&plc_source, sil_scenario.tick_ms)?;
+    let program = compile_plc_to_runtime_program(&loaded, sil_scenario.tick_ms)?;
 
     let sil_trace_path = out_dir.join("sil_trace.jsonl");
     let (num_di, num_do, num_ai, num_ao) =
@@ -9791,7 +10040,7 @@ fn run_no_board_gate_subcommand(
 
     if gate_failed {
         let diagnosis = diagnose(DiagnosisInput {
-            plc_source: &plc_source,
+            plc_source: &loaded.source,
             scenario: &sil_scenario,
             trace_events: Some(&sil_events),
             diff_report: Some(&report),
@@ -9938,16 +10187,15 @@ fn run_pil_run_subcommand(
 
     let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
 
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
     let scenario_yaml =
-        resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
+        resolve_scenario_yaml_for_plc(&loaded.source, &scenario_yaml).map_err(|e| {
             format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "pil-run", &e)
         })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
-    let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
+    let program = compile_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
 
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
@@ -10181,16 +10429,15 @@ fn run_virtual_board_subcommand(
     fs::create_dir_all(&out_dir)
         .map_err(|err| format!("Failed to create output directory {out_dir:?}: {err}"))?;
 
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let loaded = load_plc_source(Path::new(&plc_path))?;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
     let scenario_yaml =
-        resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
+        resolve_scenario_yaml_for_plc(&loaded.source, &scenario_yaml).map_err(|e| {
             format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "virtual-board", &e)
         })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
-    let program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)?;
+    let program = compile_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
     write_virtual_board_artifacts(
         Path::new(&plc_path),
         &scenario_path,
@@ -10203,39 +10450,19 @@ fn run_virtual_board_subcommand(
 }
 
 fn compile_plc_to_runtime_program(
-    plc_source: &str,
+    input: &LoadedPlcSource,
     tick_ms: u64,
 ) -> Result<Program<'static>, String> {
-    let program = parse_plc_with_required_purpose(plc_source)?;
-    let expanded = preprocess_program(&program).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
+    let program = parse_plc_with_required_purpose(input)?;
+    let expanded = preprocess_program(&program)
+        .map_err(|errors| format_plc_errors(errors, input).join("\n"))?;
 
-    let topology = build_topology_graph(&expanded).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
-    let sm = build_state_machine(&expanded).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
-    let constraints = build_constraint_set(&expanded).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
+    let topology = build_topology_graph(&expanded)
+        .map_err(|errors| format_plc_errors(errors, input).join("\n"))?;
+    let sm = build_state_machine(&expanded)
+        .map_err(|errors| format_plc_errors(errors, input).join("\n"))?;
+    let constraints = build_constraint_set(&expanded)
+        .map_err(|errors| format_plc_errors(errors, input).join("\n"))?;
 
     state_machine_to_runtime_program(&topology, &constraints, &sm, tick_ms)
         .map_err(|e| e.to_string())
@@ -10253,38 +10480,25 @@ fn io_sizes_for_program_and_scenario(
     for task in program.tasks {
         for step in task.steps {
             match step.instr {
+                Instr::WaitAllDigital { conditions, .. } => {
+                    for condition in conditions {
+                        max_di = Some(max_di.map_or(condition.id.0, |m| m.max(condition.id.0)));
+                    }
+                }
                 Instr::WaitDigital { id, .. } => {
                     max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
                 }
                 Instr::WaitAnalog { id, .. } => {
                     max_ai = Some(max_ai.map_or(id.0, |m| m.max(id.0)));
                 }
-                Instr::WaitAllDigital { conditions, .. } => {
-                    for condition in conditions {
-                        max_di = Some(max_di.map_or(condition.id.0, |m| m.max(condition.id.0)));
-                    }
-                }
                 Instr::Action { actions, .. } => {
                     for a in actions {
                         match *a {
                             Action::SetDigital { id, .. }
                             | Action::Extend { output: id }
-                            | Action::Retract { output: id } => {
+                            | Action::Retract { output: id }
+                            | Action::CylinderMotion { output: id, .. } => {
                                 max_do = Some(max_do.map_or(id.0, |m| m.max(id.0)));
-                            }
-                            Action::CylinderMotion {
-                                output: id,
-                                confirm_inputs,
-                                opposing_inputs,
-                                ..
-                            } => {
-                                max_do = Some(max_do.map_or(id.0, |m| m.max(id.0)));
-                                for id in confirm_inputs {
-                                    max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
-                                }
-                                for id in opposing_inputs {
-                                    max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
-                                }
                             }
                             Action::SetAnalog { id, .. } => {
                                 max_ao = Some(max_ao.map_or(id.0, |m| m.max(id.0)));
@@ -10366,15 +10580,16 @@ fn reason_str(r: runtime_core::TransitionReason) -> &'static str {
     }
 }
 
-fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
-    let program = parse_plc(source).map_err(|err| vec![err.to_string()])?;
+fn compile_pipeline(input: &LoadedPlcSource) -> Result<IrBundle, Vec<String>> {
+    let program = parse_plc(&input.source)
+        .map_err(|err| vec![remap_plc_error(err, &input.source_map).to_string()])?;
     for warning in collect_topology_deprecation_warnings(&program.topology) {
         eprintln!("WARNING [deprecation] {warning}");
     }
     validate_removed_legacy_io_model(&program.topology)
-        .map_err(|gate_error| vec![gate_error.to_string()])?;
+        .map_err(|gate_error| vec![format_topology_gate_error(gate_error, input)])?;
     validate_device_purpose_required(&program.topology)
-        .map_err(|gate_error| vec![gate_error.to_string()])?;
+        .map_err(|gate_error| vec![format_topology_gate_error(gate_error, input)])?;
 
     // Load device library from `devices/` directory next to the .plc file (or CWD).
     let devices_dir = std::path::Path::new("devices");
@@ -10393,14 +10608,9 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
             Some(&device_library)
         },
     )
-    .map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-    })?;
+    .map_err(|errors| format_plc_errors(errors, input))?;
     validate_topology_semantics(&expanded_program.topology)
-        .map_err(|gate_error| vec![gate_error.to_string()])?;
+        .map_err(|gate_error| vec![format_topology_gate_error(gate_error, input)])?;
 
     let mut errors = Vec::new();
     let topology = collect_stage(build_topology_graph(&expanded_program), &mut errors);
@@ -10409,7 +10619,7 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
     let timing_model = collect_stage(build_timing_model(&expanded_program), &mut errors);
 
     if !errors.is_empty() {
-        return Err(errors.into_iter().map(|error| error.to_string()).collect());
+        return Err(format_plc_errors(errors, input));
     }
 
     let topology = topology.expect("topology exists when semantic errors are empty");
@@ -10438,12 +10648,15 @@ fn compile_pipeline(source: &str) -> Result<IrBundle, Vec<String>> {
     })
 }
 
-fn parse_plc_with_required_purpose(source: &str) -> Result<rust_plc::ast::PlcProgram, String> {
-    let program = parse_plc(source).map_err(|e| e.to_string())?;
+fn parse_plc_with_required_purpose(
+    input: &LoadedPlcSource,
+) -> Result<rust_plc::ast::PlcProgram, String> {
+    let program =
+        parse_plc(&input.source).map_err(|e| remap_plc_error(e, &input.source_map).to_string())?;
     validate_removed_legacy_io_model(&program.topology)
-        .map_err(|gate_error| gate_error.to_string())?;
+        .map_err(|gate_error| format_topology_gate_error(gate_error, input))?;
     validate_device_purpose_required(&program.topology)
-        .map_err(|gate_error| gate_error.to_string())?;
+        .map_err(|gate_error| format_topology_gate_error(gate_error, input))?;
     Ok(program)
 }
 
@@ -10455,6 +10668,44 @@ fn collect_stage<T>(result: Result<T, Vec<PlcError>>, errors: &mut Vec<PlcError>
             None
         }
     }
+}
+
+fn format_plc_errors(errors: Vec<PlcError>, input: &LoadedPlcSource) -> Vec<String> {
+    errors
+        .into_iter()
+        .map(|error| remap_plc_error(error, &input.source_map).to_string())
+        .collect()
+}
+
+fn format_topology_gate_error(
+    gate_error: rust_plc::topology_semantic_gate::TopologySemanticGateError,
+    input: &LoadedPlcSource,
+) -> String {
+    let mut rendered = format!("ERROR [{}] 鎷撴墤璇箟闂ㄧ澶辫触\n", gate_error.code);
+    for issue in gate_error.issues {
+        if let Some(location) = input.source_map.remap_location(issue.line.max(1), 1) {
+            let _ = writeln!(
+                rendered,
+                "  - [{}] {}:{}:{}",
+                issue.code.as_str(),
+                location.file,
+                location.line.max(1),
+                location.column.max(1)
+            );
+        } else {
+            let _ = writeln!(
+                rendered,
+                "  - [{}] {}:{}:{}",
+                issue.code.as_str(),
+                input.requested_path.display(),
+                issue.line.max(1),
+                1
+            );
+        }
+        let _ = writeln!(rendered, "    鍘熷洜: {}", issue.message);
+        let _ = writeln!(rendered, "    寤鸿: {}", issue.suggestion);
+    }
+    rendered.trim_end().to_string()
 }
 
 fn print_success_summary(summary: &VerificationSummary) {
@@ -10524,11 +10775,7 @@ fn collect_checker_blocking_warnings(
 }
 
 fn default_verification_report_path(plc_path: &Path) -> PathBuf {
-    let stem = plc_path
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("input");
+    let stem = plc_source_stem(plc_path);
     PathBuf::from("out").join(format!("{stem}.verification_report.json"))
 }
 

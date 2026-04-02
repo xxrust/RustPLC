@@ -1,0 +1,8 @@
+{
+  "cycle": "cycle-20260326-plcgen-round1-baseline",
+  "mode": "weak-blind",
+  "execution": "single-agent fallback",
+  "note": "historical baseline reconstructed before plc-gen local flywheel config landed",
+  "target_skill_path": "E:\\personal_project\\rust_plc\\.codex\\skills\\plc-gen",
+  "task_source": "docs/wafer_loader.system.md as representative confirmed system contract"
+}

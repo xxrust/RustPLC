@@ -1,0 +1,11 @@
+{
+  "common_findings": [
+    "scenario-toolchain compatibility is now a first-class concern for plc-gen",
+    "real tooling blockers should be surfaced instead of hidden behind generic validation advice"
+  ],
+  "run_specific_findings": [
+    "single run used wafer_loader.plc and observed unsupported guard expression across three scenario commands"
+  ],
+  "conflicts": [],
+  "overall_signal": "support"
+}

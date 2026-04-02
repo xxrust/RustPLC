@@ -1,0 +1,7 @@
+python.bat : Traceback (most recent call last):
+ËùÔÚÎ»ÖÃ E:\personal_project\rust_plc\.codex\skills\skill-flywheel\scripts\flywheel.ps1:90 ×Ö·û: 5
++     & python @runnerArgs 2>&1 | Tee-Object -FilePath $sessionLog -App ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

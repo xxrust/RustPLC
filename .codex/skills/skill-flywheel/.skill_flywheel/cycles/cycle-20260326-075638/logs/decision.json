@@ -1,0 +1,16 @@
+{
+  "hypothesis_status": "partial-support",
+  "key_evidence": [
+    "The exported single-agent closeout checklist now requires `logs/*.md` and `logs/*.json` to carry the same conclusion.",
+    "`decision.json` is now explicitly called out as the shell-runner authority for `last_cycle`, `continue_next_iteration`, and stop conditions.",
+    "Public-contract coverage now asserts that the closeout checklist mentions `decision.json`, `shell runner`, `hypothesis_status`, and `continue_next_cycle`.",
+    "`python .codex/skills/skill-flywheel/scripts/test_public_contract.py` passed.",
+    "`python .codex/skills/skill-flywheel/scripts/test_flywheel_runner.py` passed."
+  ],
+  "minimal_actions": [
+    "Add a structured-closeout rule to `public/single-agent-closeout-checklist.md` so blind runners cannot leave placeholder `decision.json` behind.",
+    "Lock that rule with a public-contract test."
+  ],
+  "continue_next_cycle": true,
+  "next_question": "After the closeout contract now requires non-placeholder `decision.json`, can the outer shell runner be replayed in a fresh process and demonstrate that it advances `runner_state.json` and progress across repeated iterations without losing the latest cycle decision?"
+}

@@ -63,3 +63,19 @@ cargo run --release --bin rust_plc -- new my_plc_project
 - 当前没有 optimization subcommand
 - 现有 optimization 能力在 Rust library API：`rust_plc::optimization`
 - 如需准确说明，读 `references/optimization.md`
+
+## 6. `scenario-init` / `scenario-validate` / `scenario-doctor` 报 `unsupported guard expression`
+
+已观察到复杂 PLC 在当前 scenario 工具链下可能触发：
+
+```text
+unsupported guard expression in <task.step>: <expr>
+```
+
+做法：
+
+- 不要直接把它说成“PLC 一定写错了”
+- 先明确这是当前 scenario 工具链兼容性阻塞
+- 如果用户必须走当前 scenario 工具链，建议把关键复合 `wait` guard 拆成更细的 helper step / readiness gate
+- 如果业务语义允许，优先改成顺序单条件 `wait`；这条模式已在最小 guard-lab 中验证可通过 `scenario-init` + `scenario-validate`
+- 如果用户只是要 DSL 交付而不是当前 scenario 工具链立即跑通，应把状态写成被工具链阻塞，而不是假装 `validated`

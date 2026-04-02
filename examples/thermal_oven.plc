@@ -8,7 +8,7 @@
 # ===== 控制器 =====
 device plc_main: plc {
     purpose: "控制器本体与工艺 I/O 端口映射",
-    ports: [Y0:digital:producer, X0:digital:consumer, AI0:analog:consumer, AO0:analog:producer]
+    model_ref: openplc_softplc
 }
 
 # ===== 模拟量 I/O =====

@@ -1,0 +1,18 @@
+{
+  "task": "make `skill-flywheel` self-iterate like Ralph via a shell-driven fresh-process loop, and avoid converging before 5 outer iterations unless there is a hard blocker.",
+  "hypothesis_status": "partial-support",
+  "findings": [
+    {
+      "pain_point": "A cycle could be semantically closed in `decision.md` while `decision.json` stayed placeholder.",
+      "classification": "public-surface-gap",
+      "cause": "The closeout checklist did not explicitly say that `decision.json` is authoritative for shell-runner state reconciliation and stop conditions.",
+      "minimal_fix": "Export a synchronized closeout rule in `public/single-agent-closeout-checklist.md` and name the required decision fields."
+    },
+    {
+      "pain_point": "The session still lacks proof that the shell loop consumes the repaired structured decision across fresh-process iterations.",
+      "classification": "code-gap",
+      "cause": "This round repaired the public contract and tests but did not rerun the outer shell loop after the fix.",
+      "minimal_fix": "Replay the outer shell runner in the next cycle and confirm that `runner_state.json` advances from a substantive `decision.json`."
+    }
+  ]
+}

@@ -11,7 +11,7 @@ use crate::semantic::{
     build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
 };
 use crate::verification::timing::ProgramTimingEstimate;
-use crate::verification::{verify_all, VerificationIssue};
+use crate::verification::{VerificationIssue, verify_all};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -261,14 +261,20 @@ task fault:
 
         let candidates = optimize_plc_source(source).expect("optimize");
         assert!(!candidates.is_empty(), "expected optimization candidates");
-        assert!(candidates
-            .windows(2)
-            .all(|pair| { pair[0].legality.is_legal >= pair[1].legality.is_legal }));
-        assert!(candidates
-            .iter()
-            .all(|candidate| !candidate.source.is_empty()));
-        assert!(candidates
-            .iter()
-            .all(|candidate| candidate.source.contains("[tasks]")));
+        assert!(
+            candidates
+                .windows(2)
+                .all(|pair| { pair[0].legality.is_legal >= pair[1].legality.is_legal })
+        );
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| !candidate.source.is_empty())
+        );
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate.source.contains("[tasks]"))
+        );
     }
 }

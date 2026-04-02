@@ -1,0 +1,165 @@
+# Flywheel Runner Progress
+Started: 2026-03-25T17:24:43.958582+00:00
+Target skill: E:\personal_project\rust_plc\.codex\skills\skill-flywheel
+Task label: autonomous-self-improve
+---
+## 2026-03-25T17:29:19.028317+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: complete
+- Continue next iteration: False
+- Output status: exit:1
+- Last cycle: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\cycles\cycle-20260326-010752
+- Last decision: supported
+- Last summary: 这是对上一轮修复的验证复跑，没有发现新的稳定痛点，因此停止。
+- Substantive decision observed: True
+---
+## 2026-03-25T17:30:43.857535+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: active
+- Continue next iteration: True
+- Output status: exit:1
+- Last cycle: none
+- Last decision: none
+- Last summary: none
+- Substantive decision observed: False
+---
+## 2026-03-25T17:30:47.615852+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: active
+- Continue next iteration: True
+- Output status: exit:1
+- Last cycle: none
+- Last decision: none
+- Last summary: none
+- Substantive decision observed: False
+---
+## 2026-03-25T17:30:51.336181+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: active
+- Continue next iteration: True
+- Output status: exit:1
+- Last cycle: none
+- Last decision: none
+- Last summary: none
+- Substantive decision observed: False
+---
+## 2026-03-25T17:30:55.404085+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: active
+- Continue next iteration: True
+- Output status: exit:1
+- Last cycle: none
+- Last decision: none
+- Last summary: none
+- Substantive decision observed: False
+---
+## 2026-03-25T17:30:59.079387+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: active
+- Continue next iteration: True
+- Output status: exit:1
+- Last cycle: none
+- Last decision: none
+- Last summary: none
+- Substantive decision observed: False
+---
+## 2026-03-25T17:33:43.7765160+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: complete
+- Continue next iteration: False
+- Output status: state-reconciled
+- Last cycle: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\cycles\cycle-20260326-010752
+- Last decision: stop
+- Last summary: 最近一个实质回合 cycle-20260326-010752 已明确写出“没有发现新的稳定痛点，因此停止”。本次 runner 只做状态收口，不再打开新 cycle。
+- Substantive decision observed: True
+---
+## 2026-03-25T17:34:28.323818+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: complete
+- Continue next iteration: False
+- Output status: ok
+- Last cycle: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\cycles\cycle-20260326-010752
+- Last decision: stop
+- Last summary: 最近一个实质回合 cycle-20260326-010752 已明确写出“没有发现新的稳定痛点，因此停止”。本次 runner 只做状态收口，不再打开新 cycle。
+- Substantive decision observed: False
+---
+## 2026-03-25T23:18:51.001666+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: active
+- Continue next iteration: True
+- Output status: state-reconciled
+- Last cycle: none
+- Last decision: none
+- Last summary: none
+- Substantive decision observed: False
+---
+## 2026-03-25T23:27:40.305941+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\cycles\cycle-20260326-072310\logs
+- Status: continue
+- Continue next iteration: True
+- Output status: manual-closeout
+- Last cycle: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\cycles\cycle-20260326-072310
+- Last decision: partial
+- Last summary: 已修复 progress.txt 在 repeated fresh-process 下反复写成 Iteration 1 的问题；下一轮验证公开工件是否足以无源码观察 5 轮 outer loop。
+- Substantive decision observed: True
+---
+## 2026-03-25T23:33:01.723230+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: continue
+- Continue next iteration: True
+- Output status: exit:4294967295
+- Last cycle: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\cycles\cycle-20260326-072310
+- Last decision: partial
+- Last summary: 既然 progress.txt 已能区分 session 级轮次，下一轮只验证：当前公开工件是否足以让盲测执行者在不读源码的前提下启动并观察 5 轮 shell-driven outer loop，包括 background 启动、runner_state/progress 检查和 stop condition。
+- Substantive decision observed: True
+---
+## 2026-03-25T23:35:48.210647+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: active
+- Continue next iteration: True
+- Output status: state-reconciled
+- Last cycle: none
+- Last decision: none
+- Last summary: none
+- Substantive decision observed: False
+---
+## 2026-03-25T23:42:28.717530+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: active
+- Continue next iteration: True
+- Output status: timeout:300s
+- Last cycle: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\cycles\cycle-20260326-073942
+- Last decision: none
+- Last summary: none
+- Substantive decision observed: False
+---
+## 2026-03-25T23:49:18.540875+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: active
+- Continue next iteration: True
+- Output status: state-reconciled
+- Last cycle: none
+- Last decision: none
+- Last summary: none
+- Substantive decision observed: False
+---
+## 2026-03-25T23:53:49.526996+00:00 - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: active
+- Continue next iteration: True
+- Output status: timeout:60s
+- Last cycle: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\cycles\cycle-20260326-073942
+- Last decision: none
+- Last summary: none
+- Substantive decision observed: False
+---
+## 2026-03-25T23:58:49.2809112Z - Iteration 1
+- Log: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\iter_001.log
+- Status: continue
+- Continue next iteration: True
+- Output status: manual-closeout
+- Last cycle: E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\cycles\cycle-20260326-075638
+- Last decision: partial-support
+- Last summary: After the closeout contract now requires non-placeholder `decision.json`, can the outer shell runner be replayed in a fresh process and demonstrate that it advances `runner_state.json` and progress across repeated iterations without losing the latest cycle decision?
+- Substantive decision observed: True
+---

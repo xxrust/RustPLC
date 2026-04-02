@@ -1,0 +1,7 @@
+{
+  "run_id": "smoke-run-02",
+  "task": "为 `skill-flywheel` 自己初始化一轮最小研究回合，并检查输出是否足以支撑一次盲测。\n\n要求：\n\n1. 使用提供的命令初始化一个新的 cycle。\n2. 只根据目标 skill 与导出的辅助工件，判断初始化输出是否包含：\n   - `context/program.md`\n   - `context/task.md`\n   - `logs/pain-points.md`\n   - `logs/pain-points.json`\n   - `logs/root-cause.md`\n   - `logs/root-cause.json`\n   - `logs/decision.md`\n   - `logs/decision.json`\n   - `logs/run-index.json`\n   - `logs/synthesis.json`\n   - `logs/runs/<run-id>.md`\n   - `logs/runs/<run-id>.json`\n   - `prompts/agent1.md`\n   - `prompts/agent2.md`\n   - `prompts/agent3.md`\n   - `prompts/runs/<run-id>-agent2.md`\n3. 如果缺少关键输入、命令或边界说明，把它记录成痛点。\n4. 不要读取仓库里的普通文件来补完流程。\n",
+  "hypothesis_signal": "unknown",
+  "result_summary": "",
+  "pain_points": []
+}

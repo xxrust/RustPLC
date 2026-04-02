@@ -253,7 +253,7 @@ fn budget_thresholds_emit_warn_entries() {
 [topology]
 device plc_main: plc {
     purpose: "主 PLC",
-    ports: [X0:digital:consumer, Y0:digital:producer]
+    model_ref: openplc_softplc
 }
 device X0: digital_input { purpose: "测试输入通道" }
 device Y0: digital_output { purpose: "测试输出通道" }
@@ -308,7 +308,7 @@ fn budget_time_estimate_warns_and_deny_warnings_can_block() {
 [topology]
 device plc_main: plc {
     purpose: "主 PLC",
-    ports: [X0:digital:consumer, Y0:digital:producer]
+    model_ref: openplc_softplc
 }
 device X0: digital_input { purpose: "测试输入通道" }
 device Y0: digital_output { purpose: "测试输出通道" }
@@ -406,7 +406,7 @@ fn runtime_budget_reports_per_task_scope_for_two_active_tasks() {
 [topology]
 device plc_main: plc {
     purpose: "主 PLC",
-    ports: [X0:digital:consumer, Y0:digital:producer, Y1:digital:producer]
+    model_ref: openplc_softplc
 }
 device X0: digital_input { purpose: "测试输入通道" }
 device Y0: digital_output { purpose: "工位A输出" }
@@ -475,7 +475,7 @@ fn runtime_budget_cycle_warning_keeps_per_task_cap_with_two_active_tasks() {
 [topology]
 device plc_main: plc {
     purpose: "主 PLC",
-    ports: [X0:digital:consumer, Y0:digital:producer, Y1:digital:producer]
+    model_ref: openplc_softplc
 }
 device X0: digital_input { purpose: "测试输入通道" }
 device Y0: digital_output { purpose: "工位A输出" }

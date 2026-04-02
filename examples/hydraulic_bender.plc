@@ -8,7 +8,7 @@
 # ===== 控制器 =====
 device plc_main: plc {
     purpose: "液压折弯机 PLC 控制器，管理液压缸行程与压力闭环 I/O 端口",
-    ports: [Y0:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, AI0:analog:consumer, AO0:analog:producer]
+    model_ref: openplc_softplc
 }
 
 # ===== 模拟量 I/O =====

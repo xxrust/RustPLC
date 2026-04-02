@@ -1,0 +1,17 @@
+{
+  "research_question": "Does plc-gen need an explicit confirmed-system-to-plc lowering path for wafer-loader-like contracts?",
+  "hypothesis_status": "support",
+  "key_evidence": [
+    "wafer_loader.system.md exposes task partition, mode matrix, warning/fault split, counters, and resources as first-class structures",
+    "previous plc-gen guidance did not expose a fixed lowering bucket model",
+    "new lowering artifacts now make those structures explicit"
+  ],
+  "minimal_actions": [
+    "keep lowering artifacts",
+    "run one more verify cycle focused on direct plc-generation capability"
+  ],
+  "continue_next_cycle": true,
+  "classification": "skill-gap",
+  "decision_summary": "plc-gen needed explicit lowering guidance beyond scaffold/day-1 advice, and that gap has now been addressed.",
+  "next_question": "Can the updated plc-gen now stably interpret a confirmed wafer-loader-like system contract as plc structure without further artifact expansion?"
+}

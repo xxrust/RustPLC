@@ -1,0 +1,17 @@
+{
+  "research_question": "Does plc-gen need explicit scenario-toolchain compatibility guidance for complex plc programs?",
+  "hypothesis_status": "support",
+  "key_evidence": [
+    "real scenario-init/validate/doctor runs against wafer_loader.plc all failed with unsupported guard expression",
+    "previous plc-gen guidance did not treat this as a first-class decision point",
+    "new skill/public changes now expose toolchain blocker and scenario-friendly lowering"
+  ],
+  "minimal_actions": [
+    "keep scenario-toolchain-limitations artifact",
+    "run one verify cycle focused on correct blocker reporting"
+  ],
+  "continue_next_cycle": true,
+  "classification": "skill-gap",
+  "decision_summary": "plc-gen needed explicit scenario-toolchain compatibility handling, and the gap is now addressed.",
+  "next_question": "Can the updated plc-gen now correctly report and route around scenario-toolchain blockers for complex plc shapes?"
+}

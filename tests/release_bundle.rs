@@ -6,11 +6,9 @@ use std::process::Command;
 const PLC_FIXTURE: &str = r#"
 [topology]
 device plc_main: plc {
-    purpose: "控制器端口映射",
-    ports: [X0:digital:consumer, Y0:digital:producer]
+    purpose: "release bundle fixture controller",
+    model_ref: openplc_softplc
 }
-device X0: digital_input { purpose: "启动信号输入" }
-device Y0: digital_output { purpose: "执行器控制输出" }
 
 [constraints]
 

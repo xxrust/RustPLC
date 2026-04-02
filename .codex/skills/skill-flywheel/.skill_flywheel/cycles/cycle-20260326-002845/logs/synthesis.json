@@ -1,0 +1,9 @@
+{
+  "common_findings": [
+    "并行 blind-runner 的实例级 scaffold 已自动生成",
+    "run-index 已可作为后续聚合入口"
+  ],
+  "run_specific_findings": [],
+  "conflicts": [],
+  "overall_signal": "support"
+}

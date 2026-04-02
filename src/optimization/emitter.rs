@@ -5,7 +5,7 @@ use crate::ast::{
     StateReference, StepStatement, TaskDeclaration, TimeUnit, TimeoutDirective, WaitCondition,
     WaitStatement,
 };
-use crate::optimization::{render_plc_errors, CandidateLegality, OptimizationLegalityError};
+use crate::optimization::{CandidateLegality, OptimizationLegalityError, render_plc_errors};
 use crate::semantic::{
     build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
 };

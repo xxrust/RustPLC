@@ -1,0 +1,9 @@
+{
+  "common_findings": [],
+  "run_specific_findings": [
+    "单代理观察暴露了公开命令仍指向旧任务。",
+    "单代理观察暴露了 skill 缺少明确的 weak-blind fallback 协议。"
+  ],
+  "conflicts": [],
+  "overall_signal": "not_applicable_single_run"
+}

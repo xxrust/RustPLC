@@ -1,0 +1,33 @@
+{
+  "created_at_utc": "2026-03-25T15:41:34.948703+00:00",
+  "project_name": "rust_plc",
+  "repo_root": "E:\\personal_project\\rust_plc",
+  "target_skill_path": "E:\\personal_project\\rust_plc\\.codex\\skills\\skill-flywheel",
+  "config_dir": "E:\\personal_project\\rust_plc\\.codex\\skills\\skill-flywheel\\.skill_flywheel",
+  "artifact_source_dir": "E:\\personal_project\\rust_plc\\.codex\\skills\\skill-flywheel\\.skill_flywheel\\public",
+  "cycle_dir": "E:\\personal_project\\rust_plc\\.codex\\skills\\skill-flywheel\\.skill_flywheel\\cycles\\cycle-20260325-234134",
+  "task": "为 `skill-flywheel` 自己初始化一轮最小研究回合，并检查输出是否足以支撑一次盲测。\n\n要求：\n\n1. 使用提供的命令初始化一个新的 cycle。\n2. 只根据目标 skill 与导出的辅助工件，判断初始化输出是否包含：\n   - `context/program.md`\n   - `context/task.md`\n   - `logs/pain-points.md`\n   - `logs/root-cause.md`\n   - `logs/decision.md`\n   - `prompts/agent1.md`\n   - `prompts/agent2.md`\n   - `prompts/agent3.md`\n3. 如果缺少关键输入、命令或边界说明，把它记录成痛点。\n4. 不要读取仓库里的普通文件来补完流程。\n",
+  "task_source_path": "E:\\personal_project\\rust_plc\\.codex\\skills\\skill-flywheel\\.skill_flywheel\\tasks\\self-smoke.md",
+  "program_source_path": "E:\\personal_project\\rust_plc\\.codex\\skills\\skill-flywheel\\.skill_flywheel\\program.md",
+  "profile_source_path": "E:\\personal_project\\rust_plc\\.codex\\skills\\skill-flywheel\\.skill_flywheel\\profile.md",
+  "blocked_segments": [
+    ".git",
+    "crates",
+    "src",
+    "target",
+    "vendor",
+    "web-ui"
+  ],
+  "copied_artifacts": [
+    {
+      "path": "smoke-run-command.txt",
+      "status": "copied-file",
+      "files": 1
+    },
+    {
+      "path": "smoke-checklist.md",
+      "status": "copied-file",
+      "files": 1
+    }
+  ]
+}

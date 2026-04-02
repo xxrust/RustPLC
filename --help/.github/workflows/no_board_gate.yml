@@ -1,0 +1,16 @@
+name: rustplc-no-board-gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  no-board-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Scenario validate
+        run: cargo run --release --bin rust_plc -- scenario-validate plc/main.plc --scenario scenarios/nominal/normal.yaml --output json
+      - name: No-board gate
+        run: cargo run --release --bin rust_plc -- no-board-gate plc/main.plc --scenario scenarios/nominal/normal.yaml --out-dir out/gate/no_board/normal --output json

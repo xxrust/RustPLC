@@ -1,0 +1,13 @@
+{
+  "artifact_paths": [
+    "smoke-run-command.txt",
+    "smoke-checklist.md",
+    "single-agent-closeout-command.txt",
+    "single-agent-closeout-checklist.md",
+    "autonomous-self-improve-command.txt",
+    "autonomous-self-improve-checklist.md",
+    "autonomous-self-improve-observe-command.txt"
+  ],
+  "parallel_runs": 1,
+  "run_id_prefix": "run"
+}

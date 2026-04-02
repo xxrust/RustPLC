@@ -1,0 +1,7 @@
+interface:
+  display_name: "Skill 飞轮"
+  short_description: "围绕真实任务持续优化 skill 能力"
+  default_prompt: "使用 $skill-flywheel 围绕真实任务改进 skill、盲测 skill，并根据测试中暴露的问题持续优化 skill 能力。"
+
+policy:
+  allow_implicit_invocation: true

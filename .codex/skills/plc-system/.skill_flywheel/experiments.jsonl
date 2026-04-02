@@ -1,0 +1,1 @@
+{"cycle": "cycle-20260326-plcsystem-bootstrap", "question": "把 `plc-system` 的本地 flywheel 配置升级到当前协议后，是否能只靠 task-specific 导出工件稳定约束 System Day-1 的建议稿、问题数量、并发表达和 handoff 边界？", "decision": "continue", "reason": "`plc-system` 已具备可运行的 flywheel 本地配置和最小 Day-1 public surface；bootstrap 与导出链路已经验证通过，但真实模糊需求上的回答一致性还需要下一轮验证。", "classification": "bootstrap-validated"}

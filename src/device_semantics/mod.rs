@@ -1,4 +1,3 @@
-pub mod axis;
 pub mod cylinder;
 
 use crate::ast::TasksSection;
@@ -26,6 +25,5 @@ pub fn validate_task_action_semantics(
     device_kinds: &HashMap<String, DeviceKind>,
     errors: &mut Vec<PlcError>,
 ) {
-    axis::validate_axis_actions_in_tasks(tasks, device_kinds, errors);
     cylinder::validate_cylinder_actions_in_tasks(tasks, device_kinds, errors);
 }

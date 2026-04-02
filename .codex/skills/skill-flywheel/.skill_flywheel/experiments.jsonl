@@ -1,0 +1,8 @@
+{"cycle":"cycle-20260325-233827","question":"最小 smoke cycle 是否足以自举","decision":"continue","reason":"发现公开工件使用绝对路径，需要修复","classification":"public-surface-gap"}
+{"cycle":"cycle-20260325-234134","question":"相对路径 smoke 命令是否可稳定复跑","decision":"stop","reason":"最小自举 smoke test 已闭环","classification":"validated"}
+{"cycle":"cycle-20260325-235750","question":"结构化日志骨架是否会随 cycle 自动生成","decision":"stop","reason":"JSON 模板与 runs 目录已自动生成","classification":"validated"}
+{"cycle":"cycle-20260326-002845","question":"并行 blind-runner 的实例级 scaffold 是否会随 cycle 自动生成","decision":"stop","reason":"run-index、run 级日志和 run 级 prompts 已自动生成","classification":"validated"}
+{"cycle":"cycle-20260326-010148","question":"无法或不应启动子 agent 时，单代理 weak-blind fallback 是否能闭环","decision":"stop","reason":"已补齐单代理 fallback 协议、当前任务的公开命令/清单工件，并通过新 cycle 复跑验证","classification":"validated"}
+{"cycle":"cycle-20260326-010752","question":"为 skill-flywheel 自己初始化一轮新的研究回合，并在不启动子 agent 的前提下完成一次最小 weak-blind 闭环","decision":"stop","reason":"这是对上一轮修复的验证复跑，没有发现新的稳定痛点，因此停止","classification":"validated"}
+{"cycle":"cycle-20260326-072310","question":"外层 shell loop 的 session 级进度是否能在磁盘状态上稳定可判读","decision":"continue","reason":"已修复 repeated fresh-process 把所有轮次都写成 Iteration 1 的问题；下一轮验证公开工件是否足以无源码观察 5 轮 outer loop","classification":"code-gap"}
+{"cycle":"cycle-20260326-075638","question":"单代理 weak-blind closeout 是否会把结构化 decision 同步落盘给 shell runner 消费","decision":"continue","reason":"已把 `decision.json` 明确设为 closeout 必填且补上公共契约测试；下一轮需要 fresh-process 复跑外层 shell loop，验证 runner 会消费这个非占位 decision","classification":"public-surface-gap"}

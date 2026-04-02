@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
+use io_traits::DigitalInputId;
 use runtime_core::{
     Action, AxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting, AxisMoveKind, CamAnalogField,
-    CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr, Program, StepId, Timeout,
+    CamDigitalField, CompareOp, CylinderFaultRouting, ExprOp, ExprProgram, Instr, Program, StepId,
+    Timeout,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,17 +42,8 @@ pub fn generate_program_module(
                         return Err(CodegenError::StepIdOutOfRange);
                     }
                 }
-                Instr::WaitAllDigital { next, timeout, .. } => {
-                    if !check(next, task.steps.len()) {
-                        return Err(CodegenError::StepIdOutOfRange);
-                    }
-                    if let Some(tmo) = timeout
-                        && !check(tmo.target, task.steps.len())
-                    {
-                        return Err(CodegenError::StepIdOutOfRange);
-                    }
-                }
-                Instr::WaitDigital { next, timeout, .. } => {
+                Instr::WaitAllDigital { next, timeout, .. }
+                | Instr::WaitDigital { next, timeout, .. } => {
                     if !check(next, task.steps.len()) {
                         return Err(CodegenError::StepIdOutOfRange);
                     }
@@ -128,7 +121,7 @@ pub fn generate_program_module(
     out.push_str(
         "  use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, AnalogOutputId};\n",
     );
-    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, AxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting, AxisMotionCommand, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, ExprOp, ExprProgram, Instr, PidConfig, Program, Step, StepId, Task, Timeout};\n\n");
+    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, AxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting, AxisMotionCommand, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, DigitalCondition, ExprOp, ExprProgram, Instr, PidConfig, Program, Step, StepId, Task, Timeout};\n\n");
 
     // Emit actions arrays, then steps, then tasks, then program.
     for (tidx, task) in program.tasks.iter().enumerate() {
@@ -142,6 +135,19 @@ pub fn generate_program_module(
                     out.push_str("    ");
                     out.push_str(&format_action(a));
                     out.push_str(",\n");
+                }
+                out.push_str("  ];\n\n");
+            }
+            if let Instr::WaitAllDigital { conditions, .. } = step.instr {
+                out.push_str(&format!(
+                    "  static T{tidx}_S{sidx}_DIGITAL_CONDITIONS: [DigitalCondition; {}] = [\n",
+                    conditions.len()
+                ));
+                for condition in conditions {
+                    out.push_str(&format!(
+                        "    DigitalCondition {{ id: DigitalInputId({}), equals: {} }},\n",
+                        condition.id.0, condition.equals
+                    ));
                 }
                 out.push_str("  ];\n\n");
             }
@@ -345,42 +351,16 @@ fn format_action(a: &Action) -> String {
             opposing_inputs,
             timeout,
             fault_routing,
-        } => {
-            let confirm_inputs = if confirm_inputs.is_empty() {
-                "&[]".to_string()
-            } else {
-                format!(
-                    "&[{}]",
-                    confirm_inputs
-                        .iter()
-                        .map(|id| format!("DigitalInputId({})", id.0))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
-            let opposing_inputs = if opposing_inputs.is_empty() {
-                "&[]".to_string()
-            } else {
-                format!(
-                    "&[{}]",
-                    opposing_inputs
-                        .iter()
-                        .map(|id| format!("DigitalInputId({})", id.0))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
-            format!(
-                "Action::CylinderMotion {{ target: {:?}, output: DigitalOutputId({}), expect_extended: {}, confirm_inputs: {}, opposing_inputs: {}, timeout: {}, fault_routing: {} }}",
-                target,
-                output.0,
-                expect_extended,
-                confirm_inputs,
-                opposing_inputs,
-                format_timeout(timeout),
-                format_cylinder_fault_routing(fault_routing),
-            )
-        }
+        } => format!(
+            "Action::CylinderMotion {{ target: {:?}, output: DigitalOutputId({}), expect_extended: {}, confirm_inputs: &{}, opposing_inputs: &{}, timeout: {}, fault_routing: {} }}",
+            target,
+            output.0,
+            expect_extended,
+            format_digital_input_id_slice(confirm_inputs),
+            format_digital_input_id_slice(opposing_inputs),
+            format_timeout_option(timeout),
+            format_cylinder_fault_routing(fault_routing)
+        ),
         Action::Log {
             message_id,
             message,
@@ -426,6 +406,35 @@ fn format_u16_slice(values: &[u16]) -> String {
     }
     out.push(']');
     out
+}
+
+fn format_digital_input_id_slice(values: &[DigitalInputId]) -> String {
+    let rendered = values
+        .iter()
+        .map(|id| format!("DigitalInputId({})", id.0))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{}]", rendered)
+}
+
+fn format_timeout_option(timeout: Option<Timeout>) -> String {
+    match timeout {
+        Some(timeout) => format!(
+            "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
+            timeout.after_ticks, timeout.target.0
+        ),
+        None => "None".to_string(),
+    }
+}
+
+fn format_cylinder_fault_routing(routing: Option<CylinderFaultRouting>) -> String {
+    match routing {
+        Some(routing) => format!(
+            "Some(CylinderFaultRouting {{ on_motion_fault: StepId({}), on_safety_fault: StepId({}) }})",
+            routing.on_motion_fault.0, routing.on_safety_fault.0
+        ),
+        None => "None".to_string(),
+    }
 }
 
 fn format_axis_timeout(timeout: Option<Timeout>) -> String {
@@ -538,8 +547,21 @@ fn format_instr(tidx: usize, sidx: usize, instr: &Instr<'_>) -> String {
             next,
             timeout,
         } => {
-            let tmo = format_timeout(timeout);
-            let conditions_ref = format_digital_conditions_slice(conditions);
+            let tmo = match timeout {
+                None => "None".to_string(),
+                Some(Timeout {
+                    after_ticks,
+                    target,
+                }) => format!(
+                    "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
+                    after_ticks, target.0
+                ),
+            };
+            let conditions_ref = if conditions.is_empty() {
+                "&[]".to_string()
+            } else {
+                format!("&T{}_S{}_DIGITAL_CONDITIONS", tidx, sidx)
+            };
             format!(
                 "Instr::WaitAllDigital {{ conditions: {}, next: StepId({}), timeout: {} }}",
                 conditions_ref, next.0, tmo
@@ -678,46 +700,6 @@ fn format_instr(tidx: usize, sidx: usize, instr: &Instr<'_>) -> String {
         ),
         Instr::Goto { target } => format!("Instr::Goto {{ target: StepId({}) }}", target.0),
         Instr::Halt => "Instr::Halt".to_string(),
-    }
-}
-
-fn format_timeout(timeout: Option<Timeout>) -> String {
-    match timeout {
-        None => "None".to_string(),
-        Some(Timeout {
-            after_ticks,
-            target,
-        }) => format!(
-            "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
-            after_ticks, target.0
-        ),
-    }
-}
-
-fn format_digital_conditions_slice(conditions: &[runtime_core::DigitalCondition]) -> String {
-    if conditions.is_empty() {
-        return "&[]".to_string();
-    }
-    format!(
-        "&[{}]",
-        conditions
-            .iter()
-            .map(|condition| format!(
-                "runtime_core::DigitalCondition {{ id: DigitalInputId({}), equals: {} }}",
-                condition.id.0, condition.equals
-            ))
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
-}
-
-fn format_cylinder_fault_routing(routing: Option<runtime_core::CylinderFaultRouting>) -> String {
-    match routing {
-        None => "None".to_string(),
-        Some(routing) => format!(
-            "Some(runtime_core::CylinderFaultRouting {{ on_motion_fault: StepId({}), on_safety_fault: StepId({}) }})",
-            routing.on_motion_fault.0, routing.on_safety_fault.0
-        ),
     }
 }
 

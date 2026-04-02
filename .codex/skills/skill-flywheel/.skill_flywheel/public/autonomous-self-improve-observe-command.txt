@@ -1,0 +1,16 @@
+观察当前 outer loop 是否真的在推进：
+
+```powershell
+$state = Get-Content E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_state.json -Encoding UTF8 | ConvertFrom-Json
+$state
+Get-Content E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\progress.txt -Encoding UTF8 | Select-Object -Last 20
+if ($state.last_cycle) {
+  Get-Content (Join-Path $state.last_cycle "logs\\decision.json") -Encoding UTF8
+}
+```
+
+判断要点：
+
+- `iteration_count` 应随 fresh-process 外层迭代递增
+- `last_cycle` 应优先指向本次 session 的 active 或最新 substantive cycle
+- `decision.json` 若仍是 placeholder，说明这轮还没完成 closeout，不应误判为 stop

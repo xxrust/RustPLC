@@ -42,7 +42,10 @@ relation { from: sensor_A_ext.out, to: plc_main.X0, via: reports_to }
 relation { from: cyl_B.extended, to: sensor_B_ext.sense, via: detects }
 relation { from: sensor_B_ext.out, to: plc_main.X1, via: reports_to }
 
-device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [Y0:digital:producer, Y1:digital:producer, X0:digital:consumer, X1:digital:consumer] }
+device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
+    model_ref: openplc_softplc
+}
 [constraints]
 
 safety: cyl_A.extended conflicts_with cyl_B.extended

@@ -22,7 +22,7 @@ fn sim_pid_kpi_cli_is_deterministic_and_within_thresholds() {
 [topology]
 device plc_main: plc {
     purpose: "控制器端口映射",
-    ports: [AI0:analog:consumer, AO0:analog:producer]
+    model_ref: openplc_softplc
 }
 device AI0: analog_input { purpose: "压力反馈输入", range: 0..100, unit: "bar", external: true }
 device AO0: analog_output { purpose: "调节阀输出", range: 0..100, unit: "%" }

@@ -1,0 +1,11 @@
+{
+  "runs": [
+    {
+      "run_id": "self-smoke-01",
+      "status": "completed",
+      "signal": "support",
+      "notes": "相对路径命令可成功初始化带结构化日志的完整 cycle"
+    }
+  ],
+  "synthesis_ready": true
+}

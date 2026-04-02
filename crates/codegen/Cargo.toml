@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 runtime-core = { path = "../runtime-core" }
+io-traits = { path = "../io-traits" }
 
 [dev-dependencies]
-io-traits = { path = "../io-traits" }
 syn = { version = "2", features = ["full"] }

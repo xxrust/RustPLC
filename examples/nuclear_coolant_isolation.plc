@@ -8,23 +8,7 @@
 
 device plc_main: plc {
     purpose: "安全级双通道冗余 PLC，负责隔离阀控制与安全联锁",
-    ports: [
-        Y0:digital:producer,
-        Y1:digital:producer,
-        X0:digital:consumer,
-        X1:digital:consumer,
-        X2:digital:consumer,
-        X3:digital:consumer,
-        X4:digital:consumer,
-        X5:digital:consumer,
-        X6:digital:consumer,
-        X7:digital:consumer,
-        X8:digital:consumer,
-        X9:digital:consumer,
-        X10:digital:consumer,
-        X11:digital:consumer,
-        X12:digital:consumer
-    ]
+    model_ref: openplc_softplc
 }
 
 # ===== 操作员接口 =====

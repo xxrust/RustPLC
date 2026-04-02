@@ -408,12 +408,16 @@ task fast_fault:
             item.summary.contains("prep_a / prep_b")
                 && item.kind == OptimizationOpportunityKind::ParallelizeIndependentSteps
         }));
-        assert!(opportunities
-            .iter()
-            .any(|item| item.kind == OptimizationOpportunityKind::MergeRedundantWait));
-        assert!(opportunities
-            .iter()
-            .any(|item| item.kind == OptimizationOpportunityKind::MergeAdjacentDelay));
+        assert!(
+            opportunities
+                .iter()
+                .any(|item| item.kind == OptimizationOpportunityKind::MergeRedundantWait)
+        );
+        assert!(
+            opportunities
+                .iter()
+                .any(|item| item.kind == OptimizationOpportunityKind::MergeAdjacentDelay)
+        );
         assert!(opportunities.iter().any(|item| {
             item.kind == OptimizationOpportunityKind::ReplaceRecoveryRoute
                 && item.summary.contains("slow_fault -> fast_fault")

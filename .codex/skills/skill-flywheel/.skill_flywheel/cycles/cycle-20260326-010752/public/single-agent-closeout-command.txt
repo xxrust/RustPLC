@@ -1,0 +1,15 @@
+在仓库根目录执行下面的命令，为 `skill-flywheel` 初始化当前这轮“单代理 `weak-blind` 闭环”研究回合：
+
+```powershell
+python .codex/skills/skill-flywheel/scripts/init_public_surface.py `
+  --repo-root . `
+  --target-skill-path .codex/skills/skill-flywheel `
+  --task-file single-agent-closeout.md
+```
+
+说明：
+
+- 该命令假定你当前就在仓库根目录
+- `single-agent-closeout.md` 会从目标 skill 自己的 `.skill_flywheel/tasks/` 目录解析
+- 这轮的默认目标不是并行 blind-runner，而是让研究者在无法或不应启动子 agent 时，仍能完成一次最小 `weak-blind` 闭环
+- 初始化完成后，优先继续阅读 `public/single-agent-closeout-checklist.md`

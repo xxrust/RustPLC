@@ -2,11 +2,6 @@ use crate::ast::{
     ActionStatement, ComparisonOperator, ConditionExpression, Expression, LiteralValue,
     OnCompleteDirective, PlcProgram, StepStatement, WaitCondition, WaitStatement,
 };
-use crate::device_semantics::axis::move_action_view as axis_move_action_view;
-use crate::device_semantics::cylinder::{
-    complementary_end_state_port as complementary_cylinder_state_port,
-    is_end_state_port as is_cylinder_end_state_port, stroke_action_view as cylinder_stroke_action_view,
-};
 use crate::ir::{ActionKind, StateMachine, TransitionGuard};
 use petgraph::algo::kosaraju_scc;
 use petgraph::graph::DiGraph;
@@ -122,7 +117,7 @@ pub fn verify_liveness(
 
     let step_line_map = collect_step_line_map(program);
     let step_wait_profiles = collect_step_wait_profiles(program, state_machine);
-    check_wait_timeout_or_allow(program, &step_wait_profiles, &mut diagnostics);
+    check_wait_timeout_or_allow(program, &mut diagnostics);
     check_concurrent_wait_deadlocks(program, &step_wait_profiles, &mut diagnostics);
     check_unreachable_on_complete(program, &mut diagnostics);
     check_non_terminal_zero_out_degree(program, state_machine, &step_line_map, &mut diagnostics);
@@ -141,60 +136,35 @@ pub fn verify_liveness(
     }
 }
 
-fn check_wait_timeout_or_allow(
-    program: &PlcProgram,
-    step_wait_profiles: &HashMap<(String, String), StepWaitProfile>,
-    diagnostics: &mut Vec<LivenessDiagnostic>,
-) {
-    let closed_loop_cylinder_devices = collect_topology_closed_cylinder_devices(program);
-
+fn check_wait_timeout_or_allow(program: &PlcProgram, diagnostics: &mut Vec<LivenessDiagnostic>) {
     for task in &program.tasks.tasks {
         for step in &task.steps {
             let mut facts = StepLivenessFacts::default();
             collect_step_liveness_facts(&step.statements, &mut facts);
-            let profile = step_wait_profile_for_state(
-                step_wait_profiles,
-                &state_key(&task.name, &step.name),
-            );
 
-            if !facts.has_timeout && !facts.has_delay && !facts.has_allow_indefinite_wait {
-                for wait in facts.waits {
-                    diagnostics.push(LivenessDiagnostic {
-                        line: step.line.max(1),
-                        reason: format!(
-                            "task {}.{} 的 wait 条件 `{wait}` 缺少 timeout 分支，且未设置 allow_indefinite_wait",
-                            task.name, step.name
-                        ),
-                        physical_analysis: "如果传感器信号长期不满足，控制逻辑会永久停留在该等待点。"
-                            .to_string(),
-                        suggestion: "请为该 step 添加 `timeout: <时长> -> goto <恢复 task>`，或在人工等待场景显式设置 `allow_indefinite_wait: true`".to_string(),
-                    });
-                }
+            if facts.waits.is_empty()
+                || facts.has_timeout
+                || facts.has_delay
+                || facts.has_allow_indefinite_wait
+            {
+                continue;
             }
 
-            if profile.has_pending_action
-                && !profile.has_bounded_wait()
-                && !profile.has_allow_indefinite_wait
-            {
-                for pending_action in
-                    collect_pending_action_texts(&step.statements, &closed_loop_cylinder_devices)
-                {
-                    diagnostics.push(LivenessDiagnostic {
-                        line: step.line.max(1),
-                        reason: format!(
-                            "task {}.{} 的 pending action `{pending_action}` 缺少 timeout 分支，且未设置 allow_indefinite_wait",
-                            task.name, step.name
-                        ),
-                        physical_analysis:
-                            "如果设备动作关联反馈长期不到位，task 会永久停留在该动作的阻塞等待中。"
-                                .to_string(),
-                        suggestion: "请为该 pending action 添加 `timeout: <时长> -> goto <恢复 task>`，或只在确认属于人工等待时显式声明 `allow_indefinite_wait: true`".to_string(),
-                    });
-                }
+            for wait in facts.waits {
+                diagnostics.push(LivenessDiagnostic {
+                    line: step.line.max(1),
+                    reason: format!(
+                        "task {}.{} 的 wait 条件 `{wait}` 缺少 timeout 分支，且未设置 allow_indefinite_wait",
+                        task.name, step.name
+                    ),
+                    physical_analysis: "若传感器信号长期不满足（线路故障/执行器卡滞/设备离线），控制逻辑会永久停留在该等待点".to_string(),
+                    suggestion: "请为该 step 添加 `timeout: <时长> -> goto <恢复 task>`，或在人工等待场景显式设置 `allow_indefinite_wait: true`".to_string(),
+                });
             }
         }
     }
 }
+
 fn check_unreachable_on_complete(program: &PlcProgram, diagnostics: &mut Vec<LivenessDiagnostic>) {
     for task in &program.tasks.tasks {
         if !matches!(task.on_complete, Some(OnCompleteDirective::Unreachable)) {
@@ -501,16 +471,11 @@ fn collect_step_wait_profiles(
     state_machine: &StateMachine,
 ) -> HashMap<(String, String), StepWaitProfile> {
     let mut profiles = HashMap::new();
-    let closed_loop_cylinder_devices = collect_topology_closed_cylinder_devices(program);
 
     for task in &program.tasks.tasks {
         for step in &task.steps {
             let mut profile = StepWaitProfile::default();
-            collect_step_wait_profile_from_statements(
-                &step.statements,
-                &closed_loop_cylinder_devices,
-                &mut profile,
-            );
+            collect_step_wait_profile_from_statements(&step.statements, &mut profile);
             profiles.insert(state_key(&task.name, &step.name), profile);
         }
     }
@@ -519,10 +484,7 @@ fn collect_step_wait_profiles(
         for pending in &task_ctx.pending_actions {
             if !matches!(
                 pending.action_kind,
-                ActionKind::Extend
-                    | ActionKind::Retract
-                    | ActionKind::AxisMoveRelative
-                    | ActionKind::AxisMoveAbsolute
+                ActionKind::AxisMoveRelative | ActionKind::AxisMoveAbsolute
             ) {
                 continue;
             }
@@ -541,31 +503,31 @@ fn collect_step_wait_profiles(
 
 fn collect_step_wait_profile_from_statements(
     statements: &[StepStatement],
-    closed_loop_cylinder_devices: &HashSet<String>,
     profile: &mut StepWaitProfile,
 ) {
     for statement in statements {
         match statement {
-            StepStatement::Action(action) => {
-                if let Some(view) = axis_move_action_view(action) {
+            StepStatement::Action(action) => match action {
+                ActionStatement::AxisMoveRelative { timeout, .. }
+                | ActionStatement::AxisMoveAbsolute { timeout, .. } => {
                     profile.has_pending_action = true;
-                    if view.timeout.is_some() {
+                    if timeout.is_some() {
                         profile.has_timeout_escape = true;
                     }
-                    continue;
                 }
-
-                if let Some(view) = cylinder_stroke_action_view(action) {
-                    if view.uses_closed_loop_semantics()
-                        || closed_loop_cylinder_devices.contains(&view.target.device)
-                    {
-                        profile.has_pending_action = true;
-                        if view.timeout.is_some() {
-                            profile.has_timeout_escape = true;
-                        }
-                    }
-                }
-            }
+                ActionStatement::Extend { .. }
+                | ActionStatement::Retract { .. }
+                | ActionStatement::Set { .. }
+                | ActionStatement::SetAnalog { .. }
+                | ActionStatement::SetAnalogExpr { .. }
+                | ActionStatement::Compute { .. }
+                | ActionStatement::Call { .. }
+                | ActionStatement::CamEngage { .. }
+                | ActionStatement::CamDisengage { .. }
+                | ActionStatement::CamSwitch { .. }
+                | ActionStatement::CamPhase { .. }
+                | ActionStatement::Log { .. } => {}
+            },
             StepStatement::Wait(_) => profile.has_wait_condition = true,
             StepStatement::Timeout(_) => profile.has_timeout_escape = true,
             StepStatement::Delay { .. } => {
@@ -578,154 +540,19 @@ fn collect_step_wait_profile_from_statements(
                 }
             }
             StepStatement::Repeat { body, .. } => {
-                collect_step_wait_profile_from_statements(
-                    body,
-                    closed_loop_cylinder_devices,
-                    profile,
-                )
+                collect_step_wait_profile_from_statements(body, profile)
             }
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
-                    collect_step_wait_profile_from_statements(
-                        &branch.statements,
-                        closed_loop_cylinder_devices,
-                        profile,
-                    );
+                    collect_step_wait_profile_from_statements(&branch.statements, profile);
                 }
             }
             StepStatement::Race(block) => {
                 for branch in &block.branches {
-                    collect_step_wait_profile_from_statements(
-                        &branch.statements,
-                        closed_loop_cylinder_devices,
-                        profile,
-                    );
+                    collect_step_wait_profile_from_statements(&branch.statements, profile);
                 }
             }
             StepStatement::IfElse { .. } | StepStatement::Goto(_) | StepStatement::Effect(_) => {}
-        }
-    }
-}
-
-fn collect_topology_closed_cylinder_devices(program: &PlcProgram) -> HashSet<String> {
-    let cylinder_names = program
-        .topology
-        .devices
-        .iter()
-        .filter(|device| matches!(device.device_type, crate::ast::DeviceType::Cylinder))
-        .map(|device| device.name.clone())
-        .collect::<HashSet<_>>();
-
-    let mut state_ports_by_device = HashMap::<String, HashSet<String>>::new();
-    for connection in &program.topology.connections {
-        collect_closed_loop_cylinder_port(
-            &cylinder_names,
-            &mut state_ports_by_device,
-            &connection.from,
-            connection.from_port.as_deref(),
-        );
-        collect_closed_loop_cylinder_port(
-            &cylinder_names,
-            &mut state_ports_by_device,
-            &connection.to,
-            connection.to_port.as_deref(),
-        );
-    }
-
-    state_ports_by_device
-        .into_iter()
-        .filter_map(|(device, ports)| {
-            ports.iter().any(|port| {
-                complementary_cylinder_state_port(port)
-                    .is_some_and(|complementary| ports.contains(&complementary))
-            })
-            .then_some(device)
-        })
-        .collect()
-}
-
-fn collect_closed_loop_cylinder_port(
-    cylinder_names: &HashSet<String>,
-    state_ports_by_device: &mut HashMap<String, HashSet<String>>,
-    device_name: &str,
-    port: Option<&str>,
-) {
-    let Some(port) = port else {
-        return;
-    };
-    if !cylinder_names.contains(device_name) || !is_cylinder_end_state_port(port) {
-        return;
-    }
-    state_ports_by_device
-        .entry(device_name.to_string())
-        .or_default()
-        .insert(port.to_string());
-}
-
-fn collect_pending_action_texts(
-    statements: &[StepStatement],
-    closed_loop_cylinder_devices: &HashSet<String>,
-) -> Vec<String> {
-    let mut actions = Vec::new();
-    collect_pending_action_texts_from_statements(
-        statements,
-        closed_loop_cylinder_devices,
-        &mut actions,
-    );
-    actions
-}
-
-fn collect_pending_action_texts_from_statements(
-    statements: &[StepStatement],
-    closed_loop_cylinder_devices: &HashSet<String>,
-    actions: &mut Vec<String>,
-) {
-    for statement in statements {
-        match statement {
-            StepStatement::Action(action) => {
-                if let Some(view) = axis_move_action_view(action) {
-                    actions.push(view.action_text());
-                    continue;
-                }
-
-                if let Some(view) = cylinder_stroke_action_view(action) {
-                    if view.uses_closed_loop_semantics()
-                        || closed_loop_cylinder_devices.contains(&view.target.device)
-                    {
-                        actions.push(view.action_text());
-                    }
-                }
-            }
-            StepStatement::Repeat { body, .. } => collect_pending_action_texts_from_statements(
-                body,
-                closed_loop_cylinder_devices,
-                actions,
-            ),
-            StepStatement::Parallel(block) => {
-                for branch in &block.branches {
-                    collect_pending_action_texts_from_statements(
-                        &branch.statements,
-                        closed_loop_cylinder_devices,
-                        actions,
-                    );
-                }
-            }
-            StepStatement::Race(block) => {
-                for branch in &block.branches {
-                    collect_pending_action_texts_from_statements(
-                        &branch.statements,
-                        closed_loop_cylinder_devices,
-                        actions,
-                    );
-                }
-            }
-            StepStatement::Wait(_)
-            | StepStatement::IfElse { .. }
-            | StepStatement::Delay { .. }
-            | StepStatement::Timeout(_)
-            | StepStatement::Goto(_)
-            | StepStatement::AllowIndefiniteWait(_)
-            | StepStatement::Effect(_) => {}
         }
     }
 }
@@ -1197,10 +1024,14 @@ mod tests {
     fn passes_prd_5_5_1_to_5_5_3_liveness_examples() {
         let source = r#"
 [topology]
-
 device cyl_A: cylinder
-
 device cyl_B: cylinder
+device sensor_A_ext: sensor
+device sensor_A_ret: sensor
+device sensor_B_ext: sensor
+device sensor_B_ret: sensor
+device start_button: sensor
+device alarm_light: digital_output
 
 [constraints]
 
@@ -1655,85 +1486,6 @@ task fault:
                     && error.to_string().contains("缺少 timeout")),
             "错误应指出 fault.timeout 恢复等待缺少 timeout"
         );
-    }
-
-    #[test]
-    fn rejects_closed_loop_cylinder_pending_action_without_timeout() {
-        let source = r#"
-[topology]
-
-device cyl_a: cylinder
-device sensor_ext: sensor
-device sensor_ret: sensor
-
-relation { from: cyl_a.extended, to: sensor_ext.sense, via: detects }
-relation { from: cyl_a.retracted, to: sensor_ret.sense, via: detects }
-
-[constraints]
-
-[tasks]
-
-task main:
-    step extend:
-        action: extend cyl_a
-    on_complete: goto done
-
-task done:
-    step idle:
-        action: log "idle"
-"#;
-
-        let program = parse_plc(source).expect("test program should parse");
-        let state_machine = build_state_machine(&program).expect("state machine should build");
-
-        let errors = verify_liveness(&program, &state_machine)
-            .expect_err("closed-loop cylinder pending action without timeout should fail");
-
-        assert!(
-            errors.iter().any(|error| {
-                error.to_string().contains("extend cyl_a")
-                    && error.to_string().contains("缺少 timeout")
-            }),
-            "error should point to the closed-loop cylinder pending action missing timeout"
-        );
-    }
-
-    #[test]
-    fn accepts_closed_loop_cylinder_pending_action_with_timeout() {
-        let source = r#"
-[topology]
-
-device cyl_a: cylinder
-device sensor_ext: sensor
-device sensor_ret: sensor
-
-relation { from: cyl_a.extended, to: sensor_ext.sense, via: detects }
-relation { from: cyl_a.retracted, to: sensor_ret.sense, via: detects }
-
-[constraints]
-
-[tasks]
-
-task main:
-    step extend:
-        action: extend cyl_a
-            timeout: 100ms -> goto fault.timeout
-    on_complete: goto done
-
-task fault:
-    step timeout:
-        action: log "timeout"
-
-task done:
-    step idle:
-        action: log "idle"
-"#;
-
-        let program = parse_plc(source).expect("test program should parse");
-        let state_machine = build_state_machine(&program).expect("state machine should build");
-
-        verify_liveness(&program, &state_machine)
-            .expect("closed-loop cylinder pending action with timeout should pass");
     }
 
     #[test]

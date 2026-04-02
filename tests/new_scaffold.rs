@@ -65,7 +65,9 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
     let tasks_json =
         fs::read_to_string(project_dir.join(".vscode/tasks.json")).expect("read tasks.json");
     assert!(
-        tasks_json.contains("RustPLC: scenario-validate")
+        tasks_json.contains("RustPLC: project-check")
+            && tasks_json.contains("out/project_check/normal")
+            && tasks_json.contains("RustPLC: scenario-validate")
             && tasks_json.contains("RustPLC: scenario-doctor")
             && tasks_json.contains("RustPLC: sim-plc")
             && tasks_json.contains("RustPLC: no-board-gate")
@@ -86,7 +88,9 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
     );
     let readme = fs::read_to_string(project_dir.join("README.md")).expect("read README.md");
     assert!(
-        readme.contains("# Demo Project") && readme.contains("Project slug: `demo_project`"),
+        readme.contains("# Demo Project")
+            && readme.contains("Project slug: `demo_project`")
+            && readme.contains("project-check"),
         "README should include derived project name and slug"
     );
     let system_doc =
@@ -105,6 +109,29 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
             && manifest.contains("scenario = \"scenarios/nominal/normal.yaml\"")
             && manifest.contains("codegen = \"out/codegen\""),
         "manifest should include project identity and default paths"
+    );
+
+    let self_check = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("project-check")
+        .arg(project_dir.join("plc/main.plc"))
+        .arg("--scenario")
+        .arg(project_dir.join("scenarios/nominal/normal.yaml"))
+        .arg("--out-dir")
+        .arg(project_dir.join("out/project_check/normal"))
+        .arg("--output")
+        .arg("json")
+        .output()
+        .expect("run project-check");
+    assert!(
+        self_check.status.success(),
+        "generated project-check should pass, stderr: {}",
+        String::from_utf8_lossy(&self_check.stderr)
+    );
+    assert!(
+        project_dir
+            .join("out/project_check/normal/project_check_report.json")
+            .exists(),
+        "project-check should write the aggregated report"
     );
 
     let validate = Command::new(env!("CARGO_BIN_EXE_rust_plc"))

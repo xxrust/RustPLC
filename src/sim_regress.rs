@@ -754,38 +754,25 @@ fn io_sizes_for_program_and_scenario(
     for task in program.tasks {
         for step in task.steps {
             match step.instr {
+                Instr::WaitAllDigital { conditions, .. } => {
+                    for condition in conditions {
+                        max_di = Some(max_di.map_or(condition.id.0, |m| m.max(condition.id.0)));
+                    }
+                }
                 Instr::WaitDigital { id, .. } => {
                     max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
                 }
                 Instr::WaitAnalog { id, .. } => {
                     max_ai = Some(max_ai.map_or(id.0, |m| m.max(id.0)));
                 }
-                Instr::WaitAllDigital { conditions, .. } => {
-                    for condition in conditions {
-                        max_di = Some(max_di.map_or(condition.id.0, |m| m.max(condition.id.0)));
-                    }
-                }
                 Instr::Action { actions, .. } => {
                     for a in actions {
                         match *a {
                             Action::SetDigital { id, .. }
                             | Action::Extend { output: id }
-                            | Action::Retract { output: id } => {
+                            | Action::Retract { output: id }
+                            | Action::CylinderMotion { output: id, .. } => {
                                 max_do = Some(max_do.map_or(id.0, |m| m.max(id.0)));
-                            }
-                            Action::CylinderMotion {
-                                output: id,
-                                confirm_inputs,
-                                opposing_inputs,
-                                ..
-                            } => {
-                                max_do = Some(max_do.map_or(id.0, |m| m.max(id.0)));
-                                for id in confirm_inputs {
-                                    max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
-                                }
-                                for id in opposing_inputs {
-                                    max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
-                                }
                             }
                             Action::SetAnalog { id, .. } => {
                                 max_ao = Some(max_ao.map_or(id.0, |m| m.max(id.0)));

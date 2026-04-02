@@ -2,15 +2,7 @@
 
 device plc_main: plc {
     purpose: "控制器本体与双轴运动平台 I/O 端口映射",
-    ports: [
-        Y0:digital:producer,
-        Y1:digital:producer,
-        X0:digital:consumer,
-        X1:digital:consumer,
-        X2:digital:consumer,
-        X3:digital:consumer,
-        X4:digital:consumer
-    ]
+    model_ref: openplc_softplc
 }
 
 device start_button: sensor {

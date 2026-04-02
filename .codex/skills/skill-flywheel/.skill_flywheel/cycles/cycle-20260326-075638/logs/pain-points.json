@@ -1,0 +1,19 @@
+{
+  "task": "make `skill-flywheel` self-iterate like Ralph via a shell-driven fresh-process loop, and avoid converging before 5 outer iterations unless there is a hard blocker.",
+  "hypothesis_signal": "partial-support",
+  "result_summary": "The weak-blind closeout contract now explicitly requires `decision.json` to carry the same substantive conclusion as `decision.md`, which closes the machine-readable disk-state gap from the previous round.",
+  "pain_points": [
+    {
+      "step": "Read public/single-agent-closeout-checklist.md from the new cycle",
+      "blocker": "A blind runner previously had no explicit instruction that `decision.json` is authoritative for runner state and stop conditions.",
+      "missing_item": "A public rule to synchronize `decision.md` and `decision.json`, including the fields `hypothesis_status`, `key_evidence`, `minimal_actions`, `continue_next_cycle`, and `next_question`.",
+      "impact": "Without the JSON sync rule, the outer runner can keep seeing the cycle as unfinished even after a real closeout is written in Markdown."
+    },
+    {
+      "step": "Ask whether the shell loop is now proven end-to-end",
+      "blocker": "This round validated the public contract and tests, but did not rerun the outer shell loop after the contract fix.",
+      "missing_item": "A fresh shell-driven replay that consumes the updated `decision.json` and advances state on disk across repeated invocations.",
+      "impact": "The disk-state contract is improved, but the five-iteration fresh-process claim still needs a post-fix replay."
+    }
+  ]
+}

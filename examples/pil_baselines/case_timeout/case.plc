@@ -5,7 +5,10 @@ device start_button: sensor { purpose: "启动信号输入，用于触发超时�
 
 relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 
-device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [X0:digital:consumer] }
+device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
+    model_ref: openplc_softplc
+}
 [constraints]
 
 [tasks]

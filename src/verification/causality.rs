@@ -3,7 +3,6 @@ use crate::ast::{
     GotoDirective, LiteralValue, OnCompleteDirective, PlcProgram, StepDeclaration, StepStatement,
     WaitCondition, WaitStatement,
 };
-use crate::device_semantics::axis::move_action_view as axis_move_action_view;
 use crate::device_semantics::cylinder::stroke_action_view as cylinder_stroke_action_view;
 use crate::ir::{ConstraintSet, DeviceKind, TopologyGraph};
 use petgraph::algo::has_path_connecting;
@@ -787,31 +786,63 @@ fn motion_action_branches(
         ));
     }
 
-    if let Some(view) = axis_move_action_view(action) {
-        let mut branches = view.branch_targets();
-        branches.extend(
-            view.on_reject_routes
-                .iter()
-                .map(|route| ("on_reject_route", &route.target)),
-        );
-        branches.extend(
-            view.on_motion_fault_routes
-                .iter()
-                .map(|route| ("on_motion_fault_route", &route.target)),
-        );
-        branches.extend(
-            view.on_safety_fault_routes
-                .iter()
-                .map(|route| ("on_safety_fault_route", &route.target)),
-        );
-        return Some((
-            view.action_text(),
-            view.target.device.clone(),
-            branches,
-        ));
+    match action {
+        ActionStatement::AxisMoveRelative {
+            target,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+            ..
+        } => {
+            let mut branches = Vec::new();
+            if let Some(branch) = timeout.as_ref() {
+                branches.push(("timeout", &branch.target));
+            }
+            if let Some(branch) = on_reject.as_ref() {
+                branches.push(("on_reject", branch));
+            }
+            if let Some(branch) = on_motion_fault.as_ref() {
+                branches.push(("on_motion_fault", branch));
+            }
+            if let Some(branch) = on_safety_fault.as_ref() {
+                branches.push(("on_safety_fault", branch));
+            }
+            Some((
+                format!("axis.move_relative {}", target.device),
+                target.device.clone(),
+                branches,
+            ))
+        }
+        ActionStatement::AxisMoveAbsolute {
+            target,
+            timeout,
+            on_reject,
+            on_motion_fault,
+            on_safety_fault,
+            ..
+        } => {
+            let mut branches = Vec::new();
+            if let Some(branch) = timeout.as_ref() {
+                branches.push(("timeout", &branch.target));
+            }
+            if let Some(branch) = on_reject.as_ref() {
+                branches.push(("on_reject", branch));
+            }
+            if let Some(branch) = on_motion_fault.as_ref() {
+                branches.push(("on_motion_fault", branch));
+            }
+            if let Some(branch) = on_safety_fault.as_ref() {
+                branches.push(("on_safety_fault", branch));
+            }
+            Some((
+                format!("axis.move_absolute {}", target.device),
+                target.device.clone(),
+                branches,
+            ))
+        }
+        _ => None,
     }
-
-    None
 }
 
 fn resolve_goto_step<'a>(

@@ -39,7 +39,10 @@ relation { from: inpos_x.out, to: plc_main.X0, via: reports_to }
 relation { from: axis_x.alarm, to: alarm_x.sense, via: detects }
 relation { from: alarm_x.out, to: plc_main.X1, via: reports_to }
 
-device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [Y0:digital:producer, Y1:digital:producer, Y2:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, AI0:analog:consumer, AI1:analog:consumer, AI2:analog:consumer] }
+device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
+    model_ref: openplc_softplc
+}
 [constraints]
 
 # Basic: do not enable the axis while drive is alarming.

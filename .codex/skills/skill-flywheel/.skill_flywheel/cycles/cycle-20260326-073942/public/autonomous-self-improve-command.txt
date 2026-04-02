@@ -1,0 +1,30 @@
+直接运行 5 轮外层迭代：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .codex/skills/skill-flywheel/scripts/flywheel.ps1 `
+  -RepoRoot E:\personal_project\rust_plc `
+  -TargetSkillPath E:\personal_project\rust_plc\.codex\skills\skill-flywheel `
+  -TaskFile autonomous-self-improve.md `
+  -Tool codex `
+  -MaxIterations 5 `
+  -ResetState
+```
+
+后台运行 5 轮外层迭代：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .codex/skills/skill-flywheel/scripts/start_flywheel_background.ps1 `
+  -RepoRoot E:\personal_project\rust_plc `
+  -TargetSkillPath E:\personal_project\rust_plc\.codex\skills\skill-flywheel `
+  -TaskFile autonomous-self-improve.md `
+  -Tool codex `
+  -MaxIterations 5 `
+  -ResetState
+```
+
+说明：
+
+- 外层循环由 `flywheel.ps1` 管，不再只依赖单次会话
+- 每一轮真正的研究状态仍然落到 `.skill_flywheel/cycles/`、`runner_state.json` 和 `progress.txt`
+- 后台日志默认写到 `E:\personal_project\rust_plc\.codex\skills\skill-flywheel\.skill_flywheel\runner_logs\`
+- 启动后按 `autonomous-self-improve-checklist.md` 检查磁盘状态是否真的推进，而不是只确认命令能跑

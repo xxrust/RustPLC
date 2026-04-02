@@ -1,0 +1,17 @@
+{
+  "research_question": "Can the updated plc-gen now stably interpret wafer-loader-like confirmed contracts as plc structure rather than stopping at scaffold advice?",
+  "hypothesis_status": "support",
+  "key_evidence": [
+    "plc-gen now requires a confirmed-system lowering summary step",
+    "lowering, mode/recovery, launcher, and validation artifacts are all exported",
+    "verify round found no new lowering blocker for wafer-loader-like contracts"
+  ],
+  "minimal_actions": [
+    "stop current flywheel iteration",
+    "carry explicit weak-blind labeling into final report"
+  ],
+  "continue_next_cycle": false,
+  "classification": "task-ambiguity",
+  "decision_summary": "plc-gen is now materially stronger on confirmed-system-to-plc lowering. Further same-shape weak-blind rounds are unlikely to add evidence.",
+  "next_question": "Stop. Future work should be a real generated-plc task or clean-room verification, not another same-shape weak-blind pass."
+}

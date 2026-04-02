@@ -1,0 +1,19 @@
+{
+  "task": "为 `skill-flywheel` 自己初始化一轮新的研究回合，并在不启动子 agent 的前提下完成一次最小 `weak-blind` 闭环。\n\n要求：\n\n1. 使用提供的命令初始化一个新的 cycle。\n2. 盲测观察阶段只允许读取：\n   - 目标 skill 的 `SKILL.md`\n   - 新 cycle 下的 `context/`\n   - 新 cycle 下的 `public/`\n3. 基于这些输入，手工完成：\n   - `logs/pain-points.md`\n   - `logs/pain-points.json`\n   - `logs/root-cause.md`\n   - `logs/root-cause.json`\n   - `logs/decision.md`\n   - `logs/decision.json`\n4. 如果当前流程缺少单代理 fallback、证据强度标注或闭环步骤说明，把它记录成痛点。\n5. 不要把本轮结果写成 `clean-room` 通过；如果只是当前会话内完成的观察，必须明确标记为 `weak-blind`。\n",
+  "hypothesis_signal": "weakened",
+  "result_summary": "仅依赖目标 skill、context 和 public 工件，可以理解本轮边界与目标，但无法得到一套明确的单代理 weak-blind 闭环步骤。",
+  "pain_points": [
+    {
+      "step": "读取公开初始化命令",
+      "blocker": "smoke-run-command.txt 仍然指向旧的 self-smoke.md 任务，而不是本轮的 single-agent-closeout.md。",
+      "missing_item": "与当前研究问题一致的初始化命令，或对旧 smoke 命令适用范围的明确说明。",
+      "impact": "盲测执行者容易启动错误任务，无法真正验证单代理 fallback。"
+    },
+    {
+      "step": "尝试根据 skill 与公开工件完成单代理闭环",
+      "blocker": "SKILL.md 与 public 工件没有给出明确的单代理 fallback 协议，也没有要求如何标记 weak-blind 证据。",
+      "missing_item": "单代理执行清单，覆盖允许读取范围、建议顺序，以及 pain-points/root-cause/decision 的 weak-blind 标注方式。",
+      "impact": "研究者需要依赖临时推理补流程，cycle 结果不够稳定可复现。"
+    }
+  ]
+}

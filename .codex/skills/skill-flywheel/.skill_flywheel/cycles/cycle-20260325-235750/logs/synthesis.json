@@ -1,0 +1,9 @@
+{
+  "common_findings": [
+    "结构化日志骨架会被初始化脚本自动生成",
+    "manifest 会暴露结构化日志路径"
+  ],
+  "run_specific_findings": [],
+  "conflicts": [],
+  "overall_signal": "support"
+}

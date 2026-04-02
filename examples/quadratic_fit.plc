@@ -55,7 +55,7 @@ variable i: float = 0.0
 
 device plc_main: plc {
     purpose: "控制器本体",
-    ports: [X0:digital:consumer]
+    model_ref: openplc_softplc
 }
 
 [constraints]

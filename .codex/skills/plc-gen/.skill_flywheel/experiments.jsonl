@@ -1,0 +1,7 @@
+{"cycle":"cycle-20260326-plcgen-round1-baseline","question":"没有本地公开工件面时，plc-gen 是否能稳定指导确认版 .system.md 的 Day-1 交付","decision":"continue","reason":"发现稳定的 public-surface-gap 和 system-contract-ingest skill-gap"}
+{"cycle":"cycle-20260326-plcgen-round2-public-surface","question":"补出 launcher / contract gate / validation order 后，Day-1 工件面是否闭环","decision":"continue","reason":"公开工件面已闭环，但还需要在 skill 本体里收紧已确认 .system.md 的回答顺序"}
+{"cycle":"cycle-20260326-plcgen-round3-verify","question":"公开工件面和 skill 本体一起更新后，是否足以支撑 Day-1 弱盲执行","decision":"stop","reason":"本地配置、cycle 导出与目标测试均通过，当前问题收敛"}
+{"cycle":"cycle-20260326-plcgen-round4-system-lowering","question":"面对 wafer_loader.system.md 这类确认版合同时，plc-gen 是否已经显式说明如何把 task/mode/fault/counter/resource 降成 .plc 结构","decision":"continue","reason":"发现 lowering 规则仍主要依赖执行者自行归纳"}
+{"cycle":"cycle-20260326-plcgen-round5-system-lowering-verify","question":"补出 lowering 规则后，plc-gen 是否更适合直接生成真实 PLC 而不是只停在 Day-1 脚手架","decision":"stop","reason":"confirmed system -> plc lowering 主路径已经显式化，当前弱盲优化目标收敛"}
+{"cycle":"cycle-20260326-plcgen-round6-scenario-toolchain","question":"真实复杂 PLC 替换 scaffold 后，plc-gen 是否已经显式处理 scenario 工具链对复合 wait guard 的兼容性阻塞","decision":"continue","reason":"真实运行暴露出 scenario-init/validate/doctor 在 wafer_loader.plc 上的 toolchain blocker"}
+{"cycle":"cycle-20260326-plcgen-round7-scenario-toolchain-verify","question":"补出 scenario-friendly lowering 与 toolchain blocker 规则后，plc-gen 是否更接近一个真实可交付的 PLC 生成 skill","decision":"stop","reason":"真实工具链阻塞已进入 skill 公开面与指令主路径，当前弱盲优化目标再次收敛"}

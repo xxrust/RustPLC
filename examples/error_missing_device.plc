@@ -7,7 +7,10 @@ device valve_A: solenoid_valve {
 }
 relation { from: Y9, to: valve_A.coil, via: driven_by }
 
-device plc_main: plc { purpose: "控制器本体与工艺 I/O 端口映射",  ports: [Y0:digital:producer] }
+device plc_main: plc {
+    purpose: "控制器本体与工艺 I/O 端口映射",
+    model_ref: openplc_softplc
+}
 [constraints]
 
 [tasks]

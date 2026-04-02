@@ -1,0 +1,85 @@
+*** Begin Patch
+*** Add File: docs/main.system.md
++# Assembly station system contract
++
++## Project identity
++- Station: carrier-based mini-assembly cell that mates two sensor subassemblies and an inspection cover onto a carrier then releases it downstream.
++- Line context: downstream of feeder/pick stations, upstream of final test. 1.5®C2.5 min cycle target.
++
++## System mission
++- Load, inspect and release carriers while ensuring adhesives/sealants cure safely, catching errors before the carrier leaves the station, and keeping the vision/axis tooling in a verified state.
++
++## Safety and reliability level
++- Target safety class: SIL 1 (functional safety) with 1/0 status tracking for carriers, adhesives, and stop requests.
++- Mechanical hazard mitigation via e-stop and contact sensor gating; adhesive dosing faults escalate to a fail task that holds carrier and alerts operator.
++- Timeout guarding for each axis move/cure delay/inspection to avoid indefinite blocking of shared resources.
++
++## Operating environment
++- Industrial hall, 10®C40?°„C, compressed air 4?bar, 24?V DC control bus, Ethernet I/O to upstream/downstream cells.
++- Humans may approach every carrier change (loading/unloading), so manual interaction points sit behind lockable guards with the same PLC context.
++- Throughput target 25 carriers/hour with a maximum of two simultaneously in station boundaries (one in assembly, one in inspection area).
++
++## Normal process flow
++1. `carrier_ingress` task waits for the upstream handover signal, opens the shuttle gate, and `wait`s for carrier presence confirmation before locking the clamp.
++2. `component_transfer` task executes `axis.move_linear/axis.move_rotary` to pick adhesives and parts, applies adhesives, and places subassemblies, then issues a `delay` to let adhesives stabilize on the carrier.
++3. `inspection_monitor` task runs while adhesives delay is running: it energizes vision/force sensors, `wait`s for trigger, gathers measurements, and flags early rejects via `timeout` on the vision feedback stream.
++4. `handoff` task `wait`s for downstream ack, lifts the carrier, and `axis.move_*` to release the carrier to the next module.
++5. Station transitions to idle; `carrier_ingress` can start the next carrier as soon as gate/pressure clear, even if inspection is still validating the previous carrier.
++
++## Abnormal handling
++- Axis faults, sensor mismatches, or `timeout`ed inspections abort the current carrier, log the fault, drive the fail-safe LED, and hold the carrier until an operator resets via manual confirmation wait.
++- Adhesive pump underflow/overflow trips the `adhesive_fail` path, clamps the carrier, and routes to a failure task that waits for human clearance before releasing the lock and continuing.
++- Unsolicited e-stop or door opens immediately feed a global `stop_mode` that freezes all tasks, propagates the fault to downstream cells via handshake, and requires manual reset before restarting.
++- Any blocked resource (vision head, dispenser) signals other tasks to settle to a safe idle and not start new carriers while the resource remains unavailable.
++
++## Concurrent task partition
++- `carrier_ingress`: handles carrier acceptance, clamp, door sequencing; must not run concurrently with `maintenance_mode` but can run while `inspection_monitor` is active.
++- `component_transfer`: includes axis motion, adhesives, `delay`; necessitates exclusive access to the dispenser and pick/place axis. Shared resources: axis + dispenser (mutually exclusive). While this task is blocked, `inspection_monitor` may continue evaluating the previous carrier.
++- `inspection_monitor`: vision capture and measurement processing. Continues while adhesives cure to avoid blocking `carrier_ingress`. External feedback waits (vision signal, light curtain) gate start of `handoff`.
++- `handoff`: waits for downstream ack and can run while initial tasks are blocked; it consumes the carrier resource and coordinates release.
++- `maintenance_mode`: separate task pair triggered manually for diagnostics; it can preempt `component_transfer` but not `handoff` once release has started.
++
++## Blocking step expectations
++- `wait`s for carrier present, clamp locked, door closed, and downstream ack are explicit blocking points that must not be modeled as zero-delay transitions.
++- `delay` is the only reliable cure-slot (adhesive stabilize) and is blocking inside `component_transfer`; other tasks continue around it.
++- Every `axis.move_*` (pick, place, load, unload) is blocking until motion completes or a `timeout` fires, and must capture `timeout` to escalate to a fault task.
++- Adhesive pump priming is guarded by `wait` for pressure sensor and an accompanying `timeout` to prevent indefinite holds.
++- Manual confirmation waits appear when a failure task releases a carrier or an operator acknowledges an e-stop; these waits are blocking and require a distinct human action before resuming.
++- External feedback waits include upstream handshakes and downstream ack; failure to receive the handshake within `timeout` transitions to safe stop/fault task.
++
++## Startup and stop flow
++- Startup: verify sensors (door, carrier), reset axis to home, prime adhesives, confirm `feed_ready` from upstream, and set `mode_auto` before allowing `carrier_ingress` to run.
++- Stop: accept global `stop_mode` request, finish or abort any active motion, retract axes to safe park, release carrier clamps only after `inspection_monitor` flags pass or the operator explicitly aborts via human confirmation.
++- E-stop/power loss: immediate task suspension, propagate stop over network handshake, require manual reset command before re-entering auto mode.
++
++## Testing and maintenance modes
++- Provide `mode_maintenance` task set that runs axis homing separately, cycles vacuum/clamp actuators, and walks vision/adhesive diagnostics while keeping stations idle.
++- Provide `mode_manual` for operators to step through each `axis.move_*` and `component_transfer` stage with manual `wait` confirmations.
++- Regression scenarios must include at least one `inspection_monitor` fail to ensure the system transitions to failure task and requires reset; adhesives cure `delay` should be covered by both normal and timed-out cases.
++
++## Key constraints
++- Carrier occupancy limited to two per station boundary; do not start `carrier_ingress` until clamps and gates are idle.
++- Adhesive cure `delay` is 5®C12?s; the station must not allocate the dispenser during this period to a second carrier.
++- Vision/inspection header is a shared resource; only one inspection can run per carrier, but `inspection_monitor` runs concurrently with `component_transfer` delays.
++- Timeout for downstream acknowledgment is 3?s; exceeding it triggers a controlled stop and fault notification.
++- The station may only release carriers when no failure flag is active and the human confirmation wait (if triggered) is complete.
++
++## AI generation guidance
++- When modeling tasks in PLC, capture explicit concurrency per `docs/architecture/signal-direction.md`: `component_transfer` can delay while `inspection_monitor` continues, `carrier_ingress` only runs when door and clamps are free, and `handoff` waits for downstream ack.
++- Keep blocking waits explicit (`wait carrier_ready`, `delay adhesive_cure`, `axis.move_pick`) so verification can reason about pending actions and task-local state.
++- Capture shared-resource exclusions (axis/dispenser/vision) via mutual exclusion guards and propagate `timeout`/faults to dedicated failure tasks instead of burying them inside the runtime.
++
++## Axis control
++### Parameter layering
++- Reference motion profiles via `model_ref` definitions, with `config_ref` for line-specific speeds and a `motion_param_set` for adhesives pick/place `axis.move_*` behavior.
++- Speeds/acc/dec values are tuned offline; the system must allow overriding them per carrier type without touching semantic guards.
++### Homing and soft limits
++- Homing occurs before auto start in `startup` and must land axes at known `home` positions; soft limits held in config prevent excursions beyond tooling range.
++- Each motion has per-axis soft limits to keep pick/place within the carrier boundaries.
++### Fault policy
++- Axis faults raise a flagged `stop_mode` and subscribe to `severity` metadata (e.g., `severity=2` for axis drop). Faults auto reset only after operator `manual_ack_required` confirm per config.
++- `timeout`/`delay` hits escalate to failure tasks that hold the carrier and report the `auto_reset_policy` failure severity.
++### Propagation scope
++- Motion faults propagate to the station-level `fault task` (not system-wide) and, if unresolved, to scheduler-level `fault task` via `propagation_scope` defaulted to `self`.
++- Releasing the carrier after a motion fault is only permitted once the fault task clears to avoid mis-synchronization.
+*** End Patch

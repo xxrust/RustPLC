@@ -1,0 +1,18 @@
+{
+  "task": "为 `skill-flywheel` 自己初始化一轮新的研究回合，并在不启动子 agent 的前提下完成一次最小 `weak-blind` 闭环。\n\n要求：\n\n1. 使用提供的命令初始化一个新的 cycle。\n2. 盲测观察阶段只允许读取：\n   - 目标 skill 的 `SKILL.md`\n   - 新 cycle 下的 `context/`\n   - 新 cycle 下的 `public/`\n3. 基于这些输入，手工完成：\n   - `logs/pain-points.md`\n   - `logs/pain-points.json`\n   - `logs/root-cause.md`\n   - `logs/root-cause.json`\n   - `logs/decision.md`\n   - `logs/decision.json`\n4. 如果当前流程缺少单代理 fallback、证据强度标注或闭环步骤说明，把它记录成痛点。\n5. 不要把本轮结果写成 `clean-room` 通过；如果只是当前会话内完成的观察，必须明确标记为 `weak-blind`。\n",
+  "hypothesis_status": "weakened",
+  "findings": [
+    {
+      "pain_point": "公开初始化命令仍然指向旧的 self-smoke.md。",
+      "classification": "public-surface-gap",
+      "cause": "导出的命令工件是上一轮 smoke 自测的静态文件，当前 cycle 复制后没有与当前任务同步。",
+      "minimal_fix": "新增 single-agent-closeout 专用的公开命令与清单工件，并纳入 public_surface.json。"
+    },
+    {
+      "pain_point": "单代理 / 无子 agent 时的 fallback 没有写成稳定协议。",
+      "classification": "skill-gap",
+      "cause": "SKILL.md 与 workflow/boundary 文档只定义了角色和模式边界，没有写明在不能开子 agent 时如何手工完成 blind-runner、root-cause、decision。",
+      "minimal_fix": "在 SKILL.md、references/workflow.md 和 references/boundary.md 中补充单代理 weak-blind fallback 协议，并要求显式标记证据强度。"
+    }
+  ]
+}

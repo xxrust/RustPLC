@@ -1,0 +1,15 @@
+在仓库根目录执行下面的命令初始化 `skill-flywheel` 的最小 smoke cycle：
+
+```powershell
+python .codex/skills/skill-flywheel/scripts/init_public_surface.py `
+  --repo-root . `
+  --target-skill-path .codex/skills/skill-flywheel `
+  --task-file self-smoke.md
+```
+
+说明：
+
+- 该命令假定你当前就在仓库根目录
+- `--repo-root .` 和 `--target-skill-path .codex/skills/skill-flywheel` 会在运行时解析为当前仓库中的实际绝对路径
+- cycle 会默认写到 `.codex/skills/skill-flywheel/.skill_flywheel/cycles/`
+- `self-smoke.md` 会从目标 skill 自己的 `.skill_flywheel/tasks/` 目录解析

@@ -226,8 +226,8 @@ fn total_delay_ms(step: &StepDeclaration) -> u64 {
 mod tests {
     use super::generate_candidate_rewrites;
     use crate::ast::{StepStatement, TimeoutDirective};
-    use crate::optimization::analyzer::analyze_optimization_opportunities;
     use crate::optimization::CandidateRewriteKind;
+    use crate::optimization::analyzer::analyze_optimization_opportunities;
     use crate::parser::parse_plc;
     use crate::semantic::preprocess_program;
 

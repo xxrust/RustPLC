@@ -18,7 +18,7 @@
 
 - 并发 = 多个 active task 持有独立 task context
 - 不是“单执行点在 task.step 之间跳转”
-- `wait`、`delay`、`timeout`、`axis.move_*`、外部反馈动作默认都是 blocking
+- `wait`、`delay`、`timeout`、`axis.move_*` 默认都是 blocking
 - 一个 task 被 blocking step 挡住，不得阻塞其他 task
 
 如果一个 station 阻塞时另一个 station 还要继续跑，就必须拆成独立 task。
@@ -30,7 +30,15 @@
 - 非 manual wait 必须有 `timeout` 逃生路径
 - recovery / fault target 必须是真实 `task.step` 路径，不是抽象描述
 
-## 4. axis 规则
+## 4. 机构设备动作不得退化为传感器编排
+
+- 对于拓扑已闭合的机构设备，task step 应表达设备动作，不应显式重写关联传感器的正常到位逻辑
+- “拓扑已闭合”的判定与最小结果集合，服从 `AGENTS.md` 中“task 中的设备动作必须保持高层语义”的定义
+- 动作成功、超时以及全部关联反馈导出的异常结果，应作为设备动作语义进入编译器 / IR / runtime
+- task 负责按这些结果跳转，不负责手写 `wait sensor_a`、`if sensor_a and not sensor_b` 之类底层闭环
+- 如果现有 DSL 无法闭合某个设备动作结果，先报告语义能力缺口与 blocker；不要为了补机构正常到位闭环而伪造中间变量或监控 task，也不要静默删掉结果分流
+
+## 5. axis 规则
 
 当存在 axis motion 时：
 
@@ -43,7 +51,7 @@
 
 不要把 axis move 写成“本 step 内立刻完成”的普通即时 action。
 
-## 5. topology 与 device 质量
+## 6. topology 与 device 质量
 
 优先保证：
 
@@ -55,7 +63,7 @@
 
 不要用 `conflicts_with` 表达执行顺序。
 
-## 6. 生成 fault path 时的要求
+## 7. 生成 fault path 时的要求
 
 不要写模糊的“异常处理”注释替代真实 task。
 fault handling 必须成为实际 task/step，可被 semantic lowering、runtime bridge 与 verification 消费。

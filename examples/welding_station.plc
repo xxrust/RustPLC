@@ -2,19 +2,7 @@
 
 device plc_main: plc {
     purpose: "焊接工作站控制器本体与工艺 I/O 端口映射",
-    ports: [
-        Y0:digital:producer,
-        Y1:digital:producer,
-        Y2:digital:producer,
-        Y3:digital:producer,
-        X0:digital:consumer,
-        X1:digital:consumer,
-        X2:digital:consumer,
-        X3:digital:consumer,
-        X4:digital:consumer,
-        X5:digital:consumer,
-        X6:digital:consumer
-    ]
+    model_ref: openplc_softplc
 }
 
 device confirm_button: sensor {

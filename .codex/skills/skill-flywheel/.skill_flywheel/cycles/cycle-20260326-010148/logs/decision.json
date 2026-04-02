@@ -1,0 +1,16 @@
+{
+  "hypothesis_status": "supported",
+  "key_evidence": [
+    "初始盲测观察确认了公开命令仍指向旧任务，且 skill 未把单代理 fallback 写成稳定协议。",
+    "已新增 single-agent-closeout-command.txt 与 single-agent-closeout-checklist.md，并纳入 public_surface.json。",
+    "已在 SKILL.md、references/workflow.md、references/boundary.md 中补入单代理 weak-blind fallback 规则。",
+    "复跑初始化后，新 cycle 010752 已导出单代理公开工件，且默认并行 scaffold 对齐为单实例 run-01。"
+  ],
+  "minimal_actions": [
+    "新增当前任务对应的公开命令与闭环清单工件。",
+    "在 skill 和参考文档中补充单代理 fallback 协议。",
+    "将默认 parallel_runs 调整为 1，并把 run_id_prefix 改回通用的 run。"
+  ],
+  "continue_next_cycle": false,
+  "next_question": "当前单代理 weak-blind fallback 已闭环；除非后续要做 clean-room 复验或真实任务出现新痛点，否则停止。"
+}

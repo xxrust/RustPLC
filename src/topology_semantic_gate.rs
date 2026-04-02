@@ -39,7 +39,7 @@ pub enum TopologySemanticCode {
 }
 
 impl TopologySemanticCode {
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Sem101PortNotFound => "SEM-101",
             Self::Sem102DirectionInvalid => "SEM-102",

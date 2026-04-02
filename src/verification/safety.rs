@@ -2433,7 +2433,7 @@ fn select_safety_root_tasks(
         if transition.from.task_name != transition.to.task_name {
             cross_task_incoming.insert(transition.to.task_name.clone());
         }
-        for target_task in motion_branch_target_task_names(&transition.actions) {
+        for target_task in axis_branch_target_task_names(&transition.actions) {
             if transition.from.task_name != target_task {
                 cross_task_incoming.insert(target_task);
             }
@@ -2460,32 +2460,10 @@ fn select_safety_root_tasks(
     roots
 }
 
-fn motion_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
+fn axis_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
     let mut targets = Vec::new();
     for action in actions {
         match action {
-            TransitionAction::Extend {
-                timeout,
-                on_motion_fault,
-                on_safety_fault,
-                ..
-            }
-            | TransitionAction::Retract {
-                timeout,
-                on_motion_fault,
-                on_safety_fault,
-                ..
-            } => {
-                if let Some(timeout) = timeout {
-                    targets.push(timeout.target_task.clone());
-                }
-                if let Some(on_motion_fault) = on_motion_fault {
-                    targets.push(on_motion_fault.target_task.clone());
-                }
-                if let Some(on_safety_fault) = on_safety_fault {
-                    targets.push(on_safety_fault.target_task.clone());
-                }
-            }
             TransitionAction::AxisMoveRelative {
                 timeout,
                 on_reject,
