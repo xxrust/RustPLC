@@ -54,6 +54,9 @@ use rust_plc::timing_report::{TimingReport, build_timing_report};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
+mod cli;
+mod cli_support;
+
 #[derive(Debug, Serialize)]
 struct IrBundle {
     topology: TopologyGraph,
@@ -2092,6 +2095,11 @@ fn print_command_help_and_exit(program: &str, command: &str, exit_code: i32) -> 
 }
 
 fn main() {
+    cli::run();
+}
+
+#[allow(dead_code)]
+fn legacy_main_dispatch() {
     let mut args = env::args();
     let program = args.next().unwrap_or_else(|| "rust_plc".to_string());
 
@@ -2537,6 +2545,237 @@ fn main() {
         let blocking_warnings = collect_blocking_warnings(&ir_bundle.verification);
         if !blocking_warnings.is_empty() {
             eprintln!("--deny-warnings 已启用，检测到阻断级告警：");
+            for warning in blocking_warnings {
+                eprintln!("  - {warning}");
+            }
+            std::process::exit(2);
+        }
+    }
+
+    if let Some(ir_out_path) = ir_out_path {
+        if let Some(parent) = ir_out_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                if let Err(err) = fs::create_dir_all(parent) {
+                    eprintln!("Failed to create output directory {parent:?}: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        match serde_json::to_string_pretty(&ir_bundle) {
+            Ok(mut json) => {
+                json.push('\n');
+                if let Err(err) = fs::write(&ir_out_path, json) {
+                    eprintln!("Failed to write IR JSON file {ir_out_path:?}: {err}");
+                    std::process::exit(1);
+                }
+                eprintln!("ir_bundle: {}", ir_out_path.display());
+            }
+            Err(err) => {
+                eprintln!("Failed to serialize IR as JSON: {err}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if !no_print_ir {
+        match serde_json::to_string_pretty(&ir_bundle) {
+            Ok(json) => println!("{json}"),
+            Err(err) => {
+                eprintln!("Failed to serialize IR as JSON: {err}");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn run_compile_command(program: String, path: String, remaining: Vec<String>) {
+    let mut args = remaining.into_iter();
+    let mut report_path: Option<PathBuf> = None;
+    let mut no_print_ir = false;
+    let mut ir_out_path: Option<PathBuf> = None;
+    let mut deny_warnings = false;
+    let mut budget_thresholds = RuntimeBudgetThresholds::from_env();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--report" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --report <file>");
+                    std::process::exit(1);
+                });
+                report_path = Some(PathBuf::from(value));
+            }
+            "--no-print-ir" => {
+                no_print_ir = true;
+            }
+            "--ir-out" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --ir-out <file>");
+                    std::process::exit(1);
+                });
+                ir_out_path = Some(PathBuf::from(value));
+            }
+            "--deny-warnings" => {
+                deny_warnings = true;
+            }
+            "--budget-max-actions-per-transition" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-max-actions-per-transition <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.max_actions_per_transition =
+                    value.parse::<usize>().unwrap_or_else(|_| {
+                        eprintln!(
+                            "Invalid integer for --budget-max-actions-per-transition: {value}"
+                        );
+                        std::process::exit(1);
+                    });
+            }
+            "--budget-max-actions-per-tick" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-max-actions-per-tick <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.max_actions_per_tick_upper_bound =
+                    value.parse::<usize>().unwrap_or_else(|_| {
+                        eprintln!("Invalid integer for --budget-max-actions-per-tick: {value}");
+                        std::process::exit(1);
+                    });
+            }
+            "--budget-max-parallel-branches" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-max-parallel-branches <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.max_parallel_branches =
+                    value.parse::<usize>().unwrap_or_else(|_| {
+                        eprintln!("Invalid integer for --budget-max-parallel-branches: {value}");
+                        std::process::exit(1);
+                    });
+            }
+            "--budget-max-race-branches" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-max-race-branches <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.max_race_branches = value.parse::<usize>().unwrap_or_else(|_| {
+                    eprintln!("Invalid integer for --budget-max-race-branches: {value}");
+                    std::process::exit(1);
+                });
+            }
+            "--budget-warn-on-same-tick-cycle" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-warn-on-same-tick-cycle <true|false>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.warn_on_same_tick_cycle =
+                    value.parse::<bool>().unwrap_or_else(|_| {
+                        eprintln!("Invalid boolean for --budget-warn-on-same-tick-cycle: {value}");
+                        std::process::exit(1);
+                    });
+            }
+            "--budget-action-cost-us" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-action-cost-us <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.action_cost_us = value.parse::<u64>().unwrap_or_else(|_| {
+                    eprintln!("Invalid integer for --budget-action-cost-us: {value}");
+                    std::process::exit(1);
+                });
+            }
+            "--budget-transition-cost-us" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-transition-cost-us <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.transition_cost_us = value.parse::<u64>().unwrap_or_else(|_| {
+                    eprintln!("Invalid integer for --budget-transition-cost-us: {value}");
+                    std::process::exit(1);
+                });
+            }
+            "--budget-parallel-expand-cost-us" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-parallel-expand-cost-us <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.parallel_expand_cost_us =
+                    value.parse::<u64>().unwrap_or_else(|_| {
+                        eprintln!("Invalid integer for --budget-parallel-expand-cost-us: {value}");
+                        std::process::exit(1);
+                    });
+            }
+            "--budget-max-time-estimate-us" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --budget-max-time-estimate-us <n>");
+                    std::process::exit(1);
+                });
+                budget_thresholds.max_budget_time_estimate_us =
+                    value.parse::<u64>().unwrap_or_else(|_| {
+                        eprintln!("Invalid integer for --budget-max-time-estimate-us: {value}");
+                        std::process::exit(1);
+                    });
+            }
+            "-h" | "--help" => {
+                print_command_help_and_exit(&program, "compile", 0);
+            }
+            other => {
+                eprintln!("Unknown argument: {other}");
+                print_usage(&program);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if !is_supported_plc_source_path(Path::new(&path)) {
+        eprintln!("Expected a .plc or .bundle.toml path, got: {path}");
+        std::process::exit(1);
+    }
+
+    let loaded = match load_plc_source(Path::new(&path)) {
+        Ok(contents) => contents,
+        Err(err) => {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+    };
+
+    let ir_bundle = match compile_pipeline(&loaded) {
+        Ok(ir_bundle) => ir_bundle,
+        Err(errors) => {
+            for (index, error) in errors.iter().enumerate() {
+                if index > 0 {
+                    eprintln!();
+                }
+                eprintln!("{error}");
+            }
+            std::process::exit(1);
+        }
+    };
+    let mut ir_bundle = ir_bundle;
+    apply_runtime_budget_warnings(
+        &mut ir_bundle.verification,
+        &mut ir_bundle.runtime_budget,
+        budget_thresholds,
+    );
+
+    let report_path =
+        report_path.unwrap_or_else(|| default_verification_report_path(Path::new(&path)));
+    if let Err(err) = write_verification_report(
+        &path,
+        &report_path,
+        &ir_bundle.runtime_budget,
+        &ir_bundle.verification,
+    ) {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
+
+    print_success_summary(&ir_bundle.verification);
+    eprintln!("verification_report: {}", report_path.display());
+    if deny_warnings {
+        let blocking_warnings = collect_blocking_warnings(&ir_bundle.verification);
+        if !blocking_warnings.is_empty() {
+            eprintln!("--deny-warnings 宸插惎鐢紝妫€娴嬪埌闃绘柇绾у憡璀︼細");
             for warning in blocking_warnings {
                 eprintln!("  - {warning}");
             }
