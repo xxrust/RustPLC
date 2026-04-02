@@ -23,6 +23,7 @@ use crate::ast::{
     WorkpieceTypeDeclaration as AstWorkpieceTypeDeclaration,
 };
 use crate::axis_profile::resolve_axis_profiles;
+use crate::device_semantics;
 use crate::device_library::{DeviceDef, PortDef};
 use crate::error::PlcError;
 use crate::ir::{
@@ -35,6 +36,7 @@ use crate::ir::{
     ConnectionType, ConstraintSet, Device, DeviceKind, ExternCallBinding as IrExternCallBinding,
     ExternFunctionContract as IrExternContract, ExternFunctionDef as IrExternFunctionDef,
     ExternFunctionParam as IrExternFunctionParam, MAX_CAM_POINTS,
+    MotionFaultBranch as IrMotionFaultBranch, MotionTimeoutBranch as IrMotionTimeoutBranch,
     PendingActionContext as IrPendingActionContext, PidLoop as IrPidLoop,
     ResourceClaimRule as IrResourceClaimRule, ResourceClaimSource as IrResourceClaimSource,
     SafetyExpr, SafetyRelation as IrSafetyRelation, SafetyRule,
@@ -667,8 +669,8 @@ fn collect_used_controller_port_from_action(
     used: &mut HashSet<String>,
 ) {
     match action {
-        ActionStatement::Extend { target }
-        | ActionStatement::Retract { target }
+        ActionStatement::Extend { target, .. }
+        | ActionStatement::Retract { target, .. }
         | ActionStatement::Set { target, .. }
         | ActionStatement::SetAnalog { target, .. }
         | ActionStatement::SetAnalogExpr { target, .. }
@@ -1488,6 +1490,11 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
         &mut expr_errors,
     );
     validate_axis_motion_actions_in_tasks(&expanded.tasks, &device_kinds, &mut expr_errors);
+    device_semantics::validate_task_action_semantics(
+        &expanded.tasks,
+        &device_kinds,
+        &mut expr_errors,
+    );
     resolve_axis_motion_parameters_in_tasks(
         &mut expanded.tasks,
         &expanded.topology,
@@ -7975,8 +7982,10 @@ fn action_to_timing(
     errors: &mut Vec<PlcError>,
 ) -> Option<ActionTiming> {
     let (action_kind, target) = match action {
-        ActionStatement::Extend { target } => (ActionKind::Extend, Some(target.device.as_str())),
-        ActionStatement::Retract { target } => (ActionKind::Retract, Some(target.device.as_str())),
+        ActionStatement::Extend { target, .. } => (ActionKind::Extend, Some(target.device.as_str())),
+        ActionStatement::Retract { target, .. } => {
+            (ActionKind::Retract, Some(target.device.as_str()))
+        }
         ActionStatement::Set { target, .. } => (ActionKind::Set, Some(target.device.as_str())),
         ActionStatement::SetAnalog { target, .. } => {
             (ActionKind::SetAnalog, Some(target.device.as_str()))
@@ -8999,13 +9008,29 @@ fn resolve_task_target(
 
 fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAction> {
     match action {
-        ActionStatement::Extend { target } => Some(TransitionAction::Extend {
+        ActionStatement::Extend {
+            target,
+            timeout,
+            on_motion_fault,
+            on_safety_fault,
+        } => Some(TransitionAction::Extend {
             target: target.device.clone(),
             port: target.port.clone(),
+            timeout: timeout.as_ref().map(lower_motion_timeout_branch),
+            on_motion_fault: on_motion_fault.as_ref().map(lower_motion_fault_branch),
+            on_safety_fault: on_safety_fault.as_ref().map(lower_motion_fault_branch),
         }),
-        ActionStatement::Retract { target } => Some(TransitionAction::Retract {
+        ActionStatement::Retract {
+            target,
+            timeout,
+            on_motion_fault,
+            on_safety_fault,
+        } => Some(TransitionAction::Retract {
             target: target.device.clone(),
             port: target.port.clone(),
+            timeout: timeout.as_ref().map(lower_motion_timeout_branch),
+            on_motion_fault: on_motion_fault.as_ref().map(lower_motion_fault_branch),
+            on_safety_fault: on_safety_fault.as_ref().map(lower_motion_fault_branch),
         }),
         ActionStatement::Set { target, value } => Some(TransitionAction::Set {
             target: target.device.clone(),
@@ -9139,6 +9164,21 @@ fn lower_axis_timeout_branch(timeout: &TimeoutDirective) -> AxisTimeoutBranch {
         duration_ms: duration_to_ms(timeout),
         target_task: timeout.target.task.clone(),
         target_step: timeout.target.step.clone(),
+    }
+}
+
+fn lower_motion_timeout_branch(timeout: &TimeoutDirective) -> IrMotionTimeoutBranch {
+    IrMotionTimeoutBranch {
+        duration_ms: duration_to_ms(timeout),
+        target_task: timeout.target.task.clone(),
+        target_step: timeout.target.step.clone(),
+    }
+}
+
+fn lower_motion_fault_branch(target: &GotoDirective) -> IrMotionFaultBranch {
+    IrMotionFaultBranch {
+        target_task: target.task.clone(),
+        target_step: target.step.clone(),
     }
 }
 
@@ -10297,6 +10337,13 @@ task ready:
     fn builds_constraint_set_with_must_complete_within_worst_case_relation() {
         let input = r#"
 [topology]
+device cyl_A: cylinder
+device cyl_B: cylinder
+device sensor_A_ext: sensor
+device sensor_A_ret: sensor
+device sensor_B_ext: sensor
+device sensor_B_ret: sensor
+device start_button: sensor
 
 [constraints]
 
@@ -10941,6 +10988,13 @@ task main:
     fn builds_state_machine_from_prd_5_5_1_sequence_example() {
         let input = r#"
 [topology]
+device cyl_A: cylinder
+device cyl_B: cylinder
+device sensor_A_ext: sensor
+device sensor_A_ret: sensor
+device sensor_B_ext: sensor
+device sensor_B_ret: sensor
+device start_button: sensor
 
 [constraints]
 

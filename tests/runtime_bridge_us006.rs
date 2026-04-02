@@ -103,6 +103,16 @@ fn task_step_name<'a>(
         .name
 }
 
+fn any_task_at_step(rt: &Runtime<'_>, program: &runtime_core::Program<'_>, expected: &str) -> bool {
+    (0..program.tasks.len()).any(|task_idx| task_step_name(rt, program, task_idx) == expected)
+}
+
+fn all_task_steps<'a>(rt: &Runtime<'a>, program: &'a runtime_core::Program<'a>) -> Vec<&'a str> {
+    (0..program.tasks.len())
+        .map(|task_idx| task_step_name(rt, program, task_idx))
+        .collect()
+}
+
 const PLC_FIXTURE: &str = r#"
 [topology]
 
@@ -579,6 +589,136 @@ task done:
     step halt:
 "#;
 
+const PLC_CYLINDER_ROUTED_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc {
+    model_ref: openplc_softplc
+}
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+device sensor_ret: sensor
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step extend:
+        action: extend cyl_A
+        timeout: 50ms -> goto fault_timeout.halt
+        on_motion_fault -> fault_motion.halt
+        on_safety_fault -> fault_safety.halt
+
+    step done:
+        goto done.halt
+
+task fault_timeout:
+    step halt:
+
+task fault_motion:
+    step halt:
+
+task fault_safety:
+    step halt:
+
+task done:
+    step halt:
+"#;
+
+const PLC_CYLINDER_PARTIAL_ROUTING_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc {
+    model_ref: openplc_softplc
+}
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+device sensor_ret: sensor
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step extend:
+        action: extend cyl_A
+        timeout: 50ms -> goto fault_timeout.halt
+        on_motion_fault -> fault_motion.halt
+
+    step done:
+        goto done.halt
+
+task fault_timeout:
+    step halt:
+
+task fault_motion:
+    step halt:
+
+task done:
+    step halt:
+"#;
+
+const PLC_CYLINDER_ROUTED_NO_TIMEOUT_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc {
+    model_ref: openplc_softplc
+}
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+device sensor_ret: sensor
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step extend:
+        action: extend cyl_A
+        on_motion_fault -> fault_motion.halt
+        on_safety_fault -> fault_safety.halt
+
+    step done:
+        goto done.halt
+
+task fault_motion:
+    step halt:
+
+task fault_safety:
+    step halt:
+
+task done:
+    step halt:
+"#;
+
 #[test]
 fn bridge_supports_analog_wait_guard_mapped_to_regions() {
     let program = compile_to_runtime(PLC_ANALOG_WAIT_FIXTURE, 1);
@@ -789,6 +929,180 @@ fn bridge_rejects_partially_wired_closed_loop_cylinder_motion() {
     assert!(
         matches!(err, BridgeError::IncompleteClosedLoopCylinderMotion { .. }),
         "expected incomplete closed-loop cylinder motion error, got {err:?}"
+    );
+}
+
+#[test]
+fn bridge_lowers_closed_loop_cylinder_fault_routing_when_declared() {
+    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let extend_step = program.tasks[0]
+        .steps
+        .iter()
+        .find(|step| step.name == "main.extend")
+        .expect("extend step exists");
+
+    match extend_step.instr {
+        Instr::Action { actions, .. } => match actions {
+            [runtime_core::Action::CylinderMotion {
+                timeout: Some(timeout),
+                fault_routing: Some(routing),
+                ..
+            }] => {
+                assert_eq!(timeout.after_ticks, 5);
+                assert_eq!(
+                    program.tasks[0]
+                        .step(timeout.target)
+                        .expect("timeout target step exists")
+                        .name,
+                    "fault_timeout.halt"
+                );
+                assert_eq!(
+                    program.tasks[0]
+                        .step(routing.on_motion_fault)
+                        .expect("motion fault target exists")
+                        .name,
+                    "fault_motion.halt"
+                );
+                assert_eq!(
+                    program.tasks[0]
+                        .step(routing.on_safety_fault)
+                        .expect("safety fault target exists")
+                        .name,
+                    "fault_safety.halt"
+                );
+            }
+            other => panic!("expected routed cylinder motion action, got {other:?}"),
+        },
+        other => panic!("expected Action instr, got {other:?}"),
+    }
+}
+
+#[test]
+fn bridge_rejects_partially_declared_closed_loop_cylinder_routing() {
+    let program = parse_plc(PLC_CYLINDER_PARTIAL_ROUTING_FIXTURE).expect("parse plc");
+    let errors = build_state_machine(&program)
+        .expect_err("partial cylinder routing should be rejected in semantic layer");
+    let joined = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        joined.contains("[CYL-003]"),
+        "expected semantic CYL-003, got {joined}"
+    );
+}
+
+#[test]
+fn bridge_lowers_closed_loop_cylinder_fault_routing_without_timeout() {
+    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_NO_TIMEOUT_FIXTURE, 10);
+    let extend_step = program.tasks[0]
+        .steps
+        .iter()
+        .find(|step| step.name == "main.extend")
+        .expect("extend step exists");
+
+    match extend_step.instr {
+        Instr::Action { actions, .. } => match actions {
+            [runtime_core::Action::CylinderMotion {
+                timeout: None,
+                fault_routing: Some(routing),
+                ..
+            }] => {
+                assert_eq!(
+                    program.tasks[0]
+                        .step(routing.on_motion_fault)
+                        .expect("motion fault target exists")
+                        .name,
+                    "fault_motion.halt"
+                );
+                assert_eq!(
+                    program.tasks[0]
+                        .step(routing.on_safety_fault)
+                        .expect("safety fault target exists")
+                        .name,
+                    "fault_safety.halt"
+                );
+            }
+            other => panic!("expected cylinder routing without timeout, got {other:?}"),
+        },
+        other => panic!("expected Action instr, got {other:?}"),
+    }
+}
+
+#[test]
+fn runtime_routes_opposite_feedback_to_declared_cylinder_motion_fault_branch() {
+    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 1, 0, 0);
+    io.schedule_digital_input(Tick(0), DigitalInputId(1), true);
+    io.schedule_digital_input(Tick(1), DigitalInputId(1), false);
+    io.schedule_digital_input(Tick(2), DigitalInputId(1), true);
+
+    rt.tick(&mut io).expect("tick start while still on opposing end");
+    rt.tick(&mut io).expect("tick after opposing feedback clears");
+    rt.tick(&mut io)
+        .expect("opposite feedback should route instead of surfacing runtime error");
+
+    assert!(
+        any_task_at_step(&rt, &program, "fault_motion.halt"),
+        "expected some task context to route to fault_motion.halt, got {:?}",
+        all_task_steps(&rt, &program)
+    );
+}
+
+#[test]
+fn runtime_routes_entry_tick_contradictory_feedback_to_declared_cylinder_safety_fault_branch() {
+    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 1, 0, 0);
+    io.schedule_digital_input(Tick(0), DigitalInputId(0), true);
+    io.schedule_digital_input(Tick(0), DigitalInputId(1), true);
+
+    rt.tick(&mut io)
+        .expect("entry-tick contradictory feedback should route instead of surfacing runtime error");
+
+    assert!(
+        any_task_at_step(&rt, &program, "fault_safety.halt"),
+        "expected some task context to route to fault_safety.halt, got {:?}",
+        all_task_steps(&rt, &program)
+    );
+}
+
+#[test]
+fn runtime_routes_contradictory_feedback_to_declared_cylinder_safety_fault_branch() {
+    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 1, 0, 0);
+    io.schedule_digital_input(Tick(1), DigitalInputId(0), true);
+    io.schedule_digital_input(Tick(1), DigitalInputId(1), true);
+
+    rt.tick(&mut io).expect("tick pending action start");
+    rt.tick(&mut io)
+        .expect("contradictory feedback should route instead of surfacing runtime error");
+
+    assert!(
+        any_task_at_step(&rt, &program, "fault_safety.halt"),
+        "expected some task context to route to fault_safety.halt, got {:?}",
+        all_task_steps(&rt, &program)
+    );
+}
+
+#[test]
+fn runtime_routes_timeout_to_declared_cylinder_timeout_branch() {
+    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(2, 1, 0, 0);
+
+    for _ in 0..7 {
+        rt.tick(&mut io).expect("tick");
+    }
+
+    assert!(
+        any_task_at_step(&rt, &program, "fault_timeout.halt"),
+        "expected some task context to route to fault_timeout.halt, got {:?}",
+        all_task_steps(&rt, &program)
     );
 }
 

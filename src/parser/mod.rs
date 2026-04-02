@@ -2226,6 +2226,9 @@ fn parse_step_statement_wrapper(pair: Pair<Rule>) -> Result<StepStatement, PlcEr
 fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
     match pair.as_rule() {
         Rule::axis_move_statement => Ok(StepStatement::Action(parse_axis_move_statement(pair)?)),
+        Rule::cylinder_motion_statement => {
+            Ok(StepStatement::Action(parse_cylinder_motion_statement(pair)?))
+        }
         Rule::action_statement => Ok(StepStatement::Action(parse_action_statement(pair)?)),
         Rule::effect_statement => Ok(StepStatement::Effect(parse_effect_statement_v2(pair)?)),
         Rule::wait_statement => Ok(StepStatement::Wait(parse_wait_statement(pair)?)),
@@ -2541,6 +2544,9 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
                 .ok_or_else(|| PlcError::parse(line, "extend 缺少目标设备"))?;
             Ok(ActionStatement::Extend {
                 target: parse_action_target(target_pair)?,
+                timeout: None,
+                on_motion_fault: None,
+                on_safety_fault: None,
             })
         }
         Rule::action_retract => {
@@ -2550,6 +2556,9 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
                 .ok_or_else(|| PlcError::parse(line, "retract 缺少目标设备"))?;
             Ok(ActionStatement::Retract {
                 target: parse_action_target(target_pair)?,
+                timeout: None,
+                on_motion_fault: None,
+                on_safety_fault: None,
             })
         }
         Rule::action_set_analog => {
@@ -2692,6 +2701,77 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
         rule => Err(PlcError::parse(
             line,
             format!("不支持的 action 命令: {rule:?}"),
+        )),
+    }
+}
+
+fn parse_cylinder_motion_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError> {
+    let line = line_of(&pair);
+    let mut target = None::<ActionTarget>;
+    let mut timeout = None::<TimeoutDirective>;
+    let mut on_motion_fault = None::<GotoDirective>;
+    let mut on_safety_fault = None::<GotoDirective>;
+    let mut is_extend = None::<bool>;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::action_extend => {
+                let target_pair = part
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| PlcError::parse(line, "extend 缂哄皯鐩爣璁惧"))?;
+                target = Some(parse_action_target(target_pair)?);
+                is_extend = Some(true);
+            }
+            Rule::action_retract => {
+                let target_pair = part
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| PlcError::parse(line, "retract 缂哄皯鐩爣璁惧"))?;
+                target = Some(parse_action_target(target_pair)?);
+                is_extend = Some(false);
+            }
+            Rule::timeout_statement => {
+                if timeout.is_some() {
+                    return Err(PlcError::parse(line, "cylinder motion timeout 閲嶅澹版槑"));
+                }
+                timeout = Some(parse_timeout_statement(part)?);
+            }
+            Rule::cylinder_on_motion_fault_branch => {
+                let target_pair = first_inner(part, line, "cylinder on_motion_fault target")?;
+                if on_motion_fault.is_some() {
+                    return Err(PlcError::parse(line, "on_motion_fault 主桶分支重复声明"));
+                }
+                on_motion_fault = Some(parse_axis_branch_target(target_pair, "on_motion_fault")?);
+            }
+            Rule::cylinder_on_safety_fault_branch => {
+                let target_pair = first_inner(part, line, "cylinder on_safety_fault target")?;
+                if on_safety_fault.is_some() {
+                    return Err(PlcError::parse(line, "on_safety_fault 主桶分支重复声明"));
+                }
+                on_safety_fault = Some(parse_axis_branch_target(target_pair, "on_safety_fault")?);
+            }
+            _ => {}
+        }
+    }
+
+    let target = target.ok_or_else(|| PlcError::parse(line, "cylinder motion 缂哄皯鐩爣璁惧"))?;
+    match is_extend {
+        Some(true) => Ok(ActionStatement::Extend {
+            target,
+            timeout,
+            on_motion_fault,
+            on_safety_fault,
+        }),
+        Some(false) => Ok(ActionStatement::Retract {
+            target,
+            timeout,
+            on_motion_fault,
+            on_safety_fault,
+        }),
+        None => Err(PlcError::parse(
+            line,
+            "cylinder motion 璇彞蹇呴』鏄 extend 鎴 retract",
         )),
     }
 }
@@ -5819,7 +5899,7 @@ task ready:
 
         assert!(matches!(
             init_task.steps[0].statements.first(),
-            Some(StepStatement::Action(ActionStatement::Extend { target })) if target.device == "cyl_A"
+            Some(StepStatement::Action(ActionStatement::Extend { target, .. })) if target.device == "cyl_A"
         ));
     }
 
@@ -6227,6 +6307,52 @@ task fault:
             &step.statements[1],
             StepStatement::Action(ActionStatement::AxisMoveAbsolute { .. })
         ));
+    }
+
+    #[test]
+    fn parses_cylinder_motion_action_with_fault_branches_into_ast() {
+        let input = r#"
+[topology]
+device cyl_A: cylinder
+
+[constraints]
+
+[tasks]
+task motion:
+    step start:
+        action: extend cyl_A
+            timeout: 500ms -> goto fault.timeout
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step motion_fault:
+    step safety_fault:
+"#;
+
+        let ast = parse_plc(input).expect("cylinder motion 带故障分支语句应能解析");
+        let step = &ast.tasks.tasks[0].steps[0];
+        assert_eq!(step.statements.len(), 1);
+        match &step.statements[0] {
+            StepStatement::Action(ActionStatement::Extend {
+                target,
+                timeout,
+                on_motion_fault,
+                on_safety_fault,
+            }) => {
+                assert_eq!(target.device, "cyl_A");
+                assert_eq!(timeout.as_ref().map(|t| t.target.task.as_str()), Some("fault"));
+                assert_eq!(
+                    on_motion_fault.as_ref().and_then(|v| v.step.as_deref()),
+                    Some("motion_fault")
+                );
+                assert_eq!(
+                    on_safety_fault.as_ref().and_then(|v| v.step.as_deref()),
+                    Some("safety_fault")
+                );
+            }
+            other => panic!("expected extend action with fault branches, got {other:?}"),
+        }
     }
 
     #[test]

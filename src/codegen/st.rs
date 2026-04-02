@@ -1,3 +1,4 @@
+use crate::device_semantics::cylinder::closed_loop_stroke_target;
 use crate::ir::{
     BinaryValue, ConstraintSet, ExternCallBinding, State, StateMachine, TimerOperationKind,
     TopologyGraph, Transition, TransitionAction, TransitionGuard, VariableType,
@@ -45,6 +46,9 @@ pub enum StCodegenError {
         expr: String,
     },
     SemanticResourceInterlockUnsupported,
+    ClosedLoopCylinderSemanticsUnsupported {
+        target: String,
+    },
 }
 
 impl fmt::Display for StCodegenError {
@@ -72,6 +76,10 @@ impl fmt::Display for StCodegenError {
             StCodegenError::SemanticResourceInterlockUnsupported => write!(
                 f,
                 "semantic resource interlock is not supported by the ST backend"
+            ),
+            StCodegenError::ClosedLoopCylinderSemanticsUnsupported { target } => write!(
+                f,
+                "closed-loop cylinder semantics are not supported by the ST backend: {target}"
             ),
         }
     }
@@ -166,6 +174,16 @@ pub fn generate_st(
         })
     {
         errors.push(StCodegenError::SemanticResourceInterlockUnsupported);
+    }
+
+    for transition in &erased_state_machine.transitions {
+        for action in &transition.actions {
+            if let Some(target) = closed_loop_stroke_target(action) {
+                errors.push(StCodegenError::ClosedLoopCylinderSemanticsUnsupported {
+                    target: target.to_string(),
+                });
+            }
+        }
     }
 
     let state_ids = assign_state_ids(&erased_state_machine);
@@ -1585,6 +1603,9 @@ mod tests {
                     actions: vec![TransitionAction::Extend {
                         target: "Valve-A".to_string(),
                         port: "self".to_string(),
+                        timeout: None,
+                        on_motion_fault: None,
+                        on_safety_fault: None,
                     }],
                     effects: vec![],
                     timers: vec![],
@@ -1669,6 +1690,9 @@ mod tests {
                     actions: vec![TransitionAction::Extend {
                         target: "Valve-A".to_string(),
                         port: "self".to_string(),
+                        timeout: None,
+                        on_motion_fault: None,
+                        on_safety_fault: None,
                     }],
                     effects: vec![],
                     timers: vec![],
@@ -1824,6 +1848,58 @@ mod tests {
         .expect_err("SRI should be rejected by ST backend");
         assert!(errors.iter().any(|error| {
             matches!(error, StCodegenError::SemanticResourceInterlockUnsupported)
+        }));
+    }
+
+    #[test]
+    fn generate_st_rejects_closed_loop_cylinder_semantics() {
+        let s0 = state("main", "extend");
+        let s1 = state("done", "halt");
+        let sm = StateMachine {
+            states: vec![s0.clone(), s1.clone()],
+            transitions: vec![Transition {
+                from: s0.clone(),
+                to: s1.clone(),
+                guard: TransitionGuard::Always,
+                actions: vec![TransitionAction::Extend {
+                    target: "cyl_a".to_string(),
+                    port: "self".to_string(),
+                    timeout: Some(crate::ir::MotionTimeoutBranch {
+                        duration_ms: 500,
+                        target_task: "fault".to_string(),
+                        target_step: Some("timeout".to_string()),
+                    }),
+                    on_motion_fault: Some(crate::ir::MotionFaultBranch {
+                        target_task: "fault".to_string(),
+                        target_step: Some("motion_fault".to_string()),
+                    }),
+                    on_safety_fault: Some(crate::ir::MotionFaultBranch {
+                        target_task: "fault".to_string(),
+                        target_step: Some("safety_fault".to_string()),
+                    }),
+                }],
+                effects: vec![],
+                timers: vec![],
+            }],
+            initial: s0,
+            analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
+        };
+
+        let errors = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect_err("ST backend should reject closed-loop cylinder semantics");
+
+        assert!(errors.iter().any(|error| {
+            matches!(
+                error,
+                StCodegenError::ClosedLoopCylinderSemanticsUnsupported { target }
+                if target == "cyl_a"
+            )
         }));
     }
 

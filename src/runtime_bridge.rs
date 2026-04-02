@@ -6,6 +6,12 @@ use crate::ir::{
     CamInterpolation as IrCamInterpolation, ConstraintSet, DeviceKind, State, StateMachine,
     TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
+use crate::device_semantics::cylinder::{
+    complementary_end_state_port as cylinder_complementary_state_port,
+    is_end_state_port as is_cylinder_end_state_port,
+    state_port_key,
+    CylinderStrokeVerb,
+};
 use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
 use petgraph::Direction;
@@ -16,8 +22,8 @@ use runtime_core::{
     AxisFaultRouteKind as RtAxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting,
     AxisFaultSeverity as RtAxisFaultSeverity, AxisMotionCommand, AxisMoveKind,
     AxisStopMode as RtAxisStopMode, CamAnalogField, CamCouplingConfig, CamDigitalField,
-    CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, DigitalCondition, ExprOp,
-    ExprProgram, Instr, MAX_CAM_POINTS, MAX_TRACKED_DIGITAL_OUTPUTS,
+    CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, CylinderFaultRouting,
+    DigitalCondition, ExprOp, ExprProgram, Instr, MAX_CAM_POINTS, MAX_TRACKED_DIGITAL_OUTPUTS,
     MAX_TRANSITIONS_PER_TASK_PER_TICK, PidConfig, Program,
     ResourceClaimRule as RtResourceClaimRule, ResourceClaimSource as RtResourceClaimSource,
     SemanticResource as RtSemanticResource, SemanticResourceMode as RtSemanticResourceMode,
@@ -59,6 +65,11 @@ pub enum BridgeError {
         device: String,
         requested_state: String,
     },
+
+    #[error(
+        "closed-loop cylinder {device} in {state} must declare both on_motion_fault and on_safety_fault when cylinder fault routing is used"
+    )]
+    IncompleteClosedLoopCylinderRouting { state: String, device: String },
 
     #[error("unsupported action in {state}: {action}")]
     UnsupportedAction { state: String, action: String },
@@ -410,7 +421,7 @@ fn select_runtime_root_tasks(
         if transition.from.task_name != transition.to.task_name {
             cross_task_incoming.insert(transition.to.task_name.clone());
         }
-        for target_task in axis_branch_target_task_names(&transition.actions) {
+        for target_task in motion_branch_target_task_names(&transition.actions) {
             if transition.from.task_name != target_task {
                 cross_task_incoming.insert(target_task);
             }
@@ -437,10 +448,32 @@ fn select_runtime_root_tasks(
     roots
 }
 
-fn axis_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
+fn motion_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
     let mut targets = Vec::new();
     for action in actions {
         match action {
+            TransitionAction::Extend {
+                timeout,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            }
+            | TransitionAction::Retract {
+                timeout,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            } => {
+                if let Some(timeout) = timeout {
+                    targets.push(timeout.target_task.clone());
+                }
+                if let Some(on_motion_fault) = on_motion_fault {
+                    targets.push(on_motion_fault.target_task.clone());
+                }
+                if let Some(on_safety_fault) = on_safety_fault {
+                    targets.push(on_safety_fault.target_task.clone());
+                }
+            }
             TransitionAction::AxisMoveRelative {
                 timeout,
                 on_reject,
@@ -517,7 +550,7 @@ fn collect_runtime_task_state_keys(
                 transition.to.task_name.clone(),
                 transition.to.step_name.clone(),
             ));
-            for branch_target in axis_branch_target_state_keys(
+            for branch_target in motion_branch_target_state_keys(
                 &transition.actions,
                 task_entry_states,
                 known_state_keys,
@@ -530,7 +563,7 @@ fn collect_runtime_task_state_keys(
     reachable
 }
 
-fn axis_branch_target_state_keys(
+fn motion_branch_target_state_keys(
     actions: &[TransitionAction],
     task_entry_states: &HashMap<String, State>,
     known_state_keys: &HashSet<(String, String)>,
@@ -538,6 +571,46 @@ fn axis_branch_target_state_keys(
     let mut targets = Vec::new();
     for action in actions {
         match action {
+            TransitionAction::Extend {
+                timeout,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            }
+            | TransitionAction::Retract {
+                timeout,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            } => {
+                if let Some(timeout) = timeout {
+                    push_axis_branch_target_state_key(
+                        &mut targets,
+                        &timeout.target_task,
+                        &timeout.target_step,
+                        task_entry_states,
+                        known_state_keys,
+                    );
+                }
+                if let Some(on_motion_fault) = on_motion_fault {
+                    push_axis_branch_target_state_key(
+                        &mut targets,
+                        &on_motion_fault.target_task,
+                        &on_motion_fault.target_step,
+                        task_entry_states,
+                        known_state_keys,
+                    );
+                }
+                if let Some(on_safety_fault) = on_safety_fault {
+                    push_axis_branch_target_state_key(
+                        &mut targets,
+                        &on_safety_fault.target_task,
+                        &on_safety_fault.target_step,
+                        task_entry_states,
+                        known_state_keys,
+                    );
+                }
+            }
             TransitionAction::AxisMoveRelative {
                 timeout,
                 on_reject,
@@ -2238,7 +2311,7 @@ fn ms_to_ticks(state_name: &str, duration_ms: u64, tick_ms: u64) -> Result<u64, 
     Ok(duration_ms / tick_ms)
 }
 
-fn lookup_axis_branch_target(
+fn lookup_branch_target(
     state_name: &str,
     target_task: &str,
     target_step: &Option<String>,
@@ -2286,7 +2359,7 @@ fn leak_axis_fault_route_rules(
         out.push(AxisFaultRouteRule {
             kind: route.kind.map(lower_axis_fault_route_kind),
             code: route.code,
-            target: lookup_axis_branch_target(
+            target: lookup_branch_target(
                 state_name,
                 &route.target_task,
                 &route.target_step,
@@ -2486,36 +2559,184 @@ fn convert_action(
 ) -> Result<Action, BridgeError> {
     match runtime_action {
         RuntimeActionRef::Transition(a) => match a {
-            TransitionAction::Extend { target, port } => {
+            TransitionAction::Extend {
+                target,
+                port,
+                timeout: motion_timeout,
+                on_motion_fault,
+                on_safety_fault,
+            } => {
                 if let Some(motion) =
                     resolver.resolve_cylinder_motion(state_name, target, port, true)?
                 {
+                    let resolved_timeout = match (action_timeout, motion_timeout.as_ref()) {
+                        (Some(_), Some(_)) => {
+                            return Err(BridgeError::UnsupportedAction {
+                                state: state_name.to_string(),
+                                action: format!(
+                                    "extend {target} cannot declare both step timeout and cylinder action timeout"
+                                ),
+                            });
+                        }
+                        (Some(timeout), None) => Some(timeout),
+                        (None, Some(timeout_branch)) => Some(Timeout {
+                            after_ticks: ms_to_ticks(
+                                state_name,
+                                timeout_branch.duration_ms,
+                                tick_ms,
+                            )?,
+                            target: lookup_branch_target(
+                                state_name,
+                                &timeout_branch.target_task,
+                                &timeout_branch.target_step,
+                                state_to_step,
+                                task_entry_steps,
+                                "cylinder timeout",
+                            )?,
+                        }),
+                        (None, None) => None,
+                    };
+                    let fault_routing = match (on_motion_fault, on_safety_fault) {
+                        (None, None) => None,
+                        (Some(motion_fault), Some(safety_fault)) => {
+                            let on_motion_fault_target = lookup_branch_target(
+                                state_name,
+                                &motion_fault.target_task,
+                                &motion_fault.target_step,
+                                state_to_step,
+                                task_entry_steps,
+                                "cylinder on_motion_fault",
+                            )?;
+                            let on_safety_fault_target = lookup_branch_target(
+                                state_name,
+                                &safety_fault.target_task,
+                                &safety_fault.target_step,
+                                state_to_step,
+                                task_entry_steps,
+                                "cylinder on_safety_fault",
+                            )?;
+                            Some(CylinderFaultRouting {
+                                on_motion_fault: on_motion_fault_target,
+                                on_safety_fault: on_safety_fault_target,
+                            })
+                        }
+                        _ => {
+                            return Err(BridgeError::IncompleteClosedLoopCylinderRouting {
+                                state: state_name.to_string(),
+                                device: target.clone(),
+                            });
+                        }
+                    };
                     Ok(Action::CylinderMotion {
                         target: motion.target,
                         output: motion.output,
                         expect_extended: true,
                         confirm_inputs: motion.confirm_inputs,
                         opposing_inputs: motion.opposing_inputs,
-                        timeout: action_timeout,
+                        timeout: resolved_timeout,
+                        fault_routing,
                     })
                 } else {
+                    if motion_timeout.is_some() || on_motion_fault.is_some() || on_safety_fault.is_some()
+                    {
+                        return Err(BridgeError::UnsupportedAction {
+                            state: state_name.to_string(),
+                            action: format!(
+                                "extend {target} with fault routing requires topology-closed cylinder feedback"
+                            ),
+                        });
+                    }
                     let output = resolver.resolve_digital_output_id(state_name, target, port)?;
                     Ok(Action::Extend { output })
                 }
             }
-            TransitionAction::Retract { target, port } => {
+            TransitionAction::Retract {
+                target,
+                port,
+                timeout: motion_timeout,
+                on_motion_fault,
+                on_safety_fault,
+            } => {
                 if let Some(motion) =
                     resolver.resolve_cylinder_motion(state_name, target, port, false)?
                 {
+                    let resolved_timeout = match (action_timeout, motion_timeout.as_ref()) {
+                        (Some(_), Some(_)) => {
+                            return Err(BridgeError::UnsupportedAction {
+                                state: state_name.to_string(),
+                                action: format!(
+                                    "retract {target} cannot declare both step timeout and cylinder action timeout"
+                                ),
+                            });
+                        }
+                        (Some(timeout), None) => Some(timeout),
+                        (None, Some(timeout_branch)) => Some(Timeout {
+                            after_ticks: ms_to_ticks(
+                                state_name,
+                                timeout_branch.duration_ms,
+                                tick_ms,
+                            )?,
+                            target: lookup_branch_target(
+                                state_name,
+                                &timeout_branch.target_task,
+                                &timeout_branch.target_step,
+                                state_to_step,
+                                task_entry_steps,
+                                "cylinder timeout",
+                            )?,
+                        }),
+                        (None, None) => None,
+                    };
+                    let fault_routing = match (on_motion_fault, on_safety_fault) {
+                        (None, None) => None,
+                        (Some(motion_fault), Some(safety_fault)) => {
+                            let on_motion_fault_target = lookup_branch_target(
+                                state_name,
+                                &motion_fault.target_task,
+                                &motion_fault.target_step,
+                                state_to_step,
+                                task_entry_steps,
+                                "cylinder on_motion_fault",
+                            )?;
+                            let on_safety_fault_target = lookup_branch_target(
+                                state_name,
+                                &safety_fault.target_task,
+                                &safety_fault.target_step,
+                                state_to_step,
+                                task_entry_steps,
+                                "cylinder on_safety_fault",
+                            )?;
+                            Some(CylinderFaultRouting {
+                                on_motion_fault: on_motion_fault_target,
+                                on_safety_fault: on_safety_fault_target,
+                            })
+                        }
+                        _ => {
+                            return Err(BridgeError::IncompleteClosedLoopCylinderRouting {
+                                state: state_name.to_string(),
+                                device: target.clone(),
+                            });
+                        }
+                    };
                     Ok(Action::CylinderMotion {
                         target: motion.target,
                         output: motion.output,
                         expect_extended: false,
                         confirm_inputs: motion.confirm_inputs,
                         opposing_inputs: motion.opposing_inputs,
-                        timeout: action_timeout,
+                        timeout: resolved_timeout,
+                        fault_routing,
                     })
                 } else {
+                    if motion_timeout.is_some() || on_motion_fault.is_some() || on_safety_fault.is_some()
+                    {
+                        return Err(BridgeError::UnsupportedAction {
+                            state: state_name.to_string(),
+                            action: format!(
+                                "retract {target} with fault routing requires topology-closed cylinder feedback"
+                            ),
+                        });
+                    }
                     let output = resolver.resolve_digital_output_id(state_name, target, port)?;
                     Ok(Action::Retract { output })
                 }
@@ -2745,7 +2966,7 @@ fn convert_action(
                 }
                 let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
                 let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
-                let timeout_target = lookup_axis_branch_target(
+                let timeout_target = lookup_branch_target(
                     state_name,
                     &timeout_branch.target_task,
                     &timeout_branch.target_step,
@@ -2754,7 +2975,7 @@ fn convert_action(
                     "axis timeout",
                 )?;
                 let timeout_ticks = ms_to_ticks(state_name, timeout_branch.duration_ms, tick_ms)?;
-                let on_reject_target = lookup_axis_branch_target(
+                let on_reject_target = lookup_branch_target(
                     state_name,
                     &on_reject.target_task,
                     &on_reject.target_step,
@@ -2762,7 +2983,7 @@ fn convert_action(
                     task_entry_steps,
                     "axis on_reject",
                 )?;
-                let on_motion_fault_target = lookup_axis_branch_target(
+                let on_motion_fault_target = lookup_branch_target(
                     state_name,
                     &on_motion_fault.target_task,
                     &on_motion_fault.target_step,
@@ -2770,7 +2991,7 @@ fn convert_action(
                     task_entry_steps,
                     "axis on_motion_fault",
                 )?;
-                let on_safety_fault_target = lookup_axis_branch_target(
+                let on_safety_fault_target = lookup_branch_target(
                     state_name,
                     &on_safety_fault.target_task,
                     &on_safety_fault.target_step,
@@ -2874,7 +3095,7 @@ fn convert_action(
                 }
                 let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
                 let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
-                let timeout_target = lookup_axis_branch_target(
+                let timeout_target = lookup_branch_target(
                     state_name,
                     &timeout_branch.target_task,
                     &timeout_branch.target_step,
@@ -2883,7 +3104,7 @@ fn convert_action(
                     "axis timeout",
                 )?;
                 let timeout_ticks = ms_to_ticks(state_name, timeout_branch.duration_ms, tick_ms)?;
-                let on_reject_target = lookup_axis_branch_target(
+                let on_reject_target = lookup_branch_target(
                     state_name,
                     &on_reject.target_task,
                     &on_reject.target_step,
@@ -2891,7 +3112,7 @@ fn convert_action(
                     task_entry_steps,
                     "axis on_reject",
                 )?;
-                let on_motion_fault_target = lookup_axis_branch_target(
+                let on_motion_fault_target = lookup_branch_target(
                     state_name,
                     &on_motion_fault.target_task,
                     &on_motion_fault.target_step,
@@ -2899,7 +3120,7 @@ fn convert_action(
                     task_entry_steps,
                     "axis on_motion_fault",
                 )?;
-                let on_safety_fault_target = lookup_axis_branch_target(
+                let on_safety_fault_target = lookup_branch_target(
                     state_name,
                     &on_safety_fault.target_task,
                     &on_safety_fault.target_step,
@@ -3673,9 +3894,9 @@ impl<'a> TopologyResolver<'a> {
         let requested_port = state_port_key(
             port,
             if expect_extended {
-                "extended"
+                CylinderStrokeVerb::Extend.expected_state_port()
             } else {
-                "retracted"
+                CylinderStrokeVerb::Retract.expected_state_port()
             },
         );
         let defined_state_ports = self.cylinder_detect_state_ports(device);
@@ -4005,38 +4226,8 @@ fn leak_digital_conditions(conditions: Vec<DigitalCondition>) -> &'static [Digit
     Box::leak(conditions.into_boxed_slice())
 }
 
-fn state_port_key(port: &str, state: &str) -> String {
-    if port == "self" {
-        state.to_string()
-    } else {
-        format!("{port}.{state}")
-    }
-}
-
 fn state_port_matches(actual: Option<&str>, requested: &str) -> bool {
     matches!(actual, Some(port) if port == requested)
-}
-
-fn cylinder_complementary_state_port(requested: &str) -> Option<String> {
-    requested
-        .strip_suffix(".extended")
-        .map(|prefix| state_port_key(prefix, "retracted"))
-        .or_else(|| {
-            requested
-                .strip_suffix(".retracted")
-                .map(|prefix| state_port_key(prefix, "extended"))
-        })
-        .or_else(|| match requested {
-            "extended" => Some("retracted".to_string()),
-            "retracted" => Some("extended".to_string()),
-            _ => None,
-        })
-}
-
-fn is_cylinder_end_state_port(port: &str) -> bool {
-    matches!(port, "extended" | "retracted")
-        || port.ends_with(".extended")
-        || port.ends_with(".retracted")
 }
 
 fn matches_physical_output_kind(kind: &DeviceKind, link_kind: &crate::ir::ConnectionType) -> bool {
@@ -4118,7 +4309,10 @@ fn parse_ai_id(name: &str) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
-    use super::{cylinder_complementary_state_port, is_cylinder_end_state_port};
+    use crate::device_semantics::cylinder::{
+        complementary_end_state_port as cylinder_complementary_state_port,
+        is_end_state_port as is_cylinder_end_state_port,
+    };
 
     #[test]
     fn cylinder_complementary_state_port_maps_default_end_states() {

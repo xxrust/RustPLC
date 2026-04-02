@@ -3,6 +3,7 @@ use crate::ast::{
     GotoDirective, LiteralValue, OnCompleteDirective, PlcProgram, StepDeclaration, StepStatement,
     WaitCondition, WaitStatement,
 };
+use crate::device_semantics::cylinder::stroke_action_view as cylinder_stroke_action_view;
 use crate::ir::{ConstraintSet, DeviceKind, TopologyGraph};
 use petgraph::algo::has_path_connecting;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -654,7 +655,7 @@ fn collect_items_from_statements(
                         origin: origin.clone(),
                     });
                 }
-                collect_axis_fault_branch_pairs(
+                collect_motion_branch_pairs(
                     program,
                     action,
                     observed_names,
@@ -726,7 +727,7 @@ fn collect_items_from_statements(
     }
 }
 
-fn collect_axis_fault_branch_pairs(
+fn collect_motion_branch_pairs(
     program: &PlcProgram,
     action: &ActionStatement,
     observed_names: &HashSet<String>,
@@ -734,7 +735,7 @@ fn collect_axis_fault_branch_pairs(
     next_parallel_block_id: &mut usize,
     pairs: &mut Vec<ActionWaitPair>,
 ) {
-    let Some((action_text, action_target, branches)) = axis_fault_branches(action) else {
+    let Some((action_text, action_target, branches)) = motion_action_branches(action) else {
         return;
     };
 
@@ -774,9 +775,17 @@ fn collect_axis_fault_branch_pairs(
     }
 }
 
-fn axis_fault_branches(
+fn motion_action_branches(
     action: &ActionStatement,
 ) -> Option<(String, String, Vec<(&'static str, &GotoDirective)>)> {
+    if let Some(view) = cylinder_stroke_action_view(action) {
+        return Some((
+            view.action_text(),
+            view.target.device.clone(),
+            view.branch_targets(),
+        ));
+    }
+
     match action {
         ActionStatement::AxisMoveRelative {
             target,
@@ -930,10 +939,10 @@ fn collect_wait_items_from_statements(
 
 fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String)> {
     match action {
-        ActionStatement::Extend { target } => {
+        ActionStatement::Extend { target, .. } => {
             Some((format!("extend {}", target.device), target.device.clone()))
         }
-        ActionStatement::Retract { target } => {
+        ActionStatement::Retract { target, .. } => {
             Some((format!("retract {}", target.device), target.device.clone()))
         }
         ActionStatement::Set { target, value } => Some((
@@ -2167,6 +2176,98 @@ task fault:
                 .iter()
                 .any(|error| error.broken_link == "axis_x -> sensor_fault"),
             "应定位轴 timeout 分支缺失的 axis->sensor 链路"
+        );
+    }
+
+    #[test]
+    fn verifies_cylinder_fault_branch_wait_causality_when_links_exist() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device X0: digital_input
+device valve_a: solenoid_valve
+device cyl_a: cylinder
+device sensor_fault: sensor
+
+relation { from: Y0.out, to: valve_a.coil, via: driven_by }
+relation { from: valve_a.out, to: cyl_a.cmd, via: driven_by }
+relation { from: cyl_a.extended, to: sensor_fault.sense, via: detects }
+relation { from: sensor_fault.out, to: X0.in, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move:
+        action: extend cyl_a
+        on_motion_fault -> fault.motion_fault
+        on_safety_fault -> fault.safety_fault
+task fault:
+    step motion_fault:
+        wait: sensor_fault == true
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        verify_causality(&program, &topology, &constraints)
+            .expect("cylinder motion fault branch wait should participate in causality");
+    }
+
+    #[test]
+    fn reports_missing_cylinder_fault_branch_causality_path() {
+        let source = r#"
+[topology]
+
+device Y0: digital_output
+device valve_a: solenoid_valve
+device cyl_a: cylinder
+device sensor_fault: sensor
+
+relation { from: Y0.out, to: valve_a.coil, via: driven_by }
+relation { from: valve_a.out, to: cyl_a.cmd, via: driven_by }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step move:
+        action: extend cyl_a
+        on_motion_fault -> fault.motion_fault
+        on_safety_fault -> fault.safety_fault
+task fault:
+    step motion_fault:
+        wait: sensor_fault == true
+    step safety_fault:
+        action: log "safety"
+"#;
+
+        let program = parse_plc(source).expect("测试输入应能解析");
+        let topology = build_topology_graph(&program).expect("拓扑应能构建");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+
+        let errors = verify_causality(&program, &topology, &constraints)
+            .expect_err("missing cylinder -> sensor path should fail causality");
+
+        assert!(
+            errors.iter().any(|error| error
+                .action
+                .as_deref()
+                .unwrap_or_default()
+                .contains("on_motion_fault")),
+            "诊断动作文本应标注 on_motion_fault 分支"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.broken_link == "cyl_a -> sensor_fault"),
+            "应定位气缸分支缺失的 cylinder->sensor 链路"
         );
     }
 
