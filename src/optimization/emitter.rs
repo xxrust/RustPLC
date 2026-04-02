@@ -203,8 +203,8 @@ fn render_race_branch(name: &str, branch: &RaceBranch, indent_level: usize, out:
 
 fn render_action(action: &ActionStatement) -> String {
     match action {
-        ActionStatement::Extend { target } => format!("extend {target}"),
-        ActionStatement::Retract { target } => format!("retract {target}"),
+        ActionStatement::Extend { target, .. } => format!("extend {target}"),
+        ActionStatement::Retract { target, .. } => format!("retract {target}"),
         ActionStatement::Set { target, value } => format!("set {target} {value}"),
         ActionStatement::SetAnalog { target, value } => format!("set_analog {target} {value}"),
         ActionStatement::SetAnalogExpr { target, expr } => {

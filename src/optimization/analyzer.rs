@@ -228,8 +228,8 @@ fn profile_step(step: &StepDeclaration) -> StepProfile {
 
 fn collect_action_target(action: &ActionStatement, targets: &mut BTreeSet<String>) {
     match action {
-        ActionStatement::Extend { target }
-        | ActionStatement::Retract { target }
+        ActionStatement::Extend { target, .. }
+        | ActionStatement::Retract { target, .. }
         | ActionStatement::Set { target, .. }
         | ActionStatement::SetAnalog { target, .. }
         | ActionStatement::SetAnalogExpr { target, .. }

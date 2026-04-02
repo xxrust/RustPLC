@@ -6,6 +6,7 @@ use crate::ir::{
     CamInterpolation as IrCamInterpolation, ConstraintSet, DeviceKind, State, StateMachine,
     TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
+use crate::device_semantics::axis::move_transition_view as axis_move_transition_view;
 use crate::device_semantics::cylinder::{
     complementary_end_state_port as cylinder_complementary_state_port,
     is_end_state_port as is_cylinder_end_state_port,
@@ -451,6 +452,10 @@ fn select_runtime_root_tasks(
 fn motion_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
     let mut targets = Vec::new();
     for action in actions {
+        if let Some(view) = axis_move_transition_view(action) {
+            view.for_each_target(|task: &str, _: Option<&str>| targets.push(task.to_string()));
+            continue;
+        }
         match action {
             TransitionAction::Extend {
                 timeout,
@@ -473,46 +478,6 @@ fn motion_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> 
                 if let Some(on_safety_fault) = on_safety_fault {
                     targets.push(on_safety_fault.target_task.clone());
                 }
-            }
-            TransitionAction::AxisMoveRelative {
-                timeout,
-                on_reject,
-                on_motion_fault,
-                on_safety_fault,
-                on_reject_routes,
-                on_motion_fault_routes,
-                on_safety_fault_routes,
-                ..
-            }
-            | TransitionAction::AxisMoveAbsolute {
-                timeout,
-                on_reject,
-                on_motion_fault,
-                on_safety_fault,
-                on_reject_routes,
-                on_motion_fault_routes,
-                on_safety_fault_routes,
-                ..
-            } => {
-                targets.push(timeout.target_task.clone());
-                targets.push(on_reject.target_task.clone());
-                targets.push(on_motion_fault.target_task.clone());
-                targets.push(on_safety_fault.target_task.clone());
-                targets.extend(
-                    on_reject_routes
-                        .iter()
-                        .map(|route| route.target_task.clone()),
-                );
-                targets.extend(
-                    on_motion_fault_routes
-                        .iter()
-                        .map(|route| route.target_task.clone()),
-                );
-                targets.extend(
-                    on_safety_fault_routes
-                        .iter()
-                        .map(|route| route.target_task.clone()),
-                );
             }
             _ => {}
         }
@@ -570,6 +535,19 @@ fn motion_branch_target_state_keys(
 ) -> Vec<(String, String)> {
     let mut targets = Vec::new();
     for action in actions {
+        if let Some(view) = axis_move_transition_view(action) {
+            view.for_each_target(|task: &str, step: Option<&str>| {
+                let target_step = step.map(str::to_string);
+                push_axis_branch_target_state_key(
+                    &mut targets,
+                    task,
+                    &target_step,
+                    task_entry_states,
+                    known_state_keys,
+                );
+            });
+            continue;
+        }
         match action {
             TransitionAction::Extend {
                 timeout,
@@ -606,82 +584,6 @@ fn motion_branch_target_state_keys(
                         &mut targets,
                         &on_safety_fault.target_task,
                         &on_safety_fault.target_step,
-                        task_entry_states,
-                        known_state_keys,
-                    );
-                }
-            }
-            TransitionAction::AxisMoveRelative {
-                timeout,
-                on_reject,
-                on_motion_fault,
-                on_safety_fault,
-                on_reject_routes,
-                on_motion_fault_routes,
-                on_safety_fault_routes,
-                ..
-            }
-            | TransitionAction::AxisMoveAbsolute {
-                timeout,
-                on_reject,
-                on_motion_fault,
-                on_safety_fault,
-                on_reject_routes,
-                on_motion_fault_routes,
-                on_safety_fault_routes,
-                ..
-            } => {
-                push_axis_branch_target_state_key(
-                    &mut targets,
-                    &timeout.target_task,
-                    &timeout.target_step,
-                    task_entry_states,
-                    known_state_keys,
-                );
-                push_axis_branch_target_state_key(
-                    &mut targets,
-                    &on_reject.target_task,
-                    &on_reject.target_step,
-                    task_entry_states,
-                    known_state_keys,
-                );
-                push_axis_branch_target_state_key(
-                    &mut targets,
-                    &on_motion_fault.target_task,
-                    &on_motion_fault.target_step,
-                    task_entry_states,
-                    known_state_keys,
-                );
-                push_axis_branch_target_state_key(
-                    &mut targets,
-                    &on_safety_fault.target_task,
-                    &on_safety_fault.target_step,
-                    task_entry_states,
-                    known_state_keys,
-                );
-                for route in on_reject_routes {
-                    push_axis_branch_target_state_key(
-                        &mut targets,
-                        &route.target_task,
-                        &route.target_step,
-                        task_entry_states,
-                        known_state_keys,
-                    );
-                }
-                for route in on_motion_fault_routes {
-                    push_axis_branch_target_state_key(
-                        &mut targets,
-                        &route.target_task,
-                        &route.target_step,
-                        task_entry_states,
-                        known_state_keys,
-                    );
-                }
-                for route in on_safety_fault_routes {
-                    push_axis_branch_target_state_key(
-                        &mut targets,
-                        &route.target_task,
-                        &route.target_step,
                         task_entry_states,
                         known_state_keys,
                     );

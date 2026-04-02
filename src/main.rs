@@ -486,6 +486,11 @@ fn collect_scenario_init_hints(plc_source: &str) -> Result<ScenarioInitInputHint
                 Instr::WaitAnalog { id, .. } => {
                     used_ai.insert(id.0);
                 }
+                Instr::WaitAllDigital { conditions, .. } => {
+                    for condition in conditions {
+                        used_di.insert(condition.id.0);
+                    }
+                }
                 Instr::WaitExpr { .. }
                 | Instr::WaitCamDigital { .. }
                 | Instr::WaitCamAnalog { .. }
@@ -7058,6 +7063,11 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                 Instr::WaitAnalog { id, .. } => {
                     ais.insert(id.0);
                 }
+                Instr::WaitAllDigital { conditions, .. } => {
+                    for condition in conditions {
+                        dis.insert(condition.id.0);
+                    }
+                }
                 Instr::Action { actions, .. } => {
                     for a in actions {
                         match *a {
@@ -7066,6 +7076,20 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                             }
                             Action::Extend { output } | Action::Retract { output } => {
                                 dos.insert(output.0);
+                            }
+                            Action::CylinderMotion {
+                                output,
+                                confirm_inputs,
+                                opposing_inputs,
+                                ..
+                            } => {
+                                dos.insert(output.0);
+                                for id in confirm_inputs {
+                                    dis.insert(id.0);
+                                }
+                                for id in opposing_inputs {
+                                    dis.insert(id.0);
+                                }
                             }
                             Action::SetAnalog { id, .. } => {
                                 aos.insert(id.0);
@@ -7241,6 +7265,11 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                 Instr::WaitAnalog { id, .. } => {
                     ais.insert(id.0);
                 }
+                Instr::WaitAllDigital { conditions, .. } => {
+                    for condition in conditions {
+                        dis.insert(condition.id.0);
+                    }
+                }
                 Instr::Action { actions, .. } => {
                     for a in actions {
                         match *a {
@@ -7249,6 +7278,20 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                             }
                             Action::Extend { output } | Action::Retract { output } => {
                                 dos.insert(output.0);
+                            }
+                            Action::CylinderMotion {
+                                output,
+                                confirm_inputs,
+                                opposing_inputs,
+                                ..
+                            } => {
+                                dos.insert(output.0);
+                                for id in confirm_inputs {
+                                    dis.insert(id.0);
+                                }
+                                for id in opposing_inputs {
+                                    dis.insert(id.0);
+                                }
                             }
                             Action::SetAnalog { id, .. } => {
                                 aos.insert(id.0);
@@ -10216,6 +10259,11 @@ fn io_sizes_for_program_and_scenario(
                 Instr::WaitAnalog { id, .. } => {
                     max_ai = Some(max_ai.map_or(id.0, |m| m.max(id.0)));
                 }
+                Instr::WaitAllDigital { conditions, .. } => {
+                    for condition in conditions {
+                        max_di = Some(max_di.map_or(condition.id.0, |m| m.max(condition.id.0)));
+                    }
+                }
                 Instr::Action { actions, .. } => {
                     for a in actions {
                         match *a {
@@ -10223,6 +10271,20 @@ fn io_sizes_for_program_and_scenario(
                             | Action::Extend { output: id }
                             | Action::Retract { output: id } => {
                                 max_do = Some(max_do.map_or(id.0, |m| m.max(id.0)));
+                            }
+                            Action::CylinderMotion {
+                                output: id,
+                                confirm_inputs,
+                                opposing_inputs,
+                                ..
+                            } => {
+                                max_do = Some(max_do.map_or(id.0, |m| m.max(id.0)));
+                                for id in confirm_inputs {
+                                    max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
+                                }
+                                for id in opposing_inputs {
+                                    max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
+                                }
                             }
                             Action::SetAnalog { id, .. } => {
                                 max_ao = Some(max_ao.map_or(id.0, |m| m.max(id.0)));

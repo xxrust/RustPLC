@@ -662,9 +662,21 @@ impl ActionTarget {
 pub enum ActionStatement {
     Extend {
         target: ActionTarget,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<TimeoutDirective>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_motion_fault: Option<GotoDirective>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_safety_fault: Option<GotoDirective>,
     },
     Retract {
         target: ActionTarget,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<TimeoutDirective>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_motion_fault: Option<GotoDirective>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_safety_fault: Option<GotoDirective>,
     },
     Set {
         target: ActionTarget,

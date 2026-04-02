@@ -40,6 +40,16 @@ pub fn generate_program_module(
                         return Err(CodegenError::StepIdOutOfRange);
                     }
                 }
+                Instr::WaitAllDigital { next, timeout, .. } => {
+                    if !check(next, task.steps.len()) {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
+                    if let Some(tmo) = timeout
+                        && !check(tmo.target, task.steps.len())
+                    {
+                        return Err(CodegenError::StepIdOutOfRange);
+                    }
+                }
                 Instr::WaitDigital { next, timeout, .. } => {
                     if !check(next, task.steps.len()) {
                         return Err(CodegenError::StepIdOutOfRange);
@@ -327,6 +337,50 @@ fn format_action(a: &Action) -> String {
             "Action::Retract {{ output: DigitalOutputId({}) }}",
             output.0
         ),
+        Action::CylinderMotion {
+            target,
+            output,
+            expect_extended,
+            confirm_inputs,
+            opposing_inputs,
+            timeout,
+            fault_routing,
+        } => {
+            let confirm_inputs = if confirm_inputs.is_empty() {
+                "&[]".to_string()
+            } else {
+                format!(
+                    "&[{}]",
+                    confirm_inputs
+                        .iter()
+                        .map(|id| format!("DigitalInputId({})", id.0))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            let opposing_inputs = if opposing_inputs.is_empty() {
+                "&[]".to_string()
+            } else {
+                format!(
+                    "&[{}]",
+                    opposing_inputs
+                        .iter()
+                        .map(|id| format!("DigitalInputId({})", id.0))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            format!(
+                "Action::CylinderMotion {{ target: {:?}, output: DigitalOutputId({}), expect_extended: {}, confirm_inputs: {}, opposing_inputs: {}, timeout: {}, fault_routing: {} }}",
+                target,
+                output.0,
+                expect_extended,
+                confirm_inputs,
+                opposing_inputs,
+                format_timeout(timeout),
+                format_cylinder_fault_routing(fault_routing),
+            )
+        }
         Action::Log {
             message_id,
             message,
@@ -479,6 +533,18 @@ fn format_instr(tidx: usize, sidx: usize, instr: &Instr<'_>) -> String {
                 )
             }
         }
+        Instr::WaitAllDigital {
+            conditions,
+            next,
+            timeout,
+        } => {
+            let tmo = format_timeout(timeout);
+            let conditions_ref = format_digital_conditions_slice(conditions);
+            format!(
+                "Instr::WaitAllDigital {{ conditions: {}, next: StepId({}), timeout: {} }}",
+                conditions_ref, next.0, tmo
+            )
+        }
         Instr::WaitDigital {
             id,
             equals,
@@ -612,6 +678,46 @@ fn format_instr(tidx: usize, sidx: usize, instr: &Instr<'_>) -> String {
         ),
         Instr::Goto { target } => format!("Instr::Goto {{ target: StepId({}) }}", target.0),
         Instr::Halt => "Instr::Halt".to_string(),
+    }
+}
+
+fn format_timeout(timeout: Option<Timeout>) -> String {
+    match timeout {
+        None => "None".to_string(),
+        Some(Timeout {
+            after_ticks,
+            target,
+        }) => format!(
+            "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
+            after_ticks, target.0
+        ),
+    }
+}
+
+fn format_digital_conditions_slice(conditions: &[runtime_core::DigitalCondition]) -> String {
+    if conditions.is_empty() {
+        return "&[]".to_string();
+    }
+    format!(
+        "&[{}]",
+        conditions
+            .iter()
+            .map(|condition| format!(
+                "runtime_core::DigitalCondition {{ id: DigitalInputId({}), equals: {} }}",
+                condition.id.0, condition.equals
+            ))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn format_cylinder_fault_routing(routing: Option<runtime_core::CylinderFaultRouting>) -> String {
+    match routing {
+        None => "None".to_string(),
+        Some(routing) => format!(
+            "Some(runtime_core::CylinderFaultRouting {{ on_motion_fault: StepId({}), on_safety_fault: StepId({}) }})",
+            routing.on_motion_fault.0, routing.on_safety_fault.0
+        ),
     }
 }
 

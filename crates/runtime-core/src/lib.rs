@@ -489,6 +489,7 @@ pub enum Action {
         confirm_inputs: &'static [DigitalInputId],
         opposing_inputs: &'static [DigitalInputId],
         timeout: Option<Timeout>,
+        fault_routing: Option<CylinderFaultRouting>,
     },
     Log {
         message_id: u16,
@@ -586,6 +587,12 @@ pub struct AxisFaultRouting {
     pub on_reject_routes: &'static [AxisFaultRouteRule],
     pub on_motion_fault_routes: &'static [AxisFaultRouteRule],
     pub on_safety_fault_routes: &'static [AxisFaultRouteRule],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CylinderFaultRouting {
+    pub on_motion_fault: StepId,
+    pub on_safety_fault: StepId,
 }
 
 impl AxisFaultRouting {
@@ -2647,6 +2654,7 @@ impl<'a> Runtime<'a> {
                                     confirm_inputs,
                                     opposing_inputs,
                                     timeout,
+                                    fault_routing,
                                 } => {
                                     self.write_digital_output(io, output, expect_extended);
                                     let opposing_cleared_once = match self.task_contexts[task_idx]
@@ -2668,6 +2676,13 @@ impl<'a> Runtime<'a> {
                                     if confirm_active && opposing_active {
                                         self.task_contexts[task_idx].pending_action_state =
                                             TaskPendingActionState::Idle;
+                                        if let Some(routing) = fault_routing {
+                                            action_transition_override = Some((
+                                                routing.on_safety_fault,
+                                                TransitionReason::Action,
+                                            ));
+                                            break;
+                                        }
                                         return Err(RuntimeTickError::Core(
                                             RuntimeError::CylinderFeedbackFault {
                                                 target,
@@ -2681,6 +2696,13 @@ impl<'a> Runtime<'a> {
                                     } else if opposing_active && opposing_cleared_once {
                                         self.task_contexts[task_idx].pending_action_state =
                                             TaskPendingActionState::Idle;
+                                        if let Some(routing) = fault_routing {
+                                            action_transition_override = Some((
+                                                routing.on_motion_fault,
+                                                TransitionReason::Action,
+                                            ));
+                                            break;
+                                        }
                                         return Err(RuntimeTickError::Core(
                                             RuntimeError::CylinderFeedbackFault {
                                                 target,

@@ -1,3 +1,6 @@
+use crate::device_semantics::axis::{
+    move_transition_view as axis_move_transition_view, AxisMoveVerb,
+};
 use crate::device_semantics::cylinder::closed_loop_stroke_target;
 use crate::ir::{
     BinaryValue, ConstraintSet, ExternCallBinding, State, StateMachine, TimerOperationKind,
@@ -673,6 +676,31 @@ fn emit_actions(
 }
 
 fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariables) -> String {
+    if let Some(view) = axis_move_transition_view(action) {
+        let value_label = match view.verb {
+            AxisMoveVerb::Relative => "distance",
+            AxisMoveVerb::Absolute => "position",
+        };
+        let action_label = match view.verb {
+            AxisMoveVerb::Relative => "AXIS_MOVE_RELATIVE",
+            AxisMoveVerb::Absolute => "AXIS_MOVE_ABSOLUTE",
+        };
+        return format!(
+            "(* {action_label} {} {value_label}={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
+            normalize_identifier_for_st(view.target),
+            view.value_raw.trim(),
+            view.speed_raw.trim(),
+            view.timeout.duration_ms,
+            render_axis_target(&view.timeout.target_task, view.timeout.target_step.as_deref()),
+            render_axis_fault_target(view.on_reject),
+            render_axis_fault_target(view.on_motion_fault),
+            render_axis_fault_target(view.on_safety_fault),
+            render_axis_fault_routes(view.on_reject_routes),
+            render_axis_fault_routes(view.on_motion_fault_routes),
+            render_axis_fault_routes(view.on_safety_fault_routes),
+        );
+    }
+
     match action {
         TransitionAction::Extend { target, .. } => {
             format!("{} := TRUE;", resolved_variables.resolve_identifier(target))
@@ -771,61 +799,9 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             normalize_identifier_for_st(target),
             offset_expr_raw.trim()
         ),
-        TransitionAction::AxisMoveRelative {
-            target,
-            distance_raw,
-            speed_raw,
-            port: _,
-            semantic_tag: _,
-            timeout,
-            on_reject,
-            on_motion_fault,
-            on_safety_fault,
-            on_reject_routes,
-            on_motion_fault_routes,
-            on_safety_fault_routes,
-        } => format!(
-            "(* AXIS_MOVE_RELATIVE {} distance={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
-            normalize_identifier_for_st(target),
-            distance_raw.trim(),
-            speed_raw.trim(),
-            timeout.duration_ms,
-            render_axis_target(&timeout.target_task, timeout.target_step.as_deref()),
-            render_axis_fault_target(on_reject),
-            render_axis_fault_target(on_motion_fault),
-            render_axis_fault_target(on_safety_fault),
-            render_axis_fault_routes(on_reject_routes),
-            render_axis_fault_routes(on_motion_fault_routes),
-            render_axis_fault_routes(on_safety_fault_routes),
-        ),
-        TransitionAction::AxisMoveAbsolute {
-            target,
-            position_raw,
-            speed_raw,
-            require_homed: _,
-            port: _,
-            semantic_tag: _,
-            timeout,
-            on_reject,
-            on_motion_fault,
-            on_safety_fault,
-            on_reject_routes,
-            on_motion_fault_routes,
-            on_safety_fault_routes,
-        } => format!(
-            "(* AXIS_MOVE_ABSOLUTE {} position={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
-            normalize_identifier_for_st(target),
-            position_raw.trim(),
-            speed_raw.trim(),
-            timeout.duration_ms,
-            render_axis_target(&timeout.target_task, timeout.target_step.as_deref()),
-            render_axis_fault_target(on_reject),
-            render_axis_fault_target(on_motion_fault),
-            render_axis_fault_target(on_safety_fault),
-            render_axis_fault_routes(on_reject_routes),
-            render_axis_fault_routes(on_motion_fault_routes),
-            render_axis_fault_routes(on_safety_fault_routes),
-        ),
+        TransitionAction::AxisMoveRelative { .. } | TransitionAction::AxisMoveAbsolute { .. } => {
+            unreachable!("axis transition actions are rendered through axis_move_transition_view")
+        }
     }
 }
 

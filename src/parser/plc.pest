@@ -460,6 +460,17 @@ axis_on_reject_branch = { "on_reject" ~ axis_fault_route_matcher? ~ "->" ~ axis_
 axis_on_motion_fault_branch = { "on_motion_fault" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
 axis_on_safety_fault_branch = { "on_safety_fault" ~ axis_fault_route_matcher? ~ "->" ~ axis_branch_target }
 axis_semantic_tag_branch = { "semantic_tag" ~ ":" ~ identifier }
+cylinder_branch_target = { identifier ~ ("." ~ identifier)? }
+cylinder_on_motion_fault_branch = { "on_motion_fault" ~ "->" ~ cylinder_branch_target }
+cylinder_on_safety_fault_branch = { "on_safety_fault" ~ "->" ~ cylinder_branch_target }
+cylinder_motion_statement = {
+    "action"
+    ~ ":"
+    ~ (action_extend | action_retract)
+    ~ timeout_statement?
+    ~ cylinder_on_motion_fault_branch*
+    ~ cylinder_on_safety_fault_branch*
+}
 axis_move_statement = {
     "action"
     ~ ":"
@@ -476,7 +487,9 @@ repeat_block = { "repeat" ~ integer ~ ":" ~ step_statement+ }
 if_else_statement = { "if" ~ ":" ~ simple_condition ~ goto_statement ~ "else" ~ ":" ~ goto_statement }
 
 parallel_branch_statement = {
-    action_statement
+    axis_move_statement
+    | cylinder_motion_statement
+    | action_statement
     | effect_statement
     | wait_statement
     | delay_statement
@@ -490,7 +503,9 @@ parallel_branch = { !("on_complete" ~ ":") ~ identifier ~ ":" ~ parallel_branch_
 parallel_statement = { "parallel" ~ ":" ~ parallel_branch+ }
 
 race_branch_statement = {
-    action_statement
+    axis_move_statement
+    | cylinder_motion_statement
+    | action_statement
     | effect_statement
     | wait_statement
     | delay_statement
@@ -505,6 +520,7 @@ race_statement = { "race" ~ ":" ~ race_branch+ }
 
 step_statement = {
     axis_move_statement
+    | cylinder_motion_statement
     | action_statement
     | effect_statement
     | wait_statement

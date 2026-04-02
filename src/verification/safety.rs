@@ -2433,7 +2433,7 @@ fn select_safety_root_tasks(
         if transition.from.task_name != transition.to.task_name {
             cross_task_incoming.insert(transition.to.task_name.clone());
         }
-        for target_task in axis_branch_target_task_names(&transition.actions) {
+        for target_task in motion_branch_target_task_names(&transition.actions) {
             if transition.from.task_name != target_task {
                 cross_task_incoming.insert(target_task);
             }
@@ -2460,10 +2460,32 @@ fn select_safety_root_tasks(
     roots
 }
 
-fn axis_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
+fn motion_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
     let mut targets = Vec::new();
     for action in actions {
         match action {
+            TransitionAction::Extend {
+                timeout,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            }
+            | TransitionAction::Retract {
+                timeout,
+                on_motion_fault,
+                on_safety_fault,
+                ..
+            } => {
+                if let Some(timeout) = timeout {
+                    targets.push(timeout.target_task.clone());
+                }
+                if let Some(on_motion_fault) = on_motion_fault {
+                    targets.push(on_motion_fault.target_task.clone());
+                }
+                if let Some(on_safety_fault) = on_safety_fault {
+                    targets.push(on_safety_fault.target_task.clone());
+                }
+            }
             TransitionAction::AxisMoveRelative {
                 timeout,
                 on_reject,
@@ -2890,8 +2912,8 @@ fn collect_device_domains(
     for transition in &state_machine.transitions {
         for action in &transition.actions {
             let (target, port) = match action {
-                TransitionAction::Extend { target, port }
-                | TransitionAction::Retract { target, port }
+                TransitionAction::Extend { target, port, .. }
+                | TransitionAction::Retract { target, port, .. }
                 | TransitionAction::Set { target, port, .. }
                 | TransitionAction::SetAnalog { target, port, .. }
                 | TransitionAction::SetAnalogExpr { target, port, .. } => (target, port),
@@ -3166,7 +3188,7 @@ fn transition_effects(
             | TransitionAction::CamDisengage { .. }
             | TransitionAction::CamSwitch { .. }
             | TransitionAction::CamPhase { .. } => {}
-            TransitionAction::Extend { target, port } => {
+            TransitionAction::Extend { target, port, .. } => {
                 let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
                 else {
                     continue;
@@ -3176,7 +3198,7 @@ fn transition_effects(
                 };
                 effects.insert(device_id, state_id);
             }
-            TransitionAction::Retract { target, port } => {
+            TransitionAction::Retract { target, port, .. } => {
                 let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
                 else {
                     continue;

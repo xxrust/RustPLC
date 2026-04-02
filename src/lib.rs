@@ -10,6 +10,7 @@ pub mod component_library;
 pub mod component_scenario;
 pub mod component_sim;
 pub mod component_topology;
+pub mod device_semantics;
 pub mod device_library;
 pub mod device_subtype;
 pub mod diagnostics;

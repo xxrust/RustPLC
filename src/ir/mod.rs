@@ -312,10 +312,22 @@ pub enum TransitionAction {
     Extend {
         target: String,
         port: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<MotionTimeoutBranch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_motion_fault: Option<MotionFaultBranch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_safety_fault: Option<MotionFaultBranch>,
     },
     Retract {
         target: String,
         port: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<MotionTimeoutBranch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_motion_fault: Option<MotionFaultBranch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_safety_fault: Option<MotionFaultBranch>,
     },
     Set {
         target: String,
@@ -402,6 +414,21 @@ pub enum TransitionAction {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AxisTimeoutBranch {
     pub duration_ms: u64,
+    pub target_task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_step: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MotionTimeoutBranch {
+    pub duration_ms: u64,
+    pub target_task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_step: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MotionFaultBranch {
     pub target_task: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_step: Option<String>,
@@ -1014,6 +1041,9 @@ mod tests {
                     TransitionAction::Extend {
                         target: "cyl_A".to_string(),
                         port: "self".to_string(),
+                        timeout: None,
+                        on_motion_fault: None,
+                        on_safety_fault: None,
                     },
                     TransitionAction::AxisMoveRelative {
                         target: "axis_x".to_string(),

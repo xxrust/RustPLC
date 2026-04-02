@@ -355,8 +355,8 @@ impl PlcEvidence {
     ) {
         match statement {
             StepStatement::Action(action) => match action {
-                ActionStatement::Extend { target }
-                | ActionStatement::Retract { target }
+                ActionStatement::Extend { target, .. }
+                | ActionStatement::Retract { target, .. }
                 | ActionStatement::Set { target, .. }
                 | ActionStatement::SetAnalog { target, .. }
                 | ActionStatement::SetAnalogExpr { target, .. }
