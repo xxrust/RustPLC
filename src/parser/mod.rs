@@ -2226,9 +2226,9 @@ fn parse_step_statement_wrapper(pair: Pair<Rule>) -> Result<StepStatement, PlcEr
 fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
     match pair.as_rule() {
         Rule::axis_move_statement => Ok(StepStatement::Action(parse_axis_move_statement(pair)?)),
-        Rule::cylinder_motion_statement => {
-            Ok(StepStatement::Action(parse_cylinder_motion_statement(pair)?))
-        }
+        Rule::cylinder_motion_statement => Ok(StepStatement::Action(
+            parse_cylinder_motion_statement(pair)?,
+        )),
         Rule::action_statement => Ok(StepStatement::Action(parse_action_statement(pair)?)),
         Rule::effect_statement => Ok(StepStatement::Effect(parse_effect_statement_v2(pair)?)),
         Rule::wait_statement => Ok(StepStatement::Wait(parse_wait_statement(pair)?)),
@@ -6341,7 +6341,10 @@ task fault:
                 on_safety_fault,
             }) => {
                 assert_eq!(target.device, "cyl_A");
-                assert_eq!(timeout.as_ref().map(|t| t.target.task.as_str()), Some("fault"));
+                assert_eq!(
+                    timeout.as_ref().map(|t| t.target.task.as_str()),
+                    Some("fault")
+                );
                 assert_eq!(
                     on_motion_fault.as_ref().and_then(|v| v.step.as_deref()),
                     Some("motion_fault")

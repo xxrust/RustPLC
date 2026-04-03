@@ -1,6 +1,5 @@
 use crate::cli_support::common::{
-    DispatchResult,
-    CliOutputMode, display_path_relative_to_cwd, write_json_pretty, write_jsonl,
+    CliOutputMode, DispatchResult, display_path_relative_to_cwd, write_json_pretty, write_jsonl,
 };
 use crate::cli_support::help::command_usage;
 use rust_plc::component_diagnostics::{ComponentDiagnosisReport, diagnose_component_sim};
@@ -14,7 +13,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn try_dispatch(
+pub(super) fn try_dispatch(
     program: &str,
     command: &str,
     remaining: &[String],

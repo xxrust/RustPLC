@@ -7,7 +7,7 @@ pub(crate) struct CliCommandHelp {
     usage_template: &'static str,
 }
 
-const COMPILE_USAGE_TEMPLATE: &str = "Usage: {program} <file.plc> [--report <verification_report.json>] [--deny-warnings] [--no-print-ir] [--ir-out <ir_bundle.json>] [--budget-... <value>]";
+const COMPILE_USAGE_TEMPLATE: &str = "Usage: {program} <source.plc|source.bundle.toml> [--report <verification_report.json>] [--deny-warnings] [--no-print-ir] [--ir-out <ir_bundle.json>] [--budget-... <value>]";
 
 const CLI_COMMANDS: &[CliCommandHelp] = &[
     CliCommandHelp {
@@ -32,7 +32,7 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Simulation",
         name: "sim-plc",
         summary: "Compile a PLC file and execute it against a scenario with trace and audit outputs.",
-        usage_template: "Usage: {program} sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>] [--io-snapshot-out <io_snapshot.json>]",
+        usage_template: "Usage: {program} sim-plc <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out <trace.jsonl> [--retain-config <retain.toml>] [--retain-state <retain_state.json>] [--enable-online-force-dev] [--online-force-script <script.jsonl>] [--online-force-audit-out <audit.jsonl>] [--online-var-script <script.jsonl>] [--online-var-bindings <bindings.toml>] [--online-var-audit-out <audit.jsonl>] [--alarm-audit-out <alarm_events.ndjson>] [--alarm-hmi-ws <ws://host:port/path>] [--alarm-scenario-id <id>] [--alarm-top <n>] [--alarm-dedup-window-ms <ms>] [--alarm-min-interval-ms <ms>] [--io-snapshot-out <io_snapshot.json>]",
     },
     CliCommandHelp {
         section: "Simulation",
@@ -44,19 +44,19 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Simulation",
         name: "sim-pid-kpi",
         summary: "Run the PID KPI flow for a PLC file and a KPI scenario definition.",
-        usage_template: "Usage: {program} sim-pid-kpi <file.plc> --scenario <pid_scenario.yaml> [--out <kpi.json>]",
+        usage_template: "Usage: {program} sim-pid-kpi <source.plc|source.bundle.toml> --scenario <pid_scenario.yaml> [--out <kpi.json>]",
     },
     CliCommandHelp {
         section: "Deployment",
         name: "build-rp2040",
         summary: "Build an RP2040 deployment bundle from a PLC file and optional I/O maps.",
-        usage_template: "Usage: {program} build-rp2040 <file.plc> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]",
+        usage_template: "Usage: {program} build-rp2040 <source.plc|source.bundle.toml> --out <dir> [--io-map <file>] [--analog-calibration <file>] [--emit-uf2 <file.uf2>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Deployment",
         name: "release-bundle",
         summary: "Assemble a no-board release bundle with scenario, build, and timing artifacts.",
-        usage_template: "Usage: {program} release-bundle <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]",
+        usage_template: "Usage: {program} release-bundle <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]",
     },
     CliCommandHelp {
         section: "Deployment",
@@ -74,25 +74,31 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Deployment",
         name: "no-board-gate",
         summary: "Run the no-board regression gate and emit release diagnostics.",
-        usage_template: "Usage: {program} no-board-gate <file.plc> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]",
+        usage_template: "Usage: {program} no-board-gate <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--context <n>] [--sil-scenario <scenario.yaml>] [--board-scenario <scenario.yaml>] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Deployment",
+        name: "project-check",
+        summary: "Run the unified project regression check across compile, lint, doctor, and gate steps.",
+        usage_template: "Usage: {program} project-check <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Deployment",
         name: "commissioning-run",
         summary: "Generate a commissioning run bundle for a PLC file.",
-        usage_template: "Usage: {program} commissioning-run <file.plc> --out-dir <dir> [--output <human|json>]",
+        usage_template: "Usage: {program} commissioning-run <source.plc|source.bundle.toml> --out-dir <dir> [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Deployment",
         name: "pil-run",
         summary: "Run a PLC file against a PIL scenario.",
-        usage_template: "Usage: {program} pil-run <file.plc> --scenario <scenario.yaml>",
+        usage_template: "Usage: {program} pil-run <source.plc|source.bundle.toml> --scenario <scenario.yaml>",
     },
     CliCommandHelp {
         section: "Deployment",
         name: "virtual-board",
         summary: "Produce virtual-board artifacts from a PLC file and scenario.",
-        usage_template: "Usage: {program} virtual-board <file.plc> --scenario <scenario.yaml> --out-dir <dir>",
+        usage_template: "Usage: {program} virtual-board <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir>",
     },
     CliCommandHelp {
         section: "Diagnostics",
@@ -104,7 +110,7 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Diagnostics",
         name: "trace-doctor",
         summary: "Correlate trace, diff, timing, and snapshot artifacts into diagnosis output.",
-        usage_template: "Usage: {program} trace-doctor <file.plc> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--io-snapshot <io_snapshot.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]",
+        usage_template: "Usage: {program} trace-doctor <source.plc|source.bundle.toml> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--io-snapshot <io_snapshot.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Diagnostics",
@@ -146,43 +152,43 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Scenarios",
         name: "scenario-init",
         summary: "Generate a starter scenario YAML from a PLC file.",
-        usage_template: "Usage: {program} scenario-init <file.plc> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]",
+        usage_template: "Usage: {program} scenario-init <source.plc|source.bundle.toml> [--out <scenario.yaml>] [--preset <minimal|normal|timeout|sensor_stuck|bounce>]",
     },
     CliCommandHelp {
         section: "Scenarios",
         name: "scenario-validate",
         summary: "Validate one scenario YAML against a PLC file.",
-        usage_template: "Usage: {program} scenario-validate <file.plc> --scenario <scenario.yaml> [--output <human|json>]",
+        usage_template: "Usage: {program} scenario-validate <source.plc|source.bundle.toml> --scenario <scenario.yaml> [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Scenarios",
         name: "scenario-doctor",
         summary: "Diagnose one PLC and scenario pair and optionally preview fixes.",
-        usage_template: "Usage: {program} scenario-doctor <file.plc> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]",
+        usage_template: "Usage: {program} scenario-doctor <source.plc|source.bundle.toml> --scenario <scenario.yaml> [--fix-preview] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Scenarios",
         name: "scenario-expand",
         summary: "Expand one scenario YAML into the resolved form used by simulation.",
-        usage_template: "Usage: {program} scenario-expand <file.plc> --scenario <scenario.yaml> --out <expanded.yaml>",
+        usage_template: "Usage: {program} scenario-expand <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out <expanded.yaml>",
     },
     CliCommandHelp {
         section: "Scenarios",
         name: "scenario-gen",
         summary: "Generate scenario suites from a PLC file and a generation config.",
-        usage_template: "Usage: {program} scenario-gen --plc <file.plc> --config <gen.yaml> --out-dir <dir> [--coverage-mode <pairwise|boundary-first|risk-first>] [--dry-run] [--template-library <metadata.json>]",
+        usage_template: "Usage: {program} scenario-gen --plc <source.plc|source.bundle.toml> --config <gen.yaml> --out-dir <dir> [--coverage-mode <pairwise|boundary-first|risk-first>] [--dry-run] [--template-library <metadata.json>]",
     },
     CliCommandHelp {
         section: "Utilities",
         name: "sequence-lint",
         summary: "Lint critical wait recovery patterns in a PLC program.",
-        usage_template: "Usage: {program} sequence-lint <file.plc> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]",
+        usage_template: "Usage: {program} sequence-lint <source.plc|source.bundle.toml> [--critical-wait-level <warn|error>] [--critical-wait-exempt <task.step|task.*>]",
     },
     CliCommandHelp {
         section: "Utilities",
         name: "gen-st",
         summary: "Generate IEC 61131-3 ST output from a PLC file.",
-        usage_template: "Usage: {program} gen-st <file.plc> [--out <output.st>] [--program-name <Main>] [--no-verification-summary]",
+        usage_template: "Usage: {program} gen-st <source.plc|source.bundle.toml> [--out <output.st>] [--program-name <Main>] [--no-verification-summary]",
     },
 ];
 
@@ -269,6 +275,13 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--max-overrun-count <n>      Realtime threshold for overruns.",
             "--output <human|json>        Select CLI output format.",
         ],
+        "project-check" => &[
+            "--scenario <scenario.yaml>   Scenario shared by the doctor and no-board gate steps.",
+            "--out-dir <dir>              Required output directory for per-step artifacts.",
+            "--max-p99-exec-us <us>       Realtime threshold forwarded to no-board-gate.",
+            "--max-overrun-count <n>      Overrun threshold forwarded to no-board-gate.",
+            "--output <human|json>        Select CLI output format.",
+        ],
         "commissioning-run" => &[
             "--out-dir <dir>              Required commissioning artifact directory.",
             "--output <human|json>        Select CLI output format.",
@@ -341,7 +354,7 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--out <expanded.yaml>        Required resolved scenario output.",
         ],
         "scenario-gen" => &[
-            "--plc <file.plc>             Required PLC input.",
+            "--plc <source.plc|source.bundle.toml> Required PLC input.",
             "--config <gen.yaml>          Required scenario generation config.",
             "--out-dir <dir>              Required output directory.",
             "--coverage-mode <pairwise|boundary-first|risk-first> Scenario selection strategy.",
@@ -379,6 +392,9 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
         "flash-rp2040" => &["The target mount path must already exist and be writable."],
         "no-board-gate" => &[
             "If `--sil-scenario` or `--board-scenario` is omitted, the shared `--scenario` path is reused.",
+        ],
+        "project-check" => &[
+            "This command orchestrates `compile`, `sequence-lint`, `scenario-doctor`, and `no-board-gate` as one reproducible release check.",
         ],
         "trace-doctor" => &["At least one of `--trace` or `--diff` is required."],
         "component-sim" => {
@@ -427,6 +443,9 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         "board-parse" => &["rust_plc board-parse --in board.log --out-dir out/board_parse"],
         "no-board-gate" => &[
             "rust_plc no-board-gate examples/assembly_station.plc --scenario scenarios/normal.yaml --out-dir out/gate/no_board/assembly_station --output json",
+        ],
+        "project-check" => &[
+            "rust_plc project-check examples/project_scaffold_demo/plc/main.plc --scenario examples/project_scaffold_demo/scenarios/nominal/normal.yaml --out-dir out/project_check/project_scaffold_demo --output human",
         ],
         "commissioning-run" => &[
             "rust_plc commissioning-run examples/assembly_station.plc --out-dir out/commissioning/assembly_station",

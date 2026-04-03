@@ -4,8 +4,7 @@ use runtime_core::{
     AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE, AxisAutoResetPolicy, AxisFault, AxisFaultKind,
     AxisFaultPropagationScope, AxisFaultSeverity, AxisMotionResult, AxisMoveKind, AxisStopMode,
     AxisStopState, AxisStopTransitionPhase, CylinderFeedbackFault, Instr, Runtime, RuntimeError,
-    RuntimeTickError,
-    axis_fault_policy_log_message_id, axis_stop_transition_log_message_id,
+    RuntimeTickError, axis_fault_policy_log_message_id, axis_stop_transition_log_message_id,
 };
 use rust_plc::extern_functions::{
     EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR, ExternFunctionInfo,
@@ -761,14 +760,16 @@ fn bridge_lowers_closed_loop_cylinder_action_timeout_into_pending_motion() {
 
     match extend_step.instr {
         Instr::Action { actions, .. } => match actions {
-            [runtime_core::Action::CylinderMotion {
-                target,
-                expect_extended,
-                confirm_inputs,
-                opposing_inputs,
-                timeout: Some(timeout),
-                ..
-            }] => {
+            [
+                runtime_core::Action::CylinderMotion {
+                    target,
+                    expect_extended,
+                    confirm_inputs,
+                    opposing_inputs,
+                    timeout: Some(timeout),
+                    ..
+                },
+            ] => {
                 assert_eq!(*target, "cyl_A");
                 assert!(*expect_extended);
                 assert_eq!(*confirm_inputs, [DigitalInputId(0)]);
@@ -869,7 +870,9 @@ fn runtime_rejects_contradictory_cylinder_feedback_for_closed_loop_action() {
     io.schedule_digital_input(Tick(1), DigitalInputId(1), true);
 
     rt.tick(&mut io).expect("tick pending action start");
-    let err = rt.tick(&mut io).expect_err("contradictory feedback should fault at action layer");
+    let err = rt
+        .tick(&mut io)
+        .expect_err("contradictory feedback should fault at action layer");
     assert_eq!(
         err,
         RuntimeError::CylinderFeedbackFault {
@@ -888,8 +891,10 @@ fn runtime_rejects_reasserted_opposing_feedback_for_closed_loop_action() {
     io.schedule_digital_input(Tick(1), DigitalInputId(1), false);
     io.schedule_digital_input(Tick(2), DigitalInputId(1), true);
 
-    rt.tick(&mut io).expect("tick start while still on opposing end");
-    rt.tick(&mut io).expect("tick after opposing feedback clears");
+    rt.tick(&mut io)
+        .expect("tick start while still on opposing end");
+    rt.tick(&mut io)
+        .expect("tick after opposing feedback clears");
     let err = rt
         .tick(&mut io)
         .expect_err("reasserted opposing feedback should fault after motion leaves start end");
@@ -943,11 +948,13 @@ fn bridge_lowers_closed_loop_cylinder_fault_routing_when_declared() {
 
     match extend_step.instr {
         Instr::Action { actions, .. } => match actions {
-            [runtime_core::Action::CylinderMotion {
-                timeout: Some(timeout),
-                fault_routing: Some(routing),
-                ..
-            }] => {
+            [
+                runtime_core::Action::CylinderMotion {
+                    timeout: Some(timeout),
+                    fault_routing: Some(routing),
+                    ..
+                },
+            ] => {
                 assert_eq!(timeout.after_ticks, 5);
                 assert_eq!(
                     program.tasks[0]
@@ -1005,11 +1012,13 @@ fn bridge_lowers_closed_loop_cylinder_fault_routing_without_timeout() {
 
     match extend_step.instr {
         Instr::Action { actions, .. } => match actions {
-            [runtime_core::Action::CylinderMotion {
-                timeout: None,
-                fault_routing: Some(routing),
-                ..
-            }] => {
+            [
+                runtime_core::Action::CylinderMotion {
+                    timeout: None,
+                    fault_routing: Some(routing),
+                    ..
+                },
+            ] => {
                 assert_eq!(
                     program.tasks[0]
                         .step(routing.on_motion_fault)
@@ -1040,8 +1049,10 @@ fn runtime_routes_opposite_feedback_to_declared_cylinder_motion_fault_branch() {
     io.schedule_digital_input(Tick(1), DigitalInputId(1), false);
     io.schedule_digital_input(Tick(2), DigitalInputId(1), true);
 
-    rt.tick(&mut io).expect("tick start while still on opposing end");
-    rt.tick(&mut io).expect("tick after opposing feedback clears");
+    rt.tick(&mut io)
+        .expect("tick start while still on opposing end");
+    rt.tick(&mut io)
+        .expect("tick after opposing feedback clears");
     rt.tick(&mut io)
         .expect("opposite feedback should route instead of surfacing runtime error");
 
@@ -1060,8 +1071,9 @@ fn runtime_routes_entry_tick_contradictory_feedback_to_declared_cylinder_safety_
     io.schedule_digital_input(Tick(0), DigitalInputId(0), true);
     io.schedule_digital_input(Tick(0), DigitalInputId(1), true);
 
-    rt.tick(&mut io)
-        .expect("entry-tick contradictory feedback should route instead of surfacing runtime error");
+    rt.tick(&mut io).expect(
+        "entry-tick contradictory feedback should route instead of surfacing runtime error",
+    );
 
     assert!(
         any_task_at_step(&rt, &program, "fault_safety.halt"),

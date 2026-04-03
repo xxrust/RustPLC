@@ -95,7 +95,11 @@ fn positional_subcommand_help_short_circuits_before_reading_inputs() {
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("scenario-validate <file.plc> --scenario <scenario.yaml>"));
+    assert!(
+        stderr.contains(
+            "scenario-validate <source.plc|source.bundle.toml> --scenario <scenario.yaml>"
+        )
+    );
     assert!(stderr.contains("Validate one scenario YAML against a PLC file."));
     assert!(stderr.contains("Options:"));
     assert!(stderr.contains("--scenario <scenario.yaml>"));
@@ -111,11 +115,41 @@ fn compile_mode_help_short_circuits_before_touching_input_path() {
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("<file.plc>"));
+    assert!(stderr.contains("<source.plc|source.bundle.toml>"));
     assert!(stderr.contains("Core options:"));
     assert!(stderr.contains("Examples:"));
     assert!(!stderr.contains("Failed to read"));
-    assert!(!stderr.contains("Expected a .plc file path"));
+    assert!(!stderr.contains("Expected a .plc or .bundle.toml path"));
+}
+
+#[test]
+fn unknown_token_help_follows_compile_fallback() {
+    let output = run_cli(&["not-a-command", "--help"]);
+    assert!(
+        output.status.success(),
+        "compile fallback --help should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("<source.plc|source.bundle.toml>"));
+    assert!(stderr.contains("Core options:"));
+    assert!(!stderr.contains("Unknown command: not-a-command"));
+}
+
+#[test]
+fn help_subcommand_unknown_token_follows_compile_fallback() {
+    let output = run_cli(&["help", "not-a-command"]);
+    assert!(
+        output.status.success(),
+        "help unknown token should follow compile fallback, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("<source.plc|source.bundle.toml>"));
+    assert!(stderr.contains("Core options:"));
+    assert!(!stderr.contains("Unknown command: not-a-command"));
 }
 
 #[test]
@@ -128,7 +162,9 @@ fn detailed_help_for_sim_plc_includes_examples_and_notes() {
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("sim-plc <file.plc> --scenario <scenario.yaml> --out <trace.jsonl>"));
+    assert!(stderr.contains(
+        "sim-plc <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out <trace.jsonl>"
+    ));
     assert!(stderr.contains("Options:"));
     assert!(stderr.contains("--enable-online-force-dev"));
     assert!(stderr.contains("Notes:"));

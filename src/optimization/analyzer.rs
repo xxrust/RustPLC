@@ -32,32 +32,32 @@ pub fn analyze_optimization_opportunities(program: &PlcProgram) -> Vec<Optimizat
 
             if can_reorder_or_parallelize(&first_profile, &second_profile) {
                 let shared_details = vec![
-                    format!(
-                        "{} 与 {} 都是非阻塞 immediate step",
-                        first.name, second.name
-                    ),
-                    "两步没有 wait/delay/timeout/goto/parallel/race/axis.move".to_string(),
-                    "两步动作/资源目标集合互不重叠".to_string(),
+                    format!("{}/{} are both immediate steps", first.name, second.name),
+                    "Neither step contains wait/delay/timeout/goto/parallel/race/axis.move"
+                        .to_string(),
+                    "Their action/effect target sets are disjoint".to_string(),
                 ];
                 opportunities.push(OptimizationOpportunity {
                     kind: OptimizationOpportunityKind::ReorderIndependentSteps,
                     task: task.name.clone(),
                     steps: vec![first.name.clone(), second.name.clone()],
                     summary: format!(
-                        "task {} 的相邻 step {} / {} 可以调序",
+                        "task {} adjacent steps {} / {} can be reordered",
                         task.name, first.name, second.name
                     ),
                     details: shared_details.clone(),
+                    replacement_task: None,
                 });
                 opportunities.push(OptimizationOpportunity {
                     kind: OptimizationOpportunityKind::ParallelizeIndependentSteps,
                     task: task.name.clone(),
                     steps: vec![first.name.clone(), second.name.clone()],
                     summary: format!(
-                        "task {} 的相邻 step {} / {} 可以从串行改并行",
+                        "task {} adjacent steps {} / {} can be parallelized",
                         task.name, first.name, second.name
                     ),
                     details: shared_details,
+                    replacement_task: None,
                 });
             }
 
@@ -72,16 +72,19 @@ pub fn analyze_optimization_opportunities(program: &PlcProgram) -> Vec<Optimizat
                         task: task.name.clone(),
                         steps: vec![first.name.clone(), second.name.clone()],
                         summary: format!(
-                            "task {} 的连续等待 step {} / {} 可以合并",
+                            "task {} adjacent wait steps {} / {} can be merged",
                             task.name, first.name, second.name
                         ),
                         details: vec![
-                            format!("两步 wait 条件完全一致：{wait_signature}"),
+                            format!("Both steps wait for the same condition: {wait_signature}"),
                             match &first_profile.timeout_signature {
-                                Some(timeout) => format!("两步 timeout 路由也一致：{timeout}"),
-                                None => "两步都没有 timeout".to_string(),
+                                Some(timeout) => {
+                                    format!("Both steps share the same timeout route: {timeout}")
+                                }
+                                None => "Neither step defines a timeout route".to_string(),
                             },
                         ],
+                        replacement_task: None,
                     });
                 }
             }
@@ -92,17 +95,18 @@ pub fn analyze_optimization_opportunities(program: &PlcProgram) -> Vec<Optimizat
                     task: task.name.clone(),
                     steps: vec![first.name.clone(), second.name.clone()],
                     summary: format!(
-                        "task {} 的连续 delay step {} / {} 可以合并",
+                        "task {} adjacent delay steps {} / {} can be merged",
                         task.name, first.name, second.name
                     ),
                     details: vec![format!(
-                        "delay 可从 {}ms + {}ms 收敛为 {}ms",
+                        "delay can be folded from {}ms + {}ms to {}ms",
                         first_profile.total_delay_ms,
                         second_profile.total_delay_ms,
                         first_profile
                             .total_delay_ms
                             .saturating_add(second_profile.total_delay_ms)
                     )],
+                    replacement_task: None,
                 });
             }
         }
@@ -151,14 +155,19 @@ fn analyze_recovery_route_replacements(
             task: task.name.clone(),
             steps: vec![step_name.clone()],
             summary: format!(
-                "task {} 的 timeout 恢复路由 {} -> {} 可替换为更短路径",
+                "task {} timeout recovery route {} -> {} can be shortened",
                 task.name, current_target, candidate
             ),
             details: vec![
-                format!("step {step_name} 当前 timeout: {timeout}"),
-                format!("当前恢复 task {current_target} 的 delay 足迹为 {current_total}ms"),
-                format!("候选恢复 task {candidate} 的 delay 足迹为 {candidate_total}ms"),
+                format!("step {step_name} timeout: {timeout}"),
+                format!(
+                    "current recovery task {current_target} has total delay footprint {current_total}ms"
+                ),
+                format!(
+                    "candidate recovery task {candidate} has total delay footprint {candidate_total}ms"
+                ),
             ],
+            replacement_task: Some(candidate.clone()),
         });
     }
     opportunities
@@ -421,6 +430,10 @@ task fast_fault:
         assert!(opportunities.iter().any(|item| {
             item.kind == OptimizationOpportunityKind::ReplaceRecoveryRoute
                 && item.summary.contains("slow_fault -> fast_fault")
+        }));
+        assert!(opportunities.iter().any(|item| {
+            item.kind == OptimizationOpportunityKind::ReplaceRecoveryRoute
+                && item.replacement_task.as_deref() == Some("fast_fault")
         }));
     }
 }

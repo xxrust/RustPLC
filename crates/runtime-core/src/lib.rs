@@ -2404,7 +2404,8 @@ impl<'a> Runtime<'a> {
                                 action_index,
                                 semantic_tag: _,
                             } => {
-                                if let Some(Action::AxisMove { command }) = actions.get(action_index)
+                                if let Some(Action::AxisMove { command }) =
+                                    actions.get(action_index)
                                 {
                                     if command.target == target {
                                         action_start_index = action_index;
@@ -2438,7 +2439,8 @@ impl<'a> Runtime<'a> {
                                         TaskPendingActionState::Idle;
                                 }
                             }
-                            TaskPendingActionState::Idle | TaskPendingActionState::ExternCall { .. } => {}
+                            TaskPendingActionState::Idle
+                            | TaskPendingActionState::ExternCall { .. } => {}
                         }
                         for (action_index, a) in actions.iter().enumerate().skip(action_start_index)
                         {
@@ -2657,21 +2659,18 @@ impl<'a> Runtime<'a> {
                                     fault_routing,
                                 } => {
                                     self.write_digital_output(io, output, expect_extended);
-                                    let opposing_cleared_once = match self.task_contexts[task_idx]
-                                        .pending_action_state
-                                    {
-                                        TaskPendingActionState::CylinderMotion {
-                                            opposing_cleared_once,
-                                            ..
-                                        } => opposing_cleared_once,
-                                        _ => false,
-                                    };
-                                    let confirm_active = confirm_inputs
-                                        .iter()
-                                        .all(|id| io.read_digital_input(*id));
-                                    let opposing_active = opposing_inputs
-                                        .iter()
-                                        .any(|id| io.read_digital_input(*id));
+                                    let opposing_cleared_once =
+                                        match self.task_contexts[task_idx].pending_action_state {
+                                            TaskPendingActionState::CylinderMotion {
+                                                opposing_cleared_once,
+                                                ..
+                                            } => opposing_cleared_once,
+                                            _ => false,
+                                        };
+                                    let confirm_active =
+                                        confirm_inputs.iter().all(|id| io.read_digital_input(*id));
+                                    let opposing_active =
+                                        opposing_inputs.iter().any(|id| io.read_digital_input(*id));
 
                                     if confirm_active && opposing_active {
                                         self.task_contexts[task_idx].pending_action_state =
@@ -2722,10 +2721,8 @@ impl<'a> Runtime<'a> {
                                         {
                                             self.task_contexts[task_idx].pending_action_state =
                                                 TaskPendingActionState::Idle;
-                                            action_transition_override = Some((
-                                                timeout.target,
-                                                TransitionReason::Timeout,
-                                            ));
+                                            action_transition_override =
+                                                Some((timeout.target, TransitionReason::Timeout));
                                             break;
                                         }
                                         action_completion = ActionCompletionState::Pending;

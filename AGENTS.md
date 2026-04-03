@@ -96,6 +96,11 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `src/verification/`：四类验证引擎
 - `src/codegen/st.rs`：IEC 61131-3 ST 代码生成
 - `src/diagnostics.rs`：统一诊断结构
+- `src/main.rs`：二进制薄入口，仅负责启动 `cli::run()`
+- `src/cli/mod.rs`：CLI 分发入口与默认 compile fallback
+- `src/cli/*`：各命令的真实归属模块
+- `src/cli/shared/*`：仅供 CLI 内部复用的共享编译/验证管线
+- `src/cli_support/*`：帮助页、公共输出、scenario/plc 辅助工具；不是命令归属层
 
 ### 运行时与子项目
 
@@ -218,6 +223,17 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `src/topology_semantic_gate.rs`
 - `src/runtime_bridge.rs`
 
+### 7. CLI 命令、脚手架与交付管线问题
+
+先看：
+
+- `src/main.rs`
+- `src/cli/mod.rs`
+- `src/cli/*`
+- `src/cli/shared/*`
+- `src/cli_support/help.rs`
+- `src/cli_support/plc_pipeline.rs`
+
 ## 常见改动的联动路径
 
 下面这些是长期稳定的“改一处通常要看多处”的路径。
@@ -272,7 +288,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - Phase 3 `merge` 目前同样仍是类型级 effect：IR `inputs` 只提供 DSL 引用名，不携带实例 id 或输入类型。`runtime_bridge` 必须先根据 `target_type` 的 `merge(...)` 派生规则把输入类型多重集显式降级到 runtime，再连同原始 `inputs` 一起交给 `runtime-core`；runtime 负责按该类型多重集消费 token、显式拒绝重复 `consumed_inputs` 引用/arity mismatch，并把每个被消费输入通过 lineage 记录到输出 token
 - Phase 1 `acquire/transfer/finish` 在 runtime 只能消费“源端点恰好 1 个 active token”的状态；`0` 个属于 underflow，`>1` 个属于 duplicate occupancy 歧义，目标端点容量检查走显式 overflow 错误，避免 bridge/runtime 对未定实例做静默猜测
 - `runtime_bridge` 进入 carrier workpiece 阶段后，必须把 `workpiece_type.ingress_sites` / `*_egress_sites` 中的 `carrier.slot[*]`、`carrier.slot[row,col]` 模式展开成 runtime 可执行的具体端点，并把 carrier 每个具体 slot 追加到 runtime `workpiece_sites`；否则 `Runtime::new` 的 ingress seeding 与后续 `acquire/mount/unmount` 会在 slot 名称上失配
-- 当 `runtime_core::Action` 或 `Program` 增加新字段/变体时，除 bridge 外还要同步更新 `src/main.rs`、`src/sim_regress.rs`、`crates/codegen/src/lib.rs`、`crates/sim/*` 中对 runtime 结构的穷举匹配与静态 `Program` 夹具，否则很容易在非目标 crate 上留下编译断点
+- 当 `runtime_core::Action` 或 `Program` 增加新字段/变体时，除 bridge 外还要同步更新 `src/cli/*`、`src/cli/shared/compile_pipeline.rs`、`src/cli_support/plc_pipeline.rs`、`src/sim_regress.rs`、`crates/codegen/src/lib.rs`、`crates/sim/*` 中对 runtime 结构的穷举匹配与静态 `Program` 夹具，否则很容易在非目标 crate 上留下编译断点
 - `axis.move_relative/axis.move_absolute` 属于默认 blocking 长时动作；即使未显式编写 `wait`，也应由 `Pending -> Done/Fault` 生命周期驱动 step 离开，回归测试至少覆盖 Pending->Done 与 Pending->Fault
 - axis 动作的 `timeout/on_reject/on_motion_fault/on_safety_fault` 与细分 route 必须在 bridge 阶段降级成 runtime 可执行的 `StepId` 元数据；runtime 在 Pending 轮询阶段按“先专用 route、后主桶 fallback”执行分流，避免回退为裸 `RuntimeError::AxisFault`
 - `runtime_bridge` 构建 runtime task 时优先保留“无跨 task 入边”的 root task 边界；若全量 task 都存在跨 task 入边，则回退到 IR 初始 task 作为 active root，避免旧流程直接退化为并发全激活副作用

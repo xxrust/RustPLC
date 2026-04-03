@@ -23,8 +23,7 @@ mod tests {
         let source = r#"
 [topology]
 
-device Y0: digital_output
-device Y1: digital_output
+device plc_main: plc { model_ref: openplc_softplc }
 
 device valve_A: solenoid_valve { response_time: 10ms }
 device valve_B: solenoid_valve { response_time: 10ms }
@@ -32,9 +31,9 @@ device valve_B: solenoid_valve { response_time: 10ms }
 device cyl_A: cylinder { stroke_time: 200ms, retract_time: 180ms }
 device cyl_B: cylinder { stroke_time: 250ms, retract_time: 220ms }
 
-relation { from: Y0.out, to: valve_A.coil, via: driven_by }
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
-relation { from: Y1.out, to: valve_B.coil, via: driven_by }
+relation { from: plc_main.Y1, to: valve_B.coil, via: driven_by }
 relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
 
 [constraints]

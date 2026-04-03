@@ -179,13 +179,7 @@ fn replace_timeout_recovery_route(
     opportunity: &OptimizationOpportunity,
 ) -> Option<(CandidateRewrite, PlcProgram)> {
     let step_name = opportunity.steps.first()?;
-    let alternative = opportunity
-        .details
-        .iter()
-        .find_map(|detail| detail.strip_prefix("候选恢复 task "))?
-        .split_whitespace()
-        .next()?
-        .to_string();
+    let alternative = opportunity.replacement_task.clone()?;
 
     let mut candidate = program.clone();
     let task = candidate

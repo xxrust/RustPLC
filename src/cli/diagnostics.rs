@@ -15,7 +15,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn try_dispatch(
+pub(super) fn try_dispatch(
     program: &str,
     command: &str,
     remaining: &[String],
@@ -281,14 +281,16 @@ fn run_trace_doctor_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--scenario" => {
-                scenario_path = Some(PathBuf::from(args.next().ok_or_else(|| {
-                    "Missing value for --scenario <scenario.yaml>".to_string()
-                })?));
+                scenario_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --scenario <scenario.yaml>".to_string()
+                    })?));
             }
             "--trace" => {
-                trace_path = Some(PathBuf::from(args.next().ok_or_else(|| {
-                    "Missing value for --trace <trace.jsonl>".to_string()
-                })?));
+                trace_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --trace <trace.jsonl>".to_string()
+                    })?));
             }
             "--diff" => {
                 diff_path = Some(PathBuf::from(args.next().ok_or_else(|| {
@@ -527,9 +529,10 @@ fn run_io_map_normalize_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--in" => {
-                input = Some(PathBuf::from(args.next().ok_or_else(|| {
-                    "Missing value for --in <io_map.toml>".to_string()
-                })?));
+                input =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --in <io_map.toml>".to_string()
+                    })?));
             }
             "--out" => {
                 out = Some(PathBuf::from(args.next().ok_or_else(|| {

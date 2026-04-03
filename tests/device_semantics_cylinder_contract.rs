@@ -40,12 +40,16 @@ task main:
 "#;
 
     let program = parse_plc(input).expect("fixture should parse");
-    let errors = build_state_machine(&program).expect_err("semantic should reject non-cylinder target");
+    let errors =
+        build_state_machine(&program).expect_err("semantic should reject non-cylinder target");
     let joined = errors
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(joined.contains("[CYL-001]"), "expected CYL-001, got: {joined}");
+    assert!(
+        joined.contains("[CYL-001]"),
+        "expected CYL-001, got: {joined}"
+    );
 }

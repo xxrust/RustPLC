@@ -265,11 +265,13 @@ fn validate_cylinder_actions_in_statements(
                     continue;
                 }
 
-                for kind in classify_stroke_routing(
-                    has_on_motion_fault,
-                    has_on_safety_fault,
-                ) {
-                    errors.push(cylinder_routing_error(line, step_name, &target.device, kind));
+                for kind in classify_stroke_routing(has_on_motion_fault, has_on_safety_fault) {
+                    errors.push(cylinder_routing_error(
+                        line,
+                        step_name,
+                        &target.device,
+                        kind,
+                    ));
                 }
             }
             StepStatement::Repeat { body, .. } => {
@@ -384,9 +386,9 @@ pub fn state_port_key(port: &str, state: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
+        CylinderSemanticErrorKind, CylinderStrokeVerb, EXTENDED_STATE_PORT, RETRACTED_STATE_PORT,
         classify_stroke_routing, closed_loop_stroke_target, complementary_end_state_port,
-        is_end_state_port, stroke_action_view, validate_stroke_target_kind, CylinderStrokeVerb,
-        CylinderSemanticErrorKind, EXTENDED_STATE_PORT, RETRACTED_STATE_PORT,
+        is_end_state_port, stroke_action_view, validate_stroke_target_kind,
     };
     use crate::ast::{
         ActionStatement, ActionTarget, DurationValue, GotoDirective, TimeUnit, TimeoutDirective,
@@ -432,7 +434,10 @@ mod tests {
     #[test]
     fn stroke_verb_maps_to_expected_terminal_port() {
         assert_eq!(CylinderStrokeVerb::Extend.expected_state_port(), "extended");
-        assert_eq!(CylinderStrokeVerb::Retract.expected_state_port(), "retracted");
+        assert_eq!(
+            CylinderStrokeVerb::Retract.expected_state_port(),
+            "retracted"
+        );
         assert_eq!(CylinderStrokeVerb::Extend.action_keyword(), "extend");
         assert_eq!(CylinderStrokeVerb::Retract.action_keyword(), "retract");
     }

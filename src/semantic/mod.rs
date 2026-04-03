@@ -23,8 +23,8 @@ use crate::ast::{
     WorkpieceTypeDeclaration as AstWorkpieceTypeDeclaration,
 };
 use crate::axis_profile::resolve_axis_profiles;
-use crate::device_semantics;
 use crate::device_library::{DeviceDef, PortDef};
+use crate::device_semantics;
 use crate::error::PlcError;
 use crate::ir::{
     ActionKind, ActionRef, ActionTiming, AxisAutoResetPolicy as IrAxisAutoResetPolicy,
@@ -7982,7 +7982,9 @@ fn action_to_timing(
     errors: &mut Vec<PlcError>,
 ) -> Option<ActionTiming> {
     let (action_kind, target) = match action {
-        ActionStatement::Extend { target, .. } => (ActionKind::Extend, Some(target.device.as_str())),
+        ActionStatement::Extend { target, .. } => {
+            (ActionKind::Extend, Some(target.device.as_str()))
+        }
         ActionStatement::Retract { target, .. } => {
             (ActionKind::Retract, Some(target.device.as_str()))
         }

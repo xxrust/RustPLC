@@ -4,8 +4,7 @@ use crate::cli_support::plc_pipeline::compile_plc_to_runtime_program;
 use crate::cli_support::runtime_probe::{io_sizes_for_program_and_scenario, is_halted};
 use crate::cli_support::scenario_init::{
     ScenarioInitInputHints, ScenarioInitPreset, aliases_contain_keyword,
-    collect_scenario_init_hints,
-    default_scenario_init_out_path, render_scenario_init_yaml,
+    collect_scenario_init_hints, default_scenario_init_out_path, render_scenario_init_yaml,
 };
 use crate::cli_support::scenario_validate::{
     ScenarioValidateFinding, ScenarioValidateSeverity, collect_scenario_referenced_forced_outputs,
@@ -16,12 +15,13 @@ use crate::cli_support::scenario_yaml::{
     scenario_mismatch_hint_for_example,
 };
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
+use rust_plc::source_bundle::load_plc_source;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn try_dispatch(
+pub(super) fn try_dispatch(
     program: &str,
     command: &str,
     remaining: &[String],
@@ -61,14 +61,12 @@ pub(crate) fn run_scenario_init_subcommand(
                     })?));
             }
             "--preset" => {
-                let raw = args
-                    .next()
-                    .ok_or_else(|| {
-                        format!(
-                            "Missing value for --preset <{}>",
-                            ScenarioInitPreset::expected_values()
-                        )
-                    })?;
+                let raw = args.next().ok_or_else(|| {
+                    format!(
+                        "Missing value for --preset <{}>",
+                        ScenarioInitPreset::expected_values()
+                    )
+                })?;
                 preset = ScenarioInitPreset::parse(&raw).ok_or_else(|| {
                     format!(
                         "Invalid preset `{raw}` (expected `{}`)",
@@ -86,8 +84,9 @@ pub(crate) fn run_scenario_init_subcommand(
     }
 
     let plc_path = PathBuf::from(plc_path);
-    let plc_source = fs::read_to_string(&plc_path)
-        .map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
+    let plc_source = load_plc_source(&plc_path)
+        .map_err(|err| format!("Failed to load {}: {err}", plc_path.display()))?
+        .source;
 
     let out_path = out_path.unwrap_or_else(|| default_scenario_init_out_path(&plc_path));
     if let Some(parent) = out_path.parent() {
@@ -155,8 +154,9 @@ pub(crate) fn run_scenario_validate_subcommand(
     };
 
     let plc_path = PathBuf::from(plc_path);
-    let plc_source = fs::read_to_string(&plc_path)
-        .map_err(|err| format!("Failed to read {plc_path:?}: {err}"))?;
+    let plc_source = load_plc_source(&plc_path)
+        .map_err(|err| format!("Failed to load {}: {err}", plc_path.display()))?
+        .source;
 
     let raw_scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
     let scenario_yaml =
@@ -453,8 +453,14 @@ pub(crate) fn run_scenario_doctor_subcommand(
     };
 
     let plc_path = PathBuf::from(plc_path);
-    let plc_source = fs::read_to_string(&plc_path)
-        .map_err(|err| format!("[SCN-DOCTOR-001] Failed to read {plc_path:?}: {err}"))?;
+    let plc_source = load_plc_source(&plc_path)
+        .map_err(|err| {
+            format!(
+                "[SCN-DOCTOR-001] Failed to load {}: {err}",
+                plc_path.display()
+            )
+        })?
+        .source;
     let raw_scenario_yaml =
         read_scenario_yaml_file(&scenario_path).map_err(|err| format!("[SCN-DOCTOR-002] {err}"))?;
 
@@ -604,6 +610,7 @@ pub(crate) fn run_scenario_expand_subcommand(
 
     let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
     let out_path = out_path.ok_or_else(|| usage.clone())?;
+    let plc_path = PathBuf::from(plc_path);
 
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -612,8 +619,9 @@ pub(crate) fn run_scenario_expand_subcommand(
         }
     }
 
-    let plc_source =
-        fs::read_to_string(&plc_path).map_err(|err| format!("Failed to read {plc_path}: {err}"))?;
+    let plc_source = load_plc_source(&plc_path)
+        .map_err(|err| format!("Failed to load {}: {err}", plc_path.display()))?
+        .source;
     let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
     let resolved = resolve_scenario_yaml_for_plc(&plc_source, &scenario_yaml).map_err(|e| {
         format!(
@@ -1002,10 +1010,9 @@ pub(crate) fn run_scenario_gen_subcommand(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--plc" => {
-                plc_path =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --plc <file.plc>".to_string()
-                    })?));
+                plc_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --plc <source.plc|source.bundle.toml>".to_string()
+                })?));
             }
             "--config" => {
                 config_path =
@@ -1047,8 +1054,9 @@ pub(crate) fn run_scenario_gen_subcommand(
     let template_library_path =
         template_library_path.unwrap_or_else(scenario_gen_default_template_library_path);
 
-    let plc_source = fs::read_to_string(&plc_path)
-        .map_err(|err| format!("Failed to read {}: {err}", plc_path.display()))?;
+    let plc_source = load_plc_source(&plc_path)
+        .map_err(|err| format!("Failed to load {}: {err}", plc_path.display()))?
+        .source;
     let config_yaml = fs::read_to_string(&config_path)
         .map_err(|err| format!("Failed to read {}: {err}", config_path.display()))?;
     let config: ScenarioGenConfig = serde_yaml::from_str(&config_yaml).map_err(|err| {

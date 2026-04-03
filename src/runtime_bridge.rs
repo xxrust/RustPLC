@@ -1,3 +1,7 @@
+use crate::device_semantics::cylinder::{
+    CylinderStrokeVerb, complementary_end_state_port as cylinder_complementary_state_port,
+    is_end_state_port as is_cylinder_end_state_port, state_port_key,
+};
 use crate::ir::{
     AxisAutoResetPolicy as IrAxisAutoResetPolicy,
     AxisFaultPropagationScope as IrAxisFaultPropagationScope,
@@ -5,12 +9,6 @@ use crate::ir::{
     AxisStopMode as IrAxisStopMode, BinaryValue as IrBinaryValue,
     CamInterpolation as IrCamInterpolation, ConstraintSet, DeviceKind, State, StateMachine,
     TopologyGraph, Transition, TransitionAction, TransitionGuard,
-};
-use crate::device_semantics::cylinder::{
-    complementary_end_state_port as cylinder_complementary_state_port,
-    is_end_state_port as is_cylinder_end_state_port,
-    state_port_key,
-    CylinderStrokeVerb,
 };
 use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
@@ -2637,7 +2635,9 @@ fn convert_action(
                         fault_routing,
                     })
                 } else {
-                    if motion_timeout.is_some() || on_motion_fault.is_some() || on_safety_fault.is_some()
+                    if motion_timeout.is_some()
+                        || on_motion_fault.is_some()
+                        || on_safety_fault.is_some()
                     {
                         return Err(BridgeError::UnsupportedAction {
                             state: state_name.to_string(),
@@ -2728,7 +2728,9 @@ fn convert_action(
                         fault_routing,
                     })
                 } else {
-                    if motion_timeout.is_some() || on_motion_fault.is_some() || on_safety_fault.is_some()
+                    if motion_timeout.is_some()
+                        || on_motion_fault.is_some()
+                        || on_safety_fault.is_some()
                     {
                         return Err(BridgeError::UnsupportedAction {
                             state: state_name.to_string(),
@@ -4352,8 +4354,17 @@ mod tests {
     #[test]
     fn state_port_match_requires_exact_port_scope() {
         assert!(super::state_port_matches(Some("extended"), "extended"));
-        assert!(super::state_port_matches(Some("rod_a.extended"), "rod_a.extended"));
-        assert!(!super::state_port_matches(Some("extended"), "rod_a.extended"));
-        assert!(!super::state_port_matches(Some("rod_a.extended"), "extended"));
+        assert!(super::state_port_matches(
+            Some("rod_a.extended"),
+            "rod_a.extended"
+        ));
+        assert!(!super::state_port_matches(
+            Some("extended"),
+            "rod_a.extended"
+        ));
+        assert!(!super::state_port_matches(
+            Some("rod_a.extended"),
+            "extended"
+        ));
     }
 }
