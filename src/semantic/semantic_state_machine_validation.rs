@@ -983,6 +983,7 @@ fn validate_expression_actions_in_statements(
     }
 }
 
+#[allow(dead_code)]
 fn validate_cam_actions_in_tasks(
     tasks: &TasksSection,
     device_kinds: &HashMap<String, DeviceKind>,
@@ -1002,6 +1003,7 @@ fn validate_cam_actions_in_tasks(
     }
 }
 
+#[allow(dead_code)]
 fn validate_cam_actions_in_statements(
     statements: &[StepStatement],
     line: usize,
@@ -1098,6 +1100,7 @@ fn validate_cam_actions_in_statements(
     }
 }
 
+#[allow(dead_code)]
 fn validate_axis_motion_actions_in_tasks(
     tasks: &TasksSection,
     device_kinds: &HashMap<String, DeviceKind>,
@@ -1116,6 +1119,7 @@ fn validate_axis_motion_actions_in_tasks(
     }
 }
 
+#[allow(dead_code)]
 fn validate_axis_motion_actions_in_statements(
     statements: &[StepStatement],
     step_name: &str,
@@ -1256,6 +1260,7 @@ fn validate_axis_motion_actions_in_statements(
     }
 }
 
+#[allow(dead_code)]
 fn axis_motion_branch_error(
     line: usize,
     rule_id: &str,
@@ -1270,6 +1275,7 @@ fn axis_motion_branch_error(
     )
 }
 
+#[allow(dead_code)]
 fn validate_axis_fault_routes(
     line: usize,
     step_name: &str,
@@ -1300,6 +1306,7 @@ fn validate_axis_fault_routes(
     }
 }
 
+#[allow(dead_code)]
 fn validate_axis_motion_target_kind(
     line: usize,
     step_name: &str,
@@ -1327,10 +1334,12 @@ fn validate_axis_motion_target_kind(
     }
 }
 
+#[allow(dead_code)]
 const AXIS_MOTION_PARAM_SETS_DIR: &str = "axis_motion_param_sets";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)]
 struct AxisMotionParamSetDef {
     name: String,
     config_id: String,
@@ -1339,6 +1348,7 @@ struct AxisMotionParamSetDef {
     deceleration: f64,
 }
 
+#[allow(dead_code)]
 fn resolve_axis_motion_parameters_in_tasks(
     tasks: &mut TasksSection,
     topology: &TopologySection,
@@ -1397,6 +1407,7 @@ fn resolve_axis_motion_parameters_in_tasks(
     }
 }
 
+#[allow(dead_code)]
 fn tasks_contain_axis_motion_actions(tasks: &TasksSection) -> bool {
     tasks
         .tasks
@@ -1405,6 +1416,7 @@ fn tasks_contain_axis_motion_actions(tasks: &TasksSection) -> bool {
         .any(|step| statements_contain_axis_motion_actions(&step.statements))
 }
 
+#[allow(dead_code)]
 fn statements_contain_axis_motion_actions(statements: &[StepStatement]) -> bool {
     statements.iter().any(|statement| match statement {
         StepStatement::Action(ActionStatement::AxisMoveRelative { .. })
@@ -1429,6 +1441,7 @@ fn statements_contain_axis_motion_actions(statements: &[StepStatement]) -> bool 
     })
 }
 
+#[allow(dead_code)]
 fn resolve_axis_motion_parameters_in_statements(
     statements: &mut [StepStatement],
     line: usize,
@@ -1525,6 +1538,7 @@ fn resolve_axis_motion_parameters_in_statements(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 fn resolve_axis_motion_parameters_on_action(
     line: usize,
     absolute_position: Option<f64>,
@@ -1689,11 +1703,13 @@ fn resolve_axis_motion_parameters_on_action(
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+#[allow(dead_code)]
 struct BrakeSequenceProgress {
     engage_seen: bool,
     confirm_seen: bool,
 }
 
+#[allow(dead_code)]
 fn validate_vertical_axis_brake_sequence_in_tasks(
     tasks: &TasksSection,
     topology: &TopologySection,
@@ -1773,6 +1789,7 @@ fn validate_vertical_axis_brake_sequence_in_tasks(
     }
 }
 
+#[allow(dead_code)]
 fn collect_axis_disable_targets_from_tasks(tasks: &TasksSection) -> HashSet<String> {
     let mut targets = HashSet::new();
     for task in &tasks.tasks {
@@ -1783,6 +1800,7 @@ fn collect_axis_disable_targets_from_tasks(tasks: &TasksSection) -> HashSet<Stri
     targets
 }
 
+#[allow(dead_code)]
 fn collect_axis_disable_targets_from_statements(
     statements: &[StepStatement],
     targets: &mut HashSet<String>,
@@ -1822,6 +1840,7 @@ fn collect_axis_disable_targets_from_statements(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 fn validate_vertical_axis_brake_sequence_in_statements(
     statements: &[StepStatement],
     line: usize,
@@ -1940,6 +1959,7 @@ fn validate_vertical_axis_brake_sequence_in_statements(
     }
 }
 
+#[allow(dead_code)]
 fn wait_asserts_brake_confirmed(
     wait: &WaitStatement,
     axis: &str,
@@ -1962,6 +1982,7 @@ fn wait_asserts_brake_confirmed(
     })
 }
 
+#[allow(dead_code)]
 fn literal_matches_bool(literal: &LiteralValue, expected: bool) -> bool {
     match literal {
         LiteralValue::Boolean(value) => *value == expected,
@@ -1973,6 +1994,7 @@ fn literal_matches_bool(literal: &LiteralValue, expected: bool) -> bool {
     }
 }
 
+#[allow(dead_code)]
 fn binary_value_text(value: &IrBinaryValue) -> &'static str {
     match value {
         IrBinaryValue::On => "on",
@@ -1980,10 +2002,12 @@ fn binary_value_text(value: &IrBinaryValue) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn bool_text(value: bool) -> &'static str {
     if value { "true" } else { "false" }
 }
 
+#[allow(dead_code)]
 fn load_axis_motion_param_sets() -> Result<HashMap<String, AxisMotionParamSetDef>, Vec<PlcError>> {
     let root = Path::new(AXIS_MOTION_PARAM_SETS_DIR);
     let mut defs = HashMap::new();
@@ -2130,6 +2154,7 @@ fn expression_type_assignable_to(
     )
 }
 
+#[allow(dead_code)]
 fn validate_motor_legacy_set_actions(
     statements: &[StepStatement],
     line: usize,
@@ -2204,7 +2229,12 @@ fn validate_wait_device_references_in_statements(
                     if condition.is_expression_compare() {
                         continue;
                     }
-                    validate_motor_legacy_wait_operand(&condition.left, line, device_kinds, errors);
+                    device_semantics::motor::validate_legacy_wait_operand(
+                        &condition.left,
+                        line,
+                        device_kinds,
+                        errors,
+                    );
                     if should_validate_references {
                         validate_wait_operand_device(
                             &condition.left,
@@ -2309,6 +2339,7 @@ fn validate_wait_operand_device(
     }
 }
 
+#[allow(dead_code)]
 fn validate_motor_legacy_wait_operand(
     operand: &str,
     line: usize,

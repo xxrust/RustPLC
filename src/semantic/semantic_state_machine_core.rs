@@ -79,7 +79,7 @@ fn build_state_machine_from_ast_with_context(
         for (step_index, step) in task.steps.iter().enumerate() {
             validate_set_enum_values(&step.statements, step.line.max(1), &mut errors);
             if let Some(device_kinds) = device_kinds {
-                validate_motor_legacy_set_actions(
+                device_semantics::motor::validate_legacy_set_actions(
                     &step.statements,
                     step.line.max(1),
                     device_kinds,

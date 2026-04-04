@@ -128,7 +128,7 @@ fn is_phase1_supported_extern_type(var_type: &AstVariableType) -> bool {
 pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
     let mut errors = Vec::new();
-    validate_vertical_axis_brake_sequence_in_tasks(
+    device_semantics::axis::validate_vertical_axis_brake_sequence_in_tasks(
         &expanded.tasks,
         &expanded.topology,
         &mut errors,

@@ -1313,7 +1313,7 @@ pub fn build_constraint_set_from_ast(
                 &mut errors,
             );
             validate_set_enum_values(&step.statements, step.line.max(1), &mut errors);
-            validate_motor_legacy_set_actions(
+            device_semantics::motor::validate_legacy_set_actions(
                 &step.statements,
                 step.line.max(1),
                 &device_kinds,

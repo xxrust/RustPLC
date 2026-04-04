@@ -27,24 +27,28 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
         .iter()
         .map(|table| table.name.clone())
         .collect::<HashSet<_>>();
-    validate_cam_actions_in_tasks(
+    device_semantics::cam::validate_cam_actions_in_tasks(
         &expanded.tasks,
         &device_kinds,
         &cam_table_names,
         &mut expr_errors,
     );
-    validate_axis_motion_actions_in_tasks(&expanded.tasks, &device_kinds, &mut expr_errors);
+    device_semantics::axis::validate_axis_motion_actions_in_tasks(
+        &expanded.tasks,
+        &device_kinds,
+        &mut expr_errors,
+    );
     device_semantics::validate_task_action_semantics(
         &expanded.tasks,
         &device_kinds,
         &mut expr_errors,
     );
-    resolve_axis_motion_parameters_in_tasks(
+    device_semantics::axis::resolve_axis_motion_parameters_in_tasks(
         &mut expanded.tasks,
         &expanded.topology,
         &mut expr_errors,
     );
-    validate_vertical_axis_brake_sequence_in_tasks(
+    device_semantics::axis::validate_vertical_axis_brake_sequence_in_tasks(
         &expanded.tasks,
         &expanded.topology,
         &mut expr_errors,
