@@ -1,0 +1,382 @@
+﻿    #[test]
+    fn preprocess_expands_plc_device_ports_into_internal_io_nodes() {
+        let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
+device start_button: sensor { ports: [out:digital:producer] }
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let expanded = preprocess_program(&program).expect("preprocess");
+        assert!(
+            !expanded
+                .topology
+                .devices
+                .iter()
+                .any(|d| matches!(d.device_type, crate::ast::DeviceType::Plc)),
+            "plc 设备应在 preprocess 后降维"
+        );
+        assert!(
+            expanded.topology.devices.iter().any(|d| d.name == "Y0"),
+            "应生成 Y0 内部 IO 节点"
+        );
+        assert!(
+            expanded.topology.devices.iter().any(|d| d.name == "X0"),
+            "应生成 X0 内部 IO 节点"
+        );
+
+        let y0_edge_exists = expanded.topology.connections.iter().any(|c| {
+            c.from == "Y0"
+                && c.to == "valve_A"
+                && c.from_port.is_none()
+                && c.to_port.as_deref() == Some("coil")
+        });
+        assert!(y0_edge_exists, "plc_main.Y0 应改写为 Y0 -> valve_A.coil");
+    }
+
+    #[test]
+    fn preprocess_rejects_inline_plc_port_inventory() {
+        let input = r#"
+[topology]
+device plc_main: plc { ports: [Y0:digital:producer, X0:digital:consumer] }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let errors = preprocess_program(&program).expect_err("inline plc ports should be rejected");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("inline ports") && rendered.contains("model_ref"),
+            "expected inline port inventory rejection, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_rejects_plc_missing_model_ref() {
+        let input = r#"
+[topology]
+device plc_main: plc
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let errors = preprocess_program(&program).expect_err("plc without model_ref should fail");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("missing model_ref"),
+            "expected missing model_ref error, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_with_library_rejects_unknown_motor_extension_param_for_device_type() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    rated_power: 2.2kW,
+    steps_per_rev: 200
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+
+        let errors = preprocess_program_with_library(&program, Some(&library))
+            .expect_err("stepper_motor 不应接受 rated_power 参数");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("rated_power") && rendered.contains("未在设备库 parameters 中声明"),
+            "应报告参数未在设备库声明，实际: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_with_library_rejects_invalid_typed_motor_extension_param() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    steps_per_rev: 200.5,
+    accel_time: 120ms
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+
+        let errors = preprocess_program_with_library(&program, Some(&library))
+            .expect_err("steps_per_rev 应是 integer");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("steps_per_rev") && rendered.contains("integer"),
+            "应报告参数类型错误，实际: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_with_library_accepts_valid_typed_motor_extension_params() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    steps_per_rev: 200,
+    max_speed: 5000,
+    accel_time: 120ms,
+    decel_time: 120ms,
+    microstep: 16,
+    gear_num: 5,
+    gear_den: 2,
+    lead_screw: 5mm,
+    position_unit: mm,
+    max_acceleration: 12000pps
+}
+
+device servo_x: servo_drive {
+    microstep: 8,
+    gear_num: 10,
+    gear_den: 1,
+    lead_screw: 2mm,
+    position_unit: mm,
+    max_acceleration: 3000rpm
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        preprocess_program_with_library(&program, Some(&library))
+            .expect("合法参数应通过设备库类型校验");
+    }
+
+    #[test]
+    fn preprocess_with_library_rejects_invalid_axis_param_type_with_line_context() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    microstep: 1.5,
+    lead_screw: 5mm
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        let errors = preprocess_program_with_library(&program, Some(&library))
+            .expect_err("microstep 应是 integer");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("microstep") && rendered.contains("integer"),
+            "应报告 axis 参数类型错误，实际: {rendered}"
+        );
+        assert!(
+            errors.iter().any(|e| e.line() > 0),
+            "参数诊断应携带有效行号，实际: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_with_library_rejects_invalid_axis_param_unit_and_enum() {
+        let input = r#"
+[topology]
+
+device axis_x: stepper_motor {
+    lead_screw: 5inch,
+    position_unit: turns
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        let errors = preprocess_program_with_library(&program, Some(&library))
+            .expect_err("lead_screw 单位和 position_unit 枚举值均应被拒绝");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("lead_screw") && rendered.contains("参数单位不匹配"),
+            "应报告 axis 参数单位错误，实际: {rendered}"
+        );
+        assert!(
+            rendered.contains("position_unit") && rendered.contains("参数类型要求 enum"),
+            "应报告 axis 参数枚举错误，实际: {rendered}"
+        );
+        assert!(
+            errors.iter().any(|e| e.line() > 0),
+            "参数诊断应携带有效行号，实际: {rendered}"
+        );
+    }
+
+    #[test]
+    fn preprocess_with_library_accepts_number_params_with_expected_unit_suffix() {
+        let input = r#"
+[topology]
+
+device motor_main: motor {
+    rated_power: 2.2kW,
+    rated_freq: 50Hz,
+    accel_time: 0.8s
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        preprocess_program_with_library(&program, Some(&library))
+            .expect("带单位后缀的 number 参数应通过校验");
+    }
+
+    #[test]
+    fn preprocess_with_library_injects_cam_fault_interlock_constraint() {
+        let input = r#"
+[topology]
+
+device encoder_main: analog_input { range: 0..360 }
+device servo_cmd: analog_output { range: 0..360 }
+device cam_xy: cam_coupling {
+    master: encoder_main,
+    slave: servo_cmd,
+    table: cam_a,
+}
+cam_table cam_a: periodic [
+    (0, 0),
+    (180, 100),
+    (360, 0),
+]
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        let expanded = preprocess_program_with_library(&program, Some(&library))
+            .expect("cam device-library constraints should inject");
+
+        assert!(
+            expanded.constraints.safety.iter().any(|rule| {
+                matches!(
+                    (&rule.left, &rule.right),
+                    (
+                        crate::ast::SafetyOperand::State(left),
+                        crate::ast::SafetyOperand::State(right)
+                    ) if left.device == "cam_xy"
+                        && left.port == "fault"
+                        && left.state == "on"
+                        && right.device == "cam_xy"
+                        && right.port == "engage"
+                        && right.state == "on"
+                )
+            }),
+            "应注入 cam_coupling.toml 的 fault.on conflicts_with engage.on 约束"
+        );
+    }
+
+    #[test]
+    fn preprocess_rejects_plc_endpoint_without_explicit_port() {
+        let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
+relation { from: plc_main, to: valve_A.coil, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let errors = preprocess_program(&program).expect_err("应报错");
+        assert!(
+            errors.iter().any(|e| e.to_string().contains("未指定端口")),
+            "应提示 PLC 端点必须显式指定端口"
+        );
+    }
+
