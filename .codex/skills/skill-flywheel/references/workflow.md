@@ -32,6 +32,24 @@
 11. 把本轮结论写入 `logs/decision.md`：假设是否被支持、证据是否足够、是否值得进入下一轮。
 12. 只有在决策记录明确要求时，才使用同一任务或相近任务复跑，验证修复是否真的生效。
 
+## Benchmark 模式
+
+如果这轮不是只想回答“哪里卡住了”，而是想回答“目标 skill 是否真的变强了”，应额外引入 benchmark。
+
+推荐顺序：
+
+1. 先读 `references/benchmark-governance.md`。
+2. 让 `benchmark-proposer` 只负责整理候选 case，不负责最终冻结。
+3. 让 `benchmark-curator` 在当前 active optimizer 之外冻结 `dev` / `holdout` / `canary` case。
+4. 让 `runner-judge` 读取 hidden rubric / oracle 并写评测结果。
+5. 让 flywheel 只读取评测摘要、失败分类与聚合统计，不直接读取完整 hidden oracle。
+
+长期规则：
+
+- `benchmark-proposer` 可以是 flywheel 子 agent。
+- `benchmark-curator` 不应只是当前优化回合里的同一执行者。
+- frozen benchmark case 不得在同一轮优化里被 flywheel 重写。
+
 ## 盲测模式
 
 默认分两档：

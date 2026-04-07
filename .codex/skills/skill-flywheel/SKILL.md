@@ -30,6 +30,8 @@ description: 用于把 skill 改进组织成可重复的研究回合：设定实
   如何把痛点归类为 skill、辅助工件、代码或任务本身的问题。
 - `references/local-target-config.md`
   目标 skill 中的 `.skill_flywheel/` 应该放什么。
+- `references/benchmark-governance.md`
+  当需要验证“目标 skill 是否真的变强”时，如何冻结 benchmark、拆分 proposer / curator / judge 角色，以及隔离 hidden rubric / oracle。
 
 按需加载这些 agent 角色文件：
 
@@ -65,6 +67,8 @@ description: 用于把 skill 改进组织成可重复的研究回合：设定实
 10. 优先补稳定、显式导出的辅助工件，例如命令帮助、manifest、诊断、报告，而不是把私有推理写进 skill。
 11. 目标 skill 保持精简。可从仓库稳定导出的事实，不继续堆进 skill。
 12. 所有判断尽量落盘到 cycle 工件，不依赖会话记忆。
+13. 当目标从“回合内研究”升级为“证明 skill 效果提升”时，优先引入 benchmark；`benchmark-proposer` 可以由 flywheel 子 agent承担，但 `benchmark-curator` 和最终 judge 不应只是当前 active optimizer 的一部分。
+14. Frozen benchmark case 不得在同一轮优化里被 flywheel 重写；如果 case 过时，应退役旧 case 并新增替代 case，而不是静默改题。
 
 ## 默认流程
 
@@ -88,11 +92,12 @@ description: 用于把 skill 改进组织成可重复的研究回合：设定实
    - 明确把本轮标注为 `weak-blind`
 8. 如果需要并行盲测，就复制 `agent2` 角色到多个独立实例，并让它们分别写各自的观察记录。
 9. 汇总盲测观察，再阅读 `logs/pain-points.md`、`logs/root-cause.md` 和 `logs/decision.md`。
-10. 把最小修复落在正确层级：
+10. 如果这轮目标是验证 skill 效果提升，而不只是验证单轮流程，先读 `references/benchmark-governance.md`，并把 benchmark proposer / curator / judge 的边界单独写清。
+11. 把最小修复落在正确层级：
    - 目标 skill
    - 显式导出的辅助工件
    - 代码库对外契约 / 工具 / 诊断
-11. 只有当 `logs/decision.md` 明确写出“进入下一轮”时，才继续下一轮；否则停止并保留本轮结论。
+12. 只有当 `logs/decision.md` 明确写出“进入下一轮”时，才继续下一轮；否则停止并保留本轮结论。
 
 ## 最低完成标准
 
