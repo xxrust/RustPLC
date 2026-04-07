@@ -1,7 +1,7 @@
 interface:
-  display_name: "PLC 生成"
-  short_description: "生成、修复并验证 RustPLC 的 `.plc` 与项目级交付命令。"
-  default_prompt: "Use $plc-gen to generate or repair RustPLC PLC files and provide real validation or delivery commands."
+  display_name: "RustPLC DSL 交付"
+  short_description: "交付、修复并验证 RustPLC DSL source set 与 scaffold 项目，支持单文件 `.plc` 和多文件 `.bundle.toml` + fragments。"
+  default_prompt: "Use $plc-gen to deliver or repair RustPLC DSL sources or a scaffolded RustPLC project, preserving single-file or multi-file source boundaries and providing real validation commands."
 
 policy:
   allow_implicit_invocation: true

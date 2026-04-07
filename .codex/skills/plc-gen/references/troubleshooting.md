@@ -1,6 +1,6 @@
 # plc-gen Troubleshooting
 
-当用户还没开始真正生成 `.plc` 就卡住时，用本文件排障。
+当用户在生成、修复或验证 RustPLC DSL source set 时卡住，用本文排障。
 
 ## 1. `cargo run --release -- new ...` 失败
 
@@ -28,24 +28,24 @@ cargo run --release --bin rust_plc -- new my_plc_project
 - 把 `cargo run --release --bin rust_plc -- ...` 切成 `rust_plc ...`
 - 其他参数保持不变
 
-这是对 scaffold 用户最省事的路径。
+这条路径适合已安装 binary 的项目用户。
 
 ## 4. scenario 文件缺失
 
-只在文件确实不存在时推荐：
+按 source entry 生成或重建 scenario skeleton：
 
 ```bash
-<run> scenario-init plc/main.plc --out scenarios/nominal/normal.yaml --preset normal
+<run> scenario-init <source.plc|source.bundle.toml> --out <scenario.yaml> --preset normal
 ```
 
 如果项目来自 `new`，先检查 `scenarios/nominal/normal.yaml` 是否已经存在。
 
 ## 5. 用户要求“优化命令”
 
-不要编造 CLI。直接说明：
+直接说明：
 - 当前没有 optimization subcommand
-- 现有 optimization 能力在 Rust library API：`rust_plc::optimization`
-- 如需准确认识边界，读 `references/optimization.md`
+- 现有 optimization 能力在 Rust library API，路径是 `rust_plc::optimization`
+- 如需准确识别边界，读取 `references/optimization.md`
 
 ## 6. `scenario-*` 或 `no-board-gate` 报 `unsupported guard expression`
 
@@ -56,11 +56,10 @@ unsupported guard expression in <task.step>: <expr>
 ```
 
 做法：
-- 不要直接把它说成“PLC 一定写错了”
-- 先明确这是当前 toolchain 兼容性限制
-- 如果用户必须跑当前 scenario 工具链，再考虑把关键复合 `wait` guard 拆成更细的 helper step / readiness gate
+- 先把状态表述为当前 toolchain 兼容性限制
+- 如果用户必须跑当前 scenario 工具链，再考虑把关键复合 `wait` guard 拆成更细的 helper step 或 readiness gate
 - 如果业务语义允许，优先改成顺序单条件 `wait`
-- 如果用户只是要 DSL 交付而不是立刻跑通当前 scenario 工具链，应把状态写成 `blocked by toolchain limitation`，而不是假装 `validated`
+- 如果当前目标是 DSL 交付而不是立即跑通 scenario 工具链，状态写成 `blocked by toolchain limitation`
 
 ## 7. `project-check` 失败时如何解释
 
@@ -69,4 +68,4 @@ unsupported guard expression in <task.step>: <expr>
 做法：
 - 先告诉用户是哪个子步骤失败
 - 再引用 `out/project_check/...` 下的日志或报告路径
-- 不要只回一句“project-check failed”就结束
+- 给出下一条最小复现或排查命令
