@@ -1,2 +1,16 @@
 # Ralph Progress Log
 Started: 2026-04-07 00:00:00 CST
+
+## Codebase Patterns
+- 第二阶段的目标是“真正的意图对齐比较器”，不是继续补 authored assets / toolchain evidence / blocker 的分栏文档。
+- 比较主链必须固定为：`authored intent contract -> compile_expected_behavior_spec -> extract_observed_behavior_sequence -> compare_intent_alignment -> IntentAlignmentReport`。
+- `intent sequence` 节点是业务里程碑，不是 DSL `task.step` 名字镜像；`IntentContract` 必须显式携带“意图节点 -> 可观测里程碑”映射规则。
+- 所有 aligned / mismatch 结论都必须来自 comparator 函数返回值；skill 不能直接凭自然语言判断 trace 是否满足意图。
+- comparator 的执行顺序必须固定为：`required-step -> ordering -> postcondition -> next-cycle`。
+- 固定 mismatch taxonomy：`missing_required_step`、`wrong_order`、`duplicated_required_step`、`premature_readiness`、`postcondition_not_met`、`cross_cycle_drift`。
+- 只有 required-step、ordering、postcondition、next-cycle 四维全部通过时，系统才允许输出 aligned。
+- `blocked by missing evidence`、`blocked by missing comparator`、`blocked by toolchain limitation` 只用于比较器尚未运行或证据链未闭合的阶段，不能替代真实 mismatch。
+- phase-2 v1 的 observed 输入先固定为 `trace.jsonl` 或其解析后的 `trace_diff::NormalizedTraceEvent`；validation report 和其他 artifact 适配后置。
+- phase-2 v1 的 cycle 边界规则固定为：按 contract 声明的 cycle-start milestone 重复出现切分周期，并由 extractor 写入 `cycle_index`；comparator 不得从 `ready` 反推边界。
+- phase-2 v1 不新增公开 CLI；先把结果接入 `project-check` 或等价聚合 pipeline。
+- canonical authored contracts 与 observed traces 默认放在 `tests/fixtures/intent_alignment/`；只有涉及现有 `.plc` 示例时才补 `tests/examples_integration.rs`。
