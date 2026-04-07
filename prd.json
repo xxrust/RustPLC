@@ -1,0 +1,112 @@
+{
+  "project": "RustPLC",
+  "branchName": "ralph/plc-gen-intent-alignment-boundary",
+  "description": "澄清 plc-gen 应吸收哪些稳定的意图对齐知识、哪些内容必须来自真实 RustPLC 工具链输出，以及哪些 scenario 或 trace 命令只是可选择调用而非默认交付路径。",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "新增 plc-gen 的意图对齐边界 reference",
+      "description": "作为 plc-gen 维护者，我希望有一份专门的 reference，把 skill 知识、工具链产出的证据和可选调用命令分开，这样后续意图对齐请求不会再混淆职责边界。",
+      "acceptanceCriteria": [
+        "在 .codex/skills/plc-gen/references/intent-alignment-boundary.md 新增边界 reference 文件",
+        "文档明确区分三类内容：skill 作者化知识、编译器或场景工具链输出、可选择调用的命令",
+        "明确写出 intent sequence 和 expected-path 是作者化合同，不是编译器产生的行为证据",
+        "明确写出 behavior sequence 必须来自真实 trace、runtime 证据或 validation 输出",
+        "新增文件路径固定为 intent-alignment-boundary.md，不得改用其他命名"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "在 plc-gen SKILL.md 中路由意图对齐请求",
+      "description": "作为 plc-gen 使用者，我希望 SKILL.md 能把意图对齐、expected-path、pairwise 覆盖和状态爆炸相关请求路由到正确的 reference，而不是把它们当成普通的 .plc 编辑请求。",
+      "acceptanceCriteria": [
+        "更新 .codex/skills/plc-gen/SKILL.md，为意图对齐和 expected-path 请求加入触发或路由说明",
+        "明确写出 plc-gen 不得把意图对齐处理成全状态表穷举",
+        "明确写出 plc-gen 不得在未运行真实工具链时伪造行为证据",
+        "引用 docs/architecture/intent_alignment_verification.md 和 docs/architecture/expected-path-simulation.md 作为长期语义源",
+        "把 references/intent-alignment-boundary.md 加入 SKILL.md 的按需加载 reference 列表或等价读取路径"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "在 workflow.md 中加入作者化资产与证据分流",
+      "description": "作为 plc-gen 使用者，我希望 workflow reference 能说明何时编写 scenario 或 expected-path 合同、何时收集 trace 证据、何时停在 blocker，以便请求流程可以审计。",
+      "acceptanceCriteria": [
+        "更新 .codex/skills/plc-gen/references/workflow.md，加入区分作者化资产和工具链证据的意图对齐流程",
+        "文档明确顺序：先写合同，再收集工具链证据，最后再比对或报告当前限制",
+        "说明在缺少稳定 comparator 时的保守输出口径",
+        "说明何时必须把 scenario 工具链兼容性问题上升为 blocker",
+        "workflow.md 中新增的意图对齐流程必须显式使用 scenario、expected-path、trace、validation report 这四类术语"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "为意图对齐工作划分默认命令与可选命令",
+      "description": "作为 plc-gen 维护者，我希望 commands reference 能区分默认交付命令和可选辅助命令，这样 skill 既不会过度调用，也不会遗漏真实 CLI 能力。",
+      "acceptanceCriteria": [
+        "更新 .codex/skills/plc-gen/references/commands.md，为意图对齐工作标注默认命令与可选命令",
+        "把 scenario-expand 和 scenario-gen 写入 commands.md，并明确标记为 optional 或 non-default，而不是默认主路径",
+        "明确写出 scenario-gen 的 pairwise、boundary-first、risk-first 是覆盖策略，不是对整机 PLC 做笛卡尔积穷举",
+        "不得添加仓库 CLI help 中不存在的命令名或 flag",
+        "commands.md 中 project-check、scenario-validate、sim-plc 与 scenario-expand、scenario-gen 的地位必须被明确区分"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "要求 output-contract 区分作者化资产与工具输出",
+      "description": "作为 plc-gen 使用者，我希望最终回答能清楚区分 agent 编写的内容和工具链产出的内容，这样结果才能被审计。",
+      "acceptanceCriteria": [
+        "更新 plc-gen 的 output contract reference，要求分别汇报作者化资产、工具链输出、执行命令和 blocker",
+        "要求 skill 在只有 scenario 或 trace 证据而没有稳定比对结果时，不得宣称 intent alignment 已通过",
+        "要求在使用 scenario-gen 时汇报 coverage_mode 以及产出的 suite 或 summary 工件",
+        "要求将工具链兼容性 blocker 与 DSL 或 semantic blocker 分开汇报",
+        "output-contract.md 中最终输出分组必须至少出现 作者化资产、工具链产物、调用命令、blocker 四个标签或等价固定小节"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "在 troubleshooting 中统一 scenario 工具链 blocker 处理规则",
+      "description": "作为 plc-gen 维护者，我希望 unsupported guard expression 及类似 scenario 工具链限制的 troubleshooting 指引保持一致，避免 skill 反复给出已知会失败的建议。",
+      "acceptanceCriteria": [
+        "更新 plc-gen troubleshooting 指引，纳入当前 scenario 工具链兼容性 blocker 模式",
+        "明确写出 unsupported guard expression 不得被误报为 PLC 语义必然错误",
+        "说明何时可以使用 scenario-friendly lowering 作为 workaround，何时必须直接报告 blocker",
+        "措辞与现有 public 的 scenario-toolchain-limitations 说明保持同义",
+        "troubleshooting.md 中 unsupported guard expression 必须被明确归类为 toolchain compatibility blocker 或等价表述"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "增加展示三层分工的 worked example",
+      "description": "作为 plc-gen 使用者，我希望有一个 worked example 展示意图对齐请求如何落成作者化合同、可选命令调用和工具链证据，从而让边界变得具体可见。",
+      "acceptanceCriteria": [
+        "把 worked example 写入 .codex/skills/plc-gen/references/intent-alignment-boundary.md 的末尾",
+        "例子必须显式标出作者化资产、工具链输出、可选命令调用以及最终 blocker 或完成口径",
+        "例子必须把 pairwise、边界窗口或 don't-care 规则展示为 skill 侧覆盖启发，而不是 trace 输出字段",
+        "例子不得依赖一个并不存在的公开 expected-path CLI",
+        "worked example 必须固定包含四段内容：作者化资产、工具链产物、调用命令、最终 blocker 或完成口径"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
