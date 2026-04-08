@@ -242,8 +242,11 @@ pub fn extract_observed_behavior_sequence(
             .is_some_and(|binding| binding_matches_event(binding, raw_event, &event_entries));
         let matches_successful_cycle_end = successful_cycle_end_binding
             .is_some_and(|binding| binding_matches_event(binding, raw_event, &event_entries));
-        let starts_next_cycle_candidate =
-            cycle_boundary_seen && cycle_ready_for_handoff && !event_entries.is_empty();
+        let starts_next_cycle_candidate = if cycle_start_binding.is_some() {
+            cycle_boundary_seen && cycle_ready_for_handoff && matches_cycle_start
+        } else {
+            cycle_boundary_seen && cycle_ready_for_handoff && !event_entries.is_empty()
+        };
 
         if starts_next_cycle_candidate {
             cycle_index += 1;

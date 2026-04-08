@@ -81,6 +81,19 @@ Do not stop at a placeholder like:
 
 That may still compile today, but it is structurally under-modeled because the compiler only activates workpiece semantic and safety checks when workpiece declarations or effects are actually present.
 
+## Intent-alignment anchor rule for concurrent or pipelined flows
+
+For a structured project that overlaps preparation and transfer tasks, do not bind a business milestone to a low-level prep transition that can repeat while the current part is still in flight.
+
+Prefer milestone anchors that uniquely identify ownership handoff of the active workpiece, for example:
+- `effect: acquire ...` confirmation that picks the active part from a shared site
+- `effect: transfer ...` confirmation that moves the active part onto the next station
+- `effect: finish ...` confirmation that closes the active part at its declared terminal site
+
+Do not use a repeating prefetch or housekeeping transition as the only evidence for a required milestone when that step may fire again before the cycle completes.
+
+If a milestone keeps comparing as `duplicated_required_step` in a real canary trace, first check whether the contract chose the wrong evidence anchor before weakening the comparator.
+
 本文件记录生成 `.plc` 时不能偏离的硬约束。
 
 ## 1. task / step 基本约束

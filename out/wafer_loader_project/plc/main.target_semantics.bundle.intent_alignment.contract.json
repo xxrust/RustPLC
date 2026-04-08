@@ -55,10 +55,10 @@
         }
       },
       {
-        "milestone_id": "wafer_presented_on_slide",
+        "milestone_id": "wafer_picked_from_slide",
         "business_milestone": {
-          "label": "Wafer presented on slide",
-          "description": "Feed preparation completed the release phase so a wafer is available at the slide pick site."
+          "label": "Wafer picked from slide",
+          "description": "The rotary arm confirmed vacuum pickup from the slide site, which uniquely anchors the active wafer entering the orient flow."
         }
       },
       {
@@ -79,10 +79,10 @@
     "required_edges": [
       {
         "predecessor": "cycle_started",
-        "successor": "wafer_presented_on_slide"
+        "successor": "wafer_picked_from_slide"
       },
       {
-        "predecessor": "wafer_presented_on_slide",
+        "predecessor": "wafer_picked_from_slide",
         "successor": "wafer_oriented_ready"
       },
       {
@@ -118,17 +118,17 @@
       ]
     },
     {
-      "binding_id": "wafer_presented_on_slide_binding",
+      "binding_id": "wafer_picked_from_slide_binding",
       "subject": {
         "kind": "milestone",
-        "milestone_id": "wafer_presented_on_slide"
+        "milestone_id": "wafer_picked_from_slide"
       },
       "combination": "all_of",
       "evidence": [
         {
           "source": "trace_event",
           "key": "transition",
-          "expected": "task=3;from=17;to=18;reason=action"
+          "expected": "task=4;from=18;to=53;reason=wait_satisfied"
         }
       ]
     },

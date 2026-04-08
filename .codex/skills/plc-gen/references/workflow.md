@@ -39,6 +39,7 @@ The sidecar must:
 - bind to an authoritative intent source such as `plc/main.system.md`
 - describe business milestones rather than using raw `task.step` names as the semantic center
 - bind observations to real evidence that the current comparator can consume
+- for concurrent or pipelined stations, prefer unique workpiece-handoff anchors over repeating prep-loop transitions
 
 It is acceptable to skip the sidecar only when:
 - the task is a tiny local repair

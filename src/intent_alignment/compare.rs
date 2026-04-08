@@ -5,15 +5,15 @@ use thiserror::Error;
 use super::contract::{ObservationCombination, ObservationSubject};
 use super::expected_behavior::ExpectedBehaviorSpec;
 use super::observed::{
-    ObservedBehaviorSequence, ObservedComparisonDimension, ObservedEvidenceEntry,
-    ObservedEvidenceGap, ObservedTraceParseError, extract_observed_behavior_sequence,
-    parse_observed_trace_jsonl,
+    ObservedBehaviorSequence, ObservedComparisonDimension, ObservedEventSourceKind,
+    ObservedEvidenceEntry, ObservedEvidenceGap, ObservedTraceParseError,
+    extract_observed_behavior_sequence, parse_observed_trace_jsonl,
 };
 use super::report::{
     INTENT_ALIGNMENT_COMPARATOR_VERSION, IntentAlignmentBlockerKind,
-    IntentAlignmentContractIdentity, IntentAlignmentCycleWindow,
-    IntentAlignmentEvidenceIdentity, IntentAlignmentEvidenceKind, IntentAlignmentReport,
-    IntentAlignmentVerdict, IntentMismatch, IntentMismatchKind,
+    IntentAlignmentContractIdentity, IntentAlignmentCycleWindow, IntentAlignmentEvidenceIdentity,
+    IntentAlignmentEvidenceKind, IntentAlignmentReport, IntentAlignmentVerdict, IntentMismatch,
+    IntentMismatchKind,
 };
 
 #[derive(Debug, Error)]
@@ -105,10 +105,12 @@ fn compare_intent_alignment_with_identity(
             .filter(|matched| matched.cycle_index == cycle_index)
             .collect();
 
-        let counts = cycle_matches.iter().fold(BTreeMap::new(), |mut acc, matched| {
-            *acc.entry(matched.milestone_id.as_str()).or_insert(0usize) += 1;
-            acc
-        });
+        let counts = cycle_matches
+            .iter()
+            .fold(BTreeMap::new(), |mut acc, matched| {
+                *acc.entry(matched.milestone_id.as_str()).or_insert(0usize) += 1;
+                acc
+            });
 
         for expected_id in &expected_ids {
             match counts.get(expected_id) {
@@ -142,8 +144,7 @@ fn compare_intent_alignment_with_identity(
                     mismatches.push(IntentMismatch {
                         kind: IntentMismatchKind::WrongOrder,
                         subject: format!("{} -> {}", edge.predecessor, edge.successor),
-                        detail: "required edge order was violated in observed behavior"
-                            .to_string(),
+                        detail: "required edge order was violated in observed behavior".to_string(),
                         cycle_index: Some(cycle_index),
                     });
                 }
@@ -180,7 +181,7 @@ fn compare_intent_alignment_with_identity(
     }
 
     for (index, entry) in observed.evidence.iter().enumerate() {
-        if !consumed_indices.contains(&index) {
+        if !consumed_indices.contains(&index) && should_flag_unexpected_entry(entry) {
             mismatches.push(IntentMismatch {
                 kind: IntentMismatchKind::UnexpectedObservedStep,
                 subject: format!("{}={}", entry.key, entry.expected),
@@ -322,7 +323,8 @@ fn snapshot_has_all_facts(
     let Some(snapshot) = snapshot else {
         return false;
     };
-    facts.iter()
+    facts
+        .iter()
         .all(|fact| snapshot.get(&fact.key) == Some(&fact.expected))
 }
 
@@ -333,7 +335,8 @@ fn snapshot_has_any_fact(
     let Some(snapshot) = snapshot else {
         return false;
     };
-    facts.iter()
+    facts
+        .iter()
         .any(|fact| snapshot.get(&fact.key) == Some(&fact.expected))
 }
 
@@ -350,6 +353,10 @@ fn blocked_reason(observed: &ObservedBehaviorSequence) -> Option<String> {
                 )
         })
         .and_then(|readiness| readiness.gap.as_ref().map(|gap| gap.detail.clone()))
+}
+
+fn should_flag_unexpected_entry(entry: &ObservedEvidenceEntry) -> bool {
+    !matches!(entry.source, ObservedEventSourceKind::TraceTransition)
 }
 
 fn detect_cross_cycle_drift(
@@ -377,7 +384,10 @@ fn detect_cross_cycle_drift(
             .map(|snapshot| {
                 missing_snapshot_facts(
                     snapshot,
-                    &spec.cycle_semantics.handoff_invariant.required_terminal_facts,
+                    &spec
+                        .cycle_semantics
+                        .handoff_invariant
+                        .required_terminal_facts,
                 )
             })
             .unwrap_or_default();
@@ -465,7 +475,8 @@ fn missing_snapshot_facts(
     snapshot: &BTreeMap<String, String>,
     facts: &[super::expected_behavior::ObservedFact],
 ) -> Vec<String> {
-    facts.iter()
+    facts
+        .iter()
         .filter(|fact| snapshot.get(&fact.key) != Some(&fact.expected))
         .map(|fact| format!("{}={}", fact.key, fact.expected))
         .collect()
@@ -615,7 +626,8 @@ fn matched_occurrences(
                 }
             }
             ObservationCombination::OrderedAllOf => {
-                let cycle_indices: BTreeSet<usize> = groups.keys().map(|(cycle_index, _)| *cycle_index).collect();
+                let cycle_indices: BTreeSet<usize> =
+                    groups.keys().map(|(cycle_index, _)| *cycle_index).collect();
                 for cycle_index in cycle_indices {
                     let cycle_groups: Vec<(&(usize, u64), &Vec<usize>)> = groups
                         .iter()
