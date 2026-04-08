@@ -33,11 +33,11 @@
 本阶段默认按下列 Rust 模块骨架实施；如果实现时发现需要微调文件名，必须保持职责不变。
 
 - `src/intent_alignment/mod.rs`：对外导出 `load_intent_contract(...)`、`compile_expected_behavior_spec(...)`、`extract_observed_behavior_sequence(...)`、`compare_intent_alignment(...)`
-- `src/intent_alignment/contract.rs`：`IntentContract`、`IntentMilestone`、`PostconditionSpec`、`RestartConditionSpec`、`ExpectedBehaviorSpec`
-- `src/intent_alignment/observed.rs`：`ObservedMilestone`、`ObservedBehaviorSequence`、`ObservedEvidenceGap`、`extract_observed_behavior_sequence(...)`
-- `src/intent_alignment/compare.rs`：`compare_required_steps(...)`、`compare_ordering(...)`、`evaluate_postconditions(...)`、`detect_premature_readiness(...)`、`detect_cross_cycle_drift(...)`、`compare_intent_alignment(...)`
-- `src/intent_alignment/report.rs`：`IntentAlignmentReport`、`IntentMismatchKind`、`IntentMismatch`
-- `tests/intent_alignment_contract.rs`、`tests/intent_alignment_observed.rs`、`tests/intent_alignment_compare.rs`、`tests/intent_alignment_pipeline.rs`：最小契约与 canonical regressions
+- `src/intent_alignment/contract.rs`：`IntentContract`、`IntentMilestone`、`ContractMetadata`、`ExpectedBehaviorSpec`
+- `src/intent_alignment/observed.rs`：`RawObservedEvent`、`ObservedMilestone`、`ObservedBehaviorSequence`、`ObservedEvidenceGap`
+- `src/intent_alignment/compare.rs`：统一 conformance core、postcondition、readiness、cross-cycle 比较
+- `src/intent_alignment/report.rs`：`IntentAlignmentReport`、`IntentAlignmentVerdict`、`IntentMismatchKind`、`IntentMismatch`
+- `tests/intent_alignment_contract.rs`、`tests/intent_alignment_observed.rs`、`tests/intent_alignment_compare.rs`、`tests/intent_alignment_pipeline.rs`、`tests/intent_alignment_regress.rs`
 
 比较主链必须固定为：
 
@@ -45,114 +45,213 @@
 
 ## 4. User Stories
 
-### US-001: 落地 authored intent contract 与 expected behavior spec 编译器
-**Description:** 作为比较器实现者，我希望 authored intent contract 先被落成仓库内可加载的数据模型，并能编译成 expected behavior spec，这样后续比较面对的是形式化结构，而不是继续围绕说明文档打转。
+### US-001: 冻结 contract authoring governance 与基础 schema
+**Description:** 作为意图合同维护者，我希望先冻结 contract 的 authoring governance、source binding 和基础 schema，这样后续实现面对的是有来源约束的合同，而不是任意手写 sidecar 真相。
 
-**Implementation Anchor:** `src/intent_alignment/mod.rs`、`src/intent_alignment/contract.rs`、`tests/intent_alignment_contract.rs`、`tests/fixtures/intent_alignment/contracts/`
+**Implementation Anchor:** `src/intent_alignment/contract.rs`、`src/intent_alignment/mod.rs`、`tests/intent_alignment_contract.rs`、`tests/fixtures/intent_alignment/contracts/`
 
 **Acceptance Criteria:**
-- [ ] `src/intent_alignment/contract.rs` 新增 `IntentContract`、`IntentMilestone`、`PostconditionSpec`、`RestartConditionSpec`、`ExpectedBehaviorSpec`
-- [ ] `src/intent_alignment/mod.rs` 导出 `load_intent_contract(...)` 与 `compile_expected_behavior_spec(...)`
+- [ ] `src/intent_alignment/contract.rs` 新增 `IntentContract`、`IntentMilestone`、`ContractMetadata` 或等价基础 schema
 - [ ] phase-2 v1 只支持独立 fixture 文件加载 contract，不实现 Markdown 段落解析
-- [ ] `IntentContract` 或 `IntentMilestone` 必须显式携带“意图节点 -> 可观测里程碑”映射规则，不能把这一步留给比较器临时猜测
-- [ ] `compile_expected_behavior_spec(...)` 必须把作者化合同编译为显式 expected milestones、required edges、cycle end checks；不能把比较逻辑留给后续自然语言解释
-- [ ] `intent sequence` 节点在数据模型中被明确建模为业务里程碑，而不是 DSL `task.step` 名字镜像
-- [ ] 至少新增一个顺序案例 fixture 和一个 recovery 案例 fixture，并由 `tests/intent_alignment_contract.rs` 直接加载
+- [ ] `IntentContract` 必须包含 `contract_version`、`source_ref`、`source_digest` 或等价 provenance/source binding 字段
+- [ ] 必须最小冻结 contract authoring governance：至少明确 business owner、authoritative intent source，以及哪些输入可作为 contract 的业务评审依据
+- [ ] `intent sequence` 节点必须被建模为业务里程碑，而不是 DSL `task.step` 名字镜像
+- [ ] 至少一个 contract fixture 必须绑定到真实架构来源、现有 authored asset 或 canonical example，而不是纯手写演示夹具
 - [ ] Typecheck passes
 - [ ] Tests pass
 
-### US-002: 实现行为证据到 behavior sequence 的抽取层
-**Description:** 作为比较器实现者，我希望真实 trace、runtime context 或 validation 产物能先被归一化为 behavior sequence，这样后续比较不再依赖人工脑补。
+### US-002: 实现 contract semantic validation 与稳定诊断
+**Description:** 作为比较器实现者，我希望坏 contract 在进入 compile 前就被稳定拦截，这样后续不会对一份技术上合法但语义错误的合同继续推理。
 
-**Implementation Anchor:** `src/intent_alignment/mod.rs`、`src/intent_alignment/observed.rs`、`tests/intent_alignment_observed.rs`、`tests/fixtures/intent_alignment/observed/`
+**Implementation Anchor:** `src/intent_alignment/contract.rs`、`tests/intent_alignment_contract.rs`
+**Dependency:** 依赖 `US-001`
 
 **Acceptance Criteria:**
-- [ ] `src/intent_alignment/observed.rs` 新增 `ObservedMilestone`、`ObservedBehaviorSequence`、`ObservedEvidenceGap`
-- [ ] `src/intent_alignment/mod.rs` 导出 `extract_observed_behavior_sequence(...)`
-- [ ] phase-2 v1 只支持从 `sim-plc` / `no-board-gate` 导出的 `trace.jsonl` 抽取 behavior sequence；validation report 和其他 artifact 适配留到后续
-- [ ] `extract_observed_behavior_sequence(...)` 至少能消费 `trace_diff::NormalizedTraceEvent`，并输出里程碑名、发生顺序、证据来源、周期边界信息
-- [ ] 当证据不足以生成 behavior sequence 时，返回结构化 `ObservedEvidenceGap`，而不是默认通过
-- [ ] `tests/intent_alignment_observed.rs` 至少覆盖一个最小正例和一个证据缺失反例
+- [ ] 在 `src/intent_alignment/contract.rs` 或等价模块新增 `validate_intent_contract(...)`
+- [ ] 必须稳定拦截冲突 `required edges`、不可达里程碑、互相矛盾的 cycle/restart 约束
+- [ ] validation 失败必须返回稳定诊断，而不是让 compile 阶段兜底
+- [ ] `tests/intent_alignment_contract.rs` 必须包含至少一个坏 contract 反例并断言稳定诊断
 - [ ] Typecheck passes
 - [ ] Tests pass
 
-### US-003: 实现 required-step 与 ordering comparator
-**Description:** 作为意图对齐验证者，我希望系统能先比较必经步骤覆盖和必经顺序，这样最核心的 `A -> B -> C` 对 `A -> C` 错误可以被稳定识别。
+### US-003: 编译 ExpectedBehaviorSpec 与 IR 语义视图
+**Description:** 作为比较器实现者，我希望 contract 能被编译成 `ExpectedBehaviorSpec`，并显式对齐现有 IR 语义视图，这样 intent-alignment 不会变成第二套语义中心。
 
-**Implementation Anchor:** `src/intent_alignment/compare.rs`、`src/intent_alignment/report.rs`、`tests/intent_alignment_compare.rs`
+**Implementation Anchor:** `src/intent_alignment/mod.rs`、`src/intent_alignment/contract.rs`、`tests/intent_alignment_contract.rs`
 **Dependency:** 依赖 `US-001`、`US-002`
 
 **Acceptance Criteria:**
-- [ ] `src/intent_alignment/report.rs` 新增 `IntentMismatchKind::{missing_required_step, wrong_order, duplicated_required_step, ...}` 对应的 Rust 枚举变体
-- [ ] `src/intent_alignment/compare.rs` 新增 `compare_required_steps(...)` 与 `compare_ordering(...)`
-- [ ] `compare_intent_alignment(...)` 的执行顺序固定为 `compare_required_steps(...) -> compare_ordering(...) -> evaluate_postconditions(...) -> detect_cross_cycle_drift(...)`
-- [ ] `compare_required_steps(...)` 与 `compare_ordering(...)` 必须产出 `IntentMismatch` 或等价 typed mismatch 结构，不能只返回文本说明
-- [ ] comparator 能输出 `missing_required_step`、`wrong_order`、`duplicated_required_step`
-- [ ] `tests/intent_alignment_compare.rs` 为顺序正确、缺步骤、错顺序、重复步骤分别添加测试
+- [ ] `src/intent_alignment/mod.rs` 导出 `compile_expected_behavior_spec(...)`
+- [ ] `ExpectedBehaviorSpec` 必须显式表达 expected milestones、required edges、cycle semantics、restartability 语义
+- [ ] `IntentContract` / `ExpectedBehaviorSpec` 的核心概念必须映射到现有 IR 级语义原语，或明确声明为 IR 语义视图
+- [ ] `tests/intent_alignment_contract.rs` 必须断言 compile 后的核心语义与 contract/IR 视图一致
 - [ ] Typecheck passes
 - [ ] Tests pass
 
-### US-004: 实现 postcondition 与 premature_readiness 判定
-**Description:** 作为意图对齐验证者，我希望系统能验证周期结束时业务是否真的完成，而不是只看程序是否回到了某个等待点。
+### US-004: 实现 trace adapter v1 到 observed evidence
+**Description:** 作为比较器实现者，我希望先把现有 `trace.jsonl` 稳定适配成 observed evidence 输入，这样 observed 链路的第一步不是隐式脚本，而是可测 adapter。
 
-**Implementation Anchor:** `src/intent_alignment/compare.rs`、`src/intent_alignment/report.rs`、`tests/intent_alignment_compare.rs`
-**Dependency:** 依赖 `US-001`、`US-002`
+**Implementation Anchor:** `src/intent_alignment/observed.rs`、`src/intent_alignment/mod.rs`、`tests/intent_alignment_observed.rs`
 
 **Acceptance Criteria:**
-- [ ] `src/intent_alignment/compare.rs` 新增 `evaluate_postconditions(...)` 与 `detect_premature_readiness(...)`
-- [ ] phase-2 v1 的 postconditions 先用显式命名谓词集合或等价结构表示，不依赖自由文本解释
-- [ ] `evaluate_postconditions(...)` 必须消费 `ExpectedBehaviorSpec` 中的 postconditions，而不是直接对 trace 做字符串判断
-- [ ] `extract_observed_behavior_sequence(...)` 或等价 helper 必须提供 cycle-end snapshot 或 terminal milestone，供 postcondition 判定消费
-- [ ] comparator 能基于周期结束证据输出 `postcondition_not_met`
-- [ ] 当程序进入 `ready` 或等价状态但业务前提未恢复时，输出 `premature_readiness`
-- [ ] `tests/intent_alignment_compare.rs` 中 recovery 场景至少覆盖单气缸和多机构示例中的一个正例与一个反例
+- [ ] 在 `src/intent_alignment/observed.rs` 新增 `RawObservedEvent`、`ObservedEvidenceGap` 或等价结构
+- [ ] 在 `src/intent_alignment/mod.rs` 导出 `trace.jsonl` / `NormalizedTraceEvent` 到 observed evidence 的 adapter 入口
+- [ ] phase-2 v1 只支持从 `sim-plc` / `no-board-gate` 导出的 `trace.jsonl` 进入该 adapter
+- [ ] 当输入事件不在已知 adapter 规则内时，必须返回结构化 gap，不能静默映射
+- [ ] `tests/intent_alignment_observed.rs` 必须覆盖最小正例和未知事件反例
 - [ ] Typecheck passes
 - [ ] Tests pass
 
-### US-005: 实现 next-cycle drift 判定
-**Description:** 作为意图对齐验证者，我希望系统能检查下一周期是否从正确起点重新开始，这样“第一轮正常、第二轮漂移”的问题不会漏掉。
+### US-005: 冻结 observable vocabulary、normalization 与证据门槛
+**Description:** 作为比较器实现者，我希望 observed 证据先被归并成稳定语义单元，并为四个比较维度定义最低证据门槛，这样 extractor 不会凭残缺证据继续凑合比较。
 
-**Implementation Anchor:** `src/intent_alignment/compare.rs`、`src/intent_alignment/report.rs`、`tests/intent_alignment_compare.rs`
-**Dependency:** 依赖 `US-001`、`US-002`
+**Implementation Anchor:** `src/intent_alignment/observed.rs`、`tests/intent_alignment_observed.rs`
+**Dependency:** 依赖 `US-004`
 
 **Acceptance Criteria:**
-- [ ] `src/intent_alignment/compare.rs` 新增 `detect_cross_cycle_drift(...)`
+- [ ] 必须定义显式 observable vocabulary 或 event-to-milestone mapping contract
+- [ ] 必须冻结 observation normalization 规则，至少覆盖去重、抖动折叠、pending 到 terminal 合并、同周期重复观测的归并口径
+- [ ] 必须定义 required-step、ordering、postcondition、cross-cycle 四个维度的最低证据门槛
+- [ ] 证据不足时必须返回结构化 gap/blocking 结论，而不是继续产出部分 aligned/mismatch
+- [ ] `tests/intent_alignment_observed.rs` 必须包含重复上报、抖动或 pending 轮询不会膨胀成多个 milestone 的反例
+- [ ] Typecheck passes
+- [ ] Tests pass
+
+### US-006: 实现统一 path-conformance core
+**Description:** 作为意图对齐验证者，我希望先有一个统一的 `path-conformance / graph-matching core`，这样 required-step、ordering 和 extra-behavior 不是多个临时 pass，而是同一个核心机制的不同视图。
+
+**Implementation Anchor:** `src/intent_alignment/compare.rs`、`tests/intent_alignment_compare.rs`
+**Dependency:** 依赖 `US-003`、`US-005`
+
+**Acceptance Criteria:**
+- [ ] 在 `src/intent_alignment/compare.rs` 新增统一 conformance core，而不是一组互不相干的 compare pass
+- [ ] 该 core 必须覆盖 required steps、partial-order edges、allowed multiplicity、re-entry 与 extra-behavior 的内部判定
+- [ ] `tests/intent_alignment_compare.rs` 必须证明合法重入不会误报，非法绕路不会被静默忽略
+- [ ] Typecheck passes
+- [ ] Tests pass
+
+### US-007: 投影 mismatch taxonomy 并冻结主诊断规则
+**Description:** 作为意图对齐验证者，我希望统一 conformance 结果能被稳定投影为固定 mismatch taxonomy，这样同一最小反例不会随着实现细节漂移出不同主诊断。
+
+**Implementation Anchor:** `src/intent_alignment/report.rs`、`src/intent_alignment/compare.rs`、`tests/intent_alignment_compare.rs`
+**Dependency:** 依赖 `US-006`
+
+**Acceptance Criteria:**
+- [ ] 在 `src/intent_alignment/report.rs` 新增 `IntentMismatchKind`，至少包含 `missing_required_step`、`wrong_order`、`duplicated_required_step`、`premature_readiness`、`postcondition_not_met`、`cross_cycle_drift`
+- [ ] 必须冻结 canonical mismatch prioritization / normalization 规则，确保同一最小反例产出稳定主诊断和稳定关联节点
+- [ ] 对 contract 未声明允许的 unexpected milestone、forbidden edge 或 illegal re-entry，必须产生 non-aligned 结果而不是静默忽略
+- [ ] `tests/intent_alignment_compare.rs` 必须断言同一最小反例在不同入口下得到相同主诊断
+- [ ] Typecheck passes
+- [ ] Tests pass
+
+### US-008: 实现终态 postcondition 语义
+**Description:** 作为意图对齐验证者，我希望先稳定终态 postcondition 判定，这样业务未完成不会只靠 ready 或 terminal step 被误判为完成。
+
+**Implementation Anchor:** `src/intent_alignment/compare.rs`、`tests/intent_alignment_compare.rs`
+**Dependency:** 依赖 `US-003`、`US-005`
+
+**Acceptance Criteria:**
+- [ ] 必须冻结一个小而闭合的 `PredicateExpr` / `ObservedFact` 代数
+- [ ] `evaluate_postconditions(...)` 必须消费 `ExpectedBehaviorSpec` 中的终态 postconditions，而不是直接对 trace 做字符串判断
+- [ ] `extract_observed_behavior_sequence(...)` 或等价 helper 必须提供 cycle-end snapshot 或 terminal milestone
+- [ ] `tests/intent_alignment_compare.rs` 必须包含 `postcondition_not_met` 的正例与反例
+- [ ] Typecheck passes
+- [ ] Tests pass
+
+### US-009: 实现过程型恢复义务与 premature_readiness
+**Description:** 作为意图对齐验证者，我希望恢复过程的历史 witness 与 readiness 语义被单独检查，这样不会把终态正确但恢复路径错误的 case 放过去。
+
+**Implementation Anchor:** `src/intent_alignment/compare.rs`、`tests/intent_alignment_compare.rs`
+**Dependency:** 依赖 `US-008`
+
+**Acceptance Criteria:**
+- [ ] readiness / restartability 必须作为 `ExpectedBehaviorSpec` 的一等状态语义建模
+- [ ] 至少一类 postcondition 或 recovery obligation 必须能够消费历史 witness / 过程事实，而不是只看 cycle-end snapshot
+- [ ] 必须明确 `postcondition_not_met` 与 `premature_readiness` 的判定边界、优先级或归约关系
+- [ ] `tests/intent_alignment_compare.rs` 必须包含终态相同但恢复路径错误仍然 fail 的反例
+- [ ] Typecheck passes
+- [ ] Tests pass
+
+### US-010: 冻结 cycle semantics 与 inter-cycle handoff
+**Description:** 作为意图对齐验证者，我希望 cycle 语义和 handoff invariant 先被显式冻结，这样跨周期比较不是靠启发式切片。
+
+**Implementation Anchor:** `src/intent_alignment/compare.rs`、`src/intent_alignment/observed.rs`、`tests/intent_alignment_compare.rs`
+**Dependency:** 依赖 `US-003`、`US-005`
+
+**Acceptance Criteria:**
+- [ ] `ExpectedBehaviorSpec` 必须显式建模 `cycle_start`、`successful_cycle_end`、`aborted_cycle_end`、`restart_condition`
+- [ ] phase-2 v1 的 cycle boundary 必须由 contract 语义驱动并由 extractor 写入 `cycle_index`
+- [ ] `ExpectedBehaviorSpec` 必须显式表达 inter-cycle handoff invariant：`cycle_n` 的 terminal facts 如何约束 `cycle_n+1` 的 start facts
+- [ ] `tests/intent_alignment_compare.rs` 必须包含单周期内重复 start-like milestone 但不应被切成两个周期的反例
+- [ ] Typecheck passes
+- [ ] Tests pass
+
+### US-011: 实现 cross-cycle conformance 与 drift 诊断
+**Description:** 作为意图对齐验证者，我希望跨周期关系进入核心 conformance 模型，并只在确有独立判定价值时输出 `cross_cycle_drift`。
+
+**Implementation Anchor:** `src/intent_alignment/compare.rs`、`tests/intent_alignment_compare.rs`
+**Dependency:** 依赖 `US-007`、`US-010`
+
+**Acceptance Criteria:**
+- [ ] cross-cycle conformance 必须进入 `compare_intent_alignment(...)` 的核心语义，而不是单周期比较后的尾部补丁检查
+- [ ] `cross_cycle_drift` 必须具备独有判定面；若失败已被单周期 mismatch 充分解释，则只能作为 cross-cycle context
 - [ ] `detect_cross_cycle_drift(...)` 必须消费至少两个连续周期的 `ObservedBehaviorSequence`
-- [ ] phase-2 v1 的 cycle 边界规则固定为“按 contract 声明的 cycle-start milestone 重复出现切分周期，并由 extractor 写入 `cycle_index`”；comparator 不得从 `ready` 反推边界
-- [ ] 当第二周期跳步、从中间状态继续、或重复上一周期尾部动作时，输出 `cross_cycle_drift`
-- [ ] cycle 边界的判定规则必须体现在代码注释或 helper 函数中，不能留给人工口头解释
-- [ ] `tests/intent_alignment_compare.rs` 至少添加一个“第一轮通过、第二轮失败”的回归测试
+- [ ] `tests/intent_alignment_compare.rs` 必须包含第一周期残留风险带入第二周期而触发 drift 的反例
 - [ ] Typecheck passes
 - [ ] Tests pass
 
-### US-006: 实现 mismatch report 数据结构与 pipeline 接入
-**Description:** 作为比较器消费者，我希望 comparator 输出先以稳定数据结构接入 pipeline 或 API，这样后续 CLI 和 skill 只是消费结果，而不是再次主导设计。
+### US-012: 实现 report contract、verdict lattice 与 diagnostics 对齐
+**Description:** 作为比较器消费者，我希望库级 report 与 verdict 先稳定并对齐现有 diagnostics/self-check 模型，这样 pipeline 不会在最后一公里改写结论。
 
-**Implementation Anchor:** `src/intent_alignment/mod.rs`、`src/intent_alignment/report.rs`、`src/lib.rs`、`src/cli/utilities.rs`、`src/cli_support/plc_pipeline.rs`、`tests/intent_alignment_pipeline.rs`、`tests/self_check.rs`
-**Dependency:** 依赖 `US-001` 至 `US-005`
+**Implementation Anchor:** `src/intent_alignment/report.rs`、`src/intent_alignment/mod.rs`、`src/lib.rs`、`tests/intent_alignment_pipeline.rs`、`tests/self_check.rs`
+**Dependency:** 依赖 `US-007`、`US-009`、`US-011`
 
 **Acceptance Criteria:**
-- [ ] `src/intent_alignment/report.rs` 新增 `IntentAlignmentReport` 与 `IntentMismatch`
-- [ ] `IntentAlignmentReport` 至少包含：场景、intent 节点、behavior 节点、mismatch 类型、证据来源、结论
-- [ ] `src/intent_alignment/mod.rs` 提供单一入口 `compare_intent_alignment(...)` 并由 `src/lib.rs` 导出模块
-- [ ] phase-2 v1 不新增公开 CLI；先把结果接入 `project-check` 或等价聚合 pipeline
-- [ ] 当 comparator 已执行完成时，`compare_intent_alignment(...)` 返回稳定 mismatch 类型，而不是把所有失败折叠成 blocker
-- [ ] 当 comparator 不能执行时，返回 `missing evidence` / `missing comparator` / `toolchain limitation` 边界口径；该分支与 mismatch 分支必须在数据结构上可区分
-- [ ] `tests/intent_alignment_pipeline.rs` 覆盖“比较成功发现 mismatch”和“比较器无法执行返回 blocker”两个路径，并同步更新 `tests/self_check.rs` 中相关聚合断言
+- [ ] 在 `src/intent_alignment/report.rs` 新增 `IntentAlignmentReport` 与 `IntentMismatch`
+- [ ] `IntentAlignmentReport` 必须包含 contract identity、evidence identity、comparator/rule version、cycle window 或等价 provenance 字段
+- [ ] 必须定义 `IntentAlignmentVerdict` 或等价 verdict lattice，并明确 mismatch、gap、toolchain limitation、warning 并存时的 reduction policy
+- [ ] library-level verdict 必须是 source of truth；intent-alignment 必须复用或扩展现有统一 diagnostics / self-check 聚合模型
 - [ ] Typecheck passes
 - [ ] Tests pass
 
-### US-007: 加入 canonical examples 与端到端回归
-**Description:** 作为仓库维护者，我希望架构文档中的 cylinder 与 recovery 例子进入真正的 fixture 和回归，这样后续实现不会再次漂回只写文档不落地。
+### US-013: 接入 project-check 并锁死跨入口一致性
+**Description:** 作为比较器消费者，我希望 library report 接入 `project-check` 后仍保持跨入口一致的最终 verdict，这样 CLI/pipeline 不会重新解释 comparator 结果。
 
-**Implementation Anchor:** `tests/intent_alignment_compare.rs`、`tests/intent_alignment_pipeline.rs`、`tests/intent_alignment_regress.rs`、`tests/fixtures/intent_alignment/*`
+**Implementation Anchor:** `src/cli/utilities.rs`、`src/cli_support/plc_pipeline.rs`、`tests/intent_alignment_pipeline.rs`、`tests/self_check.rs`
+**Dependency:** 依赖 `US-012`
+
+**Acceptance Criteria:**
+- [ ] phase-2 v1 不新增公开 CLI；先把结果接入 `project-check` 或等价聚合 pipeline
+- [ ] pipeline 只能做无信息损失的确定性归约，不能再解释或改写 comparator 结论
+- [ ] `tests/intent_alignment_pipeline.rs` 必须断言严重 mismatch 不会被 pipeline 降成 warning 或 blocker 展示
+- [ ] `tests/intent_alignment_pipeline.rs` 或等价入口测试必须断言同一 library report 在所有入口上得到相同最终 verdict
+- [ ] Typecheck passes
+- [ ] Tests pass
+
+### US-014: 收口 canonical 与 mutation 回归集
+**Description:** 作为仓库维护者，我希望先把每个已冻结 mismatch 的 canonical 与 mutation 回归集收口，这样 phase-2 的基础回归边界是明确的。
+
+**Implementation Anchor:** `tests/intent_alignment_compare.rs`、`tests/intent_alignment_regress.rs`、`tests/fixtures/intent_alignment/`
+**Dependency:** 依赖 `US-013`
 
 **Acceptance Criteria:**
 - [ ] 至少新增一组 canonical intent-alignment fixtures，覆盖双气缸顺序、单气缸 recovery、多机构 recovery、跨周期 drift
-- [ ] `tests/intent_alignment_compare.rs` 中至少一个回归直接对应原架构文档中的 `A -> B` 顺序例子
-- [ ] `tests/intent_alignment_compare.rs` 或 `tests/intent_alignment_pipeline.rs` 中至少一个回归直接对应 `fault_detected -> safe_home_restored -> cycle_restartable` 例子
-- [ ] canonical authored contracts 与 observed traces 默认放在 `tests/fixtures/intent_alignment/`；只有涉及现有 `.plc` 示例时才补 `tests/examples_integration.rs`
-- [ ] 文档中引用的 canonical 例子路径与测试夹具保持一致
+- [ ] 每个已冻结 mismatch 至少新增 1 条 canonical 和 1 条最小 mutation 反例
+- [ ] 每个 canonical / mutation 回归都必须绑定到显式语义断言、FR 或 mismatch 规则
+- [ ] Typecheck passes
+- [ ] Tests pass
+
+### US-015: 加入真实 golden path 并关闭 phase-2
+**Description:** 作为仓库维护者，我希望最后再加入真实 golden path，并明确 phase-2 的固定关闭集，这样这一阶段可以客观收口，而不是无限扩张。
+
+**Implementation Anchor:** `tests/intent_alignment_pipeline.rs`、`tests/examples_integration.rs`、`tests/intent_alignment_regress.rs`、`tests/fixtures/intent_alignment/`
+**Dependency:** 依赖 `US-014`
+
+**Acceptance Criteria:**
+- [ ] 至少新增 1 条真实 golden path：从现有 `.plc` 示例或等价真实 authored asset 产出 toolchain evidence，再进入 extractor -> comparator -> report
+- [ ] golden path 必须绑定到显式语义断言、FR 或 mismatch 规则，而不是只断言流程跑通
+- [ ] 文档中引用的 canonical / golden 例子路径与测试夹具保持一致
+- [ ] phase-2 的固定关闭集必须在文档中被明确列出，超出关闭集的新回归一律后置
 - [ ] Typecheck passes
 - [ ] Tests pass
 
@@ -161,21 +260,48 @@
 - FR-1: 系统必须支持一份 authored intent contract，至少表达 `intent sequence`、可观察里程碑、required ordering、postconditions、next-cycle start conditions。
 - FR-2: authored intent contract 中的节点语义必须是业务里程碑，而不是 DSL `task.step` 名称的简单镜像。
 - FR-3: 系统必须先将 authored intent contract 编译为 `ExpectedBehaviorSpec` 或等价代码结构，再进行比较。
+- FR-3.1: authored intent contract 必须携带 provenance/source binding，至少能追溯到真实架构来源、现有 authored asset 或 canonical source。
+- FR-3.2: authored intent contract 必须经过 semantic validation；坏合同不能被编译成 `ExpectedBehaviorSpec` 后再进入 comparator。
+- FR-3.3: intent-alignment 不能创建第二套独立于 IR 的语义中心；`IntentContract` / `ExpectedBehaviorSpec` 必须映射到现有 IR 级原语或被明确声明为 IR 语义视图。
 - FR-4: `ExpectedBehaviorSpec` 必须显式表达 expected milestones、required edges、cycle end checks，不能把规则留给 agent 或 skill 的自然语言推断。
+- FR-4.1: `ExpectedBehaviorSpec` 不能只表达裸线性序列；必须支持 allowed multiplicity、partial-order edges，以及 recovery/re-entry 的可接受路径。
 - FR-5: 系统必须能从真实 trace、runtime context 或 validation 证据中抽取 `ObservedBehaviorSequence`。
 - FR-6: `ObservedBehaviorSequence` 抽取结果必须保留证据来源和周期边界信息。
 - FR-6.1: phase-2 v1 的 observed 输入先固定为 `trace.jsonl` 或其解析后的 `NormalizedTraceEvent`；其他证据适配后置。
+- FR-6.2: 系统必须定义稳定的 observable vocabulary / event-to-milestone mapping；未知事件只能产生 gap，不能静默映射成 milestone。
+- FR-6.3: observation normalization 必须定义去重、抖动折叠、pending 到 terminal 合并、同周期重复观测的稳定归并规则。
+- FR-6.4: stable semantic evidence interface 必须与 trace adapter 分离；trace.jsonl 只是 observed evidence 的一种适配来源。
+- FR-6.5: 系统必须为 required-step、ordering、postcondition、cross-cycle 四个维度定义最低证据门槛；证据不足时必须阻断对应维度比较并返回稳定 gap/blocking 结论。
 - FR-7: comparator 必须先检查 required-step coverage，再检查 ordering conformance。
 - FR-8: comparator 必须支持 `missing_required_step`、`wrong_order`、`duplicated_required_step` 三类基础 mismatch。
+- FR-8.1: comparator 不能静默忽略 unexpected milestone、forbidden edge 或 illegal re-entry；未声明允许的额外行为必须导致 non-aligned verdict。
+- FR-8.2: required-step、ordering、extra-behavior 判定在内部应由统一的 path-conformance / graph-matching 机制产生，mismatch taxonomy 只是报告视图。
+- FR-8.3: 同一最小反例必须经过 canonical mismatch prioritization / normalization 后产出稳定主诊断与稳定关联节点。
 - FR-9: comparator 必须支持 `postcondition_not_met` 和 `premature_readiness`。
+- FR-9.1: postcondition 判定必须建立在闭合的 `PredicateExpr` / `ObservedFact` 代数上，而不是靠按案例增加专用谓词名字。
+- FR-9.2: 至少一类 postcondition 或 recovery obligation 必须消费历史 witness / 过程事实，而不是只看终态 snapshot。
+- FR-9.3: readiness / restartability 必须是 `ExpectedBehaviorSpec` 的一等状态语义，而不是 comparator 的临时推断。
+- FR-9.4: `postcondition_not_met` 与 `premature_readiness` 的判定边界和归约关系必须稳定冻结，避免同一 failure 双重归类或漂移归类。
 - FR-10: comparator 必须支持 `cross_cycle_drift`，且比较范围不能只限于单周期。
+- FR-10.1: cycle boundary 必须由 contract 语义显式驱动，至少建模 `cycle_start`、`successful_cycle_end`、`aborted_cycle_end`、`restart_condition`，不能只靠 start-like milestone 重复出现启发式推断。
+- FR-10.2: 系统必须显式验证 inter-cycle handoff invariant，即 `cycle_n` 的 terminal facts 与 `cycle_n+1` 的 start facts 的兼容性。
+- FR-10.3: cross-cycle conformance 必须进入核心比较模型，不能只是单周期比较后的尾部补丁检查。
+- FR-10.4: `cross_cycle_drift` 必须具备独立于单周期 mismatch 的判定价值；若失败已被单周期 mismatch 充分解释，则应作为 cross-cycle context 而非重复主诊断。
 - FR-11: 当证据不足以执行比较时，系统必须返回结构化缺口，而不是默认判定 aligned。
 - FR-12: 当 comparator 已成功运行时，系统必须输出稳定 `IntentAlignmentReport`，而不是只输出 blocker。
 - FR-13: `IntentAlignmentReport` 必须包含 mismatch 类型、关联的 intent 节点、关联的 behavior 证据和最终判定。
+- FR-13.1: `IntentAlignmentReport` 必须包含 contract identity、evidence identity、comparator/rule version、cycle window 或等价 provenance 字段。
+- FR-13.2: pipeline 必须基于固定的 verdict lattice / reduction policy 将 report 归约成 aligned、mismatch、blocked 或等价最终结论，且不能降级严重 mismatch。
+- FR-13.3: intent-alignment 的报告和聚合必须复用或扩展现有统一 diagnostics / self-check 模型，而不是并行再造一套私有结果系统。
+- FR-13.4: library-level verdict 是 source of truth；所有 CLI / pipeline 入口只能做无信息损失的确定性归约，并保持跨入口结论一致。
 - FR-14: skill 不能直接凭自然语言判断 trace 是否满足意图；所有 aligned/mismatch 结论必须来自 comparator 函数返回值。
 - FR-15: 只有 required-step、ordering、postcondition、next-cycle 四维全部通过时，系统才允许输出 aligned。
 - FR-15.1: phase-2 v1 的 cycle 边界必须由 contract 声明的 cycle-start milestone 切分，并在 observed 序列中显式写入 `cycle_index`。
 - FR-16: canonical examples 必须进入仓库回归测试，而不是只停留在文档示意。
+- FR-16.1: canonical 回归之外，至少必须有 1 条从真实 `.plc` 或等价真实 authored asset 产出 evidence 的 golden path。
+- FR-16.2: 每个 canonical 例子至少应有 1 个最小 mutation 反例，避免 comparator 对固定样例过拟合。
+- FR-16.3: regression 只能证明显式语义断言、FR 或 mismatch 规则；回归夹具本身不能反过来成为新的语义来源。
+- FR-16.4: phase-2 必须定义固定关闭集；达到该关闭集即允许本阶段收口，新增回归需求自动后置到下一阶段而非无限扩张。
 
 ## 6. Non-Goals
 
@@ -192,6 +318,7 @@
 - mismatch 输出必须对审计友好，能让人直接看见“缺了哪个 required step”“哪条 ordering 被打破”“哪个 postcondition 没满足”。
 - worked examples 不应只是说明文字，最好直接指向 canonical fixtures。
 - 如果某个 story 只改文档、不新增或修改上述 Rust 模块、函数、测试之一，则该 story 不算完成。
+- 如果某个 story 实际包含多个执行切片，而单次迭代无法完整交付全部切片，则必须继续拆 story；不能用“先完成一半”冒充 Ralph 可执行粒度。
 
 ## 8. Technical Considerations
 

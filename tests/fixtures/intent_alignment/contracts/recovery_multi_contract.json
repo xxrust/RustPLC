@@ -1,0 +1,182 @@
+{
+  "contract_version": "phase-2.v1",
+  "source_ref": {
+    "kind": "architecture_doc",
+    "path": "docs/architecture/intent_alignment_verification.md",
+    "description": "Frozen intent-alignment architecture semantics for multi-actuator recovery."
+  },
+  "source_digest": {
+    "algorithm": "sha256",
+    "value": "10b8ce179f80c7862ff82a3b363b8792d6ff106895f68609d09558f1b8deb83c"
+  },
+  "metadata": {
+    "contract_id": "intent-alignment-recovery-multi",
+    "title": "Multi-actuator recovery contract",
+    "business_owner": "recovery-owner",
+    "authoritative_intent_source": {
+      "kind": "architecture_doc",
+      "path": "docs/architecture/intent_alignment_verification.md",
+      "description": "Architecture source of truth for intent-alignment."
+    },
+    "review_basis": [
+      {
+        "label": "Architecture semantics review",
+        "source": {
+          "kind": "architecture_doc",
+          "path": "docs/architecture/intent_alignment_verification.md",
+          "description": "Multi-actuator recovery mismatch taxonomy."
+        }
+      }
+    ]
+  },
+  "contract_core": {
+    "expected_milestones": [
+      {
+        "milestone_id": "fault_detected",
+        "business_milestone": {
+          "label": "Fault detected",
+          "description": "The station enters the coordinated recovery path."
+        }
+      },
+      {
+        "milestone_id": "all_required_cylinders_retracted",
+        "business_milestone": {
+          "label": "Cylinders retracted",
+          "description": "All safety-critical cylinders returned home."
+        }
+      },
+      {
+        "milestone_id": "all_required_drives_stopped",
+        "business_milestone": {
+          "label": "Drives stopped",
+          "description": "All moving drives are fully stopped."
+        }
+      },
+      {
+        "milestone_id": "cycle_restartable",
+        "business_milestone": {
+          "label": "Cycle restartable",
+          "description": "The coordinated recovery path is complete."
+        }
+      }
+    ],
+    "required_edges": [
+      {
+        "predecessor": "fault_detected",
+        "successor": "all_required_cylinders_retracted"
+      },
+      {
+        "predecessor": "all_required_cylinders_retracted",
+        "successor": "all_required_drives_stopped"
+      },
+      {
+        "predecessor": "all_required_drives_stopped",
+        "successor": "cycle_restartable"
+      }
+    ],
+    "postconditions": [
+      {
+        "postcondition_id": "recovery_outputs_quiesced",
+        "description": "All recovery-controlled outputs must be quiesced."
+      }
+    ],
+    "cycle_semantics": {
+      "cycle_start_milestone": "fault_detected",
+      "cycle_complete_milestone": "cycle_restartable",
+      "restart_semantics": {
+        "restartable_milestone": "cycle_restartable",
+        "next_cycle_start_milestone": "fault_detected",
+        "required_postconditions": [
+          "recovery_outputs_quiesced"
+        ]
+      }
+    }
+  },
+  "observation_bindings": [
+    {
+      "binding_id": "fault_binding",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "fault_detected"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "variable_state",
+          "key": "vars._state",
+          "expected": "0"
+        }
+      ]
+    },
+    {
+      "binding_id": "cylinders_binding",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "all_required_cylinders_retracted"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "variable_state",
+          "key": "vars._state",
+          "expected": "10"
+        }
+      ]
+    },
+    {
+      "binding_id": "drives_binding",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "all_required_drives_stopped"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "variable_state",
+          "key": "vars._state",
+          "expected": "20"
+        }
+      ]
+    },
+    {
+      "binding_id": "restartable_binding",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "cycle_restartable"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "variable_state",
+          "key": "vars._state",
+          "expected": "30"
+        }
+      ]
+    },
+    {
+      "binding_id": "quiesced_binding",
+      "subject": {
+        "kind": "postcondition",
+        "postcondition_id": "recovery_outputs_quiesced"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "variable_state",
+          "key": "vars.clamp_a",
+          "expected": "false"
+        },
+        {
+          "source": "variable_state",
+          "key": "vars.clamp_b",
+          "expected": "false"
+        },
+        {
+          "source": "variable_state",
+          "key": "vars.spindle",
+          "expected": "false"
+        }
+      ]
+    }
+  ]
+}

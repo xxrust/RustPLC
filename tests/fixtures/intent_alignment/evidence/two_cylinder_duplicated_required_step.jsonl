@@ -1,0 +1,8 @@
+{"tick":0,"vars":{"_state":0,"valve_a":false,"valve_b":false}}
+{"tick":1,"vars":{"_state":10,"valve_a":true,"valve_b":false}}
+{"tick":2,"vars":{"_state":20,"valve_a":true,"valve_b":true}}
+{"tick":3,"vars":{"_state":30,"valve_a":true,"valve_b":false}}
+{"tick":4,"vars":{"_state":10,"valve_a":true,"valve_b":false}}
+{"tick":5,"vars":{"_state":20,"valve_a":true,"valve_b":true}}
+{"tick":6,"vars":{"_state":30,"valve_a":true,"valve_b":false}}
+{"tick":7,"vars":{"_state":40,"valve_a":false,"valve_b":false}}

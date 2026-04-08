@@ -7,6 +7,11 @@ use crate::cli_support::plc_pipeline::{
     parse_loaded_plc_with_required_purpose,
 };
 use rust_plc::codegen::st::{StCodegenConfig, StCodegenError, generate_st};
+use rust_plc::intent_alignment::{
+    IntentAlignmentBlockerKind, IntentAlignmentVerdict, IntentMismatchKind,
+    compare_trace_jsonl, compile_expected_behavior_spec, read_intent_contract,
+    reduce_intent_alignment_report,
+};
 use rust_plc::semantic::preprocess_program;
 use rust_plc::sequence_lint::{
     CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
@@ -206,6 +211,10 @@ struct ProjectCheckStepReport {
     stderr_log: String,
     report_json: Option<String>,
     artifacts_dir: Option<String>,
+    intent_alignment_verdict: Option<IntentAlignmentVerdict>,
+    intent_alignment_primary_mismatch_kind: Option<IntentMismatchKind>,
+    intent_alignment_blocker_kind: Option<IntentAlignmentBlockerKind>,
+    intent_alignment_comparator_version: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -219,6 +228,13 @@ struct ProjectCheckReport {
     status: &'static str,
     failed_steps: usize,
     steps: Vec<ProjectCheckStepReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProjectCheckIntentAlignmentStepOutput {
+    verdict: IntentAlignmentVerdict,
+    summary: rust_plc::intent_alignment::IntentAlignmentPipelineSummary,
+    report: rust_plc::intent_alignment::IntentAlignmentReport,
 }
 
 fn run_project_check_child(
@@ -281,7 +297,146 @@ fn run_project_check_child(
         stderr_log: display_path_relative_to_cwd(&stderr_log_path),
         report_json,
         artifacts_dir: None,
+        intent_alignment_verdict: None,
+        intent_alignment_primary_mismatch_kind: None,
+        intent_alignment_blocker_kind: None,
+        intent_alignment_comparator_version: None,
     })
+}
+
+fn find_intent_alignment_contract(plc_path: &Path) -> Option<PathBuf> {
+    let stem = plc_path.file_stem()?.to_string_lossy();
+    let candidate = plc_path.with_file_name(format!("{stem}.intent_alignment.contract.json"));
+    candidate.exists().then_some(candidate)
+}
+
+fn run_project_check_intent_alignment_step(
+    step_dir: &Path,
+    contract_path: &Path,
+    evidence_path: &Path,
+) -> Result<ProjectCheckStepReport, String> {
+    fs::create_dir_all(step_dir).map_err(|err| {
+        format!(
+            "Failed to create project-check step directory {}: {err}",
+            step_dir.display()
+        )
+    })?;
+
+    let stdout_log_path = step_dir.join("stdout.log");
+    let stderr_log_path = step_dir.join("stderr.log");
+    let report_path = step_dir.join("report.json");
+    let summary_path = step_dir.join("summary.json");
+
+    let command = vec![
+        "project-check.intent-alignment".to_string(),
+        "--intent-contract".to_string(),
+        display_path_relative_to_cwd(contract_path),
+        "--intent-evidence".to_string(),
+        display_path_relative_to_cwd(evidence_path),
+    ];
+
+    let result = (|| -> Result<ProjectCheckIntentAlignmentStepOutput, String> {
+        let contract = read_intent_contract(contract_path)
+            .map_err(|err| format!("Failed to load intent contract: {err}"))?;
+        let spec = compile_expected_behavior_spec(&contract)
+            .map_err(|err| format!("Failed to compile intent contract: {err}"))?;
+        let evidence = fs::read_to_string(evidence_path).map_err(|err| {
+            format!(
+                "Failed to read intent evidence {}: {err}",
+                evidence_path.display()
+            )
+        })?;
+        let report = compare_trace_jsonl(&spec, &evidence)
+            .map_err(|err| format!("Intent alignment compare failed: {err}"))?;
+        let summary = reduce_intent_alignment_report(&report);
+
+        Ok(ProjectCheckIntentAlignmentStepOutput {
+            verdict: summary.verdict,
+            summary,
+            report,
+        })
+    })();
+
+    match result {
+        Ok(output) => {
+            write_json_pretty(&report_path, &output.report)?;
+            write_json_pretty(&summary_path, &output.summary)?;
+            let mut stdout_json = serde_json::to_string_pretty(&output)
+                .map_err(|err| format!("Failed to serialize intent-alignment step output: {err}"))?;
+            stdout_json.push('\n');
+            fs::write(&stdout_log_path, stdout_json.as_bytes()).map_err(|err| {
+                format!(
+                    "Failed to write project-check stdout log {}: {err}",
+                    stdout_log_path.display()
+                )
+            })?;
+            let stderr_message = if output.verdict == IntentAlignmentVerdict::Aligned {
+                String::new()
+            } else {
+                format!("intent-alignment verdict: {:?}\n", output.verdict)
+            };
+            fs::write(&stderr_log_path, stderr_message.as_bytes()).map_err(|err| {
+                format!(
+                    "Failed to write project-check stderr log {}: {err}",
+                    stderr_log_path.display()
+                )
+            })?;
+
+            Ok(ProjectCheckStepReport {
+                name: "intent_alignment",
+                command,
+                status: if output.verdict == IntentAlignmentVerdict::Aligned {
+                    "pass"
+                } else {
+                    "fail"
+                },
+                exit_code: Some(if output.verdict == IntentAlignmentVerdict::Aligned {
+                    0
+                } else {
+                    1
+                }),
+                stdout_log: display_path_relative_to_cwd(&stdout_log_path),
+                stderr_log: display_path_relative_to_cwd(&stderr_log_path),
+                report_json: Some(display_path_relative_to_cwd(&report_path)),
+                artifacts_dir: Some(display_path_relative_to_cwd(step_dir)),
+                intent_alignment_verdict: Some(output.summary.verdict),
+                intent_alignment_primary_mismatch_kind: output.summary.primary_mismatch_kind,
+                intent_alignment_blocker_kind: output.summary.blocker_kind,
+                intent_alignment_comparator_version: Some(
+                    output.summary.comparator_version.clone(),
+                ),
+            })
+        }
+        Err(err) => {
+            fs::write(&stdout_log_path, b"").map_err(|write_err| {
+                format!(
+                    "Failed to write project-check stdout log {}: {write_err}",
+                    stdout_log_path.display()
+                )
+            })?;
+            fs::write(&stderr_log_path, format!("{err}\n").as_bytes()).map_err(|write_err| {
+                format!(
+                    "Failed to write project-check stderr log {}: {write_err}",
+                    stderr_log_path.display()
+                )
+            })?;
+
+            Ok(ProjectCheckStepReport {
+                name: "intent_alignment",
+                command,
+                status: "fail",
+                exit_code: Some(1),
+                stdout_log: display_path_relative_to_cwd(&stdout_log_path),
+                stderr_log: display_path_relative_to_cwd(&stderr_log_path),
+                report_json: None,
+                artifacts_dir: None,
+                intent_alignment_verdict: Some(IntentAlignmentVerdict::Blocked),
+                intent_alignment_primary_mismatch_kind: None,
+                intent_alignment_blocker_kind: Some(IntentAlignmentBlockerKind::MissingComparator),
+                intent_alignment_comparator_version: None,
+            })
+        }
+    }
 }
 
 fn run_project_check_subcommand(
@@ -298,6 +453,8 @@ fn run_project_check_subcommand(
     let mut output_mode = CliOutputMode::Human;
     let mut max_p99_exec_us: Option<u64> = None;
     let mut max_overrun_count: Option<u64> = None;
+    let mut intent_contract_path: Option<PathBuf> = None;
+    let mut intent_evidence_path: Option<PathBuf> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -339,6 +496,18 @@ fn run_project_check_subcommand(
                         .map_err(|_| format!("Invalid integer for --max-overrun-count: {raw}"))?,
                 );
             }
+            "--intent-contract" => {
+                intent_contract_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --intent-contract <contract.json>".to_string()
+                    })?));
+            }
+            "--intent-evidence" => {
+                intent_evidence_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --intent-evidence <trace.jsonl>".to_string()
+                    })?));
+            }
             "-h" | "--help" => return Err(usage.clone()),
             other => return Err(format!("Unknown argument for project-check: {other}")),
         }
@@ -348,6 +517,12 @@ fn run_project_check_subcommand(
         .ok_or_else(|| "Missing required argument: --scenario <scenario.yaml>".to_string())?;
     let out_dir =
         out_dir.ok_or_else(|| "Missing required argument: --out-dir <dir>".to_string())?;
+    if intent_evidence_path.is_some() && intent_contract_path.is_none() {
+        return Err(
+            "project-check requires --intent-contract when --intent-evidence is provided"
+                .to_string(),
+        );
+    }
 
     fs::create_dir_all(&out_dir).map_err(|err| {
         format!(
@@ -437,7 +612,22 @@ fn run_project_check_subcommand(
     )?;
     gate_step.artifacts_dir = Some(display_path_relative_to_cwd(&gate_artifacts_dir));
 
-    let steps = vec![compile_step, lint_step, doctor_step, gate_step];
+    let mut steps = vec![compile_step, lint_step, doctor_step, gate_step];
+    let resolved_intent_contract = intent_contract_path
+        .clone()
+        .or_else(|| find_intent_alignment_contract(&plc_path_buf));
+    let resolved_intent_evidence = intent_evidence_path
+        .clone()
+        .or_else(|| Some(gate_artifacts_dir.join("sil_trace.jsonl")));
+    if let (Some(contract_path), Some(evidence_path)) = (
+        resolved_intent_contract.as_ref(),
+        resolved_intent_evidence.as_ref(),
+    ) {
+        let intent_dir = out_dir.join("intent_alignment");
+        let intent_step =
+            run_project_check_intent_alignment_step(&intent_dir, contract_path, evidence_path)?;
+        steps.push(intent_step);
+    }
     let failed_steps = steps.iter().filter(|step| step.status == "fail").count();
     let status = if failed_steps == 0 { "pass" } else { "fail" };
     let report = ProjectCheckReport {

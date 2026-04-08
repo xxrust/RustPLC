@@ -80,7 +80,7 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Deployment",
         name: "project-check",
         summary: "Run the unified project regression check across compile, lint, doctor, and gate steps.",
-        usage_template: "Usage: {program} project-check <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--output <human|json>]",
+        usage_template: "Usage: {program} project-check <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--intent-contract <contract.json> --intent-evidence <trace.jsonl>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Deployment",
@@ -280,6 +280,8 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--out-dir <dir>              Required output directory for per-step artifacts.",
             "--max-p99-exec-us <us>       Realtime threshold forwarded to no-board-gate.",
             "--max-overrun-count <n>      Overrun threshold forwarded to no-board-gate.",
+            "--intent-contract <file>     Optional intent-alignment contract fixture for an extra project-check step.",
+            "--intent-evidence <file>     Optional observed trace JSONL paired with --intent-contract.",
             "--output <human|json>        Select CLI output format.",
         ],
         "commissioning-run" => &[
@@ -395,6 +397,7 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
         ],
         "project-check" => &[
             "This command orchestrates `compile`, `sequence-lint`, `scenario-doctor`, and `no-board-gate` as one reproducible release check.",
+            "When `--intent-contract` and `--intent-evidence` are both provided, an `intent_alignment` step is appended and reduced from the library report without reinterpreting its verdict.",
         ],
         "trace-doctor" => &["At least one of `--trace` or `--diff` is required."],
         "component-sim" => {
@@ -431,7 +434,7 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
             "rust_plc sim-regress --plc-dir examples --scenario-dir scenarios --summary-out out/sim-regress/summary.json",
         ],
         "sim-pid-kpi" => &[
-            "rust_plc sim-pid-kpi examples/pid_loop.plc --scenario examples/pid_kpi_scenario.yaml --out out/pid/kpi.json",
+            "rust_plc sim-pid-kpi <source.plc|source.bundle.toml> --scenario <pid_scenario.yaml> --out out/pid/kpi.json",
         ],
         "build-rp2040" => &[
             "rust_plc build-rp2040 examples/rp2040_motion_minimal.plc --out out/rp2040 --io-map examples/rp2040_motion_minimal.io_map.toml",

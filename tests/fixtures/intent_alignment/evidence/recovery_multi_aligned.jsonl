@@ -1,0 +1,4 @@
+{"tick":0,"vars":{"_state":0,"clamp_a":true,"clamp_b":true,"spindle":true}}
+{"tick":1,"vars":{"_state":10,"clamp_a":false,"clamp_b":false,"spindle":true}}
+{"tick":2,"vars":{"_state":20,"clamp_a":false,"clamp_b":false,"spindle":false}}
+{"tick":3,"vars":{"_state":30,"clamp_a":false,"clamp_b":false,"spindle":false}}

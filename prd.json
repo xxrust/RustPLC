@@ -70,7 +70,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Implementation anchor: src/intent_alignment/observed.rs, src/intent_alignment/mod.rs, tests/intent_alignment_observed.rs. 这是 observed 链路的第 1 步，只负责 trace adapter v1。"
     },
     {
@@ -87,7 +87,7 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-004. Implementation anchor: src/intent_alignment/observed.rs, tests/intent_alignment_observed.rs. 这是 observed 链路的第 2 步，只负责 normalization、vocabulary 与证据门槛。"
     },
     {
@@ -102,7 +102,7 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-003, US-005. Implementation anchor: src/intent_alignment/compare.rs, tests/intent_alignment_compare.rs. 这是 conformance 链路的第 1 步，只负责统一核心机制。"
     },
     {
@@ -118,7 +118,7 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-006. Implementation anchor: src/intent_alignment/report.rs, src/intent_alignment/compare.rs, tests/intent_alignment_compare.rs. 这是 conformance 链路的第 2 步，只负责 mismatch taxonomy 与主诊断稳定化。"
     },
     {
@@ -134,7 +134,7 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-003, US-005. Implementation anchor: src/intent_alignment/compare.rs, tests/intent_alignment_compare.rs. 这是 postcondition 链路的第 1 步，只负责终态语义。"
     },
     {
@@ -150,7 +150,7 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-008. Implementation anchor: src/intent_alignment/compare.rs, tests/intent_alignment_compare.rs. 这是 postcondition 链路的第 2 步，只负责过程型恢复义务与 premature_readiness。"
     },
     {
@@ -166,7 +166,7 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-003, US-005. Implementation anchor: src/intent_alignment/compare.rs, src/intent_alignment/observed.rs, tests/intent_alignment_compare.rs. 这是 cross-cycle 链路的第 1 步，只负责 cycle semantics 与 handoff freeze。"
     },
     {
@@ -182,7 +182,7 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-007, US-010. Implementation anchor: src/intent_alignment/compare.rs, tests/intent_alignment_compare.rs. 这是 cross-cycle 链路的第 2 步，只负责独立的 drift conformance 与诊断。"
     },
     {
@@ -198,7 +198,7 @@
         "Tests pass"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-007, US-009, US-011. Implementation anchor: src/intent_alignment/report.rs, src/intent_alignment/mod.rs, src/lib.rs, tests/intent_alignment_pipeline.rs, tests/self_check.rs. 这是交付链路的第 1 步，只负责库级结果契约。"
     },
     {
@@ -214,7 +214,7 @@
         "Tests pass"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-012. Implementation anchor: src/cli/utilities.rs, src/cli_support/plc_pipeline.rs, tests/intent_alignment_pipeline.rs, tests/self_check.rs. 这是交付链路的第 2 步，只负责接线与跨入口一致性。"
     },
     {
@@ -229,7 +229,7 @@
         "Tests pass"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-013. Implementation anchor: tests/intent_alignment_compare.rs, tests/intent_alignment_regress.rs, tests/fixtures/intent_alignment/. 这是 phase-2 收口的第 1 步，只负责 canonical/mutation 集，不含真实 golden path。"
     },
     {
@@ -245,7 +245,7 @@
         "Tests pass"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-014. Implementation anchor: tests/intent_alignment_pipeline.rs, tests/examples_integration.rs, tests/intent_alignment_regress.rs, tests/fixtures/intent_alignment/. 这是 phase-2 收口的第 2 步，只负责真实 golden path 与阶段关闭。"
     }
   ]

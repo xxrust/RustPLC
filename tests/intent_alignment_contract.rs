@@ -4,8 +4,9 @@ use rust_plc::intent_alignment::{
     BusinessMilestone, ExpectedBehaviorCompileError, ExpectedBehaviorIrPrimitiveKind,
     ExpectedMilestoneSemanticRole, IntentContractDiagnostic, IntentContractDiagnosticCode,
     IntentContractLoadError, IntentMilestone, MilestoneEvidenceSource, ObservationCombination,
-    ObservationSubject, compile_expected_behavior_spec, parse_intent_contract_str,
-    read_intent_contract, validate_intent_contract, verify_intent_contract_source_binding,
+    ObservationSubject, ObservedFact, compile_expected_behavior_spec,
+    parse_intent_contract_str, read_intent_contract, validate_intent_contract,
+    verify_intent_contract_source_binding,
 };
 
 fn workspace_path(relative: &str) -> PathBuf {
@@ -315,6 +316,14 @@ fn compile_expected_behavior_spec_preserves_contract_core_and_observation_bindin
             .cycle_complete_milestone
     );
     assert_eq!(
+        spec.cycle_semantics.successful_cycle_end_milestone,
+        contract
+            .contract_core
+            .cycle_semantics
+            .cycle_complete_milestone
+    );
+    assert_eq!(spec.cycle_semantics.aborted_cycle_end_milestone, None);
+    assert_eq!(
         spec.cycle_semantics.restartability.restartable_milestone,
         contract
             .contract_core
@@ -339,6 +348,38 @@ fn compile_expected_behavior_spec_preserves_contract_core_and_observation_bindin
             .cycle_semantics
             .restart_semantics
             .required_postconditions
+    );
+    assert_eq!(
+        spec.cycle_semantics.restart_condition.restartable_milestone,
+        contract
+            .contract_core
+            .cycle_semantics
+            .restart_semantics
+            .restartable_milestone
+    );
+    assert_eq!(
+        spec.cycle_semantics.restart_condition.required_postconditions,
+        contract
+            .contract_core
+            .cycle_semantics
+            .restart_semantics
+            .required_postconditions
+    );
+    assert_eq!(
+        spec.cycle_semantics.handoff_invariant.required_terminal_facts,
+        vec![ObservedFact {
+            key: "milestone".to_string(),
+            expected: "cycle_restartable".to_string(),
+        }]
+    );
+    assert_eq!(
+        spec.cycle_semantics
+            .handoff_invariant
+            .required_next_cycle_start_facts,
+        vec![ObservedFact {
+            key: "milestone".to_string(),
+            expected: "start_cycle".to_string(),
+        }]
     );
 }
 
@@ -375,6 +416,11 @@ fn compile_expected_behavior_spec_emits_stable_ir_semantic_view() {
         spec.ir_view.cycle_handoff.cycle_boundary_primitive,
         ExpectedBehaviorIrPrimitiveKind::CycleBoundary
     );
+    assert_eq!(
+        spec.ir_view.cycle_handoff.successful_cycle_end_milestone,
+        "cycle_restartable"
+    );
+    assert_eq!(spec.ir_view.cycle_handoff.aborted_cycle_end_milestone, None);
     assert_eq!(
         spec.ir_view.cycle_handoff.restartability_primitive,
         ExpectedBehaviorIrPrimitiveKind::Restartability

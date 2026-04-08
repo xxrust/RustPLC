@@ -687,7 +687,7 @@ mod tests {
             IntentContractSourceBindingError::DigestMismatch {
                 path: "docs/architecture/intent_alignment_verification.md".to_string(),
                 expected: "deadbeef".to_string(),
-                actual: "c1b32a71b9e47142e5b9ed142384e6f68568f635e71bdee7d35e661b7cb3d61e"
+                actual: "10b8ce179f80c7862ff82a3b363b8792d6ff106895f68609d09558f1b8deb83c"
                     .to_string(),
             }
         );

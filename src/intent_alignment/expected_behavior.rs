@@ -3,7 +3,8 @@ use thiserror::Error;
 
 use super::contract::{
     IntentContract, IntentContractValidationError, IntentMilestone, IntentPostcondition,
-    ObservationBinding, RequiredMilestoneEdge, validate_intent_contract,
+    ObservationBinding, ObservationCombination, ObservationSubject, RequiredMilestoneEdge,
+    validate_intent_contract,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +49,28 @@ pub struct ExpectedPostconditionIrView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ObservedFact {
+    pub key: String,
+    pub expected: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "facts")]
+pub enum PredicateExpr {
+    AllOf(Vec<ObservedFact>),
+    AnyOf(Vec<ObservedFact>),
+    OrderedAllOf(Vec<ObservedFact>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectedPostconditionPredicate {
+    pub postcondition_id: String,
+    pub predicate: PredicateExpr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExpectedMilestoneGraphView {
     pub nodes: Vec<ExpectedMilestoneIrNode>,
     pub edges: Vec<ExpectedBehaviorIrEdge>,
@@ -57,7 +80,8 @@ pub struct ExpectedMilestoneGraphView {
 #[serde(deny_unknown_fields)]
 pub struct ExpectedCycleHandoffIrView {
     pub cycle_start_milestone: String,
-    pub cycle_complete_milestone: String,
+    pub successful_cycle_end_milestone: String,
+    pub aborted_cycle_end_milestone: Option<String>,
     pub restartable_milestone: String,
     pub next_cycle_start_milestone: String,
     pub required_postconditions: Vec<String>,
@@ -83,10 +107,28 @@ pub struct ExpectedRestartability {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ExpectedRestartCondition {
+    pub restartable_milestone: String,
+    pub required_postconditions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectedCycleHandoffInvariant {
+    pub required_terminal_facts: Vec<ObservedFact>,
+    pub required_next_cycle_start_facts: Vec<ObservedFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExpectedCycleSemantics {
     pub cycle_start_milestone: String,
     pub cycle_complete_milestone: String,
+    pub successful_cycle_end_milestone: String,
+    pub aborted_cycle_end_milestone: Option<String>,
     pub restartability: ExpectedRestartability,
+    pub restart_condition: ExpectedRestartCondition,
+    pub handoff_invariant: ExpectedCycleHandoffInvariant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +139,7 @@ pub struct ExpectedBehaviorSpec {
     pub expected_milestones: Vec<IntentMilestone>,
     pub required_edges: Vec<RequiredMilestoneEdge>,
     pub postconditions: Vec<IntentPostcondition>,
+    pub postcondition_predicates: Vec<ExpectedPostconditionPredicate>,
     pub observation_bindings: Vec<ObservationBinding>,
     pub cycle_semantics: ExpectedCycleSemantics,
     pub ir_view: ExpectedBehaviorIrView,
@@ -124,6 +167,12 @@ pub fn compile_expected_behavior_spec(
             .cycle_semantics
             .cycle_complete_milestone
             .clone(),
+        successful_cycle_end_milestone: contract
+            .contract_core
+            .cycle_semantics
+            .cycle_complete_milestone
+            .clone(),
+        aborted_cycle_end_milestone: None,
         restartability: ExpectedRestartability {
             restartable_milestone: contract
                 .contract_core
@@ -143,6 +192,24 @@ pub fn compile_expected_behavior_spec(
                 .restart_semantics
                 .required_postconditions
                 .clone(),
+        },
+        restart_condition: ExpectedRestartCondition {
+            restartable_milestone: contract
+                .contract_core
+                .cycle_semantics
+                .restart_semantics
+                .restartable_milestone
+                .clone(),
+            required_postconditions: contract
+                .contract_core
+                .cycle_semantics
+                .restart_semantics
+                .required_postconditions
+                .clone(),
+        },
+        handoff_invariant: ExpectedCycleHandoffInvariant {
+            required_terminal_facts: terminal_facts_for_restart(contract),
+            required_next_cycle_start_facts: next_cycle_start_facts(contract),
         },
     };
 
@@ -177,10 +244,24 @@ pub fn compile_expected_behavior_spec(
             primitive: ExpectedBehaviorIrPrimitiveKind::ConstraintPostcondition,
         })
         .collect();
+    let postcondition_predicates = contract
+        .observation_bindings
+        .iter()
+        .filter_map(|binding| {
+            let ObservationSubject::Postcondition { postcondition_id } = &binding.subject else {
+                return None;
+            };
+            Some(ExpectedPostconditionPredicate {
+                postcondition_id: postcondition_id.clone(),
+                predicate: predicate_from_binding(binding),
+            })
+        })
+        .collect();
 
     let cycle_handoff = ExpectedCycleHandoffIrView {
         cycle_start_milestone: cycle_semantics.cycle_start_milestone.clone(),
-        cycle_complete_milestone: cycle_semantics.cycle_complete_milestone.clone(),
+        successful_cycle_end_milestone: cycle_semantics.successful_cycle_end_milestone.clone(),
+        aborted_cycle_end_milestone: cycle_semantics.aborted_cycle_end_milestone.clone(),
         restartable_milestone: cycle_semantics.restartability.restartable_milestone.clone(),
         next_cycle_start_milestone: cycle_semantics
             .restartability
@@ -200,6 +281,7 @@ pub fn compile_expected_behavior_spec(
         expected_milestones: contract.contract_core.expected_milestones.clone(),
         required_edges: contract.contract_core.required_edges.clone(),
         postconditions: contract.contract_core.postconditions.clone(),
+        postcondition_predicates,
         observation_bindings: contract.observation_bindings.clone(),
         cycle_semantics,
         ir_view: ExpectedBehaviorIrView {
@@ -208,6 +290,23 @@ pub fn compile_expected_behavior_spec(
             cycle_handoff,
         },
     })
+}
+
+fn predicate_from_binding(binding: &ObservationBinding) -> PredicateExpr {
+    let facts = binding
+        .evidence
+        .iter()
+        .map(|evidence| ObservedFact {
+            key: evidence.key.clone(),
+            expected: evidence.expected.clone(),
+        })
+        .collect();
+
+    match binding.combination {
+        ObservationCombination::AllOf => PredicateExpr::AllOf(facts),
+        ObservationCombination::AnyOf => PredicateExpr::AnyOf(facts),
+        ObservationCombination::OrderedAllOf => PredicateExpr::OrderedAllOf(facts),
+    }
 }
 
 fn semantic_roles_for_milestone(
@@ -229,4 +328,77 @@ fn semantic_roles_for_milestone(
     }
 
     roles
+}
+
+fn terminal_facts_for_restart(contract: &IntentContract) -> Vec<ObservedFact> {
+    let required_postconditions = &contract
+        .contract_core
+        .cycle_semantics
+        .restart_semantics
+        .required_postconditions;
+    let mut facts = Vec::new();
+
+    for binding in &contract.observation_bindings {
+        let super::contract::ObservationSubject::Postcondition { postcondition_id } =
+            &binding.subject
+        else {
+            continue;
+        };
+        if !required_postconditions.contains(postcondition_id) {
+            continue;
+        }
+        facts.extend(binding.evidence.iter().map(|evidence| ObservedFact {
+            key: evidence.key.clone(),
+            expected: evidence.expected.clone(),
+        }));
+    }
+
+    facts.sort_by(|left, right| {
+        left.key
+            .cmp(&right.key)
+            .then_with(|| left.expected.cmp(&right.expected))
+    });
+    facts.dedup();
+    facts
+}
+
+fn next_cycle_start_facts(contract: &IntentContract) -> Vec<ObservedFact> {
+    let cycle_start_id = &contract.contract_core.cycle_semantics.cycle_start_milestone;
+    let mut facts: Vec<ObservedFact> = contract
+        .observation_bindings
+        .iter()
+        .filter_map(|binding| match &binding.subject {
+            ObservationSubject::Milestone { milestone_id } if milestone_id == cycle_start_id => {
+                Some(
+                    binding
+                        .evidence
+                        .iter()
+                        .map(|evidence| ObservedFact {
+                            key: evidence.key.clone(),
+                            expected: evidence.expected.clone(),
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect();
+
+    for fact in terminal_facts_for_restart(contract) {
+        let has_conflicting_start_fact = facts
+            .iter()
+            .any(|start_fact| start_fact.key == fact.key && start_fact.expected != fact.expected);
+        if !has_conflicting_start_fact {
+            facts.push(fact);
+        }
+    }
+
+    facts.sort_by(|left, right| {
+        left.key
+            .cmp(&right.key)
+            .then_with(|| left.expected.cmp(&right.expected))
+    });
+    facts.dedup();
+    facts
 }
