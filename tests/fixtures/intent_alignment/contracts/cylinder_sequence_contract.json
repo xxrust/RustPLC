@@ -1,0 +1,108 @@
+{
+  "contract_version": "phase-2.v1",
+  "source_ref": {
+    "kind": "architecture_doc",
+    "path": "docs/architecture/intent_alignment_verification.md",
+    "description": "Frozen intent-alignment architecture semantics for phase-2 comparator work."
+  },
+  "source_digest": {
+    "algorithm": "sha256",
+    "value": "c1b32a71b9e47142e5b9ed142384e6f68568f635e71bdee7d35e661b7cb3d61e"
+  },
+  "metadata": {
+    "contract_id": "intent-alignment-cylinder-sequence",
+    "title": "Cylinder sequence intent contract",
+    "business_owner": "assembly-cell-owner",
+    "authoritative_intent_source": {
+      "kind": "architecture_doc",
+      "path": "docs/architecture/intent_alignment_verification.md",
+      "description": "Architecture source of truth for the intent-alignment comparator."
+    },
+    "review_basis": [
+      {
+        "label": "Architecture semantics review",
+        "source": {
+          "kind": "architecture_doc",
+          "path": "docs/architecture/intent_alignment_verification.md",
+          "description": "Business review anchors milestone intent and mismatch taxonomy to the architecture doc."
+        }
+      },
+      {
+        "label": "Canonical PLC example review",
+        "source": {
+          "kind": "canonical_example",
+          "path": "examples/two_cylinder.plc",
+          "description": "Existing PLC example used as a concrete authored asset during contract review."
+        }
+      }
+    ]
+  },
+  "intent_sequence": [
+    {
+      "milestone_id": "cycle_started",
+      "business_milestone": {
+        "label": "Cycle accepted for processing",
+        "description": "A new production cycle has started and the cell commits to execute the sequence."
+      },
+      "observed_as": [
+        {
+          "source": "trace_event",
+          "key": "milestone",
+          "expected": "start_cycle"
+        }
+      ]
+    },
+    {
+      "milestone_id": "grip_part_secured",
+      "business_milestone": {
+        "label": "Part secured before transfer",
+        "description": "The workpiece is physically secured and safe to hand over to the next motion segment."
+      },
+      "observed_as": [
+        {
+          "source": "trace_event",
+          "key": "milestone",
+          "expected": "cyl_A_extend_completed"
+        },
+        {
+          "source": "trace_event",
+          "key": "milestone",
+          "expected": "cyl_A_retract_completed"
+        }
+      ]
+    },
+    {
+      "milestone_id": "transfer_lane_cleared",
+      "business_milestone": {
+        "label": "Transfer lane is cleared",
+        "description": "The second cylinder finishes its extend/retract cycle so the station is ready for the next part."
+      },
+      "observed_as": [
+        {
+          "source": "trace_event",
+          "key": "milestone",
+          "expected": "cyl_B_extend_completed"
+        },
+        {
+          "source": "trace_event",
+          "key": "milestone",
+          "expected": "cyl_B_retract_completed"
+        }
+      ]
+    },
+    {
+      "milestone_id": "cycle_restartable",
+      "business_milestone": {
+        "label": "Cell restartable for next cycle",
+        "description": "All business postconditions are satisfied and the next cycle can start from a clean baseline."
+      },
+      "observed_as": [
+        {
+          "source": "trace_event",
+          "key": "milestone",
+          "expected": "cycle_restartable"
+        }
+      ]
+    }
+  ]
+}

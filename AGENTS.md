@@ -418,6 +418,22 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `docs/extern_function_mvp_spec.md`
 - `docs/extern_function_development_guide.md`
 
+### 意图对齐比较器
+
+先看：
+
+- `docs/architecture/intent_alignment_verification.md`
+- `src/intent_alignment/contract.rs`
+- `src/intent_alignment/mod.rs`
+- `tests/intent_alignment_contract.rs`
+- `tests/fixtures/intent_alignment/contracts/*.json`
+
+原则：
+
+- phase-2 v1 的 intent contract 先固定为独立 `.json` fixture；不要在这一阶段把 Markdown 段落解析混进 authoring 链路
+- contract schema 必须保持严格白名单；source provenance 通过 `source_ref + source_digest` 绑定到架构文档、canonical example 或其他 authored asset
+- `intent_sequence` 节点表达业务里程碑，并通过 `observed_as` 映射到可观测证据；不要把 DSL `task.step` 名字直接当作 contract 语义中心
+
 ### 操作合约 EXOP
 
 先看：
