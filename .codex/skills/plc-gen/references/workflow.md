@@ -34,10 +34,11 @@
 3. 确认 DSL source shape
 4. 生成或修复 DSL source entry
 5. 调整 `scenarios/nominal/normal.yaml`
-6. 运行 `project-check`
-7. 需要单步排查时，再拆看 `scenario-validate` / `sequence-lint` / `scenario-doctor` / `no-board-gate`
-8. 需要 ST 时再运行 `gen-st`
-9. 需要板级交付时再运行 `build-rp2040` 或 `release-bundle`
+6. 仅在用户明确要求业务意图对齐时，补 `*.intent_alignment.contract.json` sidecar
+7. 运行 `project-check`
+8. 需要单步排查时，再拆看 `scenario-validate` / `sequence-lint` / `scenario-doctor` / `no-board-gate`
+9. 需要 ST 时再运行 `gen-st`
+10. 需要板级交付时再运行 `build-rp2040` 或 `release-bundle`
 
 对 scaffold 默认布局：
 - system contract 入口是 `plc/main.system.md`
@@ -48,6 +49,21 @@
 - 语义片段通常按 `topology`、`constraints`、`tasks` 分到 fragments
 
 `new` 之后通常已经有 `scenarios/nominal/normal.yaml`，只有在 scenario 缺失或用户明确要求重建 skeleton 时，再优先考虑 `scenario-init`。
+
+### 2.1 intent-alignment sidecar 何时出现
+
+只有在以下任一情况成立时，才应由 `plc-gen` 额外写入 `*.intent_alignment.contract.json`：
+
+- 用户明确要求 intent-alignment / intent gate / comparator
+- 用户明确要求 `project-check` 在基础 gate 之外再验证“程序是否做了对的事”
+- 任务目标本身就是交付 canonical example、golden path 或可复用的 intent fixture
+
+默认不要生成 sidecar。普通 DSL 交付只需要：
+- `plc/main.system.md`
+- DSL source entry
+- scenario
+
+sidecar 的职责是 authoring business-intent contract，不是替代 `.system.md`，也不是编译阶段自动长出来的文件。
 
 ## 3. 先判断运行环境
 
@@ -126,6 +142,8 @@ cargo run --release --bin rust_plc -- project-check out/my_plc_project/plc/main.
 项目级最小推荐验证：
 - `project-check`
 
+如果目录中存在已确认的 `*.intent_alignment.contract.json` sidecar，或用户显式提供 `--intent-contract` / `--intent-evidence`，则 `project-check` 可以追加 `intent_alignment` 步骤；否则它只跑基础 gate。
+
 如果 `project-check` 不适用或用户只要求局部排查，可拆开：
 - `scenario-validate`
 - `sequence-lint`
@@ -133,3 +151,30 @@ cargo run --release --bin rust_plc -- project-check out/my_plc_project/plc/main.
 - `no-board-gate`
 
 如果请求是“优化现有 PLC”，也不要跳过验证。无论是普通生成、bundle 重组还是 optimization candidate，最终都必须经过现有 semantic / verification / runtime 路径。
+
+## 9. 写入物 vs 编译产物
+
+`plc-gen` 在最终回答里必须主动区分三类东西：
+
+### 由 skill 写入
+
+- `plc/main.system.md`
+- `plc/main.plc`
+- `<name>.bundle.toml` 与 fragments
+- `scenarios/nominal/normal.yaml`
+- 可选 `*.intent_alignment.contract.json`
+
+### 由工具链产出
+
+- `verification_report.json`
+- `sil_trace.jsonl`
+- `project_check_report.json`
+- `intent_alignment/report.json`
+- 其他 `project-check` / `no-board-gate` / `gen-st` / build artifacts
+
+### 可选调用但不默认开启
+
+- intent-alignment comparator 主链
+- 带 `intent_alignment` 步骤的 `project-check`
+- ST 导出
+- 板级 build / release

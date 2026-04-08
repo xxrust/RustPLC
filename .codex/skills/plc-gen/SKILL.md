@@ -19,6 +19,7 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
 - 交付或修复 RustPLC DSL source set，包括单文件 `.plc` 与多文件 `.bundle.toml` + fragments
 - 在已确认的 `plc/main.system.md` 或等价 system contract 基础上，生成或修复与之匹配的 DSL sources
 - 在项目级请求下同时处理 scenario、验证命令与交付路径
+- 只在用户明确要求业务意图对齐时，生成或修复可选的 `*.intent_alignment.contract.json` authored sidecar
 - 明确区分“当前产品已支持的能力”和“仍是能力缺口的 blocker”
 - 当用户提到“优化”“提速”“候选方案”时，准确说明当前 optimization 的真实边界
 
@@ -43,6 +44,8 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
 优先服从这些长期稳定语义源：
 - `AGENTS.md`
 - `docs/architecture/signal-direction.md`
+- `docs/architecture/intent_alignment_verification.md`
+  仅当用户明确要求 intent-alignment / intent gate / comparator 时才消费这份语义源
 
 ## Core Rules
 
@@ -59,6 +62,9 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
 11. 如果 `.system.md` 仍含未冻结项，只把真正会改变 DSL source shape 或结构的内容记为 assumptions 或 blockers，不要擅自补全成已确认 contract。
 12. 当 `.system.md` 已明确给出 task 划分、mode、warning 或 fault 分流、共享资源或计数门槛时，必须把这些结构显式降到 DSL sources，不要压平成单一大循环。
 13. 如果现有项目已经采用 `.bundle.toml` + fragments，或需求本身更适合按 `topology`、`constraints`、`tasks` 分拆，就保持或建立这种多文件边界。
+14. `*.intent_alignment.contract.json` 是 authored sidecar，不是编译器产物，也不是 scaffold 默认必交付物。只有用户明确要求业务意图对齐、phase-2 comparator、或要让 `project-check` 带 intent-alignment gate 时才生成或修复它。
+15. 不要把 DSL `task.step` 名字直接抄成 intent contract milestone；milestone 必须表达业务里程碑，并绑定显式 observation bindings，来源必须是已确认的 intent source，而不是从 trace 或代码反推硬编。
+16. 明确区分“skill 写入的源文件”和“工具链跑出来的产物”：`*.plc`、`.bundle.toml`、fragments、`plc/main.system.md`、scenario、可选 intent sidecar 属于前者；`verification_report.json`、`sil_trace.jsonl`、`project_check_report.json`、`intent_alignment/report.json` 属于后者。
 
 ## 默认工作方式
 
@@ -74,6 +80,7 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
    - DSL source entry 与 source shape 判断
    - scaffold 默认入口 `plc/main.plc`，或现有 bundle/fragments 的生成或修复
    - `scenarios/nominal/normal.yaml` 对齐
+   - 如用户明确要求 intent-alignment，则补可选 `*.intent_alignment.contract.json` sidecar
    - `project-check` 或等价最小验证链
    - assumptions 或 blockers 说明
 7. 对“confirmed `.system.md` -> 直接生成 DSL sources”请求，先做一轮 lowering 摘要：
@@ -87,6 +94,7 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
 8. 如果 system contract 已给出 task 名称，优先保留这些名称，不要重新发明别名。
 9. 如果用户明确要求走当前 scenario 工具链，再额外做一轮 scenario 兼容性检查；若存在工具链已知限制，应明确标成 `toolchain-blocked`，不要假装 `validated`。
 10. 生成或修复后，必须给出真实验证路径，不能停在“理论上可行”。
+11. 如果生成了 intent sidecar，要明确说明它绑定的 authoritative intent source、它是 authored artifact，以及 `project-check` 是否实际跑到了 `intent_alignment` 这一步；不要把“可运行 sidecar”说成“编译默认产物”。
 
 ## Launcher Discipline
 
