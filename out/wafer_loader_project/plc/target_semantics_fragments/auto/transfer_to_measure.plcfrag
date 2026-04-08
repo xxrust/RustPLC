@@ -1,0 +1,103 @@
+task transfer_to_measure:
+    step wait_enabled:
+        wait: auto_cycle_enabled == true
+        allow_indefinite_wait: true
+
+    step wait_mode:
+        wait: mode_auto == true
+        allow_indefinite_wait: true
+
+    step wait_stop_clear:
+        wait: stop_button == false
+        allow_indefinite_wait: true
+
+    step wait_wafer_ready:
+        wait: wafer_on_orient == true
+        allow_indefinite_wait: true
+
+    step wait_measure_ready:
+        wait: measure_stage_ready == true
+        allow_indefinite_wait: true
+
+    step count_attempt:
+        action: compute transfer_attempt_count = transfer_attempt_count + 1.0
+
+    step swing_down:
+        action: extend cyl_swing
+            timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step lift_down:
+        action: extend cyl_lift
+            timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step transfer_vacuum_on:
+        action: set vac_transfer_valve.coil on
+
+    step wait_transfer_vacuum:
+        wait: sensor_transfer_vac_ok == true
+        timeout: 1000ms -> goto transfer_to_measure.record_pick_failure
+        effect: acquire holder transfer_nozzle from orient_inspection_site
+
+    step release_orient:
+        action: set vac_orient_valve.coil off
+
+    step lift_up:
+        action: retract cyl_lift
+            timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step swing_up:
+        action: retract cyl_swing
+            timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step move_front:
+        action: extend cyl_transfer
+            timeout: 900ms -> goto transfer_warning.transfer_cyl_warn
+
+    step check_drop_sensor:
+        wait: wafer_drop_detect == false
+        timeout: 10ms -> goto transfer_to_measure.record_drop_after_pick
+
+    step place_wafer:
+        action: set vac_transfer_valve.coil off
+        effect: transfer from transfer_nozzle to measure_stage_site
+
+    step transfer_back:
+        action: retract cyl_transfer
+            timeout: 900ms -> goto transfer_warning.transfer_cyl_warn
+        effect: finish workpiece at measure_stage_site as handed_to_measure
+
+    step clear_drop_streak:
+        action: compute consecutive_drop_count = 0.0
+
+    step finish_success:
+        goto transfer_to_measure.wait_enabled
+
+    step record_pick_failure:
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: compute drop_total = drop_total + 1.0
+        action: compute consecutive_drop_count = consecutive_drop_count + 1.0
+        effect: transfer from orient_inspection_site to reject_bin
+        effect: finish workpiece at reject_bin as rejected
+
+    step record_drop_after_pick:
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: compute drop_total = drop_total + 1.0
+        action: compute consecutive_drop_count = consecutive_drop_count + 1.0
+        effect: transfer from transfer_nozzle to reject_bin
+        effect: finish workpiece at reject_bin as rejected
+
+    step check_drop_streak:
+        wait: consecutive_drop_count < 2
+        timeout: 10ms -> goto transfer_fault.drop_consecutive_fault
+
+    step check_drop_rate:
+        wait: drop_rate_exceeded == false
+        timeout: 10ms -> goto transfer_fault.drop_rate_fault
+
+    on_complete: goto transfer_to_measure.wait_enabled

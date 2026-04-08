@@ -37,12 +37,14 @@
 
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+    sim::attach_inferred_plant_from_program(&mut io, &program);
     scenario
         .apply_to_simio(&mut io)
         .map_err(|e| format!("scenario apply failed: {e}"))?;
 
     let mut rt =
         runtime_core::Runtime::new(&program).map_err(|e| format!("runtime init failed: {e:?}"))?;
+    let mut axis_driver = sim::DeterministicAxisDriver::new();
 
     println!("boot ok");
     for _ in 0..scenario.duration_ticks() {
@@ -50,7 +52,7 @@
         let ts_ms = tick.saturating_mul(scenario.tick_ms);
         println!("TICK tick={tick} ts_ms={ts_ms}");
 
-        rt.tick_with_trace_and_logs(
+        rt.tick_with_trace_and_logs_and_axis(
             &mut io,
             |e| {
                 let ts_ms = e.tick.0.saturating_mul(scenario.tick_ms);
@@ -71,6 +73,7 @@
                     log.tick.0, log.task, log.step.0, log.message_id, log.message, ts_ms
                 );
             },
+            |command| axis_driver.handle(command),
         )
         .map_err(|e| format!("runtime tick failed: {e:?}"))?;
 
@@ -101,11 +104,13 @@ fn write_virtual_board_artifacts(
 ) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(program, scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+    sim::attach_inferred_plant_from_program(&mut io, program);
     scenario
         .apply_to_simio(&mut io)
         .map_err(|e| format!("scenario apply failed: {e}"))?;
     let mut rt =
         runtime_core::Runtime::new(program).map_err(|e| format!("runtime init failed: {e:?}"))?;
+    let mut axis_driver = sim::DeterministicAxisDriver::new();
     let tick_period_us = scenario.tick_ms.saturating_mul(1000);
 
     let board_log = std::cell::RefCell::new(String::new());
@@ -122,7 +127,7 @@ fn write_virtual_board_artifacts(
             .borrow_mut()
             .push_str(&format!("TICK tick={tick} ts_ms={ts_ms}\n"));
 
-        rt.tick_with_trace_and_logs(
+        rt.tick_with_trace_and_logs_and_axis(
             &mut io,
             |e| {
                 transition_count.set(transition_count.get().saturating_add(1));
@@ -145,6 +150,7 @@ fn write_virtual_board_artifacts(
                     log.tick.0, log.task, log.step.0, log.message_id, log.message, ts_ms
                 ));
             },
+            |command| axis_driver.handle(command),
         )
         .map_err(|e| format!("runtime tick failed: {e:?}"))?;
 

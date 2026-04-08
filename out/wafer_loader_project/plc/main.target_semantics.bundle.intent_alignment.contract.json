@@ -128,7 +128,7 @@
         {
           "source": "trace_event",
           "key": "transition",
-          "expected": "task=3;from=7;to=8;reason=action"
+          "expected": "task=3;from=17;to=18;reason=action"
         }
       ]
     },
@@ -143,7 +143,7 @@
         {
           "source": "trace_event",
           "key": "transition",
-          "expected": "task=4;from=11;to=12;reason=wait_satisfied"
+          "expected": "task=4;from=21;to=54;reason=wait_satisfied"
         }
       ]
     },
@@ -158,7 +158,7 @@
         {
           "source": "trace_event",
           "key": "transition",
-          "expected": "task=5;from=16;to=17;reason=action"
+          "expected": "task=5;from=26;to=27;reason=action"
         }
       ]
     }

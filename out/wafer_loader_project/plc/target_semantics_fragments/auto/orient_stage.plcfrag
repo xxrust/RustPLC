@@ -1,0 +1,119 @@
+task orient_stage:
+    step wait_enabled:
+        wait: auto_cycle_enabled == true
+        allow_indefinite_wait: true
+
+    step wait_mode:
+        wait: mode_auto == true
+        allow_indefinite_wait: true
+
+    step wait_stop_clear:
+        wait: stop_button == false
+        allow_indefinite_wait: true
+
+    step wait_slide_present:
+        wait: wafer_on_slide == true
+        allow_indefinite_wait: true
+
+    step wait_orient_free:
+        wait: wafer_on_orient == false
+        allow_indefinite_wait: true
+
+    step enable_axis:
+        action: set axis_arm.enable on
+
+    step move_to_pick:
+        action: axis.move_relative(axis_arm, distance: 45, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+            semantic_tag: arm_pick_to_slide
+
+    step arm_vacuum_on:
+        action: set vac_arm_valve.coil on
+
+    step wait_arm_vacuum:
+        wait: sensor_arm_vac_ok == true
+        timeout: 1000ms -> goto orient_fault.arm_pick_timeout
+        effect: acquire holder arm_nozzle from slide_pick_site
+
+    step move_to_orient:
+        action: axis.move_absolute(axis_arm, position: 90, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+            semantic_tag: arm_turn_to_orient
+
+    step orient_vacuum_on:
+        action: set vac_orient_valve.coil on
+
+    step wait_orient_vacuum:
+        wait: sensor_orient_vac_ok == true
+        timeout: 800ms -> goto orient_fault.orient_vacuum_timeout
+        effect: transfer from arm_nozzle to orient_inspection_site
+
+    step release_arm:
+        action: set vac_arm_valve.coil off
+
+    step decide_first_view:
+        wait: orient_side_a_ok == true
+        timeout: 10ms -> goto orient_stage.flip_orient
+
+    step keep_original:
+        action: retract cyl_orient_rotate
+            timeout: 600ms -> goto orient_warning.orient_cyl_warn
+
+    step publish_oriented_normal:
+        action: compute orient_reject_streak = 0.0
+
+    step move_back_home_normal:
+        action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step finish_normal:
+        goto orient_stage.wait_enabled
+
+    step flip_orient:
+        action: extend cyl_orient_rotate
+            timeout: 600ms -> goto orient_warning.orient_cyl_warn
+
+    step decide_flip_result:
+        wait: orient_side_b_ok == true
+        timeout: 10ms -> goto orient_stage.reject_to_ir
+
+    step keep_flipped:
+        action: compute orient_reject_streak = 0.0
+
+    step move_back_home_flipped:
+        action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step finish_flipped:
+        goto orient_stage.wait_enabled
+
+    step reject_to_ir:
+        action: set vac_orient_valve.coil off
+        action: compute orient_reject_streak = orient_reject_streak + 1.0
+        effect: transfer from orient_inspection_site to reject_bin
+        effect: finish workpiece at reject_bin as rejected
+
+    step move_back_home_reject:
+        action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step check_reject_limit:
+        wait: orient_reject_streak < 3
+        timeout: 10ms -> goto orient_fault.orient_reject_streak_fault
+
+    on_complete: goto orient_stage.wait_enabled

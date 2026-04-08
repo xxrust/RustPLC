@@ -1,0 +1,671 @@
+[topology]
+
+variable orient_reject_streak: float = 0.0
+variable transfer_attempt_count: float = 0.0
+variable drop_total: float = 0.0
+variable consecutive_drop_count: float = 0.0
+variable axis_recover_attempts: float = 0.0
+variable drop_rate_exceeded: bool = false
+variable auto_cycle_enabled: bool = false
+variable stop_requested: bool = false
+variable system_initialized: bool = false
+variable self_check_running: bool = false
+variable self_check_passed: bool = false
+variable self_check_failed: bool = false
+variable self_check_aborted: bool = false
+
+device plc_main: plc {
+    purpose: "Wafer loader controller"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor { purpose: "Auto start request", subtype: "push_button", debounce: 20ms }
+device refresh_button: sensor { purpose: "Refresh after warning or repair", subtype: "push_button", debounce: 20ms }
+device stop_button: sensor { purpose: "Normal stop request", subtype: "push_button", debounce: 20ms }
+
+device mode_auto: sensor { purpose: "Auto mode selector", subtype: "selector_switch" }
+device mode_manual: sensor { purpose: "Manual mode selector", subtype: "selector_switch" }
+device mode_step: sensor { purpose: "Step mode selector", subtype: "selector_switch" }
+device mode_maintenance: sensor { purpose: "Maintenance mode selector", subtype: "selector_switch" }
+
+device maintenance_safe_pose: sensor { purpose: "Request all mechanisms return to safe pose", subtype: "push_button", debounce: 20ms }
+device maintenance_home_arm: sensor { purpose: "Request arm return to home position", subtype: "push_button", debounce: 20ms }
+device maintenance_clear_counters: sensor { purpose: "Clear production and fault counters", subtype: "push_button", debounce: 20ms }
+device maintenance_self_check_cmd: sensor { purpose: "Start maintenance self-check program", subtype: "push_button", debounce: 20ms }
+device maintenance_abort: sensor { purpose: "Abort maintenance self-check", subtype: "push_button", debounce: 20ms }
+
+device measure_stage_ready: sensor { purpose: "Measurement stage is ready to receive wafer", subtype: "proximity_sensor" }
+device wafer_on_slide: sensor { purpose: "Wafer detected on slide pick position", subtype: "proximity_sensor" }
+device wafer_on_orient: sensor { purpose: "Wafer detected on orient stage", subtype: "proximity_sensor" }
+device wafer_drop_detect: sensor { purpose: "Drop detector during transfer path", subtype: "proximity_sensor" }
+device orient_side_a_ok: sensor { purpose: "First orient inspection result is acceptable", subtype: "proximity_sensor" }
+device orient_side_b_ok: sensor { purpose: "Flipped orient inspection result is acceptable", subtype: "proximity_sensor" }
+
+device vac_feed_valve: solenoid_valve { purpose: "Feed vacuum command valve", response_time: 20ms }
+device vac_arm_valve: solenoid_valve { purpose: "Arm vacuum command valve", response_time: 20ms }
+device vac_orient_valve: solenoid_valve { purpose: "Orient stage vacuum command valve", response_time: 20ms }
+device vac_transfer_valve: solenoid_valve { purpose: "Transfer vacuum command valve", response_time: 20ms }
+
+device sensor_feed_vac_ok: sensor { purpose: "Feed vacuum confirmation", subtype: "proximity_sensor" }
+device sensor_arm_vac_ok: sensor { purpose: "Arm vacuum confirmation", subtype: "proximity_sensor" }
+device sensor_orient_vac_ok: sensor { purpose: "Orient vacuum confirmation", subtype: "proximity_sensor" }
+device sensor_transfer_vac_ok: sensor { purpose: "Transfer vacuum confirmation", subtype: "proximity_sensor" }
+
+device valve_feed: solenoid_valve { purpose: "Feed cylinder directional valve", response_time: 20ms }
+device cyl_feed: cylinder { purpose: "Feed cylinder that pushes the wafer box to pick position", stroke_time: 350ms, retract_time: 350ms }
+device sensor_feed_ext: sensor { purpose: "Feed cylinder extended feedback", subtype: "limit_switch" }
+device sensor_feed_ret: sensor { purpose: "Feed cylinder retracted feedback", subtype: "limit_switch" }
+
+device axis_arm: stepper_motor {
+    purpose: "Pick-and-place rotary arm"
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+axis_fault_contract arm_axis_fault_policy {
+    axis: axis_arm
+    severity: recoverable
+    stop_mode: controlled
+    auto_reset_policy: immediate
+    manual_ack_required: true
+    propagation_scope: self
+}
+
+device sensor_arm_home: sensor { purpose: "Arm home proof sensor", subtype: "limit_switch" }
+
+device valve_orient_rotate: solenoid_valve { purpose: "Orient flip cylinder directional valve", response_time: 20ms }
+device cyl_orient_rotate: cylinder { purpose: "Orient stage 180-degree flip cylinder", stroke_time: 250ms, retract_time: 250ms }
+device sensor_orient_ext: sensor { purpose: "Orient cylinder flipped feedback", subtype: "limit_switch" }
+device sensor_orient_ret: sensor { purpose: "Orient cylinder home feedback", subtype: "limit_switch" }
+
+device valve_swing: solenoid_valve { purpose: "Swing cylinder directional valve", response_time: 20ms }
+device cyl_swing: cylinder { purpose: "Swing cylinder for transfer arm down and up motion", stroke_time: 250ms, retract_time: 250ms }
+device sensor_swing_down: sensor { purpose: "Swing cylinder down feedback", subtype: "limit_switch" }
+device sensor_swing_up: sensor { purpose: "Swing cylinder up feedback", subtype: "limit_switch" }
+
+device valve_lift: solenoid_valve { purpose: "Lift cylinder directional valve", response_time: 20ms }
+device cyl_lift: cylinder { purpose: "Lift cylinder for transfer pick height", stroke_time: 250ms, retract_time: 250ms }
+device sensor_lift_down: sensor { purpose: "Lift cylinder down feedback", subtype: "limit_switch" }
+device sensor_lift_up: sensor { purpose: "Lift cylinder up feedback", subtype: "limit_switch" }
+
+device valve_transfer: solenoid_valve { purpose: "Transfer cylinder directional valve", response_time: 20ms }
+device cyl_transfer: cylinder { purpose: "Transfer cylinder that moves wafer to measure stage", stroke_time: 300ms, retract_time: 300ms }
+device sensor_transfer_front: sensor { purpose: "Transfer cylinder front feedback", subtype: "limit_switch" }
+device sensor_transfer_back: sensor { purpose: "Transfer cylinder back feedback", subtype: "limit_switch" }
+
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: refresh_button.out, to: plc_main.X1, via: reports_to }
+relation { from: stop_button.out, to: plc_main.X2, via: reports_to }
+relation { from: mode_auto.out, to: plc_main.X3, via: reports_to }
+relation { from: mode_manual.out, to: plc_main.X4, via: reports_to }
+relation { from: mode_step.out, to: plc_main.X5, via: reports_to }
+relation { from: mode_maintenance.out, to: plc_main.X6, via: reports_to }
+relation { from: wafer_drop_detect.out, to: plc_main.X7, via: reports_to }
+relation { from: measure_stage_ready.out, to: plc_main.X12, via: reports_to }
+relation { from: wafer_on_slide.out, to: plc_main.X13, via: reports_to }
+relation { from: wafer_on_orient.out, to: plc_main.X14, via: reports_to }
+relation { from: orient_side_a_ok.out, to: plc_main.X15, via: reports_to }
+relation { from: orient_side_b_ok.out, to: plc_main.X16, via: reports_to }
+relation { from: sensor_feed_vac_ok.out, to: plc_main.X17, via: reports_to }
+relation { from: sensor_arm_vac_ok.out, to: plc_main.X18, via: reports_to }
+relation { from: sensor_orient_vac_ok.out, to: plc_main.X19, via: reports_to }
+relation { from: sensor_transfer_vac_ok.out, to: plc_main.X20, via: reports_to }
+relation { from: sensor_feed_ext.out, to: plc_main.X21, via: reports_to }
+relation { from: sensor_feed_ret.out, to: plc_main.X22, via: reports_to }
+relation { from: sensor_arm_home.out, to: plc_main.X23, via: reports_to }
+relation { from: sensor_orient_ext.out, to: plc_main.X24, via: reports_to }
+relation { from: sensor_orient_ret.out, to: plc_main.X25, via: reports_to }
+relation { from: sensor_swing_down.out, to: plc_main.X26, via: reports_to }
+relation { from: sensor_swing_up.out, to: plc_main.X27, via: reports_to }
+relation { from: sensor_lift_down.out, to: plc_main.X28, via: reports_to }
+relation { from: sensor_lift_up.out, to: plc_main.X29, via: reports_to }
+relation { from: sensor_transfer_front.out, to: plc_main.X30, via: reports_to }
+relation { from: sensor_transfer_back.out, to: plc_main.X31, via: reports_to }
+
+relation { from: plc_main.Y0, to: valve_feed.coil, via: driven_by }
+relation { from: valve_feed.out, to: cyl_feed.cmd, via: driven_by }
+relation { from: cyl_feed.extended, to: sensor_feed_ext.sense, via: detects }
+relation { from: cyl_feed.retracted, to: sensor_feed_ret.sense, via: detects }
+
+relation { from: plc_main.Y1, to: valve_orient_rotate.coil, via: driven_by }
+relation { from: valve_orient_rotate.out, to: cyl_orient_rotate.cmd, via: driven_by }
+relation { from: cyl_orient_rotate.extended, to: sensor_orient_ext.sense, via: detects }
+relation { from: cyl_orient_rotate.retracted, to: sensor_orient_ret.sense, via: detects }
+
+relation { from: plc_main.Y2, to: valve_swing.coil, via: driven_by }
+relation { from: valve_swing.out, to: cyl_swing.cmd, via: driven_by }
+relation { from: cyl_swing.extended, to: sensor_swing_down.sense, via: detects }
+relation { from: cyl_swing.retracted, to: sensor_swing_up.sense, via: detects }
+
+relation { from: plc_main.Y3, to: valve_lift.coil, via: driven_by }
+relation { from: valve_lift.out, to: cyl_lift.cmd, via: driven_by }
+relation { from: cyl_lift.extended, to: sensor_lift_down.sense, via: detects }
+relation { from: cyl_lift.retracted, to: sensor_lift_up.sense, via: detects }
+
+relation { from: plc_main.Y4, to: valve_transfer.coil, via: driven_by }
+relation { from: valve_transfer.out, to: cyl_transfer.cmd, via: driven_by }
+relation { from: cyl_transfer.extended, to: sensor_transfer_front.sense, via: detects }
+relation { from: cyl_transfer.retracted, to: sensor_transfer_back.sense, via: detects }
+
+relation { from: plc_main.Y5, to: vac_feed_valve.coil, via: driven_by }
+relation { from: plc_main.Y6, to: vac_arm_valve.coil, via: driven_by }
+relation { from: plc_main.Y7, to: vac_orient_valve.coil, via: driven_by }
+relation { from: plc_main.Y8, to: vac_transfer_valve.coil, via: driven_by }
+
+relation { from: plc_main.Y9, to: axis_arm.enable, via: driven_by }
+
+resource slide_pick_zone: semantic_resource { mode: exclusive }
+resource arm_orient_zone: semantic_resource { mode: exclusive }
+
+[constraints]
+
+claim: cyl_feed.extended occupies slide_pick_zone
+claim: action_tag arm_pick_to_slide occupies slide_pick_zone
+claim: cyl_swing.extended occupies arm_orient_zone
+claim: action_tag arm_turn_to_orient occupies arm_orient_zone
+
+safety: mode_auto.on conflicts_with mode_manual.on
+    reason: "Auto and manual modes must be mutually exclusive"
+
+safety: mode_auto.on conflicts_with mode_step.on
+    reason: "Auto and step modes must be mutually exclusive"
+
+safety: mode_auto.on conflicts_with mode_maintenance.on
+    reason: "Auto and maintenance modes must be mutually exclusive"
+
+safety: mode_manual.on conflicts_with mode_step.on
+    reason: "Manual and step modes must be mutually exclusive"
+
+safety: mode_manual.on conflicts_with mode_maintenance.on
+    reason: "Manual and maintenance modes must be mutually exclusive"
+
+safety: mode_step.on conflicts_with mode_maintenance.on
+    reason: "Step and maintenance modes must be mutually exclusive"
+
+safety: axis_arm.enable.off conflicts_with axis_arm.pulse.active
+    reason: "Axis pulse output must not toggle while the drive is disabled"
+
+timing: task.feed_prep must_complete_within_worst_case 4000ms
+    reason: "Feed preparation should finish within one wafer feed window"
+
+timing: task.orient_stage must_complete_within_worst_case 12000ms
+    reason: "Pick, orient, and return should finish within the rotary arm cycle budget"
+
+timing: task.transfer_to_measure must_complete_within_worst_case 18000ms
+    reason: "Transfer handoff should finish within the transfer cycle budget"
+
+[tasks]
+
+task startup_initializer:
+    step drive_safe_outputs:
+        action: set vac_feed_valve.coil off
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_feed
+        action: retract cyl_orient_rotate
+        action: retract cyl_swing
+        action: retract cyl_lift
+        action: retract cyl_transfer
+        action: set axis_arm.enable on
+
+    step wait_arm_home:
+        wait: sensor_arm_home == true
+        timeout: 5000ms -> goto startup_fault.init_pose_timeout
+
+    step startup_ready:
+        action: log "startup baseline ready"
+
+task architecture_monitor:
+    step derive_drop_rate:
+        action: compute drop_rate_exceeded = transfer_attempt_count >= 1000 AND drop_total * 1000 > transfer_attempt_count
+
+    step monitor_loop:
+        delay: 20ms
+
+    on_complete: goto architecture_monitor.derive_drop_rate
+
+task supervisor:
+    step wait_mode_auto:
+        wait: mode_auto == true
+        allow_indefinite_wait: true
+
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+
+    step wait_start_arm_home:
+        wait: sensor_arm_home == true
+        timeout: 5000ms -> goto startup_fault.init_pose_timeout
+
+    step latch_run:
+        action: compute auto_cycle_enabled = true
+        action: compute stop_requested = false
+        action: compute axis_recover_attempts = 0.0
+
+    step monitor_stop:
+        wait: stop_button == true
+        timeout: 100ms -> goto supervisor.monitor_mode_lost
+
+    step monitor_mode_lost:
+        wait: mode_auto == false
+        timeout: 100ms -> goto supervisor.monitor_stop
+
+    step request_stop:
+        action: compute stop_requested = true
+        action: compute auto_cycle_enabled = false
+        action: set vac_feed_valve.coil off
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_feed
+        action: retract cyl_orient_rotate
+        action: retract cyl_swing
+        action: retract cyl_lift
+        action: retract cyl_transfer
+
+    step clear_stop:
+        action: compute stop_requested = false
+
+    on_complete: goto supervisor.wait_start
+
+task feed_prep:
+    step wait_enabled:
+        wait: auto_cycle_enabled == true
+        allow_indefinite_wait: true
+
+    step wait_mode:
+        wait: mode_auto == true
+        allow_indefinite_wait: true
+
+    step wait_stop_clear:
+        wait: stop_button == false
+        allow_indefinite_wait: true
+
+    step wait_slide_free:
+        wait: wafer_on_slide == false
+        allow_indefinite_wait: true
+
+    step feed_forward:
+        action: extend cyl_feed
+            timeout: 800ms -> goto feed_warning.feed_cyl_warn
+
+    step feed_vacuum_on:
+        action: set vac_feed_valve.coil on
+
+    step wait_feed_vacuum:
+        wait: sensor_feed_vac_ok == true
+        timeout: 1000ms -> goto feed_fault.feed_vacuum_timeout
+
+    step feed_back:
+        action: retract cyl_feed
+            timeout: 800ms -> goto feed_warning.feed_cyl_warn
+
+    step release_to_slide:
+        action: set vac_feed_valve.coil off
+
+    on_complete: goto feed_prep.wait_enabled
+
+task orient_stage:
+    step wait_enabled:
+        wait: auto_cycle_enabled == true
+        allow_indefinite_wait: true
+
+    step wait_mode:
+        wait: mode_auto == true
+        allow_indefinite_wait: true
+
+    step wait_stop_clear:
+        wait: stop_button == false
+        allow_indefinite_wait: true
+
+    step wait_slide_present:
+        wait: wafer_on_slide == true
+        allow_indefinite_wait: true
+
+    step wait_orient_free:
+        wait: wafer_on_orient == false
+        allow_indefinite_wait: true
+
+    step enable_axis:
+        action: set axis_arm.enable on
+
+    step move_to_pick:
+        action: axis.move_relative(axis_arm, distance: 45, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+            semantic_tag: arm_pick_to_slide
+
+    step arm_vacuum_on:
+        action: set vac_arm_valve.coil on
+
+    step wait_arm_vacuum:
+        wait: sensor_arm_vac_ok == true
+        timeout: 1000ms -> goto orient_fault.arm_pick_timeout
+
+    step move_to_orient:
+        action: axis.move_absolute(axis_arm, position: 90, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+            semantic_tag: arm_turn_to_orient
+
+    step orient_vacuum_on:
+        action: set vac_orient_valve.coil on
+
+    step wait_orient_vacuum:
+        wait: sensor_orient_vac_ok == true
+        timeout: 800ms -> goto orient_fault.orient_vacuum_timeout
+
+    step release_arm:
+        action: set vac_arm_valve.coil off
+
+    step decide_first_view:
+        wait: orient_side_a_ok == true
+        timeout: 10ms -> goto orient_stage.flip_orient
+
+    step keep_original:
+        action: retract cyl_orient_rotate
+            timeout: 600ms -> goto orient_warning.orient_cyl_warn
+
+    step publish_oriented_normal:
+        action: compute orient_reject_streak = 0.0
+
+    step move_back_home_normal:
+        action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step finish_normal:
+        goto orient_stage.wait_enabled
+
+    step flip_orient:
+        action: extend cyl_orient_rotate
+            timeout: 600ms -> goto orient_warning.orient_cyl_warn
+
+    step decide_flip_result:
+        wait: orient_side_b_ok == true
+        timeout: 10ms -> goto orient_stage.reject_to_ir
+
+    step keep_flipped:
+        action: compute orient_reject_streak = 0.0
+
+    step move_back_home_flipped:
+        action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step finish_flipped:
+        goto orient_stage.wait_enabled
+
+    step reject_to_ir:
+        action: set vac_orient_valve.coil off
+        action: compute orient_reject_streak = orient_reject_streak + 1.0
+
+    step move_back_home_reject:
+        action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
+            timeout: 1500ms -> orient_axis_fault.move_timeout
+            on_reject -> orient_axis_fault.move_reject
+            on_motion_fault -> orient_axis_fault.move_motion_fault
+            on_safety_fault -> orient_axis_fault.move_safety_fault
+
+    step check_reject_limit:
+        wait: orient_reject_streak < 3
+        timeout: 10ms -> goto orient_fault.orient_reject_streak_fault
+
+    on_complete: goto orient_stage.wait_enabled
+
+task transfer_to_measure:
+    step wait_enabled:
+        wait: auto_cycle_enabled == true
+        allow_indefinite_wait: true
+
+    step wait_mode:
+        wait: mode_auto == true
+        allow_indefinite_wait: true
+
+    step wait_stop_clear:
+        wait: stop_button == false
+        allow_indefinite_wait: true
+
+    step wait_wafer_ready:
+        wait: wafer_on_orient == true
+        allow_indefinite_wait: true
+
+    step wait_measure_ready:
+        wait: measure_stage_ready == true
+        allow_indefinite_wait: true
+
+    step count_attempt:
+        action: compute transfer_attempt_count = transfer_attempt_count + 1.0
+
+    step swing_down:
+        action: extend cyl_swing
+            timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step lift_down:
+        action: extend cyl_lift
+            timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step transfer_vacuum_on:
+        action: set vac_transfer_valve.coil on
+
+    step wait_transfer_vacuum:
+        wait: sensor_transfer_vac_ok == true
+        timeout: 1000ms -> goto transfer_to_measure.record_drop
+
+    step release_orient:
+        action: set vac_orient_valve.coil off
+
+    step lift_up:
+        action: retract cyl_lift
+            timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step swing_up:
+        action: retract cyl_swing
+            timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
+
+    step move_front:
+        action: extend cyl_transfer
+            timeout: 900ms -> goto transfer_warning.transfer_cyl_warn
+
+    step check_drop_sensor:
+        wait: wafer_drop_detect == false
+        timeout: 10ms -> goto transfer_to_measure.record_drop
+
+    step place_wafer:
+        action: set vac_transfer_valve.coil off
+
+    step transfer_back:
+        action: retract cyl_transfer
+            timeout: 900ms -> goto transfer_warning.transfer_cyl_warn
+
+    step clear_drop_streak:
+        action: compute consecutive_drop_count = 0.0
+
+    step finish_success:
+        goto transfer_to_measure.wait_enabled
+
+    step record_drop:
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: compute drop_total = drop_total + 1.0
+        action: compute consecutive_drop_count = consecutive_drop_count + 1.0
+
+    step check_drop_streak:
+        wait: consecutive_drop_count < 2
+        timeout: 10ms -> goto transfer_fault.drop_consecutive_fault
+
+    step check_drop_rate:
+        wait: drop_rate_exceeded == false
+        timeout: 10ms -> goto transfer_fault.drop_rate_fault
+
+    on_complete: goto transfer_to_measure.wait_enabled
+
+task maintenance_service:
+    step wait_mode:
+        wait: mode_maintenance == true
+        allow_indefinite_wait: true
+
+    step idle:
+        delay: 50ms
+
+    on_complete: goto maintenance_service.wait_mode
+
+task startup_fault:
+    step init_pose_timeout:
+        action: compute auto_cycle_enabled = false
+        action: log "startup fault: failed to reach initialized baseline"
+
+    step cleanup_timeout:
+        action: compute auto_cycle_enabled = false
+        action: log "startup fault: stop cleanup did not return to safe pose"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto startup_initializer.drive_safe_outputs
+
+task feed_warning:
+    step feed_cyl_warn:
+        action: compute auto_cycle_enabled = false
+        action: set vac_feed_valve.coil off
+        action: retract cyl_feed
+        action: log "feed warning: feed cylinder position not confirmed"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_start
+
+task orient_warning:
+    step orient_cyl_warn:
+        action: compute auto_cycle_enabled = false
+        action: retract cyl_orient_rotate
+        action: log "orient warning: orient cylinder position not confirmed"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_start
+
+task transfer_warning:
+    step transfer_cyl_warn:
+        action: compute auto_cycle_enabled = false
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: log "transfer warning: transfer cylinder position not confirmed"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_start
+
+task feed_fault:
+    step feed_vacuum_timeout:
+        action: set vac_feed_valve.coil off
+        action: retract cyl_feed
+        action: compute auto_cycle_enabled = false
+        action: log "feed fault: wafer was not held within 1 second"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_start
+
+task orient_fault:
+    step arm_pick_timeout:
+        action: set vac_arm_valve.coil off
+        action: compute auto_cycle_enabled = false
+        action: log "orient fault: arm vacuum did not pick the wafer"
+
+    step orient_vacuum_timeout:
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: compute auto_cycle_enabled = false
+        action: log "orient fault: orient vacuum did not confirm hold"
+
+    step orient_reject_streak_fault:
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: compute auto_cycle_enabled = false
+        action: log "orient fault: three consecutive wafers rejected to IR"
+
+    step axis_unrecoverable:
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: compute auto_cycle_enabled = false
+        action: log "orient fault: arm axis recovery exhausted"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_start
+
+task orient_axis_fault:
+    step move_timeout:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    step move_reject:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    step move_motion_fault:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    step move_safety_fault:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    step decide_retry:
+        wait: axis_recover_attempts <= 2
+        timeout: 10ms -> goto orient_fault.axis_unrecoverable
+
+    step retry_pause:
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        delay: 200ms
+
+    step retry_enable:
+        action: set axis_arm.enable on
+
+    on_complete: goto orient_stage.wait_enabled
+
+task transfer_fault:
+    step drop_consecutive_fault:
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: compute auto_cycle_enabled = false
+        action: log "transfer fault: two consecutive wafer drops"
+
+    step drop_rate_fault:
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: compute auto_cycle_enabled = false
+        action: log "transfer fault: long-term wafer drop rate exceeded 1/1000"
+
+    step wait_refresh:
+        wait: refresh_button == true
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_start

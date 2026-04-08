@@ -243,6 +243,7 @@ pub(crate) fn run_scenario_validate_subcommand(
             }
         }
         let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
+        sim::attach_inferred_plant_from_program(&mut io, &runtime_program);
 
         // Re-apply the scenario onto the IO we will use for probing.
         if let Err(err) = scenario.apply_to_simio(&mut io) {
@@ -254,11 +255,17 @@ pub(crate) fn run_scenario_validate_subcommand(
         } else {
             let mut rt = runtime_core::Runtime::new(&runtime_program)
                 .map_err(|err| format!("scenario-validate: runtime init failed: {err:?}"))?;
+            let mut axis_driver = sim::DeterministicAxisDriver::new();
 
             // Probe the early ticks only; if a same-tick loop exists, it should surface quickly.
             let probe_ticks = scenario.duration_ticks().min(50);
             for _ in 0..probe_ticks {
-                if let Err(err) = rt.tick_with_trace(&mut io, |_| {}) {
+                if let Err(err) = rt.tick_with_trace_and_logs_and_axis(
+                    &mut io,
+                    |_| {},
+                    |_| {},
+                    |command| axis_driver.handle(command),
+                ) {
                     let sim_err = sim::SimRunError::from(err);
                     let mut suggestion = String::new();
 

@@ -1,0 +1,44 @@
+tick_ms: 10
+duration_ms: 1500
+inputs:
+  - at_ms: 0
+    set:
+      digital_inputs:
+        3: true
+        12: true
+        15: true
+        17: true
+        18: true
+        19: true
+        20: true
+        22: true
+        23: true
+        25: true
+        27: true
+        29: true
+        31: true
+  - at_ms: 50
+    set:
+      digital_inputs:
+        0: true
+  - at_ms: 100
+    set:
+      digital_inputs:
+        0: false
+  - at_ms: 130
+    set:
+      digital_inputs:
+        13: true
+  - at_ms: 260
+    set:
+      digital_inputs:
+        13: false
+  - at_ms: 340
+    set:
+      digital_inputs:
+        14: true
+  - at_ms: 420
+    set:
+      digital_inputs:
+        14: false
+forces: []

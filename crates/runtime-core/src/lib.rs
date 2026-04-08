@@ -1853,6 +1853,51 @@ impl<'a> Runtime<'a> {
         })
     }
 
+    pub fn tick_with_trace_and_logs_and_axis<IO: Io>(
+        &mut self,
+        io: &mut IO,
+        mut on_event: impl FnMut(TraceEvent),
+        mut on_log: impl FnMut(LogEvent),
+        mut on_axis_motion: impl FnMut(AxisMotionCommand) -> AxisMotionResult,
+    ) -> Result<(), RuntimeError> {
+        #[derive(Debug)]
+        struct MissingExternHandler;
+
+        let mut missing_extern =
+            |_function: &'static str,
+             _args: &[f32],
+             _results: &mut [f32]|
+             -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
+        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
+        let mut axis_adapter = |command: AxisMotionCommand| Ok(on_axis_motion(command));
+
+        self.tick_with_trace_and_logs_impl(
+            io,
+            &mut on_event,
+            &mut on_log,
+            &mut missing_extern,
+            None,
+            &mut ignore_error_code,
+            &mut axis_adapter,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
+        )
+        .map_err(|err| match err {
+            RuntimeTickError::Core(err) => err,
+            RuntimeTickError::ExternCallFailed { function, .. } => {
+                RuntimeError::ExternCallRequiresHandler { function }
+            }
+            RuntimeTickError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            } => RuntimeError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            },
+        })
+    }
+
     pub fn tick_with_axis<IO: Io>(
         &mut self,
         io: &mut IO,

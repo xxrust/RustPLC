@@ -76,7 +76,7 @@ impl SolenoidValve {
             .cfg
             .retract_coil
             .and_then(|idx| digital_outputs.get(idx).copied())
-            .unwrap_or(false);
+            .unwrap_or(!ext);
 
         // If both coils are on, prefer extend.
         let cmd = if ext {

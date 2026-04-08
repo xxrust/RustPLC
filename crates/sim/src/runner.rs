@@ -3,7 +3,8 @@ use core::fmt;
 use runtime_core::{Instr, Program, Runtime, RuntimeError, TransitionReason};
 
 use crate::{
-    JsonlTraceRecorder, Scenario, ScenarioError, ScenarioSummary, SimFailure, SimIo, SimReport,
+    DeterministicAxisDriver, JsonlTraceRecorder, Scenario, ScenarioError, ScenarioSummary,
+    SimFailure, SimIo, SimReport, attach_inferred_plant_from_program,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,29 +76,36 @@ pub fn run_program_for_scenario_with_tick_observer<'a>(
     io: &mut SimIo,
     mut on_tick_start: impl FnMut(&SimIo),
 ) -> Result<SimRunOutput, SimRunError> {
+    attach_inferred_plant_from_program(io, program);
     scenario.apply_to_simio(io)?;
 
     let mut rt = Runtime::new(program)?;
+    let mut axis_driver = DeterministicAxisDriver::new();
     let mut trace = JsonlTraceRecorder::new();
 
     let mut failure: Option<SimFailure> = None;
     for _ in 0..scenario.duration_ticks() {
         on_tick_start(io);
-        rt.tick_with_trace(io, |e| {
-            trace.record(e);
-            if failure.is_none() && e.reason == TransitionReason::Timeout {
-                failure = Some(SimFailure {
-                    kind: "timeout".to_string(),
-                    message: format!(
-                        "timeout transition at task {} step {} -> {}",
-                        e.task, e.from.0, e.to.0
-                    ),
-                    at_ms: e.tick.0.saturating_mul(scenario.tick_ms),
-                    task: e.task,
-                    step: e.from.0,
-                });
-            }
-        })?;
+        rt.tick_with_trace_and_logs_and_axis(
+            io,
+            |e| {
+                trace.record(e);
+                if failure.is_none() && e.reason == TransitionReason::Timeout {
+                    failure = Some(SimFailure {
+                        kind: "timeout".to_string(),
+                        message: format!(
+                            "timeout transition at task {} step {} -> {}",
+                            e.task, e.from.0, e.to.0
+                        ),
+                        at_ms: e.tick.0.saturating_mul(scenario.tick_ms),
+                        task: e.task,
+                        step: e.from.0,
+                    });
+                }
+            },
+            |_| {},
+            |command| axis_driver.handle(command),
+        )?;
 
         if is_halted(&rt, program) {
             break;

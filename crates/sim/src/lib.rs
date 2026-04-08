@@ -7,6 +7,7 @@ use runtime_core::{TraceEvent, TransitionReason};
 use serde::Serialize;
 
 mod control_kpi;
+mod default_dynamics;
 mod plant;
 mod report;
 mod runner;
@@ -15,6 +16,7 @@ mod waveform;
 pub use control_kpi::{
     ControlKpiError, PidControlScenario, PidKpiReport, ProcessModelConfig, run_pid_kpi,
 };
+pub use default_dynamics::{DeterministicAxisDriver, attach_inferred_plant_from_program};
 pub use plant::{CylinderConfig, LimitKind, LimitSensorConfig, Plant, SolenoidValveConfig};
 pub use report::{ScenarioSummary, SimFailure, SimReport};
 pub use runner::{
@@ -153,6 +155,15 @@ impl SimIo {
         // Ensure tick-0 plant state is applied to inputs before the first runtime tick.
         self.apply_plant_for_current_tick(Tick(0));
         self
+    }
+
+    pub fn attach_plant(&mut self, plant: Plant) {
+        self.plant = Some(plant);
+        self.apply_plant_for_current_tick(self.tick);
+    }
+
+    pub fn has_plant(&self) -> bool {
+        self.plant.is_some()
     }
 
     pub fn with_scheduled_changes(
