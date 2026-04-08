@@ -1273,6 +1273,94 @@ task main:
     }
 
     #[test]
+    fn respects_compute_driven_boolean_condition_in_safety_reachability() {
+        let source = r#"
+[topology]
+
+variable choose_a: bool = false
+device out_a: digital_output
+device out_b: digital_output
+
+[constraints]
+
+safety: out_a.on conflicts_with out_b.on
+
+[tasks]
+
+task main:
+    step seed:
+        action: compute choose_a = true
+    step maybe_a:
+        if: choose_a == true goto set_a.run else: goto main.maybe_b
+    step maybe_b:
+        if: choose_a == false goto set_b.run else: goto main.done
+    step done:
+        action: log "done"
+
+task set_a:
+    step run:
+        action: set out_a on
+    on_complete: goto main.maybe_b
+
+task set_b:
+    step run:
+        action: set out_b on
+    on_complete: goto main.done
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        verify_safety(&program, &constraints, &state_machine)
+            .expect("compute 写入的布尔变量应裁剪 if 分支，避免双输出冲突假阳性");
+    }
+
+    #[test]
+    fn respects_compute_arithmetic_condition_in_safety_reachability() {
+        let source = r#"
+[topology]
+
+variable count: float = 0.0
+device out_a: digital_output
+device out_b: digital_output
+
+[constraints]
+
+safety: out_a.on conflicts_with out_b.on
+
+[tasks]
+
+task main:
+    step inc:
+        action: compute count = count + 1.0
+    step maybe_a:
+        if: count > 0.0 goto set_a.run else: goto main.maybe_b
+    step maybe_b:
+        if: count <= 0.0 goto set_b.run else: goto main.done
+    step done:
+        action: log "done"
+
+task set_a:
+    step run:
+        action: set out_a on
+    on_complete: goto main.maybe_b
+
+task set_b:
+    step run:
+        action: set out_b on
+    on_complete: goto main.done
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        verify_safety(&program, &constraints, &state_machine)
+            .expect("compute 算术结果应进入 condition 求值，避免 count>0 路径误放大");
+    }
+
+    #[test]
     fn maps_set_analog_to_region_state() {
         let source = r#"
 [topology]

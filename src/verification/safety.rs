@@ -1,6 +1,6 @@
 use crate::ast::{
     ActionStatement, ComparisonOperator, ConditionExpression, DeviceType, LiteralValue, PlcProgram,
-    PortType, StepStatement, WaitCondition, WaitStatement,
+    PortType, StepStatement, VariableType as AstVariableType, WaitCondition, WaitStatement,
 };
 use crate::axis_profile::resolve_axis_profiles;
 use crate::ir::{
@@ -113,10 +113,129 @@ struct DeviceDomain {
 }
 
 #[derive(Debug, Clone)]
+struct VariableDomain {
+    name: String,
+    var_type: AstVariableType,
+    initial_value: SafetyValue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SafetyValue {
+    Bool(bool),
+    Number(u32),
+}
+
+impl SafetyValue {
+    fn bool(value: bool) -> Self {
+        Self::Bool(value)
+    }
+
+    fn number(value: f32) -> Self {
+        Self::Number(value.to_bits())
+    }
+
+    fn as_bool(self) -> Option<bool> {
+        match self {
+            Self::Bool(value) => Some(value),
+            Self::Number(bits) => {
+                let value = f32::from_bits(bits);
+                if (value - 0.0).abs() <= f32::EPSILON {
+                    Some(false)
+                } else if (value - 1.0).abs() <= f32::EPSILON {
+                    Some(true)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn as_f32(self) -> f32 {
+        match self {
+            Self::Bool(value) => {
+                if value {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Self::Number(bits) => f32::from_bits(bits),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum ModelGuard {
+    Always,
+    AnalogRegions {
+        device_id: usize,
+        allowed_states: Vec<usize>,
+    },
+    DeviceState {
+        device_id: usize,
+        expected_state: usize,
+        equals: bool,
+    },
+    VariableBool {
+        variable_id: usize,
+        equals: bool,
+    },
+    Expr(ModelExpr),
+    Timeout,
+    Delay,
+    Unsupported,
+}
+
+#[derive(Debug, Clone)]
+enum ModelExpr {
+    Literal(SafetyValue),
+    Variable(usize),
+    UnaryNeg(Box<ModelExpr>),
+    UnaryNot(Box<ModelExpr>),
+    Binary {
+        op: ModelBinaryOp,
+        left: Box<ModelExpr>,
+        right: Box<ModelExpr>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelBinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    Neq,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone)]
+struct VariableAssignment {
+    variable_id: usize,
+    expr: ModelExpr,
+}
+
+#[derive(Debug, Clone)]
+struct AnalogExprEffect {
+    device_id: usize,
+    expr: ModelExpr,
+}
+
+#[derive(Debug, Clone)]
 struct ModelEdge {
     from: usize,
     to: usize,
+    guard: ModelGuard,
     effects: HashMap<usize, usize>,
+    variable_effects: Vec<VariableAssignment>,
+    analog_expr_effects: Vec<AnalogExprEffect>,
     label: String,
 }
 
@@ -133,6 +252,7 @@ struct SafetyModel {
     devices: Vec<DeviceDomain>,
     device_index: HashMap<(String, String), usize>,
     device_state_index: Vec<HashMap<String, usize>>,
+    variables: Vec<VariableDomain>,
     suggested_depth: usize,
     max_scc_depth: usize,
 }
@@ -158,6 +278,7 @@ struct ConcreteState {
     task_states: Vec<usize>,
     task_pending: Vec<bool>,
     device_states: Vec<usize>,
+    variable_values: Vec<SafetyValue>,
 }
 
 #[derive(Debug, Clone)]

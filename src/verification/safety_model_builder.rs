@@ -24,6 +24,7 @@ impl SafetyModel {
 
         let (devices, device_index, device_state_index) =
             collect_device_domains(program, constraints, state_machine);
+        let (variables, variable_index) = collect_variable_domains(program, state_machine);
 
         let mut edges = Vec::new();
         let mut outgoing = vec![Vec::new(); states.len()];
@@ -50,8 +51,20 @@ impl SafetyModel {
                 continue;
             };
 
-            let effects =
-                transition_effects(transition, &device_index, &device_state_index, &devices);
+            let guard = compile_model_guard(
+                &transition.guard,
+                &device_index,
+                &device_state_index,
+                &devices,
+                &variable_index,
+            );
+            let effects = transition_effects(
+                transition,
+                &device_index,
+                &device_state_index,
+                &devices,
+                &variable_index,
+            );
             let expanded_effects = expand_analog_input_effects(effects, &analog_inputs);
             let label = transition_label(transition);
 
@@ -60,7 +73,10 @@ impl SafetyModel {
                 edges.push(ModelEdge {
                     from,
                     to,
-                    effects,
+                    guard: guard.clone(),
+                    effects: effects.device_effects,
+                    variable_effects: effects.variable_effects,
+                    analog_expr_effects: effects.analog_expr_effects,
                     label: label.clone(),
                 });
                 outgoing[from].push(edge_index);
@@ -76,7 +92,10 @@ impl SafetyModel {
             edges.push(ModelEdge {
                 from: state_id,
                 to: state_id,
+                guard: ModelGuard::Always,
                 effects: HashMap::new(),
+                variable_effects: Vec::new(),
+                analog_expr_effects: Vec::new(),
                 label: "无出边，保持当前状态".to_string(),
             });
             outgoing[state_id].push(edge_index);
@@ -138,9 +157,252 @@ impl SafetyModel {
             devices,
             device_index,
             device_state_index,
+            variables,
             suggested_depth,
             max_scc_depth,
         }
+    }
+}
+
+#[derive(Clone)]
+struct TransitionEffects {
+    device_effects: HashMap<usize, usize>,
+    variable_effects: Vec<VariableAssignment>,
+    analog_expr_effects: Vec<AnalogExprEffect>,
+}
+
+fn collect_variable_domains(
+    program: &PlcProgram,
+    state_machine: &StateMachine,
+) -> (Vec<VariableDomain>, HashMap<String, usize>) {
+    let relevant = collect_relevant_variable_names(program, state_machine);
+    let mut variables = Vec::new();
+    let mut variable_index = HashMap::<String, usize>::new();
+
+    for variable in &program.topology.variables {
+        if !relevant.contains(&variable.name) {
+            continue;
+        }
+        let Some(initial_value) = parse_initial_variable_value(variable) else {
+            continue;
+        };
+        let slot = variables.len();
+        variable_index.insert(variable.name.clone(), slot);
+        variables.push(VariableDomain {
+            name: variable.name.clone(),
+            var_type: variable.var_type.clone(),
+            initial_value,
+        });
+    }
+
+    (variables, variable_index)
+}
+
+fn collect_relevant_variable_names(
+    program: &PlcProgram,
+    state_machine: &StateMachine,
+) -> HashSet<String> {
+    let declared = program
+        .topology
+        .variables
+        .iter()
+        .map(|variable| variable.name.clone())
+        .collect::<HashSet<_>>();
+    let mut relevant = HashSet::<String>::new();
+
+    for transition in &state_machine.transitions {
+        if let TransitionGuard::Condition { expression } = &transition.guard {
+            collect_raw_expression_variables(expression, &declared, &mut relevant);
+        }
+
+        for action in &transition.actions {
+            match action {
+                TransitionAction::Compute { target, expr_raw } => {
+                    if declared.contains(target) {
+                        relevant.insert(target.clone());
+                    }
+                    collect_raw_expression_variables(expr_raw, &declared, &mut relevant);
+                }
+                TransitionAction::SetAnalogExpr { expr_raw, .. } => {
+                    collect_raw_expression_variables(expr_raw, &declared, &mut relevant);
+                }
+                TransitionAction::CallExtern { args_raw, .. } => {
+                    for arg in args_raw {
+                        collect_raw_expression_variables(arg, &declared, &mut relevant);
+                    }
+                }
+                TransitionAction::Extend { .. }
+                | TransitionAction::Retract { .. }
+                | TransitionAction::Set { .. }
+                | TransitionAction::SetAnalog { .. }
+                | TransitionAction::CamEngage { .. }
+                | TransitionAction::CamDisengage { .. }
+                | TransitionAction::CamSwitch { .. }
+                | TransitionAction::CamPhase { .. }
+                | TransitionAction::AxisMoveRelative { .. }
+                | TransitionAction::AxisMoveAbsolute { .. }
+                | TransitionAction::Log { .. } => {}
+            }
+        }
+    }
+
+    relevant
+}
+
+fn collect_raw_expression_variables(
+    raw: &str,
+    declared: &HashSet<String>,
+    relevant: &mut HashSet<String>,
+) {
+    let mut current = String::new();
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            current.push(ch);
+            continue;
+        }
+        maybe_record_variable_ident(&current, declared, relevant);
+        current.clear();
+    }
+    maybe_record_variable_ident(&current, declared, relevant);
+}
+
+fn maybe_record_variable_ident(
+    ident: &str,
+    declared: &HashSet<String>,
+    relevant: &mut HashSet<String>,
+) {
+    if ident.is_empty() {
+        return;
+    }
+    let lowered = ident.to_ascii_lowercase();
+    if matches!(lowered.as_str(), "and" | "or" | "not" | "true" | "false") {
+        return;
+    }
+    if declared.contains(ident) {
+        relevant.insert(ident.to_string());
+    }
+}
+
+fn parse_initial_variable_value(variable: &crate::ast::VariableDeclaration) -> Option<SafetyValue> {
+    match variable.var_type {
+        AstVariableType::Bool => match variable.initial_value.trim() {
+            "true" => Some(SafetyValue::bool(true)),
+            "false" => Some(SafetyValue::bool(false)),
+            _ => None,
+        },
+        AstVariableType::Float => variable
+            .initial_value
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .map(SafetyValue::number),
+        AstVariableType::Int => variable
+            .initial_value
+            .trim()
+            .parse::<i32>()
+            .ok()
+            .map(|value| SafetyValue::number(value as f32)),
+    }
+}
+
+fn compile_model_guard(
+    guard: &TransitionGuard,
+    device_index: &HashMap<(String, String), usize>,
+    device_state_index: &[HashMap<String, usize>],
+    device_domains: &[DeviceDomain],
+    variable_index: &HashMap<String, usize>,
+) -> ModelGuard {
+    match guard {
+        TransitionGuard::Always => ModelGuard::Always,
+        TransitionGuard::Timeout { .. } => ModelGuard::Timeout,
+        TransitionGuard::Delay { .. } => ModelGuard::Delay,
+        TransitionGuard::Condition { expression } => compile_condition_guard(
+            expression,
+            device_index,
+            device_state_index,
+            device_domains,
+            variable_index,
+        ),
+    }
+}
+
+fn compile_condition_guard(
+    expression: &str,
+    device_index: &HashMap<(String, String), usize>,
+    device_state_index: &[HashMap<String, usize>],
+    device_domains: &[DeviceDomain],
+    variable_index: &HashMap<String, usize>,
+) -> ModelGuard {
+    if let Some((device, regions)) = parse_model_analog_region_guard(expression) {
+        if let Some(device_id) = lookup_device_domain_id(device_index, &device, "self", false) {
+            return ModelGuard::AnalogRegions {
+                device_id,
+                allowed_states: regions,
+            };
+        }
+    }
+
+    if let Some((lhs, equals)) = parse_model_bool_guard(expression) {
+        if let Some(variable_id) = variable_index.get(&lhs).copied() {
+            return ModelGuard::VariableBool {
+                variable_id,
+                equals,
+            };
+        }
+        if let Some((device_id, expected_state)) = resolve_guard_state_operand(
+            &lhs,
+            equals,
+            device_index,
+            device_state_index,
+            device_domains,
+        ) {
+            return ModelGuard::DeviceState {
+                device_id,
+                expected_state,
+                equals,
+            };
+        }
+    }
+
+    compile_model_expr(expression, variable_index)
+        .map(ModelGuard::Expr)
+        .unwrap_or(ModelGuard::Unsupported)
+}
+
+fn resolve_guard_state_operand(
+    raw: &str,
+    equals: bool,
+    device_index: &HashMap<(String, String), usize>,
+    device_state_index: &[HashMap<String, usize>],
+    device_domains: &[DeviceDomain],
+) -> Option<(usize, usize)> {
+    let parts = raw.split('.').map(str::trim).collect::<Vec<_>>();
+    match parts.as_slice() {
+        [device] => {
+            let device_id = lookup_device_domain_id(device_index, device, "self", true)?;
+            let value = if equals {
+                crate::ir::BinaryValue::On
+            } else {
+                crate::ir::BinaryValue::Off
+            };
+            let state_id = binary_state_for_domain(
+                &device_domains[device_id],
+                &device_state_index[device_id],
+                &value,
+            )?;
+            Some((device_id, state_id))
+        }
+        [device, state] => {
+            let device_id = lookup_device_domain_id(device_index, device, "self", false)?;
+            let state_id = device_state_index[device_id].get(*state).copied()?;
+            Some((device_id, state_id))
+        }
+        [device, port, state] => {
+            let device_id = lookup_device_domain_id(device_index, device, port, false)?;
+            let state_id = device_state_index[device_id].get(*state).copied()?;
+            Some((device_id, state_id))
+        }
+        _ => None,
     }
 }
 
@@ -219,12 +481,9 @@ fn collect_relevant_device_ids(
 
     for claim in &constraints.resource_claims {
         if let crate::ir::ResourceClaimSource::State(state_expr) = &claim.source {
-            if let Some(device_id) = lookup_device_domain_id(
-                device_index,
-                &state_expr.device,
-                &state_expr.port,
-                false,
-            ) {
+            if let Some(device_id) =
+                lookup_device_domain_id(device_index, &state_expr.device, &state_expr.port, false)
+            {
                 relevant.insert(device_id);
             }
         }
@@ -240,12 +499,9 @@ fn collect_relevant_device_ids_from_expr(
 ) {
     match expr {
         SafetyExpr::State(state_expr) => {
-            if let Some(device_id) = lookup_device_domain_id(
-                device_index,
-                &state_expr.device,
-                &state_expr.port,
-                false,
-            ) {
+            if let Some(device_id) =
+                lookup_device_domain_id(device_index, &state_expr.device, &state_expr.port, false)
+            {
                 relevant.insert(device_id);
             }
         }
@@ -318,10 +574,7 @@ fn state_is_relevant(
     relevant_action_tags: &HashSet<String>,
 ) -> bool {
     if let Some(tags) = pending_action_tags.get(&state_id) {
-        if tags
-            .iter()
-            .any(|tag| relevant_action_tags.contains(tag))
-        {
+        if tags.iter().any(|tag| relevant_action_tags.contains(tag)) {
             return true;
         }
     }
@@ -334,6 +587,11 @@ fn state_is_relevant(
         .any(|edge| {
             edge.effects
                 .keys()
+                .chain(
+                    edge.analog_expr_effects
+                        .iter()
+                        .map(|effect| &effect.device_id),
+                )
                 .any(|device_id| relevant_device_ids.contains(device_id))
         })
 }
@@ -499,6 +757,8 @@ fn axis_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
 
 fn merge_parallel_join_effects(states: &[State], edges: &mut [ModelEdge]) {
     let mut join_effects = HashMap::<usize, HashMap<usize, usize>>::new();
+    let mut join_variable_effects = HashMap::<usize, HashMap<usize, ModelExpr>>::new();
+    let mut join_analog_expr_effects = HashMap::<usize, HashMap<usize, ModelExpr>>::new();
 
     for edge in edges.iter() {
         if !is_parallel_branch_state(states.get(edge.from))
@@ -511,6 +771,14 @@ fn merge_parallel_join_effects(states: &[State], edges: &mut [ModelEdge]) {
         for (&device_id, &state_id) in &edge.effects {
             merged.insert(device_id, state_id);
         }
+        let merged_variables = join_variable_effects.entry(edge.to).or_default();
+        for effect in &edge.variable_effects {
+            merged_variables.insert(effect.variable_id, effect.expr.clone());
+        }
+        let merged_analog = join_analog_expr_effects.entry(edge.to).or_default();
+        for effect in &edge.analog_expr_effects {
+            merged_analog.insert(effect.device_id, effect.expr.clone());
+        }
     }
 
     for edge in edges.iter_mut() {
@@ -522,6 +790,24 @@ fn merge_parallel_join_effects(states: &[State], edges: &mut [ModelEdge]) {
 
         if let Some(merged) = join_effects.get(&edge.to) {
             edge.effects = merged.clone();
+        }
+        if let Some(merged) = join_variable_effects.get(&edge.to) {
+            edge.variable_effects = merged
+                .iter()
+                .map(|(variable_id, expr)| VariableAssignment {
+                    variable_id: *variable_id,
+                    expr: expr.clone(),
+                })
+                .collect();
+        }
+        if let Some(merged) = join_analog_expr_effects.get(&edge.to) {
+            edge.analog_expr_effects = merged
+                .iter()
+                .map(|(device_id, expr)| AnalogExprEffect {
+                    device_id: *device_id,
+                    expr: expr.clone(),
+                })
+                .collect();
         }
     }
 }
@@ -1003,9 +1289,9 @@ fn collect_analog_input_states(
 }
 
 fn expand_analog_input_effects(
-    base_effects: HashMap<usize, usize>,
+    base_effects: TransitionEffects,
     analog_inputs: &[(usize, Vec<usize>)],
-) -> Vec<HashMap<usize, usize>> {
+) -> Vec<TransitionEffects> {
     let mut expanded = vec![base_effects];
 
     for (device_id, states) in analog_inputs {
@@ -1015,14 +1301,14 @@ fn expand_analog_input_effects(
 
         let mut next = Vec::new();
         for effects in expanded {
-            if effects.contains_key(device_id) {
+            if effects.device_effects.contains_key(device_id) {
                 next.push(effects);
                 continue;
             }
 
             for state_id in states {
                 let mut cloned = effects.clone();
-                cloned.insert(*device_id, *state_id);
+                cloned.device_effects.insert(*device_id, *state_id);
                 next.push(cloned);
             }
         }
@@ -1045,8 +1331,13 @@ fn transition_effects(
     device_index: &HashMap<(String, String), usize>,
     device_state_index: &[HashMap<String, usize>],
     device_domains: &[DeviceDomain],
-) -> HashMap<usize, usize> {
-    let mut effects = HashMap::<usize, usize>::new();
+    variable_index: &HashMap<String, usize>,
+) -> TransitionEffects {
+    let mut effects = TransitionEffects {
+        device_effects: HashMap::new(),
+        variable_effects: Vec::new(),
+        analog_expr_effects: Vec::new(),
+    };
 
     for action in &transition.actions {
         match action {
@@ -1063,9 +1354,24 @@ fn transition_effects(
                 else {
                     continue;
                 };
-                effects.insert(device_id, state_id);
+                effects.device_effects.insert(device_id, state_id);
             }
-            TransitionAction::SetAnalogExpr { .. } => {}
+            TransitionAction::SetAnalogExpr {
+                target,
+                port,
+                expr_raw,
+            } => {
+                let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
+                else {
+                    continue;
+                };
+                let Some(expr) = compile_model_expr(expr_raw, variable_index) else {
+                    continue;
+                };
+                effects
+                    .analog_expr_effects
+                    .push(AnalogExprEffect { device_id, expr });
+            }
             TransitionAction::Set {
                 target,
                 port,
@@ -1082,9 +1388,19 @@ fn transition_effects(
                 ) else {
                     continue;
                 };
-                effects.insert(device_id, state_id);
+                effects.device_effects.insert(device_id, state_id);
             }
-            TransitionAction::Compute { .. } => {}
+            TransitionAction::Compute { target, expr_raw } => {
+                let Some(variable_id) = variable_index.get(target).copied() else {
+                    continue;
+                };
+                let Some(expr) = compile_model_expr(expr_raw, variable_index) else {
+                    continue;
+                };
+                effects
+                    .variable_effects
+                    .push(VariableAssignment { variable_id, expr });
+            }
             TransitionAction::CallExtern { .. } => {}
             TransitionAction::AxisMoveRelative { target, .. }
             | TransitionAction::AxisMoveAbsolute { target, .. } => {
@@ -1099,7 +1415,7 @@ fn transition_effects(
                 else {
                     continue;
                 };
-                effects.insert(device_id, state_id);
+                effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::CamEngage { .. }
             | TransitionAction::CamDisengage { .. }
@@ -1113,7 +1429,7 @@ fn transition_effects(
                 let Some(state_id) = device_state_index[device_id].get("extended").copied() else {
                     continue;
                 };
-                effects.insert(device_id, state_id);
+                effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::Retract { target, port, .. } => {
                 let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
@@ -1123,7 +1439,7 @@ fn transition_effects(
                 let Some(state_id) = device_state_index[device_id].get("retracted").copied() else {
                     continue;
                 };
-                effects.insert(device_id, state_id);
+                effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::Log { .. } => {}
         }
