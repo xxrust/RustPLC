@@ -2,6 +2,7 @@
 Started: 2026-04-07 00:00:00 CST
 
 ## Codebase Patterns
+- Intent contract graph invariants live in `src/intent_alignment/contract.rs`: validate `required_edges` and `cycle_semantics` there with stable code-bearing diagnostics before any compile/comparator stage consumes the contract.
 - phase-2 v1 的 intent contract 使用独立 `tests/fixtures/intent_alignment/contracts/*.json` fixture；这一阶段不要把 Markdown 段落解析混入 authoring 链路。
 - intent contract schema 必须保持严格白名单，并用 `source_ref + source_digest` 把合同绑定到架构文档、canonical example 或其他 authored asset。
 - intent contract schema 固定拆成 `contract_core` 与 `observation_bindings`：业务语义放在前者，里程碑/后置条件到证据的组合语义映射放在后者，禁止让 comparator 猜 `observed_as` 列表语义。
@@ -43,4 +44,17 @@ Thread: https://ampcode.com/threads/unknown
   - Keep business intent semantics in `contract_core`; use `observation_bindings` only for evidence projection so later compile/comparator stages consume a single explicit contract shape.
   - `metadata.authoritative_intent_source` is not a free-form note; it must point to the same source as top-level `source_ref`, while `review_basis[*].source` must stay resolvable on disk.
   - Observation combination semantics are contract data (`all_of` / `any_of` / `ordered_all_of`), not comparator heuristics.
+---
+
+## [2026-04-08 09:44:01 CST] - US-002
+Thread: https://ampcode.com/threads/unknown
+- Implemented `validate_intent_contract(...)` in `src/intent_alignment/contract.rs` with stable diagnostics for conflicting required-edge cycles, unreachable milestones, and contradictory cycle/restart semantics.
+- Exported the validation API and diagnostic types from `src/intent_alignment/mod.rs` so later compile/comparator stages can fail contracts before reasoning over them.
+- Added regression coverage in `tests/intent_alignment_contract.rs` for one valid contract and three invalid counterexamples asserting exact diagnostic payloads and stable codes.
+- Updated `prd.json` to mark `US-002` as passing.
+- Files changed: `prd.json`, `progress.txt`, `src/intent_alignment/contract.rs`, `src/intent_alignment/mod.rs`, `tests/intent_alignment_contract.rs`
+- **Learnings for future iterations:**
+  - Contract validation should reject graph contradictions in `contract_core` before any IR-view compilation; later stages should consume a semantically closed contract, not repair one.
+  - Keep intent-contract diagnostics deterministic by sorting and asserting `(code, subject, detail)` tuples in tests; that keeps future comparator stories from depending on ad-hoc error text.
+  - Reachability is evaluated against `cycle_start_milestone` and `cycle_complete_milestone`, so detached milestones belong in validation failures rather than comparator mismatch logic.
 ---

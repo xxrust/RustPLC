@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::{collections::BTreeSet, fmt};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -163,6 +164,77 @@ impl IntentContract {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentContractDiagnosticCode {
+    ConflictingRequiredEdges,
+    UnreachableMilestone,
+    ContradictoryCycleSemantics,
+}
+
+impl IntentContractDiagnosticCode {
+    pub fn stable_code(self) -> &'static str {
+        match self {
+            Self::ConflictingRequiredEdges => "IAC-VAL-001",
+            Self::UnreachableMilestone => "IAC-VAL-002",
+            Self::ContradictoryCycleSemantics => "IAC-VAL-003",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntentContractDiagnostic {
+    pub code: IntentContractDiagnosticCode,
+    pub subject: String,
+    pub detail: String,
+}
+
+impl IntentContractDiagnostic {
+    fn new(
+        code: IntentContractDiagnosticCode,
+        subject: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            code,
+            subject: subject.into(),
+            detail: detail.into(),
+        }
+    }
+
+    pub fn stable_code(&self) -> &'static str {
+        self.code.stable_code()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntentContractValidationError {
+    pub diagnostics: Vec<IntentContractDiagnostic>,
+}
+
+impl fmt::Display for IntentContractValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "intent contract validation failed with {} diagnostic(s)",
+            self.diagnostics.len()
+        )?;
+        for diagnostic in &self.diagnostics {
+            writeln!(
+                f,
+                "- {} {}: {}",
+                diagnostic.stable_code(),
+                diagnostic.subject,
+                diagnostic.detail
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for IntentContractValidationError {}
+
 #[derive(Debug, Error)]
 pub enum IntentContractLoadError {
     #[error("failed to read intent contract from {path}: {source}")]
@@ -233,6 +305,46 @@ pub fn read_intent_contract(
         path: path.display().to_string(),
         source,
     })
+}
+
+pub fn validate_intent_contract(
+    contract: &IntentContract,
+) -> Result<(), IntentContractValidationError> {
+    let milestone_ids: BTreeSet<&str> = contract
+        .contract_core
+        .expected_milestones
+        .iter()
+        .map(|milestone| milestone.milestone_id.as_str())
+        .collect();
+    let postcondition_ids: BTreeSet<&str> = contract
+        .contract_core
+        .postconditions
+        .iter()
+        .map(|postcondition| postcondition.postcondition_id.as_str())
+        .collect();
+    let mut diagnostics = Vec::new();
+
+    validate_cycle_semantics(
+        contract,
+        &milestone_ids,
+        &postcondition_ids,
+        &mut diagnostics,
+    );
+    validate_required_edges(contract, &milestone_ids, &mut diagnostics);
+    validate_milestone_reachability(contract, &milestone_ids, &mut diagnostics);
+
+    if diagnostics.is_empty() {
+        return Ok(());
+    }
+
+    diagnostics.sort_by(|left, right| {
+        left.code
+            .cmp(&right.code)
+            .then_with(|| left.subject.cmp(&right.subject))
+            .then_with(|| left.detail.cmp(&right.detail))
+    });
+    diagnostics.dedup();
+    Err(IntentContractValidationError { diagnostics })
 }
 
 pub fn verify_intent_contract_source_binding(
@@ -312,6 +424,242 @@ fn sha256_hex(path: &Path) -> Result<String, std::io::Error> {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     Ok(hex::encode(hasher.finalize()))
+}
+
+fn validate_cycle_semantics(
+    contract: &IntentContract,
+    milestone_ids: &BTreeSet<&str>,
+    postcondition_ids: &BTreeSet<&str>,
+    diagnostics: &mut Vec<IntentContractDiagnostic>,
+) {
+    let cycle = &contract.contract_core.cycle_semantics;
+    let restart = &cycle.restart_semantics;
+
+    if !milestone_ids.contains(cycle.cycle_start_milestone.as_str()) {
+        diagnostics.push(IntentContractDiagnostic::new(
+            IntentContractDiagnosticCode::ContradictoryCycleSemantics,
+            "cycle_semantics.cycle_start_milestone",
+            format!(
+                "references unknown milestone `{}`",
+                cycle.cycle_start_milestone
+            ),
+        ));
+    }
+
+    if !milestone_ids.contains(cycle.cycle_complete_milestone.as_str()) {
+        diagnostics.push(IntentContractDiagnostic::new(
+            IntentContractDiagnosticCode::ContradictoryCycleSemantics,
+            "cycle_semantics.cycle_complete_milestone",
+            format!(
+                "references unknown milestone `{}`",
+                cycle.cycle_complete_milestone
+            ),
+        ));
+    }
+
+    if !milestone_ids.contains(restart.restartable_milestone.as_str()) {
+        diagnostics.push(IntentContractDiagnostic::new(
+            IntentContractDiagnosticCode::ContradictoryCycleSemantics,
+            "cycle_semantics.restart_semantics.restartable_milestone",
+            format!(
+                "references unknown milestone `{}`",
+                restart.restartable_milestone
+            ),
+        ));
+    }
+
+    if !milestone_ids.contains(restart.next_cycle_start_milestone.as_str()) {
+        diagnostics.push(IntentContractDiagnostic::new(
+            IntentContractDiagnosticCode::ContradictoryCycleSemantics,
+            "cycle_semantics.restart_semantics.next_cycle_start_milestone",
+            format!(
+                "references unknown milestone `{}`",
+                restart.next_cycle_start_milestone
+            ),
+        ));
+    }
+
+    if restart.restartable_milestone != cycle.cycle_complete_milestone {
+        diagnostics.push(IntentContractDiagnostic::new(
+            IntentContractDiagnosticCode::ContradictoryCycleSemantics,
+            "cycle_semantics.restart_semantics.restartable_milestone",
+            format!(
+                "must match cycle_complete_milestone `{}`",
+                cycle.cycle_complete_milestone
+            ),
+        ));
+    }
+
+    if restart.next_cycle_start_milestone != cycle.cycle_start_milestone {
+        diagnostics.push(IntentContractDiagnostic::new(
+            IntentContractDiagnosticCode::ContradictoryCycleSemantics,
+            "cycle_semantics.restart_semantics.next_cycle_start_milestone",
+            format!(
+                "must match cycle_start_milestone `{}`",
+                cycle.cycle_start_milestone
+            ),
+        ));
+    }
+
+    for postcondition_id in &restart.required_postconditions {
+        if !postcondition_ids.contains(postcondition_id.as_str()) {
+            diagnostics.push(IntentContractDiagnostic::new(
+                IntentContractDiagnosticCode::ContradictoryCycleSemantics,
+                "cycle_semantics.restart_semantics.required_postconditions",
+                format!("references unknown postcondition `{}`", postcondition_id),
+            ));
+        }
+    }
+}
+
+fn validate_required_edges(
+    contract: &IntentContract,
+    milestone_ids: &BTreeSet<&str>,
+    diagnostics: &mut Vec<IntentContractDiagnostic>,
+) {
+    let mut visiting = BTreeSet::new();
+    let mut visited = BTreeSet::new();
+
+    for milestone_id in milestone_ids {
+        detect_required_edge_cycle(
+            contract,
+            milestone_id,
+            milestone_ids,
+            &mut visiting,
+            &mut visited,
+            diagnostics,
+        );
+    }
+}
+
+fn detect_required_edge_cycle<'a>(
+    contract: &'a IntentContract,
+    current: &'a str,
+    milestone_ids: &BTreeSet<&'a str>,
+    visiting: &mut BTreeSet<&'a str>,
+    visited: &mut BTreeSet<&'a str>,
+    diagnostics: &mut Vec<IntentContractDiagnostic>,
+) {
+    if visited.contains(current) {
+        return;
+    }
+
+    visiting.insert(current);
+    for edge in contract
+        .contract_core
+        .required_edges
+        .iter()
+        .filter(|edge| edge.predecessor == current)
+    {
+        let successor = edge.successor.as_str();
+        if !milestone_ids.contains(successor) {
+            continue;
+        }
+
+        if visiting.contains(successor) {
+            diagnostics.push(IntentContractDiagnostic::new(
+                IntentContractDiagnosticCode::ConflictingRequiredEdges,
+                format!("{} -> {}", edge.predecessor, edge.successor),
+                "required edges create a cycle, so milestone ordering is contradictory",
+            ));
+            continue;
+        }
+
+        detect_required_edge_cycle(
+            contract,
+            successor,
+            milestone_ids,
+            visiting,
+            visited,
+            diagnostics,
+        );
+    }
+
+    visiting.remove(current);
+    visited.insert(current);
+}
+
+fn validate_milestone_reachability(
+    contract: &IntentContract,
+    milestone_ids: &BTreeSet<&str>,
+    diagnostics: &mut Vec<IntentContractDiagnostic>,
+) {
+    let cycle = &contract.contract_core.cycle_semantics;
+    let cycle_start = cycle.cycle_start_milestone.as_str();
+    let cycle_complete = cycle.cycle_complete_milestone.as_str();
+    if !milestone_ids.contains(cycle_start) || !milestone_ids.contains(cycle_complete) {
+        return;
+    }
+
+    let reachable_from_start = collect_reachable_milestones(
+        contract,
+        milestone_ids,
+        cycle_start,
+        |edge, current| edge.predecessor == current,
+        |edge| edge.successor.as_str(),
+    );
+    let reachable_to_complete = collect_reachable_milestones(
+        contract,
+        milestone_ids,
+        cycle_complete,
+        |edge, current| edge.successor == current,
+        |edge| edge.predecessor.as_str(),
+    );
+
+    for milestone_id in milestone_ids {
+        if !reachable_from_start.contains(milestone_id) {
+            diagnostics.push(IntentContractDiagnostic::new(
+                IntentContractDiagnosticCode::UnreachableMilestone,
+                *milestone_id,
+                format!(
+                    "is not reachable from cycle_start_milestone `{}` through required_edges",
+                    cycle_start
+                ),
+            ));
+        } else if !reachable_to_complete.contains(milestone_id) {
+            diagnostics.push(IntentContractDiagnostic::new(
+                IntentContractDiagnosticCode::UnreachableMilestone,
+                *milestone_id,
+                format!(
+                    "cannot reach cycle_complete_milestone `{}` through required_edges",
+                    cycle_complete
+                ),
+            ));
+        }
+    }
+}
+
+fn collect_reachable_milestones<'a, Filter, Next>(
+    contract: &'a IntentContract,
+    milestone_ids: &BTreeSet<&'a str>,
+    start: &'a str,
+    edge_matches: Filter,
+    next_milestone: Next,
+) -> BTreeSet<&'a str>
+where
+    Filter: Fn(&RequiredMilestoneEdge, &str) -> bool,
+    Next: Fn(&'a RequiredMilestoneEdge) -> &'a str,
+{
+    let mut frontier = vec![start];
+    let mut visited = BTreeSet::new();
+
+    while let Some(current) = frontier.pop() {
+        if !visited.insert(current) {
+            continue;
+        }
+
+        for edge in &contract.contract_core.required_edges {
+            if !edge_matches(edge, current) {
+                continue;
+            }
+            let next = next_milestone(edge);
+            if milestone_ids.contains(next) && !visited.contains(next) {
+                frontier.push(next);
+            }
+        }
+    }
+
+    visited
 }
 
 #[cfg(test)]

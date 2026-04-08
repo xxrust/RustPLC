@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
 use rust_plc::intent_alignment::{
-    IntentContractLoadError, MilestoneEvidenceSource, ObservationCombination, ObservationSubject,
-    parse_intent_contract_str, read_intent_contract, verify_intent_contract_source_binding,
+    BusinessMilestone, IntentContractDiagnostic, IntentContractDiagnosticCode,
+    IntentContractLoadError, IntentMilestone, MilestoneEvidenceSource, ObservationCombination,
+    ObservationSubject, parse_intent_contract_str, read_intent_contract, validate_intent_contract,
+    verify_intent_contract_source_binding,
 };
 
 fn workspace_path(relative: &str) -> PathBuf {
@@ -186,4 +188,99 @@ fn strict_schema_rejects_unknown_fields() {
         }
         other => panic!("expected JSON parse error, got {other:?}"),
     }
+}
+
+#[test]
+fn semantic_validation_accepts_canonical_contract_fixture() {
+    let fixture =
+        workspace_path("tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json");
+    let contract = read_intent_contract(&fixture).expect("fixture should load");
+
+    validate_intent_contract(&contract).expect("fixture should be semantically valid");
+}
+
+#[test]
+fn semantic_validation_rejects_conflicting_required_edges_with_stable_diagnostic() {
+    let fixture =
+        workspace_path("tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json");
+    let mut contract = read_intent_contract(&fixture).expect("fixture should load");
+    contract
+        .contract_core
+        .required_edges
+        .push(rust_plc::intent_alignment::RequiredMilestoneEdge {
+            predecessor: "grip_part_secured".to_string(),
+            successor: "cycle_started".to_string(),
+        });
+
+    let error =
+        validate_intent_contract(&contract).expect_err("conflicting required edges should fail");
+
+    assert_eq!(
+        error.diagnostics,
+        vec![IntentContractDiagnostic {
+            code: IntentContractDiagnosticCode::ConflictingRequiredEdges,
+            subject: "grip_part_secured -> cycle_started".to_string(),
+            detail: "required edges create a cycle, so milestone ordering is contradictory"
+                .to_string(),
+        }]
+    );
+    assert_eq!(error.diagnostics[0].stable_code(), "IAC-VAL-001");
+}
+
+#[test]
+fn semantic_validation_rejects_unreachable_milestones_with_stable_diagnostic() {
+    let fixture =
+        workspace_path("tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json");
+    let mut contract = read_intent_contract(&fixture).expect("fixture should load");
+    contract
+        .contract_core
+        .expected_milestones
+        .push(IntentMilestone {
+            milestone_id: "quality_checked".to_string(),
+            business_milestone: BusinessMilestone {
+                label: "Quality check completed".to_string(),
+                description: "Detached milestone that should be rejected by validation."
+                    .to_string(),
+            },
+        });
+
+    let error = validate_intent_contract(&contract)
+        .expect_err("unreachable milestones should fail semantic validation");
+
+    assert_eq!(
+        error.diagnostics,
+        vec![IntentContractDiagnostic {
+            code: IntentContractDiagnosticCode::UnreachableMilestone,
+            subject: "quality_checked".to_string(),
+            detail:
+                "is not reachable from cycle_start_milestone `cycle_started` through required_edges"
+                    .to_string(),
+        }]
+    );
+    assert_eq!(error.diagnostics[0].stable_code(), "IAC-VAL-002");
+}
+
+#[test]
+fn semantic_validation_rejects_contradictory_cycle_restart_constraints() {
+    let fixture =
+        workspace_path("tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json");
+    let mut contract = read_intent_contract(&fixture).expect("fixture should load");
+    contract
+        .contract_core
+        .cycle_semantics
+        .restart_semantics
+        .next_cycle_start_milestone = "grip_part_secured".to_string();
+
+    let error = validate_intent_contract(&contract)
+        .expect_err("contradictory restart semantics should fail semantic validation");
+
+    assert_eq!(
+        error.diagnostics,
+        vec![IntentContractDiagnostic {
+            code: IntentContractDiagnosticCode::ContradictoryCycleSemantics,
+            subject: "cycle_semantics.restart_semantics.next_cycle_start_milestone".to_string(),
+            detail: "must match cycle_start_milestone `cycle_started`".to_string(),
+        }]
+    );
+    assert_eq!(error.diagnostics[0].stable_code(), "IAC-VAL-003");
 }

@@ -37,7 +37,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-001. Implementation anchor: src/intent_alignment/contract.rs, tests/intent_alignment_contract.rs. 这是 contract 链路的第 2 步，只负责 semantic validation 与 diagnostics。"
     },
     {
