@@ -1,6 +1,6 @@
 use crate::cli_support::common::{DispatchResult, display_path_relative_to_cwd};
 use crate::cli_support::help::command_usage;
-use crate::cli_support::plc_pipeline::compile_plc_to_runtime_program;
+use crate::cli_support::plc_pipeline::compile_loaded_plc_to_runtime_program;
 use crate::cli_support::runtime_probe::io_sizes_for_program_and_scenario;
 use crate::cli_support::scenario_yaml::{
     format_resolve_scenario_yaml_error, parse_scenario_yaml, read_scenario_yaml_file,
@@ -1815,7 +1815,7 @@ fn run_sim_plc_subcommand(
         write_online_variable_audit(path, &variable_audit)?;
     }
 
-    let program = compile_plc_to_runtime_program(&loaded.source, scenario.tick_ms)?;
+    let program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
 
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
@@ -2042,7 +2042,7 @@ model:\n\
     })?;
     let scenario = sim::PidControlScenario::from_yaml_str(&scenario_yaml)
         .map_err(|err| format!("Failed to parse PID scenario YAML: {err}\n\n{pid_example}"))?;
-    let runtime_program = compile_plc_to_runtime_program(&loaded.source, scenario.tick_ms)?;
+    let runtime_program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
     let report = sim::run_pid_kpi(&runtime_program, &scenario)
         .map_err(|err| format!("Failed to run PID KPI simulation: {err}"))?;
 

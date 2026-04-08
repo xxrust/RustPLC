@@ -1,5 +1,36 @@
 # plc-gen Project Layout
 
+## Complex project layout: target-semantics fragments
+
+For a multi-mode, multi-task, multi-domain project, prefer organizing source files by semantic boundary rather than pushing everything into one `main.plc`.
+
+Recommended directories:
+- `topology/`
+- `constraints/`
+- `architecture/`
+- `auto/`
+- `maintenance/`
+- `manual/`
+- `operator_interface/`
+
+Concrete reference:
+- `out/skill_flywheel/plc_gen_wafer_loader/plc/target_semantics_fragments`
+
+Why this layout matters:
+- It splits by semantic ownership rather than by writing order.
+- It is easier to implement in parallel.
+- It is easier to review and regression-test.
+- It prevents the generated project from collapsing into a spaghetti PLC early.
+
+Scaffold hook:
+- For new complex projects, prefer `rust_plc new <project_dir> --layout structured-fragments`.
+- That command creates `plc/main.target_semantics.bundle.toml` plus a starter `plc/target_semantics_fragments/` tree so the skill can fill semantics instead of inventing the filesystem shape ad hoc.
+- Do not treat that bundle entry as the entire authored source set; reference-quality layouts also preserve sidecar domains like `io/`, `manual/`, `operator_interface/`, `optimization/`, `step/`, and dedicated maintenance/workpiece files even when they are not part of the main compileable bundle.
+
+Important exception for workpiece flow:
+- if the main automatic flow picks, transfers, or finishes a physical part, `topology/workpieces.plcfrag` belongs to the compileable bundle rather than remaining a comment-only sidecar
+- the sidecar-vs-bundle split is only valid when the workpiece fragment is authored context that the active compiled tasks do not yet consume
+
 本文告诉 skill：对一个 RustPLC 项目，先让用户看哪些文件，后看哪些文件。
 
 ## scaffold 默认布局

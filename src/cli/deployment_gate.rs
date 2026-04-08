@@ -112,7 +112,7 @@
         ));
     }
 
-    let program = compile_plc_to_runtime_program(&loaded.source, sil_scenario.tick_ms)?;
+    let program = compile_loaded_plc_to_runtime_program(&loaded, sil_scenario.tick_ms)?;
 
     let sil_trace_path = out_dir.join("sil_trace.jsonl");
     let (num_di, num_do, num_ai, num_ao) =

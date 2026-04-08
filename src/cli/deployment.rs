@@ -1,11 +1,11 @@
-﻿use crate::cli::shared::compile_pipeline::{
+use crate::cli::shared::compile_pipeline::{
     RuntimeBudgetSummary, compile_pipeline, write_verification_report,
 };
 use crate::cli_support::common::{CliOutputMode, DispatchResult, display_path_relative_to_cwd};
 use crate::cli_support::diagnostics_common::evidence_source_label;
 use crate::cli_support::help::command_usage;
 use crate::cli_support::plc_pipeline::{
-    compile_plc_to_runtime_program, format_loaded_plc_errors,
+    compile_loaded_plc_to_runtime_program, format_loaded_plc_errors,
     parse_loaded_plc_with_required_purpose,
 };
 use crate::cli_support::runtime_probe::{io_sizes_for_program_and_scenario, is_halted};

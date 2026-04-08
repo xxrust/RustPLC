@@ -1,5 +1,37 @@
 # plc-gen Workflow
 
+## Complex project default: target-semantics fragments
+
+For a system contract with multiple domains such as auto production flow, maintenance flow, manual flow, operator interface, supervision, topology, and constraints, prefer a structured fragment layout instead of a monolithic single-file PLC.
+
+Reference shape:
+- `topology/`
+- `constraints/`
+- `architecture/`
+- `auto/`
+- `maintenance/`
+- `manual/`
+- `operator_interface/`
+
+Use `out/skill_flywheel/plc_gen_wafer_loader/plc/target_semantics_fragments` as the concrete reference example.
+
+Decision rule:
+- If the system contract naturally decomposes into stable semantic slices, default to structured fragments.
+- If the user only asked for a tiny repair or the existing source boundary is intentionally single-file, keep the single-file path.
+- Do not generate a spaghetti PLC just because scaffold created `plc/main.plc`; scaffold default entry is not a reason to collapse source structure.
+
+Execution rule for new complex projects:
+- Start with `rust_plc new <project_dir> --layout structured-fragments` when the goal is a multi-domain or long-lived project.
+- Treat the generated `plc/main.target_semantics.bundle.toml` as the authored source entry.
+- Fill the generated `plc/target_semantics_fragments/` tree instead of hand-inventing a new fragment layout every turn.
+- Preserve the difference between the main compileable bundle and non-bundled semantic sidecars such as `io/`, `manual/`, `operator_interface/`, `optimization/`, `step/`, dedicated maintenance self-check files, or workpiece-contract fragments.
+- If the project needs a focused validation surface such as a dedicated maintenance self-check flow, prefer a second bundle entry instead of overloading the main automatic bundle.
+
+Workpiece-specific rule:
+- If the system contract contains real part flow, `topology/workpieces.plcfrag` is not merely a documentation sidecar.
+- When automatic tasks use that part flow, the main bundle must include the workpiece fragment and the task fragments must carry matching `effect:` statements.
+- A bundle that omits the workpiece fragment can still compile today if no workpiece context is present, but that is a generator miss, not a valid semantic equivalence.
+
 本文回答三个问题：
 
 1. 什么时候走 scaffold 项目
@@ -120,6 +152,10 @@ cargo run --release --bin rust_plc -- project-check out/my_plc_project/plc/main.
 
 ## 7. 只问真正改变结构的阻塞项
 
+- 控制器是走 `model_ref` profile 还是错误地在业务 DSL 里内联 ports
+- 现场 I/O 是建成语义设备并 relation 到 `plc_main.<port>`，还是退化成原始 `digital_input` / `digital_output`
+- mode / manual / maintenance / HMI 命令是已有语义输入设备，还是被错误降级成 raw signal device
+
 以下属于会改变 DSL source shape 或结构的关键问题：
 - task 划分
 - 采用单文件还是 bundle
@@ -138,6 +174,15 @@ cargo run --release --bin rust_plc -- project-check out/my_plc_project/plc/main.
 ## 8. 验证门槛
 
 `plc-gen` 交付不是“生成完就结束”。
+
+在项目级验证链之前，先做一次 controller / IO preflight：
+
+- controller 是否走 `model_ref`
+- 是否出现 inline `ports: [...]`
+- 是否把 controller channel 退化成业务 `digital_input` / `digital_output` device
+- 现场设备与 `plc_main.<port>` 的 relation 是否可解释
+
+如果这一步已经命中 `SEM-108` 或 `SCN-MAP-010`，直接记为 `failed validation`，不要继续把注意力放在 scenario、ST 导出或回复文案润色上。
 
 项目级最小推荐验证：
 - `project-check`

@@ -10,6 +10,7 @@ plc = "plc/main.plc"
 scenario = "scenarios/nominal/normal.yaml"
 io_map = "config/io_map.toml"
 retain = "config/retain.toml"
+workpiece = "config/workpiece.toml"
 
 [out]
 ir = "out/ir"

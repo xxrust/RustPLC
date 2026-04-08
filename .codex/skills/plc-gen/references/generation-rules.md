@@ -1,5 +1,86 @@
 # plc-gen Generation Rules
 
+## Mandatory example: topology-closed cylinder actions
+
+Do not generate this for a topology-closed cylinder:
+
+```plc
+step feed_forward:
+    action: extend cyl_feed
+    wait: sensor_feed_ext == true
+    timeout: 800ms -> goto feed_warning.feed_cyl_warn
+```
+
+Do not generate this either:
+
+```plc
+step orient_home:
+    action: retract cyl_orient_rotate
+    wait: sensor_orient_ret == true
+```
+
+Generate this shape instead:
+
+```plc
+step feed_forward:
+    action: extend cyl_feed
+        timeout: 800ms -> goto feed_warning.feed_cyl_warn
+```
+
+```plc
+step orient_home:
+    action: retract cyl_orient_rotate
+        timeout: 600ms -> goto orient_warning.orient_cyl_warn
+```
+
+Interpretation rule:
+- If `sensor_*` is already connected from `cyl_x.extended` or `cyl_x.retracted` through `via: detects`, that feedback belongs to the device semantics layer.
+- The generated task may route timeout or explicit fault buckets, but it must not restate the normal confirmation loop as `wait: sensor_* == true`.
+- If the generated lowering still seems to require hand-written sensor waits for the normal endpoint, stop and report a blocker instead of downgrading the actuator semantics.
+
+## Source-set structure rule
+
+For complex projects, prefer a structured fragment layout over a monolithic PLC file.
+
+Use semantic domains as the split boundary:
+- `topology/`
+- `constraints/`
+- `architecture/`
+- `auto/`
+- `maintenance/`
+- `manual/`
+- `operator_interface/`
+
+Reference example:
+- `out/skill_flywheel/plc_gen_wafer_loader/plc/target_semantics_fragments`
+
+Do not split by arbitrary line count or by temporary implementation convenience.
+Do split by stable ownership and semantic responsibility so the project is suitable for parallel implementation and later review.
+
+## Workpiece rule for physical part flow
+
+If the system contract describes a real physical part moving through the station, do not leave that flow implicit in sensors and actuators only.
+
+Treat the following as a mandatory signal that first-class workpiece modeling is required:
+- one station picks a part from another location
+- a holder or nozzle temporarily owns the part
+- the part is handed to the next machine
+- the part can be rejected, unloaded, scrapped, or otherwise reach an explicit terminal outcome
+
+Minimum delivery requirements:
+- declare a `workpiece_type`
+- declare the participating `workpiece_location` / `workpiece_holder` / `workpiece_carrier`
+- include the workpiece fragment in the main compileable bundle if the automatic flow depends on it
+- place `effect: acquire`, `effect: transfer`, and `effect: finish` on the real task steps that change ownership or terminal status
+
+Do not stop at a placeholder like:
+
+```plc
+# Sidecar workpiece-contract area.
+```
+
+That may still compile today, but it is structurally under-modeled because the compiler only activates workpiece semantic and safety checks when workpiece declarations or effects are actually present.
+
 本文件记录生成 `.plc` 时不能偏离的硬约束。
 
 ## 1. task / step 基本约束
@@ -50,12 +131,25 @@
 
 ## 6. topology / device 质量
 
+- `plc` controller 优先使用 `model_ref` profile，而不是在业务 DSL 里内联 `ports: [...]`
+- 复杂项目里，如果 `X0` / `Y0` 这类名字只是控制器通道，不要直接把它们建成 `digital_input` / `digital_output` 设备
+- `device` 只用于真实硬件对象；不要把 mode bit、manual jog bit、vacuum command bit、alias signal 之类的名字直接建成 `device`
+- 操作员按钮、模式选择开关、点动请求优先建模成语义输入设备，例如 `sensor` + `push_button` / `selector_switch`
+- 优先把现场对象建模成 `sensor`、`solenoid_valve`、`lamp`、`motor`、`cylinder` 等语义设备，再用 `relation { from, to, via }` 接到 `plc_main.<port>`
+- 如果 system contract 只给了原始 I/O 名称，把它们当 mapping hint，而不是最终业务 topology
+- 一旦出现 `SEM-108` 或 `SCN-MAP-010`，先重写 controller / IO topology，再继续修 task 或 scenario
+
 优先保证：
 - 每个 device 都有非空 `purpose`
 - 用显式 `relation { from, to, via }`
 - 端口声明与 relation 真实闭合
 - `requires` 用于依赖约束
 - `conflicts_with` 只用于真实状态冲突
+
+对 scaffold 或复杂项目，把下面模式视为硬失败：
+- controller 内联 `ports: [...]`
+- 大量 `device <name>: digital_input`
+- 大量 `device <name>: digital_output`
 
 不要用 `conflicts_with` 表达执行顺序。
 

@@ -33,7 +33,7 @@
         })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
-    let program = compile_plc_to_runtime_program(&loaded.source, scenario.tick_ms)?;
+    let program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
 
     let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
@@ -275,7 +275,7 @@ fn run_virtual_board_subcommand(
         })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
-    let program = compile_plc_to_runtime_program(&loaded.source, scenario.tick_ms)?;
+    let program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
     write_virtual_board_artifacts(
         Path::new(&plc_path),
         &scenario_path,

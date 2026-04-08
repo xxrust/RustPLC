@@ -1,6 +1,6 @@
 use crate::cli_support::common::{CliOutputMode, DispatchResult, display_path_relative_to_cwd};
 use crate::cli_support::help::command_usage;
-use crate::cli_support::plc_pipeline::compile_plc_to_runtime_program;
+use crate::cli_support::plc_pipeline::compile_loaded_plc_to_runtime_program;
 use crate::cli_support::runtime_probe::{io_sizes_for_program_and_scenario, is_halted};
 use crate::cli_support::scenario_init::{
     ScenarioInitInputHints, ScenarioInitPreset, aliases_contain_keyword,
@@ -84,9 +84,9 @@ pub(crate) fn run_scenario_init_subcommand(
     }
 
     let plc_path = PathBuf::from(plc_path);
-    let plc_source = load_plc_source(&plc_path)
-        .map_err(|err| format!("Failed to load {}: {err}", plc_path.display()))?
-        .source;
+    let loaded = load_plc_source(&plc_path)
+        .map_err(|err| format!("Failed to load {}: {err}", plc_path.display()))?;
+    let plc_source = loaded.source.clone();
 
     let out_path = out_path.unwrap_or_else(|| default_scenario_init_out_path(&plc_path));
     if let Some(parent) = out_path.parent() {
@@ -154,9 +154,9 @@ pub(crate) fn run_scenario_validate_subcommand(
     };
 
     let plc_path = PathBuf::from(plc_path);
-    let plc_source = load_plc_source(&plc_path)
-        .map_err(|err| format!("Failed to load {}: {err}", plc_path.display()))?
-        .source;
+    let loaded = load_plc_source(&plc_path)
+        .map_err(|err| format!("Failed to load {}: {err}", plc_path.display()))?;
+    let plc_source = loaded.source.clone();
 
     let raw_scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
     let scenario_yaml =
@@ -202,7 +202,7 @@ pub(crate) fn run_scenario_validate_subcommand(
         .any(|f| f.severity == ScenarioValidateSeverity::Error);
 
     if !has_error {
-        let runtime_program = compile_plc_to_runtime_program(&plc_source, scenario.tick_ms)
+        let runtime_program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)
             .map_err(|e| {
                 format!("scenario-validate: failed to compile PLC to runtime program: {e}")
             })?;

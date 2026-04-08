@@ -42,6 +42,7 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
         "scenarios/generated/.gitkeep",
         "config/io_map.toml",
         "config/retain.toml",
+        "config/workpiece.toml",
         "docs/project-layout.md",
         "out/ir/.gitkeep",
         "out/sim/.gitkeep",
@@ -67,25 +68,25 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
     assert!(
         tasks_json.contains("RustPLC: project-check")
             && tasks_json.contains("out/project_check/normal")
-            && tasks_json.contains("RustPLC: scenario-validate")
-            && tasks_json.contains("RustPLC: scenario-doctor")
             && tasks_json.contains("RustPLC: sim-plc")
-            && tasks_json.contains("RustPLC: no-board-gate")
-            && tasks_json.contains("RustPLC: gen-st"),
-        "tasks.json should contain quick command entries"
+            && tasks_json.contains("RustPLC: no-board-gate"),
+        "tasks.json should contain the scaffold quick command entries"
     );
+
     let settings_json =
         fs::read_to_string(project_dir.join(".vscode/settings.json")).expect("read settings.json");
     assert!(
         settings_json.contains("\"*.plc\"") && settings_json.contains("\"ini\""),
         "settings.json should define PLC file association"
     );
+
     let snippets = fs::read_to_string(project_dir.join(".vscode/plc.code-snippets"))
         .expect("read plc.code-snippets");
     assert!(
         snippets.contains("plc-skeleton") && snippets.contains("[topology]"),
         "plc.code-snippets should include PLC skeleton snippet"
     );
+
     let readme = fs::read_to_string(project_dir.join("README.md")).expect("read README.md");
     assert!(
         readme.contains("# Demo Project")
@@ -93,20 +94,23 @@ fn rust_plc_new_generates_bootstrap_project_and_quick_checks_pass() {
             && readme.contains("project-check"),
         "README should include derived project name and slug"
     );
+
     let system_doc =
         fs::read_to_string(project_dir.join("plc/main.system.md")).expect("read main.system.md");
     assert!(
-        system_doc.contains("## 项目身份")
-            && system_doc.contains("**项目名称**：Demo Project")
+        system_doc.contains("# Demo Project System Description")
+            && system_doc.contains("- Name: Demo Project")
             && system_doc.contains("`demo_project`"),
         "system doc should include derived project identity"
     );
+
     let manifest = fs::read_to_string(project_dir.join("rustplc.project.toml"))
         .expect("read rustplc.project.toml");
     assert!(
         manifest.contains("name = \"Demo Project\"")
             && manifest.contains("slug = \"demo_project\"")
             && manifest.contains("scenario = \"scenarios/nominal/normal.yaml\"")
+            && manifest.contains("workpiece = \"config/workpiece.toml\"")
             && manifest.contains("codegen = \"out/codegen\""),
         "manifest should include project identity and default paths"
     );

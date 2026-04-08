@@ -1,15 +1,13 @@
 use runtime_core::MAX_TRANSITIONS_PER_TASK_PER_TICK;
 use rust_plc::error::PlcError;
 use rust_plc::ir::{ConstraintSet, StateMachine, TimingModel, TopologyGraph};
-use rust_plc::parser::parse_plc;
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
     preprocess_program_with_library,
 };
 use rust_plc::source_bundle::{LoadedPlcSource, remap_plc_error};
 use rust_plc::topology_semantic_gate::{
-    collect_topology_deprecation_warnings, validate_device_purpose_required,
-    validate_removed_legacy_io_model, validate_topology_semantics,
+    collect_topology_deprecation_warnings, validate_topology_semantics,
 };
 use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
 use serde::{Deserialize, Serialize};
@@ -170,15 +168,12 @@ impl Default for RuntimeBudgetThresholds {
 }
 
 pub(in crate::cli) fn compile_pipeline(input: &LoadedPlcSource) -> Result<IrBundle, Vec<String>> {
-    let program = parse_plc(&input.source)
-        .map_err(|err| vec![remap_plc_error(err, &input.source_map).to_string()])?;
+    let program =
+        crate::cli_support::plc_pipeline::parse_loaded_plc_with_required_purpose(input)
+            .map_err(|err| vec![err])?;
     for warning in collect_topology_deprecation_warnings(&program.topology) {
         eprintln!("WARNING [deprecation] {warning}");
     }
-    validate_removed_legacy_io_model(&program.topology)
-        .map_err(|gate_error| vec![format_topology_gate_error(gate_error, input)])?;
-    validate_device_purpose_required(&program.topology)
-        .map_err(|gate_error| vec![format_topology_gate_error(gate_error, input)])?;
 
     let devices_dir = Path::new("devices");
     let device_library = match rust_plc::device_library::DeviceLibrary::load(devices_dir) {
