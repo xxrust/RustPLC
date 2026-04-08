@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
 use rust_plc::intent_alignment::{
-    BusinessMilestone, IntentContractDiagnostic, IntentContractDiagnosticCode,
+    BusinessMilestone, ExpectedBehaviorCompileError, ExpectedBehaviorIrPrimitiveKind,
+    ExpectedMilestoneSemanticRole, IntentContractDiagnostic, IntentContractDiagnosticCode,
     IntentContractLoadError, IntentMilestone, MilestoneEvidenceSource, ObservationCombination,
-    ObservationSubject, parse_intent_contract_str, read_intent_contract, validate_intent_contract,
-    verify_intent_contract_source_binding,
+    ObservationSubject, compile_expected_behavior_spec, parse_intent_contract_str,
+    read_intent_contract, validate_intent_contract, verify_intent_contract_source_binding,
 };
 
 fn workspace_path(relative: &str) -> PathBuf {
@@ -283,4 +284,164 @@ fn semantic_validation_rejects_contradictory_cycle_restart_constraints() {
         }]
     );
     assert_eq!(error.diagnostics[0].stable_code(), "IAC-VAL-003");
+}
+
+#[test]
+fn compile_expected_behavior_spec_preserves_contract_core_and_observation_bindings() {
+    let fixture =
+        workspace_path("tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json");
+    let contract = read_intent_contract(&fixture).expect("fixture should load");
+
+    let spec = compile_expected_behavior_spec(&contract).expect("valid contract should compile");
+
+    assert_eq!(spec.contract_id, contract.metadata.contract_id);
+    assert_eq!(spec.contract_version, contract.contract_version);
+    assert_eq!(
+        spec.expected_milestones,
+        contract.contract_core.expected_milestones
+    );
+    assert_eq!(spec.required_edges, contract.contract_core.required_edges);
+    assert_eq!(spec.postconditions, contract.contract_core.postconditions);
+    assert_eq!(spec.observation_bindings, contract.observation_bindings);
+    assert_eq!(
+        spec.cycle_semantics.cycle_start_milestone,
+        contract.contract_core.cycle_semantics.cycle_start_milestone
+    );
+    assert_eq!(
+        spec.cycle_semantics.cycle_complete_milestone,
+        contract
+            .contract_core
+            .cycle_semantics
+            .cycle_complete_milestone
+    );
+    assert_eq!(
+        spec.cycle_semantics.restartability.restartable_milestone,
+        contract
+            .contract_core
+            .cycle_semantics
+            .restart_semantics
+            .restartable_milestone
+    );
+    assert_eq!(
+        spec.cycle_semantics
+            .restartability
+            .next_cycle_start_milestone,
+        contract
+            .contract_core
+            .cycle_semantics
+            .restart_semantics
+            .next_cycle_start_milestone
+    );
+    assert_eq!(
+        spec.cycle_semantics.restartability.required_postconditions,
+        contract
+            .contract_core
+            .cycle_semantics
+            .restart_semantics
+            .required_postconditions
+    );
+}
+
+#[test]
+fn compile_expected_behavior_spec_emits_stable_ir_semantic_view() {
+    let fixture =
+        workspace_path("tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json");
+    let contract = read_intent_contract(&fixture).expect("fixture should load");
+
+    let spec = compile_expected_behavior_spec(&contract).expect("valid contract should compile");
+
+    assert_eq!(
+        spec.ir_view.milestone_graph.edges.len(),
+        contract.contract_core.required_edges.len()
+    );
+    assert!(
+        spec.ir_view.milestone_graph.edges.iter().all(|edge| {
+            edge.primitive == ExpectedBehaviorIrPrimitiveKind::StateMachineOrdering
+        })
+    );
+    assert_eq!(
+        spec.ir_view.postcondition_obligations.len(),
+        contract.contract_core.postconditions.len()
+    );
+    assert!(
+        spec.ir_view
+            .postcondition_obligations
+            .iter()
+            .all(|postcondition| {
+                postcondition.primitive == ExpectedBehaviorIrPrimitiveKind::ConstraintPostcondition
+            })
+    );
+    assert_eq!(
+        spec.ir_view.cycle_handoff.cycle_boundary_primitive,
+        ExpectedBehaviorIrPrimitiveKind::CycleBoundary
+    );
+    assert_eq!(
+        spec.ir_view.cycle_handoff.restartability_primitive,
+        ExpectedBehaviorIrPrimitiveKind::Restartability
+    );
+
+    let start_node = spec
+        .ir_view
+        .milestone_graph
+        .nodes
+        .iter()
+        .find(|node| node.milestone_id == "cycle_started")
+        .expect("cycle start milestone should appear in IR view");
+    assert!(
+        start_node
+            .semantic_roles
+            .contains(&ExpectedMilestoneSemanticRole::CycleStart)
+    );
+    assert!(
+        start_node
+            .semantic_roles
+            .contains(&ExpectedMilestoneSemanticRole::RequiredStep)
+    );
+
+    let restartable_node = spec
+        .ir_view
+        .milestone_graph
+        .nodes
+        .iter()
+        .find(|node| node.milestone_id == "cycle_restartable")
+        .expect("restartable milestone should appear in IR view");
+    assert!(
+        restartable_node
+            .semantic_roles
+            .contains(&ExpectedMilestoneSemanticRole::CycleComplete)
+    );
+    assert!(
+        restartable_node
+            .semantic_roles
+            .contains(&ExpectedMilestoneSemanticRole::Restartable)
+    );
+}
+
+#[test]
+fn compile_expected_behavior_spec_reuses_contract_validation_failures() {
+    let fixture =
+        workspace_path("tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json");
+    let mut contract = read_intent_contract(&fixture).expect("fixture should load");
+    contract
+        .contract_core
+        .cycle_semantics
+        .restart_semantics
+        .next_cycle_start_milestone = "grip_part_secured".to_string();
+
+    let error = compile_expected_behavior_spec(&contract)
+        .expect_err("invalid contract should fail before IR-view compilation");
+
+    match error {
+        ExpectedBehaviorCompileError::InvalidContract(validation_error) => {
+            assert_eq!(
+                validation_error.diagnostics,
+                vec![IntentContractDiagnostic {
+                    code: IntentContractDiagnosticCode::ContradictoryCycleSemantics,
+                    subject: "cycle_semantics.restart_semantics.next_cycle_start_milestone"
+                        .to_string(),
+                    detail: "must match cycle_start_milestone `cycle_started`".to_string(),
+                }]
+            );
+        }
+    }
 }

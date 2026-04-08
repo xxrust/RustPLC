@@ -16,6 +16,7 @@ Started: 2026-04-07 00:00:00 CST
 - `blocked by missing evidence`、`blocked by missing comparator`、`blocked by toolchain limitation` 只用于比较器尚未运行或证据链未闭合的阶段，不能替代真实 mismatch。
 - phase-2 v1 的 observed 输入先固定为 `trace.jsonl` 或其解析后的 `trace_diff::NormalizedTraceEvent`；validation report 和其他 artifact 适配后置。
 - phase-2 v1 的 cycle 边界规则固定为：按 contract 声明的 cycle-start milestone 重复出现切分周期，并由 extractor 写入 `cycle_index`；comparator 不得从 `ready` 反推边界。
+- `compile_expected_behavior_spec(...)` 是 authored contract 进入比较器主链的唯一编译入口；后续 observed-sequence / comparator / report 逻辑统一消费 `ExpectedBehaviorSpec` 与显式 `ir_view`，不要各自直接重读 `contract_core`。
 - phase-2 v1 不新增公开 CLI；先把结果接入 `project-check` 或等价聚合 pipeline。
 - canonical authored contracts 与 observed traces 默认放在 `tests/fixtures/intent_alignment/`；只有涉及现有 `.plc` 示例时才补 `tests/examples_integration.rs`。
 
@@ -57,4 +58,16 @@ Thread: https://ampcode.com/threads/unknown
   - Contract validation should reject graph contradictions in `contract_core` before any IR-view compilation; later stages should consume a semantically closed contract, not repair one.
   - Keep intent-contract diagnostics deterministic by sorting and asserting `(code, subject, detail)` tuples in tests; that keeps future comparator stories from depending on ad-hoc error text.
   - Reachability is evaluated against `cycle_start_milestone` and `cycle_complete_milestone`, so detached milestones belong in validation failures rather than comparator mismatch logic.
+---
+
+## [2026-04-08 09:58:29 CST] - US-003
+Thread: https://ampcode.com/threads/unknown
+- Implemented `compile_expected_behavior_spec(...)` in `src/intent_alignment/expected_behavior.rs` and exported `ExpectedBehaviorSpec` plus its explicit IR semantic view from `src/intent_alignment/mod.rs`.
+- Compiled contract core into comparator-facing semantics that preserve expected milestones, required edges, postconditions, cycle semantics, restartability, and observation bindings without creating a second semantic center.
+- Added regression coverage in `tests/intent_alignment_contract.rs` for successful spec compilation, stable IR-view projection, and compile-time reuse of contract validation failures.
+- Files changed: `AGENTS.md`, `prd.json`, `progress.txt`, `src/intent_alignment/expected_behavior.rs`, `src/intent_alignment/mod.rs`, `tests/intent_alignment_contract.rs`
+- **Learnings for future iterations:**
+  - `compile_expected_behavior_spec(...)` is now the only supported path from authored contract data into comparator-facing semantics; later extractor/comparator stories should consume `ExpectedBehaviorSpec`, not rebuild meaning from raw `contract_core` data.
+  - The explicit `ir_view` is a business-milestone-level semantic view: required edges map to ordering primitives, postconditions map to terminal obligations, and cycle/restart data map to cycle-boundary and restartability primitives.
+  - Compilation intentionally reuses `validate_intent_contract(...)` so semantic contradictions fail before any observed-behavior extraction or mismatch classification runs.
 ---

@@ -53,7 +53,7 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Dependency: US-001, US-002. Implementation anchor: src/intent_alignment/mod.rs, src/intent_alignment/contract.rs, tests/intent_alignment_contract.rs. 这是 contract 链路的第 3 步，只负责 compile 到 ExpectedBehaviorSpec / IR view。"
     },
     {
