@@ -1,4 +1,4 @@
-﻿impl SafetyModel {
+impl SafetyModel {
     fn from_inputs(
         program: &PlcProgram,
         constraints: &ConstraintSet,
@@ -86,6 +86,12 @@
 
         let task_entry_states = collect_task_entry_state_indices(state_machine, &state_index);
         let runtime_root_tasks = select_safety_root_tasks(state_machine, &task_entry_states);
+        let pending_source_states = collect_pending_source_states(state_machine, &state_index);
+        let pending_action_tags = collect_pending_action_tags(state_machine, &state_index);
+        let relevant_device_ids = collect_relevant_device_ids(constraints, &device_index);
+        let relevant_action_tags = collect_relevant_action_tags(constraints);
+        let should_slice_active_tasks =
+            !relevant_device_ids.is_empty() || !relevant_action_tags.is_empty();
         let mut active_task_names = Vec::new();
         let mut active_task_entries = Vec::new();
         let mut seen_task = HashSet::<String>::new();
@@ -94,6 +100,18 @@
                 continue;
             }
             if let Some(entry_state) = task_entry_states.get(&task_name).copied() {
+                if should_slice_active_tasks
+                    && !task_entry_reaches_relevant_state(
+                        entry_state,
+                        &outgoing,
+                        &edges,
+                        &pending_action_tags,
+                        &relevant_device_ids,
+                        &relevant_action_tags,
+                    )
+                {
+                    continue;
+                }
                 active_task_names.push(task_name);
                 active_task_entries.push(entry_state);
             }
@@ -103,11 +121,10 @@
             active_task_entries.push(initial_state);
         }
 
-        let pending_source_states = collect_pending_source_states(state_machine, &state_index);
-        let pending_action_tags = collect_pending_action_tags(state_machine, &state_index);
-
-        let max_scc_depth = scc_minimum_depth(states.len(), &edges);
-        let suggested_depth = states.len().max(max_scc_depth).max(1);
+        let reachable_state_ids =
+            collect_reachable_state_ids(&active_task_entries, initial_state, &outgoing, &edges);
+        let max_scc_depth = scc_minimum_depth_for_subset(&reachable_state_ids, &edges);
+        let suggested_depth = reachable_state_ids.len().max(max_scc_depth).max(1);
 
         Self {
             states,
@@ -163,7 +180,6 @@ fn collect_pending_source_states(
     pending
 }
 
-
 fn collect_pending_action_tags(
     state_machine: &StateMachine,
     state_index: &HashMap<(String, String), usize>,
@@ -188,6 +204,211 @@ fn collect_pending_action_tags(
         }
     }
     pending_tags
+}
+
+fn collect_relevant_device_ids(
+    constraints: &ConstraintSet,
+    device_index: &HashMap<(String, String), usize>,
+) -> HashSet<usize> {
+    let mut relevant = HashSet::new();
+
+    for rule in &constraints.safety {
+        collect_relevant_device_ids_from_expr(&rule.left, device_index, &mut relevant);
+        collect_relevant_device_ids_from_expr(&rule.right, device_index, &mut relevant);
+    }
+
+    for claim in &constraints.resource_claims {
+        if let crate::ir::ResourceClaimSource::State(state_expr) = &claim.source {
+            if let Some(device_id) = lookup_device_domain_id(
+                device_index,
+                &state_expr.device,
+                &state_expr.port,
+                false,
+            ) {
+                relevant.insert(device_id);
+            }
+        }
+    }
+
+    relevant
+}
+
+fn collect_relevant_device_ids_from_expr(
+    expr: &SafetyExpr,
+    device_index: &HashMap<(String, String), usize>,
+    relevant: &mut HashSet<usize>,
+) {
+    match expr {
+        SafetyExpr::State(state_expr) => {
+            if let Some(device_id) = lookup_device_domain_id(
+                device_index,
+                &state_expr.device,
+                &state_expr.port,
+                false,
+            ) {
+                relevant.insert(device_id);
+            }
+        }
+        SafetyExpr::Threshold { device, .. } => {
+            let (device_name, port_name) = split_threshold_target(device);
+            if let Some(device_id) =
+                lookup_device_domain_id(device_index, device_name, port_name, false)
+            {
+                relevant.insert(device_id);
+            }
+        }
+    }
+}
+
+fn collect_relevant_action_tags(constraints: &ConstraintSet) -> HashSet<String> {
+    let mut tags = HashSet::new();
+    for claim in &constraints.resource_claims {
+        if let crate::ir::ResourceClaimSource::ActionTag { tag } = &claim.source {
+            tags.insert(tag.clone());
+        }
+    }
+    tags
+}
+
+fn task_entry_reaches_relevant_state(
+    entry_state: usize,
+    outgoing: &[Vec<usize>],
+    edges: &[ModelEdge],
+    pending_action_tags: &HashMap<usize, Vec<String>>,
+    relevant_device_ids: &HashSet<usize>,
+    relevant_action_tags: &HashSet<String>,
+) -> bool {
+    let mut queue = VecDeque::from([entry_state]);
+    let mut visited = HashSet::from([entry_state]);
+
+    while let Some(state_id) = queue.pop_front() {
+        if state_is_relevant(
+            state_id,
+            outgoing,
+            edges,
+            pending_action_tags,
+            relevant_device_ids,
+            relevant_action_tags,
+        ) {
+            return true;
+        }
+
+        let Some(edge_ids) = outgoing.get(state_id) else {
+            continue;
+        };
+        for &edge_id in edge_ids {
+            let Some(edge) = edges.get(edge_id) else {
+                continue;
+            };
+            if visited.insert(edge.to) {
+                queue.push_back(edge.to);
+            }
+        }
+    }
+
+    false
+}
+
+fn state_is_relevant(
+    state_id: usize,
+    outgoing: &[Vec<usize>],
+    edges: &[ModelEdge],
+    pending_action_tags: &HashMap<usize, Vec<String>>,
+    relevant_device_ids: &HashSet<usize>,
+    relevant_action_tags: &HashSet<String>,
+) -> bool {
+    if let Some(tags) = pending_action_tags.get(&state_id) {
+        if tags
+            .iter()
+            .any(|tag| relevant_action_tags.contains(tag))
+        {
+            return true;
+        }
+    }
+
+    outgoing
+        .get(state_id)
+        .into_iter()
+        .flatten()
+        .filter_map(|edge_id| edges.get(*edge_id))
+        .any(|edge| {
+            edge.effects
+                .keys()
+                .any(|device_id| relevant_device_ids.contains(device_id))
+        })
+}
+
+fn collect_reachable_state_ids(
+    active_task_entries: &[usize],
+    initial_state: usize,
+    outgoing: &[Vec<usize>],
+    edges: &[ModelEdge],
+) -> HashSet<usize> {
+    let mut roots = active_task_entries.to_vec();
+    if roots.is_empty() {
+        roots.push(initial_state);
+    }
+
+    let mut queue = VecDeque::from(roots.clone());
+    let mut visited = roots.into_iter().collect::<HashSet<_>>();
+
+    while let Some(state_id) = queue.pop_front() {
+        let Some(edge_ids) = outgoing.get(state_id) else {
+            continue;
+        };
+        for &edge_id in edge_ids {
+            let Some(edge) = edges.get(edge_id) else {
+                continue;
+            };
+            if visited.insert(edge.to) {
+                queue.push_back(edge.to);
+            }
+        }
+    }
+
+    visited
+}
+
+fn scc_minimum_depth_for_subset(state_ids: &HashSet<usize>, edges: &[ModelEdge]) -> usize {
+    if state_ids.is_empty() {
+        return 1;
+    }
+
+    let mut graph = DiGraph::<usize, ()>::new();
+    let mut nodes = HashMap::<usize, _>::new();
+    for &state_id in state_ids {
+        nodes.insert(state_id, graph.add_node(state_id));
+    }
+
+    for edge in edges {
+        let Some(&from) = nodes.get(&edge.from) else {
+            continue;
+        };
+        let Some(&to) = nodes.get(&edge.to) else {
+            continue;
+        };
+        graph.add_edge(from, to, ());
+    }
+
+    let mut depth_requirement = 0usize;
+    for component in kosaraju_scc(&graph) {
+        if component.is_empty() {
+            continue;
+        }
+
+        let has_cycle = component.len() > 1
+            || graph
+                .edges(component[0])
+                .any(|edge| edge.target() == component[0]);
+
+        if !has_cycle {
+            continue;
+        }
+
+        depth_requirement = depth_requirement.max(component.len() + 1);
+    }
+
+    depth_requirement
 }
 
 fn select_safety_root_tasks(
@@ -544,17 +765,21 @@ fn collect_threshold_values_from_wait(
 fn collect_device_domains(
     program: &PlcProgram,
     constraints: &ConstraintSet,
-    state_machine: &StateMachine,
+    _state_machine: &StateMachine,
 ) -> (
     Vec<DeviceDomain>,
     HashMap<(String, String), usize>,
     Vec<HashMap<String, usize>>,
 ) {
     let analog_regions = compute_analog_regions(program, constraints);
+    let tracked_refs = collect_tracked_device_refs(constraints);
     let mut devices = Vec::<DeviceDomain>::new();
     let mut device_index = HashMap::<(String, String), usize>::new();
 
     for device in &program.topology.devices {
+        let Some(tracked_ports) = tracked_refs.get(&device.name) else {
+            continue;
+        };
         let (states, default_state, is_analog, region_bounds) = match device.device_type {
             DeviceType::Cylinder => {
                 let states = vec!["extended".to_string(), "retracted".to_string()];
@@ -595,108 +820,18 @@ fn collect_device_domains(
             }
         };
 
-        let index = devices.len();
-        devices.push(DeviceDomain {
-            name: device.name.clone(),
-            states,
-            default_state,
-            is_analog,
-            region_bounds,
-        });
-        device_index.insert((device.name.clone(), "self".to_string()), index);
-    }
-
-    let mut referenced_ports = HashMap::<String, Vec<String>>::new();
-    for rule in &constraints.safety {
-        if let SafetyExpr::State(ref expr) = rule.left {
-            if expr.port != "self" {
-                referenced_ports
-                    .entry(expr.device.clone())
-                    .or_default()
-                    .push(expr.port.clone());
-            }
-            if let Some(left_device) =
-                lookup_device_domain_id(&device_index, &expr.device, &expr.port, false)
-            {
-                ensure_device_state(&mut devices[left_device], &expr.state);
-            }
-        } else if let SafetyExpr::Threshold { device, .. } = &rule.left {
-            let (device_name, port_name) = split_threshold_target(device);
-            if port_name != "self" {
-                referenced_ports
-                    .entry(device_name.to_string())
-                    .or_default()
-                    .push(port_name.to_string());
-            }
+        if tracked_ports.contains("self") {
+            let index = devices.len();
+            devices.push(DeviceDomain {
+                name: device.name.clone(),
+                states,
+                default_state,
+                is_analog,
+                region_bounds,
+            });
+            device_index.insert((device.name.clone(), "self".to_string()), index);
         }
-
-        if let SafetyExpr::State(ref expr) = rule.right {
-            if expr.port != "self" {
-                referenced_ports
-                    .entry(expr.device.clone())
-                    .or_default()
-                    .push(expr.port.clone());
-            }
-            if let Some(right_device) =
-                lookup_device_domain_id(&device_index, &expr.device, &expr.port, false)
-            {
-                ensure_device_state(&mut devices[right_device], &expr.state);
-            }
-        } else if let SafetyExpr::Threshold { device, .. } = &rule.right {
-            let (device_name, port_name) = split_threshold_target(device);
-            if port_name != "self" {
-                referenced_ports
-                    .entry(device_name.to_string())
-                    .or_default()
-                    .push(port_name.to_string());
-            }
-        }
-    }
-
-    for transition in &state_machine.transitions {
-        for action in &transition.actions {
-            let (target, port) = match action {
-                TransitionAction::Extend { target, port, .. }
-                | TransitionAction::Retract { target, port, .. }
-                | TransitionAction::Set { target, port, .. }
-                | TransitionAction::SetAnalog { target, port, .. }
-                | TransitionAction::SetAnalogExpr { target, port, .. } => (target, port),
-                TransitionAction::AxisMoveRelative { target, .. }
-                | TransitionAction::AxisMoveAbsolute { target, .. } => {
-                    referenced_ports
-                        .entry(target.clone())
-                        .or_default()
-                        .push("pulse".to_string());
-                    continue;
-                }
-                TransitionAction::CamEngage { .. }
-                | TransitionAction::CamDisengage { .. }
-                | TransitionAction::CamSwitch { .. }
-                | TransitionAction::CamPhase { .. } => continue,
-                TransitionAction::Compute { .. }
-                | TransitionAction::CallExtern { .. }
-                | TransitionAction::Log { .. } => continue,
-            };
-            if port != "self" {
-                referenced_ports
-                    .entry(target.clone())
-                    .or_default()
-                    .push(port.clone());
-            }
-        }
-    }
-
-    for device in &program.topology.devices {
-        let mut ports = referenced_ports.remove(&device.name).unwrap_or_default();
-        for port in &device.attributes.ports {
-            ports.push(port.id.clone());
-        }
-
-        ports.sort();
-        ports.dedup();
-        ports.retain(|port| port != "self");
-
-        for port in ports {
+        for port in tracked_ports.iter().filter(|port| port.as_str() != "self") {
             if device_index.contains_key(&(device.name.clone(), port.clone())) {
                 continue;
             }
@@ -705,7 +840,7 @@ fn collect_device_domains(
                 .attributes
                 .ports
                 .iter()
-                .find(|candidate| candidate.id == port);
+                .find(|candidate| candidate.id == *port);
 
             let is_analog = declared_port
                 .map(|candidate| matches!(candidate.port_type, PortType::Analog))
@@ -764,7 +899,7 @@ fn collect_device_domains(
                 is_analog,
                 region_bounds,
             });
-            device_index.insert((device.name.clone(), port), index);
+            device_index.insert((device.name.clone(), port.clone()), index);
         }
     }
 
@@ -794,6 +929,44 @@ fn collect_device_domains(
     }
 
     (devices, device_index, state_index)
+}
+
+fn collect_tracked_device_refs(constraints: &ConstraintSet) -> HashMap<String, HashSet<String>> {
+    let mut refs = HashMap::<String, HashSet<String>>::new();
+
+    for rule in &constraints.safety {
+        collect_tracked_refs_from_safety_expr(&rule.left, &mut refs);
+        collect_tracked_refs_from_safety_expr(&rule.right, &mut refs);
+    }
+
+    for claim in &constraints.resource_claims {
+        if let crate::ir::ResourceClaimSource::State(state_expr) = &claim.source {
+            refs.entry(state_expr.device.clone())
+                .or_default()
+                .insert(state_expr.port.clone());
+        }
+    }
+
+    refs
+}
+
+fn collect_tracked_refs_from_safety_expr(
+    expr: &SafetyExpr,
+    refs: &mut HashMap<String, HashSet<String>>,
+) {
+    match expr {
+        SafetyExpr::State(state_expr) => {
+            refs.entry(state_expr.device.clone())
+                .or_default()
+                .insert(state_expr.port.clone());
+        }
+        SafetyExpr::Threshold { device, .. } => {
+            let (device_name, port_name) = split_threshold_target(device);
+            refs.entry(device_name.to_string())
+                .or_default()
+                .insert(port_name.to_string());
+        }
+    }
 }
 
 fn collect_analog_input_states(
@@ -1186,4 +1359,3 @@ fn render_axis_target(task: &str, step: Option<&str>) -> String {
         None => task.to_string(),
     }
 }
-

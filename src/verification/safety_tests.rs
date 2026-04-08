@@ -1,4 +1,4 @@
-﻿#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::{
         SafetyConfig, SafetyModel, SafetyProofLevel, SafetyRuleStatusKind, analog_state_for_value,
@@ -574,6 +574,8 @@ device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_d
 device out_a: digital_output
 
 [constraints]
+
+safety: AO0 > 6 conflicts_with AO0 < 2
 
 [tasks]
 
@@ -1279,8 +1281,11 @@ device AO0: analog_output { range: 0..10 }
 device Y0: digital_output
 device valve: solenoid_valve
 relation { from: Y0.out, to: valve.coil, via: driven_by }
+resource analog_band: semantic_resource { mode: exclusive }
 
 [constraints]
+
+claim: AO0.region_0 occupies analog_band
 
 [tasks]
 
@@ -1309,5 +1314,57 @@ task main:
             .any(|edge| edge.effects.get(&device_id).copied() == Some(target_state));
 
         assert!(has_effect, "set_analog 应映射到对应区间状态");
+    }
+
+    #[test]
+    fn tracks_only_constraint_relevant_device_domains() {
+        let source = r#"
+[topology]
+
+device mode_auto: sensor
+device mode_manual: sensor
+device irrelevant_sensor: sensor
+device irrelevant_output: digital_output
+
+[constraints]
+
+safety: mode_auto.on conflicts_with mode_manual.on
+
+[tasks]
+
+task main:
+    step idle:
+        action: set irrelevant_output on
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+        let model = SafetyModel::from_inputs(&program, &constraints, &state_machine);
+
+        assert!(
+            model
+                .device_index
+                .contains_key(&("mode_auto".to_string(), "self".to_string())),
+            "安全约束引用的设备应进入 safety model"
+        );
+        assert!(
+            model
+                .device_index
+                .contains_key(&("mode_manual".to_string(), "self".to_string())),
+            "安全约束引用的设备应进入 safety model"
+        );
+        assert!(
+            !model
+                .device_index
+                .contains_key(&("irrelevant_sensor".to_string(), "self".to_string())),
+            "与 safety/resource claim 无关的设备不应膨胀 safety 状态空间"
+        );
+        assert!(
+            !model
+                .device_index
+                .contains_key(&("irrelevant_output".to_string(), "self".to_string())),
+            "仅被普通 action 使用、但不参与 safety/resource claim 的设备不应被跟踪"
+        );
     }
 }

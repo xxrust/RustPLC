@@ -1,42 +1,3 @@
-﻿fn scc_minimum_depth(state_count: usize, edges: &[ModelEdge]) -> usize {
-    if state_count == 0 {
-        return 1;
-    }
-
-    let mut graph = DiGraph::<usize, ()>::new();
-    let mut nodes = Vec::with_capacity(state_count);
-    for index in 0..state_count {
-        nodes.push(graph.add_node(index));
-    }
-
-    for edge in edges {
-        if edge.from >= state_count || edge.to >= state_count {
-            continue;
-        }
-        graph.add_edge(nodes[edge.from], nodes[edge.to], ());
-    }
-
-    let mut depth_requirement = 0usize;
-    for component in kosaraju_scc(&graph) {
-        if component.is_empty() {
-            continue;
-        }
-
-        let has_cycle = component.len() > 1
-            || graph
-                .edges(component[0])
-                .any(|edge| edge.target() == component[0]);
-
-        if !has_cycle {
-            continue;
-        }
-
-        depth_requirement = depth_requirement.max(component.len() + 1);
-    }
-
-    depth_requirement
-}
-
 fn build_depth_plan(model: &SafetyModel, config: &SafetyConfig) -> DepthPlan {
     let target_depth = model.suggested_depth;
     let mut warnings = Vec::new();
@@ -316,7 +277,7 @@ fn split_points_from_region_bounds(bounds: &[(f64, f64)]) -> Vec<f64> {
     out
 }
 
-fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> SearchOutcome {
+fn explore_state_space(model: &SafetyModel, max_depth: usize) -> SearchSpace {
     let initial_state = initial_concrete_state(model);
     let mut nodes = vec![SearchNode {
         state: initial_state.clone(),
@@ -331,26 +292,13 @@ fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> Sea
     let mut fully_explored = true;
 
     while let Some(node_id) = queue.pop_front() {
-        let node = nodes[node_id].clone();
+        let node_depth = nodes[node_id].depth;
+        let node_state = nodes[node_id].state.clone();
 
-        if violates_rule(&node.state, &rule) {
-            let path = render_path(model, &nodes, node_id, &rule);
-            return SearchOutcome {
-                counterexample: Some(Counterexample { path }),
-                fully_explored,
-            };
-        }
-
-        for (task_slot, &control_state) in node.state.task_states.iter().enumerate() {
-            let outgoing = model
-                .outgoing
-                .get(control_state)
-                .cloned()
-                .unwrap_or_default();
-            if node.depth == max_depth {
-                for edge_id in outgoing {
-                    let edge = &model.edges[edge_id];
-                    let candidate = apply_edge(model, edge, &node.state, task_slot);
+        for (task_slot, &control_state) in node_state.task_states.iter().enumerate() {
+            let outgoing = materialized_successors(model, &node_state, task_slot, control_state);
+            if node_depth == max_depth {
+                for (candidate, _) in outgoing {
                     if !shortest_depth.contains_key(&candidate) {
                         fully_explored = false;
                     }
@@ -358,10 +306,8 @@ fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> Sea
                 continue;
             }
 
-            for edge_id in outgoing {
-                let edge = &model.edges[edge_id];
-                let next_state = apply_edge(model, edge, &node.state, task_slot);
-                let next_depth = node.depth + 1;
+            for (next_state, via_step) in outgoing {
+                let next_depth = node_depth + 1;
 
                 if shortest_depth
                     .get(&next_state)
@@ -376,16 +322,86 @@ fn analyze_rule(model: &SafetyModel, rule: RuleBinding, max_depth: usize) -> Sea
                     state: next_state,
                     depth: next_depth,
                     parent: Some(node_id),
-                    via_edge: Some(TransitionStep { task_slot, edge_id }),
+                    via_edge: Some(via_step),
                 });
                 queue.push_back(next_id);
             }
         }
     }
 
+    SearchSpace {
+        nodes,
+        fully_explored,
+    }
+}
+
+fn materialized_successors(
+    model: &SafetyModel,
+    current: &ConcreteState,
+    task_slot: usize,
+    control_state: usize,
+) -> Vec<(ConcreteState, TransitionStep)> {
+    let mut results = Vec::new();
+    let mut queue = VecDeque::from([(control_state, current.clone())]);
+    let mut visited = HashSet::<usize>::from([control_state]);
+
+    while let Some((state_id, state)) = queue.pop_front() {
+        let Some(outgoing) = model.outgoing.get(state_id) else {
+            continue;
+        };
+
+        for &edge_id in outgoing {
+            let edge = &model.edges[edge_id];
+            let next_state = apply_edge(model, edge, &state, task_slot);
+            let next_control_state = next_state
+                .task_states
+                .get(task_slot)
+                .copied()
+                .unwrap_or(edge.to);
+
+            if edge_is_material(model, edge, next_control_state) {
+                results.push((next_state, TransitionStep { task_slot, edge_id }));
+                continue;
+            }
+
+            if visited.insert(next_control_state) {
+                queue.push_back((next_control_state, next_state));
+            }
+        }
+    }
+
+    results
+}
+
+fn edge_is_material(model: &SafetyModel, edge: &ModelEdge, next_control_state: usize) -> bool {
+    if !edge.effects.is_empty() {
+        return true;
+    }
+
+    model
+        .pending_action_tags
+        .get(&next_control_state)
+        .is_some_and(|tags| !tags.is_empty())
+}
+
+fn analyze_rule(
+    model: &SafetyModel,
+    search_space: &SearchSpace,
+    rule: RuleBinding,
+) -> SearchOutcome {
+    for (node_id, node) in search_space.nodes.iter().enumerate() {
+        if violates_rule(&node.state, &rule) {
+            let path = render_path(model, &search_space.nodes, node_id, &rule);
+            return SearchOutcome {
+                counterexample: Some(Counterexample { path }),
+                fully_explored: search_space.fully_explored,
+            };
+        }
+    }
+
     SearchOutcome {
         counterexample: None,
-        fully_explored,
+        fully_explored: search_space.fully_explored,
     }
 }
 
@@ -393,13 +409,14 @@ fn check_semantic_resource_interlocks(
     program: &PlcProgram,
     constraints: &ConstraintSet,
     model: &SafetyModel,
-    max_depth: usize,
+    search_space: &SearchSpace,
 ) -> Vec<SafetyDiagnostic> {
     if constraints.semantic_resources.is_empty() || constraints.resource_claims.is_empty() {
         return Vec::new();
     }
 
-    let Some(counterexample) = find_semantic_resource_counterexample(model, constraints, max_depth)
+    let Some(counterexample) =
+        find_semantic_resource_counterexample(model, constraints, search_space)
     else {
         return Vec::new();
     };
@@ -444,66 +461,24 @@ fn check_semantic_resource_interlocks(
 fn find_semantic_resource_counterexample(
     model: &SafetyModel,
     constraints: &ConstraintSet,
-    max_depth: usize,
+    search_space: &SearchSpace,
 ) -> Option<SemanticResourceCounterexample> {
-    let initial_state = initial_concrete_state(model);
-    let mut nodes = vec![SearchNode {
-        state: initial_state.clone(),
-        depth: 0,
-        parent: None,
-        via_edge: None,
-    }];
-    let mut queue = VecDeque::from([0usize]);
-    let mut shortest_depth = HashMap::<ConcreteState, usize>::new();
-    shortest_depth.insert(initial_state, 0);
-
-    while let Some(node_id) = queue.pop_front() {
-        let node = nodes[node_id].clone();
-
+    for (node_id, node) in search_space.nodes.iter().enumerate() {
         if let Some((resource_name, holders)) =
             semantic_resource_conflict_in_state(model, constraints, &node.state)
         {
-            let path =
-                render_semantic_resource_path(model, &nodes, node_id, &resource_name, &holders);
+            let path = render_semantic_resource_path(
+                model,
+                &search_space.nodes,
+                node_id,
+                &resource_name,
+                &holders,
+            );
             return Some(SemanticResourceCounterexample {
                 resource_name,
                 holders,
                 path,
             });
-        }
-
-        for (task_slot, &control_state) in node.state.task_states.iter().enumerate() {
-            let outgoing = model
-                .outgoing
-                .get(control_state)
-                .cloned()
-                .unwrap_or_default();
-            if node.depth == max_depth {
-                continue;
-            }
-
-            for edge_id in outgoing {
-                let edge = &model.edges[edge_id];
-                let next_state = apply_edge(model, edge, &node.state, task_slot);
-                let next_depth = node.depth + 1;
-
-                if shortest_depth
-                    .get(&next_state)
-                    .is_some_and(|depth| *depth <= next_depth)
-                {
-                    continue;
-                }
-
-                shortest_depth.insert(next_state.clone(), next_depth);
-                let next_id = nodes.len();
-                nodes.push(SearchNode {
-                    state: next_state,
-                    depth: next_depth,
-                    parent: Some(node_id),
-                    via_edge: Some(TransitionStep { task_slot, edge_id }),
-                });
-                queue.push_back(next_id);
-            }
         }
     }
 

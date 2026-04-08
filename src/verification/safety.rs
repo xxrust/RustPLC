@@ -1,4 +1,4 @@
-﻿use crate::ast::{
+use crate::ast::{
     ActionStatement, ComparisonOperator, ConditionExpression, DeviceType, LiteralValue, PlcProgram,
     PortType, StepStatement, WaitCondition, WaitStatement,
 };
@@ -181,6 +181,12 @@ struct SearchOutcome {
 }
 
 #[derive(Debug, Clone)]
+struct SearchSpace {
+    nodes: Vec<SearchNode>,
+    fully_explored: bool,
+}
+
+#[derive(Debug, Clone)]
 struct Counterexample {
     path: Vec<String>,
 }
@@ -221,6 +227,7 @@ pub fn verify_safety_with_config(
 
     let model = SafetyModel::from_inputs(program, constraints, state_machine);
     let depth_plan = build_depth_plan(&model, &config);
+    let search_space = explore_state_space(&model, depth_plan.effective_depth);
 
     #[cfg(feature = "z3-solver")]
     z3_sanity_probe();
@@ -264,7 +271,7 @@ pub fn verify_safety_with_config(
 
         checked_rules += 1;
 
-        let outcome = analyze_rule(&model, binding, depth_plan.effective_depth);
+        let outcome = analyze_rule(&model, &search_space, binding);
         if let Some(counterexample) = outcome.counterexample {
             let (reason, suggestion) = match rule.relation {
                 SafetyRelation::ConflictsWith => (
@@ -342,7 +349,7 @@ pub fn verify_safety_with_config(
         program,
         constraints,
         &model,
-        depth_plan.effective_depth,
+        &search_space,
     ));
 
     if !diagnostics.is_empty() {
