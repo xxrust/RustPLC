@@ -618,6 +618,7 @@ enum ExprToken<'a> {
     Not,
     LParen,
     RParen,
+    Comma,
 }
 
 fn guard_allows_edge(model: &SafetyModel, state: &ConcreteState, guard: &ModelGuard) -> bool {
@@ -665,6 +666,7 @@ fn eval_model_expr(
     match expr {
         ModelExpr::Literal(value) => Some(*value),
         ModelExpr::Variable(variable_id) => state.variable_values.get(*variable_id).copied(),
+        ModelExpr::Function { kind, args } => eval_model_function(_model, state, kind, args),
         ModelExpr::UnaryNeg(inner) => Some(SafetyValue::number(
             -eval_model_expr(_model, state, inner)?.as_f32(),
         )),
@@ -709,6 +711,54 @@ fn eval_model_expr(
                 ModelBinaryOp::Or => Some(SafetyValue::bool(left.as_bool()? || right.as_bool()?)),
             }
         }
+    }
+}
+
+fn eval_model_function(
+    model: &SafetyModel,
+    state: &ConcreteState,
+    kind: &ModelFunction,
+    args: &[ModelExpr],
+) -> Option<SafetyValue> {
+    let eval_arg = |index: usize| -> Option<SafetyValue> {
+        eval_model_expr(model, state, args.get(index)?)
+    };
+
+    match kind {
+        ModelFunction::Abs => Some(SafetyValue::number(eval_arg(0)?.as_f32().abs())),
+        ModelFunction::Min => Some(SafetyValue::number(
+            eval_arg(0)?.as_f32().min(eval_arg(1)?.as_f32()),
+        )),
+        ModelFunction::Max => Some(SafetyValue::number(
+            eval_arg(0)?.as_f32().max(eval_arg(1)?.as_f32()),
+        )),
+        ModelFunction::Sin => Some(SafetyValue::number(eval_arg(0)?.as_f32().sin())),
+        ModelFunction::Cos => Some(SafetyValue::number(eval_arg(0)?.as_f32().cos())),
+        ModelFunction::Sqrt => {
+            let value = eval_arg(0)?.as_f32();
+            if value < 0.0 {
+                None
+            } else {
+                Some(SafetyValue::number(value.sqrt()))
+            }
+        }
+        ModelFunction::Pow => Some(SafetyValue::number(
+            eval_arg(0)?.as_f32().powf(eval_arg(1)?.as_f32()),
+        )),
+        ModelFunction::Fmod => {
+            let lhs = eval_arg(0)?.as_f32();
+            let rhs = eval_arg(1)?.as_f32();
+            if rhs.abs() <= f32::EPSILON {
+                None
+            } else {
+                Some(SafetyValue::number(lhs % rhs))
+            }
+        }
+        ModelFunction::Clamp => Some(SafetyValue::number(
+            eval_arg(0)?
+                .as_f32()
+                .clamp(eval_arg(1)?.as_f32(), eval_arg(2)?.as_f32()),
+        )),
     }
 }
 
@@ -885,6 +935,7 @@ fn tokenize_model_expr(raw: &str) -> Result<Vec<ExprToken<'_>>, ()> {
         match ch {
             '(' => out.push(ExprToken::LParen),
             ')' => out.push(ExprToken::RParen),
+            ',' => out.push(ExprToken::Comma),
             '+' => out.push(ExprToken::Plus),
             '-' => out.push(ExprToken::Minus),
             '*' => out.push(ExprToken::Star),
@@ -892,6 +943,7 @@ fn tokenize_model_expr(raw: &str) -> Result<Vec<ExprToken<'_>>, ()> {
             '%' => out.push(ExprToken::Percent),
             '>' => out.push(ExprToken::Gt),
             '<' => out.push(ExprToken::Lt),
+            '=' => out.push(ExprToken::EqEq),
             '!' => out.push(ExprToken::Not),
             _ => return Err(()),
         }
@@ -1043,8 +1095,12 @@ impl<'a> ModelExprParser<'a> {
             }
             Some(ExprToken::Ident(name)) => {
                 self.pos += 1;
-                let variable_id = self.variable_index.get(name).copied().ok_or(())?;
-                Ok(ModelExpr::Variable(variable_id))
+                if self.consume_if(ExprToken::LParen) {
+                    self.parse_function_call(name)
+                } else {
+                    let variable_id = self.variable_index.get(name).copied().ok_or(())?;
+                    Ok(ModelExpr::Variable(variable_id))
+                }
             }
             Some(ExprToken::LParen) => {
                 self.pos += 1;
@@ -1060,6 +1116,37 @@ impl<'a> ModelExprParser<'a> {
 
     fn peek(&self) -> Option<&ExprToken<'a>> {
         self.tokens.get(self.pos)
+    }
+
+    fn parse_function_call(&mut self, name: &str) -> Result<ModelExpr, ()> {
+        let mut args = Vec::new();
+        if !self.consume_if(ExprToken::RParen) {
+            loop {
+                args.push(self.parse_expression()?);
+                if self.consume_if(ExprToken::Comma) {
+                    continue;
+                }
+                if self.consume_if(ExprToken::RParen) {
+                    break;
+                }
+                return Err(());
+            }
+        }
+
+        let kind = match (name, args.len()) {
+            ("abs", 1) => ModelFunction::Abs,
+            ("min", 2) => ModelFunction::Min,
+            ("max", 2) => ModelFunction::Max,
+            ("sin", 1) => ModelFunction::Sin,
+            ("cos", 1) => ModelFunction::Cos,
+            ("sqrt", 1) => ModelFunction::Sqrt,
+            ("pow", 2) => ModelFunction::Pow,
+            ("fmod", 2) => ModelFunction::Fmod,
+            ("clamp", 3) => ModelFunction::Clamp,
+            _ => return Err(()),
+        };
+
+        Ok(ModelExpr::Function { kind, args })
     }
 
     fn consume_if(&mut self, token: ExprToken<'a>) -> bool {
@@ -1184,38 +1271,43 @@ fn apply_edge(
     current: &ConcreteState,
     task_slot: usize,
 ) -> ConcreteState {
-    let mut device_states = current.device_states.clone();
-    for (&device_id, &state_id) in &edge.effects {
-        if device_id < device_states.len() {
-            device_states[device_id] = state_id;
-        }
-    }
-    for effect in &edge.analog_expr_effects {
-        let Some(value) = eval_model_expr(model, current, &effect.expr) else {
-            continue;
-        };
-        let analog_value = value.as_f32().to_string();
-        let Some(state_id) =
-            analog_state_for_value(&model.devices, effect.device_id, &analog_value)
-        else {
-            continue;
-        };
-        if effect.device_id < device_states.len() {
-            device_states[effect.device_id] = state_id;
-        }
-    }
-
-    let mut variable_values = current.variable_values.clone();
-    for effect in &edge.variable_effects {
-        let Some(value) = eval_model_expr(model, current, &effect.expr) else {
-            continue;
-        };
-        if effect.variable_id < variable_values.len() {
-            variable_values[effect.variable_id] = model
-                .variables
-                .get(effect.variable_id)
-                .map(|variable| coerce_safety_value_for_type(value, &variable.var_type))
-                .unwrap_or(value);
+    let mut next = current.clone();
+    for effect in &edge.ordered_effects {
+        match effect {
+            ModelEffect::DeviceState {
+                device_id,
+                state_id,
+            } => {
+                if *device_id < next.device_states.len() {
+                    next.device_states[*device_id] = *state_id;
+                }
+            }
+            ModelEffect::AnalogExpr(effect) => {
+                let Some(value) = eval_model_expr(model, &next, &effect.expr) else {
+                    continue;
+                };
+                let analog_value = value.as_f32().to_string();
+                let Some(state_id) =
+                    analog_state_for_value(&model.devices, effect.device_id, &analog_value)
+                else {
+                    continue;
+                };
+                if effect.device_id < next.device_states.len() {
+                    next.device_states[effect.device_id] = state_id;
+                }
+            }
+            ModelEffect::VariableAssignment(effect) => {
+                let Some(value) = eval_model_expr(model, &next, &effect.expr) else {
+                    continue;
+                };
+                if effect.variable_id < next.variable_values.len() {
+                    next.variable_values[effect.variable_id] = model
+                        .variables
+                        .get(effect.variable_id)
+                        .map(|variable| coerce_safety_value_for_type(value, &variable.var_type))
+                        .unwrap_or(value);
+                }
+            }
         }
     }
 
@@ -1234,8 +1326,8 @@ fn apply_edge(
     ConcreteState {
         task_states,
         task_pending,
-        device_states,
-        variable_values,
+        device_states: next.device_states,
+        variable_values: next.variable_values,
     }
 }
 

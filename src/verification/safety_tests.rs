@@ -1361,6 +1361,83 @@ task set_b:
     }
 
     #[test]
+    fn respects_sequential_compute_effect_order_in_safety_reachability() {
+        let source = r#"
+[topology]
+
+variable a: float = 0.0
+variable b: float = 0.0
+device out_a: digital_output
+device out_b: digital_output
+
+[constraints]
+
+safety: out_a.on conflicts_with out_b.on
+
+[tasks]
+
+task main:
+    step seed:
+        action: compute a = 1.0
+        action: compute b = a + 1.0
+    step arm_a:
+        action: set out_a on
+    step maybe_b:
+        if: b <= 1.5 goto set_b.run else: goto main.done
+    step done:
+        action: log "done"
+
+task set_b:
+    step run:
+        action: set out_b on
+    on_complete: goto main.done
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        verify_safety(&program, &constraints, &state_machine)
+            .expect("同一 transition 内 compute 应按源码顺序生效，避免后续表达式继续读取旧变量值");
+    }
+
+    #[test]
+    fn respects_runtime_supported_function_guards_in_safety_reachability() {
+        let source = r#"
+[topology]
+
+device out_a: digital_output
+device out_b: digital_output
+
+[constraints]
+
+safety: out_a.on conflicts_with out_b.on
+
+[tasks]
+
+task main:
+    step arm_a:
+        action: set out_a on
+    step maybe_b:
+        if: abs(-1.0) < 0.5 goto set_b.run else: goto main.done
+    step done:
+        action: log "done"
+
+task set_b:
+    step run:
+        action: set out_b on
+    on_complete: goto main.done
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        verify_safety(&program, &constraints, &state_machine)
+            .expect("runtime 已支持的函数 guard 应进入 safety 求值，避免 unsupported guard 继续放大假路径");
+    }
+
+    #[test]
     fn maps_set_analog_to_region_state() {
         let source = r#"
 [topology]

@@ -74,6 +74,7 @@ impl SafetyModel {
                     from,
                     to,
                     guard: guard.clone(),
+                    ordered_effects: effects.ordered_effects,
                     effects: effects.device_effects,
                     variable_effects: effects.variable_effects,
                     analog_expr_effects: effects.analog_expr_effects,
@@ -93,6 +94,7 @@ impl SafetyModel {
                 from: state_id,
                 to: state_id,
                 guard: ModelGuard::Always,
+                ordered_effects: Vec::new(),
                 effects: HashMap::new(),
                 variable_effects: Vec::new(),
                 analog_expr_effects: Vec::new(),
@@ -166,6 +168,7 @@ impl SafetyModel {
 
 #[derive(Clone)]
 struct TransitionEffects {
+    ordered_effects: Vec<ModelEffect>,
     device_effects: HashMap<usize, usize>,
     variable_effects: Vec<VariableAssignment>,
     analog_expr_effects: Vec<AnalogExprEffect>,
@@ -809,6 +812,26 @@ fn merge_parallel_join_effects(states: &[State], edges: &mut [ModelEdge]) {
                 })
                 .collect();
         }
+        edge.ordered_effects = edge
+            .effects
+            .iter()
+            .map(|(device_id, state_id)| ModelEffect::DeviceState {
+                device_id: *device_id,
+                state_id: *state_id,
+            })
+            .chain(
+                edge.variable_effects
+                    .iter()
+                    .cloned()
+                    .map(ModelEffect::VariableAssignment),
+            )
+            .chain(
+                edge.analog_expr_effects
+                    .iter()
+                    .cloned()
+                    .map(ModelEffect::AnalogExpr),
+            )
+            .collect();
     }
 }
 
@@ -1309,6 +1332,13 @@ fn expand_analog_input_effects(
             for state_id in states {
                 let mut cloned = effects.clone();
                 cloned.device_effects.insert(*device_id, *state_id);
+                cloned.ordered_effects.insert(
+                    0,
+                    ModelEffect::DeviceState {
+                        device_id: *device_id,
+                        state_id: *state_id,
+                    },
+                );
                 next.push(cloned);
             }
         }
@@ -1334,6 +1364,7 @@ fn transition_effects(
     variable_index: &HashMap<String, usize>,
 ) -> TransitionEffects {
     let mut effects = TransitionEffects {
+        ordered_effects: Vec::new(),
         device_effects: HashMap::new(),
         variable_effects: Vec::new(),
         analog_expr_effects: Vec::new(),
@@ -1354,6 +1385,9 @@ fn transition_effects(
                 else {
                     continue;
                 };
+                effects
+                    .ordered_effects
+                    .push(ModelEffect::DeviceState { device_id, state_id });
                 effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::SetAnalogExpr {
@@ -1368,9 +1402,11 @@ fn transition_effects(
                 let Some(expr) = compile_model_expr(expr_raw, variable_index) else {
                     continue;
                 };
+                let effect = AnalogExprEffect { device_id, expr };
                 effects
-                    .analog_expr_effects
-                    .push(AnalogExprEffect { device_id, expr });
+                    .ordered_effects
+                    .push(ModelEffect::AnalogExpr(effect.clone()));
+                effects.analog_expr_effects.push(effect);
             }
             TransitionAction::Set {
                 target,
@@ -1388,6 +1424,9 @@ fn transition_effects(
                 ) else {
                     continue;
                 };
+                effects
+                    .ordered_effects
+                    .push(ModelEffect::DeviceState { device_id, state_id });
                 effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::Compute { target, expr_raw } => {
@@ -1397,9 +1436,11 @@ fn transition_effects(
                 let Some(expr) = compile_model_expr(expr_raw, variable_index) else {
                     continue;
                 };
+                let effect = VariableAssignment { variable_id, expr };
                 effects
-                    .variable_effects
-                    .push(VariableAssignment { variable_id, expr });
+                    .ordered_effects
+                    .push(ModelEffect::VariableAssignment(effect.clone()));
+                effects.variable_effects.push(effect);
             }
             TransitionAction::CallExtern { .. } => {}
             TransitionAction::AxisMoveRelative { target, .. }
@@ -1415,6 +1456,9 @@ fn transition_effects(
                 else {
                     continue;
                 };
+                effects
+                    .ordered_effects
+                    .push(ModelEffect::DeviceState { device_id, state_id });
                 effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::CamEngage { .. }
@@ -1429,6 +1473,9 @@ fn transition_effects(
                 let Some(state_id) = device_state_index[device_id].get("extended").copied() else {
                     continue;
                 };
+                effects
+                    .ordered_effects
+                    .push(ModelEffect::DeviceState { device_id, state_id });
                 effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::Retract { target, port, .. } => {
@@ -1439,6 +1486,9 @@ fn transition_effects(
                 let Some(state_id) = device_state_index[device_id].get("retracted").copied() else {
                     continue;
                 };
+                effects
+                    .ordered_effects
+                    .push(ModelEffect::DeviceState { device_id, state_id });
                 effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::Log { .. } => {}

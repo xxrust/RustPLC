@@ -190,6 +190,10 @@ enum ModelGuard {
 enum ModelExpr {
     Literal(SafetyValue),
     Variable(usize),
+    Function {
+        kind: ModelFunction,
+        args: Vec<ModelExpr>,
+    },
     UnaryNeg(Box<ModelExpr>),
     UnaryNot(Box<ModelExpr>),
     Binary {
@@ -217,6 +221,19 @@ enum ModelBinaryOp {
 }
 
 #[derive(Debug, Clone)]
+enum ModelFunction {
+    Abs,
+    Min,
+    Max,
+    Sin,
+    Cos,
+    Sqrt,
+    Pow,
+    Fmod,
+    Clamp,
+}
+
+#[derive(Debug, Clone)]
 struct VariableAssignment {
     variable_id: usize,
     expr: ModelExpr,
@@ -229,10 +246,18 @@ struct AnalogExprEffect {
 }
 
 #[derive(Debug, Clone)]
+enum ModelEffect {
+    DeviceState { device_id: usize, state_id: usize },
+    VariableAssignment(VariableAssignment),
+    AnalogExpr(AnalogExprEffect),
+}
+
+#[derive(Debug, Clone)]
 struct ModelEdge {
     from: usize,
     to: usize,
     guard: ModelGuard,
+    ordered_effects: Vec<ModelEffect>,
     effects: HashMap<usize, usize>,
     variable_effects: Vec<VariableAssignment>,
     analog_expr_effects: Vec<AnalogExprEffect>,
