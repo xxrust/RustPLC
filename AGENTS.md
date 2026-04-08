@@ -432,7 +432,9 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 
 - phase-2 v1 的 intent contract 先固定为独立 `.json` fixture；不要在这一阶段把 Markdown 段落解析混进 authoring 链路
 - contract schema 必须保持严格白名单；source provenance 通过 `source_ref + source_digest` 绑定到架构文档、canonical example 或其他 authored asset
-- `intent_sequence` 节点表达业务里程碑，并通过 `observed_as` 映射到可观测证据；不要把 DSL `task.step` 名字直接当作 contract 语义中心
+- contract 结构固定拆成 `contract_core` 与 `observation_bindings`：前者承载 expected milestones / required edges / postconditions / cycle semantics，后者只负责把 milestone 或 postcondition 映射到显式组合语义（`all_of` / `any_of` / `ordered_all_of`）的可观测证据
+- 顶层 `source_ref` 与 `metadata.authoritative_intent_source` 必须指向同一来源；`review_basis[*].source` 至少要能做存在性校验，避免 governance 字段退化成纯文本挂件
+- `intent_sequence` 节点表达业务里程碑，不要把 DSL `task.step` 名字直接当作 contract 语义中心
 
 ### 操作合约 EXOP
 

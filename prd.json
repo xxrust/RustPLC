@@ -8,10 +8,13 @@
       "title": "冻结 contract authoring governance 与基础 schema",
       "description": "作为意图合同维护者，我希望先冻结 contract 的 authoring governance、source binding 和基础 schema，这样后续实现面对的是有来源约束的合同，而不是任意手写 sidecar 真相。",
       "acceptanceCriteria": [
-        "在 src/intent_alignment/contract.rs 新增 IntentContract、IntentMilestone、ContractMetadata 或等价基础 schema",
+        "在 src/intent_alignment/contract.rs 新增 IntentContract、IntentContractCore、IntentMilestone、ObservationBinding、ContractMetadata 或等价基础 schema，并显式区分业务合同核心与观测映射层",
         "phase-2 v1 只支持独立 fixture 文件加载 contract，不实现 Markdown 段落解析",
         "IntentContract 必须包含 contract_version、source_ref、source_digest 或等价 provenance/source binding 字段",
+        "contract core 必须显式建模 expected milestones、required edges、postconditions、cycle/restart semantics；不能只用一个平铺的 intent_sequence 列表冒充完整合同",
+        "milestone 到 observed evidence 的映射必须显式表达组合语义，例如 all_of、any_of、ordered_all_of 或等价形式；不能让 comparator 或 compile 阶段猜测 observed_as 列表语义",
         "必须最小冻结 contract authoring governance：至少明确 business owner、authoritative intent source，以及哪些输入可作为 contract 的业务评审依据",
+        "source binding 必须闭合：authoritative intent source 与 review_basis 不能只是文本挂件，至少要能被存在性或 digest 规则验证，并且不能与顶层 source_ref 自相矛盾",
         "intent sequence 节点必须被建模为业务里程碑，而不是 DSL task.step 名字镜像",
         "至少一个 contract fixture 必须绑定到真实架构来源、现有 authored asset 或 canonical example，而不是纯手写演示夹具",
         "Typecheck passes",
@@ -19,7 +22,7 @@
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Implementation anchor: src/intent_alignment/contract.rs, src/intent_alignment/mod.rs, tests/intent_alignment_contract.rs, tests/fixtures/intent_alignment/contracts/. 这是 contract 链路的第 1 步，只负责 governance/source binding/schema，不负责 semantic validation 与 compile。"
+      "notes": "Implementation anchor: src/intent_alignment/contract.rs, src/intent_alignment/mod.rs, tests/intent_alignment_contract.rs, tests/fixtures/intent_alignment/contracts/. 这是 contract 链路的第 1 步，只负责 governance/source binding/schema，但该 schema 必须已经能承载 required edges、postconditions、cycle/restart semantics 与 observation binding 的组合语义，不能先冻结一个无法编译和验证的空壳。"
     },
     {
       "id": "US-002",

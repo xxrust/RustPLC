@@ -4,6 +4,7 @@ Started: 2026-04-07 00:00:00 CST
 ## Codebase Patterns
 - phase-2 v1 的 intent contract 使用独立 `tests/fixtures/intent_alignment/contracts/*.json` fixture；这一阶段不要把 Markdown 段落解析混入 authoring 链路。
 - intent contract schema 必须保持严格白名单，并用 `source_ref + source_digest` 把合同绑定到架构文档、canonical example 或其他 authored asset。
+- intent contract schema 固定拆成 `contract_core` 与 `observation_bindings`：业务语义放在前者，里程碑/后置条件到证据的组合语义映射放在后者，禁止让 comparator 猜 `observed_as` 列表语义。
 - 第二阶段的目标是“真正的意图对齐比较器”，不是继续补 authored assets / toolchain evidence / blocker 的分栏文档。
 - 比较主链必须固定为：`authored intent contract -> compile_expected_behavior_spec -> extract_observed_behavior_sequence -> compare_intent_alignment -> IntentAlignmentReport`。
 - `intent sequence` 节点是业务里程碑，不是 DSL `task.step` 名字镜像；`IntentContract` 必须显式携带“意图节点 -> 可观测里程碑”映射规则。
@@ -28,4 +29,18 @@ Thread: https://ampcode.com/threads/unknown
   - Intent contracts are standalone JSON fixtures in phase-2 v1; keep Markdown parsing out of the authoring path until a later story explicitly adds it.
   - The contract source of truth is provenance-bound via `source_ref + source_digest`; tests intentionally fail if the bound architecture doc changes without updating the contract fixture.
   - Model `intent_sequence` as business milestones plus `observed_as` evidence locators; avoid mirroring DSL `task.step` identifiers as contract semantics.
+---
+
+## [2026-04-08 09:32:13 CST] - US-001
+Thread: https://ampcode.com/threads/unknown
+- Implemented the phase-2 intent contract foundation as a split `contract_core` + `observation_bindings` schema in `src/intent_alignment/contract.rs`.
+- Added explicit required edges, postconditions, cycle/restart semantics, and observation combination modes (`all_of`, `any_of`, `ordered_all_of`) to the canonical contract fixture.
+- Hardened source binding governance so top-level provenance must match `authoritative_intent_source`, and every `review_basis` source is existence-checked.
+- Added regression coverage in `tests/intent_alignment_contract.rs` for standalone JSON loading, strict whitelist parsing, source-binding closure, and core-vs-observation separation.
+- Updated `AGENTS.md`, `prd.json`, and the canonical fixture under `tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json`.
+- Files changed: `AGENTS.md`, `prd.json`, `progress.txt`, `src/intent_alignment/contract.rs`, `src/intent_alignment/mod.rs`, `tests/intent_alignment_contract.rs`, `tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json`
+- **Learnings for future iterations:**
+  - Keep business intent semantics in `contract_core`; use `observation_bindings` only for evidence projection so later compile/comparator stages consume a single explicit contract shape.
+  - `metadata.authoritative_intent_source` is not a free-form note; it must point to the same source as top-level `source_ref`, while `review_basis[*].source` must stay resolvable on disk.
+  - Observation combination semantics are contract data (`all_of` / `any_of` / `ordered_all_of`), not comparator heuristics.
 ---

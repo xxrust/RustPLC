@@ -37,14 +37,78 @@
       }
     ]
   },
-  "intent_sequence": [
-    {
-      "milestone_id": "cycle_started",
-      "business_milestone": {
-        "label": "Cycle accepted for processing",
-        "description": "A new production cycle has started and the cell commits to execute the sequence."
+  "contract_core": {
+    "expected_milestones": [
+      {
+        "milestone_id": "cycle_started",
+        "business_milestone": {
+          "label": "Cycle accepted for processing",
+          "description": "A new production cycle has started and the cell commits to execute the sequence."
+        }
       },
-      "observed_as": [
+      {
+        "milestone_id": "grip_part_secured",
+        "business_milestone": {
+          "label": "Part secured before transfer",
+          "description": "The workpiece is physically secured and safe to hand over to the next motion segment."
+        }
+      },
+      {
+        "milestone_id": "transfer_lane_cleared",
+        "business_milestone": {
+          "label": "Transfer lane is cleared",
+          "description": "The second cylinder finishes its extend/retract cycle so the station is ready for the next part."
+        }
+      },
+      {
+        "milestone_id": "cycle_restartable",
+        "business_milestone": {
+          "label": "Cell restartable for next cycle",
+          "description": "All business postconditions are satisfied and the next cycle can start from a clean baseline."
+        }
+      }
+    ],
+    "required_edges": [
+      {
+        "predecessor": "cycle_started",
+        "successor": "grip_part_secured"
+      },
+      {
+        "predecessor": "grip_part_secured",
+        "successor": "transfer_lane_cleared"
+      },
+      {
+        "predecessor": "transfer_lane_cleared",
+        "successor": "cycle_restartable"
+      }
+    ],
+    "postconditions": [
+      {
+        "postcondition_id": "cell_ready_for_next_cycle",
+        "description": "The station has fully completed the business sequence and is cleanly restartable for the next cycle."
+      }
+    ],
+    "cycle_semantics": {
+      "cycle_start_milestone": "cycle_started",
+      "cycle_complete_milestone": "cycle_restartable",
+      "restart_semantics": {
+        "restartable_milestone": "cycle_restartable",
+        "next_cycle_start_milestone": "cycle_started",
+        "required_postconditions": [
+          "cell_ready_for_next_cycle"
+        ]
+      }
+    }
+  },
+  "observation_bindings": [
+    {
+      "binding_id": "cycle_started_observed",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "cycle_started"
+      },
+      "combination": "all_of",
+      "evidence": [
         {
           "source": "trace_event",
           "key": "milestone",
@@ -53,12 +117,13 @@
       ]
     },
     {
-      "milestone_id": "grip_part_secured",
-      "business_milestone": {
-        "label": "Part secured before transfer",
-        "description": "The workpiece is physically secured and safe to hand over to the next motion segment."
+      "binding_id": "grip_part_secured_observed",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "grip_part_secured"
       },
-      "observed_as": [
+      "combination": "ordered_all_of",
+      "evidence": [
         {
           "source": "trace_event",
           "key": "milestone",
@@ -72,12 +137,13 @@
       ]
     },
     {
-      "milestone_id": "transfer_lane_cleared",
-      "business_milestone": {
-        "label": "Transfer lane is cleared",
-        "description": "The second cylinder finishes its extend/retract cycle so the station is ready for the next part."
+      "binding_id": "transfer_lane_cleared_observed",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "transfer_lane_cleared"
       },
-      "observed_as": [
+      "combination": "ordered_all_of",
+      "evidence": [
         {
           "source": "trace_event",
           "key": "milestone",
@@ -91,12 +157,28 @@
       ]
     },
     {
-      "milestone_id": "cycle_restartable",
-      "business_milestone": {
-        "label": "Cell restartable for next cycle",
-        "description": "All business postconditions are satisfied and the next cycle can start from a clean baseline."
+      "binding_id": "cycle_restartable_observed",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "cycle_restartable"
       },
-      "observed_as": [
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "milestone",
+          "expected": "cycle_restartable"
+        }
+      ]
+    },
+    {
+      "binding_id": "cell_ready_for_next_cycle_observed",
+      "subject": {
+        "kind": "postcondition",
+        "postcondition_id": "cell_ready_for_next_cycle"
+      },
+      "combination": "all_of",
+      "evidence": [
         {
           "source": "trace_event",
           "key": "milestone",
