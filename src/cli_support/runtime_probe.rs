@@ -107,12 +107,20 @@ pub(crate) fn io_sizes_for_program_and_scenario(
 }
 
 pub(crate) fn is_halted<'a>(rt: &runtime_core::Runtime<'a>, program: &'a Program<'a>) -> bool {
-    let loc = rt.location();
-    let Ok(task) = program.task(loc.task) else {
+    if rt.active_task_count() == 0 {
         return false;
-    };
-    let Some(step) = task.step(loc.step) else {
-        return false;
-    };
-    matches!(step.instr, Instr::Halt)
+    }
+
+    (0..rt.active_task_count()).all(|task_idx| {
+        let Ok(ctx) = rt.task_context(task_idx) else {
+            return false;
+        };
+        let Ok(task) = program.task(task_idx) else {
+            return false;
+        };
+        let Some(step) = task.step(ctx.current_step) else {
+            return false;
+        };
+        matches!(step.instr, Instr::Halt)
+    })
 }

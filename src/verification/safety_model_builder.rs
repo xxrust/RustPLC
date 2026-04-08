@@ -717,36 +717,13 @@ fn select_safety_root_tasks(
     state_machine: &StateMachine,
     task_entry_states: &HashMap<String, usize>,
 ) -> Vec<String> {
-    let mut cross_task_incoming = HashSet::<String>::new();
-    for transition in &state_machine.transitions {
-        if transition.from.task_name != transition.to.task_name {
-            cross_task_incoming.insert(transition.to.task_name.clone());
-        }
-        for target_task in axis_branch_target_task_names(&transition.actions) {
-            if transition.from.task_name != target_task {
-                cross_task_incoming.insert(target_task);
-            }
-        }
-    }
-
-    let mut roots = Vec::new();
-    for ctx in &state_machine.task_contexts {
-        if task_entry_states.contains_key(&ctx.task_name)
-            && !cross_task_incoming.contains(&ctx.task_name)
-        {
-            roots.push(ctx.task_name.clone());
-        }
-    }
-
-    if roots.is_empty() {
-        if task_entry_states.contains_key(&state_machine.initial.task_name) {
-            roots.push(state_machine.initial.task_name.clone());
-        } else if let Some(first) = state_machine.task_contexts.first() {
-            roots.push(first.task_name.clone());
-        }
-    }
-
-    roots
+    crate::task_root_selection::select_root_task_contexts(
+        state_machine,
+        axis_branch_target_task_names,
+    )
+    .into_iter()
+    .filter(|task_name| task_entry_states.contains_key(task_name))
+    .collect()
 }
 
 fn axis_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
@@ -1442,9 +1419,10 @@ fn transition_effects(
                 else {
                     continue;
                 };
-                effects
-                    .ordered_effects
-                    .push(ModelEffect::DeviceState { device_id, state_id });
+                effects.ordered_effects.push(ModelEffect::DeviceState {
+                    device_id,
+                    state_id,
+                });
                 effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::SetAnalogExpr {
@@ -1481,9 +1459,10 @@ fn transition_effects(
                 ) else {
                     continue;
                 };
-                effects
-                    .ordered_effects
-                    .push(ModelEffect::DeviceState { device_id, state_id });
+                effects.ordered_effects.push(ModelEffect::DeviceState {
+                    device_id,
+                    state_id,
+                });
                 effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::Compute { target, expr_raw } => {
@@ -1561,9 +1540,10 @@ fn transition_effects(
                 else {
                     continue;
                 };
-                effects
-                    .ordered_effects
-                    .push(ModelEffect::DeviceState { device_id, state_id });
+                effects.ordered_effects.push(ModelEffect::DeviceState {
+                    device_id,
+                    state_id,
+                });
                 effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::CamEngage { .. }
@@ -1578,9 +1558,10 @@ fn transition_effects(
                 let Some(state_id) = device_state_index[device_id].get("extended").copied() else {
                     continue;
                 };
-                effects
-                    .ordered_effects
-                    .push(ModelEffect::DeviceState { device_id, state_id });
+                effects.ordered_effects.push(ModelEffect::DeviceState {
+                    device_id,
+                    state_id,
+                });
                 effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::Retract { target, port, .. } => {
@@ -1591,9 +1572,10 @@ fn transition_effects(
                 let Some(state_id) = device_state_index[device_id].get("retracted").copied() else {
                     continue;
                 };
-                effects
-                    .ordered_effects
-                    .push(ModelEffect::DeviceState { device_id, state_id });
+                effects.ordered_effects.push(ModelEffect::DeviceState {
+                    device_id,
+                    state_id,
+                });
                 effects.device_effects.insert(device_id, state_id);
             }
             TransitionAction::Log { .. } => {}

@@ -29,6 +29,7 @@ pub mod semantic;
 pub mod sequence_lint;
 pub mod sim_regress;
 pub mod source_bundle;
+mod task_root_selection;
 pub mod tick_timing;
 pub mod timing_report;
 pub mod topology_semantic_gate;

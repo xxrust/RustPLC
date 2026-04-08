@@ -1,4 +1,4 @@
-﻿/// Convert a compiler/semantic `StateMachine` IR into a minimal `runtime-core` `Program`.
+/// Convert a compiler/semantic `StateMachine` IR into a minimal `runtime-core` `Program`.
 ///
 /// Supported subset:
 /// - `action`: set (digital), extend, retract
@@ -10,7 +10,8 @@
 /// - `goto`
 ///
 /// Notes:
-/// - Runtime tasks are generated from root task contexts (tasks without cross-task incoming edges).
+/// - Runtime tasks are generated from condensed root task contexts (task-SCC roots without
+///   external cross-task incoming edges).
 /// - Per-task step graphs stay local (`StepId` is scoped per runtime task).
 /// - Generated program uses leaked allocations to produce a `'static` `Program`.
 pub fn state_machine_to_runtime_program(
@@ -241,36 +242,10 @@ fn select_runtime_root_tasks(
     sm: &StateMachine,
     task_entry_states: &HashMap<String, State>,
 ) -> Vec<String> {
-    let mut cross_task_incoming = HashSet::<String>::new();
-    for transition in &sm.transitions {
-        if transition.from.task_name != transition.to.task_name {
-            cross_task_incoming.insert(transition.to.task_name.clone());
-        }
-        for target_task in motion_branch_target_task_names(&transition.actions) {
-            if transition.from.task_name != target_task {
-                cross_task_incoming.insert(target_task);
-            }
-        }
-    }
-
-    let mut roots = Vec::new();
-    for ctx in &sm.task_contexts {
-        if task_entry_states.contains_key(&ctx.task_name)
-            && !cross_task_incoming.contains(&ctx.task_name)
-        {
-            roots.push(ctx.task_name.clone());
-        }
-    }
-
-    if roots.is_empty() {
-        if task_entry_states.contains_key(&sm.initial.task_name) {
-            roots.push(sm.initial.task_name.clone());
-        } else if let Some(first) = sm.task_contexts.first() {
-            roots.push(first.task_name.clone());
-        }
-    }
-
-    roots
+    crate::task_root_selection::select_root_task_contexts(sm, motion_branch_target_task_names)
+        .into_iter()
+        .filter(|task_name| task_entry_states.contains_key(task_name))
+        .collect()
 }
 
 fn motion_branch_target_task_names(actions: &[TransitionAction]) -> Vec<String> {
@@ -1276,4 +1251,3 @@ fn build_cam_tables(topology: &TopologyGraph) -> Vec<CamTableData> {
 
     out
 }
-

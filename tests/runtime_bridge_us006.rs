@@ -16,6 +16,7 @@ use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
 };
+use rust_plc::source_bundle::load_plc_source;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -64,6 +65,21 @@ fn compile_example_to_runtime(file_name: &str, tick_ms: u64) -> runtime_core::Pr
     let source = fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("read {} failed: {err}", path.display()));
     compile_to_runtime(&source, tick_ms)
+}
+
+fn compile_bundle_to_runtime(
+    relative_bundle_path: &str,
+    tick_ms: u64,
+) -> runtime_core::Program<'static> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_bundle_path);
+    let loaded = load_plc_source(&path)
+        .unwrap_or_else(|err| panic!("load bundle {} failed: {err}", path.display()));
+    let program = parse_plc(&loaded.source).expect("parse bundled plc");
+    let expanded = preprocess_program(&program).expect("preprocess");
+    let topology = build_topology_graph(&expanded).expect("topology");
+    let constraints = build_constraint_set(&expanded).expect("constraints");
+    let sm = build_state_machine(&expanded).expect("state machine");
+    state_machine_to_runtime_program(&topology, &constraints, &sm, tick_ms).expect("bridge")
 }
 
 fn variable_index(topology: &TopologyGraph, name: &str) -> u16 {
@@ -168,6 +184,33 @@ task unload:
     step halt:
 "#;
 
+const PLC_RECOVERY_SCC_ROOT_FIXTURE: &str = r#"
+[topology]
+
+device X0: digital_input
+device start_button: sensor
+
+relation { from: start_button.out, to: X0.in, via: reports_to }
+
+[constraints]
+
+[tasks]
+task startup:
+    step wait_start:
+        wait: start_button == true
+        timeout: 50ms -> goto startup_fault
+    step running:
+
+task startup_fault:
+    step recover:
+        goto startup.wait_start
+
+task background:
+    step monitor:
+        delay: 5ms
+    on_complete: goto background
+"#;
+
 #[test]
 fn bridge_preserves_task_boundaries_for_independent_roots() {
     let program = compile_to_runtime(PLC_MULTI_ROOT_TASK_FIXTURE, 1);
@@ -198,6 +241,106 @@ fn bridge_preserves_task_boundaries_for_independent_roots() {
             task.name
         );
     }
+}
+
+#[test]
+fn bridge_keeps_primary_task_active_when_recovery_task_forms_scc() {
+    let program = compile_to_runtime(PLC_RECOVERY_SCC_ROOT_FIXTURE, 1);
+    assert_eq!(
+        program.tasks.len(),
+        2,
+        "fault/recovery SCC should still keep the primary startup domain active"
+    );
+    assert_eq!(program.tasks[0].name, "startup");
+    assert_eq!(program.tasks[1].name, "background");
+    assert!(
+        program.tasks[0]
+            .steps
+            .iter()
+            .any(|step| step.name == "startup.wait_start"),
+        "startup root task should still contain its entry step"
+    );
+    assert!(
+        program.tasks[0]
+            .steps
+            .iter()
+            .any(|step| step.name == "startup_fault.recover"),
+        "startup root task should absorb the recovery task inside the same SCC domain"
+    );
+}
+
+#[test]
+fn wafer_loader_bundle_keeps_startup_and_production_domains_as_runtime_roots() {
+    let program = compile_bundle_to_runtime(
+        "out/wafer_loader_project/plc/main.target_semantics.bundle.toml",
+        10,
+    );
+    let task_names = program.tasks.iter().map(|task| task.name).collect::<Vec<_>>();
+
+    for expected in [
+        "startup_initializer",
+        "architecture_monitor",
+        "supervisor",
+        "feed_prep",
+        "orient_stage",
+        "transfer_to_measure",
+    ] {
+        assert!(
+            task_names.iter().any(|task_name| *task_name == expected),
+            "wafer-loader runtime roots should include {expected}, got {:?}",
+            task_names
+        );
+    }
+}
+
+#[test]
+fn wafer_loader_nominal_start_pulse_progress_snapshot() {
+    let program = compile_bundle_to_runtime(
+        "out/wafer_loader_project/plc/main.target_semantics.bundle.toml",
+        10,
+    );
+    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut io = sim::SimIo::new(32, 10, 0, 0);
+
+    for id in [3u16, 12, 17, 18, 19, 20, 22, 23, 25, 27, 29, 31] {
+        io.schedule_digital_input(Tick(0), DigitalInputId(id), true);
+    }
+    io.schedule_digital_input(Tick(5), DigitalInputId(0), true);
+    io.schedule_digital_input(Tick(10), DigitalInputId(0), false);
+
+    let mut snapshots = Vec::new();
+    for tick in 0..12 {
+        rt.tick(&mut io).expect("tick");
+        snapshots.push((tick, all_task_steps(&rt, &program)));
+    }
+
+    assert_eq!(snapshots.len(), 12);
+    assert_eq!(
+        snapshots[4].1,
+        vec![
+            "startup_initializer.startup_ready",
+            "architecture_monitor.monitor_loop",
+            "supervisor.wait_start",
+            "feed_prep.wait_enabled",
+            "orient_stage.wait_enabled",
+            "transfer_to_measure.wait_enabled",
+            "maintenance_service.wait_mode",
+        ],
+        "before the start pulse, wafer-loader should hold the supervisor and auto tasks at their enable gates"
+    );
+    assert_eq!(
+        snapshots[5].1,
+        vec![
+            "startup_initializer.startup_ready",
+            "architecture_monitor.monitor_loop",
+            "supervisor.monitor_stop",
+            "feed_prep.feed_forward",
+            "orient_stage.wait_slide_present",
+            "transfer_to_measure.wait_wafer_ready",
+            "maintenance_service.wait_mode",
+        ],
+        "after the start pulse, supervisor should arm the cycle and production tasks should advance into their next physical waits"
+    );
 }
 
 #[test]

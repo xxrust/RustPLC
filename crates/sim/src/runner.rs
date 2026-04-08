@@ -115,14 +115,22 @@ pub fn run_program_for_scenario_with_tick_observer<'a>(
 }
 
 fn is_halted<'a>(rt: &Runtime<'a>, program: &'a Program<'a>) -> bool {
-    let loc = rt.location();
-    let Ok(task) = program.task(loc.task) else {
+    if rt.active_task_count() == 0 {
         return false;
-    };
-    let Some(step) = task.step(loc.step) else {
-        return false;
-    };
-    matches!(step.instr, Instr::Halt)
+    }
+
+    (0..rt.active_task_count()).all(|task_idx| {
+        let Ok(ctx) = rt.task_context(task_idx) else {
+            return false;
+        };
+        let Ok(task) = program.task(task_idx) else {
+            return false;
+        };
+        let Some(step) = task.step(ctx.current_step) else {
+            return false;
+        };
+        matches!(step.instr, Instr::Halt)
+    })
 }
 
 #[cfg(test)]
@@ -207,6 +215,87 @@ faults:
                 .iter()
                 .any(|l| l.contains("\"reason\":\"timeout\"") && l.contains("\"tick\":2")),
             "expected timeout event in trace, got: {:?}",
+            out.trace.lines()
+        );
+    }
+
+    #[test]
+    fn runner_does_not_stop_when_only_one_concurrent_task_is_halted() {
+        use io_traits::DigitalInputId;
+        use runtime_core::{Instr, Program, Step, StepId, Task};
+
+        static TASK0_STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "task0.run",
+                instr: Instr::Goto { target: StepId(1) },
+            },
+            Step {
+                name: "task0.halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASK1_STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "task1.wait",
+                instr: Instr::WaitDigital {
+                    id: DigitalInputId(0),
+                    equals: true,
+                    next: StepId(1),
+                    timeout: None,
+                },
+            },
+            Step {
+                name: "task1.halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 2] = [
+            Task {
+                name: "task0",
+                steps: &TASK0_STEPS,
+                entry: StepId(0),
+            },
+            Task {
+                name: "task1",
+                steps: &TASK1_STEPS,
+                entry: StepId(0),
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
+        };
+
+        let yaml = r#"
+seed: 7
+tick_ms: 10
+duration_ms: 30
+inputs:
+  - at_ms: 10
+    set:
+      digital_inputs:
+        0: true
+"#;
+        let scenario = Scenario::from_yaml_str(yaml).unwrap();
+        let mut io = SimIo::new(1, 0, 0, 0);
+
+        let out = run_program_for_scenario(&PROGRAM, &scenario, &mut io).unwrap();
+
+        assert!(
+            out.trace
+                .lines()
+                .iter()
+                .any(|line| line.contains("\"task\":1") && line.contains("\"tick\":1")),
+            "runner should continue until task1 consumes the tick-1 input pulse; trace={:?}",
             out.trace.lines()
         );
     }
