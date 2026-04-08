@@ -1,6 +1,7 @@
 use crate::cli_support::common::{CliOutputMode, DispatchResult, display_path_relative_to_cwd};
 use crate::cli_support::diagnostics_common::evidence_source_label;
 use crate::cli_support::help::command_usage;
+use crate::cli_support::plc_pipeline::build_loaded_runtime_semantics;
 use crate::cli_support::scenario_yaml::{
     format_resolve_scenario_yaml_error, parse_scenario_yaml, read_scenario_yaml_file,
 };
@@ -8,7 +9,13 @@ use rust_plc::diagnostics::{
     DiagnosisAnchor, DiagnosisCandidate, DiagnosisInput, DiagnosisReport, EvidenceInputKind,
     EvidenceSource, IoSnapshotArtifact, diagnose,
 };
+use rust_plc::intent_alignment::{
+    BindingStability, IntentDoctorReport, IntentDoctorRuntimeTaskLayout,
+    compile_expected_behavior_spec, diagnose_intent_alignment_with_layouts, read_intent_contract,
+};
+use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::scenario_resolve::resolve_scenario_yaml_for_plc;
+use rust_plc::source_bundle::load_plc_source;
 use rust_plc::tick_timing::parse_tick_timing_jsonl;
 use rust_plc::timing_report::{TimingReport, build_timing_report};
 use serde::Serialize;
@@ -28,6 +35,10 @@ pub(super) fn try_dispatch(
         "trace-doctor" => (
             Some("[AXF-000]"),
             run_trace_doctor_subcommand(program, remaining.iter().cloned()),
+        ),
+        "intent-doctor" => (
+            Some("[IAD-000]"),
+            run_intent_doctor_subcommand(program, remaining.iter().cloned()),
         ),
         "timing-report" => (
             None,
@@ -447,6 +458,299 @@ fn run_trace_doctor_subcommand(
         print!("{json}");
     } else {
         print_trace_doctor_human(&report, top_n);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct IntentDoctorSummary {
+    observed_transition_count: usize,
+    unique_transition_count: usize,
+    candidate_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    top_transition: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct IntentDoctorArtifacts {
+    plc: String,
+    trace: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    intent_contract: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct IntentDoctorCliReport {
+    schema_version: u32,
+    command: &'static str,
+    output: &'static str,
+    analysis: IntentDoctorReport,
+    summary: IntentDoctorSummary,
+    artifacts: IntentDoctorArtifacts,
+}
+
+fn build_intent_doctor_cli_report(
+    report: IntentDoctorReport,
+    output_mode: CliOutputMode,
+    artifacts: IntentDoctorArtifacts,
+) -> IntentDoctorCliReport {
+    let top_transition = report
+        .candidates
+        .first()
+        .map(|candidate| candidate.transition.clone());
+    IntentDoctorCliReport {
+        schema_version: report.schema_version,
+        command: "intent-doctor",
+        output: output_mode.as_str(),
+        summary: IntentDoctorSummary {
+            observed_transition_count: report.observed_transition_count,
+            unique_transition_count: report.unique_transition_count,
+            candidate_count: report.candidates.len(),
+            top_transition,
+        },
+        analysis: report,
+        artifacts,
+    }
+}
+
+fn binding_stability_label(status: BindingStability) -> &'static str {
+    match status {
+        BindingStability::Stable => "stable",
+        BindingStability::Partial => "partial",
+        BindingStability::Repeated => "repeated",
+        BindingStability::Missing => "missing",
+        BindingStability::Unsupported => "unsupported",
+    }
+}
+
+fn print_intent_doctor_human(report: &IntentDoctorCliReport, top_n: usize) {
+    eprintln!(
+        "intent-doctor: PASS (observed={}, unique={}, candidates={})",
+        report.summary.observed_transition_count,
+        report.summary.unique_transition_count,
+        report.summary.candidate_count
+    );
+    eprintln!("  plc: {}", report.artifacts.plc);
+    eprintln!("  trace: {}", report.artifacts.trace);
+    if let Some(contract) = &report.artifacts.intent_contract {
+        eprintln!("  intent_contract: {contract}");
+    }
+
+    let top_n = top_n.max(1).min(report.analysis.candidates.len());
+    eprintln!("Top {top_n} anchor candidate(s):");
+    for candidate in report.analysis.candidates.iter().take(top_n) {
+        eprintln!(
+            "  {}. {} (score={:.2}, count={})",
+            candidate.rank, candidate.transition, candidate.score, candidate.occurrence_count
+        );
+        eprintln!(
+            "     states: {} -> {}",
+            candidate.from_state, candidate.to_state
+        );
+        if !candidate.workpiece_effects.is_empty() {
+            eprintln!(
+                "     workpiece: {}",
+                candidate.workpiece_effects.join(" | ")
+            );
+        }
+        if let Some(reason) = candidate.reasons.first() {
+            eprintln!("     why: {reason}");
+        }
+    }
+
+    if let Some(contract) = &report.analysis.contract_diagnosis {
+        eprintln!(
+            "Contract bindings: {} ({})",
+            contract.contract_id, contract.contract_version
+        );
+        if let Some(blocked_reason) = &contract.blocked_reason {
+            eprintln!("  blocked: {blocked_reason}");
+        }
+        for binding in &contract.milestone_bindings {
+            eprintln!(
+                "  {} [{}] observed={}/{}",
+                binding.subject,
+                binding_stability_label(binding.status),
+                binding.observed_occurrences,
+                binding.expected_occurrences
+            );
+        }
+    }
+
+    if let Some(cycle) = &report.analysis.cycle_diagnosis {
+        eprintln!(
+            "Cycle diagnosis: cycles={}, cross_cycle_ready={}, trailing_partial_cycle={}",
+            cycle.observed_cycle_count, cycle.cross_cycle_ready, cycle.trailing_partial_cycle
+        );
+        for note in &cycle.notes {
+            eprintln!("  note: {note}");
+        }
+    }
+}
+
+fn default_intent_contract_path(plc_path: &Path) -> Option<PathBuf> {
+    let file_name = plc_path.file_name()?.to_str()?;
+    let candidate_name = if file_name.ends_with(".bundle.toml") {
+        format!(
+            "{}.intent_alignment.contract.json",
+            file_name.trim_end_matches(".toml")
+        )
+    } else if file_name.ends_with(".plc") {
+        format!(
+            "{}.intent_alignment.contract.json",
+            file_name.trim_end_matches(".plc")
+        )
+    } else {
+        return None;
+    };
+    Some(plc_path.with_file_name(candidate_name))
+}
+
+fn runtime_layouts_from_program(
+    program: &runtime_core::Program<'_>,
+) -> Result<Vec<IntentDoctorRuntimeTaskLayout>, String> {
+    program
+        .tasks
+        .iter()
+        .map(|task| {
+            let step_keys = task
+                .steps
+                .iter()
+                .map(|step| {
+                    let Some((task_name, step_name)) = step.name.split_once('.') else {
+                        return Err(format!(
+                            "runtime step `{}` is missing the expected `task.step` naming form",
+                            step.name
+                        ));
+                    };
+                    Ok((task_name.to_string(), step_name.to_string()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(IntentDoctorRuntimeTaskLayout {
+                root_task: task.name.to_string(),
+                step_keys,
+            })
+        })
+        .collect()
+}
+
+fn run_intent_doctor_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = command_usage(program, "intent-doctor");
+    let Some(plc_path) = args.next() else {
+        return Err(usage);
+    };
+
+    let mut trace_path: Option<PathBuf> = None;
+    let mut intent_contract_path: Option<PathBuf> = None;
+    let mut top_n: usize = 5;
+    let mut output_mode = CliOutputMode::Human;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--trace" => {
+                trace_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --trace <trace.jsonl>".to_string()
+                    })?));
+            }
+            "--intent-contract" => {
+                intent_contract_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --intent-contract <contract.json>".to_string()
+                })?));
+            }
+            "--top" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --top <n>".to_string())?;
+                top_n = raw
+                    .parse::<usize>()
+                    .map_err(|_| format!("Invalid --top value (expected usize): {raw}"))?;
+                if top_n == 0 {
+                    return Err("Invalid --top value (expected >= 1)".to_string());
+                }
+            }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
+            "-h" | "--help" => return Err(usage.clone()),
+            other => return Err(format!("Unknown argument for intent-doctor: {other}")),
+        }
+    }
+
+    let plc_path = PathBuf::from(plc_path);
+    let trace_path = trace_path.ok_or_else(|| usage.clone())?;
+    let loaded = load_plc_source(&plc_path)?;
+    let semantics = build_loaded_runtime_semantics(&loaded)
+        .map_err(|err| format!("intent-doctor failed to compile PLC semantics: {err}"))?;
+    let runtime_program = state_machine_to_runtime_program(
+        &semantics.topology,
+        &semantics.constraints,
+        &semantics.state_machine,
+        1,
+    )
+    .map_err(|err| format!("intent-doctor failed to lower runtime layout: {err}"))?;
+    let runtime_layouts = runtime_layouts_from_program(&runtime_program)?;
+    let trace_text = fs::read_to_string(&trace_path)
+        .map_err(|err| format!("Failed to read trace JSONL {}: {err}", trace_path.display()))?;
+    let trace_events = rust_plc::trace_diff::parse_trace_jsonl(&trace_text).map_err(|err| {
+        format!(
+            "Failed to parse trace JSONL {}: {err}",
+            trace_path.display()
+        )
+    })?;
+
+    let resolved_contract_path = intent_contract_path.or_else(|| {
+        default_intent_contract_path(&plc_path).filter(|candidate| candidate.is_file())
+    });
+    let expected_behavior = if let Some(contract_path) = &resolved_contract_path {
+        let contract = read_intent_contract(contract_path).map_err(|err| {
+            format!(
+                "Failed to load intent contract {}: {err}",
+                contract_path.display()
+            )
+        })?;
+        Some(
+            compile_expected_behavior_spec(&contract)
+                .map_err(|err| format!("Failed to compile intent contract: {err}"))?,
+        )
+    } else {
+        None
+    };
+
+    let report = diagnose_intent_alignment_with_layouts(
+        &semantics.state_machine,
+        &trace_events,
+        expected_behavior.as_ref(),
+        &runtime_layouts,
+    )
+    .map_err(|err| format!("intent-doctor failed: {err}"))?;
+    let cli_report = build_intent_doctor_cli_report(
+        report,
+        output_mode,
+        IntentDoctorArtifacts {
+            plc: display_path_relative_to_cwd(&plc_path),
+            trace: display_path_relative_to_cwd(&trace_path),
+            intent_contract: resolved_contract_path
+                .as_ref()
+                .map(|path| display_path_relative_to_cwd(path)),
+        },
+    );
+
+    if output_mode == CliOutputMode::Json {
+        let mut json = serde_json::to_string_pretty(&cli_report)
+            .map_err(|err| format!("Failed to serialize intent-doctor JSON output: {err}"))?;
+        json.push('\n');
+        print!("{json}");
+    } else {
+        print_intent_doctor_human(&cli_report, top_n);
     }
     Ok(())
 }

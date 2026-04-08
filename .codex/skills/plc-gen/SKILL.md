@@ -126,6 +126,14 @@ For complex projects, do not call the result `validated` if:
 - `project-check` did not actually run the `intent_alignment` step
 - the comparator failed or was blocked and that blocker was not reported
 
+If the contract exists but anchor choice or cycle boundaries are still uncertain, run:
+
+```bash
+rust_plc intent-doctor <source.plc|source.bundle.toml> --trace <trace.jsonl> [--intent-contract <contract.json>] --output human
+```
+
+Use it to rank real anchor candidates from the compiled semantics plus observed trace before freezing milestone bindings.
+
 When editing the `plc-gen` skill, prompts, or workflow references themselves, rerun the wafer-loader canary at `out/wafer_loader_project/`.
 
 ## Source Of Truth

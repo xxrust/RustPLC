@@ -20,7 +20,7 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Core",
         name: "new",
         summary: "Create a RustPLC project scaffold with starter PLC, scenarios, and VS Code tasks.",
-        usage_template: "Usage: {program} new <project_dir> [--force]",
+        usage_template: "Usage: {program} new <project_dir> [--layout <single-file|structured-fragments>] [--force]",
     },
     CliCommandHelp {
         section: "Simulation",
@@ -111,6 +111,12 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         name: "trace-doctor",
         summary: "Correlate trace, diff, timing, and snapshot artifacts into diagnosis output.",
         usage_template: "Usage: {program} trace-doctor <source.plc|source.bundle.toml> --scenario <scenario.yaml> [--trace <trace.jsonl>] [--diff <diff_report.json>] [--timing-report <timing_report.json>] [--io-snapshot <io_snapshot.json>] [--evidence-source <no_board|hil_board|runtime_live|mixed>] [--top <n>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
+        name: "intent-doctor",
+        summary: "Rank intent-anchor candidates from a real trace and diagnose binding or cycle-boundary instability.",
+        usage_template: "Usage: {program} intent-doctor <source.plc|source.bundle.toml> --trace <trace.jsonl> [--intent-contract <contract.json>] [--top <n>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Diagnostics",
@@ -209,9 +215,10 @@ pub(crate) fn command_usage(program: &str, command: &str) -> String {
 fn command_help_options(command: &str) -> &'static [&'static str] {
     match command {
         "help" => &["[command]                  Show detailed help for one command."],
-        "new" => {
-            &["--force                    Overwrite known scaffold files in a non-empty directory."]
-        }
+        "new" => &[
+            "--layout <single-file|structured-fragments> Choose the scaffold source layout.",
+            "--force                    Overwrite known scaffold files in a non-empty directory.",
+        ],
         "sim" => &[
             "--out <trace.jsonl>          Write runtime trace JSONL.",
             "--vcd-out <wave.vcd>         Write digital waveform VCD output.",
@@ -310,6 +317,12 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--top <n>                    Limit the human report to the top N candidates.",
             "--output <human|json>        Select CLI output format.",
         ],
+        "intent-doctor" => &[
+            "--trace <trace.jsonl>        Required runtime trace input.",
+            "--intent-contract <file>     Optional contract fixture to diagnose existing milestone bindings.",
+            "--top <n>                    Limit the human report to the top N anchor candidates.",
+            "--output <human|json>        Select CLI output format.",
+        ],
         "timing-report" => &[
             "--in <tick_timing.jsonl>     Required timing JSONL input.",
             "--out <timing_report.json>   Override the output report path.",
@@ -381,6 +394,10 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
         "help" => {
             &["`help compile` shows the detailed page for the default compile-and-verify mode."]
         }
+        "new" => &[
+            "`single-file` keeps the existing Day-1 scaffold shape.",
+            "`structured-fragments` creates a `.bundle.toml` entry plus semantic fragment directories for multi-domain projects.",
+        ],
         "sim" => &["This command runs the built-in demo program, not a user PLC file."],
         "sim-plc" => &[
             "Online force and online variable controls stay disabled unless `--enable-online-force-dev` is present.",
@@ -400,6 +417,10 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
             "When `--intent-contract` and `--intent-evidence` are both provided, an `intent_alignment` step is appended and reduced from the library report without reinterpreting its verdict.",
         ],
         "trace-doctor" => &["At least one of `--trace` or `--diff` is required."],
+        "intent-doctor" => &[
+            "If `--intent-contract` is omitted, the command tries the sibling `*.intent_alignment.contract.json` path next to the PLC source entry.",
+            "Use this before finalizing milestone bindings for a new project so anchor selection is based on real trace evidence, not guessed `task.step` names.",
+        ],
         "component-sim" => {
             &["Topology and scenario inputs are validated before simulation starts."]
         }
@@ -424,6 +445,7 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         "help" => &["rust_plc help sim-plc", "rust_plc help compile"],
         "new" => &[
             "rust_plc new demo_project",
+            "rust_plc new wafer_loader --layout structured-fragments",
             "rust_plc new demo_project --force",
         ],
         "sim" => &["rust_plc sim scenarios/basic.yaml --out out/sim/trace.jsonl"],
@@ -464,6 +486,9 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         ],
         "trace-doctor" => &[
             "rust_plc trace-doctor examples/assembly_station.plc --scenario scenarios/normal.yaml --trace out/sim/trace.jsonl --diff out/diff_report.json --output human",
+        ],
+        "intent-doctor" => &[
+            "rust_plc intent-doctor out/wafer_loader_project/plc/main.target_semantics.bundle.toml --trace out/wafer_loader_project/out/project_check_with_auto_sim_v4/no_board_gate/artifacts/sil_trace.jsonl --output human",
         ],
         "timing-report" => {
             &["rust_plc timing-report --in out/tick_timing.jsonl --out out/timing_report.json"]
