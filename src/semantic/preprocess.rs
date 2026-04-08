@@ -1,4 +1,4 @@
-﻿const CONTROLLER_PROFILES_DIR: &str = "devices/controllers";
+const CONTROLLER_PROFILES_DIR: &str = "devices/controllers";
 
 #[derive(Debug, Clone)]
 struct DeviceNode {
@@ -134,6 +134,14 @@ fn inject_device_constraints(
                 }
             };
 
+            if program.constraints.safety.iter().any(|existing| {
+                safety_relations_match(&existing.relation, &relation)
+                    && safety_operands_match(&existing.left, &left)
+                    && safety_operands_match(&existing.right, &right)
+            }) {
+                continue;
+            }
+
             program.constraints.safety.push(SafetyConstraint {
                 line: 0,
                 left,
@@ -150,6 +158,56 @@ fn inject_device_constraints(
     } else {
         Err(errors)
     }
+}
+
+fn safety_relations_match(left: &AstSafetyRelation, right: &AstSafetyRelation) -> bool {
+    matches!(
+        (left, right),
+        (
+            AstSafetyRelation::ConflictsWith,
+            AstSafetyRelation::ConflictsWith
+        ) | (AstSafetyRelation::Requires, AstSafetyRelation::Requires)
+    )
+}
+
+fn safety_operands_match(left: &SafetyOperand, right: &SafetyOperand) -> bool {
+    match (left, right) {
+        (SafetyOperand::State(left), SafetyOperand::State(right)) => {
+            left.device == right.device && left.port == right.port && left.state == right.state
+        }
+        (
+            SafetyOperand::Threshold {
+                device: left_device,
+                operator: left_operator,
+                value: left_value,
+                unit: left_unit,
+            },
+            SafetyOperand::Threshold {
+                device: right_device,
+                operator: right_operator,
+                value: right_value,
+                unit: right_unit,
+            },
+        ) => {
+            left_device == right_device
+                && comparison_operators_match(left_operator, right_operator)
+                && left_value == right_value
+                && left_unit == right_unit
+        }
+        _ => false,
+    }
+}
+
+fn comparison_operators_match(left: &ComparisonOperator, right: &ComparisonOperator) -> bool {
+    matches!(
+        (left, right),
+        (ComparisonOperator::Gt, ComparisonOperator::Gt)
+            | (ComparisonOperator::Lt, ComparisonOperator::Lt)
+            | (ComparisonOperator::Gte, ComparisonOperator::Gte)
+            | (ComparisonOperator::Lte, ComparisonOperator::Lte)
+            | (ComparisonOperator::Eq, ComparisonOperator::Eq)
+            | (ComparisonOperator::Neq, ComparisonOperator::Neq)
+    )
 }
 
 fn validate_device_extra_params(
@@ -1391,4 +1449,3 @@ fn statement_contains_repeat(statement: &StepStatement) -> bool {
         | StepStatement::Effect(_) => false,
     }
 }
-
