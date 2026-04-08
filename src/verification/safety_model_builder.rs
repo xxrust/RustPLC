@@ -25,6 +25,7 @@ impl SafetyModel {
         let (devices, device_index, device_state_index) =
             collect_device_domains(program, constraints, state_machine);
         let (variables, variable_index) = collect_variable_domains(program, state_machine);
+        let pure_externs = collect_pure_extern_returns(program);
 
         let mut edges = Vec::new();
         let mut outgoing = vec![Vec::new(); states.len()];
@@ -64,6 +65,7 @@ impl SafetyModel {
                 &device_state_index,
                 &devices,
                 &variable_index,
+                &pure_externs,
             );
             let expanded_effects = expand_analog_input_effects(effects, &analog_inputs);
             let label = transition_label(transition);
@@ -201,10 +203,26 @@ fn collect_variable_domains(
     (variables, variable_index)
 }
 
+fn collect_pure_extern_returns(program: &PlcProgram) -> HashMap<String, Vec<AstVariableType>> {
+    program
+        .topology
+        .extern_functions
+        .iter()
+        .filter(|decl| decl.contract.pure)
+        .map(|decl| (decl.name.clone(), decl.return_types.clone()))
+        .collect()
+}
+
 fn collect_relevant_variable_names(
     program: &PlcProgram,
     state_machine: &StateMachine,
 ) -> HashSet<String> {
+    let declared_externs = program
+        .topology
+        .extern_functions
+        .iter()
+        .map(|decl| (decl.name.clone(), decl))
+        .collect::<HashMap<_, _>>();
     let declared = program
         .topology
         .variables
@@ -245,6 +263,29 @@ fn collect_relevant_variable_names(
                 | TransitionAction::AxisMoveRelative { .. }
                 | TransitionAction::AxisMoveAbsolute { .. }
                 | TransitionAction::Log { .. } => {}
+            }
+        }
+
+        for action in &transition.actions {
+            if let TransitionAction::CallExtern {
+                function, binding, ..
+            } = action
+                && declared_externs.contains_key(function)
+            {
+                match binding {
+                    crate::ir::ExternCallBinding::Single(name) => {
+                        if declared.contains(name) {
+                            relevant.insert(name.clone());
+                        }
+                    }
+                    crate::ir::ExternCallBinding::Tuple(names) => {
+                        for name in names {
+                            if declared.contains(name) {
+                                relevant.insert(name.clone());
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -762,6 +803,7 @@ fn merge_parallel_join_effects(states: &[State], edges: &mut [ModelEdge]) {
     let mut join_effects = HashMap::<usize, HashMap<usize, usize>>::new();
     let mut join_variable_effects = HashMap::<usize, HashMap<usize, ModelExpr>>::new();
     let mut join_analog_expr_effects = HashMap::<usize, HashMap<usize, ModelExpr>>::new();
+    let mut join_extern_effects = HashMap::<usize, Vec<ExternCallEffect>>::new();
 
     for edge in edges.iter() {
         if !is_parallel_branch_state(states.get(edge.from))
@@ -781,6 +823,12 @@ fn merge_parallel_join_effects(states: &[State], edges: &mut [ModelEdge]) {
         let merged_analog = join_analog_expr_effects.entry(edge.to).or_default();
         for effect in &edge.analog_expr_effects {
             merged_analog.insert(effect.device_id, effect.expr.clone());
+        }
+        let merged_externs = join_extern_effects.entry(edge.to).or_default();
+        for effect in &edge.ordered_effects {
+            if let ModelEffect::ExternCall(effect) = effect {
+                merged_externs.push(effect.clone());
+            }
         }
     }
 
@@ -830,6 +878,14 @@ fn merge_parallel_join_effects(states: &[State], edges: &mut [ModelEdge]) {
                     .iter()
                     .cloned()
                     .map(ModelEffect::AnalogExpr),
+            )
+            .chain(
+                join_extern_effects
+                    .get(&edge.to)
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .map(ModelEffect::ExternCall),
             )
             .collect();
     }
@@ -1362,6 +1418,7 @@ fn transition_effects(
     device_state_index: &[HashMap<String, usize>],
     device_domains: &[DeviceDomain],
     variable_index: &HashMap<String, usize>,
+    pure_externs: &HashMap<String, Vec<AstVariableType>>,
 ) -> TransitionEffects {
     let mut effects = TransitionEffects {
         ordered_effects: Vec::new(),
@@ -1442,7 +1499,55 @@ fn transition_effects(
                     .push(ModelEffect::VariableAssignment(effect.clone()));
                 effects.variable_effects.push(effect);
             }
-            TransitionAction::CallExtern { .. } => {}
+            TransitionAction::CallExtern {
+                function,
+                args_raw,
+                binding,
+            } => {
+                let Some(return_types) = pure_externs.get(function) else {
+                    continue;
+                };
+                let arg_exprs = args_raw
+                    .iter()
+                    .map(|raw| compile_model_expr(raw, variable_index))
+                    .collect::<Option<Vec<_>>>();
+                let Some(arg_exprs) = arg_exprs else {
+                    continue;
+                };
+
+                let binding_names = match binding {
+                    crate::ir::ExternCallBinding::Single(name) => vec![name.clone()],
+                    crate::ir::ExternCallBinding::Tuple(names) => names.clone(),
+                };
+                if binding_names.len() != return_types.len() {
+                    continue;
+                }
+
+                let bindings = binding_names
+                    .iter()
+                    .zip(return_types.iter())
+                    .filter_map(|(name, return_type)| {
+                        variable_index
+                            .get(name)
+                            .copied()
+                            .map(|variable_id| ExternBindingTarget {
+                                variable_id,
+                                return_type: return_type.clone(),
+                            })
+                    })
+                    .collect::<Vec<_>>();
+                if bindings.is_empty() {
+                    continue;
+                }
+
+                effects
+                    .ordered_effects
+                    .push(ModelEffect::ExternCall(ExternCallEffect {
+                        function: function.clone(),
+                        arg_exprs,
+                        bindings,
+                    }));
+            }
             TransitionAction::AxisMoveRelative { target, .. }
             | TransitionAction::AxisMoveAbsolute { target, .. } => {
                 let Some(device_id) = lookup_device_domain_id(device_index, target, "pulse", false)

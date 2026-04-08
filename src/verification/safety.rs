@@ -246,10 +246,24 @@ struct AnalogExprEffect {
 }
 
 #[derive(Debug, Clone)]
+struct ExternBindingTarget {
+    variable_id: usize,
+    return_type: AstVariableType,
+}
+
+#[derive(Debug, Clone)]
+struct ExternCallEffect {
+    function: String,
+    arg_exprs: Vec<ModelExpr>,
+    bindings: Vec<ExternBindingTarget>,
+}
+
+#[derive(Debug, Clone)]
 enum ModelEffect {
     DeviceState { device_id: usize, state_id: usize },
     VariableAssignment(VariableAssignment),
     AnalogExpr(AnalogExprEffect),
+    ExternCall(ExternCallEffect),
 }
 
 #[derive(Debug, Clone)]

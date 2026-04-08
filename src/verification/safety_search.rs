@@ -377,7 +377,8 @@ fn materialized_successors(
 }
 
 fn edge_is_material(model: &SafetyModel, edge: &ModelEdge, next_control_state: usize) -> bool {
-    if !edge.effects.is_empty()
+    if !edge.ordered_effects.is_empty()
+        || !edge.effects.is_empty()
         || !edge.variable_effects.is_empty()
         || !edge.analog_expr_effects.is_empty()
     {
@@ -781,6 +782,12 @@ fn render_safety_value(value: SafetyValue) -> String {
             }
         }
     }
+}
+
+fn builtin_extern_registry() -> &'static crate::extern_functions::ExternFunctionRegistry {
+    static REGISTRY: std::sync::OnceLock<crate::extern_functions::ExternFunctionRegistry> =
+        std::sync::OnceLock::new();
+    REGISTRY.get_or_init(crate::extern_functions::ExternFunctionRegistry::new)
 }
 
 fn coerce_safety_value_for_type(value: SafetyValue, var_type: &AstVariableType) -> SafetyValue {
@@ -1306,6 +1313,31 @@ fn apply_edge(
                         .get(effect.variable_id)
                         .map(|variable| coerce_safety_value_for_type(value, &variable.var_type))
                         .unwrap_or(value);
+                }
+            }
+            ModelEffect::ExternCall(effect) => {
+                let args = effect
+                    .arg_exprs
+                    .iter()
+                    .map(|expr| eval_model_expr(model, &next, expr).map(SafetyValue::as_f32))
+                    .collect::<Option<Vec<_>>>();
+                let Some(args) = args else {
+                    continue;
+                };
+                let Ok(results) = builtin_extern_registry().call(&effect.function, &args) else {
+                    continue;
+                };
+                for (binding, result) in effect.bindings.iter().zip(results.iter()) {
+                    if binding.variable_id < next.variable_values.len() {
+                        let value = match binding.return_type {
+                            AstVariableType::Bool => {
+                                SafetyValue::bool((*result - 0.0).abs() > f32::EPSILON)
+                            }
+                            AstVariableType::Float => SafetyValue::number(*result),
+                            AstVariableType::Int => SafetyValue::number(result.trunc()),
+                        };
+                        next.variable_values[binding.variable_id] = value;
+                    }
                 }
             }
         }

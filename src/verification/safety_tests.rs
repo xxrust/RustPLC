@@ -1438,6 +1438,51 @@ task set_b:
     }
 
     #[test]
+    fn respects_pure_extern_results_in_safety_reachability() {
+        let source = r#"
+[topology]
+
+extern function add(a: float, b: float) -> float {
+    rust_module: "math::basic"
+    pure: true
+    time_bound_us: 1000
+}
+
+variable sum: float = 0.0
+device out_a: digital_output
+device out_b: digital_output
+
+[constraints]
+
+safety: out_a.on conflicts_with out_b.on
+
+[tasks]
+
+task main:
+    step seed:
+        action: call add(1.0, 2.0) -> sum
+    step arm_a:
+        action: set out_a on
+    step maybe_b:
+        if: sum < 2.5 goto set_b.run else: goto main.done
+    step done:
+        action: log "done"
+
+task set_b:
+    step run:
+        action: set out_b on
+    on_complete: goto main.done
+"#;
+
+        let program = parse_plc(source).expect("测试程序应能解析");
+        let constraints = build_constraint_set(&program).expect("约束应能构建");
+        let state_machine = build_state_machine(&program).expect("状态机应能构建");
+
+        verify_safety(&program, &constraints, &state_machine)
+            .expect("pure extern 返回值应进入 safety 变量状态，避免把已确定的分支继续放大");
+    }
+
+    #[test]
     fn maps_set_analog_to_region_state() {
         let source = r#"
 [topology]
