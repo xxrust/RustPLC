@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import argparse
-import json
-from datetime import datetime, timezone
 from pathlib import Path
 
-
-SPLITS = ("dev", "holdout", "canary")
-STATUSES = ("draft", "frozen", "retired")
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from benchmark_common import (
+    SPLITS,
+    STATUSES,
+    default_evaluation,
+    ensure_benchmark_root,
+    ensure_case_id_available,
+    ensure_suite_dirs,
+    utc_now,
+    write_json,
+    write_text,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,68 +31,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--case-type", default="generic", help="case 类型，例如 generic / blind-runner / e2e。")
     parser.add_argument("--question", default="", help="本 case 主要验证的问题。")
     return parser.parse_args()
-
-
-def write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content if content.endswith("\n") else f"{content}\n", encoding="utf-8")
-
-
-def write_json(path: Path, payload: dict) -> None:
-    write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
-
-
-def read_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def default_manifest(benchmark_root: Path, benchmark_name: str) -> dict:
-    return {
-        "schema_version": 1,
-        "benchmark_name": benchmark_name,
-        "benchmark_root": str(benchmark_root.resolve()),
-        "created_at_utc": utc_now(),
-        "governance": {
-            "proposer_role": "draft candidate cases only",
-            "curator_role": "freeze, retire, and split cases outside the active optimization round",
-            "judge_role": "read hidden rubric/oracle and write evaluation results",
-            "flywheel_visibility": [
-                "public inputs",
-                "evaluation summaries",
-                "aggregate metrics",
-            ],
-            "hidden_paths": [
-                "cases/*/*/hidden",
-            ],
-            "frozen_case_rule": "active optimization rounds must not rewrite frozen cases",
-        },
-        "splits": {
-            "dev": {"purpose": "daily iteration and hypothesis narrowing"},
-            "holdout": {"purpose": "milestone gate outside the daily optimization loop"},
-            "canary": {"purpose": "fresh incoming regressions and drift detection"},
-        },
-        "cases": [],
-    }
-
-
-def ensure_benchmark_root(benchmark_root: Path, benchmark_name: str | None) -> dict:
-    benchmark_root.mkdir(parents=True, exist_ok=True)
-    manifest_path = benchmark_root / "manifest.json"
-    if manifest_path.exists():
-        manifest = read_json(manifest_path)
-        if manifest.get("schema_version") != 1:
-            raise ValueError("仅支持 schema_version=1 的 benchmark manifest。")
-        return manifest
-
-    actual_name = benchmark_name or benchmark_root.name
-    manifest = default_manifest(benchmark_root, actual_name)
-    write_json(manifest_path, manifest)
-    return manifest
-
-
-def ensure_split_dirs(benchmark_root: Path) -> None:
-    for split in SPLITS:
-        (benchmark_root / "cases" / split).mkdir(parents=True, exist_ok=True)
 
 
 def case_relative_dir(split: str, case_id: str) -> Path:
@@ -183,27 +123,8 @@ def default_oracle() -> dict:
     }
 
 
-def default_evaluation(case_id: str, split: str) -> dict:
-    return {
-        "schema_version": 1,
-        "case_id": case_id,
-        "split": split,
-        "status": "not_run",
-        "summary": "",
-        "verdict": "unknown",
-        "blocker_classification": "",
-        "metrics": {},
-        "evidence_paths": [],
-        "evaluated_at_utc": "",
-    }
-
-
 def register_case(manifest: dict, args: argparse.Namespace, case_rel_dir: Path) -> dict:
     existing = manifest.get("cases", [])
-    for item in existing:
-        if item.get("case_id") == args.case_id:
-            raise ValueError(f"case 已存在：{args.case_id}")
-
     record = {
         "case_id": args.case_id,
         "title": args.title,
@@ -219,18 +140,12 @@ def register_case(manifest: dict, args: argparse.Namespace, case_rel_dir: Path) 
     return manifest
 
 
-def ensure_case_id_available(manifest: dict, case_id: str) -> None:
-    for item in manifest.get("cases", []):
-        if item.get("case_id") == case_id:
-            raise ValueError(f"case 已存在：{case_id}")
-
-
 def main() -> int:
     args = parse_args()
     benchmark_root = Path(args.benchmark_root).resolve()
 
     manifest = ensure_benchmark_root(benchmark_root, args.benchmark_name)
-    ensure_split_dirs(benchmark_root)
+    ensure_suite_dirs(benchmark_root)
     ensure_case_id_available(manifest, args.case_id)
 
     case_rel_dir = case_relative_dir(args.split, args.case_id)

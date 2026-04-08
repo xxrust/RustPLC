@@ -39,10 +39,11 @@
 推荐顺序：
 
 1. 先读 `references/benchmark-governance.md`。
-2. 让 `benchmark-proposer` 只负责整理候选 case，不负责最终冻结。
-3. 让 `benchmark-curator` 在当前 active optimizer 之外冻结 `dev` / `holdout` / `canary` case。
-4. 让 `runner-judge` 读取 hidden rubric / oracle 并写评测结果。
-5. 让 flywheel 只读取评测摘要、失败分类与聚合统计，不直接读取完整 hidden oracle。
+2. 再读 `references/benchmark-operations.md`，明确 suite/case 工件、summary 与 result 的交接路径。
+3. 让 `benchmark-proposer` 只负责整理候选 case，不负责最终冻结。
+4. 让 `benchmark-curator` 在当前 active optimizer 之外冻结 `dev` / `holdout` / `canary` case。
+5. 让 `runner-judge` 读取 hidden rubric / oracle 并写评测结果。
+6. 让 flywheel 只读取评测摘要、失败分类与聚合统计，不直接读取完整 hidden oracle。
 
 长期规则：
 

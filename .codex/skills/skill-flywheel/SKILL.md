@@ -32,6 +32,8 @@ description: 用于把 skill 改进组织成可重复的研究回合：设定实
   目标 skill 中的 `.skill_flywheel/` 应该放什么。
 - `references/benchmark-governance.md`
   当需要验证“目标 skill 是否真的变强”时，如何冻结 benchmark、拆分 proposer / curator / judge 角色，以及隔离 hidden rubric / oracle。
+- `references/benchmark-operations.md`
+  benchmark proposer、curator、judge 与 flywheel 之间通过哪些 suite/case 工件交接，以及 summary / result 的最低字段契约。
 
 按需加载这些 agent 角色文件：
 
