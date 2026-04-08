@@ -38,6 +38,13 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
   最终回答必须包含什么，如何表达成功、blocker 与失败
 - `references/troubleshooting.md`
   launcher、workspace、scenario、toolchain 兼容性等常见卡点
+按需加载这些 agent 角色文件：
+- `agents/request-architect.md`
+  负责把需求收敛成 DSL lowering 决策，并在复杂项目里做任务拆分
+- `agents/senior-dsl-implementer.md`
+  负责实际写 `.plc` / bundle / fragments，并拥有编译修复权限
+- `agents/reviewer-validator.md`
+  只在实现者认为程序已收敛后出场，负责验证、回归与审核结论
 
 ## Source Of Truth
 
@@ -65,6 +72,9 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
 14. `*.intent_alignment.contract.json` 是 authored sidecar，不是编译器产物，也不是 scaffold 默认必交付物。只有用户明确要求业务意图对齐、phase-2 comparator、或要让 `project-check` 带 intent-alignment gate 时才生成或修复它。
 15. 不要把 DSL `task.step` 名字直接抄成 intent contract milestone；milestone 必须表达业务里程碑，并绑定显式 observation bindings，来源必须是已确认的 intent source，而不是从 trace 或代码反推硬编。
 16. 明确区分“skill 写入的源文件”和“工具链跑出来的产物”：`*.plc`、`.bundle.toml`、fragments、`plc/main.system.md`、scenario、可选 intent sidecar 属于前者；`verification_report.json`、`sil_trace.jsonl`、`project_check_report.json`、`intent_alignment/report.json` 属于后者。
+17. 复杂项目默认不是单 agent 一把梭，而是三层分工：需求/拆分、实现、审核。先冻结 lowering 和 write split，再并行实现，最后独立审核。
+18. “实现 agent”必须拥有真实编译权限，并以编译器/工具链反馈驱动修复；没有这层闭环，就不算资深实现者。
+19. “审核 agent”不得在需求未冻结、实现未收敛时提前出场；它的职责是验证和挑错，不是替实现者一边写一边猜。
 
 ## 默认工作方式
 
@@ -95,6 +105,9 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
 9. 如果用户明确要求走当前 scenario 工具链，再额外做一轮 scenario 兼容性检查；若存在工具链已知限制，应明确标成 `toolchain-blocked`，不要假装 `validated`。
 10. 生成或修复后，必须给出真实验证路径，不能停在“理论上可行”。
 11. 如果生成了 intent sidecar，要明确说明它绑定的 authoritative intent source、它是 authored artifact，以及 `project-check` 是否实际跑到了 `intent_alignment` 这一步；不要把“可运行 sidecar”说成“编译默认产物”。
+12. 如果任务复杂到同时涉及 `.system.md` 解释、DSL 生成、scenario/gate、intent sidecar 或多文件 bundle，先读取 `agents/request-architect.md` 产出 lowering 决策和任务拆分，再让多个实现 agent 并行作业。
+13. 每个实现 agent 都应拥有明确 write scope；如果多个实现 agent 可能改同一文件，说明拆分还没做对，应退回需求/拆分层重切边界。
+14. 审核/测试 agent 只在实现 agent 给出“程序已能稳定编译、主链无明显结构问题”的结论后才介入；它优先跑 `project-check`、相关 tests 和最小必要回归。
 
 ## Launcher Discipline
 
