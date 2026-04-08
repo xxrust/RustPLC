@@ -26,6 +26,8 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
 不要把 `SKILL.md` 写成百科。按需加载这些 reference：
 - `references/workflow.md`
   何时走 scaffold，何时只修单个 `.plc`，默认验证链是什么
+- `references/multi-agent-template.md`
+  复杂项目默认如何编排 architect / implementer / reviewer，以及何时并行、何时收口
 - `references/commands.md`
   真实 CLI、launcher 选择、Day-1 命令链，以及 installed binary / source workspace 的区别
 - `references/project-layout.md`
@@ -75,6 +77,11 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
 17. 复杂项目默认不是单 agent 一把梭，而是三层分工：需求/拆分、实现、审核。先冻结 lowering 和 write split，再并行实现，最后独立审核。
 18. “实现 agent”必须拥有真实编译权限，并以编译器/工具链反馈驱动修复；没有这层闭环，就不算资深实现者。
 19. “审核 agent”不得在需求未冻结、实现未收敛时提前出场；它的职责是验证和挑错，不是替实现者一边写一边猜。
+20. agent 角色文件不要教 agent 具体用什么命令。agent 应拿到的是职责、输入、输出、证明义务；具体命令由主 skill 按当前环境决定。
+21. 复杂项目优先走 one-shot 编排：先冻结 lowering 和拆分，再一次性交付给实现者并行推进，最后一次性交给 reviewer 审核；不要把 skill 写成多轮对话脚本。
+22. 调用这个 skill 的人默认看不到仓库源代码。skill 本身必须提供足够的公开工作协议，不能把关键定义藏在“去读源码再理解”里。
+23. skill 的主入口必须先把当前任务压成一份可转交的 public brief，再交给子 agent；不要让子 agent 依赖调用者自行查看源码。
+24. 只有主 agent 可以按需读取仓库、命令参考和实现细节；子 agent 默认只消费主 agent 明确下发的 brief、边界和证明义务。
 
 ## 默认工作方式
 
@@ -108,6 +115,39 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
 12. 如果任务复杂到同时涉及 `.system.md` 解释、DSL 生成、scenario/gate、intent sidecar 或多文件 bundle，先读取 `agents/request-architect.md` 产出 lowering 决策和任务拆分，再让多个实现 agent 并行作业。
 13. 每个实现 agent 都应拥有明确 write scope；如果多个实现 agent 可能改同一文件，说明拆分还没做对，应退回需求/拆分层重切边界。
 14. 审核/测试 agent 只在实现 agent 给出“程序已能稳定编译、主链无明显结构问题”的结论后才介入；它优先跑 `project-check`、相关 tests 和最小必要回归。
+15. 对复杂项目，默认直接套用 `references/multi-agent-template.md` 的编排模板；只有当任务明显更简单时，才退化成单实现者路径。
+
+## One-Shot Protocol
+
+复杂项目默认按下面这一个固定协议执行，而不是临场发明流程：
+
+1. 主 agent 读取需求与现有上下文。
+2. 主 agent 先整理一份 `public brief`，至少包含：
+   - 任务目标
+   - 当前 source shape
+   - 已冻结的 system contract / lowering facts
+   - authored artifacts 范围
+   - 不允许改变的边界
+   - 当前已知 blocker / assumptions
+3. `request-architect` 基于这份 brief 一次性输出：
+   - source shape 决策
+   - lowering 决策
+   - authored artifacts 清单
+   - write scope 拆分
+   - 每个实现者需要提交的证明义务
+4. 主 agent 审核 architect 输出；若拆分仍冲突，就在这一层修正，不让实现者带着模糊边界开工。
+5. `senior-dsl-implementer` x N 并行执行，各自只处理自己的 write scope，并提交：
+   - 已修改文件
+   - 已完成的局部收敛说明
+   - 剩余 blocker / 风险
+   - 对“已满足证明义务”的声明
+6. 主 agent 合并实现结果，只做必要整合，不重做子任务。
+7. `reviewer-validator` 一次性审查并给出：
+   - findings
+   - 是否允许交付
+   - 剩余风险
+
+one-shot 的关键不是“每个 agent 只说一句话”，而是每层都有固定输入输出，不靠来回聊天补定义。
 
 ## Launcher Discipline
 
