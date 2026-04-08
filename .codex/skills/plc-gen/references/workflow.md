@@ -1,225 +1,73 @@
 # plc-gen Workflow
 
-## Complex project default: target-semantics fragments
+## Default Policy
 
-For a system contract with multiple domains such as auto production flow, maintenance flow, manual flow, operator interface, supervision, topology, and constraints, prefer a structured fragment layout instead of a monolithic single-file PLC.
+For a project-scale RustPLC delivery, the default path is:
 
-Reference shape:
-- `topology/`
-- `constraints/`
-- `architecture/`
-- `auto/`
-- `maintenance/`
-- `manual/`
-- `operator_interface/`
+1. Confirm the authored intent source, usually `plc/main.system.md`.
+2. Choose the source shape.
+3. Generate or repair the DSL source entry.
+4. Generate or repair `scenarios/nominal/normal.yaml`.
+5. Author or repair a sibling `*.intent_alignment.contract.json`.
+6. Run `project-check`.
+7. Confirm that `project-check` actually ran `intent_alignment`.
+8. Report the real verdict and the real blocker or mismatch if it did not align.
 
-Use `out/skill_flywheel/plc_gen_wafer_loader/plc/target_semantics_fragments` as the concrete reference example.
+For complex projects, this is the default, not an optional extra.
 
-Decision rule:
-- If the system contract naturally decomposes into stable semantic slices, default to structured fragments.
-- If the user only asked for a tiny repair or the existing source boundary is intentionally single-file, keep the single-file path.
-- Do not generate a spaghetti PLC just because scaffold created `plc/main.plc`; scaffold default entry is not a reason to collapse source structure.
+## Source Shape
 
-Execution rule for new complex projects:
-- Start with `rust_plc new <project_dir> --layout structured-fragments` when the goal is a multi-domain or long-lived project.
-- Treat the generated `plc/main.target_semantics.bundle.toml` as the authored source entry.
-- Fill the generated `plc/target_semantics_fragments/` tree instead of hand-inventing a new fragment layout every turn.
-- Preserve the difference between the main compileable bundle and non-bundled semantic sidecars such as `io/`, `manual/`, `operator_interface/`, `optimization/`, `step/`, dedicated maintenance self-check files, or workpiece-contract fragments.
-- If the project needs a focused validation surface such as a dedicated maintenance self-check flow, prefer a second bundle entry instead of overloading the main automatic bundle.
+Use a structured fragment layout by default when the system contract has multiple stable semantic domains such as topology, constraints, supervision, auto flow, maintenance, manual mode, and operator interface.
 
-Workpiece-specific rule:
-- If the system contract contains real part flow, `topology/workpieces.plcfrag` is not merely a documentation sidecar.
-- When automatic tasks use that part flow, the main bundle must include the workpiece fragment and the task fragments must carry matching `effect:` statements.
-- A bundle that omits the workpiece fragment can still compile today if no workpiece context is present, but that is a generator miss, not a valid semantic equivalence.
+Prefer:
+- `rust_plc new <project_dir> --layout structured-fragments`
+- `plc/main.target_semantics.bundle.toml` as the source entry
+- `plc/target_semantics_fragments/` as the authored source tree
 
-本文回答三个问题：
+Only stay single-file when the request is truly small or the existing boundary is intentionally single-file.
 
-1. 什么时候走 scaffold 项目
-2. 什么时候修单文件 `.plc`
-3. 什么时候保留或建立多文件 `.bundle.toml` + fragments
+## Intent-Alignment Sidecar
 
-## 1. 先判断交付形态
+For project-scale delivery, the sidecar is required by default.
 
-出现以下任一情况时，优先交付 scaffold 项目：
-- 新 machine 或新 station
-- 用户明确要“项目”“脚手架”“完整工程”“交付包”
-- 需要 scenario、`project-check`、`no-board-gate`、ST 导出或板级构建
-- 用户缺少 repo 细节，需要一套可直接运行的项目目录
+Create a sibling file with the same stem as the source entry:
+- `main.plc` -> `main.intent_alignment.contract.json`
+- `main.target_semantics.bundle.toml` -> `main.target_semantics.bundle.intent_alignment.contract.json`
 
-出现以下情况时，优先修单文件 `.plc`：
-- 用户已经给出一个现有 `.plc`
-- 需求只涉及该 `.plc` 的局部修复、验证或报错解释
-- 当前 source boundary 很稳定，没有拆分 `topology`、`constraints`、`tasks` 的必要
+The sidecar must:
+- be authored, not treated as a compiler artifact
+- bind to an authoritative intent source such as `plc/main.system.md`
+- describe business milestones rather than using raw `task.step` names as the semantic center
+- bind observations to real evidence that the current comparator can consume
 
-出现以下情况时，优先保留或建立多文件 `.bundle.toml` + fragments：
-- 项目已经使用 `.bundle.toml`
-- 需求天然按 `topology`、`constraints`、`tasks` 分工或分阶段维护
-- 希望把 DSL 源按语义块拆分，再由 loader 组装进入编译链
-- 需要在多文件边界上稳定映射诊断与协作修改
+It is acceptable to skip the sidecar only when:
+- the task is a tiny local repair
+- the user explicitly asks to skip intent alignment
+- or there is a concrete blocker that you report as `blocked`
 
-## 2. 新项目默认路径
+## Validation
 
-对一个全新项目，默认顺序是：
+`project-check` with auto-discovered sidecar is the default validation path.
 
-1. scaffold 项目
-2. 确认 `plc/main.system.md`
-3. 确认 DSL source shape
-4. 生成或修复 DSL source entry
-5. 调整 `scenarios/nominal/normal.yaml`
-6. 仅在用户明确要求业务意图对齐时，补 `*.intent_alignment.contract.json` sidecar
-7. 运行 `project-check`
-8. 需要单步排查时，再拆看 `scenario-validate` / `sequence-lint` / `scenario-doctor` / `no-board-gate`
-9. 需要 ST 时再运行 `gen-st`
-10. 需要板级交付时再运行 `build-rp2040` 或 `release-bundle`
+Required outcome for a complex project:
+- `project-check` ran `compile_verify`
+- `project-check` ran `sequence_lint`
+- `project-check` ran `scenario_doctor`
+- `project-check` ran `no_board_gate`
+- `project-check` also ran `intent_alignment`
 
-对 scaffold 默认布局：
-- system contract 入口是 `plc/main.system.md`
-- DSL source entry 默认是 `plc/main.plc`
+If the sidecar exists but `intent_alignment` did not appear, the delivery is not validated.
 
-对 bundle 布局：
-- DSL source entry 是 `<name>.bundle.toml`
-- 语义片段通常按 `topology`、`constraints`、`tasks` 分到 fragments
+If the comparator reports `mismatch` or `blocked`, keep the artifacts and report the exact finding. Do not downgrade back to "base gate passed".
 
-`new` 之后通常已经有 `scenarios/nominal/normal.yaml`，只有在 scenario 缺失或用户明确要求重建 skeleton 时，再优先考虑 `scenario-init`。
+## Canary
 
-### 2.1 intent-alignment sidecar 何时出现
-
-只有在以下任一情况成立时，才应由 `plc-gen` 额外写入 `*.intent_alignment.contract.json`：
-
-- 用户明确要求 intent-alignment / intent gate / comparator
-- 用户明确要求 `project-check` 在基础 gate 之外再验证“程序是否做了对的事”
-- 任务目标本身就是交付 canonical example、golden path 或可复用的 intent fixture
-
-默认不要生成 sidecar。普通 DSL 交付只需要：
-- `plc/main.system.md`
-- DSL source entry
-- scenario
-
-sidecar 的职责是 authoring business-intent contract，不是替代 `.system.md`，也不是编译阶段自动长出来的文件。
-
-## 3. 先判断运行环境
-
-### 已安装 `rust_plc`
-
-这种情况下，用户可以直接：
-
-1. `rust_plc new my_plc_project`
-2. `cd my_plc_project`
-3. 在项目目录内继续运行 `rust_plc project-check ...`
-
-### 仍在 RustPLC 源码仓库内
-
-这种情况下：
-
-- `cargo run --release --bin rust_plc -- ...` 必须在 RustPLC 仓库根目录执行
-- scaffold 项目路径要写成仓库根目录可解析的路径
-- 不要让用户 `cd` 进 scaffold 目录后再跑 `cargo run ...`
-
-例如：
+When changing `plc-gen` prompts, workflow, or output policy, rerun the structured wafer-loader canary:
 
 ```bash
-cargo run --release --bin rust_plc -- project-check out/my_plc_project/plc/main.plc --scenario out/my_plc_project/scenarios/nominal/normal.yaml --out-dir out/my_plc_project/out/project_check/normal --output human
+target\debug\rust_plc.exe project-check out/wafer_loader_project/plc/main.target_semantics.bundle.toml --scenario out/wafer_loader_project/scenarios/nominal/normal.yaml --out-dir out/wafer_loader_project/out/project_check_with_intent_alignment --output human
 ```
 
-## 4. 单文件路径
-
-对现有单文件 `.plc`，默认顺序是：
-
-1. 修复 DSL 或 semantic 问题
-2. 如果用户有配套 scenario，优先跑 `project-check`
-3. 如果只是定点排查，再按需跑 `scenario-validate`、`sequence-lint`、`scenario-doctor`、`no-board-gate`
-4. 如有需要，再导出 ST 或继续做项目级 gate
-
-## 5. 多文件 bundle 路径
-
-对现有 `.bundle.toml` + fragments，默认顺序是：
-
-1. 确认 bundle entry 与 fragment 布局
-2. 按语义块修复 `topology`、`constraints`、`tasks` 对应 fragments
-3. 保持 bundle source boundary 稳定
-4. 用 bundle entry 跑 `project-check` 或对应子命令
-5. 如有需要，再导出 ST、运行仿真或继续项目级 gate
-
-## 6. 何时额外走 repo 回归
-
-如果当前工作发生在 RustPLC 源码仓内，并且修改的是示例、技能模板、编译语义或 example-backed 行为，优先补这些回归入口：
-
-- `cargo test --test examples_integration`
-- `cargo test --test runtime_bridge_us006`
-- `scripts/concurrent_runtime_verification_gate.sh`
-
-不要把 scenario CLI 结果当成源码仓语义回归的唯一依据。
-
-## 7. 只问真正改变结构的阻塞项
-
-- 控制器是走 `model_ref` profile 还是错误地在业务 DSL 里内联 ports
-- 现场 I/O 是建成语义设备并 relation 到 `plc_main.<port>`，还是退化成原始 `digital_input` / `digital_output`
-- mode / manual / maintenance / HMI 命令是已有语义输入设备，还是被错误降级成 raw signal device
-
-以下属于会改变 DSL source shape 或结构的关键问题：
-- task 划分
-- 采用单文件还是 bundle
-- 哪些等待是 manual wait，哪些必须带 timeout
-- fault 或 warning 分流怎么走
-- 关键 actuator 或 sensor 是否存在
-- mode 或 supervisor 结构
-- 共享资源与互锁边界
-
-以下内容通常可以先保守默认：
-- 占位 I/O 名称
-- 中性的 device 名称
-- 初始 timeout 数值
-- nominal scenario 的起始 timing
-
-## 8. 验证门槛
-
-`plc-gen` 交付不是“生成完就结束”。
-
-在项目级验证链之前，先做一次 controller / IO preflight：
-
-- controller 是否走 `model_ref`
-- 是否出现 inline `ports: [...]`
-- 是否把 controller channel 退化成业务 `digital_input` / `digital_output` device
-- 现场设备与 `plc_main.<port>` 的 relation 是否可解释
-
-如果这一步已经命中 `SEM-108` 或 `SCN-MAP-010`，直接记为 `failed validation`，不要继续把注意力放在 scenario、ST 导出或回复文案润色上。
-
-项目级最小推荐验证：
-- `project-check`
-
-如果目录中存在已确认的 `*.intent_alignment.contract.json` sidecar，或用户显式提供 `--intent-contract` / `--intent-evidence`，则 `project-check` 可以追加 `intent_alignment` 步骤；否则它只跑基础 gate。
-
-如果 `project-check` 不适用或用户只要求局部排查，可拆开：
-- `scenario-validate`
-- `sequence-lint`
-- `scenario-doctor`
-- `no-board-gate`
-
-如果请求是“优化现有 PLC”，也不要跳过验证。无论是普通生成、bundle 重组还是 optimization candidate，最终都必须经过现有 semantic / verification / runtime 路径。
-
-## 9. 写入物 vs 编译产物
-
-`plc-gen` 在最终回答里必须主动区分三类东西：
-
-### 由 skill 写入
-
-- `plc/main.system.md`
-- `plc/main.plc`
-- `<name>.bundle.toml` 与 fragments
-- `scenarios/nominal/normal.yaml`
-- 可选 `*.intent_alignment.contract.json`
-
-### 由工具链产出
-
-- `verification_report.json`
-- `sil_trace.jsonl`
-- `project_check_report.json`
-- `intent_alignment/report.json`
-- 其他 `project-check` / `no-board-gate` / `gen-st` / build artifacts
-
-### 可选调用但不默认开启
-
-- intent-alignment comparator 主链
-- 带 `intent_alignment` 步骤的 `project-check`
-- ST 导出
-- 板级 build / release
+The point of this canary is to catch the difference between:
+- what the generator claims the station should do
+- and what the real runtime trace actually proves

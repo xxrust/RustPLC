@@ -1,73 +1,44 @@
 # plc-gen Output Contract
 
-本文约束最终回答应长什么样。
+The final answer must always distinguish:
+- authored files written by the skill
+- toolchain artifacts produced by validation commands
+- the actual validation verdict
 
-## 最低输出
+## Minimum Output
 
-始终返回：
-- 结果摘要
-- 生成或修复后的 DSL source set / 项目结果
-- assumptions
-- 实际使用或推荐的 launcher / 命令
-- validation 状态
-- 写明哪些文件是本次由 skill 写入，哪些是工具链运行后生成
+Always report:
+- what was generated or repaired
+- what source entry is now authoritative
+- what scenario was used
+- what validation command actually ran
+- whether the result is `validated`, `validated with warnings`, `failed validation`, or `blocked`
 
-## 项目级请求时额外返回
+## Intent Alignment
 
-按需补充：
+For any complex project delivery, the final answer must explicitly state:
+- whether a sibling `*.intent_alignment.contract.json` was created or repaired
+- what its authoritative intent source is
+- whether `project-check` actually ran the `intent_alignment` step
+- the intent-alignment verdict
+- the primary mismatch kind or blocker kind if the verdict was not aligned
+
+Base-gate success without an executed `intent_alignment` step is not enough to call a complex project validated.
+
+## Artifact Separation
+
+Typical authored files:
 - `plc/main.system.md`
-- DSL source entry
-- 如果采用 bundle，则补充 `.bundle.toml` 与关键 fragments
+- `plc/main.plc`
+- `plc/main.target_semantics.bundle.toml`
+- `plc/target_semantics_fragments/**`
 - `scenarios/nominal/normal.yaml`
-- 如果用户明确要求 intent-alignment，则补充 `*.intent_alignment.contract.json`
-- 最小验证命令链
-- 当前 gate / codegen / build 状态
+- `*.intent_alignment.contract.json`
 
-## source set 表达方式
+Typical toolchain artifacts:
+- `verification_report.json`
+- `project_check_report.json`
+- `sil_trace.jsonl`
+- `intent_alignment/report.json`
 
-根据实际交付形态表达结果：
-
-### scaffold 默认布局
-
-- system contract: `plc/main.system.md`
-- DSL source entry: `plc/main.plc`
-- scenario: `scenarios/nominal/normal.yaml`
-- optional authored sidecar: `*.intent_alignment.contract.json` only when user explicitly asked for intent-alignment
-
-### 单文件 source set
-
-- DSL source entry: `<name>.plc`
-
-### 多文件 source set
-
-- DSL source entry: `<name>.bundle.toml`
-- 关键 fragments: `topology` / `constraints` / `tasks`
-
-## 状态词
-
-明确使用以下状态之一：
-- `validated`
-- `validated with warnings`
-- `blocked by missing contract`
-- `blocked by toolchain limitation`
-- `failed validation`
-
-没有真实工具运行结果时，状态应与实际执行深度一致。
-
-## 必须额外说明的边界
-
-如果这次交付涉及 intent-alignment，最终回答必须明确写出：
-- `*.intent_alignment.contract.json` 是否被创建或修复
-- 这个 contract 是 authored sidecar，不是编译默认产物
-- `project-check` 是否真的跑到了 `intent_alignment` 步骤
-- `intent_alignment/report.json`、`sil_trace.jsonl` 等是否是工具链产物
-
-如果这次交付不涉及 intent-alignment，也要明确说明“未生成 intent sidecar，验证链仅覆盖基础 gate”。
-
-## optimization 请求时
-
-如果用户问 optimization，输出里必须明确：
-- 当前是 library API，不是 CLI
-- 支持哪些 candidate rewrite kind
-- 当前是否真的运行了 API
-- 还是只在说明能力边界而未执行
+Do not describe toolchain artifacts as if they were authored source files.

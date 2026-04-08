@@ -1,5 +1,9 @@
 # Scenario Playbook（从 0 到回归门禁）
 
+说明：
+- 本页聚焦 scenario 资产的生成、校验与仿真。
+- 业务意图与实际 trace 的对齐方法见 `docs/architecture/intent_alignment_verification.md`。
+
 目标：让“场景（scenario.yaml）怎么写、怎么验证、怎么回归、怎么最小化失败”变成一条可复制的标准流程。
 
 > 约定：以下命令默认在**仓库根目录**运行（确保 `examples/`、`scenarios/` 路径可用）。

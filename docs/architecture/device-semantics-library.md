@@ -1,5 +1,8 @@
 # Device Semantics Library
 
+Related:
+- Intent-alignment verification is defined in `docs/architecture/intent_alignment_verification.md`.
+
 ## 1. 背景
 
 当前 RustPLC 中，`cylinder`、`axis`、`motor` 这类抽象设备的语义分散在多个层面：
