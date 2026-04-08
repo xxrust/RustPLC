@@ -8,6 +8,7 @@
 - skill 调用者默认看不到仓库源码
 - 因此多 agent 编排不能建立在“大家都去读源码自己悟”之上
 - 主 agent 必须先把源码相关事实压缩成可转交的 public brief
+- brief 不足时，应回到主 agent 补 brief，而不是让子 agent 越权
 
 ## 1. 何时启用多 agent
 
@@ -124,6 +125,21 @@
 - 4 个及以上：只有在 write scope 非常清晰时才考虑
 
 如果实现者之间频繁改同一文件，就说明人数太多或拆分错误。
+
+## 4.1 public brief 最低内容
+
+主 agent 下发给子 agent 的 brief 至少要覆盖：
+
+- 任务目标
+- 当前 source shape
+- 已冻结的 system contract / lowering facts
+- 当前已有文件与期望写入物
+- 不可改变的边界
+- authored artifacts 范围
+- 当前 blocker / assumptions
+- 交付成功的判据
+
+缺其中任何一项，都容易让子 agent 重新猜需求。
 
 ## 5. write scope 模板
 

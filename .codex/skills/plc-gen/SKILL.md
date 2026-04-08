@@ -28,6 +28,8 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
   何时走 scaffold，何时只修单个 `.plc`，默认验证链是什么
 - `references/multi-agent-template.md`
   复杂项目默认如何编排 architect / implementer / reviewer，以及何时并行、何时收口
+- `references/public-brief-template.md`
+  主 agent 在复杂项目里如何把源码相关事实压缩成可转交给子 agent 的公开 brief
 - `references/commands.md`
   真实 CLI、launcher 选择、Day-1 命令链，以及 installed binary / source workspace 的区别
 - `references/project-layout.md`
@@ -82,6 +84,7 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
 22. 调用这个 skill 的人默认看不到仓库源代码。skill 本身必须提供足够的公开工作协议，不能把关键定义藏在“去读源码再理解”里。
 23. skill 的主入口必须先把当前任务压成一份可转交的 public brief，再交给子 agent；不要让子 agent 依赖调用者自行查看源码。
 24. 只有主 agent 可以按需读取仓库、命令参考和实现细节；子 agent 默认只消费主 agent 明确下发的 brief、边界和证明义务。
+25. 如果 brief 不足以支持拆分或审核，正确动作是补 brief，而不是让子 agent 越权去读源码。
 
 ## 默认工作方式
 
@@ -126,6 +129,7 @@ description: Deliver, repair, and validate RustPLC DSL source sets and scaffolde
    - 任务目标
    - 当前 source shape
    - 已冻结的 system contract / lowering facts
+   - 当前已有文件与期望写入物
    - authored artifacts 范围
    - 不允许改变的边界
    - 当前已知 blocker / assumptions

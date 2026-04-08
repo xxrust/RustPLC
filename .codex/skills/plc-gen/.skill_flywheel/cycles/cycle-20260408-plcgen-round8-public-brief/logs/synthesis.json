@@ -1,0 +1,11 @@
+{
+  "common_findings": [
+    "complex-project public brief contract 原先没有进入显式 public surface。",
+    "公开面补齐后，需要自动化测试把该工件钉住。"
+  ],
+  "run_specific_findings": [
+    "本轮仅使用单代理 weak-blind fallback，未进行 clean-room 外部盲测。"
+  ],
+  "conflicts": [],
+  "overall_signal": "support"
+}

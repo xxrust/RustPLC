@@ -1,0 +1,19 @@
+{
+  "task": "# PLC Complex Project Public Brief\n\n任务目标：\n\n仅基于真实 `plc-gen` skill 和导出的公开工件面，回答下面这个问题：\n\n> 当用户已经给出一份确认版 `.system.md`，而且任务同时涉及多文件 bundle 倾向、scenario/gate、并可能要求 intent-alignment 时，主 agent 必须先准备什么 `public brief`，才能把任务 one-shot 地拆给 architect、多个 implementer 和 reviewer？\n\n观察点：\n\n- 是否先说清 `public brief`，而不是直接开始角色分工\n- 是否能列出 brief 的最低字段\n- 是否能区分 authored artifacts 与 toolchain artifacts\n- 是否能说明 architect / implementer / reviewer 各自基于 brief 交付什么\n- 如果 brief 不足，是否会要求补 brief，而不是默默越界读源码\n\n如果盲测执行者必须阅读 `references/` 或仓库普通文件才能回答，就应记为 `public-surface-gap`，而不是默默越界。\n",
+  "hypothesis_signal": "support",
+  "result_summary": "弱盲 fallback 表明 complex-project public brief contract 现在已经能通过导出的 public artifact 直接消费；同时 target-config 与 cycle 初始化测试覆盖了该工件，公开面缺口已被显式补上。",
+  "pain_points": [
+    {
+      "step": "弱盲执行者尝试回答复杂项目 one-shot 编排前的前置输入",
+      "blocker": "public brief 结构原先只存在于 skill / references 内文，没有独立 public artifact",
+      "missing_item": "complex-project-public-brief.md",
+      "impact": "调用者看不到源码时，执行者仍可能越界读 references 或重新猜 brief 结构"
+    },
+    {
+      "step": "校验 flywheel 导出链是否稳定携带新的 complex-project contract",
+      "blocker": "原目标测试未断言新 public artifact 必须存在",
+      "missing_item": "target-config 对 complex-project-public-brief.md 的回归断言",
+      "impact": "新 contract 可能在后续重构中被静默移除，导致 skill 再次退回文内规则"
+    }
+  ]
+}
