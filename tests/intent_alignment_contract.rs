@@ -2,10 +2,11 @@ use std::path::PathBuf;
 
 use rust_plc::intent_alignment::{
     BusinessMilestone, ExpectedBehaviorCompileError, ExpectedBehaviorIrPrimitiveKind,
-    ExpectedMilestoneSemanticRole, IntentContractDiagnostic, IntentContractDiagnosticCode,
-    IntentContractLoadError, IntentMilestone, MilestoneEvidenceSource, ObservationCombination,
-    ObservationSubject, ObservedFact, compile_expected_behavior_spec,
-    parse_intent_contract_str, read_intent_contract, validate_intent_contract,
+    ExpectedMilestoneSemanticRole, IntentContractDeliveryReadinessError, IntentContractDiagnostic,
+    IntentContractDiagnosticCode, IntentContractLoadError, IntentMilestone,
+    MilestoneEvidenceSource, ObservationCombination, ObservationSubject, ObservedFact,
+    compile_expected_behavior_spec, parse_intent_contract_str, read_intent_contract,
+    validate_intent_contract, verify_intent_contract_delivery_readiness,
     verify_intent_contract_source_binding,
 };
 
@@ -124,6 +125,62 @@ fn contract_fixture_source_digest_matches_architecture_source() {
 
     verify_intent_contract_source_binding(&contract, workspace_path("."))
         .expect("source digest and governance bindings should match");
+}
+
+#[test]
+fn delivery_readiness_rejects_scaffold_placeholder_digest() {
+    let fixture =
+        workspace_path("tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json");
+    let mut contract = read_intent_contract(&fixture).expect("fixture should load");
+    contract.source_digest.value = "replace_me_after_authoring".to_string();
+
+    let error = verify_intent_contract_delivery_readiness(&contract)
+        .expect_err("placeholder digest should be rejected");
+
+    assert_eq!(
+        error,
+        IntentContractDeliveryReadinessError::PlaceholderSourceDigest {
+            value: "replace_me_after_authoring".to_string(),
+        }
+    );
+}
+
+#[test]
+fn delivery_readiness_rejects_scaffold_placeholder_binding_id() {
+    let fixture =
+        workspace_path("tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json");
+    let mut contract = read_intent_contract(&fixture).expect("fixture should load");
+    contract.observation_bindings[0].binding_id = "replace_with_real_anchor".to_string();
+
+    let error = verify_intent_contract_delivery_readiness(&contract)
+        .expect_err("placeholder binding id should be rejected");
+
+    assert_eq!(
+        error,
+        IntentContractDeliveryReadinessError::PlaceholderBindingId {
+            binding_id: "replace_with_real_anchor".to_string(),
+        }
+    );
+}
+
+#[test]
+fn delivery_readiness_rejects_scaffold_placeholder_evidence() {
+    let fixture =
+        workspace_path("tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json");
+    let mut contract = read_intent_contract(&fixture).expect("fixture should load");
+    contract.observation_bindings[0].evidence[0].expected =
+        "replace_after_intent_doctor".to_string();
+
+    let error = verify_intent_contract_delivery_readiness(&contract)
+        .expect_err("placeholder evidence should be rejected");
+
+    assert_eq!(
+        error,
+        IntentContractDeliveryReadinessError::PlaceholderEvidence {
+            binding_id: contract.observation_bindings[0].binding_id.clone(),
+            expected: "replace_after_intent_doctor".to_string(),
+        }
+    );
 }
 
 #[test]
@@ -358,7 +415,9 @@ fn compile_expected_behavior_spec_preserves_contract_core_and_observation_bindin
             .restartable_milestone
     );
     assert_eq!(
-        spec.cycle_semantics.restart_condition.required_postconditions,
+        spec.cycle_semantics
+            .restart_condition
+            .required_postconditions,
         contract
             .contract_core
             .cycle_semantics
@@ -366,7 +425,9 @@ fn compile_expected_behavior_spec_preserves_contract_core_and_observation_bindin
             .required_postconditions
     );
     assert_eq!(
-        spec.cycle_semantics.handoff_invariant.required_terminal_facts,
+        spec.cycle_semantics
+            .handoff_invariant
+            .required_terminal_facts,
         vec![ObservedFact {
             key: "milestone".to_string(),
             expected: "cycle_restartable".to_string(),

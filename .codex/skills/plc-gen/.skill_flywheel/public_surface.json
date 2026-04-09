@@ -5,11 +5,18 @@
     "scaffold-day1-validation-order.md",
     "scaffold-day1-checklist.md",
     "complex-project-public-brief.md",
+    "source-shape-selection.md",
+    "controller-io-modeling-guardrails.md",
+    "legacy-io-model-removal.md",
+    "operator-command-modeling.md",
     "confirmed-system-lowering.md",
     "control-mode-and-recovery-patterns.md",
+    "intent-alignment-boundary.md",
+    "delivery-status-contract.md",
+    "optimization-surface.md",
     "scenario-toolchain-limitations.md",
     "scenario-friendly-guard-patterns.md"
   ],
-  "parallel_runs": 1,
+  "parallel_runs": 2,
   "run_id_prefix": "run"
 }

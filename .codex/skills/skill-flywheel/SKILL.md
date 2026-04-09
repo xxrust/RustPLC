@@ -5,6 +5,19 @@ description: 用于把 skill 改进组织成可重复的研究回合：设定实
 
 # skill-flywheel
 
+## High-Risk Reviewer Gate
+
+When the target skill can change delivery validation policy, or can cause a downstream project to be reported as `validated`, this is optimization parallelism for the skill itself.
+
+In that case, require an independent reviewer or validator gate before closing the round.
+The decision record must say:
+- whether that reviewer gate ran
+- what it checked
+- whether the round still relied on single-agent or weak-blind evidence
+
+This reviewer gate belongs to `skill-flywheel` optimization work.
+It is not the same thing as project-delivery parallelism inside `plc-gen`.
+
 把 `skill-flywheel` 当作研究型编排 skill，而不是项目私有知识库或普通任务执行器。
 
 它的职责不是完成某个固定 feature，而是围绕目标 skill 持续回答四个问题：

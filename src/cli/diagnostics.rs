@@ -603,7 +603,31 @@ fn default_intent_contract_path(plc_path: &Path) -> Option<PathBuf> {
     } else {
         return None;
     };
-    Some(plc_path.with_file_name(candidate_name))
+    let sibling = plc_path.with_file_name(candidate_name);
+    if sibling.is_file() {
+        return Some(sibling);
+    }
+
+    let plc_dir = plc_path.parent()?;
+    if plc_dir.file_name()?.to_str()? != "plc" {
+        return None;
+    }
+    let docs_dir = plc_dir.parent()?.join("docs");
+    let mut matches = fs::read_dir(&docs_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.ends_with(".intent_alignment.contract.json"))
+                .unwrap_or(false)
+        });
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(first)
 }
 
 fn runtime_layouts_from_program(

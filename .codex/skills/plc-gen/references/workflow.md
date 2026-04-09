@@ -41,6 +41,12 @@ The sidecar must:
 - bind observations to real evidence that the current comparator can consume
 - for concurrent or pipelined stations, prefer unique workpiece-handoff anchors over repeating prep-loop transitions
 
+Before calling the sidecar delivery-grade, confirm all of the following:
+- `source_digest.value` is no longer a scaffold placeholder such as `replace_me_after_authoring`
+- `source_ref`, `authoritative_intent_source`, and every `review_basis[*].source` resolve from the delivery root
+- the frozen anchors came from real trace evidence or `intent-doctor`
+- the sidecar no longer contains starter placeholders such as `replace_with_real_anchor` or `replace_after_intent_doctor`
+
 It is acceptable to skip the sidecar only when:
 - the task is a tiny local repair
 - the user explicitly asks to skip intent alignment
@@ -60,6 +66,7 @@ Required outcome for a complex project:
 If the sidecar exists but `intent_alignment` did not appear, the delivery is not validated.
 
 If the comparator reports `mismatch` or `blocked`, keep the artifacts and report the exact finding. Do not downgrade back to "base gate passed".
+If the sidecar is still scaffold-grade or its source binding is unresolved, report `blocked` or `failed validation`; do not report `validated`.
 
 ## Canary
 

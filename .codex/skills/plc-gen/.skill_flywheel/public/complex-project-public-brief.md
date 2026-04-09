@@ -1,5 +1,13 @@
 # Complex Project Public Brief Contract
 
+## Required Intent Sidecar Fields For Complex Delivery
+
+For complex project delivery, the brief must also say:
+- who owns the required `*.intent_alignment.contract.json`
+- which authored intent source it binds to
+- what evidence artifact proves the anchors are real
+- whether the sidecar is delivery-grade or still scaffold-grade
+
 当 `plc-gen` 面对复杂项目，而且调用者看不到仓库源码时，主 agent 必须先准备一份 `public brief`，再进入 one-shot 编排。
 
 这不是可选文案，而是 architect / implementer / reviewer 的共同输入。

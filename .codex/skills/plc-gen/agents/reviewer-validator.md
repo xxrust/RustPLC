@@ -13,9 +13,13 @@ You enter only after the implementation scopes claim they are ready for independ
 
 For any complex project delivery, verify all of the following:
 - a sibling `*.intent_alignment.contract.json` exists
+- its scaffold placeholders are gone, including digest and starter anchor placeholders
 - its authoritative intent source exists
+- its source binding resolves from the delivery root, including `review_basis`
+- its observation bindings point to real comparator-supported evidence
 - `project-check` actually appended an `intent_alignment` step
 - the reported verdict matches the produced report
+- the docs do not claim behavior that is absent from the PLC sources
 
 If any of those are missing, the project is not validated, even if the base gate passed.
 

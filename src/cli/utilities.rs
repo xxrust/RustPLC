@@ -8,9 +8,10 @@ use crate::cli_support::plc_pipeline::{
 };
 use rust_plc::codegen::st::{StCodegenConfig, StCodegenError, generate_st};
 use rust_plc::intent_alignment::{
-    IntentAlignmentBlockerKind, IntentAlignmentVerdict, IntentMismatchKind,
+    IntentAlignmentBlockerKind, IntentAlignmentVerdict, IntentContract, IntentMismatchKind,
     compare_trace_jsonl, compile_expected_behavior_spec, read_intent_contract,
-    reduce_intent_alignment_report,
+    reduce_intent_alignment_report, verify_intent_contract_delivery_readiness,
+    verify_intent_contract_source_binding,
 };
 use rust_plc::semantic::preprocess_program;
 use rust_plc::sequence_lint::{
@@ -307,7 +308,95 @@ fn run_project_check_child(
 fn find_intent_alignment_contract(plc_path: &Path) -> Option<PathBuf> {
     let stem = plc_path.file_stem()?.to_string_lossy();
     let candidate = plc_path.with_file_name(format!("{stem}.intent_alignment.contract.json"));
-    candidate.exists().then_some(candidate)
+    if candidate.exists() {
+        return Some(candidate);
+    }
+
+    let plc_dir = plc_path.parent()?;
+    if plc_dir.file_name()?.to_str()? != "plc" {
+        return None;
+    }
+    let docs_dir = plc_dir.parent()?.join("docs");
+    let mut matches = fs::read_dir(&docs_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.ends_with(".intent_alignment.contract.json"))
+                .unwrap_or(false)
+        });
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(first)
+}
+
+fn resolve_intent_contract_workspace_root(
+    contract_path: &Path,
+    contract: &IntentContract,
+) -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Ok(current_dir) = env::current_dir() {
+        candidates.push(current_dir);
+    }
+    candidates.extend(contract_path.ancestors().skip(1).map(Path::to_path_buf));
+
+    candidates
+        .into_iter()
+        .find(|root| {
+            root.join(&contract.source_ref.path).is_file()
+                && contract
+                    .metadata
+                    .review_basis
+                    .iter()
+                    .all(|review| root.join(&review.source.path).is_file())
+        })
+        .ok_or_else(|| {
+            format!(
+                "Failed to resolve intent contract workspace root for {}; none of the candidate roots expose `{}` and all review basis sources",
+                contract_path.display(),
+                contract.source_ref.path
+            )
+        })
+}
+
+fn failed_intent_alignment_step(
+    command: Vec<String>,
+    stdout_log_path: &Path,
+    stderr_log_path: &Path,
+    error_message: &str,
+    blocker_kind: IntentAlignmentBlockerKind,
+) -> Result<ProjectCheckStepReport, String> {
+    fs::write(stdout_log_path, b"").map_err(|write_err| {
+        format!(
+            "Failed to write project-check stdout log {}: {write_err}",
+            stdout_log_path.display()
+        )
+    })?;
+    fs::write(stderr_log_path, format!("{error_message}\n").as_bytes()).map_err(|write_err| {
+        format!(
+            "Failed to write project-check stderr log {}: {write_err}",
+            stderr_log_path.display()
+        )
+    })?;
+
+    Ok(ProjectCheckStepReport {
+        name: "intent_alignment",
+        command,
+        status: "fail",
+        exit_code: Some(1),
+        stdout_log: display_path_relative_to_cwd(stdout_log_path),
+        stderr_log: display_path_relative_to_cwd(stderr_log_path),
+        report_json: None,
+        artifacts_dir: None,
+        intent_alignment_verdict: Some(IntentAlignmentVerdict::Blocked),
+        intent_alignment_primary_mismatch_kind: None,
+        intent_alignment_blocker_kind: Some(blocker_kind),
+        intent_alignment_comparator_version: None,
+    })
 }
 
 fn run_project_check_intent_alignment_step(
@@ -335,9 +424,50 @@ fn run_project_check_intent_alignment_step(
         display_path_relative_to_cwd(evidence_path),
     ];
 
+    let contract = match read_intent_contract(contract_path) {
+        Ok(contract) => contract,
+        Err(err) => {
+            return failed_intent_alignment_step(
+                command,
+                &stdout_log_path,
+                &stderr_log_path,
+                &format!("Failed to load intent contract: {err}"),
+                IntentAlignmentBlockerKind::InvalidContract,
+            );
+        }
+    };
+    if let Err(err) = verify_intent_contract_delivery_readiness(&contract) {
+        return failed_intent_alignment_step(
+            command,
+            &stdout_log_path,
+            &stderr_log_path,
+            &format!("Intent contract is still a scaffold placeholder: {err}"),
+            IntentAlignmentBlockerKind::InvalidContract,
+        );
+    }
+    let workspace_root = match resolve_intent_contract_workspace_root(contract_path, &contract) {
+        Ok(root) => root,
+        Err(err) => {
+            return failed_intent_alignment_step(
+                command,
+                &stdout_log_path,
+                &stderr_log_path,
+                &err,
+                IntentAlignmentBlockerKind::InvalidContract,
+            );
+        }
+    };
+    if let Err(err) = verify_intent_contract_source_binding(&contract, &workspace_root) {
+        return failed_intent_alignment_step(
+            command,
+            &stdout_log_path,
+            &stderr_log_path,
+            &format!("Intent contract source binding is invalid: {err}"),
+            IntentAlignmentBlockerKind::InvalidContract,
+        );
+    }
+
     let result = (|| -> Result<ProjectCheckIntentAlignmentStepOutput, String> {
-        let contract = read_intent_contract(contract_path)
-            .map_err(|err| format!("Failed to load intent contract: {err}"))?;
         let spec = compile_expected_behavior_spec(&contract)
             .map_err(|err| format!("Failed to compile intent contract: {err}"))?;
         let evidence = fs::read_to_string(evidence_path).map_err(|err| {
@@ -361,8 +491,9 @@ fn run_project_check_intent_alignment_step(
         Ok(output) => {
             write_json_pretty(&report_path, &output.report)?;
             write_json_pretty(&summary_path, &output.summary)?;
-            let mut stdout_json = serde_json::to_string_pretty(&output)
-                .map_err(|err| format!("Failed to serialize intent-alignment step output: {err}"))?;
+            let mut stdout_json = serde_json::to_string_pretty(&output).map_err(|err| {
+                format!("Failed to serialize intent-alignment step output: {err}")
+            })?;
             stdout_json.push('\n');
             fs::write(&stdout_log_path, stdout_json.as_bytes()).map_err(|err| {
                 format!(
@@ -407,35 +538,13 @@ fn run_project_check_intent_alignment_step(
                 ),
             })
         }
-        Err(err) => {
-            fs::write(&stdout_log_path, b"").map_err(|write_err| {
-                format!(
-                    "Failed to write project-check stdout log {}: {write_err}",
-                    stdout_log_path.display()
-                )
-            })?;
-            fs::write(&stderr_log_path, format!("{err}\n").as_bytes()).map_err(|write_err| {
-                format!(
-                    "Failed to write project-check stderr log {}: {write_err}",
-                    stderr_log_path.display()
-                )
-            })?;
-
-            Ok(ProjectCheckStepReport {
-                name: "intent_alignment",
-                command,
-                status: "fail",
-                exit_code: Some(1),
-                stdout_log: display_path_relative_to_cwd(&stdout_log_path),
-                stderr_log: display_path_relative_to_cwd(&stderr_log_path),
-                report_json: None,
-                artifacts_dir: None,
-                intent_alignment_verdict: Some(IntentAlignmentVerdict::Blocked),
-                intent_alignment_primary_mismatch_kind: None,
-                intent_alignment_blocker_kind: Some(IntentAlignmentBlockerKind::MissingComparator),
-                intent_alignment_comparator_version: None,
-            })
-        }
+        Err(err) => failed_intent_alignment_step(
+            command,
+            &stdout_log_path,
+            &stderr_log_path,
+            &err,
+            IntentAlignmentBlockerKind::MissingEvidence,
+        ),
     }
 }
 
@@ -497,16 +606,14 @@ fn run_project_check_subcommand(
                 );
             }
             "--intent-contract" => {
-                intent_contract_path =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --intent-contract <contract.json>".to_string()
-                    })?));
+                intent_contract_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --intent-contract <contract.json>".to_string()
+                })?));
             }
             "--intent-evidence" => {
-                intent_evidence_path =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        "Missing value for --intent-evidence <trace.jsonl>".to_string()
-                    })?));
+                intent_evidence_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --intent-evidence <trace.jsonl>".to_string()
+                })?));
             }
             "-h" | "--help" => return Err(usage.clone()),
             other => return Err(format!("Unknown argument for project-check: {other}")),
@@ -681,4 +788,43 @@ fn run_project_check_subcommand(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_intent_alignment_contract;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "{prefix}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock works")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn finds_delivery_asset_contract_in_sibling_docs_dir() {
+        let base = temp_dir("intent_contract_autodiscovery");
+        let plc_dir = base.join("plc");
+        let docs_dir = base.join("docs");
+        fs::create_dir_all(&plc_dir).expect("create plc dir");
+        fs::create_dir_all(&docs_dir).expect("create docs dir");
+
+        let plc_path = plc_dir.join("main.bundle.toml");
+        let contract_path = docs_dir.join("station.intent_alignment.contract.json");
+        fs::write(&plc_path, "sources = []\n").expect("write bundle");
+        fs::write(&contract_path, "{}\n").expect("write contract");
+
+        assert_eq!(
+            find_intent_alignment_contract(&plc_path),
+            Some(contract_path)
+        );
+    }
 }

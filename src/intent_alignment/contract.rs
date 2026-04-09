@@ -280,6 +280,29 @@ pub enum IntentContractSourceBindingError {
     MissingReviewBasisSource { label: String, path: String },
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum IntentContractDeliveryReadinessError {
+    #[error(
+        "intent contract still uses the scaffold placeholder source digest `{value}`; replace it with the authored source sha256 before calling the delivery validated"
+    )]
+    PlaceholderSourceDigest { value: String },
+    #[error(
+        "intent contract binding `{binding_id}` still uses the scaffold placeholder binding id; replace it with a real authored binding id before validation"
+    )]
+    PlaceholderBindingId { binding_id: String },
+    #[error(
+        "intent contract binding `{binding_id}` still uses the scaffold placeholder evidence `{expected}`; freeze a real comparator-supported anchor before validation"
+    )]
+    PlaceholderEvidence {
+        binding_id: String,
+        expected: String,
+    },
+}
+
+const PLACEHOLDER_SOURCE_DIGEST: &str = "replace_me_after_authoring";
+const PLACEHOLDER_BINDING_ID: &str = "replace_with_real_anchor";
+const PLACEHOLDER_TRACE_EXPECTED: &str = "replace_after_intent_doctor";
+
 pub fn parse_intent_contract_str(json: &str) -> Result<IntentContract, IntentContractLoadError> {
     serde_json::from_str(json).map_err(|source| IntentContractLoadError::Json {
         path: "<inline>".to_string(),
@@ -375,6 +398,39 @@ pub fn verify_intent_contract_source_binding(
             return Err(IntentContractSourceBindingError::MissingReviewBasisSource {
                 label: review_input.label.clone(),
                 path: review_input.source.path.clone(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+pub fn verify_intent_contract_delivery_readiness(
+    contract: &IntentContract,
+) -> Result<(), IntentContractDeliveryReadinessError> {
+    if contract.source_digest.value == PLACEHOLDER_SOURCE_DIGEST {
+        return Err(
+            IntentContractDeliveryReadinessError::PlaceholderSourceDigest {
+                value: contract.source_digest.value.clone(),
+            },
+        );
+    }
+
+    for binding in &contract.observation_bindings {
+        if binding.binding_id == PLACEHOLDER_BINDING_ID {
+            return Err(IntentContractDeliveryReadinessError::PlaceholderBindingId {
+                binding_id: binding.binding_id.clone(),
+            });
+        }
+
+        if let Some(evidence) = binding
+            .evidence
+            .iter()
+            .find(|evidence| evidence.expected == PLACEHOLDER_TRACE_EXPECTED)
+        {
+            return Err(IntentContractDeliveryReadinessError::PlaceholderEvidence {
+                binding_id: binding.binding_id.clone(),
+                expected: evidence.expected.clone(),
             });
         }
     }

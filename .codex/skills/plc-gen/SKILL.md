@@ -136,11 +136,15 @@ Default requirements:
 - bind it to an authored intent source such as `plc/main.system.md`
 - run `project-check` so the real `intent_alignment` step is appended after `no-board-gate`
 - report the actual intent-alignment verdict instead of only reporting base-gate success
+- replace scaffold placeholder digests such as `replace_me_after_authoring` before calling the delivery validated
+- ensure `source_ref`, `authoritative_intent_source`, and every `review_basis[*].source` resolve against the delivery root
+- freeze `observation_bindings` against real comparator-supported evidence from trace or `intent-doctor`, not starter labels such as `replace_after_intent_doctor`
 
 For complex projects, do not call the result `validated` if:
 - the sidecar is missing without an explicit blocker
 - `project-check` did not actually run the `intent_alignment` step
 - the comparator failed or was blocked and that blocker was not reported
+- the sidecar still contains scaffold placeholders or unresolved source binding
 
 If the contract exists but anchor choice or cycle boundaries are still uncertain, run:
 
@@ -218,6 +222,9 @@ For complex work, use this default protocol:
 2. Let `request-architect` freeze source shape, lowering, artifact list, and write scopes.
 3. Let one or more `senior-dsl-implementer` agents execute disjoint scopes.
 4. Let `reviewer-validator` do the independent validation pass.
+
+This protocol is about parallel delivery of the RustPLC project itself.
+Parallel blind runs used to optimize `plc-gen` belong to `skill-flywheel`, not to the generated PLC project.
 
 ## Launcher Discipline
 

@@ -16,6 +16,7 @@ If your scope includes project delivery, bundle delivery, structured fragments, 
 - a real `project-check` run that appends `intent_alignment`
 
 Treat the sidecar as an authored business-intent artifact, never as a compiler artifact.
+Do not hand off a scaffold-grade sidecar as validated: placeholder digests, unresolved source binding, and starter anchors must be replaced or reported as blockers.
 
 ## Handoff Requirements
 
@@ -23,4 +24,5 @@ When you finish, state:
 - which files you changed
 - what command you ran
 - whether `intent_alignment` actually ran
+- whether the sidecar digest and source binding were finalized
 - the exact blocker or mismatch if it did not align

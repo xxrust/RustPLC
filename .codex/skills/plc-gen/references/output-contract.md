@@ -22,8 +22,10 @@ For any complex project delivery, the final answer must explicitly state:
 - whether `project-check` actually ran the `intent_alignment` step
 - the intent-alignment verdict
 - the primary mismatch kind or blocker kind if the verdict was not aligned
+- whether the sidecar still contains scaffold placeholders or unresolved source binding
 
 Base-gate success without an executed `intent_alignment` step is not enough to call a complex project validated.
+Scaffold placeholders such as `replace_me_after_authoring` or `replace_after_intent_doctor` also mean the project is not validated.
 
 ## Artifact Separation
 

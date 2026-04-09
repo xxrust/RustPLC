@@ -50,6 +50,7 @@ pub enum IntentAlignmentVerdict {
 pub enum IntentAlignmentBlockerKind {
     MissingEvidence,
     MissingComparator,
+    InvalidContract,
     ToolchainLimitation,
 }
 
