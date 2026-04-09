@@ -25,8 +25,8 @@ This file accumulates integration pain points from the main thread and the stati
 - Station-local nominal canaries can stay minimal, but they must still preserve workpiece semantics and high-level actuator actions. A thin local source set is acceptable; a fake wrapper over line fragments is not.
 - For repeated production cycles, a real second workpiece source is better evidence than synthetic trace duplication. The executable fix was `line_infeed_reserve` plus `reserve_loader`, not contract-side cheating.
 - In RustPLC today, task-step `if: ... else: ...` lowers to two guarded transitions: `condition` and `NOT(condition)`. That shape is valid semantically but is not runtime-lowerable in the current bridge path. For cycle gates, the stable authoring pattern is `wait: terminal_condition` plus `timeout -> goto retry_step`.
-- The original intent comparator treated overlapping pipeline starts as duplicates inside cycle 0 because it only opened a new cycle after observing the previous cycle-complete anchor. This is too weak for pipelined lines.
-- The stable fix is: assign repeated trace-anchor milestones by occurrence order when cycles overlap, and only evaluate `cross_cycle_drift` from facts that are actually snapshot-evaluable. Transition-only anchor contracts should not be rejected just because they do not carry variable snapshots.
+- For repeated production cycles, line intent evidence is only as good as the trace window. A real second ingress plus a short scenario still yields only one complete observed cycle if the second packout lands after the scenario ends.
+- Overlapping transition-anchor cycle handling is now covered by dedicated intent-alignment regressions in `tests/intent_alignment_observed.rs` and `tests/intent_alignment_compare.rs`, so line-level canaries are no longer relying on implicit comparator behavior.
 
 ## Current Evidence
 - Line bundle compile/verify: pass.
@@ -34,8 +34,8 @@ This file accumulates integration pain points from the main thread and the stati
 - Line `project-check` without intent evidence: pass.
 - Line `intent-doctor`: pass, with stable bindings for `line_started`, `weld_complete`, and `packout_complete`, `cycles=2`, `cross_cycle_ready=true`, and `trailing_partial_cycle=false`.
 - Line `project-check` with intent evidence: pass for the two-cycle canary at `line_with_intent_cycle2`.
-- `cargo test --test intent_alignment_compare`: pass, including the new overlapping transition-anchor cycle regression and the existing handoff-gap drift regression.
+- `cargo test overlapping_transition --tests`: pass, covering both observed extraction and compare behavior for overlapping transition-anchored cycles.
 
 ## Remaining Gaps
 - The current skill still lacks a dedicated public artifact for multi-station routing and station directory seeding; those were exposed by all three workers independently, so they are now strong candidates for the next `plc-gen` flywheel round.
-- The line canary now proves two overlapping cycles, but the comparator still infers cycle instances from milestone occurrence order rather than explicit workpiece instance ids. If future lines allow overtaking or branch-specific per-piece divergence, intent alignment will need instance-level anchors instead of FIFO-by-occurrence inference.
+- The line canary now proves two overlapping cycles, but it still relies on milestone occurrence order rather than explicit workpiece instance ids. If future lines allow overtaking or branch-specific per-piece divergence, intent alignment will need instance-level anchors instead of FIFO-by-occurrence inference.
