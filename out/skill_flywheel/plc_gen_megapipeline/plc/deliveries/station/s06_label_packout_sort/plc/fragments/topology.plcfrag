@@ -1,0 +1,43 @@
+device plc_main: plc {
+    purpose: "S06 label and packout controller"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor {
+    purpose: "S06 cycle start request"
+    subtype: "push_button"
+    debounce: 20ms
+}
+
+device valve_s06_pusher: solenoid_valve {
+    purpose: "S06 packout pusher valve"
+    response_time: 20ms
+}
+
+device cyl_s06_pusher: cylinder {
+    purpose: "S06 packout pusher cylinder"
+}
+
+device motor_s06_label: motor {
+    purpose: "S06 label conveyor motor"
+}
+
+workpiece battery_module_pack: workpiece_type {
+    normal_terminal_states: [packed]
+    abnormal_terminal_states: [rejected]
+    ingress_sites: [s06_infeed]
+    normal_egress_sites: [s06_outfeed]
+    abnormal_egress_sites: [s06_reject_lane]
+}
+
+location s06_infeed: workpiece_location { capacity: 1 }
+location label_stage: workpiece_location { capacity: 1 }
+location uv_stage: workpiece_location { capacity: 1 }
+location s06_outfeed: workpiece_location { capacity: 1 }
+location s06_reject_lane: workpiece_location { capacity: 1 }
+holder station_carrier: workpiece_holder { capacity: 1 }
+
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: plc_main.Y0, to: valve_s06_pusher.coil, via: driven_by }
+relation { from: plc_main.Y1, to: motor_s06_label.cmd, via: driven_by }
+relation { from: valve_s06_pusher.out, to: cyl_s06_pusher.cmd, via: driven_by }

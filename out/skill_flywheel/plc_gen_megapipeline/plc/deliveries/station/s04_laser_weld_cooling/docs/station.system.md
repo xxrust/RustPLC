@@ -20,7 +20,7 @@
 - Operator review gate for weld verification (position 7)
 
 ## Workpiece Semantics
-- Workpiece `busbar_tab_module` continues along the workpiece type declared in S03.
+- Workpiece `battery_module_pack` continues along the same line-level part identity declared upstream.
 - Locations: `s04_infeed`, `laser_chamber`, `cooling_run`, `s05_buffer`, each capacity 1 or 2 for buffering.
 - Semantic effects: `acquire holder weld_head from s04_infeed`, `effect: transfer` through each location, `effect: finish workpiece at s05_buffer as weld_cooled`.
 

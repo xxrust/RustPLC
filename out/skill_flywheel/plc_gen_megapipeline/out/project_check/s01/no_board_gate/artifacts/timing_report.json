@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "count": 40,
+  "overrun_count": 0,
+  "exec_us_min": 10,
+  "exec_us_max": 130,
+  "exec_us_p50": 10,
+  "exec_us_p95": 90,
+  "exec_us_p99": 130,
+  "exec_us_mean": 24.0
+}

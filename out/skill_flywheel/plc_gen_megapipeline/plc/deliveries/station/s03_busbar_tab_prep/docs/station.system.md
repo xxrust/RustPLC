@@ -21,7 +21,7 @@
 - Operator Inspection Gate (position 6): manual confirmation before line release.
 
 ## Workpiece Semantics
-- Workpiece `busbar_tab_module: workpiece_type` represents the partially assembled busbar with tabs attached.
+- Workpiece `battery_module_pack: workpiece_type` remains the line-level part identity while S03 promotes it into the `tab_prepared` state.
 - Locations: `infeed_s02`, `tab_prep_buffer`, `tab_prep_clamp`, `tab_prep_out`. Each location has `capacity: 2`.
 - Handoffs: `effect: transfer from tab_prep_buffer to tab_prep_clamp` and `effect: transfer from tab_prep_out to s04_infeed`.
 - The station owns `effect: acquire holder tab_grip from tab_prep_buffer` as part of the cycle semantics.
@@ -33,4 +33,3 @@
 ## Fault Strategy
 - Each pneumatic action is accompanied by a high-level `timeout` branch (e.g., `align_tab` -> `goto fault.tab_misalign`).
 - If tab stock misaligns twice within a cycle, escalate to the Fault task and release the carrier for manual reset.
-

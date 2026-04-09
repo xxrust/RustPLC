@@ -3,17 +3,17 @@
 ## Identity
 - Station slug: `s01_tray_infeed_buffer`
 - Delivery layer: `station`
-- Workpiece context: `tray_module_pack`
+- Workpiece context: `battery_module_pack`
 
 ## Workpiece semantics
-- `workpiece tray_module_pack: workpiece_type`
+- `workpiece battery_module_pack: workpiece_type`
 - Ingress site: `tray_pickup`
 - Normal egress: `buffer_ready`
 - Abnormal egress: `tray_reject`
 - Holder `tray_bay`: capacity 2 for interchange buffering
 
 ## Flow outline
-1. The operator or upstream buffer loads an empty tray at `tray_pickup`; `acquire tray_bay tray_module_pack from tray_pickup`.
+1. The operator or upstream buffer loads a `battery_module_pack` carrier at `tray_pickup`; `acquire tray_bay battery_module_pack from tray_pickup`.
 2. Dual clamp cylinders (C01–C04) seat the tray and engage sensors; motors M01/M02 index the tray to the safe transfer window.
 3. A transfer arm (cylinders C05–C08, motor M03) moves the tray into the buffer lane where buffer pistons (C09–C10) align the tray.
 4. The clamp readiness actuator suite (C11–C12, motors M04–M06) primes the tray for handoff; `effect: transfer from tray_bay to buffer_ready` once sensors confirm readiness.

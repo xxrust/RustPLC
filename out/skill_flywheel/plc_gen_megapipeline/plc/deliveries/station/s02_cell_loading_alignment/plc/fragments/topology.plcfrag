@@ -1,0 +1,43 @@
+device plc_main: plc {
+    purpose: "S02 cell loading alignment controller"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor {
+    purpose: "S02 cycle start request"
+    subtype: "push_button"
+    debounce: 20ms
+}
+
+device valve_s02_clamp: solenoid_valve {
+    purpose: "S02 preload clamp valve"
+    response_time: 20ms
+}
+
+device cyl_s02_clamp: cylinder {
+    purpose: "S02 preload clamp cylinder"
+}
+
+device motor_s02_align: motor {
+    purpose: "S02 alignment servo"
+}
+
+workpiece battery_module_pack: workpiece_type {
+    normal_terminal_states: [aligned]
+    abnormal_terminal_states: [rejected]
+    ingress_sites: [alignment_ready]
+    normal_egress_sites: [cell_loaded]
+    abnormal_egress_sites: [alignment_reject]
+}
+
+location alignment_ready: workpiece_location { capacity: 1 }
+location preload_table: workpiece_location { capacity: 1 }
+location vision_align: workpiece_location { capacity: 1 }
+location cell_loaded: workpiece_location { capacity: 1 }
+location alignment_reject: workpiece_location { capacity: 1 }
+holder alignment_table: workpiece_holder { capacity: 1 }
+
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: plc_main.Y0, to: valve_s02_clamp.coil, via: driven_by }
+relation { from: plc_main.Y1, to: motor_s02_align.cmd, via: driven_by }
+relation { from: valve_s02_clamp.out, to: cyl_s02_clamp.cmd, via: driven_by }

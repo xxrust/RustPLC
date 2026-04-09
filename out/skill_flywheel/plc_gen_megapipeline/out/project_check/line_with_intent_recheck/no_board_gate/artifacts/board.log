@@ -1,0 +1,137 @@
+boot ok
+TICK tick=0 ts_ms=0
+TRACE tick=0 task=0 from=0 to=1 reason=wait_satisfied ts_ms=0
+TRACE tick=0 task=1 from=0 to=1 reason=wait_satisfied ts_ms=0
+TRACE tick=0 task=1 from=1 to=2 reason=action ts_ms=0
+TIMING tick=0 ts_start_us=0 ts_end_us=130 exec_us=130 slack_us=19870 overrun=false
+TICK tick=1 ts_ms=20
+TRACE tick=1 task=0 from=1 to=3 reason=delay_elapsed ts_ms=20
+TIMING tick=1 ts_start_us=20000 ts_end_us=20050 exec_us=50 slack_us=19950 overrun=false
+TICK tick=2 ts_ms=40
+TIMING tick=2 ts_start_us=40000 ts_end_us=40010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=3 ts_ms=60
+TRACE tick=3 task=1 from=2 to=3 reason=delay_elapsed ts_ms=60
+TIMING tick=3 ts_start_us=60000 ts_end_us=60050 exec_us=50 slack_us=19950 overrun=false
+TICK tick=4 ts_ms=80
+TIMING tick=4 ts_start_us=80000 ts_end_us=80010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=5 ts_ms=100
+TIMING tick=5 ts_start_us=100000 ts_end_us=100010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=6 ts_ms=120
+TRACE tick=6 task=1 from=3 to=4 reason=delay_elapsed ts_ms=120
+TRACE tick=6 task=1 from=4 to=6 reason=action ts_ms=120
+TIMING tick=6 ts_start_us=120000 ts_end_us=120090 exec_us=90 slack_us=19910 overrun=false
+TICK tick=7 ts_ms=140
+TIMING tick=7 ts_start_us=140000 ts_end_us=140010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=8 ts_ms=160
+TIMING tick=8 ts_start_us=160000 ts_end_us=160010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=9 ts_ms=180
+TRACE tick=9 task=2 from=0 to=1 reason=delay_elapsed ts_ms=180
+TRACE tick=9 task=2 from=1 to=2 reason=action ts_ms=180
+TIMING tick=9 ts_start_us=180000 ts_end_us=180090 exec_us=90 slack_us=19910 overrun=false
+TICK tick=10 ts_ms=200
+TIMING tick=10 ts_start_us=200000 ts_end_us=200010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=11 ts_ms=220
+TIMING tick=11 ts_start_us=220000 ts_end_us=220010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=12 ts_ms=240
+TRACE tick=12 task=2 from=2 to=3 reason=delay_elapsed ts_ms=240
+TIMING tick=12 ts_start_us=240000 ts_end_us=240050 exec_us=50 slack_us=19950 overrun=false
+TICK tick=13 ts_ms=260
+TIMING tick=13 ts_start_us=260000 ts_end_us=260010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=14 ts_ms=280
+TIMING tick=14 ts_start_us=280000 ts_end_us=280010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=15 ts_ms=300
+TRACE tick=15 task=2 from=3 to=4 reason=delay_elapsed ts_ms=300
+TRACE tick=15 task=2 from=4 to=5 reason=action ts_ms=300
+TIMING tick=15 ts_start_us=300000 ts_end_us=300090 exec_us=90 slack_us=19910 overrun=false
+TICK tick=16 ts_ms=320
+TIMING tick=16 ts_start_us=320000 ts_end_us=320010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=17 ts_ms=340
+TIMING tick=17 ts_start_us=340000 ts_end_us=340010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=18 ts_ms=360
+TRACE tick=18 task=3 from=0 to=1 reason=delay_elapsed ts_ms=360
+TRACE tick=18 task=3 from=1 to=2 reason=action ts_ms=360
+TIMING tick=18 ts_start_us=360000 ts_end_us=360090 exec_us=90 slack_us=19910 overrun=false
+TICK tick=19 ts_ms=380
+TIMING tick=19 ts_start_us=380000 ts_end_us=380010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=20 ts_ms=400
+TIMING tick=20 ts_start_us=400000 ts_end_us=400010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=21 ts_ms=420
+TRACE tick=21 task=3 from=2 to=3 reason=delay_elapsed ts_ms=420
+TIMING tick=21 ts_start_us=420000 ts_end_us=420050 exec_us=50 slack_us=19950 overrun=false
+TICK tick=22 ts_ms=440
+TIMING tick=22 ts_start_us=440000 ts_end_us=440010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=23 ts_ms=460
+TIMING tick=23 ts_start_us=460000 ts_end_us=460010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=24 ts_ms=480
+TRACE tick=24 task=3 from=3 to=4 reason=delay_elapsed ts_ms=480
+TRACE tick=24 task=3 from=4 to=5 reason=action ts_ms=480
+TIMING tick=24 ts_start_us=480000 ts_end_us=480090 exec_us=90 slack_us=19910 overrun=false
+TICK tick=25 ts_ms=500
+TIMING tick=25 ts_start_us=500000 ts_end_us=500010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=26 ts_ms=520
+TIMING tick=26 ts_start_us=520000 ts_end_us=520010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=27 ts_ms=540
+TRACE tick=27 task=4 from=0 to=1 reason=delay_elapsed ts_ms=540
+TRACE tick=27 task=4 from=1 to=2 reason=action ts_ms=540
+TIMING tick=27 ts_start_us=540000 ts_end_us=540090 exec_us=90 slack_us=19910 overrun=false
+TICK tick=28 ts_ms=560
+TIMING tick=28 ts_start_us=560000 ts_end_us=560010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=29 ts_ms=580
+TIMING tick=29 ts_start_us=580000 ts_end_us=580010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=30 ts_ms=600
+TRACE tick=30 task=4 from=2 to=3 reason=delay_elapsed ts_ms=600
+TIMING tick=30 ts_start_us=600000 ts_end_us=600050 exec_us=50 slack_us=19950 overrun=false
+TICK tick=31 ts_ms=620
+TIMING tick=31 ts_start_us=620000 ts_end_us=620010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=32 ts_ms=640
+TIMING tick=32 ts_start_us=640000 ts_end_us=640010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=33 ts_ms=660
+TRACE tick=33 task=4 from=3 to=4 reason=delay_elapsed ts_ms=660
+TRACE tick=33 task=4 from=4 to=5 reason=action ts_ms=660
+TIMING tick=33 ts_start_us=660000 ts_end_us=660090 exec_us=90 slack_us=19910 overrun=false
+TICK tick=34 ts_ms=680
+TIMING tick=34 ts_start_us=680000 ts_end_us=680010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=35 ts_ms=700
+TIMING tick=35 ts_start_us=700000 ts_end_us=700010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=36 ts_ms=720
+TRACE tick=36 task=5 from=0 to=1 reason=delay_elapsed ts_ms=720
+TRACE tick=36 task=5 from=1 to=2 reason=action ts_ms=720
+TIMING tick=36 ts_start_us=720000 ts_end_us=720090 exec_us=90 slack_us=19910 overrun=false
+TICK tick=37 ts_ms=740
+TIMING tick=37 ts_start_us=740000 ts_end_us=740010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=38 ts_ms=760
+TIMING tick=38 ts_start_us=760000 ts_end_us=760010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=39 ts_ms=780
+TRACE tick=39 task=5 from=2 to=3 reason=delay_elapsed ts_ms=780
+TIMING tick=39 ts_start_us=780000 ts_end_us=780050 exec_us=50 slack_us=19950 overrun=false
+TICK tick=40 ts_ms=800
+TIMING tick=40 ts_start_us=800000 ts_end_us=800010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=41 ts_ms=820
+TIMING tick=41 ts_start_us=820000 ts_end_us=820010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=42 ts_ms=840
+TRACE tick=42 task=5 from=3 to=4 reason=delay_elapsed ts_ms=840
+TRACE tick=42 task=5 from=4 to=5 reason=action ts_ms=840
+TIMING tick=42 ts_start_us=840000 ts_end_us=840090 exec_us=90 slack_us=19910 overrun=false
+TICK tick=43 ts_ms=860
+TIMING tick=43 ts_start_us=860000 ts_end_us=860010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=44 ts_ms=880
+TIMING tick=44 ts_start_us=880000 ts_end_us=880010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=45 ts_ms=900
+TRACE tick=45 task=6 from=0 to=1 reason=delay_elapsed ts_ms=900
+TRACE tick=45 task=6 from=1 to=2 reason=action ts_ms=900
+TIMING tick=45 ts_start_us=900000 ts_end_us=900090 exec_us=90 slack_us=19910 overrun=false
+TICK tick=46 ts_ms=920
+TIMING tick=46 ts_start_us=920000 ts_end_us=920010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=47 ts_ms=940
+TIMING tick=47 ts_start_us=940000 ts_end_us=940010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=48 ts_ms=960
+TRACE tick=48 task=6 from=2 to=3 reason=delay_elapsed ts_ms=960
+TIMING tick=48 ts_start_us=960000 ts_end_us=960050 exec_us=50 slack_us=19950 overrun=false
+TICK tick=49 ts_ms=980
+TIMING tick=49 ts_start_us=980000 ts_end_us=980010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=50 ts_ms=1000
+TIMING tick=50 ts_start_us=1000000 ts_end_us=1000010 exec_us=10 slack_us=19990 overrun=false
+TICK tick=51 ts_ms=1020
+TRACE tick=51 task=6 from=3 to=4 reason=delay_elapsed ts_ms=1020
+TRACE tick=51 task=6 from=4 to=5 reason=action ts_ms=1020
+TIMING tick=51 ts_start_us=1020000 ts_end_us=1020090 exec_us=90 slack_us=19910 overrun=false

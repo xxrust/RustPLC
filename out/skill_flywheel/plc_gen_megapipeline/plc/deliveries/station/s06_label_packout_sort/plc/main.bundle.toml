@@ -3,114 +3,19 @@ mode = "delivery-asset"
 
 [notes]
 purpose = "S06 label application and packout sorting station for the megapipeline"
+layer = "station"
 
 [topology]
-fragments = []
+fragments = [
+  "fragments/topology.plcfrag",
+]
 
 [constraints]
-fragments = []
+fragments = [
+  "fragments/constraints.plcfrag",
+]
 
 [tasks]
-fragments = []
-
-device cyl_align_1: cylinder { purpose: "Alignment clamp 1" }
-device cyl_align_2: cylinder { purpose: "Alignment clamp 2" }
-device cyl_align_3: cylinder { purpose: "Alignment clamp 3" }
-device cyl_align_4: cylinder { purpose: "Alignment clamp 4" }
-device cyl_label_5: cylinder { purpose: "Label head pressure" }
-device cyl_label_6: cylinder { purpose: "Label setter guide" }
-device cyl_guard_7: cylinder { purpose: "UV guard gate" }
-device cyl_reject_8: cylinder { purpose: "Reject gate" }
-device cyl_release_9: cylinder { purpose: "Packout release gate" }
-
-device motor_conveyor_1: motor { purpose: "Conveyor speed 1" }
-device motor_conveyor_2: motor { purpose: "Conveyor speed 2" }
-device motor_conveyor_3: motor { purpose: "Conveyor speed 3" }
-device motor_label_4: motor { purpose: "Label servo 1" }
-device motor_label_5: motor { purpose: "Label servo 2" }
-device motor_uv_6: motor { purpose: "Curing lamp rotation" }
-device motor_sort_7: motor { purpose: "Good lane drive" }
-device motor_sort_8: motor { purpose: "Reject lane drive" }
-
-device sensor_pack_ready: sensor { purpose: "Label ready flag" }
-device sensor_uv_ready: sensor { purpose: "UV/curing sensor" }
-device sensor_reject: sensor { purpose: "Reject flag" }
-
-workpiece battery_module: workpiece_type {
-    normal_terminal_states: [packout_ready]
-    abnormal_terminal_states: [rejected]
-    ingress_sites: [s06_infeed]
-    normal_egress_sites: [s06_outfeed]
-}
-
-location s06_infeed: workpiece_location { capacity: 1 }
-location s06_outfeed: workpiece_location { capacity: 1 }
-location s06_reject_lane: workpiece_location { capacity: 1 }
-
-relation { from: sensor_pack_ready.out, to: motor_label_4.drive, via: driven_by }
-
-[tasks]
-
-task s06_align:
-    step align_module:
-        wait: sensor_pack_ready == true
-        action: engage cyl_align_1
-        action: engage cyl_align_2
-        action: engage cyl_align_3
-        action: engage cyl_align_4
-        on_complete: goto apply_label
-
-task s06_label:
-    step apply_label:
-        action: set motor_label_4.spin on
-        action: set motor_label_5.spin on
-        action: engage cyl_label_5
-        action: engage cyl_label_6
-        wait: sensor_uv_ready == true
-        timeout: 400ms -> goto fault.label_fault
-        on_complete: goto cure_uv
-
-task s06_cure:
-    step cure_uv:
-        action: set motor_uv_6.spin on
-        action: engage cyl_guard_7
-        wait: sensor_uv_ready == true
-        timeout: 300ms -> goto fault.uv_fault
-        on_complete: goto packout
-
-task s06_packout:
-    step pack_good:
-        action: set motor_sort_7.spin on
-        action: retract cyl_reject_8
-        effect: transfer from station_carrier to s06_outfeed
-        effect: finish workpiece at s06_outfeed as packout_ready
-        action: engage cyl_release_9
-        on_complete: goto done
-
-task s06_reject:
-    step pack_reject:
-        wait: sensor_reject == true
-        action: set motor_sort_8.spin on
-        action: engage cyl_reject_8
-        effect: transfer from station_carrier to s06_reject_lane
-        effect: finish workpiece at s06_reject_lane as rejected
-        on_complete: goto done
-
-task fault:
-    step label_fault:
-        action: set motor_label_4.spin off
-        action: set motor_label_5.spin off
-        effect: transfer from station_carrier to s06_reject_lane
-        effect: finish workpiece at s06_reject_lane as rejected
-        on_complete: goto done
-
-    step uv_fault:
-        action: set motor_uv_6.spin off
-        action: retract cyl_guard_7
-        effect: transfer from station_carrier to s06_reject_lane
-        effect: finish workpiece at s06_reject_lane as rejected
-        on_complete: goto done
-
-task done:
-    step idle:
-        action: engage cyl_release_9
+fragments = [
+  "fragments/tasks.plcfrag",
+]

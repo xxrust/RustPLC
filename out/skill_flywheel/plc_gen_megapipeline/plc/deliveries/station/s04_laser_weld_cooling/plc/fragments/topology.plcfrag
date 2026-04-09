@@ -1,0 +1,43 @@
+device plc_main: plc {
+    purpose: "S04 laser weld and cooling controller"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor {
+    purpose: "S04 cycle start request"
+    subtype: "push_button"
+    debounce: 20ms
+}
+
+device valve_s04_clamp: solenoid_valve {
+    purpose: "S04 weld clamp valve"
+    response_time: 20ms
+}
+
+device cyl_s04_clamp: cylinder {
+    purpose: "S04 weld clamp cylinder"
+}
+
+device motor_s04_cooling: motor {
+    purpose: "S04 cooling conveyor motor"
+}
+
+workpiece battery_module_pack: workpiece_type {
+    normal_terminal_states: [weld_cooled]
+    abnormal_terminal_states: [rejected]
+    ingress_sites: [s04_infeed]
+    normal_egress_sites: [s05_buffer]
+    abnormal_egress_sites: [s04_reject]
+}
+
+location s04_infeed: workpiece_location { capacity: 1 }
+location laser_chamber: workpiece_location { capacity: 1 }
+location cooling_run: workpiece_location { capacity: 1 }
+location s05_buffer: workpiece_location { capacity: 1 }
+location s04_reject: workpiece_location { capacity: 1 }
+holder weld_head: workpiece_holder { capacity: 1 }
+
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: plc_main.Y0, to: valve_s04_clamp.coil, via: driven_by }
+relation { from: plc_main.Y1, to: motor_s04_cooling.cmd, via: driven_by }
+relation { from: valve_s04_clamp.out, to: cyl_s04_clamp.cmd, via: driven_by }

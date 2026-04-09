@@ -28,7 +28,7 @@
 
 ## Interfaces
 - Consumers: Station S02 uses `buffer_ready` location as ingress.
-- Provides: `tray_module_pack` holder state and explicit `effect: transfer` semantics.
+- Provides: `battery_module_pack` holder state and explicit `effect: transfer` semantics.
 - Shares topology fragments from `plc/target_semantics_fragments` for devices, constraints, and auto tasks.
 
 ## Validation zones

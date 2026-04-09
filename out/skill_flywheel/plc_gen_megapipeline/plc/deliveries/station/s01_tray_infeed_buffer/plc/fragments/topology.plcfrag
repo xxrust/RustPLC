@@ -1,0 +1,43 @@
+device plc_main: plc {
+    purpose: "S01 tray infeed buffer controller"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor {
+    purpose: "S01 cycle start request"
+    subtype: "push_button"
+    debounce: 20ms
+}
+
+device valve_s01_clamp: solenoid_valve {
+    purpose: "S01 tray clamp valve"
+    response_time: 20ms
+}
+
+device cyl_s01_clamp: cylinder {
+    purpose: "S01 tray clamp cylinder"
+}
+
+device motor_s01_buffer: motor {
+    purpose: "S01 tray buffer motor"
+}
+
+workpiece battery_module_pack: workpiece_type {
+    normal_terminal_states: [buffered]
+    abnormal_terminal_states: [rejected]
+    ingress_sites: [tray_pickup]
+    normal_egress_sites: [buffer_ready]
+    abnormal_egress_sites: [tray_reject]
+}
+
+location tray_pickup: workpiece_location { capacity: 1 }
+location clamp_seat: workpiece_location { capacity: 1 }
+location buffer_lane: workpiece_location { capacity: 1 }
+location buffer_ready: workpiece_location { capacity: 1 }
+location tray_reject: workpiece_location { capacity: 1 }
+holder tray_bay: workpiece_holder { capacity: 1 }
+
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: plc_main.Y0, to: valve_s01_clamp.coil, via: driven_by }
+relation { from: plc_main.Y1, to: motor_s01_buffer.cmd, via: driven_by }
+relation { from: valve_s01_clamp.out, to: cyl_s01_clamp.cmd, via: driven_by }

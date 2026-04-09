@@ -1,0 +1,38 @@
+task s04_weld_cycle:
+    step wait_start:
+        wait: start_button == true
+        timeout: 100ms -> goto fault.reject_start
+
+    step load_weld_head:
+        effect: acquire holder weld_head from s04_infeed
+        action: extend cyl_s04_clamp
+
+    step weld_tabs:
+        effect: transfer from weld_head to laser_chamber
+        effect: acquire holder weld_head from laser_chamber
+        action: set motor_s04_cooling.cmd on
+        delay: 60ms
+
+    step cool_module:
+        effect: transfer from weld_head to cooling_run
+        effect: acquire holder weld_head from cooling_run
+        delay: 60ms
+
+    step handoff_cooled:
+        effect: transfer from weld_head to s05_buffer
+        effect: finish workpiece at s05_buffer as weld_cooled
+        action: set motor_s04_cooling.cmd off
+        action: retract cyl_s04_clamp
+
+    on_complete: goto done.halt
+
+task fault:
+    step reject_start:
+        effect: transfer from s04_infeed to s04_reject
+        effect: finish workpiece at s04_reject as rejected
+
+    on_complete: goto done.halt
+
+task done:
+    step halt:
+        action: log "s04 cycle complete"

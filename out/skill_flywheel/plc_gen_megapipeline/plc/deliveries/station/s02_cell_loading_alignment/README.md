@@ -2,7 +2,7 @@
 
 - Delivery layer: `station`
 - Identity: `s02_cell_loading_alignment`
-- Role: takes buffered tray_module_pack inputs, positions battery modules, aligns edges and confirms clamp readiness for welding.
+- Role: takes buffered `battery_module_pack` inputs, positions modules, aligns edges, and confirms clamp readiness for welding.
 - Work positions: 1) Tray intake, 2) Module preload, 3) Alignment table, 4) Vision alignment lane, 5) Safety release.
 - Actuator inventory: 10 cylinders (cam lift, preload clamps, alignment jacks, sight flippers) and 9 motors (servo aligner, vision stage, preload jaws, belt, sensor sweep).
 

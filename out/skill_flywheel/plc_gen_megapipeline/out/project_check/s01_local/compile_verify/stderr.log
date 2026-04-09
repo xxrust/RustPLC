@@ -1,0 +1,7 @@
+Verification passed:
+  - Safety: 完备证明 (depth 7)
+    Coverage: bound 2/2, degraded 0, skipped 0
+  - Liveness: 通过
+  - Timing: 通过
+  - Causality: 通过
+verification_report: out/skill_flywheel/plc_gen_megapipeline/out/project_check/s01_local\compile_verify\verification_report.json

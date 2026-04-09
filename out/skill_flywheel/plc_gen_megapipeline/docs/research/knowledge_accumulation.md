@@ -11,14 +11,18 @@ This file accumulates integration pain points from the main thread and the stati
 ## Main-Thread Integration Notes
 - The line was intentionally planned as one serial route before station authoring to avoid station-level workpiece drift.
 - Compile-surface fragments keep ownership in file names so the project does not collapse back into spaghetti PLC.
-- Worker station docs currently use inconsistent workpiece labels (`tray_module_pack`, `battery_module`, and line-level `battery_module_pack`), which is now a documented alignment gap to fix in the next refinement round.
+- The first station authoring round exposed a real independence trap: S01-S04 passed because their bundle entries still pointed at shared line fragments, which is not the same thing as a station-local executable canary.
+- Workpiece naming drift was real across worker assets; the corrective rule is to keep the line-level `battery_module_pack` type stable and express station progress via terminal states, not ad-hoc type renames.
 - Only a subset of the >100 actuators is exercised in the first line-level runtime proof path; the full actuator inventory is still declared and documented for delivery realism.
+- Three follow-up explorer subagents all failed with stream-disconnect before returning analysis. This is an orchestration-layer failure mode that must be recorded separately from PLC authoring quality.
 
 ## Toolchain Findings
 - `cargo run --bin rust_plc -- ...main.bundle.toml --no-print-ir` initially failed because `wait` without timeout is rejected by liveness on autonomous starts; the fix was to add an explicit timeout route for the line start wait.
 - `scenario-validate` initially failed because the representative cylinders had no unique physical output path; the correct closed-loop topology is `plc_main.Y -> valve.coil` and `valve.out -> cyl.cmd` via `relation`, not the deprecated `driven_by:` property.
 - The first intent contract draft failed schema validation because `postconditions` only accept `postcondition_id` and `description`; carrying a free-form `label` field is rejected by the parser.
 - The first intent-alignment run was blocked even after schema fix because the contract still used placeholder bindings. `intent-doctor` produced concrete transition anchors, and binding those real transitions allowed `project-check` to pass with `intent_alignment`.
+- Raw DSL pasted directly into `main.bundle.toml` is rejected by the loader; delivery assets must keep PLC source in fragment files and use the bundle only as a manifest.
+- Station-local nominal canaries can stay minimal, but they must still preserve workpiece semantics and high-level actuator actions. A thin local source set is acceptable; a fake wrapper over line fragments is not.
 
 ## Current Evidence
 - Line bundle compile/verify: pass.
@@ -29,5 +33,5 @@ This file accumulates integration pain points from the main thread and the stati
 
 ## Remaining Gaps
 - Cross-cycle diagnosis remains weak because the current nominal scenario only covers one complete cycle.
-- Station asset docs exist, but the line and station layers still need a shared canonical workpiece vocabulary so the delivery tree stops drifting on names.
 - The current skill still lacks a dedicated public artifact for multi-station routing and station directory seeding; those were exposed by all three workers independently, so they are now strong candidates for the next `plc-gen` flywheel round.
+- The line canary still proves only one cycle because the current executable route consumes one ingress-seeded workpiece and halts. Stronger cross-cycle evidence requires either repeated ingress semantics or a restartable multi-piece line canary.

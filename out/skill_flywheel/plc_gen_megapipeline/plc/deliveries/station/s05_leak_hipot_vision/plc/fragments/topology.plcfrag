@@ -1,0 +1,43 @@
+device plc_main: plc {
+    purpose: "S05 leak, hipot, and vision controller"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor {
+    purpose: "S05 cycle start request"
+    subtype: "push_button"
+    debounce: 20ms
+}
+
+device valve_s05_clamp: solenoid_valve {
+    purpose: "S05 seal clamp valve"
+    response_time: 20ms
+}
+
+device cyl_s05_clamp: cylinder {
+    purpose: "S05 seal clamp cylinder"
+}
+
+device motor_s05_index: motor {
+    purpose: "S05 inspection index motor"
+}
+
+workpiece battery_module_pack: workpiece_type {
+    normal_terminal_states: [validated]
+    abnormal_terminal_states: [rejected]
+    ingress_sites: [s05_infeed]
+    normal_egress_sites: [s05_outfeed]
+    abnormal_egress_sites: [s05_reject]
+}
+
+location s05_infeed: workpiece_location { capacity: 1 }
+location seal_chamber: workpiece_location { capacity: 1 }
+location hipot_cell: workpiece_location { capacity: 1 }
+location s05_outfeed: workpiece_location { capacity: 1 }
+location s05_reject: workpiece_location { capacity: 1 }
+holder inspection_carrier: workpiece_holder { capacity: 1 }
+
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: plc_main.Y0, to: valve_s05_clamp.coil, via: driven_by }
+relation { from: plc_main.Y1, to: motor_s05_index.cmd, via: driven_by }
+relation { from: valve_s05_clamp.out, to: cyl_s05_clamp.cmd, via: driven_by }

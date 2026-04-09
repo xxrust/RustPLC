@@ -1,16 +1,12 @@
-tick_ms: 10
-duration_ms: 350
+tick_ms: 20
+duration_ms: 300
 inputs:
   - at_ms: 0
     set:
       digital_inputs:
-        sensor_pack_ready: true
-  - at_ms: 30
+        0: true
+  - at_ms: 100
     set:
       digital_inputs:
-        sensor_uv_ready: true
-  - at_ms: 60
-    set:
-      digital_inputs:
-        sensor_reject: false
+        0: false
 forces: []

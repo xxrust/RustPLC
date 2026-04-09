@@ -2,26 +2,20 @@ schema_version = 1
 mode = "delivery-asset"
 
 [notes]
-purpose = "S01 tray infeed buffer station entry"
+purpose = "S01 tray infeed buffer delivery asset"
 layer = "station"
 
 [topology]
 fragments = [
-  "../../../../target_semantics_fragments/topology/controller.plcfrag",
-  "../../../../target_semantics_fragments/topology/interface_devices.plcfrag",
-  "../../../../target_semantics_fragments/topology/process_devices.plcfrag",
-  "../../../../target_semantics_fragments/topology/workpieces.plcfrag",
-  "../../../../target_semantics_fragments/topology/relations.plcfrag"
+  "fragments/topology.plcfrag",
 ]
 
 [constraints]
 fragments = [
-  "../../../../target_semantics_fragments/constraints/claims_and_rules.plcfrag"
+  "fragments/constraints.plcfrag",
 ]
 
 [tasks]
 fragments = [
-  "../../../../target_semantics_fragments/architecture/startup_and_supervision.plcfrag",
-  "../../../../target_semantics_fragments/auto/main_cycle.plcfrag",
-  "../../../../target_semantics_fragments/faults/common_faults.plcfrag"
+  "fragments/tasks.plcfrag",
 ]

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "command": "scenario-doctor",
+  "output": "json",
+  "plc": "out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s03_busbar_tab_prep/plc/main.bundle.toml",
+  "scenario": "out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s03_busbar_tab_prep/scenarios/nominal/normal.yaml",
+  "status": "pass",
+  "error_count": 0,
+  "warn_count": 0,
+  "issues": []
+}

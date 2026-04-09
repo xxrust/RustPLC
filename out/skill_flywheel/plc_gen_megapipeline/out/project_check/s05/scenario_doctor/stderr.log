@@ -1,0 +1,6 @@
+[SCN-DOCTOR-001] Failed to load out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s05_leak_hipot_vision/plc/main.bundle.toml: Failed to parse PLC bundle out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s05_leak_hipot_vision/plc/main.bundle.toml: TOML parse error at line 16, column 8
+   |
+16 | device cyl_clamp_1: cylinder { purpose: "Load clamp 1" }
+   |        ^
+expected `.`, `=`
+

@@ -6,7 +6,7 @@
 - Consumes validated modules from S05 and feeds the line outfeed.
 
 ## Workpiece Semantics
-- `workpiece battery_module` enters at `s06_infeed`, traverses label/packout positions, and leaves via `s06_outfeed`.
+- `workpiece battery_module_pack` enters at `s06_infeed`, traverses label/packout positions, and leaves via `s06_outfeed`.
 - The station owns the carrier `station_carrier` and uses `effect: transfer` and `effect: finish` to make the module state explicit.
 - Every labeling step ends with `effect: finish workpiece at s06_outfeed as validated`, so a downstream station cannot skip the final release.
 

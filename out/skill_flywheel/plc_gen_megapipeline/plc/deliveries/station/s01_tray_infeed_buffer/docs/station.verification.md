@@ -7,5 +7,5 @@
 4. Safety and liveness checks must ensure clamp resource claims hold while transfer arm actions run in parallel.
 
 ## Observables to assert
-- Buffer_precharge state never overlaps with clamp_release while `tray_module_pack` is mounted.
+- Buffer_precharge state never overlaps with clamp_release while `battery_module_pack` is mounted.
 - Fault path covers clamp timeout and transfer motor fault, routing to `tray_reject`.

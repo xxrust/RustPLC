@@ -6,10 +6,10 @@
 - Line-level parent: `plc_gen_megapipeline`
 
 ## Workpiece and Flow Intent
-- The station processes the `battery_module` workpiece coming from S04.
+- The station processes the `battery_module_pack` workpiece coming from S04.
 - It enforces electronic continuity validation (leak test), hipot excitation, and vision validation before handing the module to S06.
 - Workpiece semantics:
-  - `workpiece battery_module: workpiece_type` owns a `normal_terminal_states = [validated]` and enters `ingress_sites = [s05_infeed]` / `egress_sites = [s05_outfeed]`.
+  - `workpiece battery_module_pack: workpiece_type` owns `normal_terminal_states = [validated]` and enters `ingress_sites = [s05_infeed]` / `normal_egress_sites = [s05_outfeed]`.
   - `relationship` to upstream carrier ensures the module is mounted before any high-voltage stimulus.
   - All steps that change module state use `effect: acquire/transfer/finish` so the runtime models the carrier-to-station handoff and release explicitly.
 
