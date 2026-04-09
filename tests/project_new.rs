@@ -39,10 +39,14 @@ fn new_single_file_layout_still_creates_main_plc() {
     );
 
     assert!(project_dir.join("plc/main.plc").exists());
-    assert!(!project_dir.join("plc/main.target_semantics.bundle.toml").exists());
+    assert!(
+        !project_dir
+            .join("plc/main.target_semantics.bundle.toml")
+            .exists()
+    );
 
-    let manifest = fs::read_to_string(project_dir.join("rustplc.project.toml"))
-        .expect("read manifest");
+    let manifest =
+        fs::read_to_string(project_dir.join("rustplc.project.toml")).expect("read manifest");
     assert!(manifest.contains("plc = \"plc/main.plc\""));
     assert!(project_dir.join("config/workpiece.toml").exists());
 }
@@ -103,11 +107,53 @@ fn new_structured_fragments_layout_creates_bundle_project_that_compiles() {
         "step-mode sidecar should exist"
     );
 
-    let manifest = fs::read_to_string(project_dir.join("rustplc.project.toml"))
-        .expect("read manifest");
-    assert!(manifest.contains("plc = \"plc/main.target_semantics.bundle.toml\""));
+    let manifest =
+        fs::read_to_string(project_dir.join("rustplc.project.toml")).expect("read manifest");
+    assert!(manifest.contains("layer = \"station\""));
+    assert!(manifest.contains(
+        "plc = \"plc/deliveries/station/demo_structured/plc/main.bundle.toml\""
+    ));
+    assert!(manifest.contains(
+        "scenario = \"plc/deliveries/station/demo_structured/scenarios/nominal/normal.yaml\""
+    ));
     assert!(manifest.contains("workpiece = \"config/workpiece.toml\""));
     assert!(project_dir.join("config/workpiece.toml").exists());
+    assert!(
+        project_dir
+            .join("plc/deliveries/station/demo_structured/docs/station.system.md")
+            .exists(),
+        "station system doc should exist"
+    );
+    assert!(
+        project_dir
+            .join("plc/deliveries/station/demo_structured/docs/station.architecture.md")
+            .exists(),
+        "station architecture doc should exist"
+    );
+    assert!(
+        project_dir
+            .join("plc/deliveries/station/demo_structured/docs/station.intent_alignment.contract.json")
+            .exists(),
+        "station intent contract should exist"
+    );
+    assert!(
+        project_dir
+            .join("plc/deliveries/station/demo_structured/docs/station.verification.md")
+            .exists(),
+        "station verification doc should exist"
+    );
+    assert!(
+        project_dir
+            .join("plc/deliveries/station/demo_structured/plc/main.bundle.toml")
+            .exists(),
+        "station delivery asset bundle should exist"
+    );
+    assert!(
+        project_dir
+            .join("plc/deliveries/station/demo_structured/scenarios/nominal/normal.yaml")
+            .exists(),
+        "station delivery asset scenario should exist"
+    );
 
     let bundle = fs::read_to_string(&bundle_path).expect("read bundle");
     assert!(!bundle.contains("manual/manual_actions.plcfrag"));
@@ -123,6 +169,51 @@ fn new_structured_fragments_layout_creates_bundle_project_that_compiles() {
         compile.status.success(),
         "structured bundle scaffold should compile, stderr: {}",
         String::from_utf8_lossy(&compile.stderr)
+    );
+}
+
+#[test]
+fn new_structured_fragments_module_delivery_layer_points_manifest_to_module_asset() {
+    let base = temp_dir("rust_plc_new_structured_module");
+    let project_dir = project_path(&base, "pick_head");
+
+    let output = run_cli(&[
+        "new",
+        project_dir.to_str().expect("utf8 path"),
+        "--layout",
+        "structured-fragments",
+        "--delivery-layer",
+        "module",
+    ]);
+    assert!(
+        output.status.success(),
+        "new structured-fragments module should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifest =
+        fs::read_to_string(project_dir.join("rustplc.project.toml")).expect("read manifest");
+    assert!(manifest.contains("layer = \"module\""));
+    assert!(manifest.contains(
+        "system = \"plc/deliveries/module/pick_head/docs/module.system.md\""
+    ));
+    assert!(manifest.contains(
+        "plc = \"plc/deliveries/module/pick_head/plc/main.bundle.toml\""
+    ));
+    assert!(manifest.contains(
+        "scenario = \"plc/deliveries/module/pick_head/scenarios/nominal/normal.yaml\""
+    ));
+    assert!(
+        project_dir
+            .join("plc/deliveries/module/pick_head/docs/module.architecture.md")
+            .exists(),
+        "module architecture doc should exist"
+    );
+    assert!(
+        project_dir
+            .join("plc/deliveries/module/pick_head/README.md")
+            .exists(),
+        "module asset README should exist"
     );
 }
 

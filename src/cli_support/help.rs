@@ -20,7 +20,7 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Core",
         name: "new",
         summary: "Create a RustPLC project scaffold with starter PLC, scenarios, and VS Code tasks.",
-        usage_template: "Usage: {program} new <project_dir> [--layout <single-file|structured-fragments>] [--force]",
+        usage_template: "Usage: {program} new <project_dir> [--layout <single-file|structured-fragments>] [--delivery-layer <module|station|line>] [--force]",
     },
     CliCommandHelp {
         section: "Simulation",
@@ -217,6 +217,7 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
         "help" => &["[command]                  Show detailed help for one command."],
         "new" => &[
             "--layout <single-file|structured-fragments> Choose the scaffold source layout.",
+            "--delivery-layer <module|station|line> Choose the default delivery asset layer for scaffold docs and entries.",
             "--force                    Overwrite known scaffold files in a non-empty directory.",
         ],
         "sim" => &[
@@ -397,6 +398,7 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
         "new" => &[
             "`single-file` keeps the existing Day-1 scaffold shape.",
             "`structured-fragments` creates a `.bundle.toml` entry plus semantic fragment directories for multi-domain projects.",
+            "`--delivery-layer` defaults to `station` and adds a delivery asset skeleton with its own docs, source entry, and nominal scenario.",
         ],
         "sim" => &["This command runs the built-in demo program, not a user PLC file."],
         "sim-plc" => &[
@@ -446,6 +448,7 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         "new" => &[
             "rust_plc new demo_project",
             "rust_plc new wafer_loader --layout structured-fragments",
+            "rust_plc new pick_head --layout structured-fragments --delivery-layer module",
             "rust_plc new demo_project --force",
         ],
         "sim" => &["rust_plc sim scenarios/basic.yaml --out out/sim/trace.jsonl"],

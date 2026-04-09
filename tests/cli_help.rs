@@ -52,12 +52,22 @@ fn help_subcommand_prints_target_command_usage() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Usage:"));
-    assert!(stderr.contains("new <project_dir> [--force]"));
+    assert!(stderr.contains(
+        "new <project_dir> [--layout <single-file|structured-fragments>] [--delivery-layer <module|station|line>] [--force]"
+    ));
     assert!(stderr.contains("Create a RustPLC project scaffold"));
     assert!(stderr.contains("Options:"));
+    assert!(stderr.contains("--layout <single-file|structured-fragments>"));
+    assert!(stderr.contains("--delivery-layer <module|station|line>"));
     assert!(stderr.contains("--force"));
+    assert!(stderr.contains("Notes:"));
+    assert!(stderr.contains("structured-fragments"));
     assert!(stderr.contains("Examples:"));
     assert!(stderr.contains("rust_plc new demo_project"));
+    assert!(stderr.contains("rust_plc new wafer_loader --layout structured-fragments"));
+    assert!(stderr.contains(
+        "rust_plc new pick_head --layout structured-fragments --delivery-layer module"
+    ));
 }
 
 #[test]
@@ -82,7 +92,9 @@ fn new_help_does_not_create_literal_help_directory() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Usage:"));
-    assert!(stderr.contains("new <project_dir> [--force]"));
+    assert!(stderr.contains(
+        "new <project_dir> [--layout <single-file|structured-fragments>] [--delivery-layer <module|station|line>] [--force]"
+    ));
 }
 
 #[test]
