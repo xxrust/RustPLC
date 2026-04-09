@@ -19,6 +19,9 @@
 - The intent contract was moved from placeholder bindings to trace-derived transition bindings after a real `sim-plc` run and `intent-doctor` pass.
 - Each station bundle now owns a local `fragments/topology.plcfrag`, `fragments/constraints.plcfrag`, and `fragments/tasks.plcfrag` entry so station `project-check` no longer depends on shared line fragments.
 - The station-local canaries were normalized onto the canonical `battery_module_pack` workpiece vocabulary and retain high-level cylinder semantics instead of hand-written sensor choreography.
+- The two-cycle line canary now uses a real second ingress source plus a `reserve_loader` task, not a fake duplicated trace fixture.
+- The first two-cycle attempt failed because `if: ... else: ...` lowered to `condition + NOT(condition)`, while the runtime bridge only accepts `condition + timeout`, `condition + always`, or `always + timeout`. The fix was to rewrite each station gate as `wait: counter >= 2.0` plus `timeout -> goto entry_window`.
+- The second failure was not in the PLC route but in intent comparison: overlapping pipeline cycles were being collapsed into cycle 0. The comparator now assigns repeated trace-anchor milestones by occurrence order, and `cross_cycle_drift` only fires when handoff facts are actually snapshot-evaluable instead of blindly rejecting transition-only overlapping lines.
 
 ## Final Validation Snapshot
 - `cargo run --bin rust_plc -- out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/line/plc_gen_megapipeline/plc/main.bundle.toml --no-print-ir`
@@ -32,8 +35,11 @@
 - `cargo run --bin rust_plc -- project-check out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s04_laser_weld_cooling/plc/main.bundle.toml --scenario out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s04_laser_weld_cooling/scenarios/nominal/normal.yaml --out-dir out/skill_flywheel/plc_gen_megapipeline/out/project_check/s04_local --output human`
 - `cargo run --bin rust_plc -- project-check out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s05_leak_hipot_vision/plc/main.bundle.toml --scenario out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s05_leak_hipot_vision/scenarios/nominal/normal.yaml --out-dir out/skill_flywheel/plc_gen_megapipeline/out/project_check/s05_local --output human`
 - `cargo run --bin rust_plc -- project-check out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s06_label_packout_sort/plc/main.bundle.toml --scenario out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s06_label_packout_sort/scenarios/nominal/normal.yaml --out-dir out/skill_flywheel/plc_gen_megapipeline/out/project_check/s06_local --output human`
+- `cargo test --test intent_alignment_compare -- --nocapture`
+- `cargo run --bin rust_plc -- sim-plc out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/line/plc_gen_megapipeline/plc/main.bundle.toml --scenario out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/line/plc_gen_megapipeline/scenarios/nominal/normal.yaml --out out/skill_flywheel/plc_gen_megapipeline/out/sim/megapipeline_trace_cycle2.jsonl`
+- `cargo run --bin rust_plc -- intent-doctor out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/line/plc_gen_megapipeline/plc/main.bundle.toml --trace out/skill_flywheel/plc_gen_megapipeline/out/sim/megapipeline_trace_cycle2.jsonl --intent-contract out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/line/plc_gen_megapipeline/docs/line.intent_alignment.contract.json --output human`
+- `cargo run --bin rust_plc -- project-check out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/line/plc_gen_megapipeline/plc/main.bundle.toml --scenario out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/line/plc_gen_megapipeline/scenarios/nominal/normal.yaml --out-dir out/skill_flywheel/plc_gen_megapipeline/out/project_check/line_with_intent_cycle2 --intent-contract out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/line/plc_gen_megapipeline/docs/line.intent_alignment.contract.json --intent-evidence out/skill_flywheel/plc_gen_megapipeline/out/sim/megapipeline_trace_cycle2.jsonl --output human`
 
 ## Open Follow-Up
-- Add a second-cycle nominal scenario so `intent-doctor` can evaluate cross-cycle readiness with stronger evidence.
 - Export a public `plc-gen` helper for station asset scaffolding and multi-station routing examples so future workers do not need to infer the same structure manually.
 - Add an orchestration reliability note to the flywheel public surface so agent stream disconnects are treated as experiment data instead of silent noise.

@@ -127,6 +127,12 @@ pub struct ObservedCycleWindow {
     pub aborted_cycle_end_snapshot: Option<BTreeMap<String, String>>,
 }
 
+#[derive(Debug, Clone)]
+struct ObservedCycleBoundary {
+    tick: u64,
+    snapshot: Option<BTreeMap<String, String>>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ObservedTraceParseError {
     #[error("line {line}: invalid JSON: {detail}")]
@@ -228,6 +234,13 @@ pub fn extract_observed_behavior_sequence(
     let mut previous_vars: Option<BTreeMap<String, Value>> = None;
     let mut cycle_builders = vec![ObservedCycleWindowBuilder::new(0)];
     let mut snapshots = Vec::new();
+    let mut cycle_start_boundaries = Vec::new();
+    let mut successful_cycle_end_boundaries = Vec::new();
+    let exact_transition_cycles = cycle_start_binding
+        .zip(successful_cycle_end_binding)
+        .is_some_and(|(start, end)| {
+            is_exact_transition_binding(start) && is_exact_transition_binding(end)
+        });
 
     for raw_event in raw_events {
         let tick = raw_event.tick();
@@ -259,6 +272,18 @@ pub fn extract_observed_behavior_sequence(
 
         if matches_cycle_start && !cycle_boundary_seen {
             cycle_boundary_seen = true;
+        }
+        if matches_cycle_start {
+            cycle_start_boundaries.push(ObservedCycleBoundary {
+                tick,
+                snapshot: raw_event.snapshot_vars().map(canonical_snapshot),
+            });
+        }
+        if matches_successful_cycle_end {
+            successful_cycle_end_boundaries.push(ObservedCycleBoundary {
+                tick,
+                snapshot: raw_event.snapshot_vars().map(canonical_snapshot),
+            });
         }
 
         let builder = cycle_builders
@@ -306,22 +331,34 @@ pub fn extract_observed_behavior_sequence(
         });
     }
 
-    let cycles: Vec<ObservedCycleWindow> = cycle_builders
-        .into_iter()
-        .filter(|builder| builder.seen_anything)
-        .map(ObservedCycleWindowBuilder::finish)
-        .collect();
-    let cycle_count = if !cycles.is_empty() {
-        cycles.len()
-    } else if evidence.is_empty() {
-        0
+    let last_tick = raw_events.last().map(RawObservedEvent::tick).unwrap_or(0);
+    let (cycles, cycle_count) = if exact_transition_cycles && !cycle_start_boundaries.is_empty() {
+        let cycles = build_exact_transition_cycles(
+            &cycle_start_boundaries,
+            &successful_cycle_end_boundaries,
+            last_tick,
+        );
+        let cycle_count = cycles.len();
+        (cycles, cycle_count)
     } else {
-        evidence
-            .iter()
-            .map(|entry| entry.cycle_index)
-            .max()
-            .unwrap_or(0)
-            + 1
+        let cycles: Vec<ObservedCycleWindow> = cycle_builders
+            .into_iter()
+            .filter(|builder| builder.seen_anything)
+            .map(ObservedCycleWindowBuilder::finish)
+            .collect();
+        let cycle_count = if !cycles.is_empty() {
+            cycles.len()
+        } else if evidence.is_empty() {
+            0
+        } else {
+            evidence
+                .iter()
+                .map(|entry| entry.cycle_index)
+                .max()
+                .unwrap_or(0)
+                + 1
+        };
+        (cycles, cycle_count)
     };
 
     let readiness = vec![
@@ -359,6 +396,40 @@ pub fn extract_observed_behavior_sequence(
         readiness,
         cycle_count,
     })
+}
+
+fn is_exact_transition_binding(binding: &ObservationBinding) -> bool {
+    binding.evidence.len() == 1
+        && binding.evidence[0].key == "transition"
+        && matches!(
+            binding.combination,
+            super::contract::ObservationCombination::AllOf
+        )
+}
+
+fn build_exact_transition_cycles(
+    cycle_start_boundaries: &[ObservedCycleBoundary],
+    successful_cycle_end_boundaries: &[ObservedCycleBoundary],
+    last_tick: u64,
+) -> Vec<ObservedCycleWindow> {
+    cycle_start_boundaries
+        .iter()
+        .enumerate()
+        .map(|(cycle_index, start)| {
+            let successful_end = successful_cycle_end_boundaries.get(cycle_index);
+            ObservedCycleWindow {
+                cycle_index,
+                start_tick: start.tick,
+                end_tick: successful_end.map(|end| end.tick).unwrap_or(last_tick),
+                first_observed_snapshot: start.snapshot.clone(),
+                cycle_start_snapshot: start.snapshot.clone(),
+                successful_cycle_end_tick: successful_end.map(|end| end.tick),
+                successful_cycle_end_snapshot: successful_end.and_then(|end| end.snapshot.clone()),
+                aborted_cycle_end_tick: None,
+                aborted_cycle_end_snapshot: None,
+            }
+        })
+        .collect()
 }
 
 fn build_readiness(

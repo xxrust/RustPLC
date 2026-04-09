@@ -23,6 +23,13 @@ task station_01_infeed_buffer:
         action: set motor_s01_buffer_01.cmd off
         action: retract cyl_s01_mag_pick
 
+    step cycle_count_update:
+        action: compute s01_cycle_counter = s01_cycle_counter + 1.0
+
+    step cycle_gate:
+        wait: s01_cycle_counter >= 2.0
+        timeout: 20ms -> goto station_01_infeed_buffer.entry_window
+
     on_complete: goto done.halt
 
 task station_02_cell_loading_alignment:
@@ -48,6 +55,13 @@ task station_02_cell_loading_alignment:
         effect: transfer from holder_s02 to s02_transfer_out
         action: set motor_s02_orient_01.cmd off
         action: retract cyl_s02_cell_clamp
+
+    step cycle_count_update:
+        action: compute s02_cycle_counter = s02_cycle_counter + 1.0
+
+    step cycle_gate:
+        wait: s02_cycle_counter >= 2.0
+        timeout: 20ms -> goto station_02_cell_loading_alignment.entry_window
 
     on_complete: goto done.halt
 
@@ -75,6 +89,13 @@ task station_03_busbar_tab_prep:
         action: set motor_s03_feed_01.cmd off
         action: retract cyl_s03_tab_clamp
 
+    step cycle_count_update:
+        action: compute s03_cycle_counter = s03_cycle_counter + 1.0
+
+    step cycle_gate:
+        wait: s03_cycle_counter >= 2.0
+        timeout: 20ms -> goto station_03_busbar_tab_prep.entry_window
+
     on_complete: goto done.halt
 
 task station_04_laser_weld_cooling:
@@ -100,6 +121,13 @@ task station_04_laser_weld_cooling:
         effect: transfer from holder_s04 to s04_cool_out
         action: set motor_s04_cool_fan_01.cmd off
         action: retract cyl_s04_weld_clamp
+
+    step cycle_count_update:
+        action: compute s04_cycle_counter = s04_cycle_counter + 1.0
+
+    step cycle_gate:
+        wait: s04_cycle_counter >= 2.0
+        timeout: 20ms -> goto station_04_laser_weld_cooling.entry_window
 
     on_complete: goto done.halt
 
@@ -127,6 +155,13 @@ task station_05_leak_hipot_vision:
         action: set motor_s05_index_01.cmd off
         action: retract cyl_s05_seal_clamp
 
+    step cycle_count_update:
+        action: compute s05_cycle_counter = s05_cycle_counter + 1.0
+
+    step cycle_gate:
+        wait: s05_cycle_counter >= 2.0
+        timeout: 20ms -> goto station_05_leak_hipot_vision.entry_window
+
     on_complete: goto done.halt
 
 task station_06_label_packout_sort:
@@ -153,5 +188,28 @@ task station_06_label_packout_sort:
         effect: finish workpiece at line_packout as packed
         action: set motor_s06_pack_01.cmd off
         action: retract cyl_s06_box_pusher
+
+    step cycle_count_update:
+        action: compute s06_cycle_counter = s06_cycle_counter + 1.0
+
+    step cycle_gate:
+        wait: s06_cycle_counter >= 2.0
+        timeout: 20ms -> goto station_06_label_packout_sort.entry_window
+
+    on_complete: goto done.halt
+
+task reserve_loader:
+    step wait_start:
+        wait: start_button == true
+        timeout: 1000ms -> goto line_fault.line_start_timeout
+
+    step release_window:
+        delay: 40ms
+
+    step pick_reserve:
+        effect: acquire holder line_loader from line_infeed_reserve
+
+    step release_reserve:
+        effect: transfer from line_loader to line_infeed
 
     on_complete: goto done.halt

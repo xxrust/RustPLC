@@ -155,6 +155,103 @@ fn trace_cycle_spec() -> rust_plc::intent_alignment::ExpectedBehaviorSpec {
     compile_expected_behavior_spec(&contract).expect("contract should compile")
 }
 
+fn overlapping_trace_cycle_spec() -> rust_plc::intent_alignment::ExpectedBehaviorSpec {
+    let json = r#"
+{
+  "contract_version": "phase-2.v1",
+  "source_ref": {
+    "kind": "architecture_doc",
+    "path": "docs/architecture/intent_alignment_verification.md",
+    "description": "doc"
+  },
+  "source_digest": {
+    "algorithm": "sha256",
+    "value": "c1b32a71b9e47142e5b9ed142384e6f68568f635e71bdee7d35e661b7cb3d61e"
+  },
+  "metadata": {
+    "contract_id": "overlapping-trace-cycle-boundary",
+    "title": "Overlapping trace cycle boundary",
+    "business_owner": "assembly-cell-owner",
+    "authoritative_intent_source": {
+      "kind": "architecture_doc",
+      "path": "docs/architecture/intent_alignment_verification.md",
+      "description": "doc"
+    },
+    "review_basis": [
+      {
+        "label": "Architecture review",
+        "source": {
+          "kind": "architecture_doc",
+          "path": "docs/architecture/intent_alignment_verification.md",
+          "description": "doc"
+        }
+      }
+    ]
+  },
+  "contract_core": {
+    "expected_milestones": [
+      {
+        "milestone_id": "cycle_started",
+        "business_milestone": { "label": "Cycle started", "description": "start" }
+      },
+      {
+        "milestone_id": "midpoint",
+        "business_milestone": { "label": "Midpoint", "description": "mid" }
+      },
+      {
+        "milestone_id": "cycle_restartable",
+        "business_milestone": { "label": "Cycle restartable", "description": "done" }
+      }
+    ],
+    "required_edges": [
+      { "predecessor": "cycle_started", "successor": "midpoint" },
+      { "predecessor": "midpoint", "successor": "cycle_restartable" }
+    ],
+    "postconditions": [],
+    "cycle_semantics": {
+      "cycle_start_milestone": "cycle_started",
+      "cycle_complete_milestone": "cycle_restartable",
+      "restart_semantics": {
+        "restartable_milestone": "cycle_restartable",
+        "next_cycle_start_milestone": "cycle_started",
+        "required_postconditions": []
+      }
+    }
+  },
+  "observation_bindings": [
+    {
+      "binding_id": "start",
+      "subject": { "kind": "milestone", "milestone_id": "cycle_started" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=0;from=0;to=1;reason=action" }
+      ]
+    },
+    {
+      "binding_id": "mid",
+      "subject": { "kind": "milestone", "milestone_id": "midpoint" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=0;from=1;to=2;reason=action" }
+      ]
+    },
+    {
+      "binding_id": "done",
+      "subject": { "kind": "milestone", "milestone_id": "cycle_restartable" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=0;from=2;to=3;reason=action" }
+      ]
+    }
+  ]
+}
+"#;
+
+    let contract =
+        rust_plc::intent_alignment::parse_intent_contract_str(json).expect("contract should parse");
+    compile_expected_behavior_spec(&contract).expect("contract should compile")
+}
+
 #[test]
 fn parses_openplc_variable_snapshot_trace_jsonl() {
     let raw = std::fs::read_to_string(workspace_path(
@@ -271,4 +368,28 @@ fn extractor_does_not_create_trailing_partial_cycle_from_post_complete_trace_noi
     assert_eq!(sequence.cycle_count, 1);
     assert_eq!(sequence.cycles.len(), 1);
     assert_eq!(sequence.cycles[0].successful_cycle_end_tick, Some(1));
+}
+
+#[test]
+fn extractor_tracks_overlapping_transition_cycles_by_exact_anchor_order() {
+    let spec = overlapping_trace_cycle_spec();
+    let raw = r#"
+{"tick":0,"task":0,"from_step":0,"to_step":1,"reason":"action"}
+{"tick":1,"task":0,"from_step":1,"to_step":2,"reason":"action"}
+{"tick":2,"task":0,"from_step":0,"to_step":1,"reason":"action"}
+{"tick":3,"task":0,"from_step":2,"to_step":3,"reason":"action"}
+{"tick":4,"task":0,"from_step":1,"to_step":2,"reason":"action"}
+{"tick":5,"task":0,"from_step":2,"to_step":3,"reason":"action"}
+"#;
+
+    let events = parse_observed_trace_jsonl(raw).expect("trace should parse");
+    let sequence = extract_observed_behavior_sequence(&spec, &events)
+        .expect("overlapping exact-transition cycles should extract");
+
+    assert_eq!(sequence.cycle_count, 2);
+    assert_eq!(sequence.cycles.len(), 2);
+    assert_eq!(sequence.cycles[0].start_tick, 0);
+    assert_eq!(sequence.cycles[0].successful_cycle_end_tick, Some(3));
+    assert_eq!(sequence.cycles[1].start_tick, 2);
+    assert_eq!(sequence.cycles[1].successful_cycle_end_tick, Some(5));
 }

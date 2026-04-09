@@ -1,11 +1,19 @@
 tick_ms: 20
-duration_ms: 1600
+duration_ms: 2600
 inputs:
   - at_ms: 0
     set:
       digital_inputs:
         0: true
   - at_ms: 100
+    set:
+      digital_inputs:
+        0: false
+  - at_ms: 200
+    set:
+      digital_inputs:
+        0: true
+  - at_ms: 280
     set:
       digital_inputs:
         0: false

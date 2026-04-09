@@ -32,6 +32,13 @@ struct MatchedOccurrence {
     evidence_indices: Vec<usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RawMatchedOccurrence {
+    milestone_id: String,
+    tick: u64,
+    evidence_indices: Vec<usize>,
+}
+
 pub fn compare_trace_jsonl(
     spec: &ExpectedBehaviorSpec,
     trace_jsonl: &str,
@@ -71,6 +78,7 @@ fn compare_intent_alignment_with_identity(
         return build_report(
             spec,
             observed,
+            observed.cycle_count.max(1),
             evidence_identity,
             IntentAlignmentVerdict::Blocked,
             None,
@@ -98,7 +106,7 @@ fn compare_intent_alignment_with_identity(
         .collect();
     let mut mismatches = Vec::new();
 
-    let cycle_count = observed.cycle_count.max(1);
+    let cycle_count = effective_cycle_count(observed, &matches).max(1);
     for cycle_index in 0..cycle_count {
         let cycle_matches: Vec<&MatchedOccurrence> = matches
             .iter()
@@ -226,6 +234,7 @@ fn compare_intent_alignment_with_identity(
     build_report(
         spec,
         observed,
+        cycle_count,
         evidence_identity,
         verdict,
         mismatches.first().cloned(),
@@ -252,14 +261,16 @@ fn evaluate_postconditions(
         for predicate in &spec.postcondition_predicates {
             let satisfied = match &predicate.predicate {
                 super::expected_behavior::PredicateExpr::AllOf(facts) => {
-                    groups
-                        .iter()
-                        .filter(|((group_cycle_index, _), _)| *group_cycle_index == cycle_index)
-                        .any(|(_, indices)| {
-                            facts
-                                .iter()
-                                .all(|fact| group_has_fact(observed, indices, fact))
-                        })
+                    exact_transition_fact_cycle_indices(observed, facts)
+                        .is_some_and(|cycles| cycles.contains(&cycle_index))
+                        || groups
+                            .iter()
+                            .filter(|((group_cycle_index, _), _)| *group_cycle_index == cycle_index)
+                            .any(|(_, indices)| {
+                                facts
+                                    .iter()
+                                    .all(|fact| group_has_fact(observed, indices, fact))
+                            })
                         || cycle_window.is_some_and(|window| {
                             snapshot_has_all_facts(
                                 window.successful_cycle_end_snapshot.as_ref(),
@@ -268,14 +279,16 @@ fn evaluate_postconditions(
                         })
                 }
                 super::expected_behavior::PredicateExpr::AnyOf(facts) => {
-                    groups
-                        .iter()
-                        .filter(|((group_cycle_index, _), _)| *group_cycle_index == cycle_index)
-                        .any(|(_, indices)| {
-                            facts
-                                .iter()
-                                .any(|fact| group_has_fact(observed, indices, fact))
-                        })
+                    exact_transition_fact_cycle_indices(observed, facts)
+                        .is_some_and(|cycles| cycles.contains(&cycle_index))
+                        || groups
+                            .iter()
+                            .filter(|((group_cycle_index, _), _)| *group_cycle_index == cycle_index)
+                            .any(|(_, indices)| {
+                                facts
+                                    .iter()
+                                    .any(|fact| group_has_fact(observed, indices, fact))
+                            })
                         || cycle_window.is_some_and(|window| {
                             snapshot_has_any_fact(
                                 window.successful_cycle_end_snapshot.as_ref(),
@@ -284,20 +297,24 @@ fn evaluate_postconditions(
                         })
                 }
                 super::expected_behavior::PredicateExpr::OrderedAllOf(facts) => {
-                    let cycle_groups: Vec<(&(usize, u64), &Vec<usize>)> = groups
-                        .iter()
-                        .filter(|((group_cycle_index, _), _)| *group_cycle_index == cycle_index)
-                        .collect();
-                    let mut next_fact = 0usize;
-                    for (_, indices) in cycle_groups {
-                        if next_fact >= facts.len() {
-                            break;
+                    exact_transition_fact_cycle_indices(observed, facts)
+                        .is_some_and(|cycles| cycles.contains(&cycle_index))
+                        || {
+                            let cycle_groups: Vec<(&(usize, u64), &Vec<usize>)> = groups
+                                .iter()
+                                .filter(|((group_cycle_index, _), _)| *group_cycle_index == cycle_index)
+                                .collect();
+                            let mut next_fact = 0usize;
+                            for (_, indices) in cycle_groups {
+                                if next_fact >= facts.len() {
+                                    break;
+                                }
+                                if group_has_fact(observed, indices, &facts[next_fact]) {
+                                    next_fact += 1;
+                                }
+                            }
+                            next_fact == facts.len()
                         }
-                        if group_has_fact(observed, indices, &facts[next_fact]) {
-                            next_fact += 1;
-                        }
-                    }
-                    next_fact == facts.len()
                 }
             };
 
@@ -359,12 +376,33 @@ fn should_flag_unexpected_entry(entry: &ObservedEvidenceEntry) -> bool {
     !matches!(entry.source, ObservedEventSourceKind::TraceTransition)
 }
 
+fn exact_transition_fact_cycle_indices(
+    observed: &ObservedBehaviorSequence,
+    facts: &[super::expected_behavior::ObservedFact],
+) -> Option<BTreeSet<usize>> {
+    if facts.len() != 1 || facts[0].key != "transition" {
+        return None;
+    }
+    Some(
+        observed
+            .evidence
+            .iter()
+            .filter(|entry| entry.key == "transition" && entry.expected == facts[0].expected)
+            .enumerate()
+            .map(|(cycle_index, _)| cycle_index)
+            .collect(),
+    )
+}
+
 fn detect_cross_cycle_drift(
     spec: &ExpectedBehaviorSpec,
     observed: &ObservedBehaviorSequence,
     single_cycle_mismatches: &[IntentMismatch],
 ) -> Vec<IntentMismatch> {
     if observed.cycles.len() < 2 {
+        return Vec::new();
+    }
+    if !handoff_requires_snapshot_evidence(spec) {
         return Vec::new();
     }
 
@@ -378,16 +416,31 @@ fn detect_cross_cycle_drift(
             continue;
         }
 
+        let terminal_snapshot_facts = snapshot_evaluable_facts(
+            &spec
+                .cycle_semantics
+                .handoff_invariant
+                .required_terminal_facts,
+        );
+        let next_start_snapshot_facts = snapshot_evaluable_facts(
+            &spec
+                .cycle_semantics
+                .handoff_invariant
+                .required_next_cycle_start_facts,
+        );
+        let handoff_snapshot_evaluable =
+            !terminal_snapshot_facts.is_empty() || !next_start_snapshot_facts.is_empty();
+        if !handoff_snapshot_evaluable {
+            continue;
+        }
+
         let missing_terminal = previous
             .successful_cycle_end_snapshot
             .as_ref()
             .map(|snapshot| {
                 missing_snapshot_facts(
                     snapshot,
-                    &spec
-                        .cycle_semantics
-                        .handoff_invariant
-                        .required_terminal_facts,
+                    &terminal_snapshot_facts,
                 )
             })
             .unwrap_or_default();
@@ -397,10 +450,7 @@ fn detect_cross_cycle_drift(
             .map(|snapshot| {
                 missing_snapshot_facts(
                     snapshot,
-                    &spec
-                        .cycle_semantics
-                        .handoff_invariant
-                        .required_next_cycle_start_facts,
+                    &next_start_snapshot_facts,
                 )
             })
             .unwrap_or_default();
@@ -464,6 +514,20 @@ fn detect_cross_cycle_drift(
     mismatches
 }
 
+fn handoff_requires_snapshot_evidence(spec: &ExpectedBehaviorSpec) -> bool {
+    spec.cycle_semantics
+        .handoff_invariant
+        .required_terminal_facts
+        .iter()
+        .chain(
+            spec.cycle_semantics
+                .handoff_invariant
+                .required_next_cycle_start_facts
+                .iter(),
+        )
+        .any(|fact| fact.key != "transition")
+}
+
 fn cycle_has_non_cross_cycle_mismatch(mismatches: &[IntentMismatch], cycle_index: usize) -> bool {
     mismatches.iter().any(|mismatch| {
         mismatch.cycle_index == Some(cycle_index)
@@ -482,9 +546,19 @@ fn missing_snapshot_facts(
         .collect()
 }
 
+fn snapshot_evaluable_facts(
+    facts: &[super::expected_behavior::ObservedFact],
+) -> Vec<super::expected_behavior::ObservedFact> {
+    facts.iter()
+        .filter(|fact| fact.key.starts_with("vars."))
+        .cloned()
+        .collect()
+}
+
 fn build_report(
     spec: &ExpectedBehaviorSpec,
     observed: &ObservedBehaviorSequence,
+    effective_cycle_count: usize,
     evidence_identity: IntentAlignmentEvidenceIdentity,
     verdict: IntentAlignmentVerdict,
     primary_mismatch: Option<IntentMismatch>,
@@ -500,7 +574,7 @@ fn build_report(
         },
         evidence_identity,
         comparator_version: INTENT_ALIGNMENT_COMPARATOR_VERSION.to_string(),
-        cycle_window: cycle_window(observed),
+        cycle_window: cycle_window(observed, effective_cycle_count),
         verdict,
         primary_mismatch,
         mismatches,
@@ -510,18 +584,13 @@ fn build_report(
     }
 }
 
-fn cycle_window(observed: &ObservedBehaviorSequence) -> IntentAlignmentCycleWindow {
-    let cycle_count = observed.cycle_count;
-    let first_cycle_index = observed
-        .cycles
-        .first()
-        .map(|cycle| cycle.cycle_index)
-        .unwrap_or(0);
-    let last_cycle_index = observed
-        .cycles
-        .last()
-        .map(|cycle| cycle.cycle_index)
-        .unwrap_or_else(|| cycle_count.saturating_sub(1));
+fn cycle_window(
+    observed: &ObservedBehaviorSequence,
+    effective_cycle_count: usize,
+) -> IntentAlignmentCycleWindow {
+    let cycle_count = effective_cycle_count.max(observed.cycle_count);
+    let first_cycle_index = if cycle_count > 0 { 0 } else { 0 };
+    let last_cycle_index = cycle_count.saturating_sub(1);
     IntentAlignmentCycleWindow {
         first_cycle_index,
         last_cycle_index,
@@ -533,8 +602,10 @@ fn matched_occurrences(
     spec: &ExpectedBehaviorSpec,
     observed: &ObservedBehaviorSequence,
 ) -> Vec<MatchedOccurrence> {
+    let groups_by_tick = grouped_entries_by_tick(observed);
     let groups = grouped_entries(observed);
-    let mut matches = Vec::new();
+    let milestone_rank = milestone_rank(spec);
+    let mut raw_matches = Vec::new();
 
     for binding in &spec.observation_bindings {
         let ObservationSubject::Milestone { milestone_id } = &binding.subject else {
@@ -549,9 +620,8 @@ fn matched_occurrences(
                 }
                 used_cycle_snapshots = true;
                 if snapshot_matches_binding(cycle.cycle_start_snapshot.as_ref(), binding) {
-                    matches.push(MatchedOccurrence {
+                    raw_matches.push(RawMatchedOccurrence {
                         milestone_id: milestone_id.clone(),
-                        cycle_index: cycle.cycle_index,
                         tick: cycle.start_tick,
                         evidence_indices: groups
                             .get(&(cycle.cycle_index, cycle.start_tick))
@@ -576,9 +646,8 @@ fn matched_occurrences(
                 }
                 used_cycle_snapshots = true;
                 if snapshot_matches_binding(cycle.successful_cycle_end_snapshot.as_ref(), binding) {
-                    matches.push(MatchedOccurrence {
+                    raw_matches.push(RawMatchedOccurrence {
                         milestone_id: milestone_id.clone(),
-                        cycle_index: cycle.cycle_index,
                         tick,
                         evidence_indices: groups
                             .get(&(cycle.cycle_index, tick))
@@ -594,15 +663,14 @@ fn matched_occurrences(
 
         match binding.combination {
             ObservationCombination::AllOf => {
-                for ((cycle_index, tick), indices) in &groups {
+                for (tick, indices) in &groups_by_tick {
                     if binding
                         .evidence
                         .iter()
                         .all(|expected| group_has_evidence(observed, indices, expected))
                     {
-                        matches.push(MatchedOccurrence {
+                        raw_matches.push(RawMatchedOccurrence {
                             milestone_id: milestone_id.clone(),
-                            cycle_index: *cycle_index,
                             tick: *tick,
                             evidence_indices: indices.clone(),
                         });
@@ -610,15 +678,14 @@ fn matched_occurrences(
                 }
             }
             ObservationCombination::AnyOf => {
-                for ((cycle_index, tick), indices) in &groups {
+                for (tick, indices) in &groups_by_tick {
                     if binding
                         .evidence
                         .iter()
                         .any(|expected| group_has_evidence(observed, indices, expected))
                     {
-                        matches.push(MatchedOccurrence {
+                        raw_matches.push(RawMatchedOccurrence {
                             milestone_id: milestone_id.clone(),
-                            cycle_index: *cycle_index,
                             tick: *tick,
                             evidence_indices: indices.clone(),
                         });
@@ -647,9 +714,8 @@ fn matched_occurrences(
                         }
                     }
                     if next_expected == binding.evidence.len() {
-                        matches.push(MatchedOccurrence {
+                        raw_matches.push(RawMatchedOccurrence {
                             milestone_id: milestone_id.clone(),
-                            cycle_index,
                             tick: last_tick.unwrap_or(0),
                             evidence_indices: matched_indices,
                         });
@@ -658,6 +724,42 @@ fn matched_occurrences(
             }
         }
     }
+
+    raw_matches.sort_by(|left, right| {
+        left.tick
+            .cmp(&right.tick)
+            .then_with(|| {
+                milestone_rank
+                    .get(&left.milestone_id)
+                    .copied()
+                    .unwrap_or(usize::MAX)
+                    .cmp(
+                        &milestone_rank
+                            .get(&right.milestone_id)
+                            .copied()
+                            .unwrap_or(usize::MAX),
+                    )
+            })
+            .then_with(|| left.milestone_id.cmp(&right.milestone_id))
+    });
+
+    let mut next_cycle_by_milestone = BTreeMap::<String, usize>::new();
+    let mut matches = raw_matches
+        .into_iter()
+        .map(|matched| {
+            let cycle_index = next_cycle_by_milestone
+                .entry(matched.milestone_id.clone())
+                .or_insert(0);
+            let current_cycle = *cycle_index;
+            *cycle_index += 1;
+            MatchedOccurrence {
+                milestone_id: matched.milestone_id,
+                cycle_index: current_cycle,
+                tick: matched.tick,
+                evidence_indices: matched.evidence_indices,
+            }
+        })
+        .collect::<Vec<_>>();
 
     matches.sort_by(|left, right| {
         left.cycle_index
@@ -668,6 +770,27 @@ fn matched_occurrences(
     matches
 }
 
+fn effective_cycle_count(
+    observed: &ObservedBehaviorSequence,
+    matches: &[MatchedOccurrence],
+) -> usize {
+    observed.cycle_count.max(
+        matches
+            .iter()
+            .map(|matched| matched.cycle_index + 1)
+            .max()
+            .unwrap_or(0),
+    )
+}
+
+fn milestone_rank(spec: &ExpectedBehaviorSpec) -> BTreeMap<String, usize> {
+    spec.expected_milestones
+        .iter()
+        .enumerate()
+        .map(|(idx, milestone)| (milestone.milestone_id.clone(), idx))
+        .collect()
+}
+
 fn grouped_entries(observed: &ObservedBehaviorSequence) -> BTreeMap<(usize, u64), Vec<usize>> {
     let mut groups = BTreeMap::new();
     for (index, entry) in observed.evidence.iter().enumerate() {
@@ -675,6 +798,14 @@ fn grouped_entries(observed: &ObservedBehaviorSequence) -> BTreeMap<(usize, u64)
             .entry((entry.cycle_index, entry.tick))
             .or_insert_with(Vec::new)
             .push(index);
+    }
+    groups
+}
+
+fn grouped_entries_by_tick(observed: &ObservedBehaviorSequence) -> BTreeMap<u64, Vec<usize>> {
+    let mut groups = BTreeMap::new();
+    for (index, entry) in observed.evidence.iter().enumerate() {
+        groups.entry(entry.tick).or_insert_with(Vec::new).push(index);
     }
     groups
 }

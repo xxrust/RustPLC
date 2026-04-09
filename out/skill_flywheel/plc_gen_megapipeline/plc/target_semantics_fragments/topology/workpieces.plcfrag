@@ -1,14 +1,16 @@
 workpiece battery_module_pack: workpiece_type {
     normal_terminal_states: [packed]
     abnormal_terminal_states: [rejected]
-    ingress_sites: [line_infeed]
+    ingress_sites: [line_infeed, line_infeed_reserve]
     normal_egress_sites: [line_packout]
     abnormal_egress_sites: [line_reject]
 }
 
 location line_infeed: workpiece_location { capacity: 1 }
+location line_infeed_reserve: workpiece_location { capacity: 1 }
 location line_packout: workpiece_location { capacity: 1 }
 location line_reject: workpiece_location { capacity: 1 }
+holder line_loader: workpiece_holder { capacity: 1 }
 
 location s01_mag_pick: workpiece_location { capacity: 1 }
 location s01_tray_scan: workpiece_location { capacity: 1 }

@@ -520,6 +520,18 @@ fn binding_occurrences(
     let Some(observed) = observed else {
         return Vec::new();
     };
+    if let Some(transition) = exact_transition_binding(binding) {
+        return observed
+            .evidence
+            .iter()
+            .filter(|entry| entry.key == "transition" && entry.expected == transition)
+            .enumerate()
+            .map(|(cycle_index, entry)| BindingOccurrence {
+                cycle_index,
+                tick: entry.tick,
+            })
+            .collect();
+    }
 
     let groups = grouped_entries(observed);
     match binding.combination {
@@ -1367,9 +1379,10 @@ mod tests {
             .iter()
             .find(|binding| binding.binding_id == "cycle_started_binding")
             .expect("cycle start binding");
-        assert_eq!(start.status, BindingStability::Repeated);
+        assert_eq!(start.status, BindingStability::Stable);
 
         let cycle = report.cycle_diagnosis.expect("cycle diagnosis");
+        assert_eq!(cycle.observed_cycle_count, 3);
         assert!(cycle.trailing_partial_cycle);
     }
 }
