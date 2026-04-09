@@ -62,6 +62,22 @@ Use `out/skill_flywheel/plc_gen_wafer_loader/plc/target_semantics_fragments` as 
 - `manual/`
 - `operator_interface/`
 
+But do not treat that fragment tree as the whole authored architecture.
+
+For real delivery, first classify the asset as:
+- `module`
+- `station`
+- `line`
+
+Then ensure that asset owns its own:
+- `*.system.md`
+- `*.architecture.md`
+- `*.intent_alignment.contract.json`
+- `*.verification.md`
+
+The structured fragment tree is the compile surface.
+The delivery asset and its document set are the architecture surface.
+
 ## Scaffold Rule
 
 For a new multi-domain or long-lived station, start with:

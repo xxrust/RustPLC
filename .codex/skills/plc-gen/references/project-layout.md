@@ -1,128 +1,190 @@
 # plc-gen Project Layout
 
-## Complex project layout: target-semantics fragments
+## Role
 
-For a multi-mode, multi-task, multi-domain project, prefer organizing source files by semantic boundary rather than pushing everything into one `main.plc`.
+This reference explains how `plc-gen` should choose a project layout for real delivery work.
 
-Recommended directories:
+The key rule is:
+
+- do not choose a layout only by file count
+- choose it by delivery layer and ownership boundary
+
+## Delivery Layers Come First
+
+RustPLC projects may be delivered as:
+
+- `module`
+- `station`
+- `line`
+
+These are not just documentation labels.
+They are the primary authoring boundary.
+
+Selection rule:
+
+- if the user is delivering one reusable mechanism or unit, start from `module`
+- if the user is delivering one independently testable process cell, start from `station`
+- if the user is delivering multi-station integration, start from `line`
+
+For the frozen architecture source behind this rule, read:
+
+- `docs/architecture/delivery_layer_framework.md`
+
+## Current Best Practical Shape
+
+Today, the best practical shape is a two-layer structure:
+
+1. `authoring tree`
+2. `compile surface`
+
+The authoring tree follows delivery assets:
+
+- `module`
+- `station`
+- `line`
+
+The compile surface remains the structured target-semantics fragment layout used by the compiler:
+
 - `topology/`
 - `constraints/`
 - `architecture/`
 - `auto/`
+- `faults/`
 - `maintenance/`
 - `manual/`
 - `operator_interface/`
+- optional `io/`, `optimization/`, `step/`
+
+Do not confuse the compile surface with the whole project architecture.
+
+## Mandatory Document Set Per Delivery Asset
+
+Each `module`, `station`, or `line` asset must carry:
+
+- `*.system.md`
+- `*.architecture.md`
+- `*.intent_alignment.contract.json`
+- `*.verification.md`
+
+If these are missing, the delivery asset is structurally incomplete even if the PLC compiles.
+
+## Recommended Repository Shape
+
+```text
+plc/
+  deliveries/
+    module/
+      pick_head/
+        docs/
+          module.system.md
+          module.architecture.md
+          module.intent_alignment.contract.json
+          module.verification.md
+        plc/
+          main.bundle.toml
+          target_semantics_fragments/
+        scenarios/
+          nominal/
+    station/
+      load_station/
+        docs/
+          station.system.md
+          station.architecture.md
+          station.intent_alignment.contract.json
+          station.verification.md
+        plc/
+          main.bundle.toml
+          target_semantics_fragments/
+        scenarios/
+          nominal/
+    line/
+      wafer_line/
+        docs/
+          line.system.md
+          line.architecture.md
+          line.intent_alignment.contract.json
+          line.verification.md
+        plc/
+          main.bundle.toml
+          target_semantics_fragments/
+        scenarios/
+          nominal/
+```
+
+## Structured Fragment Layout Still Matters
+
+For the compileable source set, keep the existing structured fragment layout.
 
 Concrete reference:
+
 - `out/skill_flywheel/plc_gen_wafer_loader/plc/target_semantics_fragments`
 
-Why this layout matters:
-- It splits by semantic ownership rather than by writing order.
-- It is easier to implement in parallel.
-- It is easier to review and regression-test.
-- It prevents the generated project from collapsing into a spaghetti PLC early.
+Why this still matters:
 
-Scaffold hook:
-- For new complex projects, prefer `rust_plc new <project_dir> --layout structured-fragments`.
-- That command creates `plc/main.target_semantics.bundle.toml` plus a starter `plc/target_semantics_fragments/` tree so the skill can fill semantics instead of inventing the filesystem shape ad hoc.
-- Do not treat that bundle entry as the entire authored source set; reference-quality layouts also preserve sidecar domains like `io/`, `manual/`, `operator_interface/`, `optimization/`, `step/`, and dedicated maintenance/workpiece files even when they are not part of the main compileable bundle.
+- it splits by semantic ownership rather than writing order
+- it remains easy to compile, review, and test
+- it prevents early collapse into one spaghetti PLC
 
-Important exception for workpiece flow:
-- if the main automatic flow picks, transfers, or finishes a physical part, `topology/workpieces.plcfrag` belongs to the compileable bundle rather than remaining a comment-only sidecar
-- the sidecar-vs-bundle split is only valid when the workpiece fragment is authored context that the active compiled tasks do not yet consume
+## Naming Rule For Flattened Fragments
 
-本文告诉 skill：对一个 RustPLC 项目，先让用户看哪些文件，后看哪些文件。
+When flattening delivery assets into one compile surface, preserve ownership in file names.
 
-## scaffold 默认布局
+Examples:
 
-对 scaffold 项目，优先让用户关注这些文件：
+- `topology/module_pick_head_devices.plcfrag`
+- `topology/station_load_devices.plcfrag`
+- `topology/line_layout.plcfrag`
+- `auto/station_load_cycle.plcfrag`
+- `faults/module_pick_head_faults.plcfrag`
 
-- `plc/main.system.md`
-  已确认的 system contract，决定 task、blocking、fault 与资源边界
-- `plc/main.plc`
-  scaffold 默认的 DSL source entry
-- `scenarios/nominal/normal.yaml`
-  scaffold 已创建好的 nominal scenario
-- `rustplc.project.toml`
-  项目 manifest 与默认入口约定
-- `config/io_map.toml`
-  板级 I/O 映射
-- `config/retain.toml`
-  retain / persistence 基线
+This keeps lower-layer ownership visible even when the compiler sees a flat source entry.
 
-## DSL source set 视角
+## Scaffold Guidance
 
-RustPLC DSL 交付关注的是 source set，source entry 由项目布局决定。
+For new complex projects, `rust_plc new <project_dir> --layout structured-fragments` is still the right compile-surface starting point.
 
-常见 source set 形态有两种：
+But the skill should not stop there.
 
-### 单文件 source set
+After scaffold:
 
-- 一个 `.plc` 文件承载 `[topology]`、`[constraints]`、`[tasks]`
-- 在 scaffold 默认布局里，这个入口通常是 `plc/main.plc`
+1. classify the delivery asset as `module`, `station`, or `line`
+2. create the layer-specific document set
+3. create the layer-specific source entry and scenarios
+4. only then fill the structured fragments
 
-### 多文件 source set
+## Independent Validation Requirement
 
-- 一个 `.bundle.toml` 作为 DSL source entry
-- `topology`、`constraints`、`tasks` 分别落在不同 fragments
-- 编译、验证和 scenario 工具链统一从 bundle entry 进入
+Each delivery asset should be independently runnable and checkable.
 
-## 多文件布局关注点
+That means each asset should own:
 
-如果项目采用 `.bundle.toml` + fragments，优先让用户关注：
+- its own source entry
+- its own scenario set
+- its own intent contract
+- its own validation command path
 
-- `<name>.bundle.toml`
-  bundle source entry
-- `fragments/topology.plcfrag` 或等价 topology fragment
-- `fragments/constraints.plcfrag` 或等价 constraints fragment
-- `fragments/tasks.plcfrag` 或等价 tasks fragment
-- 配套 scenario 与项目级验证命令
+Do not rely on a line-level run to prove a module or station is correct.
 
-## 可告知用户存在，但不应优先手改的目录
+## Special Rule For Workpiece Flow
 
-- `out/ir/`
-- `out/sim/`
-- `out/gate/`
-- `out/project_check/`
-- `out/codegen/`
-- `out/rp2040/`
-- `out/release/`
+If the delivered asset moves a real part, first-class workpiece semantics are mandatory at that layer.
 
-这些都是生成产物目录，不是第一批手改目标。
+Examples:
 
-## 正确的编辑顺序
+- module: only if the module itself owns a real acquire/transfer/finish boundary
+- station: usually yes for station ingress/process/egress
+- line: yes for inter-station handoff and route closure
 
-对 scaffold 默认布局，优先顺序固定为：
+Do not leave workpiece semantics only at line level when station-level logic truly consumes and hands off parts.
 
-1. `plc/main.system.md`
-2. DSL source entry
-3. `scenarios/nominal/normal.yaml`
-4. 验证命令
-5. codegen / build / release
+## What To Show The User First
 
-对 bundle 布局，优先顺序固定为：
+For a delivery-asset-oriented project, show the user in this order:
 
-1. system contract 或等价需求源
-2. `.bundle.toml`
-3. `topology` / `constraints` / `tasks` fragments
-4. scenario
-5. 验证命令
-6. codegen / build / release
+1. the layer-specific `*.system.md`
+2. the layer-specific `*.architecture.md`
+3. the layer-specific source entry
+4. the layer-specific nominal scenario
+5. the layer-specific intent contract
 
-## VS Code 与附带文件
-
-scaffold 还会生成这些辅助文件：
-- `.vscode/*`
-- `.github/workflows/no_board_gate.yml`
-- `docs/project-layout.md`
-- `README.md`
-
-这些文件用于 Day-1 启动与项目导航，不是主语义源。如果用户问“先改哪里”，先回答 system contract、DSL source entry 与 scenario。
-
-## 运行方式提醒
-
-这个 scaffold 不是 Cargo 项目。
-
-因此：
-- 如果用户使用已安装的 `rust_plc`，可以进入 scaffold 目录继续工作
-- 如果用户使用 `cargo run --release --bin rust_plc -- ...`，就必须留在 RustPLC 源码仓根目录，对 scaffold 使用路径参数
+Artifact directories such as `out/` remain generated outputs, not the first files to hand-edit.
