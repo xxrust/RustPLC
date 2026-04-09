@@ -1,0 +1,2 @@
+# Station ownership is preserved in file naming even though the compile surface is flattened.
+# Future refinements should add explicit resource claims for shared conveyors, welding energy, and inspection fixtures.

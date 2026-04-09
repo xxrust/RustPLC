@@ -1,0 +1,11 @@
+{
+  "RustPLC: Bundle Fragment": {
+    "scope": "ini",
+    "prefix": "plcfrag",
+    "body": [
+      "# Semantic fragment placeholder",
+      "# Add topology, constraints, or task declarations here"
+    ],
+    "description": "Insert a semantic fragment placeholder"
+  }
+}

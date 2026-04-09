@@ -1,0 +1,4 @@
+device plc_main: plc {
+    purpose: "Battery module pack line controller"
+    model_ref: openplc_softplc
+}

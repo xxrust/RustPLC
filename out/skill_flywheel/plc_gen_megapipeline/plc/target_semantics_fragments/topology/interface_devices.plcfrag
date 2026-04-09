@@ -1,0 +1,15 @@
+device start_button: sensor {
+    purpose: "Line start request"
+    subtype: "push_button"
+    debounce: 20ms
+}
+
+device line_reset: sensor {
+    purpose: "Line reset request"
+    subtype: "push_button"
+    debounce: 20ms
+}
+
+device estop_ok: sensor {
+    purpose: "Safety chain healthy signal"
+}

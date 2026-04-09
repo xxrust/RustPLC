@@ -1,0 +1,154 @@
+{
+  "contract_version": "phase-2.v1",
+  "source_ref": {
+    "kind": "authored_asset",
+    "path": "plc/deliveries/line/plc_gen_megapipeline/docs/line.system.md",
+    "description": "Battery module pack line system contract."
+  },
+  "source_digest": {
+    "algorithm": "sha256",
+    "value": "replace_me_after_authoring"
+  },
+  "metadata": {
+    "contract_id": "battery_module_pack_line_starter",
+    "title": "Battery module pack line intent contract",
+    "business_owner": "engineering",
+    "authoritative_intent_source": {
+      "kind": "authored_asset",
+      "path": "plc/deliveries/line/plc_gen_megapipeline/docs/line.system.md",
+      "description": "Battery module pack line system contract."
+    },
+    "review_basis": [
+      {
+        "label": "line system contract",
+        "source": {
+          "kind": "authored_asset",
+          "path": "plc/deliveries/line/plc_gen_megapipeline/docs/line.system.md",
+          "description": "Primary authored line intent."
+        }
+      },
+      {
+        "label": "serial process plan",
+        "source": {
+          "kind": "authored_asset",
+          "path": "docs/research/serial_plan.md",
+          "description": "Frozen serial route used before parallel station authoring."
+        }
+      }
+    ]
+  },
+  "contract_core": {
+    "expected_milestones": [
+      {
+        "milestone_id": "line_started",
+        "business_milestone": {
+          "label": "Line started",
+          "description": "The line accepts one incoming workpiece and starts the route."
+        }
+      },
+      {
+        "milestone_id": "weld_complete",
+        "business_milestone": {
+          "label": "Weld complete",
+          "description": "The module has passed through the weld and cooling station."
+        }
+      },
+      {
+        "milestone_id": "packout_complete",
+        "business_milestone": {
+          "label": "Packout complete",
+          "description": "The module reaches the packed terminal state at line packout."
+        }
+      }
+    ],
+    "required_edges": [
+      {
+        "predecessor": "line_started",
+        "successor": "weld_complete"
+      },
+      {
+        "predecessor": "weld_complete",
+        "successor": "packout_complete"
+      }
+    ],
+    "postconditions": [
+      {
+        "postcondition_id": "packed_terminal",
+        "description": "The workpiece is finished at line_packout as packed."
+      }
+    ],
+    "cycle_semantics": {
+      "cycle_start_milestone": "line_started",
+      "cycle_complete_milestone": "packout_complete",
+      "restart_semantics": {
+        "restartable_milestone": "packout_complete",
+        "next_cycle_start_milestone": "line_started",
+        "required_postconditions": [
+          "packed_terminal"
+        ]
+      }
+    }
+  },
+  "observation_bindings": [
+    {
+      "binding_id": "line_started_transition",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "line_started"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "transition",
+          "expected": "task=1;from=1;to=2;reason=action"
+        }
+      ]
+    },
+    {
+      "binding_id": "weld_complete_transition",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "weld_complete"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "transition",
+          "expected": "task=4;from=4;to=5;reason=action"
+        }
+      ]
+    },
+    {
+      "binding_id": "packout_complete_transition",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "packout_complete"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "transition",
+          "expected": "task=6;from=4;to=5;reason=action"
+        }
+      ]
+    },
+    {
+      "binding_id": "packed_terminal_postcondition",
+      "subject": {
+        "kind": "postcondition",
+        "postcondition_id": "packed_terminal"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "transition",
+          "expected": "task=6;from=4;to=5;reason=action"
+        }
+      ]
+    }
+  ]
+}

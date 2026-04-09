@@ -1,0 +1,22 @@
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: line_reset.out, to: plc_main.X1, via: reports_to }
+relation { from: estop_ok.out, to: plc_main.X2, via: reports_to }
+relation { from: plc_main.Y0, to: valve_s01_mag_pick.coil, via: driven_by }
+relation { from: plc_main.Y1, to: motor_s01_buffer_01.cmd, via: driven_by }
+relation { from: plc_main.Y2, to: valve_s02_cell_clamp.coil, via: driven_by }
+relation { from: plc_main.Y3, to: motor_s02_orient_01.cmd, via: driven_by }
+relation { from: plc_main.Y4, to: valve_s03_tab_clamp.coil, via: driven_by }
+relation { from: plc_main.Y5, to: motor_s03_feed_01.cmd, via: driven_by }
+relation { from: plc_main.Y6, to: valve_s04_weld_clamp.coil, via: driven_by }
+relation { from: plc_main.Y7, to: motor_s04_cool_fan_01.cmd, via: driven_by }
+relation { from: plc_main.Y8, to: valve_s05_seal_clamp.coil, via: driven_by }
+relation { from: plc_main.Y9, to: motor_s05_index_01.cmd, via: driven_by }
+relation { from: plc_main.Y10, to: valve_s06_box_pusher.coil, via: driven_by }
+relation { from: plc_main.Y11, to: motor_s06_pack_01.cmd, via: driven_by }
+
+relation { from: valve_s01_mag_pick.out, to: cyl_s01_mag_pick.cmd, via: driven_by }
+relation { from: valve_s02_cell_clamp.out, to: cyl_s02_cell_clamp.cmd, via: driven_by }
+relation { from: valve_s03_tab_clamp.out, to: cyl_s03_tab_clamp.cmd, via: driven_by }
+relation { from: valve_s04_weld_clamp.out, to: cyl_s04_weld_clamp.cmd, via: driven_by }
+relation { from: valve_s05_seal_clamp.out, to: cyl_s05_seal_clamp.cmd, via: driven_by }
+relation { from: valve_s06_box_pusher.out, to: cyl_s06_box_pusher.cmd, via: driven_by }

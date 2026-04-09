@@ -1,0 +1,943 @@
+device valve_s01_mag_pick: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 01"
+    response_time: 25ms
+}
+
+device cyl_s01_mag_pick: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 01"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_02: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 02"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_02: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 02"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_03: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 03"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_03: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 03"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_04: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 04"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_04: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 04"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_05: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 05"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_05: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 05"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_06: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 06"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_06: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 06"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_07: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 07"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_07: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 07"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_08: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 08"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_08: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 08"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_09: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 09"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_09: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 09"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_10: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 10"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_10: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 10"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_11: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 11"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_11: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 11"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s01_unit_12: solenoid_valve {
+    purpose: "Tray Infeed and Buffer valve 12"
+    response_time: 25ms
+}
+
+device cyl_s01_unit_12: cylinder {
+    purpose: "Tray Infeed and Buffer cylinder 12"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device motor_s01_buffer_01: motor {
+    purpose: "Tray Infeed and Buffer motor 01"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s01_axis_02: motor {
+    purpose: "Tray Infeed and Buffer motor 02"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s01_axis_03: motor {
+    purpose: "Tray Infeed and Buffer motor 03"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s01_axis_04: motor {
+    purpose: "Tray Infeed and Buffer motor 04"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s01_axis_05: motor {
+    purpose: "Tray Infeed and Buffer motor 05"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s01_axis_06: motor {
+    purpose: "Tray Infeed and Buffer motor 06"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s01_axis_07: motor {
+    purpose: "Tray Infeed and Buffer motor 07"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s01_axis_08: motor {
+    purpose: "Tray Infeed and Buffer motor 08"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device valve_s02_cell_clamp: solenoid_valve {
+    purpose: "Cell Loading and Alignment valve 01"
+    response_time: 25ms
+}
+
+device cyl_s02_cell_clamp: cylinder {
+    purpose: "Cell Loading and Alignment cylinder 01"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s02_unit_02: solenoid_valve {
+    purpose: "Cell Loading and Alignment valve 02"
+    response_time: 25ms
+}
+
+device cyl_s02_unit_02: cylinder {
+    purpose: "Cell Loading and Alignment cylinder 02"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s02_unit_03: solenoid_valve {
+    purpose: "Cell Loading and Alignment valve 03"
+    response_time: 25ms
+}
+
+device cyl_s02_unit_03: cylinder {
+    purpose: "Cell Loading and Alignment cylinder 03"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s02_unit_04: solenoid_valve {
+    purpose: "Cell Loading and Alignment valve 04"
+    response_time: 25ms
+}
+
+device cyl_s02_unit_04: cylinder {
+    purpose: "Cell Loading and Alignment cylinder 04"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s02_unit_05: solenoid_valve {
+    purpose: "Cell Loading and Alignment valve 05"
+    response_time: 25ms
+}
+
+device cyl_s02_unit_05: cylinder {
+    purpose: "Cell Loading and Alignment cylinder 05"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s02_unit_06: solenoid_valve {
+    purpose: "Cell Loading and Alignment valve 06"
+    response_time: 25ms
+}
+
+device cyl_s02_unit_06: cylinder {
+    purpose: "Cell Loading and Alignment cylinder 06"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s02_unit_07: solenoid_valve {
+    purpose: "Cell Loading and Alignment valve 07"
+    response_time: 25ms
+}
+
+device cyl_s02_unit_07: cylinder {
+    purpose: "Cell Loading and Alignment cylinder 07"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s02_unit_08: solenoid_valve {
+    purpose: "Cell Loading and Alignment valve 08"
+    response_time: 25ms
+}
+
+device cyl_s02_unit_08: cylinder {
+    purpose: "Cell Loading and Alignment cylinder 08"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s02_unit_09: solenoid_valve {
+    purpose: "Cell Loading and Alignment valve 09"
+    response_time: 25ms
+}
+
+device cyl_s02_unit_09: cylinder {
+    purpose: "Cell Loading and Alignment cylinder 09"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s02_unit_10: solenoid_valve {
+    purpose: "Cell Loading and Alignment valve 10"
+    response_time: 25ms
+}
+
+device cyl_s02_unit_10: cylinder {
+    purpose: "Cell Loading and Alignment cylinder 10"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device motor_s02_orient_01: motor {
+    purpose: "Cell Loading and Alignment motor 01"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s02_axis_02: motor {
+    purpose: "Cell Loading and Alignment motor 02"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s02_axis_03: motor {
+    purpose: "Cell Loading and Alignment motor 03"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s02_axis_04: motor {
+    purpose: "Cell Loading and Alignment motor 04"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s02_axis_05: motor {
+    purpose: "Cell Loading and Alignment motor 05"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s02_axis_06: motor {
+    purpose: "Cell Loading and Alignment motor 06"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s02_axis_07: motor {
+    purpose: "Cell Loading and Alignment motor 07"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s02_axis_08: motor {
+    purpose: "Cell Loading and Alignment motor 08"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s02_axis_09: motor {
+    purpose: "Cell Loading and Alignment motor 09"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device valve_s03_tab_clamp: solenoid_valve {
+    purpose: "Busbar and Tab Preparation valve 01"
+    response_time: 25ms
+}
+
+device cyl_s03_tab_clamp: cylinder {
+    purpose: "Busbar and Tab Preparation cylinder 01"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s03_unit_02: solenoid_valve {
+    purpose: "Busbar and Tab Preparation valve 02"
+    response_time: 25ms
+}
+
+device cyl_s03_unit_02: cylinder {
+    purpose: "Busbar and Tab Preparation cylinder 02"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s03_unit_03: solenoid_valve {
+    purpose: "Busbar and Tab Preparation valve 03"
+    response_time: 25ms
+}
+
+device cyl_s03_unit_03: cylinder {
+    purpose: "Busbar and Tab Preparation cylinder 03"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s03_unit_04: solenoid_valve {
+    purpose: "Busbar and Tab Preparation valve 04"
+    response_time: 25ms
+}
+
+device cyl_s03_unit_04: cylinder {
+    purpose: "Busbar and Tab Preparation cylinder 04"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s03_unit_05: solenoid_valve {
+    purpose: "Busbar and Tab Preparation valve 05"
+    response_time: 25ms
+}
+
+device cyl_s03_unit_05: cylinder {
+    purpose: "Busbar and Tab Preparation cylinder 05"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s03_unit_06: solenoid_valve {
+    purpose: "Busbar and Tab Preparation valve 06"
+    response_time: 25ms
+}
+
+device cyl_s03_unit_06: cylinder {
+    purpose: "Busbar and Tab Preparation cylinder 06"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s03_unit_07: solenoid_valve {
+    purpose: "Busbar and Tab Preparation valve 07"
+    response_time: 25ms
+}
+
+device cyl_s03_unit_07: cylinder {
+    purpose: "Busbar and Tab Preparation cylinder 07"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s03_unit_08: solenoid_valve {
+    purpose: "Busbar and Tab Preparation valve 08"
+    response_time: 25ms
+}
+
+device cyl_s03_unit_08: cylinder {
+    purpose: "Busbar and Tab Preparation cylinder 08"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s03_unit_09: solenoid_valve {
+    purpose: "Busbar and Tab Preparation valve 09"
+    response_time: 25ms
+}
+
+device cyl_s03_unit_09: cylinder {
+    purpose: "Busbar and Tab Preparation cylinder 09"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s03_unit_10: solenoid_valve {
+    purpose: "Busbar and Tab Preparation valve 10"
+    response_time: 25ms
+}
+
+device cyl_s03_unit_10: cylinder {
+    purpose: "Busbar and Tab Preparation cylinder 10"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device motor_s03_feed_01: motor {
+    purpose: "Busbar and Tab Preparation motor 01"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s03_axis_02: motor {
+    purpose: "Busbar and Tab Preparation motor 02"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s03_axis_03: motor {
+    purpose: "Busbar and Tab Preparation motor 03"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s03_axis_04: motor {
+    purpose: "Busbar and Tab Preparation motor 04"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s03_axis_05: motor {
+    purpose: "Busbar and Tab Preparation motor 05"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s03_axis_06: motor {
+    purpose: "Busbar and Tab Preparation motor 06"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s03_axis_07: motor {
+    purpose: "Busbar and Tab Preparation motor 07"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s03_axis_08: motor {
+    purpose: "Busbar and Tab Preparation motor 08"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device valve_s04_weld_clamp: solenoid_valve {
+    purpose: "Laser Weld and Cooling valve 01"
+    response_time: 25ms
+}
+
+device cyl_s04_weld_clamp: cylinder {
+    purpose: "Laser Weld and Cooling cylinder 01"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s04_unit_02: solenoid_valve {
+    purpose: "Laser Weld and Cooling valve 02"
+    response_time: 25ms
+}
+
+device cyl_s04_unit_02: cylinder {
+    purpose: "Laser Weld and Cooling cylinder 02"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s04_unit_03: solenoid_valve {
+    purpose: "Laser Weld and Cooling valve 03"
+    response_time: 25ms
+}
+
+device cyl_s04_unit_03: cylinder {
+    purpose: "Laser Weld and Cooling cylinder 03"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s04_unit_04: solenoid_valve {
+    purpose: "Laser Weld and Cooling valve 04"
+    response_time: 25ms
+}
+
+device cyl_s04_unit_04: cylinder {
+    purpose: "Laser Weld and Cooling cylinder 04"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s04_unit_05: solenoid_valve {
+    purpose: "Laser Weld and Cooling valve 05"
+    response_time: 25ms
+}
+
+device cyl_s04_unit_05: cylinder {
+    purpose: "Laser Weld and Cooling cylinder 05"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s04_unit_06: solenoid_valve {
+    purpose: "Laser Weld and Cooling valve 06"
+    response_time: 25ms
+}
+
+device cyl_s04_unit_06: cylinder {
+    purpose: "Laser Weld and Cooling cylinder 06"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s04_unit_07: solenoid_valve {
+    purpose: "Laser Weld and Cooling valve 07"
+    response_time: 25ms
+}
+
+device cyl_s04_unit_07: cylinder {
+    purpose: "Laser Weld and Cooling cylinder 07"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s04_unit_08: solenoid_valve {
+    purpose: "Laser Weld and Cooling valve 08"
+    response_time: 25ms
+}
+
+device cyl_s04_unit_08: cylinder {
+    purpose: "Laser Weld and Cooling cylinder 08"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device motor_s04_cool_fan_01: motor {
+    purpose: "Laser Weld and Cooling motor 01"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s04_axis_02: motor {
+    purpose: "Laser Weld and Cooling motor 02"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s04_axis_03: motor {
+    purpose: "Laser Weld and Cooling motor 03"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s04_axis_04: motor {
+    purpose: "Laser Weld and Cooling motor 04"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s04_axis_05: motor {
+    purpose: "Laser Weld and Cooling motor 05"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s04_axis_06: motor {
+    purpose: "Laser Weld and Cooling motor 06"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s04_axis_07: motor {
+    purpose: "Laser Weld and Cooling motor 07"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s04_axis_08: motor {
+    purpose: "Laser Weld and Cooling motor 08"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s04_axis_09: motor {
+    purpose: "Laser Weld and Cooling motor 09"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s04_axis_10: motor {
+    purpose: "Laser Weld and Cooling motor 10"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device valve_s05_seal_clamp: solenoid_valve {
+    purpose: "Leak, HiPot and Vision Inspection valve 01"
+    response_time: 25ms
+}
+
+device cyl_s05_seal_clamp: cylinder {
+    purpose: "Leak, HiPot and Vision Inspection cylinder 01"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s05_unit_02: solenoid_valve {
+    purpose: "Leak, HiPot and Vision Inspection valve 02"
+    response_time: 25ms
+}
+
+device cyl_s05_unit_02: cylinder {
+    purpose: "Leak, HiPot and Vision Inspection cylinder 02"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s05_unit_03: solenoid_valve {
+    purpose: "Leak, HiPot and Vision Inspection valve 03"
+    response_time: 25ms
+}
+
+device cyl_s05_unit_03: cylinder {
+    purpose: "Leak, HiPot and Vision Inspection cylinder 03"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s05_unit_04: solenoid_valve {
+    purpose: "Leak, HiPot and Vision Inspection valve 04"
+    response_time: 25ms
+}
+
+device cyl_s05_unit_04: cylinder {
+    purpose: "Leak, HiPot and Vision Inspection cylinder 04"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s05_unit_05: solenoid_valve {
+    purpose: "Leak, HiPot and Vision Inspection valve 05"
+    response_time: 25ms
+}
+
+device cyl_s05_unit_05: cylinder {
+    purpose: "Leak, HiPot and Vision Inspection cylinder 05"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s05_unit_06: solenoid_valve {
+    purpose: "Leak, HiPot and Vision Inspection valve 06"
+    response_time: 25ms
+}
+
+device cyl_s05_unit_06: cylinder {
+    purpose: "Leak, HiPot and Vision Inspection cylinder 06"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s05_unit_07: solenoid_valve {
+    purpose: "Leak, HiPot and Vision Inspection valve 07"
+    response_time: 25ms
+}
+
+device cyl_s05_unit_07: cylinder {
+    purpose: "Leak, HiPot and Vision Inspection cylinder 07"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s05_unit_08: solenoid_valve {
+    purpose: "Leak, HiPot and Vision Inspection valve 08"
+    response_time: 25ms
+}
+
+device cyl_s05_unit_08: cylinder {
+    purpose: "Leak, HiPot and Vision Inspection cylinder 08"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s05_unit_09: solenoid_valve {
+    purpose: "Leak, HiPot and Vision Inspection valve 09"
+    response_time: 25ms
+}
+
+device cyl_s05_unit_09: cylinder {
+    purpose: "Leak, HiPot and Vision Inspection cylinder 09"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device motor_s05_index_01: motor {
+    purpose: "Leak, HiPot and Vision Inspection motor 01"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s05_axis_02: motor {
+    purpose: "Leak, HiPot and Vision Inspection motor 02"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s05_axis_03: motor {
+    purpose: "Leak, HiPot and Vision Inspection motor 03"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s05_axis_04: motor {
+    purpose: "Leak, HiPot and Vision Inspection motor 04"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s05_axis_05: motor {
+    purpose: "Leak, HiPot and Vision Inspection motor 05"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s05_axis_06: motor {
+    purpose: "Leak, HiPot and Vision Inspection motor 06"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s05_axis_07: motor {
+    purpose: "Leak, HiPot and Vision Inspection motor 07"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s05_axis_08: motor {
+    purpose: "Leak, HiPot and Vision Inspection motor 08"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device valve_s06_box_pusher: solenoid_valve {
+    purpose: "Label, Packout and Sort valve 01"
+    response_time: 25ms
+}
+
+device cyl_s06_box_pusher: cylinder {
+    purpose: "Label, Packout and Sort cylinder 01"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s06_unit_02: solenoid_valve {
+    purpose: "Label, Packout and Sort valve 02"
+    response_time: 25ms
+}
+
+device cyl_s06_unit_02: cylinder {
+    purpose: "Label, Packout and Sort cylinder 02"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s06_unit_03: solenoid_valve {
+    purpose: "Label, Packout and Sort valve 03"
+    response_time: 25ms
+}
+
+device cyl_s06_unit_03: cylinder {
+    purpose: "Label, Packout and Sort cylinder 03"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s06_unit_04: solenoid_valve {
+    purpose: "Label, Packout and Sort valve 04"
+    response_time: 25ms
+}
+
+device cyl_s06_unit_04: cylinder {
+    purpose: "Label, Packout and Sort cylinder 04"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s06_unit_05: solenoid_valve {
+    purpose: "Label, Packout and Sort valve 05"
+    response_time: 25ms
+}
+
+device cyl_s06_unit_05: cylinder {
+    purpose: "Label, Packout and Sort cylinder 05"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s06_unit_06: solenoid_valve {
+    purpose: "Label, Packout and Sort valve 06"
+    response_time: 25ms
+}
+
+device cyl_s06_unit_06: cylinder {
+    purpose: "Label, Packout and Sort cylinder 06"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s06_unit_07: solenoid_valve {
+    purpose: "Label, Packout and Sort valve 07"
+    response_time: 25ms
+}
+
+device cyl_s06_unit_07: cylinder {
+    purpose: "Label, Packout and Sort cylinder 07"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s06_unit_08: solenoid_valve {
+    purpose: "Label, Packout and Sort valve 08"
+    response_time: 25ms
+}
+
+device cyl_s06_unit_08: cylinder {
+    purpose: "Label, Packout and Sort cylinder 08"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device valve_s06_unit_09: solenoid_valve {
+    purpose: "Label, Packout and Sort valve 09"
+    response_time: 25ms
+}
+
+device cyl_s06_unit_09: cylinder {
+    purpose: "Label, Packout and Sort cylinder 09"
+    stroke_time: 220ms
+    retract_time: 180ms
+}
+
+device motor_s06_pack_01: motor {
+    purpose: "Label, Packout and Sort motor 01"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s06_axis_02: motor {
+    purpose: "Label, Packout and Sort motor 02"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s06_axis_03: motor {
+    purpose: "Label, Packout and Sort motor 03"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s06_axis_04: motor {
+    purpose: "Label, Packout and Sort motor 04"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s06_axis_05: motor {
+    purpose: "Label, Packout and Sort motor 05"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s06_axis_06: motor {
+    purpose: "Label, Packout and Sort motor 06"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s06_axis_07: motor {
+    purpose: "Label, Packout and Sort motor 07"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}
+
+device motor_s06_axis_08: motor {
+    purpose: "Label, Packout and Sort motor 08"
+    rated_speed: 60rpm
+    ramp_time: 80ms
+}

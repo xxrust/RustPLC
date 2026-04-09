@@ -1,0 +1,111 @@
+schema_version = 1
+mode = "delivery-asset"
+
+[notes]
+purpose = "S05 leak, hipot, and vision validation station for the megapipeline"
+
+[topology]
+fragments = []
+
+[constraints]
+fragments = []
+
+[tasks]
+fragments = []
+
+device cyl_clamp_1: cylinder { purpose: "Load clamp 1" }
+device cyl_clamp_2: cylinder { purpose: "Load clamp 2" }
+device cyl_clamp_3: cylinder { purpose: "Load clamp 3" }
+device cyl_clamp_4: cylinder { purpose: "Load clamp 4" }
+device cyl_seal_5: cylinder { purpose: "Seal jaw 5" }
+device cyl_seal_6: cylinder { purpose: "Seal jaw 6" }
+device cyl_release_7: cylinder { purpose: "Release shuttle" }
+device cyl_guard_8: cylinder { purpose: "Safety guard" }
+device cyl_curtain_9: cylinder { purpose: "Visual curtain" }
+
+device motor_rotation_1: motor { purpose: "Carrier rotation axis 1" }
+device motor_rotation_2: motor { purpose: "Carrier rotation axis 2" }
+device motor_seal_3: motor { purpose: "Seal actuator 3" }
+device motor_seal_4: motor { purpose: "Seal actuator 4" }
+device motor_hipot_5: motor { purpose: "Hipot ramp 1" }
+device motor_hipot_6: motor { purpose: "Hipot ramp 2" }
+device motor_vision_7: motor { purpose: "Vision carousel 1" }
+device motor_vision_8: motor { purpose: "Vision carousel 2" }
+
+device sensor_infeed: sensor { purpose: "Inbound module detected" }
+device sensor_leak_ok: sensor { purpose: "Leak test feedback" }
+device sensor_hipot_ready: sensor { purpose: "Hipot stabilization" }
+device sensor_vision_ok: vision { purpose: "Vision inspection pass" }
+
+workpiece battery_module: workpiece_type {
+    normal_terminal_states: [validated]
+    abnormal_terminal_states: [leak_reject]
+    ingress_sites: [s05_infeed]
+    normal_egress_sites: [s05_outfeed]
+}
+
+location s05_infeed: workpiece_location { capacity: 1 }
+location s05_outfeed: workpiece_location { capacity: 1 }
+
+relation { from: sensor_infeed.out, to: cyl_clamp_1.in, via: reports_to }
+
+[tasks]
+
+task s05_processing:
+    step wait_load:
+        wait: sensor_infeed == true
+        effect: acquire holder station_carrier from s05_infeed
+        action: engage cyl_clamp_1
+        action: engage cyl_clamp_2
+        on_complete: goto position_seal
+
+    step position_seal:
+        action: engage cyl_clamp_3
+        action: engage cyl_clamp_4
+        action: set motor_seal_3.spin on
+        action: set motor_seal_4.spin on
+        wait: sensor_leak_ok == true
+        timeout: 500ms -> goto fault.leak_fault
+        on_complete: goto position_hipot
+
+    step position_hipot:
+        action: set motor_hipot_5.spin on
+        action: set motor_hipot_6.spin on
+        wait: sensor_hipot_ready == true
+        timeout: 600ms -> goto fault.hipot_trip
+        on_complete: goto position_vision
+
+    step position_vision:
+        action: set motor_vision_7.spin on
+        action: set motor_vision_8.spin on
+        action: engage cyl_guard_8
+        action: engage cyl_curtain_9
+        wait: sensor_vision_ok == true
+        timeout: 400ms -> goto fault.vision_detect
+        effect: transfer from station_carrier to s05_outfeed
+        effect: finish workpiece at s05_outfeed as validated
+        action: engage cyl_release_7
+    on_complete: goto done
+
+task fault:
+    step leak_fault:
+        action: retract cyl_seal_5
+        action: retract cyl_seal_6
+        effect: finish workpiece at s05_outfeed as leak_reject
+        on_complete: goto done
+
+    step hipot_trip:
+        action: set motor_hipot_5.spin off
+        action: set motor_hipot_6.spin off
+        effect: finish workpiece at s05_outfeed as leak_reject
+        on_complete: goto done
+
+    step vision_detect:
+        action: set motor_vision_7.spin off
+        action: set motor_vision_8.spin off
+        effect: finish workpiece at s05_outfeed as leak_reject
+        on_complete: goto done
+
+task done:
+    step idle:
+        action: engage cyl_guard_8

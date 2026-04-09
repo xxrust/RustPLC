@@ -1,0 +1,83 @@
+{
+  "contract_version": "phase-2.v1",
+  "source_ref": {
+    "kind": "authored_asset",
+    "path": "plc/deliveries/station/s04_laser_weld_cooling/docs/station.system.md",
+    "description": "S04 system contract"
+  },
+  "source_digest": {
+    "algorithm": "sha256",
+    "value": "replace_me_after_authoring"
+  },
+  "metadata": {
+    "contract_id": "s04_laser_weld_cooling_starter",
+    "title": "S04 laser weld & cooling intent",
+    "business_owner": "replace-owner",
+    "authoritative_intent_source": {
+      "kind": "authored_asset",
+      "path": "plc/deliveries/station/s04_laser_weld_cooling/docs/station.system.md",
+      "description": "S04 business intent"
+    },
+    "review_basis": [
+      {
+        "label": "S04 system contract",
+        "source": {
+          "kind": "authored_asset",
+          "path": "plc/deliveries/station/s04_laser_weld_cooling/docs/station.system.md",
+          "description": "Replace with the final S04 intent source"
+        }
+      }
+    ]
+  },
+  "contract_core": {
+    "expected_milestones": [
+      {
+        "milestone_id": "weld_ready",
+        "business_milestone": {
+          "label": "Weld complete",
+          "description": "Laser welding finished and cooling starts."
+        }
+      },
+      {
+        "milestone_id": "weld_cooled",
+        "business_milestone": {
+          "label": "Weld cooled",
+          "description": "Assembly cooled and ready for inspection."
+        }
+      }
+    ],
+    "required_edges": [
+      {
+        "predecessor": "weld_ready",
+        "successor": "weld_cooled"
+      }
+    ],
+    "postconditions": [],
+    "cycle_semantics": {
+      "cycle_start_milestone": "weld_ready",
+      "cycle_complete_milestone": "weld_cooled",
+      "restart_semantics": {
+        "restartable_milestone": "weld_cooled",
+        "next_cycle_start_milestone": "weld_ready",
+        "required_postconditions": []
+      }
+    }
+  },
+  "observation_bindings": [
+    {
+      "binding_id": "weld_cooled_anchor",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "weld_cooled"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "transition",
+          "expected": "auto_cycle.cooling_complete"
+        }
+      ]
+    }
+  ]
+}

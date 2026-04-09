@@ -1,0 +1,24 @@
+schema_version = 1
+
+[project]
+name = "Plc Gen Megapipeline"
+slug = "plc_gen_megapipeline"
+
+[delivery]
+layer = "line"
+
+[entry]
+system = "plc/deliveries/line/plc_gen_megapipeline/docs/line.system.md"
+plc = "plc/deliveries/line/plc_gen_megapipeline/plc/main.bundle.toml"
+scenario = "plc/deliveries/line/plc_gen_megapipeline/scenarios/nominal/normal.yaml"
+io_map = "config/io_map.toml"
+retain = "config/retain.toml"
+workpiece = "config/workpiece.toml"
+
+[out]
+ir = "out/ir"
+sim = "out/sim"
+gate = "out/gate"
+codegen = "out/codegen"
+rp2040 = "out/rp2040"
+release = "out/release"

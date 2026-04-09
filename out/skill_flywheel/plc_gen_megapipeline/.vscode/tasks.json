@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "RustPLC: project-check",
+      "type": "shell",
+      "command": "cargo run --release --bin rust_plc -- project-check plc/deliveries/line/plc_gen_megapipeline/plc/main.bundle.toml --scenario plc/deliveries/line/plc_gen_megapipeline/scenarios/nominal/normal.yaml --out-dir out/project_check/normal --output human",
+      "problemMatcher": []
+    },
+    {
+      "label": "RustPLC: sim-plc",
+      "type": "shell",
+      "command": "cargo run --release --bin rust_plc -- sim-plc plc/deliveries/line/plc_gen_megapipeline/plc/main.bundle.toml --scenario plc/deliveries/line/plc_gen_megapipeline/scenarios/nominal/normal.yaml --out out/sim/normal/trace.jsonl",
+      "problemMatcher": []
+    },
+    {
+      "label": "RustPLC: no-board-gate",
+      "type": "shell",
+      "command": "cargo run --release --bin rust_plc -- no-board-gate plc/deliveries/line/plc_gen_megapipeline/plc/main.bundle.toml --scenario plc/deliveries/line/plc_gen_megapipeline/scenarios/nominal/normal.yaml --out-dir out/gate/no_board/normal --output human",
+      "problemMatcher": []
+    }
+  ]
+}
