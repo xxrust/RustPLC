@@ -1,8 +1,0 @@
-{
-  "schema_version": 1,
-  "source_plc": "out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s04_laser_weld_cooling/plc/main.bundle.toml",
-  "scenario_path": "out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s04_laser_weld_cooling/scenarios/nominal/normal.yaml",
-  "generated_at": "2026-04-09T07:04:32.4547765Z",
-  "tick_ms": 10,
-  "duration_ticks": 40
-}

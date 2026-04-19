@@ -1,5 +1,0 @@
-# Constraint placeholders for line-level interlocks.
-# Planned follow-ups:
-# - weld energy only after S04 entry clamp is established
-# - hipot only after S05 seal clamp is established
-# - packout only after S06 qr verification is complete

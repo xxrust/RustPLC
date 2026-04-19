@@ -1,6 +1,0 @@
-Failed to parse PLC bundle out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/station/s06_label_packout_sort/plc/main.bundle.toml: TOML parse error at line 16, column 8
-   |
-16 | device cyl_align_1: cylinder { purpose: "Alignment clamp 1" }
-   |        ^
-expected `.`, `=`
-

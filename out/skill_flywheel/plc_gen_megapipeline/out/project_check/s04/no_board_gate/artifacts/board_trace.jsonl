@@ -1,6 +1,0 @@
-{"tick":0,"task":0,"from_step":0,"to_step":1,"reason":"action","timestamp_ms":0}
-{"tick":0,"task":0,"from_step":1,"to_step":2,"reason":"wait_satisfied","timestamp_ms":0}
-{"tick":0,"task":0,"from_step":2,"to_step":3,"reason":"action","timestamp_ms":0}
-{"tick":2,"task":0,"from_step":3,"to_step":4,"reason":"delay_elapsed","timestamp_ms":20}
-{"tick":2,"task":0,"from_step":4,"to_step":5,"reason":"action","timestamp_ms":20}
-{"tick":2,"task":0,"from_step":5,"to_step":7,"reason":"action","timestamp_ms":20}

@@ -1,8 +1,0 @@
-{
-  "schema_version": 1,
-  "source_plc": "out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/line/plc_gen_megapipeline/plc/main.bundle.toml",
-  "scenario_path": "out/skill_flywheel/plc_gen_megapipeline/plc/deliveries/line/plc_gen_megapipeline/scenarios/nominal/normal.yaml",
-  "generated_at": "2026-04-09T06:47:47.563978Z",
-  "tick_ms": 20,
-  "duration_ticks": 80
-}

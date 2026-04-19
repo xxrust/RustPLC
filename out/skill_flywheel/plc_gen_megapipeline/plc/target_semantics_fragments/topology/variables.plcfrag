@@ -1,6 +1,0 @@
-variable s01_cycle_counter: float = 0.0
-variable s02_cycle_counter: float = 0.0
-variable s03_cycle_counter: float = 0.0
-variable s04_cycle_counter: float = 0.0
-variable s05_cycle_counter: float = 0.0
-variable s06_cycle_counter: float = 0.0

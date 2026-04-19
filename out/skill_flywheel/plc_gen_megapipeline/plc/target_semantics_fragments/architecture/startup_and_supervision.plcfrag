@@ -1,9 +1,0 @@
-task line_supervisor:
-    step wait_start:
-        wait: start_button == true
-        timeout: 1000ms -> goto line_fault.line_start_timeout
-
-    step latch_run:
-        delay: 20ms
-
-    on_complete: goto done.halt

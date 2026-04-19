@@ -22,3 +22,8 @@
 
 # Generated test artifacts
 /output/
+
+# Flywheel experiment artifacts should not live in the main repo.
+/.codex/skills/*/.skill_flywheel/cycles/
+/.codex/skills/*/.skill_flywheel/benchmark/
+/ubuntu@*

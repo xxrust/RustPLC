@@ -1,3 +1,0 @@
-{"tick":0,"ts_start_us":0,"ts_end_us":130,"exec_us":130,"slack_us":9870,"overrun":false}
-{"tick":1,"ts_start_us":10000,"ts_end_us":10010,"exec_us":10,"slack_us":9990,"overrun":false}
-{"tick":2,"ts_start_us":20000,"ts_end_us":20130,"exec_us":130,"slack_us":9870,"overrun":false}

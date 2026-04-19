@@ -1,7 +1,0 @@
-{"tick":0,"ts_start_us":0,"ts_end_us":90,"exec_us":90,"slack_us":19910,"overrun":false}
-{"tick":1,"ts_start_us":20000,"ts_end_us":20010,"exec_us":10,"slack_us":19990,"overrun":false}
-{"tick":2,"ts_start_us":40000,"ts_end_us":40010,"exec_us":10,"slack_us":19990,"overrun":false}
-{"tick":3,"ts_start_us":60000,"ts_end_us":60050,"exec_us":50,"slack_us":19950,"overrun":false}
-{"tick":4,"ts_start_us":80000,"ts_end_us":80010,"exec_us":10,"slack_us":19990,"overrun":false}
-{"tick":5,"ts_start_us":100000,"ts_end_us":100010,"exec_us":10,"slack_us":19990,"overrun":false}
-{"tick":6,"ts_start_us":120000,"ts_end_us":120090,"exec_us":90,"slack_us":19910,"overrun":false}
