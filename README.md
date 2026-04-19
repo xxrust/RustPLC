@@ -131,8 +131,11 @@ cargo run --release --bin rust_plc -- no-board-gate plc/main.plc \
   --out-dir out/gate/no_board/normal --output human
 
 cargo run --release --bin rust_plc -- gen-st plc/main.plc \
-  --out out/codegen/st/main.st
+  --out out/codegen/st/main.st \
+  --task-interval-ms 10
 ```
+
+`gen-st` 现在会同时生成 OpenPLC 可消费的 `CONFIGURATION / RESOURCE / TASK` 结构，并把内部 `_state` 导出为板级 trace bit，便于和外部控制器或仿真 trace 对齐。
 
 ### CLI Help
 
@@ -286,7 +289,7 @@ cargo build --release
 [topology]
 device plc_main: plc {
     purpose: "控制器本体与工艺 I/O 端口映射",
-    ports: [Y0:digital:producer, X0:digital:consumer]
+    model_ref: openplc_softplc
 }
 device valve_A: solenoid_valve {
     purpose: "控制A缸主气路通断",
@@ -363,10 +366,27 @@ for candidate in candidates.iter().take(3) {
 cargo run --release --bin rust_plc -- build-rp2040 examples/assembly_station.plc \
   --out out/rp2040 --io-map io_map.toml --emit-uf2 out/firmware.uf2
 
+# 构建可在 Renode STM32F4 Discovery 上运行的固件
+rustup target add thumbv7em-none-eabi
+cargo run --release --bin rust_plc -- build-renode-stm32 \
+  examples/pil_baselines/case_timeout/case.plc \
+  --scenario examples/pil_baselines/case_timeout/scenarios/base.yaml \
+  --out out/renode_f4
+
+# 在本地 Renode 中运行并打印 UART trace
+scripts/renode/run_firmware_trace.sh \
+  --elf out/renode_f4/board-renode-stm32.elf
+
 # 自动化发行包生成
 cargo run --release --bin rust_plc -- release-bundle examples/assembly_station.plc \
   --scenario scenarios/normal.yaml --out-dir out/release
 ```
+
+Renode 构建路径当前会产出：
+- `generated_program.rs`
+- `scenario.resolved.yaml`
+- `build_meta.json`
+- `board-renode-stm32.elf`
 
 ---
 

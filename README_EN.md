@@ -150,7 +150,7 @@ Verification passed:
 
 | Capability | Description |
 |------------|-------------|
-| **📝 ST Code Generation** | `gen-st` compiles verified IR to IEC 61131-3 Structured Text; vendored `iec2c` validates syntax in CI |
+| **📝 ST Code Generation** | `gen-st` compiles verified IR to IEC 61131-3 Structured Text, emits OpenPLC `CONFIGURATION/RESOURCE/TASK`, and exports `_state` trace bits; vendored `iec2c` validates syntax in CI |
 | **🔬 Formal Verification** | Four engines (Safety / Liveness / Timing / Causality) with compile-time mathematical proofs |
 | **⚙️ PLC Optimization** | Conservative candidate generation over preprocessed tasks, with timing reuse, legality recheck, stable ranking, and `[tasks]`-only emission |
 | **🤖 AI-Assisted Generation** | Natural language → AI multi-turn dialogue → `.plc` generation → auto-verification |
@@ -309,6 +309,29 @@ cargo run --release --bin rust_plc -- build-rp2040 examples/assembly_station.plc
 cargo run --release --bin rust_plc -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP2
 ```
 
+### 5.5. Renode STM32F4 Firmware Trace
+
+```bash
+# Install the target used by the Renode STM32F4 Discovery firmware
+rustup target add thumbv7em-none-eabi
+
+# Build an ELF from a PLC + scenario pair
+cargo run --release --bin rust_plc -- build-renode-stm32 \
+  examples/pil_baselines/case_timeout/case.plc \
+  --scenario examples/pil_baselines/case_timeout/scenarios/base.yaml \
+  --out out/renode_f4
+
+# Run the ELF in a local Renode instance and print UART trace lines
+scripts/renode/run_firmware_trace.sh \
+  --elf out/renode_f4/board-renode-stm32.elf
+```
+
+This path currently emits:
+- `generated_program.rs`
+- `scenario.resolved.yaml`
+- `build_meta.json`
+- `board-renode-stm32.elf`
+
 ### 6. Release Delivery
 
 ```bash
@@ -434,6 +457,9 @@ The differentiator is not "yet another generator." It is an engineering loop whe
 
 **ST Code Generation (this release):**
 - ✅ `gen-st` command: compile verified IR → IEC 61131-3 Structured Text
+- ✅ OpenPLC-compatible `CONFIGURATION Config0` / `RESOURCE Res0` / `TASK MainTask` footer
+- ✅ `--task-interval-ms` flag to set exported ST task interval explicitly
+- ✅ `_state_trace_b*` exports for board-level state observation and trace alignment
 - ✅ Vendored matiec (`vendor/matiec/`) — `iec2c` binary + standard library, no external install needed
 - ✅ Full round-trip test: `.plc` → ST → `iec2c` compile → `POUS.c`/`POUS.h` artifacts verified
 - ✅ Cross-platform test harness: Windows uses vendored `iec2c.exe`; Linux uses PATH fallback; graceful skip when unavailable

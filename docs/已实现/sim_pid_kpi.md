@@ -1,13 +1,18 @@
 # PID KPI Simulation (US-010)
 
 `sim-pid-kpi` runs a no-board closed-loop PID simulation and exports KPI JSON.
+The command is still available, but the historical `examples/pid_loop.plc` fixture is no longer the canonical topology example for current semantic-gate rules. Treat the help contract below as authoritative.
 
 ## Command
 
 ```bash
-cargo run --release -- sim-pid-kpi examples/pid_loop.plc \
-  --scenario examples/pid_kpi_scenario.yaml \
-  --out out/pid_kpi.json
+cargo run --release -- help sim-pid-kpi
+```
+
+Current command contract:
+
+```text
+sim-pid-kpi <source.plc|source.bundle.toml> --scenario <pid_scenario.yaml> --out <kpi.json>
 ```
 
 ## Scenario YAML

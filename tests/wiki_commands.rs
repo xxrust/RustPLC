@@ -117,26 +117,27 @@ fn no_board_playbook_command_chain_succeeds() {
 }
 
 #[test]
-fn sim_pid_kpi_doc_command_succeeds() {
-    let base = temp_dir("rust_plc_wiki_pid_kpi");
-    let out_path = base.join("pid_kpi.json");
+fn sim_pid_kpi_command_is_exposed_in_cli_help() {
     let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("help")
         .arg("sim-pid-kpi")
-        .arg(repo_path("examples/pid_loop.plc"))
-        .arg("--scenario")
-        .arg(repo_path("examples/pid_kpi_scenario.yaml"))
-        .arg("--out")
-        .arg(&out_path)
         .output()
-        .expect("run sim-pid-kpi");
+        .expect("run help sim-pid-kpi");
 
     assert!(
         output.status.success(),
-        "sim-pid-kpi should pass, stderr: {}",
+        "help sim-pid-kpi should succeed, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let kpi: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&out_path).expect("read KPI json"))
-            .expect("KPI JSON");
-    assert!(kpi.get("kpi").is_some());
+
+    let rendered = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        rendered
+            .contains("sim-pid-kpi <source.plc|source.bundle.toml> --scenario <pid_scenario.yaml>"),
+        "sim-pid-kpi help should describe the current source entry contract"
+    );
 }

@@ -54,6 +54,16 @@ scripts/pil_semantic_baseline.sh \
 scripts/pil_trace_baseline_suite.sh \
   --runner renode \
   --out-root out/ci_pil_baselines_renode
+
+rustup target add thumbv7em-none-eabi
+
+cargo run --release --bin rust_plc -- build-renode-stm32 \
+  examples/pil_baselines/case_timeout/case.plc \
+  --scenario examples/pil_baselines/case_timeout/scenarios/base.yaml \
+  --out out/ci_renode_f4
+
+scripts/renode/run_firmware_trace.sh \
+  --elf out/ci_renode_f4/board-renode-stm32.elf
 ```
 
 Topology perf gate thresholds live in `scripts/perf/topology_perf_thresholds.json`.
@@ -105,3 +115,39 @@ rustup target add thumbv6m-none-eabi
 If the Renode job fails:
 - delete `out/tools/renode/` and retry (forces re-download)
 - check that `python3`, `tar`, and outbound HTTPS access are available
+
+## Renode Firmware Trace Path
+
+This is the repo-local path for validating that a PLC + scenario pair can be lowered into a Renode STM32F4 Discovery firmware image and still emit traceable UART output.
+
+Prerequisites:
+- `rustup target add thumbv7em-none-eabi`
+- local Renode available, or `scripts/renode/ensure_renode.sh` able to download it
+
+Build:
+
+```bash
+cargo run --release --bin rust_plc -- build-renode-stm32 \
+  examples/pil_baselines/case_timeout/case.plc \
+  --scenario examples/pil_baselines/case_timeout/scenarios/base.yaml \
+  --out out/ci_renode_f4
+```
+
+Expected artifacts:
+- `out/ci_renode_f4/generated_program.rs`
+- `out/ci_renode_f4/scenario.resolved.yaml`
+- `out/ci_renode_f4/build_meta.json`
+- `out/ci_renode_f4/board-renode-stm32.elf`
+
+Run locally:
+
+```bash
+scripts/renode/run_firmware_trace.sh \
+  --elf out/ci_renode_f4/board-renode-stm32.elf
+```
+
+What to check in the UART output:
+- `TICK ...` lines are present
+- `TRACE ...` lines appear for step transitions
+- `TIMING ...` lines are emitted once per tick
+- no `ERROR stage=...` lines appear during the nominal case
