@@ -63,6 +63,7 @@ fn run_gen_st_subcommand(
     let mut out_path: Option<PathBuf> = None;
     let mut program_name = "Main".to_string();
     let mut include_verification_summary = true;
+    let mut task_interval_ms: u64 = 10;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -83,6 +84,17 @@ fn run_gen_st_subcommand(
             "--no-verification-summary" => {
                 include_verification_summary = false;
             }
+            "--task-interval-ms" => {
+                let raw = args.next().ok_or_else(|| {
+                    "Missing value for --task-interval-ms <ms> in gen-st subcommand".to_string()
+                })?;
+                task_interval_ms = raw.parse::<u64>().map_err(|_| {
+                    format!("Invalid value for --task-interval-ms `{raw}` (expected integer)")
+                })?;
+                if task_interval_ms == 0 {
+                    return Err("--task-interval-ms must be greater than zero".to_string());
+                }
+            }
             "-h" | "--help" => return Err(usage.clone()),
             other => return Err(format!("Unknown argument for gen-st: {other}\n{usage}")),
         }
@@ -102,6 +114,7 @@ fn run_gen_st_subcommand(
         program_name,
         source_file: plc_path.clone(),
         include_verification_summary,
+        task_interval_ms,
     };
     let st_text = generate_st(
         &semantics.topology,

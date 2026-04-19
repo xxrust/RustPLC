@@ -26,11 +26,16 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
 }
 
 fn run_gen_st(plc: &Path, out_st: &Path) {
+    run_gen_st_with_extra_args(plc, out_st, &[]);
+}
+
+fn run_gen_st_with_extra_args(plc: &Path, out_st: &Path, extra_args: &[&str]) {
     let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
         .arg("gen-st")
         .arg(plc)
         .arg("--out")
         .arg(out_st)
+        .args(extra_args)
         .output()
         .expect("should run rust_plc gen-st");
 
@@ -135,8 +140,31 @@ fn st_codegen_two_cylinder_and_assembly_station_generate() {
 
     assert!(two.contains("PROGRAM Main"));
     assert!(two.contains("CASE _state OF"));
+    assert!(two.contains("_state_trace_b0 AT %QX0.0 : BOOL;"));
+    assert!(two.contains("_state_trace_b13 AT %QX1.5 : BOOL;"));
+    assert!(two.contains("_state_trace_b0 := (_state MOD 2) >= 1;"));
+    assert!(two.contains("_state_trace_b3 := (_state MOD 16) >= 8;"));
+    assert!(two.contains("CONFIGURATION Config0"));
+    assert!(two.contains("TASK MainTask(INTERVAL := T#10ms, PRIORITY := 0);"));
     assert!(assembly.contains("PROGRAM Main"));
     assert!(assembly.contains("CASE _state OF"));
+    assert!(assembly.contains("_state_trace_b0 AT %QX0.0 : BOOL;"));
+    assert!(assembly.contains("CONFIGURATION Config0"));
+}
+
+#[test]
+fn st_codegen_cli_allows_custom_task_interval() {
+    let dir = unique_temp_dir("st_codegen_task_interval");
+    let out_st = dir.join("two_cylinder_25ms.st");
+
+    run_gen_st_with_extra_args(
+        &example_path("two_cylinder.plc"),
+        &out_st,
+        &["--task-interval-ms", "25"],
+    );
+
+    let rendered = fs::read_to_string(&out_st).expect("should read generated st");
+    assert!(rendered.contains("TASK MainTask(INTERVAL := T#25ms, PRIORITY := 0);"));
 }
 
 #[test]
@@ -214,6 +242,14 @@ fn st_codegen_two_cylinder_compiles_with_matiec() {
         dir.join("POUS.h").exists(),
         "iec2c should produce POUS.h for two_cylinder"
     );
+    assert!(
+        dir.join("Config0.c").exists(),
+        "iec2c should produce Config0.c for two_cylinder"
+    );
+    assert!(
+        dir.join("Res0.c").exists(),
+        "iec2c should produce Res0.c for two_cylinder"
+    );
 }
 
 #[test]
@@ -242,5 +278,13 @@ fn st_codegen_assembly_station_compiles_with_matiec() {
     assert!(
         dir.join("POUS.h").exists(),
         "iec2c should produce POUS.h for assembly_station"
+    );
+    assert!(
+        dir.join("Config0.c").exists(),
+        "iec2c should produce Config0.c for assembly_station"
+    );
+    assert!(
+        dir.join("Res0.c").exists(),
+        "iec2c should produce Res0.c for assembly_station"
     );
 }

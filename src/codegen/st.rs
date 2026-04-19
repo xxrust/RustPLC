@@ -9,6 +9,8 @@ use std::fmt;
 const STATE_ID_STRIDE: i32 = 10;
 const RESERVED_INTERNAL_ERROR_STATE_ID: i32 = 9999;
 const INTERNAL_STATE_VAR: &str = "_state";
+const INTERNAL_STATE_TRACE_PREFIX: &str = "_state_trace_b";
+const INTERNAL_STATE_TRACE_BITS: u8 = 14;
 const INTERNAL_TIMER_PREFIX: &str = "_timer_";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +18,7 @@ pub struct StCodegenConfig {
     pub program_name: String,
     pub source_file: String,
     pub include_verification_summary: bool,
+    pub task_interval_ms: u64,
 }
 
 impl Default for StCodegenConfig {
@@ -24,6 +27,7 @@ impl Default for StCodegenConfig {
             program_name: "Main".to_string(),
             source_file: String::new(),
             include_verification_summary: true,
+            task_interval_ms: 10,
         }
     }
 }
@@ -222,8 +226,10 @@ pub fn generate_st(
         &timers,
         &resolved_variables.declarations,
     );
+    emit_trace_var_block(&mut out);
     emit_state_constants_comment(&mut out, &erased_state_machine, &state_ids);
     emit_timer_calls(&mut out, &timers);
+    emit_trace_exports(&mut out);
     emit_case_block(
         &mut out,
         &erased_state_machine,
@@ -231,7 +237,8 @@ pub fn generate_st(
         &transitions_by_state,
         &resolved_variables,
     );
-    out.push_str("END_PROGRAM\n");
+    out.push_str("END_PROGRAM\n\n");
+    emit_openplc_configuration(&mut out, config);
 
     Ok(out)
 }
@@ -592,6 +599,18 @@ fn emit_var_block(
     out.push_str("END_VAR\n\n");
 }
 
+fn emit_trace_var_block(out: &mut String) {
+    out.push_str("VAR\n");
+    for bit in 0..INTERNAL_STATE_TRACE_BITS {
+        let byte = bit / 8;
+        let offset = bit % 8;
+        out.push_str(&format!(
+            "    {INTERNAL_STATE_TRACE_PREFIX}{bit} AT %QX{byte}.{offset} : BOOL;\n"
+        ));
+    }
+    out.push_str("END_VAR\n\n");
+}
+
 fn emit_state_constants_comment(
     out: &mut String,
     state_machine: &StateMachine,
@@ -623,6 +642,17 @@ fn emit_timer_calls(out: &mut String, timers: &BTreeMap<i32, u64>) {
     }
 }
 
+fn emit_trace_exports(out: &mut String) {
+    for bit in 0..INTERNAL_STATE_TRACE_BITS {
+        let mask = 1_i32 << bit;
+        out.push_str(&format!(
+            "{INTERNAL_STATE_TRACE_PREFIX}{bit} := ({INTERNAL_STATE_VAR} MOD {}) >= {mask};\n",
+            mask * 2
+        ));
+    }
+    out.push('\n');
+}
+
 fn emit_case_block(
     out: &mut String,
     state_machine: &StateMachine,
@@ -645,6 +675,11 @@ fn emit_case_block(
         if let Some(transitions) = transitions_by_state.get(&state_id) {
             emit_actions(out, transitions, resolved_variables);
             emit_guard_branches(out, state_id, transitions, state_ids, resolved_variables);
+        } else {
+            // OpenPLC rejects empty CASE arms, so terminal states must still emit a valid statement.
+            out.push_str(&format!(
+                "        {INTERNAL_STATE_VAR} := {INTERNAL_STATE_VAR};\n"
+            ));
         }
 
         out.push('\n');
@@ -670,6 +705,21 @@ fn emit_actions(
             }
         }
     }
+}
+
+fn emit_openplc_configuration(out: &mut String, config: &StCodegenConfig) {
+    let task_interval_ms = config.task_interval_ms.max(1);
+    out.push_str("CONFIGURATION Config0\n\n");
+    out.push_str("  RESOURCE Res0 ON PLC\n");
+    out.push_str(&format!(
+        "    TASK MainTask(INTERVAL := T#{task_interval_ms}ms, PRIORITY := 0);\n"
+    ));
+    out.push_str(&format!(
+        "    PROGRAM Inst0 WITH MainTask : {};\n",
+        config.program_name
+    ));
+    out.push_str("  END_RESOURCE\n");
+    out.push_str("END_CONFIGURATION\n");
 }
 
 fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariables) -> String {
@@ -1738,6 +1788,40 @@ mod tests {
         assert!(st.contains("(* LOG: trip *)"));
         assert!(st.contains("valve_a := TRUE;"));
         assert!(st.contains("_state := 20;"));
+        assert!(st.contains("CONFIGURATION Config0"));
+        assert!(st.contains("TASK MainTask(INTERVAL := T#10ms, PRIORITY := 0);"));
+    }
+
+    #[test]
+    fn generate_st_emits_noop_for_terminal_case_arm() {
+        let s0 = state("main", "idle");
+        let s1 = state("done", "halt");
+
+        let sm = StateMachine {
+            states: vec![s0.clone(), s1.clone()],
+            transitions: vec![Transition {
+                from: s0.clone(),
+                to: s1.clone(),
+                guard: TransitionGuard::Always,
+                actions: vec![],
+                effects: vec![],
+                timers: vec![],
+            }],
+            initial: s0,
+            analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
+        };
+
+        let st = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("codegen should succeed");
+
+        assert!(st.contains("10: (* done.halt *)"));
+        assert!(st.contains("_state := _state;"));
     }
 
     #[test]
