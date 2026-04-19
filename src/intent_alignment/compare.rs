@@ -35,6 +35,7 @@ struct MatchedOccurrence {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RawMatchedOccurrence {
     milestone_id: String,
+    cycle_index: usize,
     tick: u64,
     evidence_indices: Vec<usize>,
 }
@@ -602,7 +603,6 @@ fn matched_occurrences(
     spec: &ExpectedBehaviorSpec,
     observed: &ObservedBehaviorSequence,
 ) -> Vec<MatchedOccurrence> {
-    let groups_by_tick = grouped_entries_by_tick(observed);
     let groups = grouped_entries(observed);
     let milestone_rank = milestone_rank(spec);
     let mut raw_matches = Vec::new();
@@ -622,6 +622,7 @@ fn matched_occurrences(
                 if snapshot_matches_binding(cycle.cycle_start_snapshot.as_ref(), binding) {
                     raw_matches.push(RawMatchedOccurrence {
                         milestone_id: milestone_id.clone(),
+                        cycle_index: cycle.cycle_index,
                         tick: cycle.start_tick,
                         evidence_indices: groups
                             .get(&(cycle.cycle_index, cycle.start_tick))
@@ -648,6 +649,7 @@ fn matched_occurrences(
                 if snapshot_matches_binding(cycle.successful_cycle_end_snapshot.as_ref(), binding) {
                     raw_matches.push(RawMatchedOccurrence {
                         milestone_id: milestone_id.clone(),
+                        cycle_index: cycle.cycle_index,
                         tick,
                         evidence_indices: groups
                             .get(&(cycle.cycle_index, tick))
@@ -663,7 +665,7 @@ fn matched_occurrences(
 
         match binding.combination {
             ObservationCombination::AllOf => {
-                for (tick, indices) in &groups_by_tick {
+                for ((cycle_index, tick), indices) in &groups {
                     if binding
                         .evidence
                         .iter()
@@ -671,6 +673,7 @@ fn matched_occurrences(
                     {
                         raw_matches.push(RawMatchedOccurrence {
                             milestone_id: milestone_id.clone(),
+                            cycle_index: *cycle_index,
                             tick: *tick,
                             evidence_indices: indices.clone(),
                         });
@@ -678,7 +681,7 @@ fn matched_occurrences(
                 }
             }
             ObservationCombination::AnyOf => {
-                for (tick, indices) in &groups_by_tick {
+                for ((cycle_index, tick), indices) in &groups {
                     if binding
                         .evidence
                         .iter()
@@ -686,6 +689,7 @@ fn matched_occurrences(
                     {
                         raw_matches.push(RawMatchedOccurrence {
                             milestone_id: milestone_id.clone(),
+                            cycle_index: *cycle_index,
                             tick: *tick,
                             evidence_indices: indices.clone(),
                         });
@@ -716,6 +720,7 @@ fn matched_occurrences(
                     if next_expected == binding.evidence.len() {
                         raw_matches.push(RawMatchedOccurrence {
                             milestone_id: milestone_id.clone(),
+                            cycle_index,
                             tick: last_tick.unwrap_or(0),
                             evidence_indices: matched_indices,
                         });
@@ -726,8 +731,9 @@ fn matched_occurrences(
     }
 
     raw_matches.sort_by(|left, right| {
-        left.tick
-            .cmp(&right.tick)
+        left.cycle_index
+            .cmp(&right.cycle_index)
+            .then_with(|| left.tick.cmp(&right.tick))
             .then_with(|| {
                 milestone_rank
                     .get(&left.milestone_id)
@@ -743,18 +749,12 @@ fn matched_occurrences(
             .then_with(|| left.milestone_id.cmp(&right.milestone_id))
     });
 
-    let mut next_cycle_by_milestone = BTreeMap::<String, usize>::new();
     let mut matches = raw_matches
         .into_iter()
         .map(|matched| {
-            let cycle_index = next_cycle_by_milestone
-                .entry(matched.milestone_id.clone())
-                .or_insert(0);
-            let current_cycle = *cycle_index;
-            *cycle_index += 1;
             MatchedOccurrence {
                 milestone_id: matched.milestone_id,
-                cycle_index: current_cycle,
+                cycle_index: matched.cycle_index,
                 tick: matched.tick,
                 evidence_indices: matched.evidence_indices,
             }
@@ -798,14 +798,6 @@ fn grouped_entries(observed: &ObservedBehaviorSequence) -> BTreeMap<(usize, u64)
             .entry((entry.cycle_index, entry.tick))
             .or_insert_with(Vec::new)
             .push(index);
-    }
-    groups
-}
-
-fn grouped_entries_by_tick(observed: &ObservedBehaviorSequence) -> BTreeMap<u64, Vec<usize>> {
-    let mut groups = BTreeMap::new();
-    for (index, entry) in observed.evidence.iter().enumerate() {
-        groups.entry(entry.tick).or_insert_with(Vec::new).push(index);
     }
     groups
 }
