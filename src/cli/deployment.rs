@@ -42,6 +42,10 @@ pub(super) fn try_dispatch(
             Some("[BLD-000]"),
             run_build_rp2040_subcommand(program, remaining.iter().cloned()),
         ),
+        "build-renode-stm32" => (
+            Some("[BLD-000]"),
+            run_build_renode_stm32_subcommand(program, remaining.iter().cloned()),
+        ),
         "release-bundle" => (
             None,
             run_release_bundle_subcommand(program, remaining.iter().cloned()),

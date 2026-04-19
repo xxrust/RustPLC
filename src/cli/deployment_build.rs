@@ -315,6 +315,153 @@ Start from the generated `io_map.template.toml` under `--out <dir>` and fill in 
     Ok(())
 }
 
+fn run_build_renode_stm32_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = "Usage: ".to_string()
+        + program
+        + " build-renode-stm32 <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out <dir> [--output <human|json>]";
+    let Some(plc_path) = args.next() else {
+        return Err(usage);
+    };
+
+    let mut scenario_path: Option<PathBuf> = None;
+    let mut out_dir: Option<PathBuf> = None;
+    let mut output_mode = CliOutputMode::Human;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scenario" => {
+                scenario_path = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "Missing value for --scenario <scenario.yaml>".to_string())?,
+                ));
+            }
+            "--out" => {
+                out_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "Missing value for --out <dir>".to_string()
+                    })?));
+            }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid --output value `{raw}` (expected `human` or `json`)")
+                })?;
+            }
+            "-h" | "--help" => return Err(usage.clone()),
+            other => return Err(format!("Unknown argument for build-renode-stm32: {other}")),
+        }
+    }
+
+    let scenario_path = scenario_path.ok_or_else(|| usage.clone())?;
+    let out_dir = out_dir.ok_or_else(|| usage.clone())?;
+    fs::create_dir_all(&out_dir)
+        .map_err(|err| format!("Failed to create out dir {out_dir:?}: {err}"))?;
+
+    let loaded = load_plc_source(Path::new(&plc_path))?;
+    let scenario_yaml = read_scenario_yaml_file(&scenario_path)?;
+    let scenario_yaml =
+        resolve_scenario_yaml_for_plc(&loaded.source, &scenario_yaml).map_err(|e| {
+            format_resolve_scenario_yaml_error(&plc_path, &scenario_path, "build-renode-stm32", &e)
+        })?;
+    let scenario = parse_scenario_yaml(&scenario_yaml)?;
+
+    let plc_source = loaded.source.clone();
+    let plc_bytes = plc_source.as_bytes().to_vec();
+    let sha256 = {
+        let mut h = Sha256::new();
+        h.update(&plc_bytes);
+        hex::encode(h.finalize())
+    };
+
+    let ir_bundle = compile_pipeline(&loaded).map_err(|errors| errors.join("\n\n"))?;
+    let runtime_program = state_machine_to_runtime_program(
+        &ir_bundle.topology,
+        &ir_bundle.constraints,
+        &ir_bundle.state_machine,
+        scenario.tick_ms,
+    )
+    .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
+    let generated_src = codegen::generate_program_module(&runtime_program, "generated")
+        .map_err(|err| format!("Codegen failed: {err:?}"))?;
+    let generated_path = out_dir.join("generated_program.rs");
+    fs::write(&generated_path, ensure_trailing_newline(generated_src))
+        .map_err(|err| format!("Failed to write {generated_path:?}: {err}"))?;
+
+    let scenario_out_path = out_dir.join("scenario.resolved.yaml");
+    fs::write(&scenario_out_path, &scenario_yaml)
+        .map_err(|err| format!("Failed to write {scenario_out_path:?}: {err}"))?;
+
+    let generated_at = time::OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string());
+    let git_metadata = detect_git_metadata();
+    let meta = BuildMeta {
+        plc_sha256: &sha256,
+        generated_at: &generated_at,
+        tool_version: env!("CARGO_PKG_VERSION"),
+        runtime_semver: runtime_core::VERSION,
+        git_commit: &git_metadata.commit,
+        git_dirty: git_metadata.dirty,
+        runtime_budget: ir_bundle.runtime_budget.summary(),
+        realtime_profile: RealtimeProfile {
+            tick_ms: scenario.tick_ms,
+            thresholds: RealtimeThresholdConfig {
+                max_p99_exec_us: None,
+                max_overrun_count: None,
+            },
+            overrun_count: 0,
+            p99_exec_us: 0,
+        },
+        io_map: None,
+    };
+    let mut meta_json = serde_json::to_string_pretty(&meta)
+        .map_err(|err| format!("Failed to serialize build_meta.json: {err}"))?;
+    meta_json.push('\n');
+    let meta_path = out_dir.join("build_meta.json");
+    fs::write(&meta_path, meta_json)
+        .map_err(|err| format!("Failed to write {meta_path:?}: {err}"))?;
+
+    let elf_path = emit_renode_stm32_elf(&generated_path, &scenario_out_path, &out_dir)?;
+
+    if output_mode == CliOutputMode::Json {
+        #[derive(Serialize)]
+        struct BuildRenodeJson {
+            schema_version: u32,
+            command: &'static str,
+            output: &'static str,
+            status: &'static str,
+            out_dir: String,
+            artifacts: BTreeMap<&'static str, String>,
+        }
+        let mut artifacts = BTreeMap::<&'static str, String>::new();
+        artifacts.insert(
+            "generated_program",
+            display_path_relative_to_cwd(&generated_path),
+        );
+        artifacts.insert("scenario", display_path_relative_to_cwd(&scenario_out_path));
+        artifacts.insert("elf", display_path_relative_to_cwd(&elf_path));
+        artifacts.insert("build_meta", display_path_relative_to_cwd(&meta_path));
+        let payload = BuildRenodeJson {
+            schema_version: 1,
+            command: "build-renode-stm32",
+            output: output_mode.as_str(),
+            status: "pass",
+            out_dir: display_path_relative_to_cwd(&out_dir),
+            artifacts,
+        };
+        let mut json = serde_json::to_string_pretty(&payload)
+            .map_err(|err| format!("Failed to serialize build-renode-stm32 JSON output: {err}"))?;
+        json.push('\n');
+        print!("{json}");
+    }
+
+    Ok(())
+}
+
 
 fn tool_command(bin: &str) -> std::process::Command {
     #[cfg(windows)]
@@ -332,6 +479,63 @@ fn tool_command(bin: &str) -> std::process::Command {
         }
     }
     std::process::Command::new(bin)
+}
+
+fn ensure_trailing_newline(mut text: String) -> String {
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text
+}
+
+fn emit_renode_stm32_elf(
+    generated_program_rs: &Path,
+    scenario_yaml: &Path,
+    out_dir: &Path,
+) -> Result<PathBuf, String> {
+    let generated_program_rs = absolutize_path(generated_program_rs)?;
+    let scenario_yaml = absolutize_path(scenario_yaml)?;
+    let out_dir = absolutize_path(out_dir)?;
+    fs::create_dir_all(&out_dir)
+        .map_err(|err| format!("Failed to create Renode build output dir {out_dir:?}: {err}"))?;
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let cargo_bin = env::var("RUST_PLC_CARGO_BIN").unwrap_or_else(|_| "cargo".to_string());
+    let target_dir = out_dir.join("cargo-target");
+    let cargo = tool_command(&cargo_bin)
+        .current_dir(&repo_root)
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .env("RUSTFLAGS", "-C link-arg=-Tlink.x")
+        .env("RUST_PLC_GENERATED_PROGRAM_RS", &generated_program_rs)
+        .env("RUST_PLC_SCENARIO_YAML", &scenario_yaml)
+        .arg("build")
+        .arg("-p")
+        .arg("board-renode-stm32")
+        .arg("--target")
+        .arg("thumbv7em-none-eabi")
+        .arg("--release")
+        .output()
+        .map_err(|err| {
+            format!("Failed to run cargo for Renode STM32 firmware build (bin={cargo_bin}): {err}")
+        })?;
+    if !cargo.status.success() {
+        return Err(format!(
+            "Renode STM32 firmware build failed.\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&cargo.stdout),
+            String::from_utf8_lossy(&cargo.stderr)
+        ));
+    }
+
+    let built_elf = target_dir.join("thumbv7em-none-eabi/release/board-renode-stm32");
+    if !built_elf.exists() {
+        return Err(format!(
+            "Expected Renode STM32 firmware ELF does not exist after build: {built_elf:?}"
+        ));
+    }
+    let elf_out = out_dir.join("board-renode-stm32.elf");
+    fs::copy(&built_elf, &elf_out)
+        .map_err(|err| format!("Failed to copy Renode STM32 ELF to {elf_out:?}: {err}"))?;
+    Ok(elf_out)
 }
 
 fn emit_rp2040_uf2(

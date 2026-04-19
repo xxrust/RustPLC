@@ -54,6 +54,12 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
     },
     CliCommandHelp {
         section: "Deployment",
+        name: "build-renode-stm32",
+        summary: "Build a Renode-ready STM32F4 Discovery firmware ELF from a PLC file and scenario.",
+        usage_template: "Usage: {program} build-renode-stm32 <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out <dir> [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Deployment",
         name: "release-bundle",
         summary: "Assemble a no-board release bundle with scenario, build, and timing artifacts.",
         usage_template: "Usage: {program} release-bundle <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--io-map <file>] [--max-p99-exec-us <us>] [--max-overrun-count <n>]",
@@ -194,7 +200,7 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         section: "Utilities",
         name: "gen-st",
         summary: "Generate IEC 61131-3 ST output from a PLC file.",
-        usage_template: "Usage: {program} gen-st <source.plc|source.bundle.toml> [--out <output.st>] [--program-name <Main>] [--no-verification-summary]",
+        usage_template: "Usage: {program} gen-st <source.plc|source.bundle.toml> [--out <output.st>] [--program-name <Main>] [--task-interval-ms <ms>] [--no-verification-summary]",
     },
 ];
 
@@ -255,6 +261,11 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--io-map <file>              Validate and embed an explicit IO map.",
             "--analog-calibration <file>  Apply analog scaling/offset calibration.",
             "--emit-uf2 <file.uf2>        Produce a flashable UF2 image.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "build-renode-stm32" => &[
+            "--scenario <scenario.yaml>   Required scenario compiled into the ELF.",
+            "--out <dir>                  Required build output directory.",
             "--output <human|json>        Select CLI output format.",
         ],
         "release-bundle" => &[
@@ -384,6 +395,7 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
         "gen-st" => &[
             "--out <output.st>            Write ST output to a file instead of stdout.",
             "--program-name <Main>        Override the emitted ST program name.",
+            "--task-interval-ms <ms>      Override the OpenPLC cyclic task interval in ms.",
             "--no-verification-summary    Omit verification comments from ST output.",
         ],
         _ => &[],
@@ -407,6 +419,9 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
         "build-rp2040" => {
             &["`--emit-uf2` requires `--io-map` so the board pin contract is explicit."]
         }
+        "build-renode-stm32" => &[
+            "This command embeds both the generated runtime program and the resolved scenario into a local STM32F4 Discovery firmware image for Renode.",
+        ],
         "release-bundle" => &[
             "The bundle reuses compile, simulation, timing, and gate artifacts instead of inventing a parallel flow.",
         ],
@@ -463,6 +478,9 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         ],
         "build-rp2040" => &[
             "rust_plc build-rp2040 examples/rp2040_motion_minimal.plc --out out/rp2040 --io-map examples/rp2040_motion_minimal.io_map.toml",
+        ],
+        "build-renode-stm32" => &[
+            "rust_plc build-renode-stm32 examples/pil_baselines/case_timeout/case.plc --scenario examples/pil_baselines/case_timeout/scenarios/base.yaml --out out/renode_case_timeout",
         ],
         "release-bundle" => &[
             "rust_plc release-bundle examples/assembly_station.plc --scenario scenarios/normal.yaml --out-dir out/release/assembly_station",

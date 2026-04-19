@@ -33,6 +33,7 @@ members = [
   "crates/runtime-core",
   "crates/sim",
   "crates/board-rp2040",
+  "crates/board-renode-stm32",
   "crates/codegen",
   "crates/web-server",
 ]
