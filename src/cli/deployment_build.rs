@@ -464,6 +464,12 @@ fn run_build_renode_stm32_subcommand(
 
 
 fn tool_command(bin: &str) -> std::process::Command {
+    if let Some((program, args)) = split_command_prefix(bin) {
+        let mut cmd = std::process::Command::new(program);
+        cmd.args(args);
+        return cmd;
+    }
+
     #[cfg(windows)]
     {
         let lower = bin.to_ascii_lowercase();
@@ -479,6 +485,51 @@ fn tool_command(bin: &str) -> std::process::Command {
         }
     }
     std::process::Command::new(bin)
+}
+
+fn split_command_prefix(raw: &str) -> Option<(&str, Vec<&str>)> {
+    let parts: Vec<&str> = raw.split_whitespace().collect();
+    if parts.len() <= 1 {
+        return None;
+    }
+    Some((parts[0], parts[1..].to_vec()))
+}
+
+fn uses_wsl_command_prefix(raw: &str) -> bool {
+    split_command_prefix(raw)
+        .map(|(program, _)| program.eq_ignore_ascii_case("wsl"))
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn windows_path_to_wsl(path: &Path) -> Option<PathBuf> {
+    use std::path::{Component, Prefix};
+
+    let mut components = path.components();
+    let drive = match components.next()? {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+                (letter as char).to_ascii_lowercase()
+            }
+            _ => return None,
+        },
+        _ => return None,
+    };
+
+    let mut out = PathBuf::from(format!("/mnt/{drive}"));
+    for component in components {
+        match component {
+            Component::RootDir => {}
+            Component::Normal(part) => out.push(part),
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+#[cfg(not(windows))]
+fn windows_path_to_wsl(_path: &Path) -> Option<PathBuf> {
+    None
 }
 
 fn ensure_trailing_newline(mut text: String) -> String {
@@ -502,12 +553,27 @@ fn emit_renode_stm32_elf(
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let cargo_bin = env::var("RUST_PLC_CARGO_BIN").unwrap_or_else(|_| "cargo".to_string());
     let target_dir = out_dir.join("cargo-target");
+    let target_dir_for_process = if uses_wsl_command_prefix(&cargo_bin) {
+        windows_path_to_wsl(&target_dir).unwrap_or_else(|| target_dir.clone())
+    } else {
+        target_dir.clone()
+    };
+    let generated_program_for_process = if uses_wsl_command_prefix(&cargo_bin) {
+        windows_path_to_wsl(&generated_program_rs).unwrap_or_else(|| generated_program_rs.clone())
+    } else {
+        generated_program_rs.clone()
+    };
+    let scenario_yaml_for_process = if uses_wsl_command_prefix(&cargo_bin) {
+        windows_path_to_wsl(&scenario_yaml).unwrap_or_else(|| scenario_yaml.clone())
+    } else {
+        scenario_yaml.clone()
+    };
     let cargo = tool_command(&cargo_bin)
         .current_dir(&repo_root)
-        .env("CARGO_TARGET_DIR", &target_dir)
+        .env("CARGO_TARGET_DIR", &target_dir_for_process)
         .env("RUSTFLAGS", "-C link-arg=-Tlink.x")
-        .env("RUST_PLC_GENERATED_PROGRAM_RS", &generated_program_rs)
-        .env("RUST_PLC_SCENARIO_YAML", &scenario_yaml)
+        .env("RUST_PLC_GENERATED_PROGRAM_RS", &generated_program_for_process)
+        .env("RUST_PLC_SCENARIO_YAML", &scenario_yaml_for_process)
         .arg("build")
         .arg("-p")
         .arg("board-renode-stm32")

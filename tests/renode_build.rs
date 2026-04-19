@@ -3,18 +3,15 @@ use std::process::Command;
 
 #[test]
 fn cli_build_renode_stm32_emits_expected_artifacts() {
-    let target_available = Command::new("wsl")
-        .args([
-            "-e",
-            "bash",
-            "-lc",
-            "rustup target list --installed | grep -q '^thumbv7em-none-eabi$'",
-        ])
-        .status()
-        .map(|status| status.success())
+    let target_available = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|stdout| stdout.lines().any(|line| line.trim() == "thumbv7em-none-eabi"))
         .unwrap_or(false);
     if !target_available {
-        eprintln!("skip: WSL thumbv7em-none-eabi target not installed");
+        eprintln!("skip: host thumbv7em-none-eabi target not installed");
         return;
     }
 
