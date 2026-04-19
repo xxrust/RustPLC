@@ -2,7 +2,7 @@
 
 See the full Chinese methodology doc:
 
-- `docs/diagnostics_backend_methodology.md`
+- `docs/已实现/diagnostics_backend_methodology.md`
 
 Quick entrypoints:
 

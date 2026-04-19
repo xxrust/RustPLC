@@ -2,7 +2,7 @@
 
 Date: 2026-02-19
 
-Canonical document: `docs/commissioning_playbook.md`
+Canonical document: `docs/已实现/commissioning_playbook.md`
 
 Covers one chained workflow across:
 

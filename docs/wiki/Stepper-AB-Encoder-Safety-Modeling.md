@@ -5,8 +5,8 @@ Date: 2026-02-18
 This is a repo-local Wiki draft meant to be readable offline.
 
 Source of truth:
-- `docs/stepper_ab_encoder.md` (this draft should stay terminology-compatible with it)
-- Scenario workflow: `docs/scenario_playbook.md`
+- `docs/已实现/stepper_ab_encoder.md` (this draft should stay terminology-compatible with it)
+- Scenario workflow: `docs/已实现/scenario_playbook.md`
 
 ## Scope
 
@@ -79,7 +79,7 @@ For stable safety modeling, pair the rule set with scenario regression:
 - At least 1 “wrong direction / bad sign” case.
 - At least 1 alarm-triggered fault case.
 
-See `docs/scenario_playbook.md` for scenario authoring + `scenario-validate` + `sim-plc` + batch regression.
+See `docs/已实现/scenario_playbook.md` for scenario authoring + `scenario-validate` + `sim-plc` + batch regression.
 
 Repo fixtures you can copy/adapt:
 - `examples/stepper_collision_guard.plc` + `scenarios/stepper_collision_guard/*.yaml`

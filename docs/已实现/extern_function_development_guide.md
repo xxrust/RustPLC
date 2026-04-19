@@ -4,7 +4,7 @@ Status: **Published for rollout (US-018)**
 
 This guide explains how to design extern contracts, implement Rust handlers, and write DSL flows that keep deterministic control logic in RustPLC while offloading heavy math to Rust.
 
-For the frozen grammar/contract surface, always treat `docs/extern_function_mvp_spec.md` as the source of truth.
+For the frozen grammar/contract surface, always treat `docs/已实现/extern_function_mvp_spec.md` as the source of truth.
 
 ## 1) Development workflow
 
@@ -317,7 +317,7 @@ Use this sequence when migrating expression-heavy DSL logic to extern calls:
 
 ## 7) Reference links
 
-- Frozen grammar and syntax contract: `docs/extern_function_mvp_spec.md`
+- Frozen grammar and syntax contract: `docs/已实现/extern_function_mvp_spec.md`
 - Runtime contract enforcement and registry APIs: `src/extern_functions.rs`
 - Runtime extern execution APIs: `crates/runtime-core/src/lib.rs`
 - End-to-end extern integration tests: `tests/runtime_bridge_us006.rs`

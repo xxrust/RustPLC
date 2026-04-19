@@ -2,7 +2,7 @@
 
 Date: 2026-02-19
 
-- Canonical doc: `docs/runtime_online_variable_control.md`
+- Canonical doc: `docs/已实现/runtime_online_variable_control.md`
 - Command surface (sim-plc):
   - `--enable-online-force-dev`
   - `--online-var-script <script.jsonl>`

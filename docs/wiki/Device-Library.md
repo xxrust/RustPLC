@@ -149,4 +149,4 @@ task cycle:
 | `src/parser/plc.pest` | `state_reference` 三段规则、`action_target` 规则 |
 | `src/semantic/mod.rs` | `inject_device_constraints`、`expand_port_state_ref` |
 | `devices/*.toml` | 设备库定义文件 |
-| `docs/device-library-design.md` | 完整设计方案（v3.1） |
+| `docs/已实现/device-library-design.md` | 完整设计方案（v3.1） |

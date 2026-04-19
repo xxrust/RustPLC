@@ -2,7 +2,7 @@
 
 对应详细文档：
 
-- `docs/component_library_fault_model_migration.md`
+- `docs/已实现/component_library_fault_model_migration.md`
 
 ## 快速命令
 

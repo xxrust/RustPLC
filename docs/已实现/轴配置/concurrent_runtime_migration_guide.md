@@ -54,7 +54,7 @@
 并发 runtime 与四类 verification 的 CI 门禁统一脚本：
 
 - `scripts/concurrent_runtime_verification_gate.sh`
-- 端到端分阶段验收基线：`docs/concurrent_runtime_e2e_acceptance_baseline.md`
+- 端到端分阶段验收基线：`docs/已实现/轴配置/concurrent_runtime_e2e_acceptance_baseline.md`
 
 本地复现命令序列：
 

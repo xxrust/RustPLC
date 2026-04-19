@@ -16,7 +16,7 @@ cargo run --release -- new my_plc_project
 - `scenarios/nominal/normal.yaml`
 - `config/io_map.toml`
 - `config/retain.toml`
-- `docs/project-layout.md`
+- `docs/project-layout.md` (generated per-project note)
 - `.gitignore`
 - `.github/workflows/no_board_gate.yml`
 - `.vscode/tasks.json` + `.vscode/settings.json` + `.vscode/extensions.json`
@@ -24,6 +24,14 @@ cargo run --release -- new my_plc_project
 - `.vscode/README.md`
 
 Project name is derived from `new <project_dir>` and injected into `README.md`, `plc/main.system.md`, and `rustplc.project.toml`.
+
+Authoritative boundary:
+
+- the formal requirements entry of a generated project is `plc/main.system.md`
+- the generated `docs/project-layout.md` belongs to that project itself
+- the repository-level layout contract lives in `docs/已实现/generated_project_layout_spec.md`
+- `examples/*.system.md` are sample assets, not project entrypoints
+- `docs/patent_collected/**` and `docs/web_collected/**` are research assets, not project entrypoints
 
 ## VS Code Day-1 Package
 
@@ -41,6 +49,12 @@ Project name is derived from `new <project_dir>` and injected into `README.md`, 
   - `plc-wait-timeout`
 
 ## First Checks
+
+Change into the generated project directory first:
+
+```bash
+cd my_plc_project
+```
 
 ```bash
 cargo run --release -- scenario-validate plc/main.plc --scenario scenarios/nominal/normal.yaml --output human

@@ -198,8 +198,8 @@ If there are still stories with `passes: false`, end your response normally (ano
 ### 外部函数文档
 
 - 保持两层文档：
-  - `docs/extern_function_mvp_spec.md`：冻结的语法合约（字段/默认/非目标边界）
-  - `docs/extern_function_development_guide.md`：推出指导、实际示例、迁移说明
+  - `docs/已实现/extern_function_mvp_spec.md`：冻结的语法合约（字段/默认/非目标边界）
+  - `docs/已实现/extern_function_development_guide.md`：推出指导、实际示例、迁移说明
 - 通过将规范视为不可变来避免规范漂移；所有指导放在开发指南中
 ## 操作合约（EXOP）系统
 

@@ -2,7 +2,7 @@
 
 日期：2026-02-18
 
-本页是对 `docs/fail_safe_safe_state.md` 的“可执行落地版”补充：把安全态策略如何进入 `io_map.toml`、如何被固化到固件、以及固件在运行时何时触发 Safe State 说明清楚。
+本页是对 `docs/已实现/fail_safe_safe_state.md` 的“可执行落地版”补充：把安全态策略如何进入 `io_map.toml`、如何被固化到固件、以及固件在运行时何时触发 Safe State 说明清楚。
 
 ## 1. 目标
 
@@ -72,7 +72,6 @@ group = 30
 
 ## 5. 相关文档
 
-- 设计口径：`docs/fail_safe_safe_state.md`
+- 设计口径：`docs/已实现/fail_safe_safe_state.md`
 - RP2040 固件实现：`crates/board-rp2040/src/main.rs`
 - io_map 解析与模板：`src/io_map.rs`、`src/main.rs`（io_map.template.toml 生成）
-

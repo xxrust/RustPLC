@@ -5,9 +5,8 @@ Date: 2026-02-19
 This is a repo-local Wiki draft meant to be readable offline.
 
 Source of truth:
-- Motion overview: `docs/board_rp2040.md`
-- Virtual channels mapping: `docs/motion_virtual_channels.md`
-- io_map delta note: `docs/motion_io_map_format_delta.md`
+- Motion overview: `docs/已实现/board_rp2040.md`
+- io_map delta note: `docs/已实现/motion_io_map_format_delta.md`
 
 ## Goal
 
@@ -73,4 +72,3 @@ cargo build -p board-rp2040 --target thumbv6m-none-eabi --release
 - If the regression test fails, inspect the emitted trace JSONL and confirm:
   - at least one transition has `reason == "timeout"` for fault scenarios
   - the nominal scenario completes without timeouts
-

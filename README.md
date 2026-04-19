@@ -72,7 +72,7 @@ cargo run --release --bin rust_plc -- examples/two_cylinder.plc --no-print-ir
 
 > ⚠️ **强制审核规则（自 2026-02-24 起）**：每个 `device` 必须声明 `purpose`，缺失将直接导致 Semantic Gate 校验失败。
 >
-> 🔄 **兼容说明（~ 2026-06-30）**：旧版 `connected_to` 或端口作为设备的写法仍可运行，但会给出 `WARN` 级迁移提示。
+> 🔄 **拓扑约束说明**：旧版 `connected_to` 与“端口直接充当设备”的写法不再作为推荐兼容路径；遇到旧工程时，应先迁移到当前拓扑/端口建模，再继续编译与生成。
 
 ---
 
@@ -149,9 +149,13 @@ cargo run --release --bin rust_plc -- scenario-validate --help
 
 进一步说明：
 
-- 目录约定文档：`docs/generated_project_layout_spec.md`
+- 目录约定文档：`docs/已实现/generated_project_layout_spec.md`
 - 脚手架说明：`docs/已实现/developer_bootstrap_pack.md`
 - 仓库内完整示例：`examples/project_scaffold_demo/`
+
+正式项目的需求入口固定为 `plc/main.system.md`。
+`examples/*.system.md` 只用于示例与回归夹具。
+`docs/patent_collected/**` 与 `docs/web_collected/**` 属于研究资料，不应当作项目正式入口。
 
 ---
 
@@ -368,20 +372,21 @@ cargo run --release --bin rust_plc -- release-bundle examples/assembly_station.p
 
 ## 📚 开发文档与资源
 
-欢迎访问我们的 **[GitHub Wiki](https://github.com/xxrust/RustPLC/wiki)** 获取详尽指南：
+当前以仓库内文档为准：
 
-- 🚀 [Quick Start](https://github.com/xxrust/RustPLC/wiki/Quick-Start) - 5 分钟上手指南
-- 📖 [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) - 完整语法参考
-- 🏗️ [Architecture](https://github.com/xxrust/RustPLC/wiki/Architecture) - 编译流水线与模块架构
-- 🔬 [Verification Engines](https://github.com/xxrust/RustPLC/wiki/Verification-Engines) - 深入了解四大形式化引擎
-- 🤖 [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) - AI 辅助编码流程
+- `AGENTS.md` - 项目总纲、源码导航、跨层改动联动路径
+- `docs/architecture/signal-direction.md` - 并发 task / blocking step 的长期语义源
+- `docs/已实现/generated_project_layout_spec.md` - `rust_plc new` 项目目录约定
+- `docs/已实现/developer_bootstrap_pack.md` - Day-1 项目初始化与脚手架说明
+- `docs/已实现/extern_function_mvp_spec.md` - extern function 冻结合同
+- `docs/已实现/extern_function_development_guide.md` - extern function 落地指南
+- `docs/已实现/semantic_resource_interlock_spec.md` - 资源互锁规范
+- `docs/已实现/semantic_resource_interlock_development_guide.md` - 资源互锁开发指南
+- `docs/已实现/workpiece_to_st_codegen_policy.md` - 工件语义进入 ST 的边界
+- `docs/已实现/轴配置/concurrent_runtime_migration_guide.md` - 并发 runtime 迁移说明
+- `docs/已实现/轴配置/concurrent_runtime_e2e_acceptance_baseline.md` - 并发 runtime 验收基线
 
-本仓库同时维护可离线阅读的 repo-local wiki 草稿，新增定位页：
-
-- 🚀 `docs/wiki/AI-for-AI-Platform-Vision.md` - RustPLC 如何从 AI 辅助 PLC 编译器演进为面向 AI 系统本身的工程平台
-- 🧩 `docs/workpiece_to_st_codegen_policy.md` - 工件语义进入 ST 时的擦除策略与边界
-
-> **📎 进阶开发者提示**：在本地 `docs/已实现/` 目录中，可查阅场景系统、在线变量控制、元件库以及 Subtype 规范等数十份详细的底层设计白皮书。
+`docs/wiki/` 中仍保留少量 repo-local wiki 草稿用于离线阅读，但它们不是项目权威规范。
 
 ---
 

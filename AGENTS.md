@@ -415,8 +415,8 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `src/runtime_bridge.rs`
 - `crates/runtime-core/src/lib.rs`
 - `src/verification/causality.rs`
-- `docs/extern_function_mvp_spec.md`
-- `docs/extern_function_development_guide.md`
+- `docs/已实现/extern_function_mvp_spec.md`
+- `docs/已实现/extern_function_development_guide.md`
 
 ### 意图对齐比较器
 
@@ -474,8 +474,8 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 先看：
 
 - `docs/architecture/signal-direction.md`
-- `docs/concurrent_runtime_e2e_acceptance_baseline.md`
-- `docs/concurrent_runtime_migration_guide.md`
+- `docs/已实现/轴配置/concurrent_runtime_e2e_acceptance_baseline.md`
+- `docs/已实现/轴配置/concurrent_runtime_migration_guide.md`
 - `.codex/skills/plc-system/SKILL.md`
 - `.codex/skills/plc-gen/SKILL.md`
 - `tests/runtime_bridge_us006.rs`
@@ -489,7 +489,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `tests/*.rs`：集成与回归测试
 - `tests/examples_integration.rs`：示例程序回归总入口
 - 并发 runtime + 四类 verification 的 CI/本地统一门禁入口：`scripts/concurrent_runtime_verification_gate.sh`
-- 并发重构的端到端分阶段验收清单：`docs/concurrent_runtime_e2e_acceptance_baseline.md`
+- 并发重构的端到端分阶段验收清单：`docs/已实现/轴配置/concurrent_runtime_e2e_acceptance_baseline.md`
 
 做改动时至少回答：
 

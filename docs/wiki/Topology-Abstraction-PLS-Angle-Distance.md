@@ -3,8 +3,8 @@
 Date: 2026-02-18
 
 This is a repo-local Wiki draft, aligned with:
-- `docs/stepper_ab_encoder.md`
-- `docs/scenario_playbook.md`
+- `docs/已实现/stepper_ab_encoder.md`
+- `docs/已实现/scenario_playbook.md`
 
 ## Problem Statement
 
@@ -95,6 +95,5 @@ task cycle:
 
 ## Cross References
 
-- Safety and rule templates: `docs/stepper_ab_encoder.md`
-- Scenario authoring and regression loop: `docs/scenario_playbook.md`
-
+- Safety and rule templates: `docs/已实现/stepper_ab_encoder.md`
+- Scenario authoring and regression loop: `docs/已实现/scenario_playbook.md`

@@ -9,7 +9,7 @@
 > 约定：以下命令默认在**仓库根目录**运行（确保 `examples/`、`scenarios/` 路径可用）。
 
 相关建模规范/规则模板：
-- 步进轴（Pulse/Dir）+ AB 编码器安全互锁建模：`docs/stepper_ab_encoder.md`
+- 步进轴（Pulse/Dir）+ AB 编码器安全互锁建模：`docs/已实现/stepper_ab_encoder.md`
 
 ## 1) 从 .plc 初始化场景骨架（推荐起点）
 
@@ -78,11 +78,11 @@ cargo run --release -- sim-regress \
 - `minimized_scenario.yaml`：最小复现场景（含来源信息 + 下一步建议）
 - `minimized_trace.jsonl` / `minimized_report.json`
 
-更详细的回灌流程见：`docs/scenario_minimization.md`
+更详细的回灌流程见：`docs/已实现/scenario_minimization.md`
 
 ## 7) 门禁（SIL vs virtual-board + 实时阈值）
 
-无开发板门禁 playbook 见：`docs/no_board_playbook.md`
+无开发板门禁 playbook 见：`docs/已实现/no_board_playbook.md`
 
 ## 常见错误（以及怎么修）
 

@@ -23,7 +23,7 @@
 **执行要求**
 
 - 人工审阅：术语必须覆盖 `active task / task context / blocking step / pending action / completion condition`
-- 迁移语义边界必须在 `docs/concurrent_runtime_migration_guide.md` 明确声明旧语义仅用于迁移对比
+- 迁移语义边界必须在 `docs/已实现/轴配置/concurrent_runtime_migration_guide.md` 明确声明旧语义仅用于迁移对比
 
 **通过判据**
 
@@ -80,7 +80,7 @@ scripts/concurrent_runtime_verification_gate.sh
 
 **必须产物**
 
-- `docs/concurrent_runtime_migration_guide.md`（迁移差异、告警码、复现命令）
+- `docs/已实现/轴配置/concurrent_runtime_migration_guide.md`（迁移差异、告警码、复现命令）
 - `scripts/concurrent_runtime_verification_gate.sh`（本地/CI 同源门禁脚本）
 - `.github/workflows/rp2040_regression.yml`（包含 `concurrent-runtime-verification-gate` 任务）
 

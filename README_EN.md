@@ -343,15 +343,23 @@ Full documentation available on **[GitHub Wiki](https://github.com/xxrust/RustPL
 | [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) | AI generation workflow |
 | [Contributing](https://github.com/xxrust/RustPLC/wiki/Contributing) | Development guide |
 
-**Local Documentation (in repo):**
-- Optimization pipeline: [`docs/wiki/PLC-Optimization-Pipeline.md`](docs/wiki/PLC-Optimization-Pipeline.md)
-- Platform vision: [`docs/wiki/AI-for-AI-Platform-Vision.md`](docs/wiki/AI-for-AI-Platform-Vision.md)
-- Workpiece-to-ST policy: [`docs/workpiece_to_st_codegen_policy.md`](docs/workpiece_to_st_codegen_policy.md)
-- Scenario system: [`docs/scenario_playbook.md`](docs/scenario_playbook.md), [`docs/scenario_minimization.md`](docs/scenario_minimization.md)
-- No-board delivery: [`docs/no_board_playbook.md`](docs/no_board_playbook.md)
-- Motion control: [`docs/stepper_ab_encoder.md`](docs/stepper_ab_encoder.md)
-- Recovery templates: [`docs/recovery_templates_sequence_lint.md`](docs/recovery_templates_sequence_lint.md)
-- Topology refactor: [`docs/topology_perf_baseline.md`](docs/topology_perf_baseline.md), [`docs/testing_inventory_matrix.md`](docs/testing_inventory_matrix.md)
+**Authoritative docs (in repo):**
+- [`AGENTS.md`](AGENTS.md) - project charter, code navigation, cross-layer change map
+- [`docs/architecture/signal-direction.md`](docs/architecture/signal-direction.md) - long-term source for concurrent task / blocking-step semantics
+- [`docs/已实现/generated_project_layout_spec.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/generated_project_layout_spec.md) - `rust_plc new` project layout contract
+- [`docs/已实现/developer_bootstrap_pack.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/developer_bootstrap_pack.md) - bootstrap and Day-1 workflow
+- [`docs/已实现/extern_function_mvp_spec.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/extern_function_mvp_spec.md) - frozen extern-function contract
+- [`docs/已实现/extern_function_development_guide.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/extern_function_development_guide.md) - extern-function implementation guide
+- [`docs/已实现/semantic_resource_interlock_spec.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/semantic_resource_interlock_spec.md) - resource-interlock spec
+- [`docs/已实现/semantic_resource_interlock_development_guide.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/semantic_resource_interlock_development_guide.md) - resource-interlock development guide
+- [`docs/已实现/workpiece_to_st_codegen_policy.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/workpiece_to_st_codegen_policy.md) - workpiece-to-ST boundary
+- [`docs/已实现/scenario_playbook.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/scenario_playbook.md) and [`docs/已实现/scenario_minimization.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/scenario_minimization.md) - scenario workflow
+- [`docs/已实现/no_board_playbook.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/no_board_playbook.md) - no-board delivery gate
+- [`docs/已实现/stepper_ab_encoder.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/stepper_ab_encoder.md) - motion-control note
+- [`docs/已实现/recovery_templates_sequence_lint.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/recovery_templates_sequence_lint.md) - recovery template linting
+- [`docs/已实现/topology_perf_baseline.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/topology_perf_baseline.md) and [`docs/已实现/testing_inventory_matrix.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/testing_inventory_matrix.md) - topology regression references
+
+For generated projects, the only formal requirements entry is `plc/main.system.md`. `examples/*.system.md` are samples, while `docs/patent_collected/**` and `docs/web_collected/**` are research assets, not project entrypoints.
 
 ---
 

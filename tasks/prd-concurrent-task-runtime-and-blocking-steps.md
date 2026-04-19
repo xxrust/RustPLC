@@ -228,7 +228,7 @@
 
 执行口径补充（US-020 收口）：
 
-- 端到端分阶段验收命令与产物清单以 `docs/concurrent_runtime_e2e_acceptance_baseline.md` 为准。
+- 端到端分阶段验收命令与产物清单以 `docs/已实现/轴配置/concurrent_runtime_e2e_acceptance_baseline.md` 为准。
 - Ralph 顺序执行与 `passes` 状态以根目录 `prd.json` 的 priority 升序为准（不是本文件中的历史分组编号）。
 
 ## 9. Success Metrics

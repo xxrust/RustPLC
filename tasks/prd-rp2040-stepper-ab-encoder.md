@@ -167,7 +167,7 @@
 **Description**：作为后续维护者，我希望 wiki 沉淀“怎么配、怎么测、怎么排障”。  
 **Acceptance Criteria**：
 - [ ] 更新 `docs/wiki` 至少 2 页：实现指南 + CI/排障。
-- [ ] wiki 与 `docs/stepper_ab_encoder.md` 术语一致。
+- [ ] wiki 与 `docs/已实现/stepper_ab_encoder.md` 术语一致。
 - [ ] 提供“从 0 到回归通过”的命令清单。
 - [ ] Tests pass (`cargo test --workspace`)。
 - [ ] Typecheck passes。

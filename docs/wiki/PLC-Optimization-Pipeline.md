@@ -184,7 +184,7 @@ If future optimization needs richer transformations, the semantic shape must mov
 - `src/optimization/ranker.rs`
 - `src/optimization/emitter.rs`
 - `src/verification/timing.rs`
-- `docs/plc_optimization_architecture_spec.md`
+- `docs/已实现/plc_optimization_architecture_spec.md`
 
 ---
 

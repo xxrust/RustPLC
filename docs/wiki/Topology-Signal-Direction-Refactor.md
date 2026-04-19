@@ -1,6 +1,6 @@
 # Topology Signal Direction Refactor
 
-This page documents the topology semantics refactor introduced in the `ralph/topology-signal-direction-refactor` branch (US-001 ~ US-016).
+This page documents the topology semantics refactor now reflected in the current repository (original rollout: US-001 ~ US-016).
 
 ---
 
@@ -176,7 +176,7 @@ The `component-topology-diff` module computes node/port/relation/tag-level diffs
 - `scripts/migrate_connected_to.py` — migration tool
 - `scripts/ci_no_connected_to_regression.sh` — CI guard
 - `scripts/topology_perf_gate.py` — performance gate
-- `docs/topology_perf_baseline.md` — baseline fixture docs
-- `docs/testing_inventory_matrix.md` — test coverage matrix
+- `docs/已实现/topology_perf_baseline.md` — baseline fixture docs
+- `docs/已实现/testing_inventory_matrix.md` — test coverage matrix
 - `tests/component_topology_diff.rs` — semantic diff tests
 - `tests/component_topology_validate.rs` — tag rule contract tests

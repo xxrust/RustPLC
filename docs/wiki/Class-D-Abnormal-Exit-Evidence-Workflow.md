@@ -41,5 +41,5 @@ Purpose: make Class-D manual files traceable to their original capture/export so
 
 ## Related Docs
 
-- `docs/abnormal_exit_matrix.md`
-- `docs/board_rp2040.md`
+- `docs/已实现/abnormal_exit_matrix.md`
+- `docs/已实现/board_rp2040.md`
