@@ -382,6 +382,14 @@ pub(crate) fn validate_scenario_against_plc(
             }
         })
         .collect::<Vec<_>>();
+    if start_ids.is_empty() {
+        start_ids.extend(hints.digital_ids.iter().copied().filter(|id| {
+            !hints
+                .digital_aliases
+                .get(id)
+                .is_some_and(|aliases| aliases_contain_keyword(aliases, "sensor"))
+        }));
+    }
     start_ids.sort_unstable();
     start_ids.dedup();
 

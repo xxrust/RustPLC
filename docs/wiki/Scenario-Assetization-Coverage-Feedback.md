@@ -15,7 +15,7 @@ Date: 2026-02-19
 
 ```bash
 cargo run --release -- scenario-gen \
-  --plc examples/assembly_station.plc \
+  --plc examples/rp2040_motion_minimal.plc \
   --config examples/scenario_gen/basic.yaml \
   --out-dir out/scenario_gen \
   --coverage-mode risk-first \

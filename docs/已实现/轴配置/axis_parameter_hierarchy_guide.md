@@ -65,5 +65,5 @@ action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, s
 cargo check
 cargo test --lib axis_profile
 cargo test --test runtime_bridge_us006
-cargo run --bin rust_plc -- examples/two_cylinder.plc
+cargo run --bin rust_plc -- examples/dual_axis_platform.plc
 ```

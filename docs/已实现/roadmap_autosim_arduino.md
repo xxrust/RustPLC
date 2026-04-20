@@ -155,16 +155,16 @@
 
 ```bash
 # 1) 编译 + 形式化验证（现状已有）
-rustplc verify examples/assembly_station.plc
+rustplc verify examples/rp2040_motion_minimal.plc
 
 # 2) SIL：带 plant 的仿真跑批（你选择优先做强）
-rustplc sim examples/assembly_station.plc --scenario scenarios/normal.yaml --report out/report.json
+rustplc sim examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --report out/report.json
 
 # 3) SIL 回归：批量场景 + 自动最小化失败用例
 rustplc sim-regress examples/*.plc --scenarios scenarios/ --out out/regress/
 
 # 4) 生成 RP2040 固件（把 IR/字节码打包进固件）
-rustplc build-rp2040 examples/assembly_station.plc --out out/firmware.uf2
+rustplc build-rp2040 examples/rp2040_motion_minimal.plc --out out/firmware.uf2
 
 # 5) 自动装载到 Pico（UF2 或 probe-rs）
 rustplc flash-rp2040 out/firmware.uf2
@@ -227,7 +227,7 @@ UF2 路线（最少硬件依赖）的基本思路：
 目标：把“外部输入脚本 + 扰动 + seed + 运行时长”变成可版本化资产，支持回放与最小化。
 
 ```yaml
-# scenarios/normal.yaml（示意）
+# scenarios/rp2040_motion_minimal/normal.yaml（示意）
 seed: 42
 tick_ms: 1
 duration_ms: 12000

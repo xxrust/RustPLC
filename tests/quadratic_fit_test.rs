@@ -26,7 +26,10 @@ fn quadratic_fit_compiles_successfully() {
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("验证通过"), "verification should pass");
+    assert!(
+        stderr.contains("Verification passed:"),
+        "verification should pass"
+    );
     assert!(
         stderr.contains("Safety: 完备证明"),
         "safety verification should pass"
@@ -192,3 +195,4 @@ fn quadratic_fit_uses_correct_number_of_variables() {
         "should have variable sum_y"
     );
 }
+

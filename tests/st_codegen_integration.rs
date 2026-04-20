@@ -127,38 +127,36 @@ fn run_iec2c(iec2c: &Path, lib_dir: &Path, st_file: &Path, out_dir: &Path) -> st
 // ---------------------------------------------------------------------------
 
 #[test]
-fn st_codegen_two_cylinder_and_assembly_station_generate() {
+fn st_codegen_project_scaffold_and_dual_axis_generate() {
     let dir = unique_temp_dir("st_codegen_generate");
-    let two_st = dir.join("two_cylinder.st");
-    let assembly_st = dir.join("assembly_station.st");
+    let scaffold_st = dir.join("project_scaffold_demo.st");
+    let dual_axis_st = dir.join("dual_axis_platform.st");
 
-    run_gen_st(&example_path("two_cylinder.plc"), &two_st);
-    run_gen_st(&example_path("assembly_station.plc"), &assembly_st);
+    run_gen_st(&example_path("project_scaffold_demo/plc/main.plc"), &scaffold_st);
+    run_gen_st(&example_path("dual_axis_platform.plc"), &dual_axis_st);
 
-    let two = fs::read_to_string(&two_st).expect("should read generated st");
-    let assembly = fs::read_to_string(&assembly_st).expect("should read generated st");
+    let scaffold = fs::read_to_string(&scaffold_st).expect("should read generated st");
+    let dual_axis = fs::read_to_string(&dual_axis_st).expect("should read generated st");
 
-    assert!(two.contains("PROGRAM Main"));
-    assert!(two.contains("CASE _state OF"));
-    assert!(two.contains("_state_trace_b0 AT %QX0.0 : BOOL;"));
-    assert!(two.contains("_state_trace_b13 AT %QX1.5 : BOOL;"));
-    assert!(two.contains("_state_trace_b0 := (_state MOD 2) >= 1;"));
-    assert!(two.contains("_state_trace_b3 := (_state MOD 16) >= 8;"));
-    assert!(two.contains("CONFIGURATION Config0"));
-    assert!(two.contains("TASK MainTask(INTERVAL := T#10ms, PRIORITY := 0);"));
-    assert!(assembly.contains("PROGRAM Main"));
-    assert!(assembly.contains("CASE _state OF"));
-    assert!(assembly.contains("_state_trace_b0 AT %QX0.0 : BOOL;"));
-    assert!(assembly.contains("CONFIGURATION Config0"));
+    assert!(scaffold.contains("PROGRAM Main"));
+    assert!(scaffold.contains("CASE _state OF"));
+    assert!(scaffold.contains("_timer_0(IN := _state = 0, PT := T#100ms);"));
+    assert!(scaffold.contains("_state_trace_b13 AT %QX1.5 : BOOL;"));
+    assert!(scaffold.contains("CONFIGURATION Config0"));
+    assert!(scaffold.contains("TASK MainTask(INTERVAL := T#10ms, PRIORITY := 0);"));
+    assert!(dual_axis.contains("PROGRAM Main"));
+    assert!(dual_axis.contains("CASE _state OF"));
+    assert!(dual_axis.contains("cycle.move_to_target__parallel_1_fork"));
+    assert!(dual_axis.contains("CONFIGURATION Config0"));
 }
 
 #[test]
 fn st_codegen_cli_allows_custom_task_interval() {
     let dir = unique_temp_dir("st_codegen_task_interval");
-    let out_st = dir.join("two_cylinder_25ms.st");
+    let out_st = dir.join("dual_axis_platform_25ms.st");
 
     run_gen_st_with_extra_args(
-        &example_path("two_cylinder.plc"),
+        &example_path("dual_axis_platform.plc"),
         &out_st,
         &["--task-interval-ms", "25"],
     );
@@ -170,13 +168,13 @@ fn st_codegen_cli_allows_custom_task_interval() {
 #[test]
 fn st_codegen_timer_calls_appear_before_case() {
     let dir = unique_temp_dir("st_codegen_timer");
-    let out_st = dir.join("two_cylinder.st");
+    let out_st = dir.join("project_scaffold_demo.st");
 
-    run_gen_st(&example_path("two_cylinder.plc"), &out_st);
+    run_gen_st(&example_path("project_scaffold_demo/plc/main.plc"), &out_st);
     let rendered = fs::read_to_string(&out_st).expect("should read generated st");
 
     let timer_pos = rendered
-        .find("_timer_0(IN := _state = 0, PT := T#500ms);")
+        .find("_timer_0(IN := _state = 0, PT := T#100ms);")
         .expect("timer call should exist");
     let case_pos = rendered.find("CASE _state OF").expect("CASE should exist");
 
@@ -215,20 +213,20 @@ fn matiec_vendor_directory_is_complete() {
 }
 
 #[test]
-fn st_codegen_two_cylinder_compiles_with_matiec() {
+fn st_codegen_project_scaffold_compiles_with_matiec() {
     let Some((iec2c, lib_dir)) = find_iec2c() else {
         eprintln!("[SKIP] iec2c not available on this platform — skipping matiec round-trip");
         return;
     };
 
-    let dir = unique_temp_dir("st_codegen_matiec_two");
-    let out_st = dir.join("two_cylinder.st");
-    run_gen_st(&example_path("two_cylinder.plc"), &out_st);
+    let dir = unique_temp_dir("st_codegen_matiec_scaffold");
+    let out_st = dir.join("project_scaffold_demo.st");
+    run_gen_st(&example_path("project_scaffold_demo/plc/main.plc"), &out_st);
 
     let output = run_iec2c(&iec2c, &lib_dir, &out_st, &dir);
     assert!(
         output.status.success(),
-        "iec2c compile failed for two_cylinder.st:\nstdout:\n{}\nstderr:\n{}",
+        "iec2c compile failed for project_scaffold_demo.st:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -236,55 +234,55 @@ fn st_codegen_two_cylinder_compiles_with_matiec() {
     // Verify iec2c produced the expected C artifacts
     assert!(
         dir.join("POUS.c").exists(),
-        "iec2c should produce POUS.c for two_cylinder"
+        "iec2c should produce POUS.c for project_scaffold_demo"
     );
     assert!(
         dir.join("POUS.h").exists(),
-        "iec2c should produce POUS.h for two_cylinder"
+        "iec2c should produce POUS.h for project_scaffold_demo"
     );
     assert!(
         dir.join("Config0.c").exists(),
-        "iec2c should produce Config0.c for two_cylinder"
+        "iec2c should produce Config0.c for project_scaffold_demo"
     );
     assert!(
         dir.join("Res0.c").exists(),
-        "iec2c should produce Res0.c for two_cylinder"
+        "iec2c should produce Res0.c for project_scaffold_demo"
     );
 }
 
 #[test]
-fn st_codegen_assembly_station_compiles_with_matiec() {
+fn st_codegen_dual_axis_platform_compiles_with_matiec() {
     let Some((iec2c, lib_dir)) = find_iec2c() else {
         eprintln!("[SKIP] iec2c not available on this platform — skipping matiec round-trip");
         return;
     };
 
-    let dir = unique_temp_dir("st_codegen_matiec_assembly");
-    let out_st = dir.join("assembly_station.st");
-    run_gen_st(&example_path("assembly_station.plc"), &out_st);
+    let dir = unique_temp_dir("st_codegen_matiec_dual_axis");
+    let out_st = dir.join("dual_axis_platform.st");
+    run_gen_st(&example_path("dual_axis_platform.plc"), &out_st);
 
     let output = run_iec2c(&iec2c, &lib_dir, &out_st, &dir);
     assert!(
         output.status.success(),
-        "iec2c compile failed for assembly_station.st:\nstdout:\n{}\nstderr:\n{}",
+        "iec2c compile failed for dual_axis_platform.st:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 
     assert!(
         dir.join("POUS.c").exists(),
-        "iec2c should produce POUS.c for assembly_station"
+        "iec2c should produce POUS.c for dual_axis_platform"
     );
     assert!(
         dir.join("POUS.h").exists(),
-        "iec2c should produce POUS.h for assembly_station"
+        "iec2c should produce POUS.h for dual_axis_platform"
     );
     assert!(
         dir.join("Config0.c").exists(),
-        "iec2c should produce Config0.c for assembly_station"
+        "iec2c should produce Config0.c for dual_axis_platform"
     );
     assert!(
         dir.join("Res0.c").exists(),
-        "iec2c should produce Res0.c for assembly_station"
+        "iec2c should produce Res0.c for dual_axis_platform"
     );
 }

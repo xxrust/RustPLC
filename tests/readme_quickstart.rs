@@ -7,7 +7,7 @@ fn repo_path(p: &str) -> std::path::PathBuf {
 
 #[test]
 fn readme_compile_quickstart_command_succeeds() {
-    let plc_path = repo_path("examples/two_cylinder.plc");
+    let plc_path = repo_path("examples/project_scaffold_demo/plc/main.plc");
     assert!(plc_path.exists(), "expected README example PLC to exist");
 
     let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
@@ -22,3 +22,4 @@ fn readme_compile_quickstart_command_succeeds() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+

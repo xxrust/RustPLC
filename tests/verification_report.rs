@@ -1,5 +1,6 @@
 use std::fs;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 
 use runtime_core::MAX_TRANSITIONS_PER_TASK_PER_TICK;
 use rust_plc::verification::WarningEntry;
@@ -25,7 +26,7 @@ struct LegacyVerificationReport {
     verification: LegacyVerificationSummary,
 }
 
-fn temp_dir(prefix: &str) -> std::path::PathBuf {
+fn temp_dir(prefix: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "{prefix}_{}_{}",
         std::process::id(),
@@ -38,33 +39,151 @@ fn temp_dir(prefix: &str) -> std::path::PathBuf {
     dir
 }
 
-#[test]
-fn cli_writes_structured_verification_report_with_counts() {
-    let base = temp_dir("rust_plc_verification_report_ok");
-    let plc_path = base.join("ok.plc");
-    let report_path = base.join("my_report.json");
+fn write_plc(base: &Path, name: &str, source: &str) -> PathBuf {
+    let plc_path = base.join(name);
+    fs::write(&plc_path, source).expect("write plc");
+    plc_path
+}
 
-    let source = r#"
+fn read_report(report_path: &Path) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(report_path).expect("read report"))
+        .expect("report JSON should parse")
+}
+
+fn run_compile_report(plc_path: &Path, report_path: &Path, extra_args: &[&str]) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_rust_plc"));
+    cmd.arg(plc_path).arg("--report").arg(report_path);
+    cmd.args(extra_args);
+    cmd.output().expect("run rust_plc")
+}
+
+fn report_ok_source() -> &'static str {
+    r#"
 [topology]
-device start_button: digital_input { purpose: "启动输入" }
-device motor: digital_output { purpose: "电机输出" }
+device plc_main: plc {
+    purpose: "controller"
+    model_ref: openplc_softplc
+}
+device run_lamp: solenoid_valve {
+    purpose: "demo output"
+    response_time: 20ms
+}
+relation { from: plc_main.Y0, to: run_lamp.coil, via: driven_by }
 
 [constraints]
 
 [tasks]
 task main:
     step run:
-        action: set motor on
-"#;
-    fs::write(&plc_path, source).expect("write plc");
+        action: set run_lamp on
+"#
+}
 
-    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg(&plc_path)
-        .arg("--report")
-        .arg(&report_path)
-        .output()
-        .expect("run rust_plc");
+fn budget_single_output_source() -> &'static str {
+    r#"
+[topology]
+device plc_main: plc {
+    purpose: "controller"
+    model_ref: openplc_softplc
+}
+device run_lamp: solenoid_valve {
+    purpose: "test output"
+    response_time: 20ms
+}
+relation { from: plc_main.Y0, to: run_lamp.coil, via: driven_by }
 
+[constraints]
+
+[tasks]
+task main:
+    step s1:
+        action: set run_lamp on
+"#
+}
+
+fn budget_two_tasks_source(with_cycle: bool) -> String {
+    let task_suffix = if with_cycle {
+        r#"
+        allow_indefinite_wait: true
+    on_complete: goto station_a
+
+task station_b:
+    step run:
+        action: set station_b_lamp on
+        allow_indefinite_wait: true
+    on_complete: goto station_b
+"#
+    } else {
+        r#"
+
+task station_b:
+    step run:
+        action: set station_b_lamp on
+"#
+    };
+
+    format!(
+        r#"
+[topology]
+device plc_main: plc {{
+    purpose: "controller"
+    model_ref: openplc_softplc
+}}
+device station_a_lamp: solenoid_valve {{ purpose: "station A output", response_time: 20ms }}
+device station_b_lamp: solenoid_valve {{ purpose: "station B output", response_time: 20ms }}
+relation {{ from: plc_main.Y0, to: station_a_lamp.coil, via: driven_by }}
+relation {{ from: plc_main.Y1, to: station_b_lamp.coil, via: driven_by }}
+
+[constraints]
+
+[tasks]
+task station_a:
+    step run:
+        action: set station_a_lamp on{task_suffix}"#
+    )
+}
+
+fn axis_blocking_warning_source() -> &'static str {
+    r#"
+[topology]
+device axis_x: stepper_motor {
+    purpose: "x axis"
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: set axis_x.enable on
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    on_complete: goto done
+
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+
+task done:
+    step halt:
+"#
+}
+
+#[test]
+fn cli_writes_structured_verification_report_with_counts() {
+    let base = temp_dir("rust_plc_verification_report_ok");
+    let plc_path = write_plc(&base, "ok.plc", report_ok_source());
+    let report_path = base.join("my_report.json");
+
+    let output = run_compile_report(&plc_path, &report_path, &[]);
     assert!(
         output.status.success(),
         "rust_plc should succeed, stderr: {}",
@@ -72,10 +191,7 @@ task main:
     );
     assert!(report_path.exists(), "report file should be written");
 
-    let report: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&report_path).expect("read report"))
-            .expect("report JSON should parse");
-
+    let report = read_report(&report_path);
     assert_eq!(
         report["source_plc"].as_str(),
         Some(
@@ -84,38 +200,16 @@ task main:
                 .expect("temp PLC path should be valid UTF-8")
         )
     );
-    assert!(
-        report["generated_at"].as_str().is_some(),
-        "report should include generated_at"
-    );
+    assert!(report["generated_at"].as_str().is_some());
     assert_eq!(report["schema_version"], 1);
-    assert!(
-        report["tool_version"].as_str().is_some(),
-        "report should include tool_version"
-    );
-    assert!(
-        report["runtime_budget"].is_object(),
-        "report should include runtime_budget object"
-    );
-    assert!(
-        report["runtime_budget"]["budget_time_estimate"].is_object(),
-        "runtime_budget should include budget_time_estimate object"
-    );
+    assert!(report["tool_version"].as_str().is_some());
+    assert!(report["runtime_budget"].is_object());
+    assert!(report["runtime_budget"]["budget_time_estimate"].is_object());
     assert_eq!(report["verification"]["safety"]["skipped_rules"], 0);
-    assert!(
-        report["verification"]["safety"]["checked_rules"].is_number(),
-        "checked_rules should be numeric"
-    );
-    assert!(
-        report["verification"]["safety"]["coverage"].is_object(),
-        "safety should include coverage object"
-    );
-    assert!(
-        report["verification"]["safety"]["rule_statuses"].is_array(),
-        "safety should include rule_statuses array"
-    );
+    assert!(report["verification"]["safety"]["checked_rules"].is_number());
+    assert!(report["verification"]["safety"]["coverage"].is_object());
+    assert!(report["verification"]["safety"]["rule_statuses"].is_array());
     assert!(report["verification"]["safety"]["warnings"].is_array());
-
     assert!(report["verification"]["liveness"]["warnings"].is_array());
     assert!(report["verification"]["timing"]["warnings"].is_array());
     assert!(report["verification"]["causality"]["warnings"].is_array());
@@ -125,175 +219,87 @@ task main:
 }
 
 #[test]
-fn cli_report_captures_bounded_safety_warning() {
+fn cli_report_captures_warn_entry_payload() {
     let base = temp_dir("rust_plc_verification_report_warn");
-    let plc_path = base.join("warn.plc");
+    let plc_path = write_plc(&base, "warn.plc", budget_single_output_source());
     let report_path = base.join("warn_report.json");
 
-    let source = r#"
-[topology]
-device mode_switch: digital_input { purpose: "模式选择输入" }
-device out_a: digital_output { purpose: "A 支路输出" }
-device out_b: digital_output { purpose: "B 支路输出" }
-
-[constraints]
-safety: out_a.on requires out_a.on
-
-[tasks]
-task choose:
-    step wait_mode:
-        wait: mode_switch == true
-        allow_indefinite_wait: true
-    step decide:
-        if: mode_switch == true goto process_A else: goto process_B
-
-task process_A:
-    step run:
-        action: set out_a on
-    on_complete: goto choose
-
-task process_B:
-    step run:
-        action: set out_b on
-    on_complete: goto choose
-"#;
-    fs::write(&plc_path, source).expect("write plc");
-
-    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg(&plc_path)
-        .arg("--report")
-        .arg(&report_path)
-        .output()
-        .expect("run rust_plc");
-
+    let output = run_compile_report(
+        &plc_path,
+        &report_path,
+        &["--budget-max-actions-per-transition", "0"],
+    );
     assert!(
         output.status.success(),
-        "rust_plc should still succeed with bounded safety, stderr: {}",
+        "rust_plc should still succeed with warn entries, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let report: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&report_path).expect("read report"))
-            .expect("report JSON should parse");
-
-    assert_eq!(report["verification"]["safety"]["level"], "有界验证");
-    assert_eq!(report["verification"]["safety"]["checked_rules"], 1);
-    assert_eq!(report["verification"]["safety"]["skipped_rules"], 0);
-
-    let warnings = report["verification"]["safety"]["warnings"]
+    let report = read_report(&report_path);
+    let warnings = report["verification"]["timing"]["warnings"]
         .as_array()
-        .expect("safety warnings should be an array");
+        .expect("timing warnings should be an array");
     assert!(
-        warnings
-            .iter()
-            .any(|w| w["level"] == "warn" && w["message"].as_str().is_some()),
-        "bounded safety case should include warn-level warning entries"
+        warnings.iter().any(|w| {
+            w["level"] == "warn"
+                && w["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("runtime budget")
+        }),
+        "report should include warn-level warning entries"
     );
 }
 
 #[test]
 fn deny_warnings_fails_process_when_warns_exist() {
     let base = temp_dir("rust_plc_verification_report_deny_warn");
-    let plc_path = base.join("warn.plc");
+    let plc_path = write_plc(&base, "warn.plc", budget_single_output_source());
     let report_path = base.join("warn_report.json");
 
-    let source = r#"
-[topology]
-device mode_switch: digital_input { purpose: "模式选择输入" }
-device out_a: digital_output { purpose: "A 支路输出" }
-device out_b: digital_output { purpose: "B 支路输出" }
-
-[constraints]
-safety: out_a.on requires out_a.on
-
-[tasks]
-task choose:
-    step wait_mode:
-        wait: mode_switch == true
-        allow_indefinite_wait: true
-    step decide:
-        if: mode_switch == true goto process_A else: goto process_B
-
-task process_A:
-    step run:
-        action: set out_a on
-    on_complete: goto choose
-
-task process_B:
-    step run:
-        action: set out_b on
-    on_complete: goto choose
-"#;
-    fs::write(&plc_path, source).expect("write plc");
-
-    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg(&plc_path)
-        .arg("--report")
-        .arg(&report_path)
-        .arg("--deny-warnings")
-        .output()
-        .expect("run rust_plc");
-
+    let output = run_compile_report(
+        &plc_path,
+        &report_path,
+        &["--budget-max-actions-per-transition", "0", "--deny-warnings"],
+    );
     assert!(
         !output.status.success(),
         "deny-warnings should fail the process when warn entries exist"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("--deny-warnings"));
-    assert!(stderr.contains("[safety]"));
+    assert!(stderr.contains("verification warnings"));
 }
 
 #[test]
 fn budget_thresholds_emit_warn_entries() {
     let base = temp_dir("rust_plc_budget_warn");
-    let plc_path = base.join("budget_warn.plc");
+    let plc_path = write_plc(&base, "budget_warn.plc", budget_single_output_source());
     let report_path = base.join("budget_warn_report.json");
 
-    let source = r#"
-[topology]
-device plc_main: plc {
-    purpose: "主 PLC",
-    model_ref: openplc_softplc
-}
-device X0: digital_input { purpose: "测试输入通道" }
-device Y0: digital_output { purpose: "测试输出通道" }
-
-[constraints]
-
-[tasks]
-task main:
-    step s1:
-        action: set Y0 on
-"#;
-    fs::write(&plc_path, source).expect("write plc");
-
-    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg(&plc_path)
-        .arg("--report")
-        .arg(&report_path)
-        .arg("--budget-max-actions-per-transition")
-        .arg("0")
-        .output()
-        .expect("run rust_plc");
-
+    let output = run_compile_report(
+        &plc_path,
+        &report_path,
+        &["--budget-max-actions-per-transition", "0"],
+    );
     assert!(
         output.status.success(),
         "runtime budget warning should not fail by default, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let report: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&report_path).expect("read report"))
-            .expect("report JSON should parse");
+    let report = read_report(&report_path);
     let timing_warnings = report["verification"]["timing"]["warnings"]
         .as_array()
         .expect("timing warnings should be array");
     assert!(
-        timing_warnings.iter().any(|w| w["level"] == "warn"
-            && w["message"]
-                .as_str()
-                .unwrap_or("")
-                .contains("runtime budget")),
+        timing_warnings.iter().any(|w| {
+            w["level"] == "warn"
+                && w["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("runtime budget")
+        }),
         "budget threshold exceed should add warn-level timing warning"
     );
 }
@@ -301,51 +307,28 @@ task main:
 #[test]
 fn budget_time_estimate_warns_and_deny_warnings_can_block() {
     let base = temp_dir("rust_plc_budget_time_estimate");
-    let plc_path = base.join("budget_time.plc");
+    let plc_path = write_plc(&base, "budget_time.plc", budget_single_output_source());
     let report_path = base.join("budget_time_report.json");
 
-    let source = r#"
-[topology]
-device plc_main: plc {
-    purpose: "主 PLC",
-    model_ref: openplc_softplc
-}
-device X0: digital_input { purpose: "测试输入通道" }
-device Y0: digital_output { purpose: "测试输出通道" }
+    let warn_args = [
+        "--budget-action-cost-us",
+        "20",
+        "--budget-transition-cost-us",
+        "10",
+        "--budget-parallel-expand-cost-us",
+        "5",
+        "--budget-max-time-estimate-us",
+        "10",
+    ];
 
-[constraints]
-
-[tasks]
-task main:
-    step s1:
-        action: set Y0 on
-"#;
-    fs::write(&plc_path, source).expect("write plc");
-
-    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg(&plc_path)
-        .arg("--report")
-        .arg(&report_path)
-        .arg("--budget-action-cost-us")
-        .arg("20")
-        .arg("--budget-transition-cost-us")
-        .arg("10")
-        .arg("--budget-parallel-expand-cost-us")
-        .arg("5")
-        .arg("--budget-max-time-estimate-us")
-        .arg("10")
-        .output()
-        .expect("run rust_plc");
-
+    let output = run_compile_report(&plc_path, &report_path, &warn_args);
     assert!(
         output.status.success(),
         "budget time estimate warning should not fail by default, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let report: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&report_path).expect("read report"))
-            .expect("report JSON should parse");
+    let report = read_report(&report_path);
     assert_eq!(
         report["runtime_budget"]["budget_time_estimate"]["max_allowed_us"].as_u64(),
         Some(10)
@@ -369,88 +352,53 @@ task main:
         "over-budget estimate should emit warn-level timing warning"
     );
 
-    let deny_output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg(&plc_path)
-        .arg("--report")
-        .arg(base.join("budget_time_report_deny.json"))
-        .arg("--budget-action-cost-us")
-        .arg("20")
-        .arg("--budget-transition-cost-us")
-        .arg("10")
-        .arg("--budget-parallel-expand-cost-us")
-        .arg("5")
-        .arg("--budget-max-time-estimate-us")
-        .arg("10")
-        .arg("--deny-warnings")
-        .output()
-        .expect("run rust_plc --deny-warnings");
-
+    let deny_output = run_compile_report(
+        &plc_path,
+        &base.join("budget_time_report_deny.json"),
+        &[
+            "--budget-action-cost-us",
+            "20",
+            "--budget-transition-cost-us",
+            "10",
+            "--budget-parallel-expand-cost-us",
+            "5",
+            "--budget-max-time-estimate-us",
+            "10",
+            "--deny-warnings",
+        ],
+    );
     assert!(
         !deny_output.status.success(),
         "deny-warnings should fail for over-budget time estimate warning"
     );
     let deny_stderr = String::from_utf8_lossy(&deny_output.stderr);
-    assert!(
-        deny_stderr.contains("runtime budget time estimate"),
-        "deny-warnings stderr should mention budget time estimate warning"
-    );
+    assert!(deny_stderr.contains("runtime budget time estimate"));
 }
 
 #[test]
 fn runtime_budget_reports_per_task_scope_for_two_active_tasks() {
     let base = temp_dir("rust_plc_budget_two_tasks_scope");
-    let plc_path = base.join("budget_two_tasks_scope.plc");
+    let plc_path = write_plc(
+        &base,
+        "budget_two_tasks_scope.plc",
+        &budget_two_tasks_source(false),
+    );
     let report_path = base.join("budget_two_tasks_scope_report.json");
 
-    let source = r#"
-[topology]
-device plc_main: plc {
-    purpose: "主 PLC",
-    model_ref: openplc_softplc
-}
-device X0: digital_input { purpose: "测试输入通道" }
-device Y0: digital_output { purpose: "工位A输出" }
-device Y1: digital_output { purpose: "工位B输出" }
-
-[constraints]
-
-[tasks]
-task station_a:
-    step run:
-        action: set Y0 on
-
-task station_b:
-    step run:
-        action: set Y1 on
-"#;
-    fs::write(&plc_path, source).expect("write plc");
-
-    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg(&plc_path)
-        .arg("--report")
-        .arg(&report_path)
-        .output()
-        .expect("run rust_plc");
-
+    let output = run_compile_report(&plc_path, &report_path, &[]);
     assert!(
         output.status.success(),
         "rust_plc should succeed, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let report: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&report_path).expect("read report"))
-            .expect("report JSON should parse");
-
+    let report = read_report(&report_path);
     let cap = MAX_TRANSITIONS_PER_TASK_PER_TICK as u64;
     assert_eq!(
         report["runtime_budget"]["transition_budget_scope"].as_str(),
         Some("per_task_per_tick")
     );
-    assert_eq!(
-        report["runtime_budget"]["active_task_count"].as_u64(),
-        Some(2)
-    );
+    assert_eq!(report["runtime_budget"]["active_task_count"].as_u64(), Some(2));
     assert_eq!(
         report["runtime_budget"]["max_transitions_per_tick_cap"].as_u64(),
         Some(cap)
@@ -468,58 +416,23 @@ task station_b:
 #[test]
 fn runtime_budget_cycle_warning_keeps_per_task_cap_with_two_active_tasks() {
     let base = temp_dir("rust_plc_budget_two_tasks_cycle");
-    let plc_path = base.join("budget_two_tasks_cycle.plc");
+    let plc_path = write_plc(
+        &base,
+        "budget_two_tasks_cycle.plc",
+        &budget_two_tasks_source(true),
+    );
     let report_path = base.join("budget_two_tasks_cycle_report.json");
 
-    let source = r#"
-[topology]
-device plc_main: plc {
-    purpose: "主 PLC",
-    model_ref: openplc_softplc
-}
-device X0: digital_input { purpose: "测试输入通道" }
-device Y0: digital_output { purpose: "工位A输出" }
-device Y1: digital_output { purpose: "工位B输出" }
-
-[constraints]
-
-[tasks]
-task station_a:
-    step run:
-        action: set Y0 on
-        allow_indefinite_wait: true
-    on_complete: goto station_a
-
-task station_b:
-    step run:
-        action: set Y1 on
-        allow_indefinite_wait: true
-    on_complete: goto station_b
-"#;
-    fs::write(&plc_path, source).expect("write plc");
-
-    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg(&plc_path)
-        .arg("--report")
-        .arg(&report_path)
-        .output()
-        .expect("run rust_plc");
-
+    let output = run_compile_report(&plc_path, &report_path, &[]);
     assert!(
         output.status.success(),
         "rust_plc should succeed even with budget warning, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let report: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&report_path).expect("read report"))
-            .expect("report JSON should parse");
-
+    let report = read_report(&report_path);
     let cap = MAX_TRANSITIONS_PER_TASK_PER_TICK as u64;
-    assert_eq!(
-        report["runtime_budget"]["active_task_count"].as_u64(),
-        Some(2)
-    );
+    assert_eq!(report["runtime_budget"]["active_task_count"].as_u64(), Some(2));
     assert_eq!(
         report["runtime_budget"]["max_transitions_same_tick_upper_bound"].as_u64(),
         Some(cap)
@@ -550,47 +463,10 @@ task station_b:
 #[test]
 fn report_emits_axis_blocking_migration_warning_with_stable_code() {
     let base = temp_dir("rust_plc_axis_blocking_migration_warning");
-    let plc_path = base.join("axis_blocking_warning.plc");
+    let plc_path = write_plc(&base, "axis_blocking_warning.plc", axis_blocking_warning_source());
     let report_path = base.join("axis_blocking_warning_report.json");
 
-    let source = r#"
-[topology]
-device axis_x: stepper_motor {
-    purpose: "X 轴",
-    model_ref: stepper_generic,
-    config_ref: stepper_default
-}
-
-[constraints]
-
-[tasks]
-task motion:
-    step run:
-        action: set axis_x.enable on
-        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2)
-            timeout: 500ms -> fault.timeout
-            on_reject -> fault.reject
-            on_motion_fault -> fault.motion_fault
-            on_safety_fault -> fault.safety_fault
-    on_complete: goto done
-
-task fault:
-    step timeout:
-    step reject:
-    step motion_fault:
-    step safety_fault:
-
-task done:
-    step halt:
-"#;
-    fs::write(&plc_path, source).expect("write plc");
-
-    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg(&plc_path)
-        .arg("--report")
-        .arg(&report_path)
-        .output()
-        .expect("run rust_plc");
+    let output = run_compile_report(&plc_path, &report_path, &[]);
     assert!(
         output.status.success(),
         "rust_plc should succeed with migration warning, stderr: {}",
@@ -610,7 +486,7 @@ task done:
                 && warning["message"]
                     .as_str()
                     .unwrap_or("")
-                    .contains("axis.move_* 现按默认阻塞语义执行")
+                    .contains("axis.move_* now executes with default blocking semantics")
         }),
         "axis migration warning should include stable code MIG-AXIS-BLOCK-001"
     );
@@ -623,7 +499,7 @@ task done:
             .liveness
             .warnings
             .iter()
-            .any(|warning| { warning.level == "warn" && warning.message.contains("axis.move_*") }),
+            .any(|warning| warning.level == "warn" && warning.message.contains("axis.move_*")),
         "legacy warning parser should still read level/message from code-aware warnings"
     );
 }

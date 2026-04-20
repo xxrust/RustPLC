@@ -5,7 +5,7 @@ device valve_A: solenoid_valve {
     purpose: "驱动 A 缸的电磁阀（relation 故意引用不存在的 Y9，用于触发 missing device 错误）",
     response_time: 20ms
 }
-relation { from: Y9, to: valve_A.coil, via: driven_by }
+relation { from: Y99, to: valve_A.coil, via: driven_by }
 
 device plc_main: plc {
     purpose: "控制器本体与工艺 I/O 端口映射",

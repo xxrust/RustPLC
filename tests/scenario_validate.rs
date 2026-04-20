@@ -45,8 +45,8 @@ fn run_scenario_init(plc: &Path, out: &Path, preset: &str) -> std::process::Outp
 #[test]
 fn scenario_validate_passes_for_examples() {
     let cases = [
-        ("examples/assembly_station.plc", "normal"),
-        ("examples/two_cylinder.plc", "minimal"),
+        ("examples/project_scaffold_demo/plc/main.plc", "normal"),
+        ("examples/dual_axis_platform.plc", "normal"),
     ];
 
     let base = temp_dir("rust_plc_scenario_validate_examples");
@@ -118,7 +118,7 @@ forces:
         ),
     ];
 
-    let plc = repo_path("examples/assembly_station.plc");
+    let plc = repo_path("examples/project_scaffold_demo/plc/main.plc");
     for (dir_prefix, file_name, scenario_yaml, expected_error) in cases {
         let base = temp_dir(dir_prefix);
         let scenario_path = base.join(file_name);

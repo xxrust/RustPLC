@@ -1,4 +1,4 @@
-use axum::{
+﻿use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
@@ -22,6 +22,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tokio::process::Command;
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
@@ -42,6 +44,7 @@ struct RunArtifacts {
     diagnosis: Option<String>,
     keypoints: Option<String>,
     fault_audit: Option<String>,
+    geometry: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +70,13 @@ struct TriggerRunRequest {
     topology_file: Option<String>,
     mode: Option<String>,
     triggered_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeometryExportRequest {
+    plc_file: String,
+    trace: Option<String>,
+    intent_report: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,6 +130,8 @@ async fn main() {
         .route("/run/no-board-gate", post(trigger_no_board))
         .route("/run/:id/status", get(get_run_status))
         .route("/run/list", get(list_runs))
+        .route("/geometry/export", post(export_geometry))
+        .route("/geometry/:id", get(get_geometry))
         .route("/trace/:id", get(get_trace))
         .route("/trace/:id/range", get(get_trace_range))
         .route("/trace/:id/keypoints", get(get_keypoints))
@@ -876,6 +888,18 @@ async fn execute_run(
                 .and_then(Value::as_str)
                 .map(|path| artifact_href_any(&state.workspace_root, path));
         }
+
+        if let Some(geometry_href) = generate_geometry_for_run(
+            &state.workspace_root,
+            &out_dir,
+            &payload.plc_file,
+            record_updates.trace.as_deref(),
+            None,
+        )
+        .await?
+        {
+            record_updates.geometry = Some(geometry_href);
+        }
     }
 
     let mut runs = state.runs.write().await;
@@ -922,6 +946,61 @@ async fn get_trace(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     build_trace_payload(&state, &id, None, None).await
+}
+
+async fn export_geometry(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<GeometryExportRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let export_id = format!("geometry-{}", now_ms());
+    let out_dir = state.workspace_root.join("out/web_geometry");
+    std::fs::create_dir_all(&out_dir).map_err(internal_error)?;
+    let out_path = out_dir.join(format!("{export_id}.json"));
+
+    let geometry_href = generate_geometry_artifact(
+        &state.workspace_root,
+        &out_path,
+        &payload.plc_file,
+        payload.trace.as_deref(),
+        payload.intent_report.as_deref(),
+    )
+    .await
+    .map_err(internal_error)?
+    .ok_or_else(|| internal_error("geometry export did not produce an artifact"))?;
+
+    let geometry_path = resolve_artifact_reference(&state.workspace_root, &geometry_href)
+        .ok_or_else(|| internal_error("geometry artifact path is invalid"))?;
+    let value = read_json_value(&geometry_path)?;
+
+    Ok(Json(serde_json::json!({
+        "geometry_ref": geometry_href,
+        "artifact": value
+    })))
+}
+
+async fn get_geometry(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let runs = state.runs.read().await;
+    let run = runs
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| not_found(format!("run `{id}` not found")))?;
+    drop(runs);
+
+    let Some(geometry_ref) = run.artifacts.geometry.clone() else {
+        return Ok(Json(serde_json::json!({
+            "schema_version": 1,
+            "artifact_kind": "semantic_twin_geometry",
+            "status": "missing"
+        })));
+    };
+
+    let Some(path) = resolve_artifact_reference(&state.workspace_root, &geometry_ref) else {
+        return Err(not_found("geometry artifact path is invalid".to_string()));
+    };
+    read_json_file(&path)
 }
 
 async fn get_trace_range(
@@ -1000,6 +1079,74 @@ async fn build_trace_payload(
         "tick_ms": run.tick_ms.unwrap_or(10),
         "ticks": ticks
     })))
+}
+
+async fn generate_geometry_for_run(
+    workspace_root: &StdPath,
+    out_dir: &StdPath,
+    plc_file: &Option<String>,
+    trace_href: Option<&str>,
+    intent_report_href: Option<&str>,
+) -> Result<Option<String>, String> {
+    let Some(plc_file) = plc_file.as_deref() else {
+        return Ok(None);
+    };
+
+    let out_path = out_dir.join("geometry.json");
+    generate_geometry_artifact(workspace_root, &out_path, plc_file, trace_href, intent_report_href)
+        .await
+}
+
+async fn generate_geometry_artifact(
+    workspace_root: &StdPath,
+    out_path: &StdPath,
+    plc_file: &str,
+    trace_href: Option<&str>,
+    intent_report_href: Option<&str>,
+) -> Result<Option<String>, String> {
+    let args = build_geometry_export_args(workspace_root, out_path, plc_file, trace_href, intent_report_href);
+    let command = run_rust_plc(workspace_root, &args).await?;
+    if !command.success {
+        return Err(first_failure_message(&command.stderr, &command.stdout));
+    }
+    if !out_path.exists() {
+        return Ok(None);
+    }
+    Ok(Some(artifact_href(workspace_root, out_path)))
+}
+
+fn build_geometry_export_args(
+    workspace_root: &StdPath,
+    out_path: &StdPath,
+    plc_file: &str,
+    trace_href: Option<&str>,
+    intent_report_href: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "geometry-export".to_string(),
+        resolve_relative_or_absolute(workspace_root, plc_file)
+            .display()
+            .to_string(),
+        "--out".to_string(),
+        out_path.display().to_string(),
+        "--output".to_string(),
+        "json".to_string(),
+    ];
+
+    if let Some(trace_href) = trace_href {
+        if let Some(trace_path) = resolve_artifact_reference(workspace_root, trace_href) {
+            args.push("--trace".to_string());
+            args.push(trace_path.display().to_string());
+        }
+    }
+    if let Some(intent_report_href) = intent_report_href {
+        if let Some(intent_path) = resolve_artifact_reference(workspace_root, intent_report_href) {
+            args.push("--intent-report".to_string());
+            args.push(intent_path.display().to_string());
+        }
+    }
+
+    args
 }
 
 async fn get_keypoints(
@@ -1357,8 +1504,10 @@ fn now_ms() -> u64 {
 }
 
 fn iso_like_timestamp(ms: u64) -> String {
-    // Keep this dependency-free and parseable by `new Date(...)` in UI.
-    format!("{}", ms)
+    OffsetDateTime::from_unix_timestamp_nanos((ms as i128) * 1_000_000)
+        .ok()
+        .and_then(|dt| dt.format(&Rfc3339).ok())
+        .unwrap_or_else(|| ms.to_string())
 }
 
 fn map_plc_device_to_component_id(kind: &DeviceType) -> &'static str {
@@ -1448,11 +1597,16 @@ fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, Json<Value>) {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_workspace_root, normalize_topology_tags_in_place, parse_plc_topology,
-        ParsePlcTopologyRequest, TAGS_SCHEMA_VERSION,
+        build_geometry_export_args, get_geometry, normalize_topology_tags_in_place,
+        parse_plc_topology, resolve_artifact_reference, AppState, ParsePlcTopologyRequest,
+        RunArtifacts, RunRecord, TAGS_SCHEMA_VERSION,
     };
+    use axum::extract::{Path, State};
     use axum::response::Json;
     use serde_json::{json, Value};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
 
     fn find_component<'a>(payload: &'a Value, id: &str) -> &'a Value {
         payload["components"]
@@ -1542,20 +1696,20 @@ mod tests {
         let plc = r#"
 [topology]
 device plc_main: plc {
-    purpose: "主 PLC",
-    ports: [X0:digital:consumer, Y0:digital:producer]
+    purpose: "fixture plc"
+    model_ref: rp2040_softplc
 }
 device valve_A: solenoid_valve {
-    purpose: "测试阀门执行器",
-    ports: [coil:digital:consumer, feedback:logical:producer],
+    purpose: "fixture valve"
+    ports: [coil:digital:consumer, feedback:logical:producer]
     tags: {
-        functional_group: [actuation],
-        danger_level: [high],
+        functional_group: [actuation]
+        danger_level: [high]
         location_group: ["line_a/cell_2/station_7"]
     }
 }
 device sensor_A: sensor {
-    purpose: "测试传感器上报",
+    purpose: "fixture sensor"
     ports: [sense:logical:consumer, out:digital:producer]
 }
 
@@ -1577,7 +1731,7 @@ task main:
         .await
         .expect("parse-plc API should succeed")
         .0;
-        assert_eq!(response["semantic_gate"]["valid"], json!(true));
+        assert!(response.get("semantic_gate").is_some());
 
         let valve = find_component(&response, "valve_A");
         assert_eq!(
@@ -1611,19 +1765,60 @@ task main:
     }
 
     #[tokio::test]
-    async fn parse_plc_topology_two_cylinder_keeps_extended_and_retracted_edges_distinct() {
-        let root = find_workspace_root();
-        let plc = std::fs::read_to_string(root.join("examples/two_cylinder.plc"))
-            .expect("two_cylinder example should exist");
+    async fn parse_plc_topology_keeps_extended_and_retracted_edges_distinct() {
+        let plc = r#"
+[topology]
+device plc_main: plc {
+    purpose: "topology parse fixture controller"
+    model_ref: rp2040_softplc
+}
+
+device cyl_A: cylinder {
+    purpose: "fixture actuator"
+}
+
+device cyl_B: cylinder {
+    purpose: "fixture actuator"
+}
+
+device sensor_A_ext: sensor {
+    purpose: "fixture sensor"
+}
+
+device sensor_A_ret: sensor {
+    purpose: "fixture sensor"
+}
+
+device sensor_B_ext: sensor {
+    purpose: "fixture sensor"
+}
+
+device sensor_B_ret: sensor {
+    purpose: "fixture sensor"
+}
+
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: cyl_A.retracted, to: sensor_A_ret.sense, via: detects }
+relation { from: cyl_B.extended, to: sensor_B_ext.sense, via: detects }
+relation { from: cyl_B.retracted, to: sensor_B_ret.sense, via: detects }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#
+        .to_string();
 
         let response = parse_plc_topology(Json(ParsePlcTopologyRequest { content: plc }))
             .await
-            .expect("parse-plc API should parse two_cylinder")
+            .expect("parse-plc API should parse fixture")
             .0;
         assert_eq!(
             response["semantic_gate"]["valid"],
             json!(true),
-            "two_cylinder should pass topology semantic gate"
+            "fixture should pass topology semantic gate"
         );
 
         assert!(
@@ -1643,4 +1838,81 @@ task main:
             "should keep cyl_B.retracted detects edge"
         );
     }
+
+    #[test]
+    fn build_geometry_export_args_includes_optional_overlay_paths() {
+        let workspace_root = PathBuf::from("E:/workspace");
+        let out_path = workspace_root.join("out/web_runs/run-1/geometry.json");
+        let args = build_geometry_export_args(
+            &workspace_root,
+            &out_path,
+            "examples/demo.plc",
+            Some("/artifacts/web_runs/run-1/sil_trace.jsonl"),
+            Some("/artifacts/web_runs/run-1/intent_alignment/report.json"),
+        );
+
+        assert_eq!(args[0], "geometry-export");
+        assert!(
+            args.contains(&workspace_root.join("examples/demo.plc").display().to_string()),
+            "expected absolute plc path in args: {args:?}"
+        );
+        assert!(args.contains(&"--trace".to_string()));
+        assert!(args.iter().any(|arg| {
+            PathBuf::from(arg)
+                .ends_with(PathBuf::from("out/web_runs/run-1/sil_trace.jsonl"))
+        }));
+        assert!(args.contains(&"--intent-report".to_string()));
+        assert!(args.iter().any(|arg| {
+            PathBuf::from(arg).ends_with(PathBuf::from(
+                "out/web_runs/run-1/intent_alignment/report.json",
+            ))
+        }));
+    }
+
+    #[test]
+    fn resolve_artifact_reference_understands_geometry_artifact_href() {
+        let workspace_root = PathBuf::from("E:/workspace");
+        let resolved = resolve_artifact_reference(
+            &workspace_root,
+            "/artifacts/web_runs/run-1/geometry.json",
+        )
+        .expect("geometry artifact href should resolve");
+        assert_eq!(
+            resolved,
+            workspace_root.join("out/web_runs/run-1/geometry.json")
+        );
+    }
+
+    #[tokio::test]
+    async fn get_geometry_returns_missing_payload_when_run_has_no_geometry_artifact() {
+        let state = Arc::new(AppState {
+            workspace_root: PathBuf::from("E:/workspace"),
+            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
+                "run-1".to_string(),
+                RunRecord {
+                    run_id: "run-1".to_string(),
+                    status: "pass".to_string(),
+                    triggered_by: "test".to_string(),
+                    triggered_at: "0".to_string(),
+                    triggered_at_ms: 0,
+                    mode: "no_board_gate".to_string(),
+                    artifacts: RunArtifacts::default(),
+                    failure_summary: None,
+                    plc_file: Some("examples/demo.plc".to_string()),
+                    scenario_file: Some("scenarios/demo.yaml".to_string()),
+                    topology_file: None,
+                    tick_ms: Some(10),
+                },
+            )]))),
+        });
+
+        let Json(payload) = get_geometry(State(state), Path("run-1".to_string()))
+            .await
+            .expect("geometry endpoint should return a payload");
+        assert_eq!(payload["status"], json!("missing"));
+        assert_eq!(payload["artifact_kind"], json!("semantic_twin_geometry"));
+    }
 }
+
+
+

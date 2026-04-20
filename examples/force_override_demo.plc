@@ -5,12 +5,11 @@
 # - Force DO0/AO0 to fixed values (overriding program writes)
 # - Clear forces later to show normal program writes resume
 
-device AO0: analog_output { purpose: "模拟量输出通道，演示 SIL FORCE 覆盖后程序写入被屏蔽的效果",  range: 0..10, unit: "V" }
-
 device plc_main: plc {
-    purpose: "控制器本体与工艺 I/O 端口映射",
+    purpose: "Controller with OpenPLC-compatible forceable IO channels"
     model_ref: openplc_softplc
 }
+
 [constraints]
 
 [tasks]
@@ -24,7 +23,7 @@ task ready:
 task run:
     step set_on:
         action: set Y0 on
-        action: set_analog AO0 7.5
+        action: set_analog AO0 0.75
         action: log "run:on"
 
     step hold_on:
@@ -32,7 +31,7 @@ task run:
 
     step set_off:
         action: set Y0 off
-        action: set_analog AO0 2.5
+        action: set_analog AO0 0.25
         action: log "run:off"
 
     step hold_off:

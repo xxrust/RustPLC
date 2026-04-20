@@ -80,9 +80,9 @@ fn compile_source_to_json(source: &str) -> Result<Value, Vec<String>> {
 }
 
 #[test]
-fn parses_two_cylinder_example_into_verified_ir_json() {
-    let source = read_example("two_cylinder.plc");
-    let ir_json = compile_source_to_json(&source).expect("two_cylinder example should compile");
+fn parses_dual_axis_platform_example_into_verified_ir_json() {
+    let source = read_example("dual_axis_platform.plc");
+    let ir_json = compile_source_to_json(&source).expect("dual_axis_platform example should compile");
 
     assert!(ir_json.get("topology").is_some());
     assert!(ir_json.get("state_machine").is_some());
@@ -1080,7 +1080,7 @@ fn reports_undefined_device_for_error_example() {
         .expect_err("error_missing_device should fail semantic checks");
 
     assert!(
-        errors.iter().any(|error| error.contains("未定义设备 Y9")),
+        errors.iter().any(|error| error.contains("Y99")),
         "error output should include missing device name"
     );
 }
@@ -1139,9 +1139,9 @@ fn reports_all_four_verifier_failures_for_combined_error_example() {
 }
 
 #[test]
-fn cli_prints_verified_json_and_summary_for_two_cylinder_example() {
+fn cli_prints_verified_json_and_summary_for_dual_axis_platform_example() {
     let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
-        .arg(example_path("two_cylinder.plc"))
+        .arg(example_path("dual_axis_platform.plc"))
         .output()
         .expect("should run rust_plc binary");
 
@@ -1161,7 +1161,7 @@ fn cli_prints_verified_json_and_summary_for_two_cylinder_example() {
 
     let stderr_text = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr_text.contains("验证通过"),
+        stderr_text.contains("Verification passed:"),
         "CLI should print success summary to stderr"
     );
     assert!(
@@ -1284,7 +1284,7 @@ fn parses_hydraulic_bender_example_into_verified_ir_json() {
 }
 
 #[test]
-fn parses_dual_axis_platform_example_into_verified_ir_json() {
+fn reports_verified_status_for_dual_axis_platform_example() {
     let source = read_example("dual_axis_platform.plc");
     let ir_json =
         compile_source_to_json(&source).expect("dual_axis_platform example should compile");

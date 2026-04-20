@@ -53,7 +53,7 @@
 ## 设计偏好
 
 - 命名语言：中英文混合（设备名英文，purpose 中文）
-- 代码风格：参考 two_cylinder.plc 的 plc_main + relation 模式
+- 代码风格：参考当前 examples 中 `plc_main + relation` 的建模模式
 - 时序参数：电机 ramp_time 50ms，原点回归超时 3000ms，到位超时 3000ms
 - 扩展预期：后续可能增加 Z 轴，命名预留扩展空间
 

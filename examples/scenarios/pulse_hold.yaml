@@ -1,7 +1,7 @@
 # High-level scenario sugar example (pulse + hold).
 #
 # This file is meant to be used with a specific PLC topology, e.g.:
-#   cargo run --release -- scenario-validate examples/assembly_station.plc --scenario examples/scenarios/pulse_hold.yaml
+#   cargo run --release -- scenario-validate examples/project_scaffold_demo/plc/main.plc --scenario examples/scenarios/pulse_hold.yaml
 #
 # Notes:
 # - `pulse` / `hold` are expanded into low-level `inputs: - at_ms: ... set: ...` events at load time.
@@ -13,12 +13,13 @@ duration_ms: 1000
 pulse:
   - at_ms: 0
     width_ms: 50
-    digital: start_button
+    digital: x0
 
 # Hold a sensor true for a while (useful for forcing/overriding a condition).
 hold:
   - from_ms: 200
     to_ms: 300
-    digital: sensor_left_arrive
+    digital: x0
     value: true
+
 

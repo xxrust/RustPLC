@@ -1,36 +1,51 @@
-use std::fs;
+﻿use std::fs;
 use std::process::Command;
 
 const PLC_FIXTURE: &str = r#"
 [topology]
 
 device plc_main: plc {
-    purpose: "测试主控制器",
+    purpose: "fixture controller"
     model_ref: rp2040_softplc
 }
 
-device valve_A: solenoid_valve { purpose: "测试电磁阀执行器" }
+device start_button: sensor {
+    purpose: "fixture start request"
+    subtype: "push_button"
+    debounce: 20ms
+}
 
-device cyl_A: cylinder { purpose: "测试气缸执行机构" }
+device run_lamp: solenoid_valve {
+    purpose: "fixture status lamp"
+    response_time: 20ms
+}
 
-device sensor_ext: sensor { purpose: "测试到位传感器" }
+device pressure_sensor: sensor {
+    purpose: "fixture analog feedback sensor"
+    ports: [out:analog:producer]
+}
 
-relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
-relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
-relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
-relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+device drive_motor: motor {
+    purpose: "fixture analog load"
+    ports: [cmd:analog:consumer]
+}
+
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: plc_main.Y0, to: run_lamp.coil, via: driven_by }
+relation { from: pressure_sensor.out, to: plc_main.AI0, via: reports_to }
+relation { from: plc_main.AO0, to: drive_motor.cmd, via: driven_by }
 
 [constraints]
 
 [tasks]
 
 task main:
-    step extend:
-        action: extend cyl_A
-
-    step wait_button:
-        wait: X0 == true
+    step wait_start:
+        wait: start_button == true
         timeout: 50ms -> goto fault
+
+    step drive_output:
+        action: set run_lamp.coil on
 
     step sample_analog:
         wait: AI0 >= 0.0
@@ -41,13 +56,14 @@ task main:
 
     step done:
         action: log "build_rp2040_fixture_done"
-        action: retract cyl_A
+        action: set run_lamp.coil off
 
     on_complete: goto done_task
 
 task fault:
     step stop:
-        action: retract cyl_A
+        action: set run_lamp.coil off
+        action: set_analog AO0 0.0
 
     on_complete: goto done_task
 
@@ -614,3 +630,6 @@ fn cli_build_rp2040_emit_uf2_reports_missing_elf_output() {
         "stderr should mention missing ELF, got: {stderr}"
     );
 }
+
+
+

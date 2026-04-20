@@ -59,7 +59,7 @@
 
 ```bash
 cargo check
-cargo run --bin rust_plc -- examples/two_cylinder.plc
+cargo run --bin rust_plc -- examples/dual_axis_platform.plc
 cargo test --test examples_integration
 cargo test --test axis_fault_routing_trace_snapshot_us016
 cargo test --test runtime_bridge_us006

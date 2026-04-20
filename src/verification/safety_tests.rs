@@ -9,7 +9,7 @@ mod tests {
     use crate::semantic::{build_constraint_set, build_state_machine};
 
     #[test]
-    fn proves_two_cylinder_sequence_without_parallel_conflict() {
+    fn proves_sequential_cylinder_sequence_without_parallel_conflict() {
         let source = r#"
 [topology]
 
@@ -572,10 +572,11 @@ task inspect:
 
 device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default, motion_param_set: stepper_default_fast }
 device out_a: digital_output
+device AI0: analog_input { range: 0..10 }
 
 [constraints]
 
-safety: AO0 > 6 conflicts_with AO0 < 2
+safety: AI0 > 6 conflicts_with AI0 < 2
 
 [tasks]
 

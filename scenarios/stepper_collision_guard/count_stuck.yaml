@@ -17,9 +17,9 @@ inputs:
   - at_ms: 1000
     set:
       analog_inputs:
-        AI0: 60000
+        AI0: 0.4
 
   - at_ms: 2000
     set:
       analog_inputs:
-        AI0: 70000
+        AI0: 0.6

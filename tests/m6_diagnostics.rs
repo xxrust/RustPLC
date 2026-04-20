@@ -82,7 +82,7 @@ inputs:
 
     let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
         .arg("scenario-validate")
-        .arg(repo_path("examples/assembly_station.plc"))
+        .arg(repo_path("examples/project_scaffold_demo/plc/main.plc"))
         .arg("--scenario")
         .arg(&scenario)
         .arg("--output")
@@ -131,14 +131,14 @@ inputs:
   - at_ms: 0
     set:
       digital_inputs:
-        10: true
+        0: true
 "#,
     )
     .expect("write scenario");
 
     let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
         .arg("scenario-doctor")
-        .arg(repo_path("examples/assembly_station.plc"))
+        .arg(repo_path("examples/project_scaffold_demo/plc/main.plc"))
         .arg("--scenario")
         .arg(&scenario)
         .arg("--fix-preview")

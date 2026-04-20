@@ -108,6 +108,12 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
     },
     CliCommandHelp {
         section: "Diagnostics",
+        name: "geometry-export",
+        summary: "Export a semantic-twin geometry artifact from topology, state-machine, constraints, and optional evidence.",
+        usage_template: "Usage: {program} geometry-export <source.plc|source.bundle.toml> --out <geometry.json> [--trace <trace.jsonl>] [--intent-report <report.json>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
         name: "trace-diff",
         summary: "Compare SIL and board traces and emit a mismatch report.",
         usage_template: "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]",
@@ -312,6 +318,12 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--scenario <scenario.yaml>   Scenario YAML to replay.",
             "--out-dir <dir>              Required output directory for board-like artifacts.",
         ],
+        "geometry-export" => &[
+            "--out <geometry.json>        Required semantic-twin geometry artifact output.",
+            "--trace <trace.jsonl>        Optional runtime trace overlay input.",
+            "--intent-report <report.json> Optional intent-alignment report overlay input.",
+            "--output <human|json>        Select CLI output format.",
+        ],
         "trace-diff" => &[
             "--sil <trace.jsonl>          SIL trace JSONL input.",
             "--board <trace.jsonl>        Board or virtual-board trace JSONL input.",
@@ -433,6 +445,10 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
             "This command orchestrates `compile`, `sequence-lint`, `scenario-doctor`, and `no-board-gate` as one reproducible release check.",
             "When `--intent-contract` and `--intent-evidence` are both provided, an `intent_alignment` step is appended and reduced from the library report without reinterpreting its verdict.",
         ],
+        "geometry-export" => &[
+            "This command writes a stable JSON artifact for later SVG, web, or animation rendering; it does not render UI directly.",
+            "When `--trace` is provided, runtime task and step names are resolved with a best-effort mapping from semantic task contexts.",
+        ],
         "trace-doctor" => &["At least one of `--trace` or `--diff` is required."],
         "intent-doctor" => &[
             "If `--intent-contract` is omitted, the command tries the sibling `*.intent_alignment.contract.json` path next to the PLC source entry.",
@@ -468,7 +484,7 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         ],
         "sim" => &["rust_plc sim scenarios/basic.yaml --out out/sim/trace.jsonl"],
         "sim-plc" => &[
-            "rust_plc sim-plc examples/assembly_station.plc --scenario scenarios/normal.yaml --out out/sim/trace.jsonl",
+            "rust_plc sim-plc examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --out out/sim/trace.jsonl",
         ],
         "sim-regress" => &[
             "rust_plc sim-regress --plc-dir examples --scenario-dir scenarios --summary-out out/sim-regress/summary.json",
@@ -483,30 +499,34 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
             "rust_plc build-renode-stm32 examples/pil_baselines/case_timeout/case.plc --scenario examples/pil_baselines/case_timeout/scenarios/base.yaml --out out/renode_case_timeout",
         ],
         "release-bundle" => &[
-            "rust_plc release-bundle examples/assembly_station.plc --scenario scenarios/normal.yaml --out-dir out/release/assembly_station",
+            "rust_plc release-bundle examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --out-dir out/release/rp2040_motion_minimal",
         ],
         "flash-rp2040" => &["rust_plc flash-rp2040 --uf2 out/rp2040/app.uf2 --mount E:\\"],
         "board-parse" => &["rust_plc board-parse --in board.log --out-dir out/board_parse"],
         "no-board-gate" => &[
-            "rust_plc no-board-gate examples/assembly_station.plc --scenario scenarios/normal.yaml --out-dir out/gate/no_board/assembly_station --output json",
+            "rust_plc no-board-gate examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --out-dir out/gate/no_board/rp2040_motion_minimal --output json",
         ],
         "project-check" => &[
             "rust_plc project-check examples/project_scaffold_demo/plc/main.plc --scenario examples/project_scaffold_demo/scenarios/nominal/normal.yaml --out-dir out/project_check/project_scaffold_demo --output human",
         ],
         "commissioning-run" => &[
-            "rust_plc commissioning-run examples/assembly_station.plc --out-dir out/commissioning/assembly_station",
+            "rust_plc commissioning-run examples/project_scaffold_demo/plc/main.plc --out-dir out/commissioning/project_scaffold_demo",
         ],
         "pil-run" => {
-            &["rust_plc pil-run examples/assembly_station.plc --scenario scenarios/normal.yaml"]
+            &["rust_plc pil-run examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml"]
         }
         "virtual-board" => &[
-            "rust_plc virtual-board examples/assembly_station.plc --scenario scenarios/normal.yaml --out-dir out/virtual_board/assembly_station",
+            "rust_plc virtual-board examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --out-dir out/virtual_board/rp2040_motion_minimal",
+        ],
+        "geometry-export" => &[
+            "rust_plc geometry-export examples/rp2040_motion_minimal.plc --out out/geometry/rp2040_motion_minimal.geometry.json",
+            "rust_plc geometry-export out/wafer_loader_project/plc/main.target_semantics.bundle.toml --trace out/wafer_loader_project/out/project_check_with_auto_sim_v4/no_board_gate/artifacts/sil_trace.jsonl --intent-report out/wafer_loader_project/out/project_check_with_auto_sim_v4/intent_alignment/report.json --out out/geometry/wafer_loader.geometry.json --output json",
         ],
         "trace-diff" => &[
             "rust_plc trace-diff --sil out/sil_trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json --fail-on-mismatch",
         ],
         "trace-doctor" => &[
-            "rust_plc trace-doctor examples/assembly_station.plc --scenario scenarios/normal.yaml --trace out/sim/trace.jsonl --diff out/diff_report.json --output human",
+            "rust_plc trace-doctor examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --trace out/sim/trace.jsonl --diff out/diff_report.json --output human",
         ],
         "intent-doctor" => &[
             "rust_plc intent-doctor out/wafer_loader_project/plc/main.target_semantics.bundle.toml --trace out/wafer_loader_project/out/project_check_with_auto_sim_v4/no_board_gate/artifacts/sil_trace.jsonl --output human",
@@ -533,22 +553,22 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
             "rust_plc scenario-init examples/project_scaffold_demo/plc/main.plc --preset normal --out scenarios/generated/project_scaffold_demo.normal.yaml",
         ],
         "scenario-validate" => &[
-            "rust_plc scenario-validate examples/assembly_station.plc --scenario scenarios/normal.yaml --output json",
+            "rust_plc scenario-validate examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --output json",
         ],
         "scenario-doctor" => &[
-            "rust_plc scenario-doctor examples/assembly_station.plc --scenario scenarios/normal.yaml --fix-preview --output human",
+            "rust_plc scenario-doctor examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --fix-preview --output human",
         ],
         "scenario-expand" => &[
-            "rust_plc scenario-expand examples/assembly_station.plc --scenario scenarios/normal.yaml --out out/scenario.expanded.yaml",
+            "rust_plc scenario-expand examples/project_scaffold_demo/plc/main.plc --scenario examples/scenarios/pulse_hold.yaml --out out/scenario.expanded.yaml",
         ],
         "scenario-gen" => &[
-            "rust_plc scenario-gen --plc examples/assembly_station.plc --config examples/scenario_gen/basic.yaml --out-dir out/scenario_gen",
+            "rust_plc scenario-gen --plc examples/rp2040_motion_minimal.plc --config examples/scenario_gen/basic.yaml --out-dir out/scenario_gen",
         ],
         "sequence-lint" => &[
             "rust_plc sequence-lint examples/recovery_templates/power_loss_recovery.plc --critical-wait-level error",
         ],
         "gen-st" => {
-            &["rust_plc gen-st examples/assembly_station.plc --out out/codegen/assembly_station.st"]
+            &["rust_plc gen-st examples/dual_axis_platform.plc --out out/codegen/dual_axis_platform.st"]
         }
         _ => &[],
     }
@@ -618,8 +638,8 @@ fn render_compile_help(program: &str) -> String {
         &mut msg,
         "Examples",
         &[
-            "rust_plc examples/assembly_station.plc --report out/verification_report.json",
-            "rust_plc examples/assembly_station.plc --ir-out out/ir_bundle.json --no-print-ir",
+            "rust_plc examples/dual_axis_platform.plc --report out/verification_report.json",
+            "rust_plc examples/project_scaffold_demo/plc/main.plc --ir-out out/ir_bundle.json --no-print-ir",
         ],
     );
     msg.trim_end().to_string()
@@ -710,3 +730,18 @@ pub(crate) fn print_command_help_and_exit(program: &str, command: &str, exit_cod
 pub(crate) fn print_usage(program: &str) {
     eprintln!("{}", render_root_help(program));
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

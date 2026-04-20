@@ -134,13 +134,13 @@ macro_rules! err_contains {
 // -----------------------------------------------------------------------------
 
 #[test]
-fn large_example_assembly_station_compiles_and_has_nontrivial_ir() {
-    let source = read_example("assembly_station.plc");
-    let ir = compile_source_to_json(&source).expect("assembly_station should compile");
+fn large_example_three_station_assembly_compiles_and_has_nontrivial_ir() {
+    let source = read_example("three_station_assembly.plc");
+    let ir = compile_source_to_json(&source).expect("three_station_assembly should compile");
 
-    assert!(ir["topology"]["graph"]["nodes"].as_array().unwrap().len() >= 30);
-    assert!(ir["state_machine"]["states"].as_array().unwrap().len() >= 12);
-    assert!(ir["state_machine"]["transitions"].as_array().unwrap().len() >= 20);
+    assert!(ir["topology"]["graph"]["nodes"].as_array().unwrap().len() >= 20);
+    assert!(ir["state_machine"]["states"].as_array().unwrap().len() >= 10);
+    assert!(ir["state_machine"]["transitions"].as_array().unwrap().len() >= 12);
 }
 
 // -----------------------------------------------------------------------------

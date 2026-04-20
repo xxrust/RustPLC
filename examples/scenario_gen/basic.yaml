@@ -1,7 +1,7 @@
 # Scenario generator config (example).
 #
 # Usage:
-#   cargo run --release -- scenario-gen --plc examples/assembly_station.plc \
+#   cargo run --release -- scenario-gen --plc examples/rp2040_motion_minimal.plc \
 #     --config examples/scenario_gen/basic.yaml --out-dir out/scenario_gen
 #
 # Notes:
@@ -20,3 +20,4 @@ inject_sensor_stuck: [false, true]
 
 # Upper bound of emitted cases (keeps CI fast & output manageable).
 max_cases: 6
+
