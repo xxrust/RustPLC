@@ -11,29 +11,29 @@ It may be omitted only when one of these is true:
 
 Do not describe a scaffold placeholder contract as a validated sidecar.
 Placeholder digests, unresolved source binding, or starter anchors mean the asset is still blocked.
+The bound `source_digest.value` must be the real lowercase SHA-256 hex of the authored source.
 
 这个工件只回答一个问题：
 
-> `*.intent_alignment.contract.json` 什么时候属于本轮 authored sidecar，什么时候不该默认生成？
+> `*.intent_alignment.contract.json` 什么时候属于本轮 authored sidecar，什么时候可以被显式 blocker 替代？
 
-## 只在明确请求时生成或修复
+## complex delivery 默认要生成或修复
 
-只有以下任一情况成立时，`plc-gen` 才应额外写入 `*.intent_alignment.contract.json`：
+只要属于以下任一情况，`plc-gen` 默认就应把 `*.intent_alignment.contract.json` 当成 authored sidecar：
 
-- 用户明确要求 intent-alignment
-- 用户明确要求 intent gate 或 comparator
+- scaffolded station / module / line 项目
+- structured fragment source set
+- bundle-based complex delivery
+- canonical example、golden path 或 intent fixture 交付
 - 用户明确要求 `project-check` 在基础 gate 之外再验证“程序是否做了对的事”
-- 任务目标本身就是交付 canonical example、golden path 或可复用的 intent fixture
 
-## 默认不要生成
+## 可以不生成的例外
 
-普通 DSL 交付默认只需要：
+只有以下场景才默认不要求 sidecar：
 
-- `plc/main.system.md`
-- DSL source entry
-- scenario
-
-如果用户没有显式提出 intent 相关目标，就不要把 sidecar 当成默认交付物。
+- 普通单文件局部 repair
+- 用户明确说“先不要做 intent-alignment”
+- 还拿不到真实 authored intent source、source binding 或 anchor evidence，且该 blocker 已被显式报告
 
 ## sidecar 的身份
 
@@ -50,6 +50,6 @@ Placeholder digests, unresolved source binding, or starter anchors mean the asse
 
 ## 正确的回答边界
 
-- 可以说“本轮未生成 intent sidecar，验证链只覆盖基础 gate”
-- 可以说“已按用户要求补 sidecar，并在 `project-check` 中追加 intent-alignment 步骤”
-- 不要把“可能以后会需要”包装成默认生成理由
+- 可以说“本轮因 blocker 未完成 intent sidecar authoring，因此验证链只覆盖基础 gate”
+- 可以说“已按复杂项目默认要求补 sidecar，并在 `project-check` 中追加 intent-alignment 步骤”
+- 不要把 scaffold placeholder sidecar 包装成已经完成的 authored sidecar

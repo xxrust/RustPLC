@@ -6,6 +6,12 @@ Do not report `validated` when the sidecar still contains:
 - `replace_me_after_authoring`
 - unresolved source binding
 - starter anchors such as `replace_after_intent_doctor`
+- a `source_digest.value` that is not the real lowercase SHA-256 hex of the bound source
+
+Do not report `generated` or `validated with warnings` when delivery-asset authored docs still contain scaffold markers such as:
+- `Default Starter Flow`
+- `starter`
+- `Replace with the authored`
 
 这个工件只回答一个问题：
 
@@ -44,7 +50,7 @@ Do not report `validated` when the sidecar still contains:
 - `<name>.bundle.toml`
 - fragments
 - `scenarios/nominal/normal.yaml`
-- 可选 `*.intent_alignment.contract.json`
+- complex delivery 默认需要的 `*.intent_alignment.contract.json`
 
 ## toolchain artifacts
 
@@ -61,8 +67,9 @@ Do not report `validated` when the sidecar still contains:
 - DSL source entry 是什么
 - 如果采用 bundle，关键 fragments 是哪些
 - scenario 是否被创建或修改
-- 是否生成可选 intent sidecar
+- 是否生成默认要求的 intent sidecar，还是被 blocker 阻塞
 - 当前最小验证链是什么
+- delivery asset docs 是否已经脱离 scaffold 占位态
 
 ## 不要做的事
 

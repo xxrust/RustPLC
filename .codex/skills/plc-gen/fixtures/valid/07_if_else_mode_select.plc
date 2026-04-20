@@ -1,7 +1,8 @@
 [topology]
 
-device mode_switch: digital_input {
-    purpose: "模式选择开关，true 选择 A 流程，false 选择 B 流程"
+device mode_switch: sensor {
+    purpose: "模式选择开关，true 选择 A 流程，false 选择 B 流程",
+    subtype: "selector_switch"
 }
 
 [constraints]

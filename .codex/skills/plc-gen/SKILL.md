@@ -94,6 +94,20 @@ cargo run --release --bin rust_plc -- new <project_dir> --layout structured-frag
 
 Treat `plc/main.target_semantics.bundle.toml` as the source entry and fill the generated fragments under `plc/target_semantics_fragments/`.
 
+## Hard Guardrail: Replace Scaffold Placeholders Before Calling The Project Generated
+
+For scaffolded complex delivery, the generated tree is only a starter shell.
+
+Before calling the result "generated", "ready", or "validated":
+- replace scaffold placeholder intent sources such as `plc/main.system.md`
+- replace delivery-asset placeholder docs such as `plc/deliveries/station/<slug>/docs/station.system.md`
+- ensure the delivery-asset doc set, not only the root scaffold doc, carries the confirmed process facts
+- decide which delivery-asset `main.bundle.toml` is the authoritative source entry for this asset
+- either author a real `*.intent_alignment.contract.json` with resolved source binding, or report an explicit blocker
+
+Do not stop at "scaffold succeeded" when the request was to generate a real project from a confirmed `.system.md`.
+If delivery docs still contain scaffold markers such as `Default Starter Flow`, `starter`, or `replace_me_after_authoring`, the job is not complete.
+
 ## Hard Guardrail: Do Not Confuse The Bundle With The Whole Delivery
 
 For complex projects, the compileable bundle is only one layer.
@@ -134,6 +148,7 @@ intent alignment is not optional.
 Default requirements:
 - author a sibling `*.intent_alignment.contract.json` sidecar next to the source entry
 - bind it to an authored intent source such as `plc/main.system.md`
+- write `source_digest.value` as the real lowercase SHA-256 hex of that authored source
 - run `project-check` so the real `intent_alignment` step is appended after `no-board-gate`
 - report the actual intent-alignment verdict instead of only reporting base-gate success
 - replace scaffold placeholder digests such as `replace_me_after_authoring` before calling the delivery validated
@@ -163,6 +178,9 @@ Prefer these stable sources:
 - `docs/architecture/signal-direction.md`
 - `docs/architecture/intent_alignment_verification.md`
 - the confirmed authored intent source such as `plc/main.system.md`
+
+When the authoritative source contains non-ASCII text, read it with explicit UTF-8 handling before freezing lowering facts.
+Do not proceed from mojibake or partially decoded system text.
 
 ## Core Rules
 
@@ -211,6 +229,7 @@ Use these role briefs as needed:
 4. Generate or repair the DSL source entry.
 5. Generate or repair `scenarios/nominal/normal.yaml`.
 6. For complex delivery, generate or repair the sibling `*.intent_alignment.contract.json`.
+   Keep `source_digest.value` in lowercase SHA-256 hex so source binding matches the toolchain verifier.
 7. Run `project-check`.
 8. Confirm that `intent_alignment` actually appeared as a step.
 9. Report the real verdict, mismatch, or blocker.

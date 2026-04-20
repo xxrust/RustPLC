@@ -43,6 +43,7 @@ The sidecar must:
 
 Before calling the sidecar delivery-grade, confirm all of the following:
 - `source_digest.value` is no longer a scaffold placeholder such as `replace_me_after_authoring`
+- `source_digest.value` is the real lowercase SHA-256 hex of the bound authored source
 - `source_ref`, `authoritative_intent_source`, and every `review_basis[*].source` resolve from the delivery root
 - the frozen anchors came from real trace evidence or `intent-doctor`
 - the sidecar no longer contains starter placeholders such as `replace_with_real_anchor` or `replace_after_intent_doctor`

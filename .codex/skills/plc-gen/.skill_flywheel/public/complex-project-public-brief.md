@@ -22,6 +22,7 @@ For complex project delivery, the brief must also say:
    - 单文件 `.plc`
    - 还是 `.bundle.toml` + fragments
    - 是否已存在 scaffold 项目
+   - authoritative source 是否需要显式 UTF-8 读取
 3. 已冻结的 system / lowering facts
    - task partition
    - blocking / timeout / wait / delay / axis.move_*
@@ -30,9 +31,11 @@ For complex project delivery, the brief must also say:
 4. 当前已有文件与期望写入物
    - 当前已有的关键文件
    - 这轮允许 skill 写入哪些文件
+   - root scaffold 文件与 delivery asset 文件各自负责什么
 5. authored artifact 范围
    - 是否需要 scenario
-   - 是否需要可选 `*.intent_alignment.contract.json`
+   - complex delivery 下是否默认需要 `*.intent_alignment.contract.json`
+   - 如果本轮不写 sidecar，具体 blocker 是什么
 6. 不可改变的边界
    - 不允许破坏的 source boundary
    - 不允许擅自补全的未冻结 contract
@@ -66,6 +69,7 @@ For complex project delivery, the brief must also say:
 - 不要把命令列表当作 brief 主体
 - 不要让 implementer 自己重新猜 contract
 - 不要让 reviewer 一边审一边继续发明需求
+- 不要只替换 root `plc/main.system.md` 却让 delivery asset docs 保持 scaffold 占位文案
 
 ## brief 不足时怎么办
 

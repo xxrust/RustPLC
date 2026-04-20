@@ -2,88 +2,91 @@
 
 ## 研究问题
 
-`plc-gen` 现在虽然已经引入了 `public brief`、one-shot 和多 agent 编排，但这些新规则是否已经暴露成盲测执行者可直接消费的公开工件，而不是仍然主要埋在 skill / references 里。
+给定确认版 `examples/three_station_assembly.system.md`，`plc-gen` 当前的 skill 与公开工件，是否已经足够让弱盲执行者：
+
+- scaffold 一个真实的 station 级 structured-fragments 项目
+- 把 confirmed system 真正下沉到 delivery asset docs / bundle / fragments
+- 运行真实 `project-check`
+- 并在 intent sidecar 仍是占位状态时正确报告 blocker，而不是把 scaffold 误报成“已生成项目”
 
 ## 当前假设
 
-当前最主要的缺口不是继续扩写 `plc-gen` 本体，而是缺少一份显式导出的 “complex-project public brief contract”。
+当前主缺口更像 `public-surface-gap`，不是 `plc-gen` 完全不会做项目生成。
 
-如果把下面这件事公开导出：
+更具体地说，公开面很可能缺 3 件事：
 
-- 复杂项目里主 agent 必须先准备什么 `public brief`
-- brief 至少包含哪些字段
-- architect / implementer / reviewer 各自基于 brief 做什么
-
-那么一个看不到源码的执行者就不需要翻 `references/` 才能理解这套 one-shot 编排。
+- source shape 该如何从 root scaffold 切到 delivery asset `main.bundle.toml`
+- 确认版 `.system.md` 进入 scaffold 后，哪些占位 docs/sidecar 必须立刻替换
+- 复杂项目下 intent sidecar 什么时候是默认要求，而不是“有空再说”
 
 ## 对照基线
 
 - baseline skill / baseline 工件：
-  `plc-gen` 已写入 one-shot / public brief 规则，但 `.skill_flywheel/public/` 还没有专门的 public brief 工件。
+  `plc-gen` 主 skill 已要求 structured-fragments、delivery asset、`project-check` 与复杂项目默认 intent alignment。
 - 本轮期待看到的差异：
-  弱盲执行者只靠真实 `plc-gen` + 导出的 `public/`，就能回答复杂项目下如何准备 public brief、如何拆分角色、哪些内容属于 authored artifacts。
+  盲测执行者只靠真实 `plc-gen` + 导出的 `public/`，就能从 confirmed `.system.md` 走到真实项目交付链，而不是停在 scaffold 默认壳子。
 
 ## 固定边界
 
 - 本轮盲测模式固定为 `weak-blind`
-- 盲测执行者默认只能读取目标 skill、`context/` 与显式导出的 `public/`
+- 盲测执行者默认只读取目标 skill、`context/` 与显式导出的 `public/`
 - 不允许把仓库普通 `docs/`、`src/` 或其他实现文件当作盲测输入
+- 研究对象固定为 `examples/three_station_assembly.system.md`
 
 ## 并行设置
 
-- 并行实例数：1
-- 每个实例共享的固定输入：同一份 `plc-gen`、同一份 complex-project 任务、同一组 `public/`
-- 每个实例允许变化的因素：无
-- 实例之间禁止共享的内容：不适用，本轮不并行
+- 并行实例数：2
+- 每个实例共享的固定输入：同一份 `plc-gen`、同一份 confirmed `.system.md`、同一组 `public/`
+- 每个实例允许变化的因素：实现者自己的作者化路径与命令顺序
+- 实例之间禁止共享的内容：彼此的输出目录与中途结论
 
 ## 随机性控制
 
-- 本轮接受的随机性来源：单代理 fallback 的宿主上下文污染
+- 本轮接受的随机性来源：执行者自己的 authoring 选择与工具链失败路径
 - 不允许更换任务模板
 - 不把本轮结果写成 `clean-room`
 
 ## 任务选择
 
 - 本轮使用的真实任务：
-  给一个复杂项目请求，包含确认版 `.system.md`、多文件 bundle 倾向、scenario/gate 约束，以及可选 intent-alignment；要求回答“主 agent 必须先准备什么 public brief，再如何 one-shot 拆给 architect / implementer / reviewer”。
+  从 `examples/three_station_assembly.system.md` 生成一个 station 级 structured-fragments RustPLC 项目，并尽量跑通 `project-check`。
 - 为什么这个任务能验证当前假设：
-  因为它正好验证 `plc-gen` 最新引入、也最容易重新藏回 skill 内部的那部分能力。
+  因为它同时覆盖了 source-shape 选择、confirmed-system 下沉、delivery docs/intent sidecar authoring、project-check 入口，以及“不能把 scaffold 占位物当交付”的整条链路。
 
 ## 成功信号
 
-- 导出的 `public/` 中存在专门的 public brief 工件，而不是只靠 skill / references 内文
-- 弱盲执行者能回答：
-  - public brief 至少包含什么
-  - architect / implementer / reviewer 如何基于 brief 交接
-  - 哪些是 skill 写入物，哪些是工具链产物
+- blind runner 产出真实的 delivery asset docs，而不是停留在 scaffold 默认文案
+- delivery asset `main.bundle.toml` 与 scenario 真正成为执行入口
+- intent sidecar 要么被真实 authoring，要么被显式报告为 blocker
 - `test_plc_gen_target_config.py` 通过
 
 ## 失败信号
 
-- 仍然必须翻 `references/public-brief-template.md` 才能答题
-- 仍然把 public brief 结构藏在主 skill 规则里，没有显式 public artifact
-- target config 测试未覆盖新工件
+- 执行者只成功 scaffold，但没有替换 delivery asset 占位 docs
+- 执行者仍把 root `plc/main.system.md` 当成复杂项目唯一需要修改的文件
+- 执行者把 scaffold 占位 intent contract 当成可验证 sidecar
+- target config 仍声明导出不存在的 public artifact
 
 ## 决策规则
 
-- 如果属于 `skill-gap`：只补 `plc-gen` 本体里缺失的选择规则
-- 如果属于 `public-surface-gap`：补 `.skill_flywheel/public/` 与 `public_surface.json`
+- 如果属于 `skill-gap`：补 `plc-gen` 本体中的硬规则或 workflow
+- 如果属于 `public-surface-gap`：优先补 `.skill_flywheel/public/`、`profile.md` 与 target config 测试
 - 如果属于 `code-gap`：补 `skill-flywheel` 导出脚本或目标测试
-- 如果属于 `task-ambiguity`：收窄任务，只保留 complex-project public brief 主路径
+- 如果属于 `task-ambiguity`：收窄任务，只保留“confirmed system -> delivery asset project-check”主路径
 
 ## 冲突证据处理
 
 - 如果多实例结论冲突：视为证据不足，本轮不升格成 skill 结论
-- 如果证据不足：只允许补更窄 public artifact，不继续泛化
+- 如果证据不足：只允许补更窄、更直接的 public artifact，不继续泛化
 
 ## 停止条件
 
-- public brief contract 已进入 `.skill_flywheel/public/`
-- target config 测试覆盖新工件
-- 完成一轮弱盲 cycle 并写出 decision
+- 公开工件已能覆盖这轮真实任务的主路径
+- target config 测试通过
+- 至少完成一轮修复后复跑，并拿到“不是只 scaffold 成功”的证据
 
 ## 预算
 
 - 最大轮数：1
-- 最大并行实例数：1
+- 最大并行实例数：2
 - 连续 1 轮没有新证据就停止

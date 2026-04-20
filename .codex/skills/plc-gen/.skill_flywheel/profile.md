@@ -13,7 +13,16 @@
 - `scaffold-day1-validation-order.md`
 - `scaffold-day1-checklist.md`
 - `complex-project-public-brief.md`
+- `source-shape-selection.md`
+- `delivery-asset-placeholder-replacement.md`
+- `delivery-asset-write-map.md`
+- `controller-io-modeling-guardrails.md`
+- `legacy-io-model-removal.md`
+- `operator-command-modeling.md`
 - `confirmed-system-lowering.md`
+- `intent-alignment-boundary.md`
+- `delivery-status-contract.md`
+- `optimization-surface.md`
 - `control-mode-and-recovery-patterns.md`
 - `scenario-toolchain-limitations.md`
 - `scenario-friendly-guard-patterns.md`

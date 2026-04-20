@@ -28,6 +28,8 @@ class PlcGenTargetConfigTests(unittest.TestCase):
         self.assertIn("scaffold-day1-launchers.md", config["artifact_paths"])
         self.assertIn("complex-project-public-brief.md", config["artifact_paths"])
         self.assertIn("source-shape-selection.md", config["artifact_paths"])
+        self.assertIn("delivery-asset-placeholder-replacement.md", config["artifact_paths"])
+        self.assertIn("delivery-asset-write-map.md", config["artifact_paths"])
         self.assertIn("controller-io-modeling-guardrails.md", config["artifact_paths"])
         self.assertIn("legacy-io-model-removal.md", config["artifact_paths"])
         self.assertIn("operator-command-modeling.md", config["artifact_paths"])
@@ -63,6 +65,8 @@ class PlcGenTargetConfigTests(unittest.TestCase):
             self.assertTrue((cycle_dir / "public" / "scaffold-day1-checklist.md").exists())
             self.assertTrue((cycle_dir / "public" / "complex-project-public-brief.md").exists())
             self.assertTrue((cycle_dir / "public" / "source-shape-selection.md").exists())
+            self.assertTrue((cycle_dir / "public" / "delivery-asset-placeholder-replacement.md").exists())
+            self.assertTrue((cycle_dir / "public" / "delivery-asset-write-map.md").exists())
             self.assertTrue((cycle_dir / "public" / "controller-io-modeling-guardrails.md").exists())
             self.assertTrue((cycle_dir / "public" / "legacy-io-model-removal.md").exists())
             self.assertTrue((cycle_dir / "public" / "operator-command-modeling.md").exists())
@@ -80,6 +84,8 @@ class PlcGenTargetConfigTests(unittest.TestCase):
         validation_order = (public_dir / "scaffold-day1-validation-order.md").read_text(encoding="utf-8")
         checklist = (public_dir / "scaffold-day1-checklist.md").read_text(encoding="utf-8")
         source_shape = (public_dir / "source-shape-selection.md").read_text(encoding="utf-8")
+        placeholder_replacement = (public_dir / "delivery-asset-placeholder-replacement.md").read_text(encoding="utf-8")
+        write_map = (public_dir / "delivery-asset-write-map.md").read_text(encoding="utf-8")
         controller_guardrails = (public_dir / "controller-io-modeling-guardrails.md").read_text(encoding="utf-8")
         legacy_io = (public_dir / "legacy-io-model-removal.md").read_text(encoding="utf-8")
         operator_commands = (public_dir / "operator-command-modeling.md").read_text(encoding="utf-8")
@@ -92,6 +98,16 @@ class PlcGenTargetConfigTests(unittest.TestCase):
         self.assertIn("blocked by toolchain limitation", validation_order)
         self.assertIn("project-check", checklist)
         self.assertIn(".bundle.toml", source_shape)
+        self.assertIn("three_station_assembly", source_shape)
+        self.assertIn("line", source_shape)
+        self.assertIn("单机运行", source_shape)
+        self.assertIn("Default Starter Flow", placeholder_replacement)
+        self.assertIn("replace_me_after_authoring", placeholder_replacement)
+        self.assertIn("UTF-8", placeholder_replacement)
+        self.assertIn("delivery asset", placeholder_replacement)
+        self.assertIn("docs/*.system.md", write_map)
+        self.assertIn("main.bundle.toml", write_map)
+        self.assertIn("intent_alignment.contract.json", write_map)
         self.assertIn("model_ref", controller_guardrails)
         self.assertIn("SCN-MAP-010", controller_guardrails)
         self.assertIn("SEM-108", legacy_io)
@@ -101,31 +117,33 @@ class PlcGenTargetConfigTests(unittest.TestCase):
         self.assertIn("authored sidecar", intent_boundary)
         self.assertIn("toolchain artifacts", intent_boundary)
         self.assertIn("required by default", intent_boundary)
+        self.assertIn("lowercase SHA-256", intent_boundary)
         self.assertIn("validated with warnings", delivery_status)
         self.assertIn("toolchain artifacts", delivery_status)
         self.assertIn("replace_me_after_authoring", delivery_status)
+        self.assertIn("lowercase SHA-256", delivery_status)
         self.assertIn("library", optimization)
         self.assertIn("CLI", optimization)
         self.assertIn("subcommand", optimization)
 
-    def test_plc_gen_valid_fixtures_use_controller_profiles(self) -> None:
+    def test_plc_gen_valid_fixtures_keep_operator_inputs_semantic(self) -> None:
         fixtures_dir = PLC_GEN_ROOT / "fixtures" / "valid"
-        inline_ports = []
         raw_digital_io = []
-        missing_model_ref = []
+        push_button_fixtures = []
+        selector_switch_fixtures = []
 
         for fixture_path in fixtures_dir.glob("*.plc"):
             source = fixture_path.read_text(encoding="utf-8")
-            if "ports: [" in source:
-                inline_ports.append(fixture_path.name)
             if ": digital_input {" in source or ": digital_output {" in source:
                 raw_digital_io.append(fixture_path.name)
-            if "device plc_main: plc" in source and "model_ref:" not in source:
-                missing_model_ref.append(fixture_path.name)
+            if 'subtype: "push_button"' in source:
+                push_button_fixtures.append(fixture_path.name)
+            if 'subtype: "selector_switch"' in source:
+                selector_switch_fixtures.append(fixture_path.name)
 
-        self.assertEqual([], inline_ports)
         self.assertEqual([], raw_digital_io)
-        self.assertEqual([], missing_model_ref)
+        self.assertNotEqual([], push_button_fixtures)
+        self.assertNotEqual([], selector_switch_fixtures)
 
 
 if __name__ == "__main__":

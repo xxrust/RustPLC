@@ -1,6 +1,16 @@
 # Confirmed System To PLC Lowering
 
-当用户已经提供确认版 `.system.md` 时，`plc-gen` 不应再从零问需求，而应先把 system contract 压缩成一个 `.plc` lowering 摘要。
+当用户已经提供确认版 `.system.md` 时，`plc-gen` 不应再从零问需求，而应先把 system contract 压缩成一个 project-lowering 摘要。
+
+对 complex delivery，先把 lowering 映射到 5 类写入物：
+
+1. delivery asset `docs/*.system.md`
+2. delivery asset `docs/*.architecture.md` / `docs/*.verification.md`
+3. delivery asset `plc/main.bundle.toml` 与 fragments
+4. delivery asset `scenarios/nominal/normal.yaml`
+5. `*.intent_alignment.contract.json` 或显式 blocker
+
+如果输入本身是多工位整线描述，先冻结 delivery layer，再做 lowering；不要一边按 `station` 写，一边在 system 里保留整线语义。
 
 默认按这 6 个桶来收敛：
 
@@ -33,4 +43,19 @@
    - 真实互斥冲突用 `conflicts_with`。
    - 不要用 `conflicts_with` 表达纯顺序关系。
 
-回答时建议先给 5 到 10 行 lowering 摘要，再进入 `.plc` 或 scaffold 交付。
+## project-level authoring 顺序
+
+对 scaffolded station / module / line，优先：
+
+1. 把确认版 system fact 落到 delivery asset `docs/*.system.md`
+2. 让 root `plc/main.system.md` 只承担项目级 bridge / 索引角色，不要让它替代 delivery asset docs
+3. 明确 delivery asset `main.bundle.toml` 是本轮 authoritative source entry
+4. 清掉 delivery asset docs 与 sidecar 中的 scaffold placeholder
+5. 再把上述 6 个桶拆到 fragments
+6. 修 scenario
+7. 修 intent sidecar 或显式报 blocker
+
+不要只改 root `plc/main.system.md`，却把 delivery asset docs 保持 scaffold 默认文案。
+如果 delivery asset docs 仍出现 `Default Starter Flow` 或 `starter intent contract`，说明 lowering 还没真正落盘。
+
+回答时建议先给 5 到 10 行 lowering 摘要，再进入 bundle / fragments 或 scaffold 交付。
