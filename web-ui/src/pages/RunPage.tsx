@@ -3,7 +3,8 @@ import { Card, Button, Form, Input, Space, Table, Tag, Typography, Alert, Spin, 
 import { PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { runApi } from '../services/api';
+import GeometryPreview from '../components/geometry/GeometryPreview';
+import { geometryApi, runApi } from '../services/api';
 import type { RunStatus } from '../types';
 
 const { Title, Text } = Typography;
@@ -96,6 +97,9 @@ const RunPage: React.FC = () => {
           <Button size="small" onClick={() => setSelectedRunId(record.run_id)}>{t('run.viewDetails')}</Button>
           {record.artifacts?.trace && (
             <Button size="small" type="link" href={record.artifacts.trace} target="_blank">Trace</Button>
+          )}
+          {record.artifacts?.geometry && (
+            <Button size="small" type="link" href={record.artifacts.geometry} target="_blank">Geometry</Button>
           )}
           {record.artifacts?.diagnosis && (
             <Button size="small" type="link" href={record.artifacts.diagnosis} target="_blank">{t('run.diagnosis')}</Button>
@@ -229,10 +233,16 @@ const RunDetails: React.FC<{ runId: string }> = ({ runId }) => {
       return status === 'running' ? 2000 : false;
     },
   });
+  const run = data?.data;
+
+  const { data: geometryData, isLoading: isGeometryLoading } = useQuery({
+    queryKey: ['geometry', runId],
+    queryFn: () => geometryApi.getGeometry(runId),
+    enabled: Boolean(runId),
+    refetchInterval: run?.status === 'running' ? 2000 : false,
+  });
 
   if (isLoading) return <Spin />;
-
-  const run = data?.data;
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="large">
@@ -261,9 +271,16 @@ const RunDetails: React.FC<{ runId: string }> = ({ runId }) => {
             {run.artifacts.diff && <li><a href={run.artifacts.diff} target="_blank">{t('run.diffReport')}</a></li>}
             {run.artifacts.timing && <li><a href={run.artifacts.timing} target="_blank">{t('run.timingReport')}</a></li>}
             {run.artifacts.diagnosis && <li><a href={run.artifacts.diagnosis} target="_blank">{t('run.diagnosisReport')}</a></li>}
+            {run.artifacts.geometry && <li><a href={run.artifacts.geometry} target="_blank">Geometry Artifact</a></li>}
           </ul>
         </div>
       )}
+      <GeometryPreview
+        artifact={geometryData?.data}
+        artifactHref={run?.artifacts?.geometry}
+        loading={isGeometryLoading}
+        runMode={run?.mode}
+      />
     </Space>
   );
 };

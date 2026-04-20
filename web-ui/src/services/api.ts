@@ -6,6 +6,7 @@ import type {
   DiagnosisReport,
   TraceData,
   TimingReport,
+  GeometryArtifactResponse,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -92,6 +93,11 @@ export const runApi = {
 
   listRuns: (limit = 20) =>
     apiClient.get<RunStatus[]>('/run/list', { params: { limit } }),
+};
+
+export const geometryApi = {
+  getGeometry: (runId: string) =>
+    apiClient.get<GeometryArtifactResponse>(`/geometry/${runId}`),
 };
 
 // Trace 相关 API
