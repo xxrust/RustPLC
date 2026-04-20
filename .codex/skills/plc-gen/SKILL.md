@@ -47,6 +47,22 @@ Checklist before writing a cylinder step:
 - if the actuator is already modeled as a semantic device, do not recreate its closed loop in `task.step`
 - if the topology is not closed enough to support the action semantically, report a blocker instead of silently downgrading to sensor choreography
 
+## Hard Guardrail: Scenario Must Explicitly Drive Non-Closed Inputs
+
+Do not assume a nominal scenario can advance a real cycle by pulsing only the start button.
+
+If a wait depends on ordinary PLC inputs or sensor devices that are not topology-closed actuator feedback, the scenario must explicitly drive those inputs.
+
+Examples:
+- homing / target sensors for a motion platform
+- presence sensors, cooling sensors, or manual reset inputs
+- any `plc_main.X*` mapped field signal that runtime will not synthesize for you
+
+Only topology-closed semantic device actions, such as a cylinder action with built-in endpoint semantics, may advance without hand-authored nominal sensor events.
+
+Before freezing intent anchors, run a real trace and confirm it covers the intended cycle boundary.
+If the trace stalls because the scenario only drove operator start and never drove the dependent field inputs, repair the scenario first instead of guessing the contract.
+
 ## Hard Guardrail: Prefer Structured Source Sets
 
 For complex projects, do not default to a monolithic `plc/main.plc`.

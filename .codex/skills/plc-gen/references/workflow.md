@@ -8,10 +8,11 @@ For a project-scale RustPLC delivery, the default path is:
 2. Choose the source shape.
 3. Generate or repair the DSL source entry.
 4. Generate or repair `scenarios/nominal/normal.yaml`.
-5. Author or repair a sibling `*.intent_alignment.contract.json`.
-6. Run `project-check`.
-7. Confirm that `project-check` actually ran `intent_alignment`.
-8. Report the real verdict and the real blocker or mismatch if it did not align.
+5. Run `sim-plc` or equivalent trace-producing validation to confirm the scenario actually drives one real nominal cycle.
+6. Author or repair a sibling `*.intent_alignment.contract.json`.
+7. Run `project-check`.
+8. Confirm that `project-check` actually ran `intent_alignment`.
+9. Report the real verdict and the real blocker or mismatch if it did not align.
 
 For complex projects, this is the default, not an optional extra.
 
@@ -45,7 +46,9 @@ Before calling the sidecar delivery-grade, confirm all of the following:
 - `source_digest.value` is no longer a scaffold placeholder such as `replace_me_after_authoring`
 - `source_digest.value` is the real lowercase SHA-256 hex of the bound authored source
 - `source_ref`, `authoritative_intent_source`, and every `review_basis[*].source` resolve from the delivery root
+- the nominal scenario really drove the needed field inputs instead of only the operator start/reset pulse
 - the frozen anchors came from real trace evidence or `intent-doctor`
+- that trace actually covered at least one full cycle boundary for the intended contract
 - the sidecar no longer contains starter placeholders such as `replace_with_real_anchor` or `replace_after_intent_doctor`
 
 It is acceptable to skip the sidecar only when:

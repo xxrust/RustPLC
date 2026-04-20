@@ -9,9 +9,10 @@
 5. 立刻替换 delivery asset 下的 scaffold 占位 docs，例如 `plc/deliveries/station/<slug>/docs/station.system.md`
 6. 先写 confirmed-system lowering 摘要，再生成或修复 delivery asset `main.bundle.toml` 与 fragments
 7. 修复 `scenarios/nominal/normal.yaml`
-8. complex delivery 默认同时处理 `*.intent_alignment.contract.json`，如果仍是占位状态则明确报 blocker
-9. 在 delivery asset source entry 上运行 `project-check`
-10. 需要 ST 时再运行 `gen-st`
+8. 先跑一次真实 trace，确认 scenario 不只驱动启动按钮，而且确实驱动了本周期依赖的普通 field inputs / sensors
+9. complex delivery 默认同时处理 `*.intent_alignment.contract.json`，如果仍是占位状态则明确报 blocker
+10. 在 delivery asset source entry 上运行 `project-check`
+11. 需要 ST 时再运行 `gen-st`
 
 ## 最低验证门槛
 
@@ -22,6 +23,7 @@
 
 没有真实工具运行结果时，不要把状态写成 `validated`。
 如果 `*.intent_alignment.contract.json` 仍含 `replace_me_after_authoring` 或 `replace_after_intent_doctor`，也不要写成 `validated`。
+如果 trace 还没覆盖到 cycle start / cycle complete 边界，也不要提前冻结 sidecar。
 
 推荐状态词只有这四个：
 

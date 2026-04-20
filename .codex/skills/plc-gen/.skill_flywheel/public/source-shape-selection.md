@@ -27,6 +27,9 @@
 - 单个可独立测试的工艺单元，默认 `station`
 - 多工位集成、跨工位节拍衔接、站间交接或用户直接描述为“装配线/产线”，默认 `line`
 
+像 `welding_station`、`dual_axis_platform` 这类“单机/单工位，但包含并行、互锁、scenario、gate 或 delivery docs”的项目，默认仍是 complex delivery。
+它们的默认落点是 `station` delivery asset，而不是退回单文件 `main.plc`。
+
 如果 authoritative source 同时满足以下特征，更应优先 `line`：
 
 - 明确写出多个工位或 station
@@ -50,6 +53,7 @@
   - `plc/deliveries/station/<slug>/scenarios/nominal/normal.yaml`
 
 对 complex delivery，不要只改 root scaffold 文件而让 delivery asset docs 继续保持占位状态。
+即使 delivery layer 最终是 `station`，也仍然要按 delivery asset 方式 authoring docs、bundle、scenario 与默认需要的 intent sidecar。
 
 ## confirmed system 的落盘顺序
 

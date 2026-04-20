@@ -54,6 +54,12 @@
 
 默认做法是先交付 Day-1 版本，再把这些作为 assumptions 写清。
 
+但如果某个 nominal cycle 依赖普通 field inputs / sensors 才能推进：
+
+- 不要假设 runtime 会替你自动合成这些输入
+- 这些输入事件应落到 `scenarios/nominal/normal.yaml`
+- 只靠 `start_button` 或确认按钮脉冲，不等于 scenario 已经足够
+
 ## complex delivery 的额外提醒
 
 confirmed `.system.md` 足够进入项目生成，不代表 scaffold 默认 docs / intent sidecar 可以原样保留。
