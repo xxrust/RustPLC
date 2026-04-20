@@ -92,6 +92,11 @@ class PlcGenTargetConfigTests(unittest.TestCase):
         intent_boundary = (public_dir / "intent-alignment-boundary.md").read_text(encoding="utf-8")
         delivery_status = (public_dir / "delivery-status-contract.md").read_text(encoding="utf-8")
         optimization = (public_dir / "optimization-surface.md").read_text(encoding="utf-8")
+        skill_text = (PLC_GEN_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        workflow = (PLC_GEN_ROOT / "references" / "workflow.md").read_text(encoding="utf-8")
+        output_contract = (PLC_GEN_ROOT / "references" / "output-contract.md").read_text(encoding="utf-8")
+        generation_rules = (PLC_GEN_ROOT / "references" / "generation-rules.md").read_text(encoding="utf-8")
+        troubleshooting = (PLC_GEN_ROOT / "references" / "troubleshooting.md").read_text(encoding="utf-8")
 
         self.assertIn("project-check", launchers)
         self.assertIn("project-check", validation_order)
@@ -131,6 +136,20 @@ class PlcGenTargetConfigTests(unittest.TestCase):
         self.assertIn("library", optimization)
         self.assertIn("CLI", optimization)
         self.assertIn("subcommand", optimization)
+        self.assertIn("workspace root used to launch `project-check`", skill_text)
+        self.assertIn("repo-root-relative paths are the safest default", skill_text)
+        self.assertIn("workspace root used to launch validation", workflow)
+        self.assertIn("docs-sidecar copy", output_contract)
+        self.assertIn("validated with warnings", output_contract)
+        self.assertIn("sibling sidecar exists", output_contract)
+        self.assertIn("timing budget", generation_rules)
+        self.assertIn("repeat N", generation_rules)
+        self.assertIn("Process-only exception", generation_rules)
+        self.assertIn("analog / PID", generation_rules)
+        self.assertIn("invalid_contract", troubleshooting)
+        self.assertIn("docs-sidecar", troubleshooting)
+        self.assertIn("workpiece required=true", troubleshooting)
+        self.assertIn("AI0/AO0", troubleshooting)
 
     def test_plc_gen_valid_fixtures_keep_operator_inputs_semantic(self) -> None:
         fixtures_dir = PLC_GEN_ROOT / "fixtures" / "valid"

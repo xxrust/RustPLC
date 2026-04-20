@@ -15,7 +15,7 @@ For any complex project delivery, verify all of the following:
 - a sibling `*.intent_alignment.contract.json` exists
 - its scaffold placeholders are gone, including digest and starter anchor placeholders
 - its authoritative intent source exists
-- its source binding resolves from the delivery root, including `review_basis`
+- its source binding resolves from the workspace root used to launch validation, including `review_basis`
 - its observation bindings point to real comparator-supported evidence
 - `project-check` actually appended an `intent_alignment` step
 - the reported verdict matches the produced report

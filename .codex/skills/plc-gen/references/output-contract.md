@@ -18,6 +18,7 @@ Always report:
 
 For any complex project delivery, the final answer must explicitly state:
 - whether a sibling `*.intent_alignment.contract.json` was created or repaired
+- whether a docs-sidecar copy also exists, and which one is authoritative for validation
 - what its authoritative intent source is
 - whether `project-check` actually ran the `intent_alignment` step
 - the intent-alignment verdict
@@ -26,6 +27,8 @@ For any complex project delivery, the final answer must explicitly state:
 
 Base-gate success without an executed `intent_alignment` step is not enough to call a complex project validated.
 Scaffold placeholders such as `replace_me_after_authoring` or `replace_after_intent_doctor` also mean the project is not validated.
+If a sibling sidecar exists next to the source entry, treat it as the authoritative auto-discovered contract for `project-check`; do not leave that sibling at scaffold grade while only repairing a docs-sidecar copy.
+If the comparator returns `aligned` but also reports only one observed cycle with a cross-cycle warning, report `validated with warnings` rather than plain `validated`.
 
 ## Artifact Separation
 

@@ -69,3 +69,44 @@ unsupported guard expression in <task.step>: <expr>
 - 先告诉用户是哪个子步骤失败
 - 再引用 `out/project_check/...` 下的日志或报告路径
 - 给出下一条最小复现或排查命令
+
+## 8. `intent_alignment` 报 `invalid_contract`
+
+常见原因：
+- sibling `*.intent_alignment.contract.json` 仍是 scaffold placeholder
+- 只修了 `docs/*.intent_alignment.contract.json`，但 source entry 同级 sibling sidecar 仍存在并被 `project-check` 优先选中
+- `source_ref` / `review_basis[*].source` 不能从当前 launcher workspace root 解析
+
+做法：
+- 先确认 source entry 同级是否存在 sibling sidecar；若存在，它就是 `project-check` 默认优先消费的 contract
+- 不要只修 docs-sidecar 而放着 sibling placeholder 不管
+- 对放在 `out/...` 下的生成项目，优先把 contract source 路径写成 repo-root-relative 可解析路径
+
+## 9. 过程站被 `workpiece required=true` 拦住
+
+常见场景：
+- 热处理炉
+- 压力/流量/温控回路
+- 阀站、隔离站
+- 其他没有离散件流转的 process-only 资产
+
+如果项目没有真实 `acquire/transfer/finish` 语义，却被 project policy 要求 first-class workpiece：
+
+- 不要伪造一套假 workpiece 流程
+- 把 `config/workpiece.toml` 改成 deliberate no-workpiece exception
+- 然后再继续 compile / sim / gate
+
+## 10. `AI0/AO0` 与 PID / 工程量阈值冲突
+
+如果你看到类似：
+- `AI0` / `AO0` 被当成 `range 0..1`
+- `AI0 > 180`、`AI0 >= 145`、`AI0 < 50` 越界
+- PID `limit 0..100` 超出 `AO0` 范围
+- 同时 legacy `analog_input` / `analog_output` 写法又触发 `SEM-108`
+
+说明当前项目撞上了模拟量 / PID authoring 的真实能力边界。
+
+做法：
+- 不要继续把它包装成“只差一点就 validated”
+- 明确报 `blocked by toolchain limitation` 或等价 blocker
+- 在最终答复里写清：是哪条 range / PID 规则拦住了交付

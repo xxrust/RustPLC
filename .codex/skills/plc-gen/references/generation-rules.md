@@ -73,6 +73,10 @@ Minimum delivery requirements:
 - include the workpiece fragment in the main compileable bundle if the automatic flow depends on it
 - place `effect: acquire`, `effect: transfer`, and `effect: finish` on the real task steps that change ownership or terminal status
 
+Process-only exception:
+- if the confirmed system is a valve station, thermal process, pressure loop, or other process-only asset with no discrete part ownership flow, do not invent workpiece semantics
+- in scaffolded projects, explicitly switch `config/workpiece.toml` to a deliberate no-workpiece exception before claiming validation
+
 Do not stop at a placeholder like:
 
 ```plc
@@ -122,6 +126,13 @@ If a milestone keeps comparing as `duplicated_required_step` in a real canary tr
 - 非 manual wait 默认应有 timeout 或可解释的收敛路径
 - recovery / fault target 必须是实际 `task.step` 路径，不是抽象注释
 
+## 3.1 timing budget 不得拍脑袋
+
+- `must_complete_within` / `must_complete_within_worst_case` 必须和实际 authored 路径一致
+- 不要写一个低于固定 `delay` 总和、显式 timeout 上界或重复次数展开总量的 narrative 数字
+- 对 `repeat N` 或多段冷却/保压路径，要把每次重复都计入预算
+- 如果当前还算不清 budget，先不写该 timing claim，或明确写成 assumption / blocker
+
 ## 4. 机构设备动作不得退化为传感器编排
 
 - 对于拓扑已闭合的机构设备，task step 应表达设备动作，不应显式重写关联传感器的正常到位闭环
@@ -165,6 +176,14 @@ If a milestone keeps comparing as `duplicated_required_step` in a real canary tr
 - 大量 `device <name>: digital_output`
 
 不要用 `conflicts_with` 表达执行顺序。
+
+## 6.1 analog / PID 能力边界
+
+- 当前 complex-project source path 不要默认假设 `plc_main.AI*` / `AO*` 就等于工程量模拟量
+- 如果 controller-profile 端口被当前语义当成 `0..1` 内部标量，而 process contract 需要 `50` / `145` / `180` 这类工程量阈值或 PID `limit 0..100`
+- 且 legacy `analog_input` / `analog_output` 设备又会触发 `SEM-108`
+
+则应把该项目标记为能力边界 / blocker，而不是继续硬凑一个“已验证”的 PID 或温控交付
 
 ## 7. 共享资源与模式切换
 

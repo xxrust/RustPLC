@@ -44,6 +44,6 @@ The reviewer must verify:
 - `project-check` really appended `intent_alignment`
 - the reported verdict matches the generated artifacts
 - the sidecar no longer contains scaffold placeholders such as `replace_me_after_authoring`
-- the sidecar source binding resolves from the delivery root
+- the sidecar source binding resolves from the workspace root used to launch validation
 - milestone anchors are comparator-supported and trace-backed, not synthetic starter labels
 - docs do not promise recovery or branch behavior that the PLC fragments do not implement

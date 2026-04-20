@@ -150,6 +150,20 @@ Minimum required shape:
 
 Do not leave workpiece semantics as a comment-only placeholder when the main production flow consumes or moves parts.
 
+If the confirmed system is process-only and does not move discrete parts, do not invent fake workpiece flow just to satisfy project policy.
+For scaffolded projects in that case, explicitly set `config/workpiece.toml` to a deliberate no-workpiece exception such as `required = false` before calling validation complete.
+
+## Hard Guardrail: Do Not Fake A Validated Analog/PID Delivery
+
+For controller-profile projects, do not assume `plc_main.AI*` / `AO*` automatically give you engineering-unit analog semantics suitable for a process station.
+
+If current validation shows one of these conflicts:
+- `analog_input` / `analog_output` source devices are rejected by semantic gates such as `SEM-108`
+- controller profile ports expose `0..1` scalar range while the process contract needs engineering thresholds like `50`, `145`, or `180`
+- PID `limit` / threshold math cannot be expressed without tripping those range checks
+
+report a concrete blocker or toolchain limitation instead of pretending the project is validated.
+
 ## Hard Guardrail: Intent Alignment Is Default For Complex Project Delivery
 
 For any project-scale delivery such as:
@@ -168,7 +182,8 @@ Default requirements:
 - run `project-check` so the real `intent_alignment` step is appended after `no-board-gate`
 - report the actual intent-alignment verdict instead of only reporting base-gate success
 - replace scaffold placeholder digests such as `replace_me_after_authoring` before calling the delivery validated
-- ensure `source_ref`, `authoritative_intent_source`, and every `review_basis[*].source` resolve against the delivery root
+- ensure `source_ref`, `authoritative_intent_source`, and every `review_basis[*].source` resolve from the workspace root used to launch `project-check`
+- for generated projects under `out/...`, repo-root-relative paths are the safest default for those contract sources
 - freeze `observation_bindings` against real comparator-supported evidence from trace or `intent-doctor`, not starter labels such as `replace_after_intent_doctor`
 
 For complex projects, do not call the result `validated` if:

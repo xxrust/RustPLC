@@ -45,7 +45,8 @@ The sidecar must:
 Before calling the sidecar delivery-grade, confirm all of the following:
 - `source_digest.value` is no longer a scaffold placeholder such as `replace_me_after_authoring`
 - `source_digest.value` is the real lowercase SHA-256 hex of the bound authored source
-- `source_ref`, `authoritative_intent_source`, and every `review_basis[*].source` resolve from the delivery root
+- `source_ref`, `authoritative_intent_source`, and every `review_basis[*].source` resolve from the workspace root used to launch validation
+- for generated projects under `out/...`, repo-root-relative paths are the safest default for those contract sources
 - the nominal scenario really drove the needed field inputs instead of only the operator start/reset pulse
 - the frozen anchors came from real trace evidence or `intent-doctor`
 - that trace actually covered at least one full cycle boundary for the intended contract
