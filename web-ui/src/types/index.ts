@@ -59,6 +59,7 @@ export interface RunStatus {
   mode?: 'no_board_gate' | 'component_sim' | string;
   triggered_by: string;
   triggered_at: string;
+  triggered_at_ms?: number;
   artifacts: {
     trace?: string;
     diff?: string;
@@ -128,7 +129,7 @@ export interface GeometryNode {
   lane_id: string;
   views: GeometryViewKind[];
   evidence_status: GeometryEvidenceStatus;
-  attributes: Record<string, string>;
+  attributes?: Record<string, string>;
 }
 
 export interface GeometryEdge {
@@ -139,7 +140,7 @@ export interface GeometryEdge {
   label: string;
   views: GeometryViewKind[];
   evidence_status: GeometryEvidenceStatus;
-  attributes: Record<string, string>;
+  attributes?: Record<string, string>;
 }
 
 export interface GeometryObservedTransition {
@@ -168,6 +169,99 @@ export interface GeometryIntentOverlay {
   mismatches: Array<Record<string, unknown>>;
 }
 
+export interface GeometryNarrativeDeviceRef {
+  device_id: string;
+  label: string;
+  kind: string;
+}
+
+export interface GeometryNarrativeDeviceChain {
+  source_kind: string;
+  explanation: string;
+  command_devices: GeometryNarrativeDeviceRef[];
+  actuator_devices: GeometryNarrativeDeviceRef[];
+  feedback_devices: GeometryNarrativeDeviceRef[];
+  io_devices: GeometryNarrativeDeviceRef[];
+  evidence_chain_ids: string[];
+}
+
+export interface GeometryNarrativeAction {
+  kind: string;
+  label: string;
+  target_device_id?: string;
+  target_port?: string;
+}
+
+export interface GeometryNarrativeTransition {
+  transition_id: string;
+  to_step_id: string;
+  to_step_label: string;
+  guard_kind: string;
+  guard_label: string;
+  timers: string[];
+  actions: GeometryNarrativeAction[];
+  effects: string[];
+  observed: boolean;
+}
+
+export interface GeometryNarrativeTransitionRef {
+  transition_id: string;
+  guard_kind: string;
+  guard_label: string;
+  to_step_id: string;
+  to_step_label: string;
+}
+
+export interface GeometryNarrativeBlockingPoint {
+  step_id: string;
+  step_label: string;
+  release_transitions: GeometryNarrativeTransitionRef[];
+  timeout_transitions: GeometryNarrativeTransitionRef[];
+}
+
+export interface GeometryNarrativeExit {
+  from_step_id: string;
+  from_step_label: string;
+  via: GeometryNarrativeTransitionRef;
+}
+
+export interface GeometryNarrativeCoverage {
+  uncovered_step_count: number;
+  trace_available: boolean;
+  intent_available: boolean;
+}
+
+export interface GeometryNarrativeStep {
+  step_id: string;
+  label: string;
+  index: number;
+  is_initial: boolean;
+  is_current: boolean;
+  incoming_transition_ids: string[];
+  outgoing: GeometryNarrativeTransition[];
+  device_chains: GeometryNarrativeDeviceChain[];
+  evidence_chain_ids: string[];
+  evidence_reasons: string[];
+}
+
+export interface GeometryNarrativeTask {
+  task_id: string;
+  label: string;
+  entry_step_id: string;
+  current_step_id: string;
+  blocking_state: string;
+  pending_actions: string[];
+  main_path_step_ids: string[];
+  blocking_points: GeometryNarrativeBlockingPoint[];
+  fault_exits: GeometryNarrativeExit[];
+  coverage: GeometryNarrativeCoverage;
+  steps: GeometryNarrativeStep[];
+}
+
+export interface GeometryNarrative {
+  tasks: GeometryNarrativeTask[];
+}
+
 export interface GeometryArtifact {
   schema_version: number;
   artifact_kind: 'semantic_twin_geometry' | string;
@@ -180,6 +274,7 @@ export interface GeometryArtifact {
     trace?: GeometryTraceOverlay;
     intent?: GeometryIntentOverlay;
   };
+  narrative?: GeometryNarrative;
 }
 
 export interface GeometryArtifactMissing {

@@ -14,8 +14,8 @@
 ## 1) 从 .plc 初始化场景骨架（推荐起点）
 
 ```bash
-cargo run --release -- scenario-init examples/assembly_station.plc \
-  --out out/assembly_station.scenario.yaml --preset normal
+cargo run --release -- scenario-init examples/project_scaffold_demo/plc/main.plc \
+  --out out/project_scaffold_demo.scenario.yaml --preset normal
 ```
 
 常用 preset：
@@ -27,8 +27,8 @@ cargo run --release -- scenario-init examples/assembly_station.plc \
 ## 2) 运行前校验（避免“跑起来才发现 YAML 写错/风险很高”）
 
 ```bash
-cargo run --release -- scenario-validate examples/assembly_station.plc \
-  --scenario out/assembly_station.scenario.yaml
+cargo run --release -- scenario-validate examples/project_scaffold_demo/plc/main.plc \
+  --scenario out/project_scaffold_demo.scenario.yaml
 ```
 
 校验会给出：
@@ -41,21 +41,21 @@ cargo run --release -- scenario-validate examples/assembly_station.plc \
 如果你在场景里写了 `pulse` / `hold`（或使用设备名写法），可以导出展开后的 canonical 输入：
 
 ```bash
-cargo run --release -- scenario-expand examples/assembly_station.plc \
+cargo run --release -- scenario-expand examples/project_scaffold_demo/plc/main.plc \
   --scenario examples/scenarios/pulse_hold.yaml --out out/pulse_hold.expanded.yaml
 ```
 
 ## 4) 单场景 SIL 仿真（生成 trace）
 
 ```bash
-cargo run --release -- sim-plc examples/assembly_station.plc \
-  --scenario scenarios/normal.yaml --out out/trace.jsonl
+cargo run --release -- sim-plc examples/project_scaffold_demo/plc/main.plc \
+  --scenario out/project_scaffold_demo.scenario.yaml --out out/trace.jsonl
 ```
 
 ## 5) 批量生成场景（参数化覆盖边界）
 
 ```bash
-cargo run --release -- scenario-gen --plc examples/assembly_station.plc \
+cargo run --release -- scenario-gen --plc examples/rp2040_motion_minimal.plc \
   --config examples/scenario_gen/basic.yaml --out-dir out/scenario_gen
 ```
 
@@ -91,7 +91,7 @@ cargo run --release -- sim-regress \
 如果你看到类似：
 
 ```text
-Scenario YAML file not found: scenarios/normal.yaml
+Scenario YAML file not found: out/project_scaffold_demo.scenario.yaml
   cwd: ...
 ```
 
@@ -107,4 +107,4 @@ cargo run --release -- scenario-init <file.plc> --out out/my.scenario.yaml --pre
 
 2) 场景与 PLC 不匹配（用错了示例场景）
 
-当你把 `scenarios/normal.yaml` 用在 `examples/two_cylinder.plc` 上时，CLI 会给出可复制的修复命令，按提示改为对应的场景文件即可（或先跑 `scenario-validate` 让它告诉你哪里不匹配）。
+当你把某个 PLC 的场景文件误用到另一个 PLC 上时，CLI 会给出可复制的修复命令；按提示改成与当前 PLC 匹配的场景文件即可，或者先跑 `scenario-validate` 让它指出具体不匹配项。

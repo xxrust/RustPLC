@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import GeometryPreview from '../components/geometry/GeometryPreview';
 import { geometryApi, runApi } from '../services/api';
 import type { RunStatus } from '../types';
+import { formatTimestamp } from '../utils/time';
 
 const { Title, Text } = Typography;
 
@@ -81,7 +82,8 @@ const RunPage: React.FC = () => {
       title: t('run.triggeredAt'),
       dataIndex: 'triggered_at',
       key: 'triggered_at',
-      render: (time: string) => new Date(time).toLocaleString(),
+      render: (_time: string, record: RunStatus) =>
+        formatTimestamp(record.triggered_at, record.triggered_at_ms),
     },
     {
       title: t('run.failureSummary'),
@@ -236,10 +238,11 @@ const RunDetails: React.FC<{ runId: string }> = ({ runId }) => {
   const run = data?.data;
 
   const { data: geometryData, isLoading: isGeometryLoading } = useQuery({
-    queryKey: ['geometry', runId],
+    queryKey: ['geometry', runId, run?.artifacts?.geometry ?? 'missing'],
     queryFn: () => geometryApi.getGeometry(runId),
     enabled: Boolean(runId),
-    refetchInterval: run?.status === 'running' ? 2000 : false,
+    refetchInterval:
+      run?.status === 'running' || !run?.artifacts?.geometry ? 2000 : false,
   });
 
   if (isLoading) return <Spin />;
@@ -258,7 +261,7 @@ const RunDetails: React.FC<{ runId: string }> = ({ runId }) => {
       </div>
       <div>
         <Text strong>{t('run.triggeredAt')}: </Text>
-        <Text>{run?.triggered_at ? new Date(run.triggered_at).toLocaleString() : '-'}</Text>
+        <Text>{formatTimestamp(run?.triggered_at, run?.triggered_at_ms)}</Text>
       </div>
       {run?.failure_summary && (
         <Alert message={t('run.failureSummary')} description={run.failure_summary} type="error" showIcon />

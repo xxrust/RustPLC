@@ -21,22 +21,31 @@ fn sim_pid_kpi_cli_is_deterministic_and_within_thresholds() {
     let plc = r#"
 [topology]
 device plc_main: plc {
-    purpose: "控制器端口映射",
+    purpose: "pid test controller"
     model_ref: openplc_softplc
 }
-device AI0: analog_input { purpose: "压力反馈输入", range: 0..100, unit: "bar", external: true }
-device AO0: analog_output { purpose: "调节阀输出", range: 0..100, unit: "%" }
+device pressure_sensor: sensor {
+    purpose: "pid feedback sensor"
+    ports: [out:analog:producer]
+}
+device pressure_valve: motor {
+    purpose: "pid analog load"
+    ports: [cmd:analog:consumer]
+}
 device loop_pressure: pid {
-    purpose: "压力闭环控制器",
+    purpose: "pid loop"
     pv: AI0,
-    sp: 60bar,
+    sp: 0.6,
     kp: 2.0,
     ki: 0.5,
     kd: 0.0,
     out: AO0,
     period_ms: 100,
-    limit: 0..100
+    limit: 0..1
 }
+
+relation { from: pressure_sensor.out, to: plc_main.AI0, via: reports_to }
+relation { from: plc_main.AO0, to: pressure_valve.cmd, via: driven_by }
 
 [constraints]
 

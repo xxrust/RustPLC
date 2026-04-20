@@ -1258,7 +1258,7 @@ mod tests {
     use crate::parser::parse_plc;
 
     #[test]
-    fn gate_rejects_two_cylinder_wrong_input_wiring() {
+    fn gate_rejects_invalid_input_to_input_wiring() {
         let input = r#"
 [topology]
 device Y0: digital_output

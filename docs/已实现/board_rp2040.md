@@ -27,13 +27,13 @@ Or from DSL in one flow (`.plc -> verify -> generated program/io map/meta`):
 
 ```bash
 # Step 1: generate artifacts (includes `io_map.template.toml`)
-cargo run --release -- build-rp2040 examples/assembly_station.plc --out out/rp2040
+cargo run --release -- build-rp2040 examples/rp2040_motion_minimal.plc --out out/rp2040
 
 # Step 2: copy + edit the IO map (pin mapping is board-specific)
 cp out/rp2040/io_map.template.toml out/rp2040/io_map.toml
 
 # Step 3 (optional): build firmware + UF2 (requires `thumbv6m-none-eabi` + `elf2uf2-rs`)
-cargo run --release -- build-rp2040 examples/assembly_station.plc \
+cargo run --release -- build-rp2040 examples/rp2040_motion_minimal.plc \
   --out out/rp2040 \
   --io-map out/rp2040/io_map.toml \
   --emit-uf2 out/firmware.uf2
@@ -159,7 +159,7 @@ For reproducible board comparison, use:
 
 ```bash
 scripts/rp2040_trace_gate.sh \
-  --plc examples/assembly_station.plc \
+  --plc examples/rp2040_motion_minimal.plc \
   --io-map out/rp2040/io_map.toml \
   --sil-trace out/trace.jsonl \
   --out-dir out/rp2040_gate \

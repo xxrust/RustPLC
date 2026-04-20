@@ -16,4 +16,4 @@ inputs:
   - at_ms: 800
     set:
       analog_inputs:
-        AI0: 200000
+        AI0: 1.0

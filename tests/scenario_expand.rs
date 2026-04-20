@@ -21,7 +21,7 @@ fn temp_dir(prefix: &str) -> PathBuf {
 
 #[test]
 fn scenario_expand_writes_parseable_expanded_yaml() {
-    let plc = repo_path("examples/assembly_station.plc");
+    let plc = repo_path("examples/project_scaffold_demo/plc/main.plc");
     let scenario = repo_path("examples/scenarios/pulse_hold.yaml");
     assert!(plc.exists(), "expected PLC example to exist");
     assert!(scenario.exists(), "expected example scenario to exist");

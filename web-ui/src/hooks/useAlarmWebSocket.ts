@@ -14,8 +14,14 @@ export const useAlarmWebSocket = () => {
   const [alarms, setAlarms] = useState<AlarmEvent[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
+  const wsEnabled = import.meta.env.VITE_ENABLE_ALARM_WS === 'true';
 
   useEffect(() => {
+    if (!wsEnabled) {
+      setConnected(false);
+      return undefined;
+    }
+
     const connectWebSocket = () => {
       // Use relative WebSocket URL to go through Vite proxy
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -63,7 +69,7 @@ export const useAlarmWebSocket = () => {
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [wsEnabled]);
 
   return { connected, alarms };
 };

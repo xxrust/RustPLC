@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { runApi, alarmApi } from '../services/api';
 import { useAppStore } from '../stores/appStore';
+import { formatTimestamp } from '../utils/time';
 
 const { Title, Text } = Typography;
 
@@ -128,7 +129,9 @@ const Dashboard: React.FC = () => {
                     description={
                       <Space direction="vertical" size="small">
                         <Text type="secondary">{t('run.triggeredBy')}: {run.triggered_by}</Text>
-                        <Text type="secondary">{new Date(run.triggered_at).toLocaleString()}</Text>
+                        <Text type="secondary">
+                          {formatTimestamp(run.triggered_at, run.triggered_at_ms)}
+                        </Text>
                         {run.failure_summary && <Text type="danger">{run.failure_summary}</Text>}
                       </Space>
                     }

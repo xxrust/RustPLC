@@ -133,7 +133,7 @@ Minimal usage example:
 use rust_plc::optimization::optimize_plc_source;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let source = std::fs::read_to_string("examples/two_cylinder.plc")?;
+    let source = std::fs::read_to_string("examples/project_scaffold_demo/plc/main.plc")?;
     let candidates = optimize_plc_source(&source)?;
 
     for candidate in candidates.iter().take(3) {

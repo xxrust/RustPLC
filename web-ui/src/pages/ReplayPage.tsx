@@ -11,6 +11,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { traceApi, runApi } from '../services/api';
+import { formatTimestamp } from '../utils/time';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -66,7 +67,7 @@ const ReplayPage: React.FC = () => {
         >
           {runsData?.data?.map((run: any) => (
             <Option key={run.run_id} value={run.run_id}>
-              {run.run_id.slice(0, 12)} - {run.status} - {new Date(run.triggered_at).toLocaleString()}
+              {run.run_id.slice(0, 12)} - {run.status} - {formatTimestamp(run.triggered_at, run.triggered_at_ms)}
             </Option>
           ))}
         </Select>

@@ -116,12 +116,12 @@ pub struct TopologySemanticGateError {
 A. 新增门禁模块与数据结构（不改现有验证器）；  
 B. 在 `compile_pipeline` 接线硬隔离；  
 C. 收紧旧设备类型矩阵（去掉错误放行）；  
-D. 修复 two_cylinder 与回归夹具；  
+D. 修复非法布线回归夹具；  
 E. UI 去降级化 + 错误面板联动。
 
 ## 10. 验收闸门
 
-- `examples/two_cylinder.plc` 必须在门禁阶段失败，且至少包含：
+- 非法布线回归夹具必须在门禁阶段失败，且至少包含：
   - `SEM-102`（方向错误，或通过角色判定得出）
   - `SEM-103`（类型不兼容，若命中）
 - 门禁失败时，验证摘要中不得出现 `Safety/Liveness/Timing/Causality 通过`。

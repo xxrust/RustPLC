@@ -21,7 +21,7 @@ fn temp_dir(prefix: &str) -> std::path::PathBuf {
 
 #[test]
 fn scenario_gen_is_deterministic_and_emits_expected_number_of_cases() {
-    let plc = repo_path("examples/assembly_station.plc");
+    let plc = repo_path("examples/rp2040_motion_minimal.plc");
     let config = repo_path("examples/scenario_gen/basic.yaml");
     assert!(plc.exists(), "expected PLC example to exist");
     assert!(config.exists(), "expected scenario-gen config to exist");
@@ -119,7 +119,7 @@ fn scenario_gen_is_deterministic_and_emits_expected_number_of_cases() {
 
 #[test]
 fn scenario_gen_supports_dry_run_and_boundary_first_summary_contract() {
-    let plc = repo_path("examples/assembly_station.plc");
+    let plc = repo_path("examples/rp2040_motion_minimal.plc");
     let config = repo_path("examples/scenario_gen/basic.yaml");
     let base = temp_dir("rust_plc_scenario_gen_dry_run");
     let out_dir = base.join("dry_run");
@@ -176,7 +176,7 @@ fn scenario_gen_supports_dry_run_and_boundary_first_summary_contract() {
 
 #[test]
 fn scenario_gen_risk_first_prioritizes_fault_cases() {
-    let plc = repo_path("examples/assembly_station.plc");
+    let plc = repo_path("examples/rp2040_motion_minimal.plc");
     let base = temp_dir("rust_plc_scenario_gen_risk_first");
     let out_dir = base.join("risk_first");
     let config_path = base.join("risk.yaml");

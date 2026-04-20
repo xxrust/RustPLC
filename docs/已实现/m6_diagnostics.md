@@ -31,21 +31,21 @@ Examples:
 Key commands now support machine-readable diagnostics:
 
 ```bash
-rust_plc scenario-validate examples/assembly_station.plc \
-  --scenario scenarios/normal.yaml \
+rust_plc scenario-validate examples/rp2040_motion_minimal.plc \
+  --scenario scenarios/rp2040_motion_minimal/normal.yaml \
   --output json
 
-rust_plc no-board-gate examples/two_cylinder.plc \
-  --scenario scenarios/two_cylinder.yaml \
+rust_plc no-board-gate examples/rp2040_motion_minimal.plc \
+  --scenario scenarios/rp2040_motion_minimal/normal.yaml \
   --out-dir out/no_board_gate \
   --output json
 
-rust_plc build-rp2040 examples/two_cylinder.plc \
+rust_plc build-rp2040 examples/rp2040_motion_minimal.plc \
   --out out/build_rp2040 \
   --output json
 
-rust_plc trace-doctor examples/two_cylinder.plc \
-  --scenario scenarios/two_cylinder.yaml \
+rust_plc trace-doctor examples/rp2040_motion_minimal.plc \
+  --scenario scenarios/rp2040_motion_minimal/normal.yaml \
   --trace out/no_board_gate/sil_trace.jsonl \
   --diff out/no_board_gate/diff_report.json \
   --timing-report out/no_board_gate/timing_report.json \
@@ -58,8 +58,8 @@ rust_plc trace-doctor examples/two_cylinder.plc \
 Run focused diagnostics and optional fix preview:
 
 ```bash
-rust_plc scenario-doctor examples/assembly_station.plc \
-  --scenario scenarios/normal.yaml \
+rust_plc scenario-doctor examples/project_scaffold_demo/plc/main.plc \
+  --scenario out/project_scaffold_demo.scenario.yaml \
   --fix-preview \
   --output human
 ```
@@ -80,8 +80,8 @@ Symptom (JSON issue code): `SCN-MAP-002`
 Fix:
 
 ```bash
-rust_plc scenario-init examples/assembly_station.plc \
-  --out scenarios/assembly_station.fixed.yaml \
+rust_plc scenario-init examples/project_scaffold_demo/plc/main.plc \
+  --out out/project_scaffold_demo.scenario.yaml \
   --preset normal
 ```
 

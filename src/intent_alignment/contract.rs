@@ -743,7 +743,7 @@ mod tests {
             IntentContractSourceBindingError::DigestMismatch {
                 path: "docs/architecture/intent_alignment_verification.md".to_string(),
                 expected: "deadbeef".to_string(),
-                actual: "10b8ce179f80c7862ff82a3b363b8792d6ff106895f68609d09558f1b8deb83c"
+                actual: "6793be8964362b3c71fe069f822722854547bf4c74787730bd1c88be20ed69ef"
                     .to_string(),
             }
         );
@@ -756,7 +756,7 @@ mod tests {
         ))
         .expect("fixture should load");
         contract.metadata.authoritative_intent_source.path =
-            "examples/two_cylinder.plc".to_string();
+            "examples/dual_axis_platform.plc".to_string();
 
         let error = verify_intent_contract_source_binding(&contract, fixture_path("."))
             .expect_err("conflicting authoritative source should fail");
@@ -765,7 +765,7 @@ mod tests {
             error,
             IntentContractSourceBindingError::AuthoritativeSourceConflict {
                 contract_path: "docs/architecture/intent_alignment_verification.md".to_string(),
-                authoritative_path: "examples/two_cylinder.plc".to_string(),
+                authoritative_path: "examples/dual_axis_platform.plc".to_string(),
             }
         );
     }

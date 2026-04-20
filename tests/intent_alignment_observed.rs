@@ -254,12 +254,15 @@ fn overlapping_trace_cycle_spec() -> rust_plc::intent_alignment::ExpectedBehavio
 
 #[test]
 fn parses_openplc_variable_snapshot_trace_jsonl() {
-    let raw = std::fs::read_to_string(workspace_path(
-        "examples/openplc_trace_phase2/two_cylinder.sil.normalized.jsonl",
-    ))
-    .expect("read openplc normalized trace");
+    let raw = r#"
+{"tick":0,"vars":{"_state":0,"valve_a":false,"valve_b":false}}
+{"tick":1,"vars":{"_state":10,"valve_a":true,"valve_b":false}}
+{"tick":2,"vars":{"_state":20,"valve_a":false,"valve_b":false}}
+{"tick":3,"vars":{"_state":30,"valve_a":false,"valve_b":true}}
+{"tick":4,"vars":{"_state":40,"valve_a":false,"valve_b":false}}
+"#;
 
-    let events = parse_observed_trace_jsonl(&raw).expect("trace should parse");
+    let events = parse_observed_trace_jsonl(raw).expect("trace should parse");
 
     assert_eq!(events.len(), 5);
     assert!(matches!(

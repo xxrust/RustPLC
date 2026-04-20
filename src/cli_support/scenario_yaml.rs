@@ -161,17 +161,17 @@ pub(crate) fn scenario_mismatch_hint_for_example(
 }
 
 fn scenario_mismatch_hint_for_example_paths(
-    plc_path: &str,
+    _plc_path: &str,
     scenario_path: &Path,
     subcommand: &str,
 ) -> Option<String> {
-    let plc_name = Path::new(plc_path).file_name().and_then(|s| s.to_str())?;
     let scenario_name = scenario_path.file_name().and_then(|s| s.to_str())?;
 
-    if plc_name == "two_cylinder.plc" && scenario_name == "normal.yaml" {
+    if scenario_name == "normal.yaml" {
         let mut msg = String::from(
-            "Tip: `scenarios/normal.yaml` is tuned for `examples/assembly_station.plc`.\n\
-For `examples/two_cylinder.plc`, use `scenarios/two_cylinder.yaml`.",
+            "Tip: `normal.yaml` is usually project-specific and should be regenerated for the PLC you are validating.\n\
+Known healthy reference: `examples/rp2040_motion_minimal.plc` with `scenarios/rp2040_motion_minimal/normal.yaml`.\n\
+Preferred fix: run `scenario-init` for your current PLC and use the generated scenario.",
         );
         if let Some(suggested_cmd) = suggested_example_command(subcommand) {
             msg.push_str("\nSuggested command:\n  ");
@@ -186,25 +186,25 @@ For `examples/two_cylinder.plc`, use `scenarios/two_cylinder.yaml`.",
 fn suggested_example_command(subcommand: &str) -> Option<&'static str> {
     match subcommand {
         "sim-plc" => Some(
-            "cargo run --release --bin rust_plc -- sim-plc examples/two_cylinder.plc --scenario scenarios/two_cylinder.yaml --out trace.jsonl",
+            "cargo run --release --bin rust_plc -- sim-plc examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --out trace.jsonl",
         ),
         "scenario-validate" => Some(
-            "cargo run --release --bin rust_plc -- scenario-validate examples/two_cylinder.plc --scenario scenarios/two_cylinder.yaml",
+            "cargo run --release --bin rust_plc -- scenario-validate examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml",
         ),
         "scenario-doctor" => Some(
-            "cargo run --release --bin rust_plc -- scenario-doctor examples/two_cylinder.plc --scenario scenarios/two_cylinder.yaml",
+            "cargo run --release --bin rust_plc -- scenario-doctor examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml",
         ),
         "no-board-gate" => Some(
-            "cargo run --release --bin rust_plc -- no-board-gate examples/two_cylinder.plc --scenario scenarios/two_cylinder.yaml --out-dir out/no_board_gate",
+            "cargo run --release --bin rust_plc -- no-board-gate examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --out-dir out/no_board_gate",
         ),
         "pil-run" => Some(
-            "cargo run --release --bin rust_plc -- pil-run examples/two_cylinder.plc --scenario scenarios/two_cylinder.yaml",
+            "cargo run --release --bin rust_plc -- pil-run examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml",
         ),
         "virtual-board" => Some(
-            "cargo run --release --bin rust_plc -- virtual-board examples/two_cylinder.plc --scenario scenarios/two_cylinder.yaml --out-dir out/virtual_board",
+            "cargo run --release --bin rust_plc -- virtual-board examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --out-dir out/virtual_board",
         ),
         "release-bundle" => Some(
-            "cargo run --release --bin rust_plc -- release-bundle examples/two_cylinder.plc --scenario scenarios/two_cylinder.yaml --out-dir out/release_bundle",
+            "cargo run --release --bin rust_plc -- release-bundle examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --out-dir out/release_bundle",
         ),
         _ => None,
     }

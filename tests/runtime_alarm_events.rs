@@ -20,26 +20,36 @@ fn write_fixture_plc(path: &Path) {
     let plc = r#"
 [topology]
 device plc_main: plc {
-    purpose: "控制器端口映射",
+    purpose: "alarm test controller"
     model_ref: openplc_softplc
 }
-device X0: digital_input { purpose: "启动按钮信号输入" }
-device Y0: digital_output { purpose: "执行器控制输出" }
+device start_button: sensor {
+    purpose: "alarm test start input"
+    subtype: "push_button"
+    debounce: 20ms
+}
+device run_lamp: solenoid_valve {
+    purpose: "alarm test output"
+    response_time: 20ms
+}
+
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: plc_main.Y0, to: run_lamp.coil, via: driven_by }
 
 [constraints]
 
 [tasks]
 task cycle:
     step wait_start:
-        wait: X0 == true
+        wait: start_button == true
         timeout: 20ms -> goto fault
     step run:
-        action: set Y0 on
+        action: set run_lamp.coil on
     on_complete: goto done
 
 task fault:
     step safe_stop:
-        action: set Y0 off
+        action: set run_lamp.coil off
 
 task done:
     step halt:

@@ -14,7 +14,7 @@ use crate::ir::{
 };
 use crate::trace_diff::NormalizedTraceEvent;
 
-pub const GEOMETRY_VIEW_SCHEMA_VERSION: u32 = 1;
+pub const GEOMETRY_VIEW_SCHEMA_VERSION: u32 = 2;
 pub const GEOMETRY_VIEW_ARTIFACT_KIND: &str = "semantic_twin_geometry";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -82,6 +82,8 @@ pub struct GeometryArtifact {
     pub nodes: Vec<GeometryNode>,
     pub edges: Vec<GeometryEdge>,
     pub overlays: GeometryOverlays,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub narrative: Option<GeometryNarrative>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -178,6 +180,142 @@ pub struct GeometryIntentOverlay {
     pub mismatch_count: usize,
     pub warnings: Vec<String>,
     pub mismatches: Vec<IntentMismatch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrative {
+    pub tasks: Vec<GeometryNarrativeTask>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrativeTask {
+    pub task_id: String,
+    pub label: String,
+    pub entry_step_id: String,
+    pub current_step_id: String,
+    pub blocking_state: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_actions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub main_path_step_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocking_points: Vec<GeometryNarrativeBlockingPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fault_exits: Vec<GeometryNarrativeExit>,
+    pub coverage: GeometryNarrativeCoverage,
+    pub steps: Vec<GeometryNarrativeStep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrativeCoverage {
+    pub uncovered_step_count: usize,
+    pub trace_available: bool,
+    pub intent_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrativeBlockingPoint {
+    pub step_id: String,
+    pub step_label: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub release_transitions: Vec<GeometryNarrativeTransitionRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timeout_transitions: Vec<GeometryNarrativeTransitionRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrativeExit {
+    pub from_step_id: String,
+    pub from_step_label: String,
+    pub via: GeometryNarrativeTransitionRef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrativeTransitionRef {
+    pub transition_id: String,
+    pub guard_kind: String,
+    pub guard_label: String,
+    pub to_step_id: String,
+    pub to_step_label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrativeStep {
+    pub step_id: String,
+    pub label: String,
+    pub index: usize,
+    pub is_initial: bool,
+    pub is_current: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub incoming_transition_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outgoing: Vec<GeometryNarrativeTransition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_chains: Vec<GeometryNarrativeDeviceChain>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_chain_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrativeTransition {
+    pub transition_id: String,
+    pub to_step_id: String,
+    pub to_step_label: String,
+    pub guard_kind: String,
+    pub guard_label: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<GeometryNarrativeAction>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<String>,
+    pub observed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrativeAction {
+    pub kind: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_device_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_port: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrativeDeviceChain {
+    pub source_kind: String,
+    pub explanation: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command_devices: Vec<GeometryNarrativeDeviceRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actuator_devices: Vec<GeometryNarrativeDeviceRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub feedback_devices: Vec<GeometryNarrativeDeviceRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub io_devices: Vec<GeometryNarrativeDeviceRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_chain_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryNarrativeDeviceRef {
+    pub device_id: String,
+    pub label: String,
+    pub kind: String,
 }
 
 pub fn export_geometry_artifact(
@@ -664,6 +802,13 @@ pub fn export_geometry_artifact(
         warnings: report.warnings.clone(),
         mismatches: report.mismatches.clone(),
     });
+    let narrative = Some(build_geometry_narrative(
+        topology,
+        constraints,
+        state_machine,
+        trace_events,
+        intent_report.is_some(),
+    ));
 
     GeometryArtifact {
         schema_version: GEOMETRY_VIEW_SCHEMA_VERSION,
@@ -689,7 +834,635 @@ pub fn export_geometry_artifact(
             trace: trace_overlay,
             intent: intent_overlay,
         },
+        narrative,
     }
+}
+
+#[derive(Debug, Clone)]
+struct GeometryDeviceCatalog {
+    by_name: HashMap<String, DeviceKind>,
+    incoming: HashMap<String, Vec<String>>,
+    outgoing: HashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+struct GeometryCausalityEntry {
+    id: String,
+    reason: Option<String>,
+    devices: Vec<String>,
+}
+
+fn build_geometry_narrative(
+    topology: &TopologyGraph,
+    constraints: &ConstraintSet,
+    state_machine: &StateMachine,
+    trace_events: Option<&[NormalizedTraceEvent]>,
+    intent_available: bool,
+) -> GeometryNarrative {
+    let device_catalog = build_geometry_device_catalog(topology);
+    let causality_catalog = build_geometry_causality_catalog(constraints);
+    let observed_transition_ids = build_observed_transition_ids(trace_events, state_machine);
+    let task_contexts = state_machine
+        .task_contexts
+        .iter()
+        .map(|context| (context.task_name.clone(), context))
+        .collect::<HashMap<_, _>>();
+    let mut transitions_by_from = HashMap::<String, Vec<(usize, &crate::ir::Transition)>>::new();
+    let mut transitions_by_to = HashMap::<String, Vec<(usize, &crate::ir::Transition)>>::new();
+    for (idx, transition) in state_machine.transitions.iter().enumerate() {
+        transitions_by_from
+            .entry(format!("step:{}", state_key(&transition.from)))
+            .or_default()
+            .push((idx, transition));
+        transitions_by_to
+            .entry(format!("step:{}", state_key(&transition.to)))
+            .or_default()
+            .push((idx, transition));
+    }
+
+    let task_names = state_machine
+        .states
+        .iter()
+        .map(|state| state.task_name.clone())
+        .chain(state_machine.task_contexts.iter().map(|context| context.task_name.clone()))
+        .collect::<BTreeSet<_>>();
+
+    let mut tasks = Vec::new();
+    for task_name in task_names {
+        let step_states = state_machine
+            .states
+            .iter()
+            .filter(|state| state.task_name == task_name)
+            .cloned()
+            .collect::<Vec<_>>();
+        if step_states.is_empty() {
+            continue;
+        }
+
+        let context = task_contexts.get(&task_name).copied();
+        let entry_state = context
+            .map(|ctx| ctx.entry_state.clone())
+            .unwrap_or_else(|| step_states[0].clone());
+        let current_state = context
+            .map(|ctx| ctx.current_state.clone())
+            .unwrap_or_else(|| entry_state.clone());
+        let blocking_state = context
+            .map(|ctx| blocking_state_name(&ctx.blocking_state).to_string())
+            .unwrap_or_else(|| "ready".to_string());
+        let pending_actions = context
+            .map(|ctx| {
+                ctx.pending_actions
+                    .iter()
+                    .map(|action| {
+                        let mut out = action_kind_name(&action.action_kind).to_string();
+                        if let Some(target) = &action.target {
+                            out.push(':');
+                            out.push_str(target);
+                        }
+                        out
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let ordered_states = order_task_states(
+            &entry_state,
+            &step_states,
+            &transitions_by_from,
+        );
+        let mut steps = Vec::new();
+        for (index, state) in ordered_states.iter().enumerate() {
+            let step_id = format!("step:{}", state_key(state));
+            let outgoing_raw = transitions_by_from
+                .get(&step_id)
+                .cloned()
+                .unwrap_or_default();
+            let incoming_raw = transitions_by_to.get(&step_id).cloned().unwrap_or_default();
+            let outgoing = outgoing_raw
+                .iter()
+                .map(|(transition_idx, transition)| {
+                    build_narrative_transition(
+                        *transition_idx,
+                        transition,
+                        &observed_transition_ids,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let device_chains = build_step_device_chains(
+                &outgoing_raw,
+                &device_catalog,
+                &causality_catalog,
+            );
+            let evidence_chain_ids = device_chains
+                .iter()
+                .flat_map(|chain| chain.evidence_chain_ids.iter().cloned())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let evidence_reasons = evidence_chain_ids
+                .iter()
+                .filter_map(|chain_id| {
+                    causality_catalog
+                        .iter()
+                        .find(|entry| &entry.id == chain_id)
+                        .and_then(|entry| entry.reason.clone())
+                })
+                .collect::<Vec<_>>();
+            steps.push(GeometryNarrativeStep {
+                step_id: step_id.clone(),
+                label: state.step_name.clone(),
+                index,
+                is_initial: state == &entry_state,
+                is_current: state == &current_state,
+                incoming_transition_ids: incoming_raw
+                    .iter()
+                    .map(|(transition_idx, _)| format!("transition:{transition_idx}"))
+                    .collect(),
+                outgoing,
+                device_chains,
+                evidence_chain_ids,
+                evidence_reasons,
+            });
+        }
+
+        let main_path_step_ids = steps
+            .iter()
+            .map(|step| step.step_id.clone())
+            .collect::<Vec<_>>();
+        let (blocking_points, fault_exits) = build_task_headline(&steps);
+        let uncovered_step_count = steps
+            .iter()
+            .filter(|step| step.device_chains.is_empty())
+            .count();
+
+        tasks.push(GeometryNarrativeTask {
+            task_id: format!("task:{task_name}"),
+            label: task_name,
+            entry_step_id: format!("step:{}", state_key(&entry_state)),
+            current_step_id: format!("step:{}", state_key(&current_state)),
+            blocking_state,
+            pending_actions,
+            main_path_step_ids,
+            blocking_points,
+            fault_exits,
+            coverage: GeometryNarrativeCoverage {
+                uncovered_step_count,
+                trace_available: trace_events.is_some(),
+                intent_available,
+            },
+            steps,
+        });
+    }
+
+    GeometryNarrative { tasks }
+}
+
+fn build_geometry_device_catalog(topology: &TopologyGraph) -> GeometryDeviceCatalog {
+    let by_name = topology
+        .graph
+        .node_weights()
+        .map(|device| (device.name.clone(), device.kind.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut incoming = HashMap::<String, Vec<String>>::new();
+    let mut outgoing = HashMap::<String, Vec<String>>::new();
+    let links = if !topology.links.is_empty() {
+        topology
+            .links
+            .iter()
+            .map(|link| (link.from.clone(), link.to.clone()))
+            .collect::<Vec<_>>()
+    } else {
+        topology
+            .graph
+            .edge_references()
+            .map(|edge| {
+                (
+                    topology.graph[edge.source()].name.clone(),
+                    topology.graph[edge.target()].name.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    for (from, to) in links {
+        outgoing.entry(from.clone()).or_default().push(to.clone());
+        incoming.entry(to).or_default().push(from);
+    }
+
+    GeometryDeviceCatalog {
+        by_name,
+        incoming,
+        outgoing,
+    }
+}
+
+fn build_geometry_causality_catalog(constraints: &ConstraintSet) -> Vec<GeometryCausalityEntry> {
+    constraints
+        .causality
+        .iter()
+        .enumerate()
+        .map(|(idx, chain)| GeometryCausalityEntry {
+            id: format!("causality:{idx}"),
+            reason: chain.reason.clone(),
+            devices: chain.devices.clone(),
+        })
+        .collect()
+}
+
+fn build_observed_transition_ids(
+    trace_events: Option<&[NormalizedTraceEvent]>,
+    state_machine: &StateMachine,
+) -> BTreeSet<String> {
+    let Some(events) = trace_events else {
+        return BTreeSet::new();
+    };
+
+    map_trace_overlay(events, state_machine)
+        .into_iter()
+        .filter_map(|transition| {
+            let from_state = transition.from_state?;
+            let to_state = transition.to_state?;
+            Some(format!("step:{from_state}->step:{to_state}"))
+        })
+        .collect()
+}
+
+fn order_task_states(
+    entry_state: &State,
+    step_states: &[State],
+    transitions_by_from: &HashMap<String, Vec<(usize, &crate::ir::Transition)>>,
+) -> Vec<State> {
+    let mut ordered = Vec::new();
+    let mut seen = BTreeSet::new();
+    let states_by_id = step_states
+        .iter()
+        .map(|state| (format!("step:{}", state_key(state)), state.clone()))
+        .collect::<HashMap<_, _>>();
+
+    fn visit(
+        step_id: &str,
+        states_by_id: &HashMap<String, State>,
+        transitions_by_from: &HashMap<String, Vec<(usize, &crate::ir::Transition)>>,
+        seen: &mut BTreeSet<String>,
+        ordered: &mut Vec<State>,
+    ) {
+        if !seen.insert(step_id.to_string()) {
+            return;
+        }
+        let Some(state) = states_by_id.get(step_id) else {
+            return;
+        };
+        ordered.push(state.clone());
+        if let Some(transitions) = transitions_by_from.get(step_id) {
+            for (_, transition) in transitions {
+                visit(
+                    &format!("step:{}", state_key(&transition.to)),
+                    states_by_id,
+                    transitions_by_from,
+                    seen,
+                    ordered,
+                );
+            }
+        }
+    }
+
+    visit(
+        &format!("step:{}", state_key(entry_state)),
+        &states_by_id,
+        transitions_by_from,
+        &mut seen,
+        &mut ordered,
+    );
+    for state in step_states {
+        visit(
+            &format!("step:{}", state_key(state)),
+            &states_by_id,
+            transitions_by_from,
+            &mut seen,
+            &mut ordered,
+        );
+    }
+    ordered
+}
+
+fn build_narrative_transition(
+    transition_idx: usize,
+    transition: &crate::ir::Transition,
+    observed_transition_ids: &BTreeSet<String>,
+) -> GeometryNarrativeTransition {
+    let timers = transition
+        .timers
+        .iter()
+        .map(|timer| {
+            let duration = timer
+                .duration_ms
+                .map(|value| format!("{value}ms"))
+                .unwrap_or_else(|| "open".to_string());
+            format!("{}:{duration}", timer.timer_name)
+        })
+        .collect::<Vec<_>>();
+    let actions = transition
+        .actions
+        .iter()
+        .map(build_narrative_action)
+        .collect::<Vec<_>>();
+    let effects = transition
+        .effects
+        .iter()
+        .map(workpiece_effect_label)
+        .collect::<Vec<_>>();
+    let transition_key = format!(
+        "step:{}->step:{}",
+        state_key(&transition.from),
+        state_key(&transition.to)
+    );
+
+    GeometryNarrativeTransition {
+        transition_id: format!("transition:{transition_idx}"),
+        to_step_id: format!("step:{}", state_key(&transition.to)),
+        to_step_label: transition.to.step_name.clone(),
+        guard_kind: transition_guard_kind(&transition.guard).to_string(),
+        guard_label: transition_guard_label(&transition.guard),
+        timers,
+        actions,
+        effects,
+        observed: observed_transition_ids.contains(&transition_key),
+    }
+}
+
+fn build_narrative_action(action: &TransitionAction) -> GeometryNarrativeAction {
+    GeometryNarrativeAction {
+        kind: action_kind_name(&action_kind_from_transition(action)).to_string(),
+        label: transition_action_label(action),
+        target_device_id: action_target_name(action).map(|target| format!("device:{target}")),
+        target_port: action_target_port(action).map(str::to_string),
+    }
+}
+
+fn build_step_device_chains(
+    outgoing_raw: &[(usize, &crate::ir::Transition)],
+    device_catalog: &GeometryDeviceCatalog,
+    causality_catalog: &[GeometryCausalityEntry],
+) -> Vec<GeometryNarrativeDeviceChain> {
+    let mut chains = Vec::new();
+    let mut seen = BTreeSet::new();
+    let known_devices = device_catalog
+        .by_name
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    for (_, transition) in outgoing_raw {
+        for action in &transition.actions {
+            if let Some(target) = action_target_name(action) {
+                let key = format!("action:{target}");
+                if seen.insert(key) {
+                    if let Some(chain) = build_device_chain_for_focus(
+                        target,
+                        "action_target",
+                        transition_action_label(action),
+                        device_catalog,
+                        causality_catalog,
+                    ) {
+                        chains.push(chain);
+                    }
+                }
+            }
+        }
+
+        for device_name in extract_guard_device_names(&transition.guard, &known_devices) {
+            let key = format!("guard:{device_name}");
+            if seen.insert(key) {
+                if let Some(chain) = build_device_chain_for_focus(
+                    &device_name,
+                    "guard_dependency",
+                    transition_guard_label(&transition.guard),
+                    device_catalog,
+                    causality_catalog,
+                ) {
+                    chains.push(chain);
+                }
+            }
+        }
+    }
+
+    chains
+}
+
+fn build_device_chain_for_focus(
+    focal: &str,
+    source_kind: &str,
+    explanation: String,
+    device_catalog: &GeometryDeviceCatalog,
+    causality_catalog: &[GeometryCausalityEntry],
+) -> Option<GeometryNarrativeDeviceChain> {
+    if !device_catalog.by_name.contains_key(focal) {
+        return None;
+    }
+
+    let upstream = traverse_device_neighbors(focal, &device_catalog.incoming);
+    let downstream = traverse_device_neighbors(focal, &device_catalog.outgoing);
+    let mut command_devices = Vec::new();
+    let mut actuator_devices = Vec::new();
+    let mut feedback_devices = Vec::new();
+    let mut io_devices = Vec::new();
+
+    push_device_ref_by_bucket(
+        focal,
+        device_catalog,
+        &mut command_devices,
+        &mut actuator_devices,
+        &mut feedback_devices,
+        &mut io_devices,
+    );
+    for device in upstream.iter().rev() {
+        push_device_ref_by_bucket(
+            device,
+            device_catalog,
+            &mut command_devices,
+            &mut actuator_devices,
+            &mut feedback_devices,
+            &mut io_devices,
+        );
+    }
+    for device in &downstream {
+        push_device_ref_by_bucket(
+            device,
+            device_catalog,
+            &mut command_devices,
+            &mut actuator_devices,
+            &mut feedback_devices,
+            &mut io_devices,
+        );
+    }
+
+    let chain_device_names = command_devices
+        .iter()
+        .chain(actuator_devices.iter())
+        .chain(feedback_devices.iter())
+        .chain(io_devices.iter())
+        .map(|device| device.label.clone())
+        .collect::<BTreeSet<_>>();
+    let evidence_chain_ids = causality_catalog
+        .iter()
+        .filter(|entry| entry.devices.iter().any(|device| chain_device_names.contains(device)))
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+
+    Some(GeometryNarrativeDeviceChain {
+        source_kind: source_kind.to_string(),
+        explanation,
+        command_devices,
+        actuator_devices,
+        feedback_devices,
+        io_devices,
+        evidence_chain_ids,
+    })
+}
+
+fn push_device_ref_by_bucket(
+    device_name: &str,
+    device_catalog: &GeometryDeviceCatalog,
+    command_devices: &mut Vec<GeometryNarrativeDeviceRef>,
+    actuator_devices: &mut Vec<GeometryNarrativeDeviceRef>,
+    feedback_devices: &mut Vec<GeometryNarrativeDeviceRef>,
+    io_devices: &mut Vec<GeometryNarrativeDeviceRef>,
+) {
+    let Some(kind) = device_catalog.by_name.get(device_name) else {
+        return;
+    };
+    let device_ref = GeometryNarrativeDeviceRef {
+        device_id: format!("device:{device_name}"),
+        label: device_name.to_string(),
+        kind: device_kind_name(kind).to_string(),
+    };
+    match device_bucket(kind) {
+        "command" => push_unique_device_ref(command_devices, device_ref),
+        "actuator" => push_unique_device_ref(actuator_devices, device_ref),
+        "feedback" => push_unique_device_ref(feedback_devices, device_ref),
+        _ => push_unique_device_ref(io_devices, device_ref),
+    }
+}
+
+fn push_unique_device_ref(
+    target: &mut Vec<GeometryNarrativeDeviceRef>,
+    device_ref: GeometryNarrativeDeviceRef,
+) {
+    if target.iter().any(|existing| existing.device_id == device_ref.device_id) {
+        return;
+    }
+    target.push(device_ref);
+}
+
+fn traverse_device_neighbors(
+    start: &str,
+    adjacency: &HashMap<String, Vec<String>>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut queue = adjacency.get(start).cloned().unwrap_or_default();
+    let mut seen = BTreeSet::new();
+    while let Some(device) = queue.first().cloned() {
+        queue.remove(0);
+        if !seen.insert(device.clone()) {
+            continue;
+        }
+        out.push(device.clone());
+        if let Some(next) = adjacency.get(&device) {
+            queue.extend(next.iter().cloned());
+        }
+    }
+    out
+}
+
+fn extract_guard_device_names(
+    guard: &TransitionGuard,
+    known_devices: &BTreeSet<String>,
+) -> Vec<String> {
+    let TransitionGuard::Condition { expression } = guard else {
+        return Vec::new();
+    };
+    expression
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .filter(|token| !token.is_empty())
+        .filter(|token| known_devices.contains(*token))
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn build_task_headline(
+    steps: &[GeometryNarrativeStep],
+) -> (
+    Vec<GeometryNarrativeBlockingPoint>,
+    Vec<GeometryNarrativeExit>,
+) {
+    let mut blocking_points = Vec::new();
+    let mut fault_exits = Vec::new();
+
+    for step in steps {
+        let timeout_transitions = step
+            .outgoing
+            .iter()
+            .filter(|transition| is_timeout_transition(transition))
+            .map(narrative_transition_ref)
+            .collect::<Vec<_>>();
+        let release_transitions = step
+            .outgoing
+            .iter()
+            .filter(|transition| !is_timeout_transition(transition))
+            .map(narrative_transition_ref)
+            .collect::<Vec<_>>();
+
+        if !timeout_transitions.is_empty()
+            || release_transitions
+                .iter()
+                .any(|transition| transition.guard_kind != "always")
+        {
+            blocking_points.push(GeometryNarrativeBlockingPoint {
+                step_id: step.step_id.clone(),
+                step_label: step.label.clone(),
+                release_transitions: release_transitions.clone(),
+                timeout_transitions: timeout_transitions.clone(),
+            });
+        }
+
+        let preferred_transition_id = release_transitions
+            .first()
+            .map(|transition| transition.transition_id.clone())
+            .or_else(|| step.outgoing.first().map(|transition| transition.transition_id.clone()));
+        for transition in step.outgoing.iter().map(narrative_transition_ref) {
+            if preferred_transition_id
+                .as_ref()
+                .is_some_and(|preferred| preferred == &transition.transition_id)
+            {
+                continue;
+            }
+            fault_exits.push(GeometryNarrativeExit {
+                from_step_id: step.step_id.clone(),
+                from_step_label: step.label.clone(),
+                via: transition,
+            });
+        }
+    }
+
+    (blocking_points, fault_exits)
+}
+
+fn narrative_transition_ref(
+    transition: &GeometryNarrativeTransition,
+) -> GeometryNarrativeTransitionRef {
+    GeometryNarrativeTransitionRef {
+        transition_id: transition.transition_id.clone(),
+        guard_kind: transition.guard_kind.clone(),
+        guard_label: transition.guard_label.clone(),
+        to_step_id: transition.to_step_id.clone(),
+        to_step_label: transition.to_step_label.clone(),
+    }
+}
+
+fn is_timeout_transition(transition: &GeometryNarrativeTransition) -> bool {
+    transition.guard_kind == "timeout" || transition.guard_kind == "delay" || !transition.timers.is_empty()
 }
 
 fn ensure_external_device_node(
@@ -805,6 +1578,15 @@ fn transition_guard_label(guard: &TransitionGuard) -> String {
     }
 }
 
+fn transition_guard_kind(guard: &TransitionGuard) -> &'static str {
+    match guard {
+        TransitionGuard::Always => "always",
+        TransitionGuard::Condition { .. } => "condition",
+        TransitionGuard::Timeout { .. } => "timeout",
+        TransitionGuard::Delay { .. } => "delay",
+    }
+}
+
 fn transition_action_label(action: &TransitionAction) -> String {
     match action {
         TransitionAction::Extend { target, .. } => format!("extend {target}"),
@@ -850,6 +1632,56 @@ fn transition_action_label(action: &TransitionAction) -> String {
             format!("axis_move_absolute {target} {position_raw}")
         }
         TransitionAction::Log { message } => format!("log {message}"),
+    }
+}
+
+fn action_kind_from_transition(action: &TransitionAction) -> ActionKind {
+    match action {
+        TransitionAction::Extend { .. } => ActionKind::Extend,
+        TransitionAction::Retract { .. } => ActionKind::Retract,
+        TransitionAction::Set { .. } => ActionKind::Set,
+        TransitionAction::SetAnalog { .. } => ActionKind::SetAnalog,
+        TransitionAction::SetAnalogExpr { .. } => ActionKind::SetAnalogExpr,
+        TransitionAction::Compute { .. } => ActionKind::Compute,
+        TransitionAction::CallExtern { .. } => ActionKind::CallExtern,
+        TransitionAction::CamEngage { .. } => ActionKind::CamEngage,
+        TransitionAction::CamDisengage { .. } => ActionKind::CamDisengage,
+        TransitionAction::CamSwitch { .. } => ActionKind::CamSwitch,
+        TransitionAction::CamPhase { .. } => ActionKind::CamPhase,
+        TransitionAction::AxisMoveRelative { .. } => ActionKind::AxisMoveRelative,
+        TransitionAction::AxisMoveAbsolute { .. } => ActionKind::AxisMoveAbsolute,
+        TransitionAction::Log { .. } => ActionKind::Log,
+    }
+}
+
+fn action_target_name(action: &TransitionAction) -> Option<&str> {
+    match action {
+        TransitionAction::Extend { target, .. }
+        | TransitionAction::Retract { target, .. }
+        | TransitionAction::Set { target, .. }
+        | TransitionAction::SetAnalog { target, .. }
+        | TransitionAction::SetAnalogExpr { target, .. }
+        | TransitionAction::Compute { target, .. }
+        | TransitionAction::CamEngage { target, .. }
+        | TransitionAction::CamDisengage { target, .. }
+        | TransitionAction::CamSwitch { target, .. }
+        | TransitionAction::CamPhase { target, .. }
+        | TransitionAction::AxisMoveRelative { target, .. }
+        | TransitionAction::AxisMoveAbsolute { target, .. } => Some(target.as_str()),
+        TransitionAction::CallExtern { .. } | TransitionAction::Log { .. } => None,
+    }
+}
+
+fn action_target_port(action: &TransitionAction) -> Option<&str> {
+    match action {
+        TransitionAction::Extend { port, .. }
+        | TransitionAction::Retract { port, .. }
+        | TransitionAction::Set { port, .. }
+        | TransitionAction::SetAnalog { port, .. }
+        | TransitionAction::SetAnalogExpr { port, .. }
+        | TransitionAction::AxisMoveRelative { port, .. }
+        | TransitionAction::AxisMoveAbsolute { port, .. } => Some(port.as_str()),
+        _ => None,
     }
 }
 
@@ -931,6 +1763,22 @@ fn device_kind_name(kind: &DeviceKind) -> &'static str {
         DeviceKind::AnalogInput => "analog_input",
         DeviceKind::AnalogOutput => "analog_output",
         DeviceKind::Pid => "pid",
+    }
+}
+
+fn device_bucket(kind: &DeviceKind) -> &'static str {
+    match kind {
+        DeviceKind::DigitalOutput | DeviceKind::AnalogOutput | DeviceKind::Plc => "command",
+        DeviceKind::SolenoidValve
+        | DeviceKind::Cylinder
+        | DeviceKind::Motor
+        | DeviceKind::StepperMotor
+        | DeviceKind::Vfd
+        | DeviceKind::ServoDrive
+        | DeviceKind::CamCoupling
+        | DeviceKind::Pid => "actuator",
+        DeviceKind::Sensor => "feedback",
+        DeviceKind::DigitalInput | DeviceKind::AnalogInput => "io",
     }
 }
 
@@ -1194,6 +2042,48 @@ mod tests {
                 .expect("intent overlay")
                 .verdict,
             IntentAlignmentVerdict::Aligned
+        );
+        let narrative = artifact.narrative.as_ref().expect("narrative");
+        assert_eq!(narrative.tasks.len(), 2);
+        let main_task = narrative
+            .tasks
+            .iter()
+            .find(|task| task.task_id == "task:main")
+            .expect("main task narrative");
+        assert_eq!(main_task.entry_step_id, "step:main.wait_start");
+        assert_eq!(
+            main_task.main_path_step_ids,
+            vec![
+                "step:main.wait_start".to_string(),
+                "step:main.run".to_string(),
+            ]
+        );
+        assert_eq!(main_task.current_step_id, "step:main.run");
+        assert_eq!(main_task.coverage.trace_available, true);
+        assert_eq!(main_task.coverage.intent_available, true);
+        assert!(main_task
+            .blocking_points
+            .iter()
+            .any(|point| point.step_id == "step:main.wait_start"
+                && point
+                    .release_transitions
+                    .iter()
+                    .any(|transition| transition.to_step_id == "step:main.run"
+                        && transition.guard_label == "when X0 == true")));
+        let run_step = main_task
+            .steps
+            .iter()
+            .find(|step| step.step_id == "step:main.run")
+            .expect("run step narrative");
+        assert!(run_step.is_current);
+        assert_eq!(main_task.steps.len(), 2);
+        assert_eq!(
+            main_task
+                .steps
+                .iter()
+                .filter(|step| step.is_current)
+                .count(),
+            1
         );
     }
 }

@@ -7,7 +7,7 @@
   },
   "source_digest": {
     "algorithm": "sha256",
-    "value": "10b8ce179f80c7862ff82a3b363b8792d6ff106895f68609d09558f1b8deb83c"
+    "value": "6793be8964362b3c71fe069f822722854547bf4c74787730bd1c88be20ed69ef"
   },
   "metadata": {
     "contract_id": "intent-alignment-cylinder-sequence",
@@ -31,7 +31,7 @@
         "label": "Canonical PLC example review",
         "source": {
           "kind": "canonical_example",
-          "path": "examples/two_cylinder.plc",
+          "path": "examples/dual_axis_platform.plc",
           "description": "Existing PLC example used as a concrete authored asset during contract review."
         }
       }

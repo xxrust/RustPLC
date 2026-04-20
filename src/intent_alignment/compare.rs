@@ -665,6 +665,26 @@ fn matched_occurrences(
 
         match binding.combination {
             ObservationCombination::AllOf => {
+                if exact_transition_binding_uses_occurrence_order(binding, observed) {
+                    let mut occurrence_index = 0usize;
+                    for ((_, tick), indices) in &groups {
+                        if binding
+                            .evidence
+                            .iter()
+                            .all(|expected| group_has_evidence(observed, indices, expected))
+                        {
+                            raw_matches.push(RawMatchedOccurrence {
+                                milestone_id: milestone_id.clone(),
+                                cycle_index: occurrence_index,
+                                tick: *tick,
+                                evidence_indices: indices.clone(),
+                            });
+                            occurrence_index += 1;
+                        }
+                    }
+                    continue;
+                }
+
                 for ((cycle_index, tick), indices) in &groups {
                     if binding
                         .evidence
@@ -800,6 +820,23 @@ fn grouped_entries(observed: &ObservedBehaviorSequence) -> BTreeMap<(usize, u64)
             .push(index);
     }
     groups
+}
+
+fn exact_transition_binding_uses_occurrence_order(
+    binding: &super::contract::ObservationBinding,
+    observed: &ObservedBehaviorSequence,
+) -> bool {
+    binding.evidence.len() == 1
+        && binding.evidence[0].key == "transition"
+        && matches!(binding.combination, ObservationCombination::AllOf)
+        && observed_cycles_overlap(observed)
+}
+
+fn observed_cycles_overlap(observed: &ObservedBehaviorSequence) -> bool {
+    observed
+        .cycles
+        .windows(2)
+        .any(|pair| pair[1].start_tick <= pair[0].end_tick)
 }
 
 fn group_has_evidence(

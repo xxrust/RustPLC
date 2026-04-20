@@ -1,6 +1,0 @@
-{"tick":0,"vars":{"_state":0,"motor_left":false,"motor_right":false}}
-{"tick":1,"vars":{"_state":10,"motor_left":true,"motor_right":false}}
-{"tick":2,"vars":{"_state":20,"motor_left":true,"motor_right":true}}
-{"tick":3,"vars":{"_state":30,"motor_left":true,"motor_right":true}}
-{"tick":4,"vars":{"_state":40,"motor_left":false,"motor_right":true}}
-{"tick":5,"vars":{"_state":50,"motor_left":false,"motor_right":false}}

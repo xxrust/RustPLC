@@ -5,46 +5,24 @@ use std::process::Command;
 const PLC_FIXTURE: &str = r#"
 [topology]
 
-device Y0: digital_output
 device X0: digital_input
-
 device start_button: sensor
 
-device valve_A: solenoid_valve
-
-device cyl_A: cylinder
-
-device sensor_ext: sensor
-
 relation { from: start_button.out, to: X0.in, via: reports_to }
-relation { from: Y0.out, to: valve_A.coil, via: driven_by }
-relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
-relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
-relation { from: sensor_ext.out, to: X0.in, via: reports_to }
 
 [constraints]
 
 [tasks]
 
 task main:
-    step extend:
-        action: extend cyl_A
-
     step wait_button:
         wait: start_button == true
         timeout: 50ms -> goto fault
 
-    step dwell:
-        delay: 20ms
-
-    step retract:
-        action: retract cyl_A
-
     on_complete: goto done
 
 task fault:
-    step retract_fault:
-        action: retract cyl_A
+    step halt_fault:
     on_complete: goto done
 
 task done:

@@ -25,8 +25,8 @@ fn scenario_init_generates_parseable_yaml() {
     let base = temp_dir("rust_plc_scenario_init");
 
     let cases = [
-        ("examples/assembly_station.plc", "normal"),
-        ("examples/two_cylinder.plc", "minimal"),
+        ("examples/project_scaffold_demo/plc/main.plc", "normal"),
+        ("examples/dual_axis_platform.plc", "normal"),
     ];
 
     for (rel_plc, preset) in cases {

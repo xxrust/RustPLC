@@ -182,7 +182,7 @@ fn detailed_help_for_sim_plc_includes_examples_and_notes() {
     assert!(stderr.contains("Notes:"));
     assert!(stderr.contains("Online force and online variable controls"));
     assert!(stderr.contains("Examples:"));
-    assert!(stderr.contains("rust_plc sim-plc examples/assembly_station.plc"));
+    assert!(stderr.contains("rust_plc sim-plc examples/rp2040_motion_minimal.plc"));
 }
 
 #[test]
@@ -204,5 +204,6 @@ fn detailed_help_for_geometry_export_includes_overlay_options() {
     assert!(stderr.contains("Notes:"));
     assert!(stderr.contains("stable JSON artifact"));
     assert!(stderr.contains("Examples:"));
-    assert!(stderr.contains("rust_plc geometry-export examples/assembly_station.plc"));
+    assert!(stderr.contains("rust_plc geometry-export examples/rp2040_motion_minimal.plc"));
 }
+

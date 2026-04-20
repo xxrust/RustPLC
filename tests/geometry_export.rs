@@ -87,6 +87,10 @@ fn geometry_export_writes_artifact_and_json_summary() {
             .and_then(Value::as_u64),
         Some(1)
     );
+    assert_eq!(
+        artifact.get("schema_version").and_then(Value::as_u64),
+        Some(2)
+    );
 
     let nodes = artifact
         .get("nodes")
@@ -98,4 +102,34 @@ fn geometry_export_writes_artifact_and_json_summary() {
     assert!(nodes
         .iter()
         .any(|node| { node.get("id").and_then(Value::as_str) == Some("step:main.wait_start") }));
+
+    let narrative_tasks = artifact
+        .get("narrative")
+        .and_then(|value| value.get("tasks"))
+        .and_then(Value::as_array)
+        .expect("narrative tasks");
+    assert_eq!(narrative_tasks.len(), 1);
+    let main_task = &narrative_tasks[0];
+    assert_eq!(
+        main_task.get("task_id").and_then(Value::as_str),
+        Some("task:main")
+    );
+    assert_eq!(
+        main_task
+            .get("main_path_step_ids")
+            .and_then(Value::as_array)
+            .map(|values| values.len()),
+        Some(2)
+    );
+    assert_eq!(
+        main_task
+            .get("coverage")
+            .and_then(|value| value.get("trace_available"))
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert!(main_task
+        .get("blocking_points")
+        .and_then(Value::as_array)
+        .is_some_and(|points| !points.is_empty()));
 }

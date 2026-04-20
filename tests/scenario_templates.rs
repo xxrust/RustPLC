@@ -21,14 +21,14 @@ fn temp_dir(prefix: &str) -> PathBuf {
 
 #[test]
 fn scenario_init_presets_generate_validateable_scenarios() {
-    let plc = repo_path("examples/assembly_station.plc");
+    let plc = repo_path("examples/dual_axis_platform.plc");
     assert!(plc.exists(), "expected PLC example to exist");
 
     let base = temp_dir("rust_plc_scenario_templates");
 
     let presets = ["normal", "timeout", "sensor_stuck", "bounce"];
     for preset in presets {
-        let out = base.join(format!("assembly_station_{preset}.yaml"));
+        let out = base.join(format!("dual_axis_platform_{preset}.yaml"));
 
         let init = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
             .arg("scenario-init")

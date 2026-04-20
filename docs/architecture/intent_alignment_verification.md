@@ -330,15 +330,15 @@ fault_detected
 phase-2 的关闭集固定为以下 3 类资产，达到后即可收口，不再继续把新 case 无限塞回本阶段：
 
 1. Canonical fixtures
-   - `tests/fixtures/intent_alignment/contracts/two_cylinder_openplc_contract.json`
+   - `tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json`
    - `tests/fixtures/intent_alignment/contracts/recovery_single_contract.json`
    - `tests/fixtures/intent_alignment/contracts/recovery_multi_contract.json`
    - `tests/fixtures/intent_alignment/evidence/*.jsonl`
 2. Canonical + mutation regressions
-   - `tests/intent_alignment_regress.rs` 必须覆盖双气缸顺序、单执行器 recovery、多执行器 recovery，以及每个已冻结 mismatch 的最小 mutation 反例。
+   - `tests/intent_alignment_pipeline.rs` 必须覆盖顺序动作、单执行器 recovery、多执行器 recovery，以及每个已冻结 mismatch 的最小 mutation 反例。
 3. Real golden path
-   - `examples/two_cylinder.plc`
-   - `examples/openplc_trace_phase2/two_cylinder.sil.normalized.jsonl`
+   - `examples/dual_axis_platform.plc`
+   - `tests/fixtures/intent_alignment/traces/two_cycle_aligned.jsonl`
    - golden path 必须经过 `contract -> extractor -> comparator -> report` 主链，并断言显式语义，而不是只断言流程能跑通。
 
 超出以上关闭集的新 mismatch、新 evidence source 或新的 CLI 入口，统一后置到下一阶段，不在 phase-2 内继续扩张。
