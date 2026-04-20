@@ -230,6 +230,13 @@ rust_plc geometry-export <source.plc|source.bundle.toml> \
 - 提供 `Constellation / Orbit / Evidence` 三种过滤视图
 - 支持 trace scrubber 与关键转移跳转
 
+当前已落地的 web seam：
+
+- `POST /api/geometry/export`
+  - 从 `plc_file` 与可选 `trace` / `intent_report` 生成 geometry artifact
+- `GET /api/geometry/:run_id`
+  - 读取某次 web run 自动生成的 geometry artifact
+
 ### Phase 3
 
 - 引入动画尾迹
