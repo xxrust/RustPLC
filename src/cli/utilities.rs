@@ -1,23 +1,25 @@
 use crate::cli_support::common::{
-    CliOutputMode, DispatchResult, display_path_relative_to_cwd, write_json_pretty,
+    display_path_relative_to_cwd, write_json_pretty, CliOutputMode, DispatchResult,
 };
 use crate::cli_support::help::command_usage;
 use crate::cli_support::plc_pipeline::{
     compile_loaded_codegen_semantics, format_loaded_plc_errors,
     parse_loaded_plc_with_required_purpose,
 };
-use rust_plc::codegen::st::{StCodegenConfig, StCodegenError, generate_st};
+use rust_plc::codegen::st::{generate_st, StCodegenConfig, StCodegenError};
+use rust_plc::geometry_view::{export_geometry_artifact, GeometryArtifact};
 use rust_plc::intent_alignment::{
-    IntentAlignmentBlockerKind, IntentAlignmentVerdict, IntentContract, IntentMismatchKind,
     compare_trace_jsonl, compile_expected_behavior_spec, read_intent_contract,
     reduce_intent_alignment_report, verify_intent_contract_delivery_readiness,
-    verify_intent_contract_source_binding,
+    verify_intent_contract_source_binding, IntentAlignmentBlockerKind, IntentAlignmentVerdict,
+    IntentContract, IntentMismatchKind,
 };
 use rust_plc::semantic::preprocess_program;
 use rust_plc::sequence_lint::{
-    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
+    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
 };
 use rust_plc::source_bundle::{is_supported_plc_source_path, load_plc_source};
+use rust_plc::trace_diff::parse_trace_jsonl;
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -30,6 +32,10 @@ pub(super) fn try_dispatch(
     remaining: &[String],
 ) -> Option<DispatchResult> {
     let (error_prefix, result) = match command {
+        "geometry-export" => (
+            Some("[GEOM-000]"),
+            run_geometry_export_subcommand(program, remaining.iter().cloned()),
+        ),
         "gen-st" => (
             Some("[STGEN-000]"),
             run_gen_st_subcommand(program, remaining.iter().cloned()),
@@ -48,6 +54,185 @@ pub(super) fn try_dispatch(
         error_prefix,
         result,
     })
+}
+
+#[derive(Debug, Serialize)]
+struct GeometryExportReport {
+    schema_version: u32,
+    command: &'static str,
+    source_plc: String,
+    output_path: String,
+    node_count: usize,
+    edge_count: usize,
+    observed_transition_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trace_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    intent_report_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    intent_verdict: Option<IntentAlignmentVerdict>,
+}
+
+fn run_geometry_export_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = command_usage(program, "geometry-export");
+
+    let Some(plc_path) = args.next() else {
+        return Err(usage);
+    };
+
+    let mut out_path: Option<PathBuf> = None;
+    let mut trace_path: Option<PathBuf> = None;
+    let mut intent_report_path: Option<PathBuf> = None;
+    let mut output_mode = CliOutputMode::Human;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--out" => {
+                let value = args.next().ok_or_else(|| {
+                    "Missing value for --out <geometry.json> in geometry-export".to_string()
+                })?;
+                out_path = Some(PathBuf::from(value));
+            }
+            "--trace" => {
+                let value = args.next().ok_or_else(|| {
+                    "Missing value for --trace <trace.jsonl> in geometry-export".to_string()
+                })?;
+                trace_path = Some(PathBuf::from(value));
+            }
+            "--intent-report" => {
+                let value = args.next().ok_or_else(|| {
+                    "Missing value for --intent-report <report.json> in geometry-export".to_string()
+                })?;
+                intent_report_path = Some(PathBuf::from(value));
+            }
+            "--output" => {
+                let raw = args.next().ok_or_else(|| {
+                    "Missing value for --output <human|json> in geometry-export".to_string()
+                })?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!(
+                        "Invalid value for --output `{raw}` in geometry-export (expected human or json)"
+                    )
+                })?;
+            }
+            "-h" | "--help" => return Err(usage.clone()),
+            other => {
+                return Err(format!(
+                    "Unknown argument for geometry-export: {other}\n{usage}"
+                ));
+            }
+        }
+    }
+
+    let out_path = out_path.ok_or_else(|| {
+        "geometry-export requires --out <geometry.json> to persist the artifact".to_string()
+    })?;
+
+    if !is_supported_plc_source_path(Path::new(&plc_path)) {
+        return Err(format!(
+            "geometry-export expects a supported PLC source path, got: {plc_path}"
+        ));
+    }
+
+    let loaded = load_plc_source(Path::new(&plc_path))?;
+    let semantics =
+        compile_loaded_codegen_semantics(&loaded).map_err(|errors| errors.join("\n"))?;
+
+    let trace_events = if let Some(path) = &trace_path {
+        let text = fs::read_to_string(path)
+            .map_err(|err| format!("Failed to read trace {}: {err}", path.display()))?;
+        Some(parse_trace_jsonl(&text).map_err(|err| {
+            format!(
+                "Failed to parse trace JSONL {} for geometry-export: {err}",
+                path.display()
+            )
+        })?)
+    } else {
+        None
+    };
+
+    let intent_report = if let Some(path) = &intent_report_path {
+        let text = fs::read_to_string(path)
+            .map_err(|err| format!("Failed to read intent report {}: {err}", path.display()))?;
+        Some(serde_json::from_str(&text).map_err(|err| {
+            format!(
+                "Failed to parse intent report {} for geometry-export: {err}",
+                path.display()
+            )
+        })?)
+    } else {
+        None
+    };
+
+    let artifact: GeometryArtifact = export_geometry_artifact(
+        &plc_path,
+        &semantics.topology,
+        &semantics.constraints,
+        &semantics.state_machine,
+        trace_events.as_deref(),
+        intent_report.as_ref(),
+    );
+    write_json_pretty(&out_path, &artifact)?;
+
+    let report = GeometryExportReport {
+        schema_version: 1,
+        command: "geometry-export",
+        source_plc: plc_path,
+        output_path: display_path_relative_to_cwd(&out_path),
+        node_count: artifact.nodes.len(),
+        edge_count: artifact.edges.len(),
+        observed_transition_count: artifact.summary.observed_transition_count,
+        trace_path: trace_path
+            .as_ref()
+            .map(|path| display_path_relative_to_cwd(path.as_path())),
+        intent_report_path: intent_report_path
+            .as_ref()
+            .map(|path| display_path_relative_to_cwd(path.as_path())),
+        intent_verdict: artifact
+            .overlays
+            .intent
+            .as_ref()
+            .map(|overlay| overlay.verdict),
+    };
+
+    match output_mode {
+        CliOutputMode::Json => {
+            let mut body = serde_json::to_string_pretty(&report)
+                .map_err(|err| format!("Failed to serialize geometry-export JSON: {err}"))?;
+            body.push('\n');
+            print!("{body}");
+        }
+        CliOutputMode::Human => {
+            eprintln!("geometry-export: PASS");
+            eprintln!("  source: {}", report.source_plc);
+            eprintln!("  out: {}", report.output_path);
+            eprintln!("  nodes: {}", report.node_count);
+            eprintln!("  edges: {}", report.edge_count);
+            if let Some(trace_path) = &report.trace_path {
+                eprintln!("  trace: {trace_path}");
+                eprintln!(
+                    "  observed_transitions: {}",
+                    report.observed_transition_count
+                );
+            }
+            if let Some(verdict) = report.intent_verdict {
+                eprintln!("  intent_verdict: {}", intent_verdict_name(verdict));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn intent_verdict_name(verdict: IntentAlignmentVerdict) -> &'static str {
+    match verdict {
+        IntentAlignmentVerdict::Aligned => "aligned",
+        IntentAlignmentVerdict::Mismatch => "mismatch",
+        IntentAlignmentVerdict::Blocked => "blocked",
+    }
 }
 
 fn run_gen_st_subcommand(

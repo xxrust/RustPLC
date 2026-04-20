@@ -16,6 +16,7 @@ pub mod device_subtype;
 pub mod diagnostics;
 pub mod error;
 pub mod extern_functions;
+pub mod geometry_view;
 pub mod iec_address;
 pub mod intent_alignment;
 pub mod io_map;

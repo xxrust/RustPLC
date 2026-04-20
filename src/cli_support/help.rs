@@ -108,6 +108,12 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
     },
     CliCommandHelp {
         section: "Diagnostics",
+        name: "geometry-export",
+        summary: "Export a semantic-twin geometry artifact from topology, state-machine, constraints, and optional evidence.",
+        usage_template: "Usage: {program} geometry-export <source.plc|source.bundle.toml> --out <geometry.json> [--trace <trace.jsonl>] [--intent-report <report.json>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
         name: "trace-diff",
         summary: "Compare SIL and board traces and emit a mismatch report.",
         usage_template: "Usage: {program} trace-diff --sil <trace.jsonl> --board <trace.jsonl> --out <report.json> [--context <n>] [--fail-on-mismatch]",
@@ -312,6 +318,12 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--scenario <scenario.yaml>   Scenario YAML to replay.",
             "--out-dir <dir>              Required output directory for board-like artifacts.",
         ],
+        "geometry-export" => &[
+            "--out <geometry.json>        Required semantic-twin geometry artifact output.",
+            "--trace <trace.jsonl>        Optional runtime trace overlay input.",
+            "--intent-report <report.json> Optional intent-alignment report overlay input.",
+            "--output <human|json>        Select CLI output format.",
+        ],
         "trace-diff" => &[
             "--sil <trace.jsonl>          SIL trace JSONL input.",
             "--board <trace.jsonl>        Board or virtual-board trace JSONL input.",
@@ -433,6 +445,10 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
             "This command orchestrates `compile`, `sequence-lint`, `scenario-doctor`, and `no-board-gate` as one reproducible release check.",
             "When `--intent-contract` and `--intent-evidence` are both provided, an `intent_alignment` step is appended and reduced from the library report without reinterpreting its verdict.",
         ],
+        "geometry-export" => &[
+            "This command writes a stable JSON artifact for later SVG, web, or animation rendering; it does not render UI directly.",
+            "When `--trace` is provided, runtime task and step names are resolved with a best-effort mapping from semantic task contexts.",
+        ],
         "trace-doctor" => &["At least one of `--trace` or `--diff` is required."],
         "intent-doctor" => &[
             "If `--intent-contract` is omitted, the command tries the sibling `*.intent_alignment.contract.json` path next to the PLC source entry.",
@@ -501,6 +517,10 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         }
         "virtual-board" => &[
             "rust_plc virtual-board examples/assembly_station.plc --scenario scenarios/normal.yaml --out-dir out/virtual_board/assembly_station",
+        ],
+        "geometry-export" => &[
+            "rust_plc geometry-export examples/assembly_station.plc --out out/geometry/assembly_station.geometry.json",
+            "rust_plc geometry-export out/wafer_loader_project/plc/main.target_semantics.bundle.toml --trace out/wafer_loader_project/out/project_check_with_auto_sim_v4/no_board_gate/artifacts/sil_trace.jsonl --intent-report out/wafer_loader_project/out/project_check_with_auto_sim_v4/intent_alignment/report.json --out out/geometry/wafer_loader.geometry.json --output json",
         ],
         "trace-diff" => &[
             "rust_plc trace-diff --sil out/sil_trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json --fail-on-mismatch",

@@ -184,3 +184,25 @@ fn detailed_help_for_sim_plc_includes_examples_and_notes() {
     assert!(stderr.contains("Examples:"));
     assert!(stderr.contains("rust_plc sim-plc examples/assembly_station.plc"));
 }
+
+#[test]
+fn detailed_help_for_geometry_export_includes_overlay_options() {
+    let output = run_cli(&["help", "geometry-export"]);
+    assert!(
+        output.status.success(),
+        "help geometry-export should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(
+        "geometry-export <source.plc|source.bundle.toml> --out <geometry.json>"
+    ));
+    assert!(stderr.contains("Options:"));
+    assert!(stderr.contains("--trace <trace.jsonl>"));
+    assert!(stderr.contains("--intent-report <report.json>"));
+    assert!(stderr.contains("Notes:"));
+    assert!(stderr.contains("stable JSON artifact"));
+    assert!(stderr.contains("Examples:"));
+    assert!(stderr.contains("rust_plc geometry-export examples/assembly_station.plc"));
+}
