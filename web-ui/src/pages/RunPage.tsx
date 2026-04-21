@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
-import { Card, Button, Form, Input, Space, Table, Tag, Typography, Alert, Spin, Select } from 'antd';
+import { Alert, Button, Card, Form, Input, Select, Space, Spin, Table, Tag, Typography } from 'antd';
 import { PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import GeometryPreview from '../components/geometry/GeometryPreview';
-import { geometryApi, runApi } from '../services/api';
+import RunReviewCockpit from '../components/review/RunReviewCockpit';
+import { geometryApi, runApi, traceApi } from '../services/api';
 import type { RunStatus } from '../types';
 import { formatTimestamp } from '../utils/time';
 
-const { Title, Text } = Typography;
+const { Paragraph, Text, Title } = Typography;
 
 type RunTriggerMode = 'no_board_gate' | 'component_sim';
 
@@ -16,7 +16,27 @@ interface RunTriggerFormValues {
   mode: RunTriggerMode;
   plcFile?: string;
   topologyFile?: string;
-  scenarioFile: string;
+  scenarioFile?: string;
+}
+
+function localizeRunStatus(status: string, t: (key: string) => string): string {
+  const map: Record<string, string> = {
+    running: 'run.statusRunning',
+    pass: 'run.statusPass',
+    fail: 'run.statusFail',
+  };
+  return map[status] ? t(map[status]) : status;
+}
+
+function localizeTriggeredBy(value: string | undefined, t: (key: string) => string): string {
+  if (value === 'web-user') return t('run.triggeredByWebUser');
+  return value || '-';
+}
+
+function describeReviewSignal(run: RunStatus): string {
+  if (run.status === 'fail') return run.failure_summary ?? 'FAILED_NO_SUMMARY';
+  if (run.status === 'running') return run.failure_summary ?? 'RUNNING_NO_SUMMARY';
+  return 'PASSED_READY_FOR_REVIEW';
 }
 
 const RunPage: React.FC = () => {
@@ -30,22 +50,24 @@ const RunPage: React.FC = () => {
     refetchInterval: 5000,
   });
 
+  React.useEffect(() => {
+    if (!selectedRunId && runsData?.data?.length) {
+      setSelectedRunId(runsData.data[0].run_id);
+    }
+  }, [runsData?.data, selectedRunId]);
+
   const triggerMutation = useMutation({
     mutationFn: (values: RunTriggerFormValues) => {
       if (values.mode === 'component_sim') {
-        return runApi.triggerComponentSim(values.topologyFile || '', values.scenarioFile);
+        return runApi.triggerComponentSim(values.topologyFile || '', values.scenarioFile || '');
       }
-      return runApi.triggerNoBoard(values.plcFile || '', values.scenarioFile);
+      return runApi.triggerNoBoard(values.plcFile || '', values.scenarioFile || '');
     },
     onSuccess: (response) => {
       setSelectedRunId(response.data.run_id);
       refetch();
     },
   });
-
-  const handleTrigger = (values: any) => {
-    triggerMutation.mutate(values);
-  };
 
   const columns = [
     {
@@ -60,13 +82,8 @@ const RunPage: React.FC = () => {
       key: 'status',
       render: (status: string) => {
         const colorMap = { running: 'processing', pass: 'success', fail: 'error' };
-        return <Tag color={colorMap[status as keyof typeof colorMap]}>{status.toUpperCase()}</Tag>;
+        return <Tag color={colorMap[status as keyof typeof colorMap]}>{localizeRunStatus(status, t)}</Tag>;
       },
-    },
-    {
-      title: t('run.triggeredBy'),
-      dataIndex: 'triggered_by',
-      key: 'triggered_by',
     },
     {
       title: t('run.runMode'),
@@ -79,6 +96,12 @@ const RunPage: React.FC = () => {
       },
     },
     {
+      title: t('run.triggeredBy'),
+      dataIndex: 'triggered_by',
+      key: 'triggered_by',
+      render: (value?: string) => localizeTriggeredBy(value, t),
+    },
+    {
       title: t('run.triggeredAt'),
       dataIndex: 'triggered_at',
       key: 'triggered_at',
@@ -86,46 +109,83 @@ const RunPage: React.FC = () => {
         formatTimestamp(record.triggered_at, record.triggered_at_ms),
     },
     {
-      title: t('run.failureSummary'),
+      title: t('run.reviewSignal'),
       dataIndex: 'failure_summary',
       key: 'failure_summary',
-      render: (summary?: string) => summary ? <Text type="danger">{summary}</Text> : '-',
+      render: (_summary: string | undefined, record: RunStatus) => {
+        const signal = describeReviewSignal(record);
+        const text =
+          signal === 'FAILED_NO_SUMMARY'
+            ? t('run.reviewSignalFailedNoSummary')
+            : signal === 'RUNNING_NO_SUMMARY'
+              ? t('run.reviewSignalRunning')
+              : signal === 'PASSED_READY_FOR_REVIEW'
+                ? t('run.reviewSignalPassed')
+                : signal;
+        return <Text type={record.status === 'fail' ? 'danger' : 'secondary'}>{text}</Text>;
+      },
     },
     {
       title: t('run.actions'),
       key: 'action',
-      render: (_: any, record: RunStatus) => (
-        <Space>
-          <Button size="small" onClick={() => setSelectedRunId(record.run_id)}>{t('run.viewDetails')}</Button>
-          {record.artifacts?.trace && (
-            <Button size="small" type="link" href={record.artifacts.trace} target="_blank">Trace</Button>
-          )}
-          {record.artifacts?.geometry && (
-            <Button size="small" type="link" href={record.artifacts.geometry} target="_blank">Geometry</Button>
-          )}
-          {record.artifacts?.diagnosis && (
-            <Button size="small" type="link" href={record.artifacts.diagnosis} target="_blank">{t('run.diagnosis')}</Button>
-          )}
-        </Space>
+      render: (_: unknown, record: RunStatus) => (
+        <Button size="small" type="primary" onClick={() => setSelectedRunId(record.run_id)}>
+          {t('run.review')}
+        </Button>
       ),
     },
   ];
 
   return (
-    <div>
-      <Title level={2}>{t('run.title')}</Title>
+    <div style={{ display: 'grid', gap: 24 }}>
+      <div>
+        <Title level={2} style={{ marginBottom: 8 }}>
+          {t('run.title')}
+        </Title>
+        <Paragraph style={{ color: '#94a3b8', marginBottom: 0 }}>
+          {t('run.intro')}
+        </Paragraph>
+      </div>
 
-      <Card title={t('run.triggerGate')} style={{ marginBottom: 24 }}>
+      <Card
+        title={t('run.runHistory')}
+        extra={
+          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+            {t('run.refresh')}
+          </Button>
+        }
+      >
+        <Table
+          dataSource={runsData?.data || []}
+          columns={columns}
+          rowKey="run_id"
+          loading={isLoading}
+          locale={{ emptyText: t('run.noRunsAvailable') }}
+          pagination={{ pageSize: 10 }}
+          rowClassName={(record) => (record.run_id === selectedRunId ? 'ant-table-row-selected' : '')}
+        />
+      </Card>
+
+      {selectedRunId ? (
+        <Card title={t('run.reviewFocus', { runId: selectedRunId.slice(0, 12) })}>
+          <RunDetails runId={selectedRunId} />
+        </Card>
+      ) : (
+        <Card>
+          <Text type="secondary">{t('run.noRunsAvailable')}</Text>
+        </Card>
+      )}
+
+      <Card title={t('run.triggerCardTitle')}>
+        <Paragraph style={{ color: '#94a3b8' }}>
+          {t('run.triggerHint')}
+        </Paragraph>
+
         <Form
           form={form}
           layout="vertical"
-          onFinish={handleTrigger}
-          initialValues={{
-            mode: 'component_sim',
-            topologyFile: 'examples/component_model/topology.json',
-            plcFile: 'examples/demo.plc',
-            scenarioFile: 'examples/component_model/scenario_normal.json',
-          }}
+          onFinish={(values) => triggerMutation.mutate(values)}
+          initialValues={{ mode: 'component_sim' }}
         >
           <Form.Item
             name="mode"
@@ -148,18 +208,18 @@ const RunPage: React.FC = () => {
                   name="topologyFile"
                   label={t('run.topologyFile')}
                   rules={[{ required: true, message: t('run.topologyFileRequired') }]}
-                  style={{ width: 640 }}
+                  style={{ width: 680 }}
                 >
-                  <Input placeholder="examples/component_model/topology.json" />
+                  <Input placeholder={t('run.topologyPlaceholder')} />
                 </Form.Item>
               ) : (
                 <Form.Item
                   name="plcFile"
                   label={t('run.plcFile')}
                   rules={[{ required: true, message: t('run.plcFileRequired') }]}
-                  style={{ width: 640 }}
+                  style={{ width: 680 }}
                 >
-                  <Input placeholder="examples/demo.plc" />
+                  <Input placeholder={t('run.plcPlaceholder')} />
                 </Form.Item>
               )
             }
@@ -169,22 +229,28 @@ const RunPage: React.FC = () => {
             name="scenarioFile"
             label={t('run.scenarioFile')}
             rules={[{ required: true, message: t('run.scenarioFileRequired') }]}
-            style={{ width: 640 }}
+            style={{ width: 680 }}
           >
-            <Input placeholder="examples/component_model/scenario_normal.json" />
+            <Input placeholder={t('run.scenarioPlaceholder')} />
           </Form.Item>
-          <Form.Item>
-            <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={triggerMutation.isPending}>
-              {t('run.run')}
+
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              icon={<PlayCircleOutlined />}
+              loading={triggerMutation.isPending}
+            >
+              {t('run.submitRunRequest')}
             </Button>
           </Form.Item>
         </Form>
 
         {triggerMutation.isSuccess && (
           <Alert
-            message={t('run.triggered')}
-            description={`${t('run.runId')}: ${triggerMutation.data?.data.run_id}`}
-            type="success"
+            message={t('run.requestSubmitted')}
+            description={t('run.requestSubmittedDesc', { runId: triggerMutation.data?.data.run_id })}
+            type="info"
             showIcon
             closable
             style={{ marginTop: 16 }}
@@ -201,33 +267,13 @@ const RunPage: React.FC = () => {
           />
         )}
       </Card>
-
-      <Card
-        title={t('run.runHistory')}
-        extra={<Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('run.refresh')}</Button>}
-      >
-        <Table
-          dataSource={runsData?.data || []}
-          columns={columns}
-          rowKey="run_id"
-          loading={isLoading}
-          pagination={{ pageSize: 10 }}
-          rowClassName={(record) => record.run_id === selectedRunId ? 'ant-table-row-selected' : ''}
-        />
-      </Card>
-
-      {selectedRunId && (
-        <Card title={`${t('run.runDetails')}: ${selectedRunId.slice(0, 12)}`} style={{ marginTop: 24 }}>
-          <RunDetails runId={selectedRunId} />
-        </Card>
-      )}
     </div>
   );
 };
 
 const RunDetails: React.FC<{ runId: string }> = ({ runId }) => {
   const { t } = useTranslation();
-  const { data, isLoading } = useQuery({
+  const { data: runStatusData, isLoading } = useQuery({
     queryKey: ['runStatus', runId],
     queryFn: () => runApi.getRunStatus(runId),
     refetchInterval: (query) => {
@@ -235,54 +281,43 @@ const RunDetails: React.FC<{ runId: string }> = ({ runId }) => {
       return status === 'running' ? 2000 : false;
     },
   });
-  const run = data?.data;
+
+  const run = runStatusData?.data;
 
   const { data: geometryData, isLoading: isGeometryLoading } = useQuery({
     queryKey: ['geometry', runId, run?.artifacts?.geometry ?? 'missing'],
     queryFn: () => geometryApi.getGeometry(runId),
     enabled: Boolean(runId),
-    refetchInterval:
-      run?.status === 'running' || !run?.artifacts?.geometry ? 2000 : false,
+    refetchInterval: run?.status === 'running' || !run?.artifacts?.geometry ? 2000 : false,
   });
 
-  if (isLoading) return <Spin />;
+  const { data: keypointsData, isLoading: isKeypointsLoading } = useQuery({
+    queryKey: ['trace-keypoints', runId],
+    queryFn: () => traceApi.getKeypoints(runId),
+    enabled: Boolean(runId),
+    refetchInterval: run?.status === 'running' ? 2000 : false,
+  });
+
+  const { data: traceData, isLoading: isTraceLoading } = useQuery({
+    queryKey: ['trace', runId],
+    queryFn: () => traceApi.getTrace(runId),
+    enabled: Boolean(runId),
+    refetchInterval: run?.status === 'running' ? 2000 : false,
+  });
+
+  if (isLoading) {
+    return <Spin />;
+  }
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="large">
-      <div>
-        <Text strong>{t('run.status')}: </Text>
-        <Tag color={run?.status === 'pass' ? 'success' : run?.status === 'fail' ? 'error' : 'processing'}>
-          {run?.status?.toUpperCase()}
-        </Tag>
-      </div>
-      <div>
-        <Text strong>{t('run.triggeredBy')}: </Text>
-        <Text>{run?.triggered_by}</Text>
-      </div>
-      <div>
-        <Text strong>{t('run.triggeredAt')}: </Text>
-        <Text>{formatTimestamp(run?.triggered_at, run?.triggered_at_ms)}</Text>
-      </div>
-      {run?.failure_summary && (
-        <Alert message={t('run.failureSummary')} description={run.failure_summary} type="error" showIcon />
-      )}
-      {run?.artifacts && (
-        <div>
-          <Text strong>{t('run.artifacts')}:</Text>
-          <ul>
-            {run.artifacts.trace && <li><a href={run.artifacts.trace} target="_blank">{t('run.traceData')}</a></li>}
-            {run.artifacts.diff && <li><a href={run.artifacts.diff} target="_blank">{t('run.diffReport')}</a></li>}
-            {run.artifacts.timing && <li><a href={run.artifacts.timing} target="_blank">{t('run.timingReport')}</a></li>}
-            {run.artifacts.diagnosis && <li><a href={run.artifacts.diagnosis} target="_blank">{t('run.diagnosisReport')}</a></li>}
-            {run.artifacts.geometry && <li><a href={run.artifacts.geometry} target="_blank">Geometry Artifact</a></li>}
-          </ul>
-        </div>
-      )}
-      <GeometryPreview
-        artifact={geometryData?.data}
-        artifactHref={run?.artifacts?.geometry}
-        loading={isGeometryLoading}
-        runMode={run?.mode}
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <RunReviewCockpit
+        run={run}
+        geometry={geometryData?.data}
+        keypoints={keypointsData?.data}
+        trace={traceData?.data}
+        title={t('run.reviewTitle')}
+        loading={isGeometryLoading || isKeypointsLoading || isTraceLoading}
       />
     </Space>
   );

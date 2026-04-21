@@ -1,31 +1,58 @@
+<h1 align="center">RustPLC</h1>
+
 <p align="center">
-  <h1 align="center">RustPLC</h1>
-  <p align="center">
-    <strong>Formally Verified Industrial Control Compiler</strong><br>
-    Declare physical topology and safety constraints. Compiler proves correctness mathematically.
-  </p>
-  <p align="center">
-    <strong>English</strong> | <a href="README.md">中文</a>
-  </p>
+  <strong>AI agents design industrial control programs. The compiler proves them correct.</strong>
+</p>
+
+<p align="center">
+  <a href="README_EN.md"><strong>English</strong></a> | <a href="README.md">中文</a>
+</p>
+
+<p align="center">
+  <a href="#understand-rustplc-in-30-seconds">30-Second Overview</a> •
+  <a href="#why-rustplc">Why RustPLC</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#core-capabilities">Capabilities</a> •
+  <a href="#ai-for-ai">AI for AI</a> •
+  <a href="#documentation">Docs</a>
 </p>
 
 ---
 
 ## Understand RustPLC in 30 Seconds
 
-```mermaid
-flowchart TD
-    A["Describe process"] --> B["AI generates .plc"]
-    B --> C["Compiler verifies"]
-    C --> D{"Passed?"}
-    D -- "Yes" --> E["JSON IR output"]
-    D -- "No" --> F["Error report + fix suggestion"]
-    F --> B
+```
+Engineer describes intent → AI agent generates .plc → Compiler proves correctness → Deploy to hardware
+                                                        ↑ Fails? Returns structured fix suggestions
 ```
 
 **Traditional**: Engineer writes ladder logic → manual safety review → collisions/deadlocks/timeouts found during commissioning
 
 **RustPLC**: Engineer describes process → AI generates declarative DSL → compiler mathematically proves safety → all issues caught at compile time
+
+**In one sentence: RustPLC is the "Rust compiler" for industrial control — if it compiles, it's safe.**
+
+---
+
+## Why RustPLC
+
+Industrial control software has a fundamental contradiction:
+
+> The more complex the control logic, the less reliable human review becomes — yet complex systems demand the highest safety guarantees.
+
+Existing toolchains (ladder logic, ST, FBD) are fundamentally **"write then check"** — implement first, find problems through manual review and on-site commissioning. This works for simple cases, but with concurrent control, multi-axis coordination, and safety interlocks, the state space explodes beyond what humans can reason about.
+
+RustPLC's answer is **"prove as you write"**:
+
+| | Traditional PLC Development | RustPLC |
+|---|---|---|
+| Collision detection | Found during commissioning | Compile-time BMC proof |
+| Deadlock analysis | Avoided by experience | Automatic SCC + reachability check |
+| Timing verification | Measured with oscilloscope | Static critical-path analysis |
+| Causal chains | Manual walkthrough | Automatic topology BFS verification |
+| AI-generated code | No correctness guarantee | Compiler closed-loop verification |
+
+The last row is the key: when AI agents can generate industrial control programs, **who guarantees the AI's code is safe?** RustPLC is that guarantee.
 
 ---
 
@@ -35,379 +62,359 @@ flowchart TD
 git clone https://github.com/xxrust/RustPLC.git
 cd RustPLC
 cargo build --release
-cargo run --release --bin rust_plc -- examples/two_cylinder.plc --no-print-ir
+```
+
+### Compile & Verify
+
+```bash
+cargo run --release -- examples/dual_axis_platform.plc --no-print-ir
 ```
 
 ```
 Verification passed:
   - Safety: Complete proof (depth 4) — conflicts_with satisfied
   - Liveness: Passed — no deadlock risk
-  - Timing: Passed
+  - Timing: Passed — task.cycle within 8000ms budget
   - Causality: Passed — all signal chains connected
+```
+
+Four verification engines run in parallel, mathematically proving your program is free of collisions, deadlocks, timing violations, and broken signal chains.
+
+### Generate IEC 61131-3 ST Code
+
+```bash
+cargo run --release -- gen-st examples/dual_axis_platform.plc --out out/dual_axis.st
+```
+
+Verified IR compiles directly to standard Structured Text, importable into OpenPLC / CODESYS.
+
+### Scenario Simulation
+
+```bash
+# Generate scenario skeleton
+cargo run --release -- scenario-init examples/assembly_station.plc \
+  --out scenarios/normal.yaml --preset normal
+
+# SIL simulation
+cargo run --release -- sim-plc examples/assembly_station.plc \
+  --scenario scenarios/normal.yaml --out trace.jsonl
+```
+
+### Deploy to RP2040
+
+```bash
+cargo run --release -- build-rp2040 examples/rp2040_motion_minimal.plc \
+  --out out/rp2040 --io-map examples/rp2040_motion_minimal.io_map.toml --emit-uf2 out/firmware.uf2
+```
+
+### Create a New Project
+
+```bash
+cargo run --release -- new my_plc_project
+```
+
+```
+my_plc_project/
+├── rustplc.project.toml
+├── plc/
+│   ├── main.system.md      # Requirements doc (AI reads this to generate .plc)
+│   └── main.plc
+├── scenarios/
+│   ├── nominal/
+│   └── faults/
+└── out/
 ```
 
 ---
 
-## System Architecture
+## The DSL at a Glance
 
+RustPLC's DSL is not another programming language — it's a declarative description of industrial control intent. Engineers (or AI agents) declare **"what devices exist, what constraints apply, what to do"**, and the compiler proves whether those declarations are consistent.
+
+```plc
+[topology]
+device plc_main: plc {
+    purpose: "Controller body",
+    model_ref: openplc_softplc
+}
+device valve_A: solenoid_valve {
+    purpose: "Solenoid valve driving cylinder A",
+    response_time: 20ms
+}
+device cyl_A: cylinder {
+    purpose: "Station A cylinder actuator",
+    stroke_time: 300ms
+}
+device sensor_A: sensor { purpose: "Cylinder A position sensor" }
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A.sense, via: detects }
+relation { from: sensor_A.out, to: plc_main.X0, via: reports_to }
+
+[constraints]
+safety: cyl_A.extended requires sensor_A.on
+timing: task.cycle must_complete_within 2000ms
+causality: Y0 -> valve_A -> cyl_A -> sensor_A
+
+[tasks]
+task cycle:
+    step extend:
+        action: extend cyl_A
+        wait: sensor_A == true
+        timeout: 500ms -> goto fault_handler
+    on_complete: goto ready
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                                  📝 Input Layer                                      │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│  .plc DSL File                    Scenario YAML (scenario.yaml)                     │
-│  - topology                       - digital_inputs / analog_inputs                   │
-│  - constraints                    - tick_ms / duration_ticks                         │
-│  - tasks (control logic)          - fault injection                                  │
-└────────────────┬────────────────────────────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                              ⚙️ Compiler Core (src/)                                 │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│  Parser (pest PEG) ──▶ AST ──▶ Semantic Analysis + Preprocessing ──▶ IR            │
-│                                (repeat/delay expansion)   (TopologyGraph + StateMachine)│
-│                                                                                      │
-│  Key Modules:                                                                        │
-│  • parser/plc.pest    - PEG grammar definition                                      │
-│  • ast/mod.rs         - AST types (PlcProgram, DeviceDeclaration, StepStatement)   │
-│  • semantic/mod.rs    - Semantic analysis + IR lowering                             │
-│  • ir/mod.rs          - IR types (petgraph DiGraph)                                 │
-└────────────────┬────────────────────────────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                    🔬 Verification Engines (Parallel) (src/verification/)            │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐│
-│  │  Safety Engine  │  │ Liveness Engine │  │  Timing Engine  │  │ Causality Engine││
-│  │  BMC + k-induct │  │ SCC + Reachable │  │  Critical Path  │  │   Topology BFS  ││
-│  │  conflicts_with │  │  Deadlock check │  │  response_time  │  │  connected_to   ││
-│  │  requires       │  │  Livelock check │  │  budget bounds  │  │  detects chain  ││
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘  └─────────────────┘│
-│                                      ▼                                               │
-│                          verification_report.json                                    │
-│                          (Structured verification report + warning levels)           │
-└────────────────┬────────────────────────────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                          🏃 Runtime Layer (crates/)                                  │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                        ┌─────────────────────────────┐                              │
-│                        │   runtime-core (no_std)     │                              │
-│                        │   Deterministic State Machine│                             │
-│                        │   - Program / Task / Step   │                              │
-│                        │   - Instr / Action          │                              │
-│                        └──────────┬──────────────────┘                              │
-│                                   │                                                  │
-│              ┌────────────────────┼────────────────────┐                            │
-│              ▼                    ▼                    ▼                            │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐                 │
-│  │   SimIO (sim)    │  │  Virtual Board   │  │  RP2040 HAL      │                 │
-│  │   SIL Simulation │  │  Virtual Runner  │  │  Hardware Layer  │                 │
-│  │   - Plant model  │  │  - tick_timing   │  │  - GPIO/ADC/PWM  │                 │
-│  │   - Fault inject │  │  - Real board sim│  │  - PIO (motion)  │                 │
-│  │   - Waveform     │  │  - Overrun mark  │  │  - RTT logging   │                 │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘                 │
-│          │                      │                      │                            │
-│          ▼                      ▼                      ▼                            │
-│   sil_trace.jsonl      board_trace.jsonl      RP2040 Firmware (UF2)                │
-│   sim_report.json      tick_timing.jsonl      + board.log (RTT)                    │
-└────────────────┬────────────────────────────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                          📊 Analysis & Gating (src/)                                 │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│  trace-diff              timing-report           no-board-gate                      │
-│  SIL vs Board Compare    p50/p95/p99 Stats      Real-Time Threshold Gate           │
-│  - Tick-by-tick diff     - exec_us / slack_us   - --max-p99-exec-us                │
-│  - Context window        - overrun_count        - --max-overrun-count               │
-│  - fail-on-mismatch      - timing_report.json   - Trace consistency + RT checks    │
-│                                                                                      │
-│  release-bundle                                                                      │
-│  Auditable Delivery Package                                                          │
-│  - manifest.json (SHA256 manifest)                                                  │
-│  - build_meta.json (git commit / dirty / tool_version)                             │
-│  - All verification reports + trace + timing evidence                               │
-└────────────────┬────────────────────────────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                                📦 Output Layer                                       │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│  ✅ Compile-time: verification_report.json (four engine proof results)              │
-│  🧪 Simulation:   trace.jsonl + wave.vcd + sim_report.json                         │
-│  📦 Deployment:   firmware.uf2 + io_map.toml + analog_contract.toml                │
-│  🚫 Gating:       diff_report.json + timing_report.json + gate_summary.json        │
-│  📋 Delivery:     release-bundle/ (manifest + all artifacts + SHA manifest)        │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
+
+Three sections, three concerns:
+
+- **topology** — what devices exist, how they're wired
+- **constraints** — what must never happen, what must always hold
+- **tasks** — what to do, in what order
+
+The compiler reads all three, builds a unified IR, then uses four engines to prove the constraints hold across every possible execution path.
 
 ---
 
 ## Core Capabilities
 
-| Capability | Description |
-|------------|-------------|
-| **📝 ST Code Generation** | `gen-st` compiles verified IR to IEC 61131-3 Structured Text, emits OpenPLC `CONFIGURATION/RESOURCE/TASK`, and exports `_state` trace bits; vendored `iec2c` validates syntax in CI |
-| **🔬 Formal Verification** | Four engines (Safety / Liveness / Timing / Causality) with compile-time mathematical proofs |
-| **⚙️ PLC Optimization** | Conservative candidate generation over preprocessed tasks, with timing reuse, legality recheck, stable ranking, and `[tasks]`-only emission |
-| **🤖 AI-Assisted Generation** | Natural language → AI multi-turn dialogue → `.plc` generation → auto-verification |
-| **🧪 SIL Simulation** | Scenario-driven deterministic simulation, fault injection, waveform export, batch regression |
-| **📋 Scenario Engineering** | Scenario init, validation, expansion, batch generation, failure minimization |
-| **🎛️ PID Control** | DSL-declared PID loops, deterministic runtime execution, KPI regression analysis |
-| **🔄 Motion Control** | Stepper + AB encoder, PIO high-speed pulses, collision guard, virtual channels |
-| **📦 RP2040 Deployment** | Cross-compile to Raspberry Pi Pico, I/O mapping, trace comparison gate |
-| **⏱️ Real-Time Gating** | Tick timing sampling, p50/p95/p99 stats, real-time threshold gates |
-| **🚫 No-Board Delivery** | Virtual board runner, SIL vs virtual-board comparison, release-bundle |
-| **🛡️ Recovery Templates** | E-stop/power-loss/sensor-stuck recovery templates, critical wait recoverability lint |
-| **🏷️ Tag-Driven Topology** | Multi-dimensional tags (functional/danger/location), batch refactor, rule engine, visual grouping |
-| **🔀 Port-Level Wiring** | Explicit `driven_by`/`reports_to`/`detects` semantics, MIMO topology, port contract validation |
-| **📊 Semantic Diff** | Topology change impact analysis, node/port/relation/tag-level diff, audit records |
-| **⚡ Performance Gate** | 500-node/2000-edge baseline, compile/parse/render p95 threshold CI gate |
+### Four-Engine Formal Verification
 
----
+The compiler ships four parallel verification engines. These aren't tests — they're mathematical proofs:
 
-## Typical Workflow
+| Engine | Method | What It Proves |
+|--------|--------|----------------|
+| Safety | BMC + k-induction | `conflicts_with` / `requires` hold in all reachable states |
+| Liveness | SCC + reachability | No deadlocks, no livelocks, all paths terminate |
+| Timing | Critical-path analysis | `must_complete_within` time budgets are satisfied |
+| Causality | Topology BFS | Signal chains are complete, no broken links or orphaned devices |
 
-### 1. Write / Generate .plc
-
-**Option A: AI Dialogue Generation (Recommended)**
+### Compilation Pipeline
 
 ```
-> Help me write a PLC program. I have two cylinders that can't extend simultaneously, extend A first then B...
+.plc source
+  │
+  ├─ Parser (PEG) ──→ AST ──→ Semantic Analysis ──→ IR (petgraph DiGraph)
+  │                              ↑ repeat/delay/sugar expansion
+  │                              ↑ name resolution + constraint checking
+  │
+  ├─ IR ──→ Safety Engine ──┐
+  ├─ IR ──→ Liveness Engine ─┤──→ verification_report.json
+  ├─ IR ──→ Timing Engine ──┤
+  ├─ IR ──→ Causality Engine ┘
+  │
+  ├─ IR ──→ Runtime Bridge ──→ runtime-core (no_std) ──→ RP2040 / STM32 firmware
+  ├─ IR ──→ Codegen ──→ IEC 61131-3 ST ──→ OpenPLC / CODESYS
+  └─ IR ──→ SimIO ──→ SIL simulation ──→ trace.jsonl + wave.vcd
 ```
 
-AI will generate a complete `.plc` file through multi-turn dialogue and auto-verify it.
+### Multi-Target Deployment
 
-**Option B: Hand-write DSL**
+| Target | Command | Output |
+|--------|---------|--------|
+| Formal verification | `compile` | verification_report.json |
+| ST code generation | `gen-st` | IEC 61131-3 ST (OpenPLC/CODESYS) |
+| RP2040 firmware | `build-rp2040` | UF2 firmware + io_map |
+| STM32 emulation | `build-renode-stm32` | ELF + Renode trace |
+| SIL simulation | `sim-plc` | trace.jsonl + sim_report |
+| No-board delivery | `no-board-gate` | diff_report + timing_report |
+| Release bundle | `release-bundle` | SHA256 manifest + all evidence |
 
-```plc
-[topology]
-device plc_main: plc {
-    purpose: "Controller body and process I/O port mapping",
-    model_ref: openplc_softplc
-}
-device valve_A: solenoid_valve {
-    purpose: "Drive the main pneumatic path for cylinder A",
-    response_time: 20ms,
-    ports: [coil:digital:consumer, out:pneumatic:producer]
-}
-device cyl_A: cylinder {
-    purpose: "Cylinder actuator for station A motion",
-    stroke_time: 300ms,
-    ports: [cmd:pneumatic:consumer, extended:logical:producer]
-}
-device sensor_A_ext: sensor { purpose: "Sense cylinder A extended position" }
-
-relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
-relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
-relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
-relation { from: sensor_A_ext.out, to: plc_main.X0, via: reports_to }
-
-[constraints]
-safety: cyl_A.extended requires sensor_A_ext.on
-
-[tasks]
-task cycle:
-    step extend_A:
-        action: extend cyl_A
-        wait: sensor_A_ext == true
-        timeout: 500ms -> goto fault_handler
-```
-
-> **Note**: Legacy device attributes `driven_by/reports_to/detects` are removed. Use `relation { from, to, via }` only. Use explicit `plc_main.<port>` endpoint references in new topology.
->
-> **Recommended modeling (since March 26, 2026)**: Prefer `device plc_main: plc { model_ref: openplc_softplc }` or another controller profile from `devices/controllers/*.toml`. For RP2040 builds, use `model_ref: rp2040_softplc`. Controller IO inventory belongs to the controller profile, not to inline `ports: [...]` in business DSL.
->
-> **Mandatory review rule (effective February 24, 2026)**: every `device` must declare `purpose`; missing `purpose` fails semantic gate review.
-
-### 2. Compile & Verify
+### Scenario Engineering
 
 ```bash
-cargo run --release --bin rust_plc -- your_file.plc --no-print-ir
+scenario-init     # Generate scenario skeleton
+scenario-validate # Validate scenario legality
+scenario-expand   # Expand pulse/hold sugar
+scenario-gen      # Batch-generate scenarios
+sim-regress       # Batch regression simulation
 ```
 
-### 2.5. Rank Optimization Candidates (Library API)
+Fault injection, waveform export, KPI regression (overshoot / steady-state error / settling time), failure minimization — a complete simulation engineering chain.
 
-Optimization currently ships as a library pipeline instead of a CLI subcommand. It reuses the existing semantic, timing, and verification chain rather than inventing a parallel ruleset.
-
-```rust
-use rust_plc::optimization::optimize_plc_source;
-
-let source = std::fs::read_to_string("examples/two_cylinder.plc")?;
-let candidates = optimize_plc_source(&source)?;
-
-for candidate in candidates.iter().take(3) {
-    println!(
-        "{} legal={} nominal_ms={} rewrite={}",
-        candidate.id,
-        candidate.legality.is_legal,
-        candidate.timing.global_nominal_ms,
-        candidate.rewrite.summary
-    );
-}
-```
-
-### 3. Scenario Simulation
-
-```bash
-# Initialize scenario skeleton
-cargo run --release --bin rust_plc -- scenario-init examples/assembly_station.plc \
-  --out scenarios/normal.yaml --preset normal
-
-# SIL simulation
-cargo run --release --bin rust_plc -- sim-plc examples/assembly_station.plc \
-  --scenario scenarios/normal.yaml --out trace.jsonl
-
-# Batch regression
-cargo run --release --bin rust_plc -- sim-regress --plc-dir examples --scenario-dir scenarios
-```
-
-### CLI Help
-
-- `cargo run --release --bin rust_plc -- --help`: show the top-level command index.
-- `cargo run --release --bin rust_plc -- help <command>`: show the full help page for one command.
-- `cargo run --release --bin rust_plc -- <command> --help`: equivalent shortcut when you are already typing the command.
-- The default compile-and-verify mode also has a help page: `cargo run --release --bin rust_plc -- help compile`
-- Examples:
-
-```bash
-cargo run --release --bin rust_plc -- help sim-plc
-cargo run --release --bin rust_plc -- scenario-validate --help
-```
-
-### 4. No-Board Gate
+### Real-Time Gating
 
 ```bash
 # SIL vs virtual-board comparison + real-time threshold check
-cargo run --release --bin rust_plc -- no-board-gate examples/assembly_station.plc \
+cargo run --release -- no-board-gate examples/assembly_station.plc \
   --scenario scenarios/normal.yaml \
-  --out-dir out/gate \
-  --max-p99-exec-us 500 \
-  --max-overrun-count 0
+  --max-p99-exec-us 500 --max-overrun-count 0
 ```
 
-### 5. RP2040 Deployment
+Tick-level timing sampling, p50/p95/p99 statistics, automatic threshold enforcement. Release bundles include SHA256 manifests + git metadata for full auditability.
 
-```bash
-# Generate firmware build inputs
-cargo run --release --bin rust_plc -- build-rp2040 examples/assembly_station.plc --out out/rp2040
+---
 
-# Fill I/O mapping
-cp out/rp2040/io_map.template.toml out/rp2040/io_map.toml
-# Edit io_map.toml to fill GPIO pins
+## AI for AI
 
-# One-step UF2 firmware build
-cargo run --release --bin rust_plc -- build-rp2040 examples/assembly_station.plc \
-  --out out/rp2040 \
-  --io-map out/rp2040/io_map.toml \
-  --emit-uf2 out/firmware.uf2
+RustPLC isn't just "AI helps humans write PLC programs." The stronger direction is becoming an **AI-for-AI engineering platform**:
 
-# Flash to Pico
-cargo run --release --bin rust_plc -- flash-rp2040 --uf2 out/firmware.uf2 --mount /media/RPI-RP2
+```
+AI agent generates control intent
+    ↓
+AI agent generates .plc (topology + constraints + tasks)
+    ↓
+Compiler formally verifies (four engines prove in parallel)
+    ↓
+Fails → structured error report + fix suggestions → AI agent auto-repairs → re-verify
+    ↓
+Passes → runtime / simulation / code generation / release bundle
+    ↓
+Human engineers: define boundaries, review evidence, approve release
 ```
 
-### 5.5. Renode STM32F4 Firmware Trace
+This direction holds if four contracts stay intact:
 
-```bash
-# Install the target used by the Renode STM32F4 Discovery firmware
-rustup target add thumbv7em-none-eabi
+1. AI-generated artifacts must enter a unified semantic model, not stay as prompt text
+2. Generated results must be constrained by verification, simulation, and traceability
+3. Code generation must be explicit about preserved vs. erased semantics
+4. Release bundles must be reproducible by another AI system or another engineer
 
-# Build an ELF from a PLC + scenario pair
-cargo run --release --bin rust_plc -- build-renode-stm32 \
-  examples/pil_baselines/case_timeout/case.plc \
-  --scenario examples/pil_baselines/case_timeout/scenarios/base.yaml \
-  --out out/renode_f4
+The differentiator isn't "yet another generator." It's an engineering loop where AI output is **verifiable, executable, auditable, and repeatable**.
 
-# Run the ELF in a local Renode instance and print UART trace lines
-scripts/renode/run_firmware_trace.sh \
-  --elf out/renode_f4/board-renode-stm32.elf
+### MCP Integration
+
+RustPLC ships an MCP server so AI agents can call the compiler directly:
+
+```json
+{
+  "mcpServers": {
+    "rustplc": {
+      "command": "python",
+      "args": ["-m", "server"],
+      "cwd": "rustplc-mcp"
+    }
+  }
+}
 ```
 
-This path currently emits:
-- `generated_program.rs`
-- `scenario.resolved.yaml`
-- `build_meta.json`
-- `board-renode-stm32.elf`
+Available tools for agents:
+- `validate_plc` — verify a .plc file
+- `compile_plc` — compile and retrieve IR
+- `get_rustplc_skill_guide` — get DSL authoring guide
 
-### 6. Release Delivery
+---
 
-```bash
-# Package auditable release artifacts (with SHA manifest, git metadata, real-time evidence)
-cargo run --release --bin rust_plc -- release-bundle examples/assembly_station.plc \
-  --scenario scenarios/normal.yaml \
-  --out-dir out/release \
-  --max-p99-exec-us 500 \
-  --max-overrun-count 0
+## Examples Gallery
+
+| Example | Features | Complexity |
+|---------|----------|------------|
+| `project_scaffold_demo/` | Minimal project structure, scaffolding | ★ |
+| `rp2040_motion_minimal.plc` | Motion control, analog I/O | ★★ |
+| `dual_axis_platform.plc` | Dual-axis coordination, parallel, race, conflicts_with | ★★★ |
+| `assembly_station.plc` | Multi-device coordination, parallel, requires | ★★★ |
+| `nuclear_coolant_isolation.plc` | SIL3 nuclear safety, redundant sensors, OR fault tolerance | ★★★★ |
+| `three_station_assembly.plc` | Large-scale topology, assembly workflow | ★★★★ |
+| `thermal_oven.plc` | PID temperature control, analog protection | ★★★ |
+| `hydraulic_bender.plc` | PID hydraulics, worst-case timing | ★★★ |
+| `recovery_templates/` | E-stop recovery, fault routing | ★★★ |
+| `force_override_demo.plc` | Online forcing, debug semantics | ★★ |
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                           Input Layer                                │
+├──────────────────────────────────────────────────────────────────────┤
+│  .plc DSL file                    Scenario YAML                      │
+│  - topology (devices + wiring)    - digital_inputs / analog_inputs   │
+│  - constraints (safety rules)     - fault injection                  │
+│  - tasks (control logic)          - tick_ms / duration_ticks         │
+└───────────────────┬──────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                Compiler Core (120 Rust source files, 60K+ lines)     │
+├──────────────────────────────────────────────────────────────────────┤
+│  Parser (PEG, 544 rules) → AST → Semantic (preprocessing + IR       │
+│  lowering) → IR (petgraph DiGraph)                                   │
+│                                                                      │
+│  Four parallel verification engines:                                 │
+│  Safety (BMC) │ Liveness (SCC) │ Timing (critical path) │ Causality │
+└───────────────────┬──────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                      Runtime Layer (7 crates)                        │
+├──────────────────────────────────────────────────────────────────────┤
+│  runtime-core (no_std)    SimIO (SIL simulation)    Codegen (ST)     │
+│  board-rp2040 (firmware)  board-renode-stm32        web-server (Axum)│
+└───────────────────┬──────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                          Output Layer                                │
+├──────────────────────────────────────────────────────────────────────┤
+│  verification_report.json    IEC 61131-3 ST    firmware.uf2          │
+│  trace.jsonl + wave.vcd      timing_report     release-bundle/       │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📚 Documentation
+## Project Scale
 
-Full documentation available on **[GitHub Wiki](https://github.com/xxrust/RustPLC/wiki)**:
+| Metric | Value |
+|--------|-------|
+| Rust source files | 120 |
+| Compiler code | 60,000+ lines |
+| PEG grammar rules | 544 lines |
+| Test cases | 831 |
+| Example .plc files | 29 |
+| Workspace crates | 7 |
+| Verification engines | 4 |
+| CLI subcommands | 20+ |
+| Wiki pages | 19 |
+| Architecture docs | 7 |
+
+---
+
+## Documentation
+
+### In-Repo Docs
+
+| Document | Content |
+|----------|---------|
+| [`AGENTS.md`](AGENTS.md) | Project charter, layering principles, code navigation |
+| [`docs/architecture/signal-direction.md`](docs/architecture/signal-direction.md) | Concurrent task / blocking step semantics (frozen) |
+| [`docs/architecture/device-semantics-library.md`](docs/architecture/device-semantics-library.md) | Device family semantic abstraction |
+| [`docs/architecture/intent_alignment_verification.md`](docs/architecture/intent_alignment_verification.md) | Intent contract verification |
+
+### Wiki
 
 | Page | Content |
 |------|---------|
-| [Quick Start](https://github.com/xxrust/RustPLC/wiki/Quick-Start) | 5-minute getting started guide |
-| [DSL Language Reference](https://github.com/xxrust/RustPLC/wiki/DSL-Language-Reference) | Complete syntax reference |
-| [Architecture](https://github.com/xxrust/RustPLC/wiki/Architecture) | Compilation pipeline & module structure |
-| [Verification Engines](https://github.com/xxrust/RustPLC/wiki/Verification-Engines) | Four engine internals |
-| [SIL Simulation](https://github.com/xxrust/RustPLC/wiki/SIL-Simulation) | Simulation loop |
-| [Scenario System](https://github.com/xxrust/RustPLC/wiki/Scenario-System) | Scenario engineering |
-| [PID Control](https://github.com/xxrust/RustPLC/wiki/PID-Control) | PID loops |
-| [Motion Control](https://github.com/xxrust/RustPLC/wiki/Motion-Control) | Stepper + AB encoder |
-| [No-Board Gate](https://github.com/xxrust/RustPLC/wiki/No-Board-Gate) | No-board delivery gate |
-| [Recovery Templates](https://github.com/xxrust/RustPLC/wiki/Recovery-Templates) | Fault recovery templates |
-| [RP2040 Deployment](https://github.com/xxrust/RustPLC/wiki/RP2040-Deployment) | Board-level deployment |
-| [Examples Gallery](https://github.com/xxrust/RustPLC/wiki/Examples-Gallery) | Example walkthroughs |
-| [AI Assisted Generation](https://github.com/xxrust/RustPLC/wiki/AI-Assisted-Generation) | AI generation workflow |
-| [Contributing](https://github.com/xxrust/RustPLC/wiki/Contributing) | Development guide |
+| [AI-for-AI Platform Vision](docs/wiki/AI-for-AI-Platform-Vision.md) | AI agent engineering platform direction |
+| [PLC Optimization Pipeline](docs/wiki/PLC-Optimization-Pipeline.md) | Optimization candidate generation & ranking |
+| [Device Library](docs/wiki/Device-Library.md) | TOML device definitions & constraints |
+| [Scenario Assetization](docs/wiki/Scenario-Assetization-Coverage-Feedback.md) | Scenario engineering & coverage feedback |
+| [RP2040 Motion Control](docs/wiki/RP2040-Motion-Minimal-Example.md) | Embedded deployment example |
+| [Topology Signal Direction](docs/wiki/Topology-Signal-Direction-Refactor.md) | Port-level topology semantics |
+| [Stepper Safety Modeling](docs/wiki/Stepper-AB-Encoder-Safety-Modeling.md) | Motion control safety |
+| [CI Runbook](docs/wiki/CI-Runbook.md) | CI/CD procedures |
+| [Fail-Safe State](docs/wiki/Fail-Safe-Safe-State.md) | Safe state modeling |
+| [Developer Bootstrap](docs/wiki/Developer-Bootstrap-Pack.md) | Getting started guide |
 
-**Authoritative docs (in repo):**
-- [`AGENTS.md`](AGENTS.md) - project charter, code navigation, cross-layer change map
-- [`docs/architecture/signal-direction.md`](docs/architecture/signal-direction.md) - long-term source for concurrent task / blocking-step semantics
-- [`docs/已实现/generated_project_layout_spec.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/generated_project_layout_spec.md) - `rust_plc new` project layout contract
-- [`docs/已实现/developer_bootstrap_pack.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/developer_bootstrap_pack.md) - bootstrap and Day-1 workflow
-- [`docs/已实现/extern_function_mvp_spec.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/extern_function_mvp_spec.md) - frozen extern-function contract
-- [`docs/已实现/extern_function_development_guide.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/extern_function_development_guide.md) - extern-function implementation guide
-- [`docs/已实现/semantic_resource_interlock_spec.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/semantic_resource_interlock_spec.md) - resource-interlock spec
-- [`docs/已实现/semantic_resource_interlock_development_guide.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/semantic_resource_interlock_development_guide.md) - resource-interlock development guide
-- [`docs/已实现/workpiece_to_st_codegen_policy.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/workpiece_to_st_codegen_policy.md) - workpiece-to-ST boundary
-- [`docs/已实现/scenario_playbook.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/scenario_playbook.md) and [`docs/已实现/scenario_minimization.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/scenario_minimization.md) - scenario workflow
-- [`docs/已实现/no_board_playbook.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/no_board_playbook.md) - no-board delivery gate
-- [`docs/已实现/stepper_ab_encoder.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/stepper_ab_encoder.md) - motion-control note
-- [`docs/已实现/recovery_templates_sequence_lint.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/recovery_templates_sequence_lint.md) - recovery template linting
-- [`docs/已实现/topology_perf_baseline.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/topology_perf_baseline.md) and [`docs/已实现/testing_inventory_matrix.md`](docs/%E5%B7%B2%E5%AE%9E%E7%8E%B0/testing_inventory_matrix.md) - topology regression references
+### CLI Help
 
-For generated projects, the only formal requirements entry is `plc/main.system.md`. `examples/*.system.md` are samples, while `docs/patent_collected/**` and `docs/web_collected/**` are research assets, not project entrypoints.
+```bash
+cargo run --release -- --help              # Command index
+cargo run --release -- help <command>      # Single command details
+cargo run --release -- help compile        # Compile command help
+cargo run --release -- help sim-plc        # Simulation command help
+```
 
 ---
 
-## AI for AI Direction
+## Design Principles
 
-RustPLC is not just moving toward "AI helps humans write PLC programs." The stronger direction is to become an `AI for AI` engineering platform:
-
-- AI agents generate control intent, topology, constraints, scenarios, and regression assets
-- the compiler collapses those artifacts into one IR and proves key properties on it
-- runtime, simulation, and codegen turn the result into executable and auditable deliverables
-- human engineers move up the stack: define boundaries, review evidence, approve release
-
-That direction only works if four contracts stay intact:
-
-- AI-generated artifacts must enter a unified semantic model instead of staying as prompt text
-- generated results must be constrained by verification, simulation, and traceability
-- code generation must be explicit about preserved semantics versus erased semantics
-- release bundles must be reproducible by another AI system or another engineer
-
-The differentiator is not "yet another generator." It is an engineering loop where AI output is:
-
-- verifiable
-- executable
-- auditable
-- repeatable
+- Semantics must precede implementation
+- IR is the single semantic convergence point
+- Verification is the main path, not a plugin
+- Runtime and codegen only consume closed IR semantics
+- Docs, examples, tests, and skills must stay in sync with compiler contracts
 
 ---
 
@@ -415,79 +422,28 @@ The differentiator is not "yet another generator." It is an engineering loop whe
 
 ### Completed
 
-**Core Compiler:**
-- ✅ DSL design and parser
-- ✅ Four formal verification engines (Safety / Liveness / Timing / Causality)
-- ✅ Structured error reporting (line numbers + fix suggestions)
-- ✅ DSL v2 (delay / repeat / wait AND|OR / if-else / goto task.step / custom states)
-- ✅ PLC optimization pipeline (`analyze -> rewrite -> timing -> legality -> ranking -> emitter`)
-- ✅ AI-assisted generation (plc-gen skill)
+**Compiler Core** — DSL design, four-engine verification, structured error reporting, DSL v2 syntax extensions, optimization pipeline
 
-**I/O & Control:**
-- ✅ Analog I/O (analog_input / analog_output / set_analog / threshold comparison)
-- ✅ PID minimal subset (DSL/IR/runtime integration + KPI regression)
-- ✅ Motion control (stepper + AB encoder + PIO + collision guard + virtual channels)
+**I/O & Control** — Analog I/O, PID control, stepper + AB encoder + collision guard
 
-**Simulation & Testing:**
-- ✅ SIL simulation loop (SimIO / Plant / fault injection / waveform export)
-- ✅ Scenario system (init / validate / expand / gen / batch regression / failure minimization)
-- ✅ Simulation object model & KPI regression (overshoot / settling time / steady-state error)
+**Simulation & Testing** — SIL simulation, scenario engineering (init/validate/expand/gen/regress), KPI regression
 
-**Deployment & Gating:**
-- ✅ Code generation + RP2040 build/flash (build-rp2040 / flash-rp2040)
-- ✅ Board-level observability & SIL comparison (board-parse / trace-diff)
-- ✅ Virtual board runner + no-board comparison gate (no-board-gate)
-- ✅ Release bundle & traceability (release-bundle + SHA manifest + git metadata)
+**Deployment & Gating** — ST code generation, RP2040 firmware, Renode STM32 emulation, no-board delivery gate, release bundles
 
-**Quality & Real-Time:**
-- ✅ Unified verification report contract (verification_report.json + warning levels)
-- ✅ CLI gate (--deny-warnings)
-- ✅ Runtime upper-bound analysis (tick transfer / action / parallel expansion budgets)
-- ✅ Structural upper-bound to time budget mapping (budget_time_estimate)
-- ✅ Tick timing observability contract (tick_timing.jsonl + per-tick exec/slack/overrun)
-- ✅ Timing statistics report (timing-report: p50/p95/p99/max + overrun count)
-- ✅ No-board gate real-time thresholds (--max-p99-exec-us / --max-overrun-count)
-- ✅ Worst-case load scenario injection & reproducible replay
-- ✅ Recovery templates & sequence lint (critical waits must be recoverable)
+**Topology & Semantics** — Port-level topology, multi-dimensional tags, semantic diff, performance gate, intent contract verification
 
-**Documentation & Engineering:**
-- ✅ Analog safety coverage transparency (rule binding rate & abstraction granularity report)
-- ✅ Threshold semantic hardening (type / range / unit consistency checks)
-- ✅ No-RTOS Real-Time Playbook documentation
+### In Progress
 
-**ST Code Generation (this release):**
-- ✅ `gen-st` command: compile verified IR → IEC 61131-3 Structured Text
-- ✅ OpenPLC-compatible `CONFIGURATION Config0` / `RESOURCE Res0` / `TASK MainTask` footer
-- ✅ `--task-interval-ms` flag to set exported ST task interval explicitly
-- ✅ `_state_trace_b*` exports for board-level state observation and trace alignment
-- ✅ Vendored matiec (`vendor/matiec/`) — `iec2c` binary + standard library, no external install needed
-- ✅ Full round-trip test: `.plc` → ST → `iec2c` compile → `POUS.c`/`POUS.h` artifacts verified
-- ✅ Cross-platform test harness: Windows uses vendored `iec2c.exe`; Linux uses PATH fallback; graceful skip when unavailable
-- ✅ `matiec_vendor_directory_is_complete` guard test catches broken vendor state early
-- ✅ Unified topology direction: producer → consumer (`driven_by` / `reports_to` / `detects`)
-- ✅ Removed `connected_to` ambiguity; batch migration tool + CI regression guard
-- ✅ Ports as first-class citizens (`id/type/role`), MIMO topology support
-- ✅ Multi-dimensional tag system (`functional_group` / `danger_level` / `location_group`)
-- ✅ Tag-driven batch refactor (preview diff, rollback, export)
-- ✅ Tag rule engine (danger-level dual-channel, within-group / cross-group connection constraints)
-- ✅ Frontend tag visualization grouping & filtering, `location_group` one-click navigation
-- ✅ parse-plc API returns relation & port metadata (`relation/from_port/to_port/signal`)
-- ✅ Frontend port contract & wiring binding refactor (cylinder/sensor/switch/stepper/generic)
-- ✅ Test inventory matrix & parameterization refactor, removed invalid tests
-- ✅ Semantic diff & impact analysis (node/port/relation/tag changes + affected rules/tests/modules)
-- ✅ Performance gate: 500-node/2000-edge baseline, p95 threshold CI alerts
-
-### Planned
-
-- ⏳ Hardware abstraction layer (EtherCAT / Modbus / more GPIO boards)
-- ⏳ Multi-controller coordination
-- ⏳ LSP editor integration (syntax highlighting, completion, go-to-definition)
+- Hardware abstraction layer (EtherCAT / Modbus / more GPIO boards)
+- Multi-controller coordination
+- LSP editor integration (syntax highlighting, completion, go-to-definition)
+- Web IDE (online editing, verification, simulation)
 
 ---
 
 ## License
 
-MIT
+[MIT License](LICENSE)
 
 ---
 

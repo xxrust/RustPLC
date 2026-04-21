@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "tick_ms": 10,
+  "duration_ms": 1200,
+  "switch_events": [
+    { "at_ms": 0, "target": "start_button", "value": true },
+    { "at_ms": 40, "target": "start_button", "value": false }
+  ],
+  "sensor_events": [
+    { "at_ms": 320, "target": "sensor_a_ext", "value": true },
+    { "at_ms": 620, "target": "sensor_a_ext", "value": false },
+    { "at_ms": 760, "target": "sensor_a_ret", "value": true }
+  ],
+  "component_faults": []
+}

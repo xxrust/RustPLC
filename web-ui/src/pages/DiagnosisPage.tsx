@@ -122,6 +122,7 @@ const DiagnosisPage: React.FC = () => {
           columns={columns}
           rowKey="alarm_id"
           loading={isLoading}
+          locale={{ emptyText: t('diagnosis.noData') }}
           pagination={{ pageSize: 20 }}
         />
       </Card>

@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { RunMode, UserRole } from '../types';
 
+export const DEFAULT_PROJECT_ID = 'demo';
+const LEGACY_DEFAULT_PROJECT_ID = 'component_model';
+
 interface AppState {
   // 运行模式
   runMode: RunMode;
@@ -47,7 +50,7 @@ export const useAppStore = create<AppState>()(
       },
       setCurrentUser: (user) => set({ currentUser: user }),
 
-      currentProject: null,
+      currentProject: DEFAULT_PROJECT_ID,
       currentProjectPath: null,
       currentProjectContent: null,
       setCurrentProject: (project, path = null, content = null) =>
@@ -65,6 +68,20 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'rustplc-app-storage',
+      merge: (persistedState, currentState) => {
+        const merged = {
+          ...currentState,
+          ...(persistedState as Partial<AppState> | undefined),
+        };
+
+        return {
+          ...merged,
+          currentProject:
+            !merged.currentProject || merged.currentProject === LEGACY_DEFAULT_PROJECT_ID
+              ? DEFAULT_PROJECT_ID
+              : merged.currentProject,
+        };
+      },
       partialize: (state) => ({
         runMode: state.runMode,
         currentUser: state.currentUser,

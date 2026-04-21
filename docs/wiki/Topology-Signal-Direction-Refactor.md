@@ -1,30 +1,41 @@
-# Topology Signal Direction Refactor
+# 拓扑信号方向重构
 
-This page documents the topology semantics refactor now reflected in the current repository (original rollout: US-001 ~ US-016).
-
----
-
-## Background
-
-The original DSL used `connected_to` to express device relationships, but this field was ambiguous — it conflated drive relationships, signal reporting, and detection into a single keyword. As topology complexity grew (MIMO, multi-sensor, cross-zone), the ambiguity caused inconsistencies in IR construction, causality verification, and frontend rendering.
+RustPLC 的拓扑语义从模糊的 `connected_to` 演进为显式的 `driven_by` / `reports_to` / `detects` 三种关系，所有边统一为 **producer → consumer** 方向。
 
 ---
 
-## What Changed
+## 为什么重构
 
-### DSL: `connected_to` → explicit relation fields
+原始 DSL 用 `connected_to` 表达设备关系，但这个关键字把驱动关系、信号上报和检测混为一谈。当拓扑复杂度上升（MIMO、多传感器、跨区域），模糊性导致 IR 构建、因果验证和前端渲染出现不一致。
 
-| Old | New | Meaning |
-|-----|-----|---------|
-| `connected_to: valve_A` | `driven_by: valve_A` | Actuator is driven by upstream device |
-| `connected_to: X0` | `reports_to: X0` | Sensor reports signal to I/O point |
-| `connected_to: cyl_A` | `detects: cyl_A` | Sensor detects state of target device |
+---
 
-All topology edges now flow **producer → consumer** (signal source to signal sink).
+## 新语义
 
-### Ports as first-class citizens
+### 三种关系类型
 
-Devices now declare typed ports:
+| 关系 | 含义 | 方向 |
+|------|------|------|
+| `driven_by` | 执行器被上游设备驱动 | producer → consumer |
+| `reports_to` | 传感器向 I/O 点上报信号 | producer → consumer |
+| `detects` | 传感器检测目标设备状态 | producer → consumer |
+
+### DSL 语法
+
+```plc
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A.sense, via: detects }
+relation { from: sensor_A.out, to: plc_main.X0, via: reports_to }
+```
+
+每条 relation 显式声明源端口、目标端口和关系类型，消除歧义。
+
+---
+
+## 端口作为一等公民
+
+设备声明类型化端口：
 
 ```json
 {
@@ -34,18 +45,22 @@ Devices now declare typed ports:
 }
 ```
 
-Port roles: `producer` | `consumer` | `bidirectional`
-Port types: `digital` | `analog` | `pneumatic` | `logical` | `generic`
+| 属性 | 值 |
+|------|------|
+| role | `producer` / `consumer` / `bidirectional` |
+| type | `digital` / `analog` / `pneumatic` / `logical` / `generic` |
 
-Connections reference `from_port` / `to_port` explicitly, enabling MIMO topologies (one-to-many, many-to-one, many-to-many).
+端口级连接支持 MIMO 拓扑（一对多、多对一、多对多）。
 
-### Multi-dimensional tags
+---
 
-Devices support structured tags for grouping, risk classification, and location:
+## 多维标签
+
+设备支持结构化标签，用于分组、风险分级和位置定位：
 
 ```plc
 device cyl_press: cylinder {
-    driven_by: valve_press,
+    purpose: "冲压气缸",
     tags: {
         functional_group: "press_unit",
         danger_level: "high",
@@ -54,36 +69,13 @@ device cyl_press: cylinder {
 }
 ```
 
-Tag dimensions:
-- `functional_group` — logical function grouping
-- `danger_level` — risk classification (`low` / `medium` / `high`)
-- `location_group` — hierarchical physical location (`line/cell/station`)
+| 标签维度 | 用途 |
+|---------|------|
+| `functional_group` | 逻辑功能分组 |
+| `danger_level` | 风险等级（`low` / `medium` / `high`） |
+| `location_group` | 层级物理位置（`line/cell/station`） |
 
----
-
-## Migration
-
-### Automated migration tool
-
-```bash
-python3 scripts/migrate_connected_to.py --input examples/ --output examples/
-```
-
-Items that cannot be auto-migrated are flagged with a human-confirmation prompt.
-
-### CI regression guard
-
-CI now rejects any new `connected_to` usage:
-
-```bash
-bash scripts/ci_no_connected_to_regression.sh
-```
-
----
-
-## Tag Rule Engine
-
-Tag rules are declared in the topology JSON under `tag_rules`:
+### 标签规则引擎
 
 ```json
 {
@@ -102,81 +94,103 @@ Tag rules are declared in the topology JSON under `tag_rules`:
 }
 ```
 
-Rule violations produce structured errors with `code/path/message`.
+- `danger_level: high` 的设备自动要求双通道冗余
+- `functional_group: within_only` 禁止跨组连接
+- `location_group` 可配置允许的跨区域连接对
+
+规则违反产生结构化错误（`code/path/message`）。
 
 ---
 
-## API Changes
+## 迁移
 
-`parse-plc` and topology API responses now include:
+### 自动迁移工具
 
-```json
-{
-  "relations": [
-    {
-      "from": "valve_A",
-      "to": "cyl_A",
-      "relation": "driven_by",
-      "from_port": "output",
-      "to_port": "drive_in",
-      "signal": "pneumatic"
-    }
-  ],
-  "nodes": [
-    {
-      "id": "cyl_A",
-      "ports": [...],
-      "tags": { "functional_group": "press_unit", "danger_level": "high" }
-    }
-  ]
-}
+```bash
+python3 scripts/migrate_connected_to.py --input examples/ --output examples/
+```
+
+无法自动迁移的项会标记为需人工确认。
+
+### CI 回归守卫
+
+CI 拒绝任何新的 `connected_to` 用法：
+
+```bash
+bash scripts/ci_no_connected_to_regression.sh
 ```
 
 ---
 
-## Frontend
+## 语义 Diff
 
-- Connections are bound to `sourceHandle` / `targetHandle` matching port IDs
-- Port contract covers: `cylinder` / `sensor` / `switch` / `stepper` / `generic`
-- Missing port metadata shows degraded style + warning
-- Tag panel supports filter, group highlight, and `location_group` one-click navigation
+`component-topology-diff` 模块计算两个拓扑快照之间的差异：
+
+- 节点级 diff（新增/删除/修改设备）
+- 端口级 diff（端口变更）
+- 关系级 diff（连接变更）
+- 标签级 diff（标签变更）
+- 影响分析（受影响的规则、测试、模块）
+
+输出适合审计记录。
 
 ---
 
-## Performance Gate
+## 性能门禁
 
-A 500-node / 2000-edge baseline fixture guards scale regressions:
+500 节点 / 2000 边基准测试守护规模回归：
 
 ```bash
 python3 scripts/topology_perf_gate.py --output human
 ```
 
-Thresholds (`scripts/perf/topology_perf_thresholds.json`):
-
-| Path | p95 limit |
-|------|-----------|
+| 路径 | p95 阈值 |
+|------|----------|
 | `parse_validate` | 250 ms |
 | `compile_simulate` | 400 ms |
 | `render_transform` | 80 ms |
 
 ---
 
-## Semantic Diff
+## API 输出
 
-The `component-topology-diff` module computes node/port/relation/tag-level diffs between two topology snapshots and outputs an impact analysis (affected rules, tests, modules). Output is suitable for audit records.
+`parse-plc` 和拓扑 API 返回完整的关系和端口元数据：
+
+```json
+{
+  "relations": [{
+    "from": "valve_A", "to": "cyl_A",
+    "relation": "driven_by",
+    "from_port": "output", "to_port": "drive_in",
+    "signal": "pneumatic"
+  }],
+  "nodes": [{
+    "id": "cyl_A",
+    "ports": [...],
+    "tags": { "functional_group": "press_unit", "danger_level": "high" }
+  }]
+}
+```
 
 ---
 
-## Related Files
+## 前端
 
-- `src/ast/mod.rs` — `TopologyConnection`, `DevicePort`, `DeviceTags`, `TopologyRelation`
-- `src/component_topology.rs` — `ComponentTagRules`, tag rule validation
-- `src/semantic/mod.rs` — producer → consumer graph construction
-- `src/verification/causality.rs` — updated BFS traversal
-- `scripts/migrate_connected_to.py` — migration tool
-- `scripts/ci_no_connected_to_regression.sh` — CI guard
-- `scripts/topology_perf_gate.py` — performance gate
-- `docs/已实现/topology_perf_baseline.md` — baseline fixture docs
-- `docs/已实现/testing_inventory_matrix.md` — test coverage matrix
-- `tests/component_topology_diff.rs` — semantic diff tests
-- `tests/component_topology_validate.rs` — tag rule contract tests
+- 连接绑定到 `sourceHandle` / `targetHandle`（匹配端口 ID）
+- 端口契约覆盖：`cylinder` / `sensor` / `switch` / `stepper` / `generic`
+- 缺失端口元数据显示降级样式 + 警告
+- 标签面板支持过滤、分组高亮、`location_group` 一键导航
+
+---
+
+## 相关文件
+
+| 文件 | 说明 |
+|---|---|
+| `src/ast/mod.rs` | `TopologyRelation`, `DevicePort`, `DeviceTags` |
+| `src/component_topology.rs` | 标签规则验证 |
+| `src/semantic/mod.rs` | producer → consumer 图构建 |
+| `src/verification/causality.rs` | BFS 遍历（更新后） |
+| `scripts/migrate_connected_to.py` | 迁移工具 |
+| `tests/component_topology_diff.rs` | 语义 diff 测试 |
+| `tests/component_topology_validate.rs` | 标签规则契约测试 |

@@ -1,62 +1,53 @@
-# Stepper + AB Encoder Safety Modeling (Draft)
+# 步进电机 + AB 编码器安全建模
 
-Date: 2026-02-18
+工业场景中最常见的运动控制组合：步进电机（STEP/DIR/EN）+ 增量式 AB 编码器。RustPLC 的建模原则是严格分层 — DSL 只管状态机和安全约束，驱动层负责脉冲生成和编码器解码。
 
-This is a repo-local Wiki draft meant to be readable offline.
+---
 
-Source of truth:
-- `docs/已实现/stepper_ab_encoder.md` (this draft should stay terminology-compatible with it)
-- Scenario workflow: `docs/已实现/scenario_playbook.md`
+## 分层原则
 
-## Scope
+| 层 | 职责 | 可验证性 |
+|---|---|---|
+| DSL（RustPLC） | 顺序控制、联锁、wait 条件、安全约束 | 四引擎形式化验证 |
+| 驱动/板卡层 | 脉冲生成、AB 解码、计数、滤波、单位换算 | 实时性保证，不在 DSL 验证范围 |
 
-This note targets the common industrial setup:
+驱动层的输出以简单信号（digital/analog）回馈 DSL，保持验证可处理。
 
-- Actuator: Pulse/Dir stepper axis (STEP/DIR/EN).
-- Feedback: incremental AB encoder (high-rate counting/dir inference done in the driver/board layer).
-- RustPLC DSL is used for: sequencing, interlocks, wait conditions, and verifiable safety constraints.
+---
 
-## Core Principle: Layering
+## zone_code：碰撞窗口编码
 
-Keep a strict split:
+`zone_code` 是推荐的碰撞窗口抽象信号：
 
-- DSL (verifiable): only the state machine + interlocks + safety.
-- Driver/board (real-time): pulse generation, AB decoding, counting, filtering, unit conversion.
-- Feed results back into DSL as simple signals (digital/analog) to keep verification tractable.
+- 拓扑中建模为 `analog_input { external: true }`
+- 语义：`0 = 安全`，`1..N = 碰撞窗口`
+- 由驱动层产生（含迟滞/LUT/几何逻辑），DSL 消费
 
-## Canonical Safety Abstraction: `zone_code`
+好处：
+- 复杂几何/窗口逻辑留在驱动层，不污染 DSL
+- 产生稳定、可审查的 `safety:` 规则
+- 窗口变更是驱动层配置变更，不需要改 DSL
 
-`zone_code` is the recommended “collision window encoding” signal:
+---
 
-- Modeled in topology as `analog_input { external: true }`.
-- Semantics: `0 = safe`, `1..N = collision window`.
-- Produced by the driver/board layer (with hysteresis / LUT / geometry logic); consumed by DSL.
+## 双向联锁（最小组合）
 
-Why this helps:
-- Keeps complex geometry/window logic out of the DSL.
-- Produces stable, reviewable `safety:` rules.
-- Changes to windows become configuration changes in the driver layer, not DSL rewrites.
+碰撞防护不能只写单向规则。推荐最小组合：
 
-## Bi-directional Interlock (Minimum Combo)
-
-Do not model collision avoidance as a single one-way rule. The recommended minimum is:
-
-1. Window-side interlock (state-side): when `zone_code != 0`, forbid the actuator dangerous posture.
-2. Command-side interlock (command-side): when a motion command is issued, also forbid the actuator dangerous posture (or require “safe posture”).
-
-### Copyable DSL Template (Parseable)
+1. **窗口侧联锁**（状态侧）：`zone_code != 0` 时禁止危险姿态
+2. **指令侧联锁**（命令侧）：发出运动指令时也禁止危险姿态
 
 ```plc
 [topology]
-device zone_code: analog_input { range: 0..3, unit: "zone", external: true } # 0=safe, 1..N=collision window
+device zone_code: analog_input { range: 0..3, unit: "zone", external: true }
 device move_cmd: digital_output
 device cyl_clamp: cylinder
 
 [constraints]
-# Window-side interlock: collision window forbids dangerous posture.
+# 窗口侧：碰撞窗口内禁止危险姿态
 safety: zone_code > 0 conflicts_with cyl_clamp.extended
 
-# Command-side interlock: motion commands are only legal in safe posture.
+# 指令侧：运动指令只在安全姿态下合法
 safety: move_cmd.on conflicts_with cyl_clamp.extended
 
 [tasks]
@@ -64,26 +55,60 @@ task cycle:
     step hold:
 ```
 
-## Anti-patterns (Common Pitfalls)
+---
 
-- Only writing the window-side interlock (`zone_code > 0 conflicts_with ...`) and forgetting the command-side interlock.
-- Encoding windows directly in DSL with multiple thresholds (hard to maintain; hard to express hysteresis; easy to get wrong).
-- Exposing raw AB A/B edges to DSL (should be decoded into `count/speed/dir` first).
+## 标准信号集
 
-## Regression Coverage (SIL)
+推荐的拓扑抽象接口信号：
 
-For stable safety modeling, pair the rule set with scenario regression:
+| 类型 | 信号 | 说明 |
+|------|------|------|
+| Analog | `axis_count` | 编码器计数（主坐标） |
+| Analog | `axis_theta` | 角度（派生） |
+| Analog | `axis_pos_mm` | 线性位置（派生） |
+| Analog | `axis_speed` | 速度 |
+| Digital | `range_valid` | 量程有效 |
+| Digital | `pos_consistent` | 位置一致性（编码器 vs 外部传感器） |
+| Digital | `inpos` | 到位 |
+| Digital | `alarm` | 报警 |
+| Analog | `zone_code` | 碰撞窗口编码 |
 
-- 1 normal case (safe -> move -> stop/inpos).
-- At least 1 “count stuck” timeout case.
-- At least 1 “wrong direction / bad sign” case.
-- At least 1 alarm-triggered fault case.
+坐标换算（count → theta → pos_mm）在驱动层完成，DSL 只消费输出信号。
 
-See `docs/已实现/scenario_playbook.md` for scenario authoring + `scenario-validate` + `sim-plc` + batch regression.
+---
 
-Repo fixtures you can copy/adapt:
+## 常见反模式
+
+| 反模式 | 问题 |
+|--------|------|
+| 只写窗口侧联锁，忘记指令侧 | 运动指令发出时无保护 |
+| 在 DSL 中用多阈值编码窗口 | 难维护、难表达迟滞、容易出错 |
+| 把 AB 原始边沿暴露给 DSL | 应先解码为 count/speed/dir |
+
+---
+
+## 回归覆盖
+
+配合安全建模的场景回归最小集：
+
+| 场景 | 覆盖 |
+|------|------|
+| 正常运动 | safe → move → stop/inpos |
+| 计数卡死 | count stuck → timeout |
+| 方向错误 | wrong direction / bad sign |
+| 报警触发 | alarm → fault |
+
+可复制的仓库 fixture：
 - `examples/stepper_collision_guard.plc` + `scenarios/stepper_collision_guard/*.yaml`
-- `examples/rp2040_motion_minimal.plc` + `scenarios/rp2040_motion_minimal/*.yaml` (dual-axis, motion-channel convention)
+- `examples/rp2040_motion_minimal.plc` + `scenarios/rp2040_motion_minimal/*.yaml`
 
-CI gate for the RP2040 minimal motion fixture:
-- `tests/rp2040_motion_minimal_scenarios.rs`
+CI 门禁：`tests/rp2040_motion_minimal_scenarios.rs`
+
+---
+
+## 相关文档
+
+- 设计文档：`docs/已实现/stepper_ab_encoder.md`
+- 场景工作流：`docs/已实现/scenario_playbook.md`
+- 拓扑抽象：[Topology-Abstraction-PLS-Angle-Distance](Topology-Abstraction-PLS-Angle-Distance.md)
+- RP2040 示例：[RP2040-Motion-Minimal-Example](RP2040-Motion-Minimal-Example.md)

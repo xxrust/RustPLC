@@ -66,6 +66,8 @@ export interface RunStatus {
     timing?: string;
     diagnosis?: string;
     geometry?: string;
+    keypoints?: string;
+    fault_audit?: string;
   };
   failure_summary?: string;
 }
@@ -379,6 +381,20 @@ export interface TraceData {
   schema_version: number;
   tick_ms: number;
   ticks: TickSnapshot[];
+}
+
+export interface TraceKeypoint {
+  tick: number;
+  at_ms: number;
+  category: string;
+  source: string;
+  label: string;
+}
+
+export interface TraceKeypointArtifact {
+  schema_version: number;
+  tick_ms: number;
+  keypoints: TraceKeypoint[];
 }
 
 export interface TimingReport {

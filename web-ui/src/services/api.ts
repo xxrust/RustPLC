@@ -5,6 +5,7 @@ import type {
   RunStatus,
   DiagnosisReport,
   TraceData,
+  TraceKeypointArtifact,
   TimingReport,
   GeometryArtifactResponse,
 } from '../types';
@@ -104,6 +105,9 @@ export const geometryApi = {
 export const traceApi = {
   getTrace: (runId: string) =>
     apiClient.get<TraceData>(`/trace/${runId}`),
+
+  getKeypoints: (runId: string) =>
+    apiClient.get<TraceKeypointArtifact>(`/trace/${runId}/keypoints`),
 
   getTickRange: (runId: string, startTick: number, endTick: number) =>
     apiClient.get<TraceData>(`/trace/${runId}/range`, {

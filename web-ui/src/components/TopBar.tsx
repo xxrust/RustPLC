@@ -28,6 +28,21 @@ const RUN_MODE_COLORS: Record<string, string> = {
   runtime_live: '#52c41a',
 };
 
+function localizeUserName(name: string | undefined, t: (key: string) => string): string {
+  if (name === 'Developer') return t('user.defaultName');
+  return name || '';
+}
+
+function localizeUserRole(role: string | undefined, t: (key: string) => string): string {
+  const map: Record<string, string> = {
+    operator: 'user.roleOperator',
+    engineer: 'user.roleEngineer',
+    auditor: 'user.roleAuditor',
+    admin: 'user.roleAdmin',
+  };
+  return role && map[role] ? t(map[role]) : role || '';
+}
+
 const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClose, onNewTab }) => {
   const { t, i18n } = useTranslation();
   const { runMode, currentProject, hasUnsavedChanges, alarmCount, currentUser } = useAppStore();
@@ -141,7 +156,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
             gap: 6,
           }}
         >
-          {saving ? `⏳ ${t('topBar.saving')}` : `💾 ${t('topBar.save')}`}
+          {saving ? t('topBar.saving') : t('topBar.save')}
         </button>
       )}
 
@@ -290,7 +305,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
             }}
             title={`${alarmCount.critical} ${t('statusBar.critical')}, ${alarmCount.warning} ${t('statusBar.warning')}`}
           >
-            ⚠ {totalAlarms}
+            {totalAlarms}
           </div>
         )}
 
@@ -315,8 +330,10 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
 
         {/* User */}
         <div style={{ color: '#a0a0a0', fontSize: 12 }}>
-          {currentUser?.name}
-          <span style={{ color: '#4a4a4a', marginLeft: 4 }}>({currentUser?.role})</span>
+          {localizeUserName(currentUser?.name, t)}
+          <span style={{ color: '#4a4a4a', marginLeft: 4 }}>
+            ({localizeUserRole(currentUser?.role, t)})
+          </span>
         </div>
       </div>
 

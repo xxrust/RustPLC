@@ -31,7 +31,7 @@ const GenericNode: React.FC<NodeProps> = ({ data, selected }) => {
       </div>
       <div style={{ padding: '8px 12px' }}>
         <div style={{ color: '#a0a0a0', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}>
-          {d.type || 'generic'}
+          {d.device_type || d.type || 'generic'}
         </div>
         <div style={{ color: '#a0a0a0', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}>
           {d.status || 'idle'}

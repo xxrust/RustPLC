@@ -58,7 +58,7 @@ export const ProjectSelector: React.FC = () => {
       message.success(`${t('projectSelector.switched')}: ${name}`);
       setVisible(false);
     } catch {
-      message.error(`Failed to open ${file.name}`);
+      message.error(t('projectSelector.openFailed', { fileName: file.name }));
     } finally {
       // Reset so the same file can be re-selected
       e.target.value = '';

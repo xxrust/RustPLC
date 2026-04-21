@@ -6,17 +6,18 @@ import StatusBar from '../components/StatusBar';
 import ComponentLibrary from '../components/ComponentLibrary';
 import PropertiesPanel from '../components/PropertiesPanel';
 import TopologyCanvas from '../components/canvas/TopologyCanvas';
-import TickTimeline from '../components/replay/TickTimeline';
 import RunPage from '../pages/RunPage';
 import DiagnosisPage from '../pages/DiagnosisPage';
 import ScenarioPage from '../pages/ScenarioPage';
+import ReplayPage from '../pages/ReplayPage';
+import AuditPage from '../pages/AuditPage';
 import { useTopologyStore } from '../stores/topologyStore';
-import { useReplayStore } from '../stores/replayStore';
 import { useAppStore } from '../stores/appStore';
-import { topologyApi, traceApi, runApi } from '../services/api';
+import { topologyApi } from '../services/api';
 import type { NodeData } from '../stores/topologyStore';
+import type { DevicePortMetadata } from '../types';
 import { normalizeDeviceTags } from '../utils/deviceTags';
-import { getEdgeSignalLabel } from '../utils/portContract';
+import { getDefaultPortsForNodeType, getEdgeSignalLabel } from '../utils/portContract';
 
 interface Tab {
   id: string;
@@ -38,13 +39,13 @@ const IDDELayout: React.FC = () => {
     { id: 'run-1', label: t('tabs.run'), view: 'run' },
     { id: 'diagnosis-1', label: t('tabs.diagnosis'), view: 'diagnosis' },
     { id: 'replay-1', label: t('tabs.replay'), view: 'replay' },
+    { id: 'audit-1', label: t('tabs.audit'), view: 'audit' },
   ]);
   const [activeTabId, setActiveTabId] = useState('topology-1');
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
   const { setNodes, setEdges, hasUnsavedChanges } = useTopologyStore();
-  const { setSnapshots } = useReplayStore();
   const { currentProject, currentProjectContent } = useAppStore();
 
   const dragTypeRef = useRef<{ type: string; label: string } | null>(null);
@@ -84,9 +85,7 @@ const IDDELayout: React.FC = () => {
 
     const loadTopology = async () => {
       if (!projectId) {
-        if (!cancelled) {
-          loadDemoData(setNodes, setEdges);
-        }
+        clearTopology();
         return;
       }
 
@@ -117,55 +116,15 @@ const IDDELayout: React.FC = () => {
       }
     };
 
-    const loadReplay = async () => {
-      try {
-        const snapshots = await fetchLatestComponentReplaySnapshots();
-        if (!cancelled) {
-          if (snapshots) {
-            setSnapshots(snapshots);
-          } else {
-            loadDemoSnapshots(setSnapshots);
-          }
-        }
-      } catch {
-        if (!cancelled) {
-          loadDemoSnapshots(setSnapshots);
-        }
-      }
-    };
-
     loadTopology();
-    loadReplay();
 
     return () => {
       cancelled = true;
     };
-  }, [currentProject, currentProjectContent, setNodes, setEdges, setSnapshots]);
+  }, [currentProject, currentProjectContent, setNodes, setEdges]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
-
-  useEffect(() => {
-    if (activeTab?.view !== 'replay') return;
-
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const snapshots = await fetchLatestComponentReplaySnapshots();
-        if (!cancelled && snapshots) {
-          setSnapshots(snapshots);
-        }
-      } catch {
-        // keep existing snapshots when refresh fails
-      }
-    };
-
-    void refresh();
-    const timer = window.setInterval(refresh, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [activeTab?.view, setSnapshots]);
+  const showEditorChrome = activeTab?.view === 'topology';
 
   const handleTabClick = (id: string) => setActiveTabId(id);
 
@@ -226,7 +185,7 @@ const IDDELayout: React.FC = () => {
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Left sidebar */}
-        {!leftCollapsed && (
+        {showEditorChrome && !leftCollapsed && (
           <div
             style={{
               width: SIDEBAR_WIDTH,
@@ -262,7 +221,7 @@ const IDDELayout: React.FC = () => {
         )}
 
         {/* Collapsed left toggle */}
-        {leftCollapsed && (
+        {showEditorChrome && leftCollapsed && (
           <button
             onClick={() => setLeftCollapsed(false)}
             style={{
@@ -284,7 +243,7 @@ const IDDELayout: React.FC = () => {
         {/* Main content area */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Canvas / view area */}
-          {(activeTab?.view === 'topology' || activeTab?.view === 'replay' || !activeTab) ? (
+          {(activeTab?.view === 'topology' || !activeTab) ? (
             <>
               <div
                 style={{ flex: 1, overflow: 'hidden', position: 'relative' }}
@@ -293,7 +252,6 @@ const IDDELayout: React.FC = () => {
               >
                 <ViewContent view={activeTab?.view || 'topology'} />
               </div>
-              {activeTab?.view === 'replay' && <TickTimeline />}
             </>
           ) : (
             <div style={{ flex: 1, overflowY: 'auto', background: '#1e1e1e' }}>
@@ -303,7 +261,7 @@ const IDDELayout: React.FC = () => {
         </div>
 
         {/* Right properties panel */}
-        {!rightCollapsed && (
+        {showEditorChrome && !rightCollapsed && (
           <div
             style={{
               width: PANEL_WIDTH,
@@ -341,7 +299,7 @@ const IDDELayout: React.FC = () => {
         )}
 
         {/* Collapsed right toggle */}
-        {rightCollapsed && (
+        {showEditorChrome && rightCollapsed && (
           <button
             onClick={() => setRightCollapsed(false)}
             style={{
@@ -368,24 +326,8 @@ const IDDELayout: React.FC = () => {
 
 // View content dispatcher
 const ViewContent: React.FC<{ view: Tab['view'] }> = ({ view }) => {
-  const { t } = useTranslation();
-  const { snapshots, currentTick } = useReplayStore();
-  const { nodes, updateNodeData } = useTopologyStore();
-
-  // Sync replay tick → node data
-  useEffect(() => {
-    if (view !== 'replay') return;
-    const snapshot = snapshots[currentTick];
-    if (!snapshot) return;
-    nodes.forEach((node) => {
-      const comp = snapshot.components[node.id];
-      if (comp) updateNodeData(node.id, comp);
-    });
-  }, [currentTick, snapshots, view, nodes, updateNodeData]);
-
   switch (view) {
     case 'topology':
-    case 'replay':
       return <TopologyCanvas />;
     case 'scenario':
       return <div style={{ padding: 24 }}><ScenarioPage /></div>;
@@ -394,82 +336,93 @@ const ViewContent: React.FC<{ view: Tab['view'] }> = ({ view }) => {
     case 'diagnosis':
       return <div style={{ padding: 24 }}><DiagnosisPage /></div>;
     case 'audit':
-      return <PlaceholderView title={t('placeholders.audit')} description={t('placeholders.auditDesc')} />;
+      return <div style={{ padding: 24 }}><AuditPage /></div>;
+    case 'replay':
+      return <div style={{ padding: 24 }}><ReplayPage /></div>;
     default:
       return null;
   }
 };
-
-const PlaceholderView: React.FC<{ title: string; description: string }> = ({ title, description }) => (
-  <div
-    style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100%',
-      gap: 12,
-      background: '#1e1e1e',
-    }}
-  >
-    <div style={{ color: '#e0e0e0', fontSize: 18, fontWeight: 600 }}>{title}</div>
-    <div style={{ color: '#a0a0a0', fontSize: 13 }}>{description}</div>
-  </div>
-);
 
 export default IDDELayout;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ id: string; source: string; target: string }> } {
-  const nodes: Node<NodeData>[] = (data.components || []).map((comp: any, i: number) => ({
-    id: comp.id,
-    type: mapComponentType(
-      comp.component_id || comp.type || 'generic',
-      comp.params?.device_type,
-      comp.params?.endpoint_kind
-    ),
-    position: comp.position || { x: 150 + (i % 3) * 200, y: 100 + Math.floor(i / 3) * 160 },
-    data: {
-      label: comp.id,
-      type: mapComponentType(
-        comp.component_id || comp.type || 'generic',
-        comp.params?.device_type,
-        comp.params?.endpoint_kind
-      ),
-      status: 'idle',
-      ...comp.params,
-      tags: normalizeDeviceTags(comp.params?.tags),
-    },
-  }));
   const edges = (data.connections || []).map((conn: any, i: number) => {
+    const fromEndpoint = parseEndpoint(conn.from);
+    const toEndpoint = parseEndpoint(conn.to);
+    const sourceHandle = normalizeHandleId(conn.from_port ?? fromEndpoint.portId);
+    const targetHandle = normalizeHandleId(conn.to_port ?? toEndpoint.portId);
     const edge: any = {
       id: `e-${i}`,
-      source: normalizeEndpointId(conn.from),
-      target: normalizeEndpointId(conn.to),
+      source: fromEndpoint.nodeId,
+      target: toEndpoint.nodeId,
       data:
         typeof conn.relation === 'string' && conn.relation
           ? { relation: conn.relation }
           : undefined,
     };
-    if (typeof conn.from_port === 'string' && conn.from_port) {
-      edge.sourceHandle = conn.from_port;
+    if (sourceHandle) {
+      edge.sourceHandle = sourceHandle;
     }
-    if (typeof conn.to_port === 'string' && conn.to_port) {
-      edge.targetHandle = conn.to_port;
+    if (targetHandle) {
+      edge.targetHandle = targetHandle;
     }
-    edge.label = getEdgeSignalLabel(conn.from_port, conn.to_port, conn.signal);
+    edge.label = getEdgeSignalLabel(sourceHandle, targetHandle, conn.signal);
     return edge;
+  });
+
+  const inferredPortsByNode = buildInferredPortsByNode(data.components || [], edges);
+
+  const nodes: Node<NodeData>[] = (data.components || []).map((comp: any, i: number) => {
+    const nodeType = mapComponentType(
+      comp.component_id || comp.type || 'generic',
+      comp.params?.device_type,
+      comp.params?.endpoint_kind
+    );
+    const explicitPorts = Array.isArray(comp.params?.ports) ? comp.params.ports : [];
+    const inferredPorts = inferredPortsByNode.get(comp.id) || [];
+
+    return {
+      id: comp.id,
+      type: nodeType,
+      position: comp.position || { x: 150 + (i % 3) * 240, y: 100 + Math.floor(i / 3) * 180 },
+      data: {
+        label: comp.id,
+        type: nodeType,
+        status: 'idle',
+        ...comp.params,
+        ports: mergePorts(explicitPorts, inferredPorts),
+        tags: normalizeDeviceTags(comp.params?.tags),
+      },
+    };
   });
   return { nodes, edges };
 }
 
-function normalizeEndpointId(raw: string): string {
+function parseEndpoint(raw: string): { nodeId: string; portId?: string } {
   if (!raw) {
-    return raw;
+    return { nodeId: raw };
   }
   const idx = raw.indexOf('.');
-  return idx >= 0 ? raw.slice(0, idx) : raw;
+  if (idx < 0) {
+    return { nodeId: raw };
+  }
+  const nodeId = raw.slice(0, idx);
+  const portId = raw.slice(idx + 1).trim();
+  return {
+    nodeId,
+    portId: portId || undefined,
+  };
+}
+
+function normalizeHandleId(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function mapComponentType(raw: string, deviceType?: string, endpointKind?: string): string {
@@ -492,136 +445,123 @@ function mapComponentType(raw: string, deviceType?: string, endpointKind?: strin
   if (t.includes('cylinder')) return 'cylinder';
   if (t.includes('sensor')) return 'sensor';
   if (t.includes('switch')) return 'switch';
+  if (t.includes('plc') || t.includes('controller')) return 'generic';
   if (t.includes('stepper') || t.includes('motor')) return 'stepper_pd';
   return 'generic';
 }
 
-function loadDemoData(
-  setNodes: (nodes: Node<NodeData>[]) => void,
-  setEdges: (edges: any[]) => void
-) {
-  setNodes([
-    { id: 'cyl_a', type: 'cylinder', position: { x: 300, y: 150 }, data: { label: 'cyl_a', type: 'cylinder', status: 'retracted', response_time: 200 } },
-    { id: 'cyl_b', type: 'cylinder', position: { x: 300, y: 300 }, data: { label: 'cyl_b', type: 'cylinder', status: 'extended', response_time: 200 } },
-    { id: 'sensor_a1', type: 'sensor', position: { x: 100, y: 120 }, data: { label: 'sensor_a1', type: 'sensor', status: 'off' } },
-    { id: 'sensor_a2', type: 'sensor', position: { x: 100, y: 200 }, data: { label: 'sensor_a2', type: 'sensor', status: 'on' } },
-    { id: 'sensor_b1', type: 'sensor', position: { x: 100, y: 280 }, data: { label: 'sensor_b1', type: 'sensor', status: 'off' } },
-    { id: 'sensor_b2', type: 'sensor', position: { x: 100, y: 360 }, data: { label: 'sensor_b2', type: 'sensor', status: 'on' } },
-  ]);
-  setEdges([
-    { id: 'e1', source: 'sensor_a1', target: 'cyl_a' },
-    { id: 'e2', source: 'sensor_a2', target: 'cyl_a' },
-    { id: 'e3', source: 'sensor_b1', target: 'cyl_b' },
-    { id: 'e4', source: 'sensor_b2', target: 'cyl_b' },
-  ]);
-}
-
-function loadDemoSnapshots(setSnapshots: (s: any[]) => void) {
-  setSnapshots(Array.from({ length: 100 }, (_, i) => ({
-    tick: i,
-    components: {
-      cyl_a: { status: i < 30 ? 'retracted' : i < 60 ? 'extended' : 'retracted' },
-      cyl_b: { status: i < 50 ? 'extended' : 'retracted' },
-      sensor_a1: { status: i >= 30 && i < 60 ? 'on' : 'off' },
-      sensor_a2: { status: i < 30 ? 'on' : 'off' },
-      sensor_b1: { status: i >= 50 ? 'on' : 'off' },
-      sensor_b2: { status: i < 50 ? 'on' : 'off' },
-    },
-    events: i === 30
-      ? [{ type: 'info' as const, message: 'cyl_a extended' }]
-      : i === 75
-      ? [{ type: 'error' as const, message: 'timeout detected' }]
-      : [],
-  })));
-}
-
-async function fetchLatestComponentReplaySnapshots(): Promise<any[] | null> {
-  const res = await runApi.listRuns(20);
-  const runs = res.data as any[];
-  const latestComponentRun = runs.find(
-    (run) => run.mode === 'component_sim' && run.artifacts?.trace
+function buildInferredPortsByNode(
+  components: any[],
+  edges: Array<{ source: string; target: string; sourceHandle?: string; targetHandle?: string }>
+): Map<string, DevicePortMetadata[]> {
+  const componentById = new Map(
+    components.map((comp) => [
+      comp.id,
+      mapComponentType(
+        comp.component_id || comp.type || 'generic',
+        comp.params?.device_type,
+        comp.params?.endpoint_kind
+      ),
+    ])
   );
-  if (!latestComponentRun) {
-    return null;
-  }
+  const portMap = new Map<string, Map<string, DevicePortMetadata>>();
 
-  const traceRes = await traceApi.getTrace(latestComponentRun.run_id);
-  const trace = traceRes.data as any;
-  if (!trace.ticks || trace.ticks.length === 0) {
-    return null;
-  }
+  const ensurePort = (nodeId: string, portId: string, role: 'producer' | 'consumer') => {
+    const nodeType = componentById.get(nodeId);
+    const defaultPorts = getDefaultPortsForNodeType(nodeType);
+    const defaultPort = defaultPorts.find((port) => port.id === portId);
+    const inferredType = defaultPort?.type || inferPortType(portId);
 
-  const snapshots = trace.ticks.map((tick: any) => ({
-    tick: tick.tick,
-    components: normalizeReplayComponents(tick),
-    io: {
-      di: tick.digital_inputs,
-      do: tick.digital_outputs,
-      ai: tick.analog_inputs,
-      ao: tick.analog_outputs,
-    },
-    events: [],
-  }));
-  const hasComponentState = snapshots.some(
-    (snapshot: { components: Record<string, unknown> }) =>
-      Object.keys(snapshot.components).length > 0
-  );
-  return hasComponentState ? snapshots : null;
-}
+    let nodePorts = portMap.get(nodeId);
+    if (!nodePorts) {
+      nodePorts = new Map<string, DevicePortMetadata>();
+      portMap.set(nodeId, nodePorts);
+    }
 
-function normalizeReplayComponents(tick: any): Record<string, Partial<NodeData>> {
-  const rawComponents = tick?.component_states ?? tick?.components;
-  if (!rawComponents || typeof rawComponents !== 'object') {
-    return {};
-  }
+    const existing = nodePorts.get(portId);
+    if (existing) {
+      nodePorts.set(portId, {
+        ...existing,
+        type: existing.type === 'generic' ? inferredType : existing.type,
+        role:
+          existing.role === role || existing.role === 'bidirectional'
+            ? existing.role
+            : 'bidirectional',
+      });
+      return;
+    }
 
-  return Object.entries(rawComponents).reduce<Record<string, Partial<NodeData>>>(
-    (acc, [componentId, raw]) => {
-      if (!raw || typeof raw !== 'object') {
-        return acc;
-      }
-      acc[componentId] = normalizeReplayComponent(raw as Record<string, any>);
-      return acc;
-    },
-    {}
+    nodePorts.set(portId, {
+      id: portId,
+      type: inferredType,
+      role,
+    });
+  };
+
+  edges.forEach((edge) => {
+    if (edge.sourceHandle) {
+      ensurePort(edge.source, edge.sourceHandle, 'producer');
+    }
+    if (edge.targetHandle) {
+      ensurePort(edge.target, edge.targetHandle, 'consumer');
+    }
+  });
+
+  return new Map(
+    Array.from(portMap.entries()).map(([nodeId, ports]) => [
+      nodeId,
+      Array.from(ports.values()),
+    ])
   );
 }
 
-function normalizeReplayComponent(raw: Record<string, any>): Partial<NodeData> {
-  const outputs =
-    raw.outputs && typeof raw.outputs === 'object'
-      ? (raw.outputs as Record<string, unknown>)
-      : {};
-  const componentType =
-    typeof raw.component_type === 'string' ? raw.component_type.toLowerCase() : '';
-  const state =
-    typeof raw.state === 'string'
-      ? raw.state
-      : typeof raw.status === 'string'
-        ? raw.status
-        : '';
-  const hasFault = Array.isArray(raw.active_faults) && raw.active_faults.length > 0;
-
-  let status = state;
-  if (componentType === 'switch') {
-    if (state === 'on') status = 'closed';
-    if (state === 'off') status = 'open';
-  } else if (componentType === 'stepper_pd') {
-    if (state === 'enabled') status = 'running';
-    if (state === 'disabled') status = 'idle';
-  }
-  if (hasFault) {
-    status = 'fault';
+function mergePorts(
+  explicitPorts: DevicePortMetadata[],
+  inferredPorts: DevicePortMetadata[]
+): DevicePortMetadata[] {
+  if (explicitPorts.length === 0) {
+    return inferredPorts;
   }
 
-  const normalized: Partial<NodeData> = {};
-  if (status) {
-    normalized.status = status;
-  }
-  if (typeof outputs.state === 'boolean') {
-    normalized.value = outputs.state;
-  } else if (typeof raw.value === 'boolean' || typeof raw.value === 'number') {
-    normalized.value = raw.value;
-  }
-  return normalized;
+  const merged = new Map<string, DevicePortMetadata>();
+  explicitPorts.forEach((port) => merged.set(port.id, { ...port }));
+
+  inferredPorts.forEach((port) => {
+    const existing = merged.get(port.id);
+    if (!existing) {
+      merged.set(port.id, { ...port });
+      return;
+    }
+    merged.set(port.id, {
+      id: existing.id,
+      type: existing.type === 'generic' ? port.type : existing.type,
+      role:
+        existing.role === port.role || existing.role === 'bidirectional'
+          ? existing.role
+          : 'bidirectional',
+    });
+  });
+
+  return Array.from(merged.values());
 }
+
+function inferPortType(portId: string): DevicePortMetadata['type'] {
+  const id = portId.toLowerCase();
+  if (/^(ai|ao)\d+$/.test(id) || id.includes('analog') || id.includes('freq') || id.includes('pressure')) {
+    return 'analog';
+  }
+  if (
+    id.includes('extended') ||
+    id.includes('retracted') ||
+    id.includes('fault') ||
+    id.includes('ready') ||
+    id.includes('position') ||
+    id.includes('running') ||
+    id.includes('home') ||
+    id.includes('target')
+  ) {
+    return 'logical';
+  }
+  return 'digital';
+}
+

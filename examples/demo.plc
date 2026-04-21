@@ -1,0 +1,76 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "教学演示用控制器，展示按钮输入、PLC 输出、执行元件与反馈闭环"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor {
+    purpose: "操作员启动按钮，触发单缸伸出再缩回"
+    subtype: "push_button"
+    debounce: 20ms
+}
+
+device valve_a: solenoid_valve {
+    purpose: "控制 A 缸伸出/缩回的电磁阀"
+    response_time: 20ms
+}
+
+device cyl_a: cylinder {
+    purpose: "教学演示单缸，展示 PLC 指令到机构动作的最小闭环"
+    stroke_time: 300ms
+    retract_time: 300ms
+}
+
+device sensor_a_ext: sensor {
+    purpose: "A 缸伸出到位确认"
+    subtype: "limit_switch"
+}
+
+device sensor_a_ret: sensor {
+    purpose: "A 缸缩回到位确认"
+    subtype: "limit_switch"
+}
+
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: plc_main.Y0, to: valve_a.coil, via: driven_by }
+relation { from: valve_a.out, to: cyl_a.cmd, via: driven_by }
+relation { from: cyl_a.extended, to: sensor_a_ext.sense, via: detects }
+relation { from: sensor_a_ext.out, to: plc_main.X1, via: reports_to }
+relation { from: cyl_a.retracted, to: sensor_a_ret.sense, via: detects }
+relation { from: sensor_a_ret.out, to: plc_main.X2, via: reports_to }
+
+[constraints]
+
+causality: Y0 -> valve_a -> cyl_a -> sensor_a_ext
+    reason: "PLC 伸出命令应能沿阀、气缸、传感器形成清晰闭环"
+
+[tasks]
+
+task ready:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+
+task cycle:
+    step extend:
+        action: set valve_a.coil on
+
+    step wait_extended:
+        wait: sensor_a_ext == true
+        timeout: 1000ms -> goto fault
+
+    step retract:
+        action: set valve_a.coil off
+
+    step wait_retracted:
+        wait: sensor_a_ret == true
+        timeout: 1000ms -> goto fault
+
+    on_complete: goto ready
+
+task fault:
+    step safe_stop:
+        action: set valve_a.coil off
+    on_complete: goto ready
