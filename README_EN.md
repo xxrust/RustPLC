@@ -1,7 +1,17 @@
-<h1 align="center">RustPLC</h1>
+<p align="center">
+  <img src="docs/assets/hero-banner.svg" alt="RustPLC — Formally Verified Industrial Control Compiler" width="700">
+</p>
 
 <p align="center">
   <strong>AI agents design industrial control programs. The compiler proves them correct.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/language-Rust-e8630a?style=flat-square&logo=rust" alt="Rust">
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License">
+  <img src="https://img.shields.io/badge/tests-831_passing-2ea44f?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/code-60K%2B_lines-8250df?style=flat-square" alt="Lines">
+  <img src="https://img.shields.io/badge/verification-4_engines-cf222e?style=flat-square" alt="Engines">
 </p>
 
 <p align="center">
@@ -21,9 +31,20 @@
 
 ## Understand RustPLC in 30 Seconds
 
-```
-Engineer describes intent → AI agent generates .plc → Compiler proves correctness → Deploy to hardware
-                                                        ↑ Fails? Returns structured fix suggestions
+```mermaid
+flowchart LR
+    A["👷 Engineer describes intent"] --> B["🤖 AI agent generates .plc"]
+    B --> C["⚙️ RustPLC Compiler"]
+    C --> D{"4-Engine Verification"}
+    D -- "✅ Pass" --> E["🚀 Deploy to hardware"]
+    D -- "❌ Fail" --> F["📋 Fix suggestions"]
+    F --> B
+    style A fill:#f5f0ff,stroke:#8250df,stroke-width:2px
+    style B fill:#f5f0ff,stroke:#8250df,stroke-width:2px
+    style C fill:#e8f4fd,stroke:#0969da,stroke-width:2px
+    style D fill:#fce4ec,stroke:#cf222e,stroke-width:2px
+    style E fill:#e6ffed,stroke:#2ea44f,stroke-width:2px
+    style F fill:#fff3e0,stroke:#e8630a,stroke-width:2px
 ```
 
 **Traditional**: Engineer writes ladder logic → manual safety review → collisions/deadlocks/timeouts found during commissioning
@@ -44,13 +65,9 @@ Existing toolchains (ladder logic, ST, FBD) are fundamentally **"write then chec
 
 RustPLC's answer is **"prove as you write"**:
 
-| | Traditional PLC Development | RustPLC |
-|---|---|---|
-| Collision detection | Found during commissioning | Compile-time BMC proof |
-| Deadlock analysis | Avoided by experience | Automatic SCC + reachability check |
-| Timing verification | Measured with oscilloscope | Static critical-path analysis |
-| Causal chains | Manual walkthrough | Automatic topology BFS verification |
-| AI-generated code | No correctness guarantee | Compiler closed-loop verification |
+<p align="center">
+  <img src="docs/assets/comparison.svg" alt="Traditional PLC vs RustPLC" width="750">
+</p>
 
 The last row is the key: when AI agents can generate industrial control programs, **who guarantees the AI's code is safe?** RustPLC is that guarantee.
 
@@ -191,22 +208,9 @@ The compiler ships four parallel verification engines. These aren't tests — th
 
 ### Compilation Pipeline
 
-```
-.plc source
-  │
-  ├─ Parser (PEG) ──→ AST ──→ Semantic Analysis ──→ IR (petgraph DiGraph)
-  │                              ↑ repeat/delay/sugar expansion
-  │                              ↑ name resolution + constraint checking
-  │
-  ├─ IR ──→ Safety Engine ──┐
-  ├─ IR ──→ Liveness Engine ─┤──→ verification_report.json
-  ├─ IR ──→ Timing Engine ──┤
-  ├─ IR ──→ Causality Engine ┘
-  │
-  ├─ IR ──→ Runtime Bridge ──→ runtime-core (no_std) ──→ RP2040 / STM32 firmware
-  ├─ IR ──→ Codegen ──→ IEC 61131-3 ST ──→ OpenPLC / CODESYS
-  └─ IR ──→ SimIO ──→ SIL simulation ──→ trace.jsonl + wave.vcd
-```
+<p align="center">
+  <img src="docs/assets/pipeline.svg" alt="RustPLC Compilation Pipeline" width="850">
+</p>
 
 ### Multi-Target Deployment
 
@@ -249,19 +253,9 @@ Tick-level timing sampling, p50/p95/p99 statistics, automatic threshold enforcem
 
 RustPLC isn't just "AI helps humans write PLC programs." The stronger direction is becoming an **AI-for-AI engineering platform**:
 
-```
-AI agent generates control intent
-    ↓
-AI agent generates .plc (topology + constraints + tasks)
-    ↓
-Compiler formally verifies (four engines prove in parallel)
-    ↓
-Fails → structured error report + fix suggestions → AI agent auto-repairs → re-verify
-    ↓
-Passes → runtime / simulation / code generation / release bundle
-    ↓
-Human engineers: define boundaries, review evidence, approve release
-```
+<p align="center">
+  <img src="docs/assets/ai-loop.svg" alt="AI for AI Engineering Loop" width="750">
+</p>
 
 This direction holds if four contracts stay intact:
 
@@ -314,42 +308,60 @@ Available tools for agents:
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                           Input Layer                                │
-├──────────────────────────────────────────────────────────────────────┤
-│  .plc DSL file                    Scenario YAML                      │
-│  - topology (devices + wiring)    - digital_inputs / analog_inputs   │
-│  - constraints (safety rules)     - fault injection                  │
-│  - tasks (control logic)          - tick_ms / duration_ticks         │
-└───────────────────┬──────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                Compiler Core (120 Rust source files, 60K+ lines)     │
-├──────────────────────────────────────────────────────────────────────┤
-│  Parser (PEG, 544 rules) → AST → Semantic (preprocessing + IR       │
-│  lowering) → IR (petgraph DiGraph)                                   │
-│                                                                      │
-│  Four parallel verification engines:                                 │
-│  Safety (BMC) │ Liveness (SCC) │ Timing (critical path) │ Causality │
-└───────────────────┬──────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                      Runtime Layer (7 crates)                        │
-├──────────────────────────────────────────────────────────────────────┤
-│  runtime-core (no_std)    SimIO (SIL simulation)    Codegen (ST)     │
-│  board-rp2040 (firmware)  board-renode-stm32        web-server (Axum)│
-└───────────────────┬──────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                          Output Layer                                │
-├──────────────────────────────────────────────────────────────────────┤
-│  verification_report.json    IEC 61131-3 ST    firmware.uf2          │
-│  trace.jsonl + wave.vcd      timing_report     release-bundle/       │
-└──────────────────────────────────────────────────────────────────────┘
+> See the full pipeline diagram in the [Compilation Pipeline](#compilation-pipeline) section above. Below is a layered overview:
+
+```mermaid
+graph TB
+    subgraph Input["📝 Input Layer"]
+        PLC[".plc DSL file<br/>topology · constraints · tasks"]
+        YAML["Scenario YAML<br/>inputs · faults · tick_ms"]
+    end
+
+    subgraph Compiler["⚙️ Compiler Core · 120 Rust files · 60K+ lines"]
+        PARSE["Parser<br/>PEG 544 rules"] --> AST["AST"]
+        AST --> SEM["Semantic<br/>preprocessing + IR lowering"]
+        SEM --> IR["IR<br/>petgraph DiGraph"]
+    end
+
+    subgraph Verify["🔬 Four Parallel Verification Engines"]
+        S["Safety<br/>BMC"]
+        L["Liveness<br/>SCC"]
+        T["Timing<br/>Critical Path"]
+        C["Causality<br/>BFS"]
+    end
+
+    subgraph Runtime["🏃 Runtime Layer · 7 crates"]
+        RT["runtime-core<br/>no_std"]
+        SIM["SimIO<br/>SIL simulation"]
+        CG["Codegen<br/>IEC 61131-3 ST"]
+        RP["board-rp2040"]
+        RE["board-renode-stm32"]
+        WEB["web-server<br/>Axum"]
+    end
+
+    subgraph Output["📦 Output Layer"]
+        VR["verification_report.json"]
+        ST["IEC 61131-3 ST"]
+        FW["firmware.uf2"]
+        TR["trace.jsonl + wave.vcd"]
+        RB["release-bundle/"]
+    end
+
+    PLC --> PARSE
+    YAML --> SIM
+    IR --> S & L & T & C
+    S & L & T & C --> VR
+    IR --> RT & SIM & CG
+    RT --> FW
+    CG --> ST
+    SIM --> TR
+    RT --> RB
+
+    style Input fill:#fff3e0,stroke:#e8630a,stroke-width:2px
+    style Compiler fill:#e8f4fd,stroke:#0969da,stroke-width:2px
+    style Verify fill:#fce4ec,stroke:#cf222e,stroke-width:2px
+    style Runtime fill:#e6ffed,stroke:#2ea44f,stroke-width:2px
+    style Output fill:#f6f8fa,stroke:#d0d7de,stroke-width:2px
 ```
 
 ---

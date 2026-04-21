@@ -1,7 +1,17 @@
-<h1 align="center">RustPLC</h1>
+<p align="center">
+  <img src="docs/assets/hero-banner.svg" alt="RustPLC — Formally Verified Industrial Control Compiler" width="700">
+</p>
 
 <p align="center">
   <strong>让 AI Agent 设计工控程序，编译器数学证明正确性</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/language-Rust-e8630a?style=flat-square&logo=rust" alt="Rust">
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License">
+  <img src="https://img.shields.io/badge/tests-831_passing-2ea44f?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/code-60K%2B_lines-8250df?style=flat-square" alt="Lines">
+  <img src="https://img.shields.io/badge/verification-4_engines-cf222e?style=flat-square" alt="Engines">
 </p>
 
 <p align="center">
@@ -21,9 +31,20 @@
 
 ## 30 秒理解 RustPLC
 
-```
-工程师描述意图 → AI Agent 生成 .plc → 编译器形式化证明 → 部署到真实硬件
-                                          ↑ 不通过则返回修复建议
+```mermaid
+flowchart LR
+    A["👷 工程师描述意图"] --> B["🤖 AI Agent 生成 .plc"]
+    B --> C["⚙️ RustPLC 编译器"]
+    C --> D{"四引擎验证"}
+    D -- "✅ 通过" --> E["🚀 部署到硬件"]
+    D -- "❌ 不通过" --> F["📋 修复建议"]
+    F --> B
+    style A fill:#f5f0ff,stroke:#8250df,stroke-width:2px
+    style B fill:#f5f0ff,stroke:#8250df,stroke-width:2px
+    style C fill:#e8f4fd,stroke:#0969da,stroke-width:2px
+    style D fill:#fce4ec,stroke:#cf222e,stroke-width:2px
+    style E fill:#e6ffed,stroke:#2ea44f,stroke-width:2px
+    style F fill:#fff3e0,stroke:#e8630a,stroke-width:2px
 ```
 
 传统方式：工程师手写梯形图 → 人工安全审查 → 碰撞/死锁/超时在调试现场才发现
@@ -44,13 +65,9 @@ RustPLC：工程师描述工艺 → AI 生成声明式 DSL → 编译器数学�
 
 RustPLC 的回答是 **"写时即证"**：
 
-| | 传统 PLC 开发 | RustPLC |
-|---|---|---|
-| 碰撞检测 | 现场调试发现 | 编译期 BMC 证明 |
-| 死锁分析 | 靠经验避免 | SCC + 可达性自动检查 |
-| 时序验证 | 示波器测量 | 关键路径静态分析 |
-| 因果链 | 人工走查 | 拓扑 BFS 自动验证 |
-| AI 生成代码 | 无法保证正确性 | 编译器闭环验证 |
+<p align="center">
+  <img src="docs/assets/comparison.svg" alt="传统 PLC 开发 vs RustPLC" width="750">
+</p>
 
 最后一行是关键：当 AI Agent 能生成工控程序时，**谁来保证 AI 生成的代码是安全的？** RustPLC 就是这个保证。
 
@@ -191,22 +208,9 @@ task cycle:
 
 ### 编译流水线
 
-```
-.plc 源码
-  │
-  ├─ Parser (PEG) ──→ AST ──→ Semantic Analysis ──→ IR (petgraph DiGraph)
-  │                              ↑ repeat/delay/sugar 展开
-  │                              ↑ 名称解析 + 约束检查
-  │
-  ├─ IR ──→ Safety Engine ──┐
-  ├─ IR ──→ Liveness Engine ─┤──→ verification_report.json
-  ├─ IR ──→ Timing Engine ──┤
-  ├─ IR ──→ Causality Engine ┘
-  │
-  ├─ IR ──→ Runtime Bridge ──→ runtime-core (no_std) ──→ RP2040 / STM32 固件
-  ├─ IR ──→ Codegen ──→ IEC 61131-3 ST ──→ OpenPLC / CODESYS
-  └─ IR ──→ SimIO ──→ SIL 仿真 ──→ trace.jsonl + wave.vcd
-```
+<p align="center">
+  <img src="docs/assets/pipeline.svg" alt="RustPLC 编译流水线" width="850">
+</p>
 
 ### 多目标部署
 
@@ -249,19 +253,9 @@ tick 级时序采样，p50/p95/p99 统计，超限自动拦截。发布包包含
 
 RustPLC 不只是 "AI 帮人写 PLC 程序"。更强的方向是成为 **AI for AI 工程平台**：
 
-```
-AI Agent 生成控制意图
-    ↓
-AI Agent 生成 .plc（拓扑 + 约束 + 任务）
-    ↓
-编译器形式化验证（四引擎并行证明）
-    ↓
-不通过 → 结构化错误报告 + 修复建议 → AI Agent 自动修复 → 重新验证
-    ↓
-通过 → 运行时 / 仿真 / 代码生成 / 发布包
-    ↓
-人类工程师：定义边界、审查证据、批准发布
-```
+<p align="center">
+  <img src="docs/assets/ai-loop.svg" alt="AI for AI 工程闭环" width="750">
+</p>
 
 这个方向成立的前提是四个契约：
 
@@ -314,41 +308,60 @@ Agent 可用的工具：
 
 ## 系统架构
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                           输入层                                      │
-├──────────────────────────────────────────────────────────────────────┤
-│  .plc DSL 文件                    场景 YAML                          │
-│  - topology (设备 + 连接)          - digital_inputs / analog_inputs   │
-│  - constraints (安全约束)          - fault injection (故障注入)        │
-│  - tasks (控制逻辑)               - tick_ms / duration_ticks         │
-└───────────────────┬──────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                      编译器核心 (120 个 Rust 源文件, 60K+ 行)          │
-├──────────────────────────────────────────────────────────────────────┤
-│  Parser (PEG 544 规则) → AST → Semantic (预处理 + IR 降级) → IR      │
-│                                                                      │
-│  四引擎并行验证:                                                      │
-│  Safety (BMC) │ Liveness (SCC) │ Timing (关键路径) │ Causality (BFS) │
-└───────────────────┬──────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                         运行时层 (7 个 crate)                         │
-├──────────────────────────────────────────────────────────────────────┤
-│  runtime-core (no_std)    SimIO (SIL 仿真)    Codegen (ST 生成)      │
-│  board-rp2040 (固件)      board-renode-stm32   web-server (Axum)     │
-└───────────────────┬──────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                           输出层                                      │
-├──────────────────────────────────────────────────────────────────────┤
-│  verification_report.json    IEC 61131-3 ST    firmware.uf2          │
-│  trace.jsonl + wave.vcd      timing_report     release-bundle/       │
-└──────────────────────────────────────────────────────────────────────┘
+> 完整的编译流水线图见上方 [编译流水线](#编译流水线) 章节。下图是分层总览：
+
+```mermaid
+graph TB
+    subgraph Input["📝 输入层"]
+        PLC[".plc DSL 文件<br/>topology · constraints · tasks"]
+        YAML["场景 YAML<br/>inputs · faults · tick_ms"]
+    end
+
+    subgraph Compiler["⚙️ 编译器核心 · 120 Rust 源文件 · 60K+ 行"]
+        PARSE["Parser<br/>PEG 544 规则"] --> AST["AST"]
+        AST --> SEM["Semantic<br/>预处理 + IR 降级"]
+        SEM --> IR["IR<br/>petgraph DiGraph"]
+    end
+
+    subgraph Verify["🔬 四引擎并行验证"]
+        S["Safety<br/>BMC"]
+        L["Liveness<br/>SCC"]
+        T["Timing<br/>关键路径"]
+        C["Causality<br/>BFS"]
+    end
+
+    subgraph Runtime["🏃 运行时层 · 7 crate"]
+        RT["runtime-core<br/>no_std"]
+        SIM["SimIO<br/>SIL 仿真"]
+        CG["Codegen<br/>IEC 61131-3 ST"]
+        RP["board-rp2040"]
+        RE["board-renode-stm32"]
+        WEB["web-server<br/>Axum"]
+    end
+
+    subgraph Output["📦 输出层"]
+        VR["verification_report.json"]
+        ST["IEC 61131-3 ST"]
+        FW["firmware.uf2"]
+        TR["trace.jsonl + wave.vcd"]
+        RB["release-bundle/"]
+    end
+
+    PLC --> PARSE
+    YAML --> SIM
+    IR --> S & L & T & C
+    S & L & T & C --> VR
+    IR --> RT & SIM & CG
+    RT --> FW
+    CG --> ST
+    SIM --> TR
+    RT --> RB
+
+    style Input fill:#fff3e0,stroke:#e8630a,stroke-width:2px
+    style Compiler fill:#e8f4fd,stroke:#0969da,stroke-width:2px
+    style Verify fill:#fce4ec,stroke:#cf222e,stroke-width:2px
+    style Runtime fill:#e6ffed,stroke:#2ea44f,stroke-width:2px
+    style Output fill:#f6f8fa,stroke:#d0d7de,stroke-width:2px
 ```
 
 ---

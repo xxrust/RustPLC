@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 340" width="800" height="340">
+  <rect width="800" height="340" rx="12" fill="#fafbfc" stroke="#e1e4e8" stroke-width="1"/>
+
+  <!-- Column headers -->
+  <rect x="160" y="15" width="290" height="36" rx="10" fill="#cf222e"/>
+  <text x="305" y="39" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="16" font-weight="700" fill="#fff">传统 PLC 开发</text>
+
+  <rect x="470" y="15" width="290" height="36" rx="10" fill="#2ea44f"/>
+  <text x="615" y="39" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="16" font-weight="700" fill="#fff">RustPLC</text>
+
+  <!-- Divider -->
+  <line x1="460" y1="60" x2="460" y2="320" stroke="#d0d7de" stroke-width="1.5" stroke-dasharray="4,4"/>
+
+  <!-- Row backgrounds -->
+  <rect x="20" y="60" width="760" height="50" fill="#fff"/>
+  <rect x="20" y="110" width="760" height="50" fill="#f6f8fa"/>
+  <rect x="20" y="160" width="760" height="50" fill="#fff"/>
+  <rect x="20" y="210" width="760" height="50" fill="#f6f8fa"/>
+  <rect x="20" y="260" width="760" height="50" fill="#fff"/>
+
+  <!-- Row 1: Collision -->
+  <text x="55" y="90" font-family="Segoe UI,system-ui,sans-serif" font-size="12" font-weight="600" fill="#1a1a2e">碰撞检测</text>
+  <text x="175" y="82" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#cf222e">现场调试时才发现</text>
+  <text x="175" y="98" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#57606a">两个气缸同时伸出 → 撞机 → 停产</text>
+  <text x="485" y="82" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#1a7f37">编译期 BMC 数学证明</text>
+  <text x="485" y="98" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#57606a">conflicts_with 约束 → 所有状态穷举验证</text>
+
+  <!-- Row 2: Deadlock -->
+  <text x="55" y="140" font-family="Segoe UI,system-ui,sans-serif" font-size="12" font-weight="600" fill="#1a1a2e">死锁分析</text>
+  <text x="175" y="132" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#cf222e">靠老师傅经验避免</text>
+  <text x="175" y="148" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#57606a">并发任务互等 → 产线卡死 → 人工重启</text>
+  <text x="485" y="132" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#1a7f37">SCC + 可达性自动检查</text>
+  <text x="485" y="148" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#57606a">强连通分量分析 → 编译期报告死锁路径</text>
+
+  <!-- Row 3: Timing -->
+  <text x="55" y="190" font-family="Segoe UI,system-ui,sans-serif" font-size="12" font-weight="600" fill="#1a1a2e">时序验证</text>
+  <text x="175" y="182" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#cf222e">示波器现场测量</text>
+  <text x="175" y="198" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#57606a">超时偶发 → 难复现 → 加大余量凑合用</text>
+  <text x="485" y="182" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#1a7f37">关键路径静态分析</text>
+  <text x="485" y="198" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#57606a">must_complete_within → 编译期证明时间预算</text>
+
+  <!-- Row 4: Causality -->
+  <text x="55" y="240" font-family="Segoe UI,system-ui,sans-serif" font-size="12" font-weight="600" fill="#1a1a2e">因果链</text>
+  <text x="175" y="232" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#cf222e">人工走查信号表</text>
+  <text x="175" y="248" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#57606a">漏接一根线 → 传感器无反馈 → 盲动</text>
+  <text x="485" y="232" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#1a7f37">拓扑 BFS 自动验证</text>
+  <text x="485" y="248" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#57606a">causality 声明 → 编译器验证信号链完整</text>
+
+  <!-- Row 5: AI -->
+  <text x="55" y="290" font-family="Segoe UI,system-ui,sans-serif" font-size="12" font-weight="600" fill="#1a1a2e">AI 生成代码</text>
+  <text x="175" y="282" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#cf222e">无法保证正确性</text>
+  <text x="175" y="298" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#57606a">AI 幻觉 → 生成的逻辑可能有隐藏缺陷</text>
+  <text x="485" y="282" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" font-weight="600" fill="#1a7f37">编译器闭环验证</text>
+  <text x="485" y="298" font-family="Segoe UI,system-ui,sans-serif" font-size="11.5" fill="#57606a">AI 生成 → 四引擎证明 → 不通过则自动修复</text>
+
+  <!-- Bottom highlight -->
+  <rect x="470" y="310" width="290" height="22" rx="11" fill="#2ea44f" opacity="0.1"/>
+  <text x="615" y="325" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="11" font-weight="600" fill="#1a7f37">如果编译通过，它就是安全的</text>
+</svg>

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200">
+  <rect width="800" height="200" rx="16" fill="#fafbfc" stroke="#e1e4e8" stroke-width="1.5"/>
+
+  <!-- Decorative gear -->
+  <g transform="translate(60, 100)">
+    <circle cx="0" cy="0" r="28" fill="none" stroke="#e8630a" stroke-width="3" opacity="0.2"/>
+    <circle cx="0" cy="0" r="18" fill="none" stroke="#e8630a" stroke-width="2.5" opacity="0.3"/>
+    <path d="M0,-32 L3,-22 L-3,-22 Z M0,32 L3,22 L-3,22 Z M-32,0 L-22,3 L-22,-3 Z M32,0 L22,3 L22,-3 Z M-22,-22 L-15,-17 L-17,-15 Z M22,22 L15,17 L17,15 Z M22,-22 L17,-15 L15,-17 Z M-22,22 L-17,15 L-15,17 Z" fill="#e8630a" opacity="0.25"/>
+    <circle cx="0" cy="0" r="12" fill="#e8630a" opacity="0.85"/>
+    <text x="0" y="5" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="28" fill="#fff">&#x2699;</text>
+  </g>
+
+  <!-- Title -->
+  <text x="120" y="90" font-family="Segoe UI,system-ui,sans-serif" font-size="52" font-weight="700" fill="#1a1a2e">RustPLC</text>
+
+  <!-- Subtitle -->
+  <text x="122" y="125" font-family="Segoe UI,system-ui,sans-serif" font-size="18" fill="#4a4a6a">Formally Verified Industrial Control Compiler</text>
+
+  <!-- Tags -->
+  <g transform="translate(122, 145)">
+    <rect x="0" y="0" width="90" height="24" rx="12" fill="#e8630a"/>
+    <text x="45" y="16" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="13" font-weight="600" fill="#fff">4 Engines</text>
+
+    <rect x="100" y="0" width="110" height="24" rx="12" fill="#2ea44f"/>
+    <text x="155" y="16" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="13" font-weight="600" fill="#fff">831 Tests</text>
+
+    <rect x="220" y="0" width="100" height="24" rx="12" fill="#0969da"/>
+    <text x="270" y="16" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="13" font-weight="600" fill="#fff">60K+ Lines</text>
+
+    <rect x="330" y="0" width="80" height="24" rx="12" fill="#8250df"/>
+    <text x="370" y="16" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="13" font-weight="600" fill="#fff">no_std</text>
+
+    <rect x="420" y="0" width="100" height="24" rx="12" fill="#cf222e"/>
+    <text x="470" y="16" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="13" font-weight="600" fill="#fff">AI for AI</text>
+  </g>
+
+  <!-- Decorative dots -->
+  <circle cx="700" cy="40" r="4" fill="#e8630a" opacity="0.15"/>
+  <circle cx="720" cy="55" r="6" fill="#0969da" opacity="0.12"/>
+  <circle cx="740" cy="35" r="3" fill="#2ea44f" opacity="0.18"/>
+  <circle cx="690" cy="65" r="5" fill="#8250df" opacity="0.1"/>
+  <circle cx="750" cy="60" r="4" fill="#cf222e" opacity="0.12"/>
+</svg>
