@@ -1763,6 +1763,12 @@ fn device_kind_name(kind: &DeviceKind) -> &'static str {
         DeviceKind::AnalogInput => "analog_input",
         DeviceKind::AnalogOutput => "analog_output",
         DeviceKind::Pid => "pid",
+        DeviceKind::ProportionalValve => "proportional_valve",
+        DeviceKind::Gripper => "gripper",
+        DeviceKind::Conveyor => "conveyor",
+        DeviceKind::Pump => "pump",
+        DeviceKind::Heater => "heater",
+        DeviceKind::VisionSensor => "vision_sensor",
     }
 }
 
@@ -1776,7 +1782,13 @@ fn device_bucket(kind: &DeviceKind) -> &'static str {
         | DeviceKind::Vfd
         | DeviceKind::ServoDrive
         | DeviceKind::CamCoupling
-        | DeviceKind::Pid => "actuator",
+        | DeviceKind::Pid
+        | DeviceKind::ProportionalValve
+        | DeviceKind::Gripper
+        | DeviceKind::Conveyor
+        | DeviceKind::Pump
+        | DeviceKind::Heater
+        | DeviceKind::VisionSensor => "actuator",
         DeviceKind::Sensor => "feedback",
         DeviceKind::DigitalInput | DeviceKind::AnalogInput => "io",
     }

@@ -1,5 +1,5 @@
 ﻿use crate::ast::{
-    ActionStatement, AxisAutoResetPolicy as AstAxisAutoResetPolicy,
+    ActionStatement, ActionTarget, AxisAutoResetPolicy as AstAxisAutoResetPolicy,
     AxisFaultContractDeclaration as AstAxisFaultContractDeclaration,
     AxisFaultPropagationScope as AstAxisFaultPropagationScope,
     AxisFaultRouteDirective as AstAxisFaultRouteDirective,
@@ -52,7 +52,12 @@ use crate::ir::{
     WorkpiecePropertyTypeDef as IrWorkpiecePropertyTypeDef, WorkpieceSiteDef as IrWorkpieceSiteDef,
     WorkpieceSiteKind as IrWorkpieceSiteKind, WorkpieceTypeDef as IrWorkpieceTypeDef,
 };
-use crate::plc_port::{PlcPortKind, canonical_physical_device_name, parse_plc_port_ref};
+use crate::plc_port::{
+    PlcPortKind, canonical_physical_device_name, parse_physical_plc_port_ref, parse_plc_port_ref,
+};
+use crate::topology_semantic_gate::{
+    TopologySemanticGateError, validate_removed_legacy_io_model, validate_topology_semantics,
+};
 use petgraph::graph::NodeIndex;
 use runtime_core::MAX_VARIABLES as RUNTIME_MAX_VARIABLES;
 use serde::Deserialize;

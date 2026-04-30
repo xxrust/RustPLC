@@ -1326,6 +1326,12 @@ fn parse_device_type(pair: Pair<Rule>) -> Result<DeviceType, PlcError> {
         "analog_input" => Ok(DeviceType::AnalogInput),
         "analog_output" => Ok(DeviceType::AnalogOutput),
         "pid" => Ok(DeviceType::Pid),
+        "proportional_valve" => Ok(DeviceType::ProportionalValve),
+        "gripper" => Ok(DeviceType::Gripper),
+        "conveyor" => Ok(DeviceType::Conveyor),
+        "pump" => Ok(DeviceType::Pump),
+        "heater" => Ok(DeviceType::Heater),
+        "vision_sensor" => Ok(DeviceType::VisionSensor),
         other => Err(PlcError::parse(line, format!("未知设备类型: {other}"))),
     }
 }

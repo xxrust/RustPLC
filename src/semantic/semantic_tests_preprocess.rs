@@ -99,6 +99,89 @@ task main:
 }
 
 #[test]
+fn source_topology_gate_rejects_raw_io_devices_before_ir_builders() {
+    let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device Y0: digital_output { purpose: "raw coil" }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let direct_errors =
+        validate_source_topology_semantics(&program).expect_err("source gate should reject raw IO");
+    let builder_errors =
+        build_state_machine(&program).expect_err("state machine builder should run source gate");
+    let rendered = direct_errors
+        .iter()
+        .chain(builder_errors.iter())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered.contains("SEM-108") && rendered.contains("digital_output"),
+        "expected SEM-108 raw IO rejection, got: {rendered}"
+    );
+}
+
+#[test]
+fn source_state_machine_entry_rejects_raw_axis_port_bypass() {
+    let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: default }
+
+[constraints]
+
+[tasks]
+task main:
+    step jog:
+        action: set axis_x.pulse on
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let errors = build_state_machine(&program).expect_err("raw axis pulse should be rejected");
+    let rendered = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered.contains("SEM-110") && rendered.contains("axis_x.pulse"),
+        "expected raw axis port bypass rejection, got: {rendered}"
+    );
+}
+
+#[test]
+fn source_topology_gate_accepts_channel_bindings_not_io_devices() {
+    let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device pressure_sensor: sensor { ports: [out:analog:producer] }
+device valve: proportional_valve
+
+relation { from: pressure_sensor.out, to: plc_main.AI0, via: reports_to }
+relation { from: plc_main.AO0, to: valve.cmd, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    validate_source_topology_semantics(&program).expect("channel bindings should pass source gate");
+}
+
+#[test]
 fn preprocess_with_library_rejects_unknown_motor_extension_param_for_device_type() {
     let input = r#"
 [topology]

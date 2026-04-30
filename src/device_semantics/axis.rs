@@ -6,7 +6,9 @@ use crate::ast::{
 };
 use crate::axis_profile::resolve_axis_profiles;
 use crate::error::PlcError;
-use crate::ir::{AxisBrakeConfig, AxisOrientation, BinaryValue as IrBinaryValue, DeviceKind};
+use crate::ir::{
+    AxisBrakeConfig, AxisDeviceType, AxisOrientation, BinaryValue as IrBinaryValue, DeviceKind,
+};
 use rustplc_device_semantics::axis::AxisFaultRouteKind;
 pub use rustplc_device_semantics::axis::{
     DEFAULT_PORT, DEFAULT_REQUIRE_HOMED, FAMILY, MOVE_ABSOLUTE_ACTION, MOVE_RELATIVE_ACTION,
@@ -29,6 +31,42 @@ pub const AXIS_MOTION_CAPABILITY: DeviceActionContract<'static> = DeviceActionCo
         DeviceActionResultBucket::SafetyFault,
     ],
 };
+
+pub const AXIS_CAPABILITY_DEVICE_TYPES: &[&str] = &["stepper_motor", "servo_drive"];
+
+pub const fn device_type_supports_axis_motion(device_type: &DeviceType) -> bool {
+    matches!(
+        device_type,
+        DeviceType::StepperMotor | DeviceType::ServoDrive
+    )
+}
+
+pub const fn device_kind_supports_axis_motion(kind: &DeviceKind) -> bool {
+    matches!(kind, DeviceKind::StepperMotor | DeviceKind::ServoDrive)
+}
+
+pub fn axis_device_type_from_ast(device_type: &DeviceType) -> Option<AxisDeviceType> {
+    match device_type {
+        DeviceType::StepperMotor => Some(AxisDeviceType::StepperMotor),
+        DeviceType::ServoDrive => Some(AxisDeviceType::ServoDrive),
+        _ => None,
+    }
+}
+
+pub const fn axis_device_type_name(axis_type: &AxisDeviceType) -> &'static str {
+    match axis_type {
+        AxisDeviceType::StepperMotor => "stepper_motor",
+        AxisDeviceType::ServoDrive => "servo_drive",
+    }
+}
+
+pub fn axis_capability_device_type_text() -> &'static str {
+    "stepper_motor or servo_drive"
+}
+
+pub fn axis_capability_device_type_text_zh() -> &'static str {
+    "stepper_motor/servo_drive"
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxisMotionBranchKind {
@@ -183,10 +221,7 @@ pub fn resolve_axis_motion_parameters_in_tasks(
 
     let mut device_default_param_sets = HashMap::<String, String>::new();
     for device in &topology.devices {
-        if !matches!(
-            device.device_type,
-            DeviceType::StepperMotor | DeviceType::ServoDrive
-        ) {
+        if !device_type_supports_axis_motion(&device.device_type) {
             continue;
         }
         if let Some(default_set) = device
@@ -229,10 +264,7 @@ pub fn validate_vertical_axis_brake_sequence_in_tasks(
         .iter()
         .filter(|device| {
             disable_targets.contains(&device.name)
-                && matches!(
-                    device.device_type,
-                    DeviceType::StepperMotor | DeviceType::ServoDrive
-                )
+                && device_type_supports_axis_motion(&device.device_type)
                 && device
                     .attributes
                     .model_ref
@@ -469,20 +501,28 @@ fn validate_axis_motion_target_kind(
     errors: &mut Vec<PlcError>,
 ) {
     match device_kinds.get(target) {
-        Some(DeviceKind::StepperMotor) | Some(DeviceKind::ServoDrive) => {}
+        Some(kind) if device_kind_supports_axis_motion(kind) => {}
         Some(kind) => errors.push(PlcError::semantic_with_reason(
             line,
-            format!("[AXIS-005] axis target '{target}' must be stepper_motor or servo_drive."),
             format!(
-                "step '{step_name}' 当前目标类型为 {}。请改用 stepper_motor/servo_drive 设备。",
-                device_kind_name(kind)
+                "[AXIS-005] axis target '{target}' must be {}.",
+                axis_capability_device_type_text()
+            ),
+            format!(
+                "step '{step_name}' 当前目标类型为 {}。请改用 {} 设备。",
+                device_kind_name(kind),
+                axis_capability_device_type_text_zh()
             ),
         )),
         None => errors.push(PlcError::semantic_with_reason(
             line,
-            format!("[AXIS-005] axis target '{target}' must be stepper_motor or servo_drive."),
             format!(
-                "step '{step_name}' 引用了未定义设备。请先在 [topology] 声明该轴设备，且类型为 stepper_motor 或 servo_drive。"
+                "[AXIS-005] axis target '{target}' must be {}.",
+                axis_capability_device_type_text()
+            ),
+            format!(
+                "step '{step_name}' 引用了未定义设备。请先在 [topology] 声明该轴设备，且类型为 {}。",
+                axis_capability_device_type_text_zh()
             ),
         )),
     }
@@ -1060,8 +1100,14 @@ fn load_axis_motion_param_sets() -> Result<HashMap<String, AxisMotionParamSetDef
 
 #[cfg(test)]
 mod tests {
-    use super::{AXIS_MOTION_ACTION_CONTRACT, AXIS_MOTION_CAPABILITY, AxisMotionBranchKind};
+    use super::{
+        AXIS_CAPABILITY_DEVICE_TYPES, AXIS_MOTION_ACTION_CONTRACT, AXIS_MOTION_CAPABILITY,
+        AxisMotionBranchKind, axis_device_type_from_ast, axis_device_type_name,
+        device_kind_supports_axis_motion, device_type_supports_axis_motion,
+    };
+    use crate::ast::DeviceType;
     use crate::device_semantics::DeviceActionResultBucket;
+    use crate::ir::{AxisDeviceType, DeviceKind};
     use rustplc_device_semantics::axis::{
         DEFAULT_PORT, DEFAULT_REQUIRE_HOMED, FAMILY, MOVE_ABSOLUTE_ACTION, MOVE_RELATIVE_ACTION,
     };
@@ -1110,6 +1156,43 @@ mod tests {
                 DeviceActionResultBucket::MotionFault,
                 DeviceActionResultBucket::SafetyFault,
             ]
+        );
+    }
+
+    #[test]
+    fn axis_capability_helper_accepts_current_axis_device_types_only() {
+        assert_eq!(
+            AXIS_CAPABILITY_DEVICE_TYPES,
+            ["stepper_motor", "servo_drive"]
+        );
+
+        assert!(device_type_supports_axis_motion(&DeviceType::StepperMotor));
+        assert!(device_type_supports_axis_motion(&DeviceType::ServoDrive));
+        assert!(!device_type_supports_axis_motion(&DeviceType::Motor));
+
+        assert!(device_kind_supports_axis_motion(&DeviceKind::StepperMotor));
+        assert!(device_kind_supports_axis_motion(&DeviceKind::ServoDrive));
+        assert!(!device_kind_supports_axis_motion(&DeviceKind::Motor));
+    }
+
+    #[test]
+    fn axis_capability_helper_maps_ast_type_to_axis_profile_type() {
+        assert_eq!(
+            axis_device_type_from_ast(&DeviceType::StepperMotor),
+            Some(AxisDeviceType::StepperMotor)
+        );
+        assert_eq!(
+            axis_device_type_from_ast(&DeviceType::ServoDrive),
+            Some(AxisDeviceType::ServoDrive)
+        );
+        assert_eq!(axis_device_type_from_ast(&DeviceType::Motor), None);
+        assert_eq!(
+            axis_device_type_name(&AxisDeviceType::StepperMotor),
+            "stepper_motor"
+        );
+        assert_eq!(
+            axis_device_type_name(&AxisDeviceType::ServoDrive),
+            "servo_drive"
         );
     }
 }

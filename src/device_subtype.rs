@@ -75,6 +75,12 @@ fn device_type_label(device_type: &DeviceType) -> &'static str {
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
+        DeviceType::ProportionalValve => "proportional_valve",
+        DeviceType::Gripper => "gripper",
+        DeviceType::Conveyor => "conveyor",
+        DeviceType::Pump => "pump",
+        DeviceType::Heater => "heater",
+        DeviceType::VisionSensor => "vision_sensor",
     }
 }
 

@@ -1060,6 +1060,12 @@ fn ast_type_to_ir_kind(device_type: &DeviceType) -> DeviceKind {
         DeviceType::AnalogInput => DeviceKind::AnalogInput,
         DeviceType::AnalogOutput => DeviceKind::AnalogOutput,
         DeviceType::Pid => DeviceKind::Pid,
+        DeviceType::ProportionalValve => DeviceKind::ProportionalValve,
+        DeviceType::Gripper => DeviceKind::Gripper,
+        DeviceType::Conveyor => DeviceKind::Conveyor,
+        DeviceType::Pump => DeviceKind::Pump,
+        DeviceType::Heater => DeviceKind::Heater,
+        DeviceType::VisionSensor => DeviceKind::VisionSensor,
     }
 }
 
@@ -1128,5 +1134,11 @@ fn device_kind_name(kind: &DeviceKind) -> &'static str {
         DeviceKind::AnalogInput => "analog_input",
         DeviceKind::AnalogOutput => "analog_output",
         DeviceKind::Pid => "pid",
+        DeviceKind::ProportionalValve => "proportional_valve",
+        DeviceKind::Gripper => "gripper",
+        DeviceKind::Conveyor => "conveyor",
+        DeviceKind::Pump => "pump",
+        DeviceKind::Heater => "heater",
+        DeviceKind::VisionSensor => "vision_sensor",
     }
 }

@@ -204,7 +204,13 @@ fn default_states_for_kind(kind: &DeviceKind) -> &'static [&'static str] {
         | DeviceKind::StepperMotor
         | DeviceKind::Vfd
         | DeviceKind::ServoDrive
-        | DeviceKind::CamCoupling => &["on", "off", "forward", "reverse", "active", "idle"],
+        | DeviceKind::CamCoupling
+        | DeviceKind::ProportionalValve
+        | DeviceKind::Gripper
+        | DeviceKind::Conveyor
+        | DeviceKind::Pump
+        | DeviceKind::Heater
+        | DeviceKind::VisionSensor => &["on", "off", "forward", "reverse", "active", "idle"],
         DeviceKind::AnalogInput | DeviceKind::AnalogOutput | DeviceKind::Pid | DeviceKind::Plc => {
             &[]
         }

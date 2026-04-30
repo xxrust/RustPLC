@@ -1,6 +1,6 @@
 use crate::error::PlcError;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -12,6 +12,18 @@ pub struct DeviceDef {
     pub parameters: Vec<DeviceParameterDef>,
     #[serde(default)]
     pub device_constraints: DeviceConstraints,
+    #[serde(default)]
+    pub interface_contract: Option<DeviceInterfaceContract>,
+    #[serde(default)]
+    pub capabilities: Vec<DeviceCapability>,
+    #[serde(default)]
+    pub defaults: Option<DeviceDefaults>,
+    #[serde(default)]
+    pub alarm_map: Option<DeviceAlarmMap>,
+    #[serde(default)]
+    pub verification_contract: Option<DeviceVerificationContract>,
+    #[serde(default)]
+    pub codegen_support: Option<DeviceCodegenSupport>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -82,6 +94,124 @@ pub struct DeviceParameterDef {
     pub options: Vec<String>,
     #[serde(default)]
     pub description: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DeviceInterfaceContract {
+    #[serde(default)]
+    pub ports: Vec<DeviceInterfacePortContract>,
+    #[serde(default)]
+    pub actions: Vec<DeviceInterfaceActionContract>,
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeviceInterfacePortContract {
+    pub name: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub allowed_states: Vec<String>,
+    #[serde(default)]
+    pub direction: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeviceInterfaceActionContract {
+    pub name: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub consumes: Vec<String>,
+    #[serde(default)]
+    pub produces: Vec<String>,
+    #[serde(default)]
+    pub faults: Vec<String>,
+    #[serde(default)]
+    pub description: String,
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeviceCapability {
+    pub name: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub ports: Vec<String>,
+    #[serde(default)]
+    pub parameters: Vec<String>,
+    #[serde(default)]
+    pub description: String,
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DeviceDefaults {
+    #[serde(default)]
+    pub parameters: BTreeMap<String, toml::Value>,
+    #[serde(default)]
+    pub ports: BTreeMap<String, String>,
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DeviceAlarmMap {
+    #[serde(default)]
+    pub entries: Vec<DeviceAlarmMapping>,
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeviceAlarmMapping {
+    pub code: String,
+    #[serde(default)]
+    pub condition: String,
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub recoverable: bool,
+    #[serde(default)]
+    pub description: String,
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DeviceVerificationContract {
+    #[serde(default)]
+    pub assumptions: Vec<String>,
+    #[serde(default)]
+    pub safety: Vec<String>,
+    #[serde(default)]
+    pub liveness: Vec<String>,
+    #[serde(default)]
+    pub timing: Vec<String>,
+    #[serde(default)]
+    pub causality: Vec<String>,
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DeviceCodegenSupport {
+    #[serde(default)]
+    pub targets: Vec<String>,
+    #[serde(default)]
+    pub unsupported_targets: Vec<String>,
+    #[serde(default)]
+    pub notes: String,
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, toml::Value>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -222,5 +352,149 @@ reason = "双线圈不能同时通电"
         assert_eq!(def.interfaces.ports[0].states, vec!["on", "off"]);
         assert_eq!(def.device_constraints.safety.len(), 1);
         assert_eq!(def.device_constraints.safety[0].relation, "conflicts_with");
+        assert!(def.interface_contract.is_none());
+        assert!(def.capabilities.is_empty());
+        assert!(def.defaults.is_none());
+        assert!(def.alarm_map.is_none());
+        assert!(def.verification_contract.is_none());
+        assert!(def.codegen_support.is_none());
+    }
+
+    #[test]
+    fn parse_toml_with_extended_contract_fields() {
+        let toml_str = r#"
+[identity]
+name = "Servo Drive"
+type = "servo_drive"
+
+[[interfaces.ports]]
+name = "enable"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[interface_contract]
+version = "1"
+
+[[interface_contract.ports]]
+name = "enable"
+required = true
+allowed_states = ["on", "off"]
+direction = "output"
+
+[[interface_contract.actions]]
+name = "axis.move_absolute"
+required = true
+consumes = ["enable"]
+produces = ["in_position"]
+faults = ["timeout", "motion_fault"]
+
+[[capabilities]]
+name = "positioning"
+kind = "motion"
+ports = ["enable", "in_position"]
+parameters = ["max_speed"]
+description = "Absolute positioning support"
+
+[defaults.parameters]
+max_speed = 1200
+home_required = true
+
+[defaults.ports]
+enable = "off"
+
+[alarm_map]
+source = "drive_status"
+
+[[alarm_map.entries]]
+code = "ALM_TIMEOUT"
+condition = "timeout"
+severity = "fault"
+recoverable = true
+description = "Motion command timed out"
+
+[verification_contract]
+assumptions = ["axis is homed before motion"]
+safety = ["enable must be off on fault"]
+liveness = ["move eventually reaches done or fault"]
+timing = ["move_absolute completes within configured timeout"]
+causality = ["command edge drives motion request"]
+
+[codegen_support]
+targets = ["st", "openplc"]
+unsupported_targets = ["ladder"]
+notes = "Requires motion FB mapping"
+"#;
+
+        let def: DeviceDef = toml::from_str(toml_str).unwrap();
+
+        let interface_contract = def.interface_contract.as_ref().unwrap();
+        assert_eq!(
+            interface_contract
+                .metadata
+                .get("version")
+                .and_then(toml::Value::as_str),
+            Some("1")
+        );
+        assert_eq!(interface_contract.ports.len(), 1);
+        assert_eq!(interface_contract.ports[0].name, "enable");
+        assert!(interface_contract.ports[0].required);
+        assert_eq!(interface_contract.actions.len(), 1);
+        assert_eq!(
+            interface_contract.actions[0].faults,
+            vec!["timeout", "motion_fault"]
+        );
+
+        assert_eq!(def.capabilities.len(), 1);
+        assert_eq!(def.capabilities[0].name, "positioning");
+        assert_eq!(def.capabilities[0].kind, "motion");
+
+        let defaults = def.defaults.as_ref().unwrap();
+        assert_eq!(
+            defaults
+                .parameters
+                .get("max_speed")
+                .and_then(toml::Value::as_integer),
+            Some(1200)
+        );
+        assert_eq!(
+            defaults
+                .parameters
+                .get("home_required")
+                .and_then(toml::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            defaults.ports.get("enable").map(String::as_str),
+            Some("off")
+        );
+
+        let alarm_map = def.alarm_map.as_ref().unwrap();
+        assert_eq!(
+            alarm_map
+                .metadata
+                .get("source")
+                .and_then(toml::Value::as_str),
+            Some("drive_status")
+        );
+        assert_eq!(alarm_map.entries.len(), 1);
+        assert_eq!(alarm_map.entries[0].code, "ALM_TIMEOUT");
+        assert!(alarm_map.entries[0].recoverable);
+
+        let verification_contract = def.verification_contract.as_ref().unwrap();
+        assert_eq!(
+            verification_contract.safety,
+            vec!["enable must be off on fault"]
+        );
+        assert_eq!(
+            verification_contract.causality,
+            vec!["command edge drives motion request"]
+        );
+
+        let codegen_support = def.codegen_support.as_ref().unwrap();
+        assert_eq!(codegen_support.targets, vec!["st", "openplc"]);
+        assert_eq!(codegen_support.unsupported_targets, vec!["ladder"]);
+        assert_eq!(codegen_support.notes, "Requires motion FB mapping");
     }
 }

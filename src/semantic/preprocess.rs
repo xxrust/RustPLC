@@ -53,6 +53,12 @@ fn device_type_str(device_type: &DeviceType) -> &'static str {
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
+        DeviceType::ProportionalValve => "proportional_valve",
+        DeviceType::Gripper => "gripper",
+        DeviceType::Conveyor => "conveyor",
+        DeviceType::Pump => "pump",
+        DeviceType::Heater => "heater",
+        DeviceType::VisionSensor => "vision_sensor",
     }
 }
 
@@ -487,6 +493,12 @@ fn implicit_port_ids_for_device_type(device_type: &DeviceType) -> &'static [&'st
         DeviceType::AnalogInput => &["in"],
         DeviceType::AnalogOutput => &["out"],
         DeviceType::Pid => &["in", "out"],
+        DeviceType::ProportionalValve => &["cmd", "feedback", "fault"],
+        DeviceType::Gripper => &["cmd", "gripped", "released", "part_present", "fault"],
+        DeviceType::Conveyor => &["drive", "running", "jam", "fault"],
+        DeviceType::Pump => &["drive", "running", "pressure", "flow", "fault"],
+        DeviceType::Heater => &["power", "temperature", "fault"],
+        DeviceType::VisionSensor => &["trigger", "ready", "busy", "pass", "fail", "fault"],
     }
 }
 
@@ -1241,6 +1253,12 @@ fn device_type_name(device_type: &DeviceType) -> &'static str {
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
+        DeviceType::ProportionalValve => "proportional_valve",
+        DeviceType::Gripper => "gripper",
+        DeviceType::Conveyor => "conveyor",
+        DeviceType::Pump => "pump",
+        DeviceType::Heater => "heater",
+        DeviceType::VisionSensor => "vision_sensor",
     }
 }
 

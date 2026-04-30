@@ -2,6 +2,7 @@ pub mod axis;
 pub mod cam;
 pub mod cylinder;
 pub mod motor;
+pub mod process;
 
 use crate::ast::TasksSection;
 use crate::error::PlcError;
@@ -40,6 +41,12 @@ pub(crate) const fn device_kind_name(kind: &DeviceKind) -> &'static str {
         DeviceKind::AnalogInput => "analog_input",
         DeviceKind::AnalogOutput => "analog_output",
         DeviceKind::Pid => "pid",
+        DeviceKind::ProportionalValve => "proportional_valve",
+        DeviceKind::Gripper => "gripper",
+        DeviceKind::Conveyor => "conveyor",
+        DeviceKind::Pump => "pump",
+        DeviceKind::Heater => "heater",
+        DeviceKind::VisionSensor => "vision_sensor",
     }
 }
 

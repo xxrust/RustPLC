@@ -38,6 +38,12 @@ device_type = {
     | "analog_output"
     | "analog_input"
     | "pid"
+    | "proportional_valve"
+    | "gripper"
+    | "conveyor"
+    | "pump"
+    | "heater"
+    | "vision_sensor"
 }
 
 attribute_name = {

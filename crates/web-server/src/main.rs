@@ -492,6 +492,44 @@ fn implicit_ports_for_device_type(device_type: &DeviceType) -> Vec<DevicePort> {
             device_port("in", PortType::Analog, PortRole::Consumer),
             device_port("out", PortType::Analog, PortRole::Producer),
         ],
+        DeviceType::ProportionalValve => vec![
+            device_port("cmd", PortType::Analog, PortRole::Consumer),
+            device_port("feedback", PortType::Analog, PortRole::Producer),
+            device_port("fault", PortType::Logical, PortRole::Producer),
+        ],
+        DeviceType::Gripper => vec![
+            device_port("cmd", PortType::Digital, PortRole::Consumer),
+            device_port("gripped", PortType::Logical, PortRole::Producer),
+            device_port("released", PortType::Logical, PortRole::Producer),
+            device_port("part_present", PortType::Logical, PortRole::Producer),
+            device_port("fault", PortType::Logical, PortRole::Producer),
+        ],
+        DeviceType::Conveyor => vec![
+            device_port("drive", PortType::Digital, PortRole::Consumer),
+            device_port("running", PortType::Logical, PortRole::Producer),
+            device_port("jam", PortType::Logical, PortRole::Producer),
+            device_port("fault", PortType::Logical, PortRole::Producer),
+        ],
+        DeviceType::Pump => vec![
+            device_port("drive", PortType::Digital, PortRole::Consumer),
+            device_port("running", PortType::Logical, PortRole::Producer),
+            device_port("pressure", PortType::Analog, PortRole::Producer),
+            device_port("flow", PortType::Analog, PortRole::Producer),
+            device_port("fault", PortType::Logical, PortRole::Producer),
+        ],
+        DeviceType::Heater => vec![
+            device_port("power", PortType::Digital, PortRole::Consumer),
+            device_port("temperature", PortType::Analog, PortRole::Producer),
+            device_port("fault", PortType::Logical, PortRole::Producer),
+        ],
+        DeviceType::VisionSensor => vec![
+            device_port("trigger", PortType::Digital, PortRole::Consumer),
+            device_port("ready", PortType::Logical, PortRole::Producer),
+            device_port("busy", PortType::Logical, PortRole::Producer),
+            device_port("pass", PortType::Logical, PortRole::Producer),
+            device_port("fail", PortType::Logical, PortRole::Producer),
+            device_port("fault", PortType::Logical, PortRole::Producer),
+        ],
     }
 }
 
@@ -1579,6 +1617,12 @@ fn map_plc_device_to_component_id(kind: &DeviceType) -> &'static str {
         DeviceType::Pid => "generic",
         DeviceType::Plc => "generic",
         DeviceType::CamCoupling => "generic",
+        DeviceType::ProportionalValve => "generic",
+        DeviceType::Gripper => "generic",
+        DeviceType::Conveyor => "generic",
+        DeviceType::Pump => "generic",
+        DeviceType::Heater => "generic",
+        DeviceType::VisionSensor => "generic",
     }
 }
 
@@ -1598,6 +1642,12 @@ fn plc_device_type_name(kind: &DeviceType) -> &'static str {
         DeviceType::Pid => "pid",
         DeviceType::Plc => "plc",
         DeviceType::CamCoupling => "cam_coupling",
+        DeviceType::ProportionalValve => "proportional_valve",
+        DeviceType::Gripper => "gripper",
+        DeviceType::Conveyor => "conveyor",
+        DeviceType::Pump => "pump",
+        DeviceType::Heater => "heater",
+        DeviceType::VisionSensor => "vision_sensor",
     }
 }
 
@@ -1616,7 +1666,13 @@ fn endpoint_kind_for_device_type(kind: &DeviceType) -> &'static str {
         | DeviceType::Vfd
         | DeviceType::ServoDrive
         | DeviceType::Pid
-        | DeviceType::CamCoupling => "process_device",
+        | DeviceType::CamCoupling
+        | DeviceType::ProportionalValve
+        | DeviceType::Gripper
+        | DeviceType::Conveyor
+        | DeviceType::Pump
+        | DeviceType::Heater
+        | DeviceType::VisionSensor => "process_device",
     }
 }
 

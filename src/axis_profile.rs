@@ -1,6 +1,9 @@
-use crate::ast::{DeviceDeclaration, DeviceType};
+use crate::ast::DeviceDeclaration;
+use crate::device_semantics::axis::{
+    axis_device_type_from_ast, axis_device_type_name, device_type_supports_axis_motion,
+};
 use crate::error::PlcError;
-use crate::ir::{AxisBrakeConfig, AxisDeviceType, AxisOrientation, AxisProfile, BinaryValue};
+use crate::ir::{AxisBrakeConfig, AxisOrientation, AxisProfile, BinaryValue};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -97,12 +100,7 @@ fn resolve_axis_profiles_with_dirs(
 ) -> Result<BTreeMap<String, AxisProfile>, Vec<PlcError>> {
     let axis_devices = devices
         .iter()
-        .filter(|device| {
-            matches!(
-                device.device_type,
-                DeviceType::StepperMotor | DeviceType::ServoDrive
-            )
-        })
+        .filter(|device| device_type_supports_axis_motion(&device.device_type))
         .collect::<Vec<_>>();
 
     if axis_devices.is_empty() {
@@ -206,13 +204,10 @@ fn resolve_axis_profiles_with_dirs(
             continue;
         };
 
-        let axis_type = match device.device_type {
-            DeviceType::StepperMotor => AxisDeviceType::StepperMotor,
-            DeviceType::ServoDrive => AxisDeviceType::ServoDrive,
-            _ => unreachable!("axis filter should only keep stepper/servo"),
-        };
+        let axis_type = axis_device_type_from_ast(&device.device_type)
+            .expect("axis filter should only keep axis-capable device types");
 
-        let expected_type = axis_type_name(&axis_type);
+        let expected_type = axis_device_type_name(&axis_type);
         if model.device_type.trim() != expected_type {
             errors.push(PlcError::semantic_with_reason(
                 line,
@@ -547,13 +542,6 @@ fn resolve_axis_profiles_with_dirs(
     }
 }
 
-fn axis_type_name(axis_type: &AxisDeviceType) -> &'static str {
-    match axis_type {
-        AxisDeviceType::StepperMotor => "stepper_motor",
-        AxisDeviceType::ServoDrive => "servo_drive",
-    }
-}
-
 fn parse_axis_orientation(raw: Option<&str>) -> Result<AxisOrientation, String> {
     match raw.map(str::trim).filter(|value| !value.is_empty()) {
         None => Ok(AxisOrientation::Horizontal),
@@ -815,6 +803,7 @@ impl NamedDef for AxisMotionParamSetDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::AxisDeviceType;
     use crate::parser::parse_plc;
     use std::collections::BTreeMap;
     use std::fs;
@@ -987,6 +976,35 @@ deceleration = 1800.0
         assert_eq!(profile.motor_class_id, "stepper_basic");
         assert_eq!(profile.max_speed, 3000.0);
         assert_eq!(profile.position_unit, "pulse");
+
+        fs::remove_dir_all(dirs.root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn resolves_servo_axis_profile_through_axis_capability_helper() {
+        let dirs = mk_temp_axis_dirs("servo_ok");
+        seed_default_axis_defs(&dirs);
+        fs::write(
+            dirs.configs.join("servo_default.toml"),
+            r#"
+name = "servo_default"
+model_id = "servo_generic"
+position_unit = "deg"
+speed_limit = 150.0
+acceleration_limit = 300.0
+"#,
+        )
+        .expect("write servo config");
+
+        let devices = parse_devices(
+            "device axis_y: servo_drive { model_ref: servo_generic, config_ref: servo_default }",
+        );
+        let profiles = resolve_with_fixture(&devices, &dirs).expect("servo profile should resolve");
+        let profile = profiles.get("axis_y").expect("axis_y profile should exist");
+        assert_eq!(profile.device_type, AxisDeviceType::ServoDrive);
+        assert_eq!(profile.model_ref, "servo_generic");
+        assert_eq!(profile.config_ref, "servo_default");
+        assert_eq!(profile.position_unit, "deg");
 
         fs::remove_dir_all(dirs.root).expect("cleanup temp dir");
     }

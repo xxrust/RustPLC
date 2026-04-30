@@ -918,6 +918,13 @@ device pick_servo: servo_drive {
     electronic_gear_den: 1,
     positioning_window: 5
 }
+
+device flow_valve: proportional_valve
+device hand: gripper
+device belt: conveyor
+device coolant_pump: pump
+device oven_heater: heater
+device camera: vision_sensor
 "#;
 
         assert!(parse_topology(input).is_ok());

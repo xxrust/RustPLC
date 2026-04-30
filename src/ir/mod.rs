@@ -25,6 +25,12 @@ pub enum DeviceKind {
     AnalogInput,
     AnalogOutput,
     Pid,
+    ProportionalValve,
+    Gripper,
+    Conveyor,
+    Pump,
+    Heater,
+    VisionSensor,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

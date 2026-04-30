@@ -928,6 +928,149 @@ fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
             gate_port("in", PortType::Analog, PortRole::Consumer, None),
             gate_port("out", PortType::Analog, PortRole::Producer, None),
         ],
+        DeviceType::ProportionalValve => vec![
+            gate_port(
+                "cmd",
+                PortType::Analog,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "feedback",
+                PortType::Analog,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+        ],
+        DeviceType::Gripper => vec![
+            gate_port(
+                "cmd",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "gripped",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "released",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "part_present",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+        ],
+        DeviceType::Conveyor => vec![
+            gate_port(
+                "drive",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "running",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port("jam", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+        ],
+        DeviceType::Pump => vec![
+            gate_port(
+                "drive",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "running",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "pressure",
+                PortType::Analog,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port("flow", PortType::Analog, PortRole::Producer, Some("state")),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+        ],
+        DeviceType::Heater => vec![
+            gate_port(
+                "power",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "temperature",
+                PortType::Analog,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+        ],
+        DeviceType::VisionSensor => vec![
+            gate_port(
+                "trigger",
+                PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "ready",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+            gate_port("busy", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port("pass", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port("fail", PortType::Logical, PortRole::Producer, Some("state")),
+            gate_port(
+                "fault",
+                PortType::Logical,
+                PortRole::Producer,
+                Some("state"),
+            ),
+        ],
     }
 }
 
@@ -1220,6 +1363,12 @@ fn device_type_name(device_type: &DeviceType) -> &'static str {
         DeviceType::AnalogInput => "analog_input",
         DeviceType::AnalogOutput => "analog_output",
         DeviceType::Pid => "pid",
+        DeviceType::ProportionalValve => "proportional_valve",
+        DeviceType::Gripper => "gripper",
+        DeviceType::Conveyor => "conveyor",
+        DeviceType::Pump => "pump",
+        DeviceType::Heater => "heater",
+        DeviceType::VisionSensor => "vision_sensor",
     }
 }
 
