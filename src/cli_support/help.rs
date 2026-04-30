@@ -421,8 +421,8 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
         }
         "new" => &[
             "`single-file` keeps the existing Day-1 scaffold shape.",
-            "`structured-fragments` creates a `.bundle.toml` entry plus semantic fragment directories for multi-domain projects.",
-            "`--delivery-layer` defaults to `station` and adds a delivery asset skeleton with its own docs, source entry, and nominal scenario.",
+            "`structured-fragments` creates a phased directory layout (00_topology/ through 07_hmi/) with a v2 bundle entry for multi-agent projects.",
+            "`--delivery-layer` defaults to `station` and is recorded as metadata in rustplc.project.toml.",
         ],
         "sim" => &["This command runs the built-in demo program, not a user PLC file."],
         "sim-plc" => &[
@@ -512,9 +512,9 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         "commissioning-run" => &[
             "rust_plc commissioning-run examples/project_scaffold_demo/plc/main.plc --out-dir out/commissioning/project_scaffold_demo",
         ],
-        "pil-run" => {
-            &["rust_plc pil-run examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml"]
-        }
+        "pil-run" => &[
+            "rust_plc pil-run examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml",
+        ],
         "virtual-board" => &[
             "rust_plc virtual-board examples/rp2040_motion_minimal.plc --scenario scenarios/rp2040_motion_minimal/normal.yaml --out-dir out/virtual_board/rp2040_motion_minimal",
         ],
@@ -567,9 +567,9 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         "sequence-lint" => &[
             "rust_plc sequence-lint examples/recovery_templates/power_loss_recovery.plc --critical-wait-level error",
         ],
-        "gen-st" => {
-            &["rust_plc gen-st examples/dual_axis_platform.plc --out out/codegen/dual_axis_platform.st"]
-        }
+        "gen-st" => &[
+            "rust_plc gen-st examples/dual_axis_platform.plc --out out/codegen/dual_axis_platform.st",
+        ],
         _ => &[],
     }
 }
@@ -730,18 +730,3 @@ pub(crate) fn print_command_help_and_exit(program: &str, command: &str, exit_cod
 pub(crate) fn print_usage(program: &str) {
     eprintln!("{}", render_root_help(program));
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

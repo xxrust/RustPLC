@@ -65,9 +65,11 @@ fn help_subcommand_prints_target_command_usage() {
     assert!(stderr.contains("Examples:"));
     assert!(stderr.contains("rust_plc new demo_project"));
     assert!(stderr.contains("rust_plc new wafer_loader --layout structured-fragments"));
-    assert!(stderr.contains(
-        "rust_plc new pick_head --layout structured-fragments --delivery-layer module"
-    ));
+    assert!(
+        stderr.contains(
+            "rust_plc new pick_head --layout structured-fragments --delivery-layer module"
+        )
+    );
 }
 
 #[test]
@@ -195,9 +197,9 @@ fn detailed_help_for_geometry_export_includes_overlay_options() {
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains(
-        "geometry-export <source.plc|source.bundle.toml> --out <geometry.json>"
-    ));
+    assert!(
+        stderr.contains("geometry-export <source.plc|source.bundle.toml> --out <geometry.json>")
+    );
     assert!(stderr.contains("Options:"));
     assert!(stderr.contains("--trace <trace.jsonl>"));
     assert!(stderr.contains("--intent-report <report.json>"));
@@ -206,4 +208,3 @@ fn detailed_help_for_geometry_export_includes_overlay_options() {
     assert!(stderr.contains("Examples:"));
     assert!(stderr.contains("rust_plc geometry-export examples/rp2040_motion_minimal.plc"));
 }
-

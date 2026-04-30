@@ -42,6 +42,8 @@ struct SourceBundleManifest {
     constraints: Option<SourceBundleSection>,
     #[serde(default)]
     tasks: Option<SourceBundleSection>,
+    #[serde(default)]
+    phases: Option<BTreeMap<String, BundlePhase>>,
     #[serde(flatten)]
     extra: BTreeMap<String, toml::Value>,
 }
@@ -50,6 +52,22 @@ struct SourceBundleManifest {
 struct SourceBundleSection {
     #[serde(default)]
     fragments: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BundlePhase {
+    path: String,
+    section: String,
+    #[serde(default)]
+    depends_on: Vec<String>,
+    #[serde(default)]
+    exports: Vec<String>,
+    #[serde(default = "default_true")]
+    enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl SourceBundleMap {
@@ -141,14 +159,18 @@ fn load_bundle_source(path: &Path) -> Result<LoadedPlcSource, String> {
     let manifest: SourceBundleManifest = toml::from_str(&manifest_text)
         .map_err(|err| format!("Failed to parse PLC bundle {}: {err}", path.display()))?;
 
-    if manifest.schema_version != 1 {
-        return Err(format!(
-            "Unsupported PLC bundle schema_version {} in {} (expected 1)",
-            manifest.schema_version,
+    match manifest.schema_version {
+        1 => load_bundle_v1(path, manifest),
+        2 => load_bundle_v2(path, manifest),
+        other => Err(format!(
+            "Unsupported PLC bundle schema_version {} in {} (expected 1 or 2)",
+            other,
             path.display()
-        ));
+        )),
     }
+}
 
+fn load_bundle_v1(path: &Path, manifest: SourceBundleManifest) -> Result<LoadedPlcSource, String> {
     let unsupported = manifest
         .extra
         .keys()
@@ -225,6 +247,168 @@ fn load_bundle_source(path: &Path) -> Result<LoadedPlcSource, String> {
         source,
         source_map,
     })
+}
+
+fn load_bundle_v2(path: &Path, manifest: SourceBundleManifest) -> Result<LoadedPlcSource, String> {
+    let phases = manifest
+        .phases
+        .ok_or_else(|| format!("PLC bundle v2 {} requires a [phases] table", path.display()))?;
+
+    let bundle_dir = path.parent().unwrap_or_else(|| Path::new("."));
+
+    let mut export_owners = BTreeMap::<String, String>::new();
+    let mut topology_fragments = Vec::new();
+    let mut constraint_fragments = Vec::new();
+    let mut task_fragments = Vec::new();
+
+    let mut sorted_phases: Vec<_> = phases.into_iter().collect();
+    sorted_phases.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    for (phase_name, phase) in &sorted_phases {
+        if !phase.enabled {
+            continue;
+        }
+        let valid_sections = ["topology", "constraints", "tasks"];
+        if !valid_sections.contains(&phase.section.as_str()) {
+            return Err(format!(
+                "Phase `{}` in {} has invalid section `{}` (expected one of: {})",
+                phase_name,
+                path.display(),
+                phase.section,
+                valid_sections.join(", ")
+            ));
+        }
+        for dep in &phase.depends_on {
+            if !sorted_phases.iter().any(|(name, _)| name == dep) {
+                return Err(format!(
+                    "Phase `{}` in {} depends on unknown phase `{}`",
+                    phase_name,
+                    path.display(),
+                    dep
+                ));
+            }
+        }
+        for export in &phase.exports {
+            let export = export.trim();
+            if export.is_empty() {
+                return Err(format!(
+                    "Phase `{}` in {} declares an empty export name",
+                    phase_name,
+                    path.display()
+                ));
+            }
+            if let Some(previous_phase) =
+                export_owners.insert(export.to_string(), phase_name.to_string())
+            {
+                return Err(format!(
+                    "Export `{}` in {} is declared by both phase `{}` and phase `{}`",
+                    export,
+                    path.display(),
+                    previous_phase,
+                    phase_name
+                ));
+            }
+        }
+
+        let phase_dir = bundle_dir.join(&phase.path);
+        let plc_files = collect_plc_files_sorted(&phase_dir).map_err(|err| {
+            format!(
+                "Failed to scan phase directory {} for phase `{}` in {}: {err}",
+                phase_dir.display(),
+                phase_name,
+                path.display()
+            )
+        })?;
+
+        let target = match phase.section.as_str() {
+            "topology" => &mut topology_fragments,
+            "constraints" => &mut constraint_fragments,
+            "tasks" => &mut task_fragments,
+            _ => unreachable!(),
+        };
+        for plc_file in plc_files {
+            target.push(plc_file);
+        }
+    }
+
+    let mut assembled_lines = Vec::<String>::new();
+    let mut source_map = SourceBundleMap::default();
+
+    for (section_name, fragments) in [
+        ("topology", topology_fragments),
+        ("constraints", constraint_fragments),
+        ("tasks", task_fragments),
+    ] {
+        assembled_lines.push(format!("[{section_name}]"));
+        assembled_lines.push(String::new());
+        for fragment_path in fragments {
+            let fragment_text = fs::read_to_string(&fragment_path).map_err(|err| {
+                format!(
+                    "Failed to read phase file {} referenced from {}: {err}",
+                    fragment_path.display(),
+                    path.display()
+                )
+            })?;
+
+            assembled_lines.push(format!(
+                "# bundle fragment: {}",
+                fragment_path
+                    .strip_prefix(bundle_dir)
+                    .unwrap_or(&fragment_path)
+                    .display()
+            ));
+            let fragment_lines = fragment_text
+                .lines()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>();
+            if !fragment_lines.is_empty() {
+                let assembled_start_line = assembled_lines.len() + 1;
+                let assembled_end_line = assembled_start_line + fragment_lines.len() - 1;
+                source_map.entries.push(SourceLineMapEntry {
+                    assembled_start_line,
+                    assembled_end_line,
+                    source_path: absolutize_display_path(&fragment_path),
+                    source_start_line: 1,
+                });
+                assembled_lines.extend(fragment_lines);
+            }
+            assembled_lines.push(String::new());
+        }
+    }
+
+    let mut source = assembled_lines.join("\n");
+    if !source.ends_with('\n') {
+        source.push('\n');
+    }
+
+    Ok(LoadedPlcSource {
+        requested_path: path.to_path_buf(),
+        source,
+        source_map,
+    })
+}
+
+fn collect_plc_files_sorted(dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name.starts_with('_') {
+                continue;
+            }
+            match path.extension().and_then(|e| e.to_str()) {
+                Some("plc") | Some("plcfrag") => files.push(path),
+                _ => {}
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
 }
 
 fn count_source_lines(source: &str) -> usize {
@@ -339,5 +523,45 @@ mod tests {
 
         let err = load_plc_source(&base.join("demo.bundle.toml")).expect_err("bundle should fail");
         assert!(err.contains("unsupported sections [io_alias]"));
+    }
+
+    #[test]
+    fn rejects_duplicate_v2_phase_exports() {
+        let base = temp_dir("rust_plc_bundle_v2_duplicate_exports");
+        fs::write(
+            base.join("demo.bundle.toml"),
+            "schema_version = 2\n\
+             [phases.00_topology]\n\
+             path = \"00_topology/\"\n\
+             section = \"topology\"\n\
+             exports = [\"shared\"]\n\
+             [phases.01_init]\n\
+             path = \"01_init/\"\n\
+             section = \"tasks\"\n\
+             exports = [\"shared\"]\n",
+        )
+        .expect("write bundle");
+
+        let err = load_plc_source(&base.join("demo.bundle.toml")).expect_err("bundle should fail");
+        assert!(err.contains("Export `shared`"));
+        assert!(err.contains("phase `00_topology`"));
+        assert!(err.contains("phase `01_init`"));
+    }
+
+    #[test]
+    fn rejects_empty_v2_phase_export_names() {
+        let base = temp_dir("rust_plc_bundle_v2_empty_export");
+        fs::write(
+            base.join("demo.bundle.toml"),
+            "schema_version = 2\n\
+             [phases.00_topology]\n\
+             path = \"00_topology/\"\n\
+             section = \"topology\"\n\
+             exports = [\"\"]\n",
+        )
+        .expect("write bundle");
+
+        let err = load_plc_source(&base.join("demo.bundle.toml")).expect_err("bundle should fail");
+        assert!(err.contains("declares an empty export name"));
     }
 }
