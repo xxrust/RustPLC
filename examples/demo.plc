@@ -55,17 +55,11 @@ task ready:
 
 task cycle:
     step extend:
-        action: set valve_a.coil on
-
-    step wait_extended:
-        wait: sensor_a_ext == true
+        action: extend cyl_a
         timeout: 1000ms -> goto fault
 
     step retract:
-        action: set valve_a.coil off
-
-    step wait_retracted:
-        wait: sensor_a_ret == true
+        action: retract cyl_a
         timeout: 1000ms -> goto fault
 
     on_complete: goto ready

@@ -138,12 +138,18 @@ Related:
 建议新增：
 
 ```text
+crates/device-semantics/
+  src/lib.rs
+  src/cylinder.rs
+
 src/device_semantics/
   mod.rs
   cylinder.rs
   axis.rs
   motor.rs
 ```
+
+`crates/device-semantics` 只放不依赖分配、不依赖 AST/IR 的纯设备语义，例如常量、默认值、动作枚举和 runtime 可见 fault 类型。`src/device_semantics` 负责把这些纯语义接到主编译器的 AST、IR、semantic validation、topology lowering 和诊断上。
 
 第一阶段只要求真正落地 `cylinder.rs`，其余文件可以后续补。
 
@@ -246,6 +252,23 @@ task clamp:
 - 这个动作是不是闭环动作
 - 若要求闭环，当前 DSL 分流是否完整
 - 若要求闭环，当前拓扑是否具备互补反馈
+
+气缸 stroke 动作契约应集中表达默认参数，而不是让各层各自硬编码：
+
+- `feedback_debounce_ms` 默认 `20`
+- `stroke_timeout_ms` 默认 `3000`
+- `allow_extend` 默认 `true`
+- `allow_retract` 默认 `true`
+- `simulation_mode` 默认 `false`
+
+这些默认值属于设备语义契约的基线。项目 manifest / topology / HMI 参数以后可以覆盖它们，但覆盖后的值仍必须通过 `device_semantics::cylinder` 进入 IR、runtime、verification 和 codegen。runtime 不应在缺少 `timeout -> <target>` 时自行猜测默认超时跳转目标。
+
+轴的第一阶段语义集中点与气缸不同：它不是端位反馈闭环，而是长时运动命令的生命周期、故障分类和策略分流。
+
+- `crates/device-semantics::axis` 定义 runtime 可见的纯语义类型：`AxisFaultKind`、`AxisFaultCategory`、`AxisMotionResult`、`AxisMoveKind`、`AxisFaultRouteKind`、`AxisFaultPolicy`、停机状态与审计消息 ID。
+- `src/device_semantics::axis` 定义主编译器侧动作契约：`axis.move_relative` / `axis.move_absolute` 默认端口为 `self`，`move_absolute` 默认要求 homed，运动动作必须具备 `timeout`、`on_reject`、`on_motion_fault`、`on_safety_fault` 四类分支。
+- fault route bucket 也属于轴动作契约：`on_reject` 只接受 `reject/vendor`，`on_motion_fault` 只接受 `motion/vendor`，`on_safety_fault` 只接受 `safety/vendor`。
+- runtime-core 只重新导出并消费这些类型；它不再作为轴 fault 分类、停机审计 ID 或 motion result 的定义源。
 
 ### 6.3 IR 层
 

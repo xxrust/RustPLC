@@ -6,195 +6,19 @@ extern crate std;
 
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId, Io, Tick};
 use libm::{cosf, floorf, fmodf, powf, sinf, sqrtf};
+pub use rustplc_device_semantics::axis::{
+    AXIS_FAULT_POLICY_LOG_MESSAGE, AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE,
+    AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE, AxisAutoResetPolicy, AxisFault, AxisFaultCategory,
+    AxisFaultKind, AxisFaultPolicy, AxisFaultPropagationScope, AxisFaultRouteKind,
+    AxisFaultSeverity, AxisMotionResult, AxisMoveKind, AxisStopMode, AxisStopState,
+    AxisStopTransitionPhase, axis_fault_policy_log_message_id, axis_stop_transition_log_message_id,
+};
+pub use rustplc_device_semantics::cylinder::CylinderFeedbackFault;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StepId(pub u16);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisFaultCategory {
-    Recoverable,
-    NonRecoverable,
-    Safety,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisFaultKind {
-    Reject,
-    Motion,
-    Safety,
-    Vendor {
-        category: AxisFaultCategory,
-        vendor_code: i32,
-    },
-}
-
-impl AxisFaultKind {
-    pub const fn category(self) -> AxisFaultCategory {
-        match self {
-            AxisFaultKind::Reject => AxisFaultCategory::Recoverable,
-            AxisFaultKind::Motion => AxisFaultCategory::NonRecoverable,
-            AxisFaultKind::Safety => AxisFaultCategory::Safety,
-            AxisFaultKind::Vendor { category, .. } => category,
-        }
-    }
-
-    pub const fn vendor_code(self) -> Option<i32> {
-        match self {
-            AxisFaultKind::Vendor { vendor_code, .. } => Some(vendor_code),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AxisFault {
-    pub kind: AxisFaultKind,
-    pub category: AxisFaultCategory,
-    pub error_code: i32,
-    pub vendor_code: Option<i32>,
-}
-
-impl AxisFault {
-    pub const fn new(kind: AxisFaultKind, error_code: i32) -> Self {
-        Self {
-            category: kind.category(),
-            vendor_code: kind.vendor_code(),
-            kind,
-            error_code,
-        }
-    }
-
-    pub const fn reject(error_code: i32) -> Self {
-        Self::new(AxisFaultKind::Reject, error_code)
-    }
-
-    pub const fn motion(error_code: i32) -> Self {
-        Self::new(AxisFaultKind::Motion, error_code)
-    }
-
-    pub const fn safety(error_code: i32) -> Self {
-        Self::new(AxisFaultKind::Safety, error_code)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisFaultSeverity {
-    Recoverable,
-    NonRecoverable,
-    Safety,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisStopMode {
-    Controlled,
-    Quick,
-    Immediate,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisStopState {
-    Running,
-    ControlledStopping,
-    QuickStopping,
-    ImmediateStopping,
-    Stopped,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisAutoResetPolicy {
-    Never,
-    OnClear,
-    Immediate,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisFaultPropagationScope {
-    SelfOnly,
-    Group,
-    All,
-    Followers,
-    Custom,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AxisFaultPolicy<'a> {
-    pub axis: &'a str,
-    pub severity: AxisFaultSeverity,
-    pub stop_mode: AxisStopMode,
-    pub auto_reset_policy: AxisAutoResetPolicy,
-    pub manual_ack_required: bool,
-    pub propagation_scope: AxisFaultPropagationScope,
-    pub propagation_targets: &'a [&'static str],
-}
-
-pub const AXIS_FAULT_POLICY_LOG_MESSAGE: &str = "axis_fault_policy_applied";
-const AXIS_FAULT_POLICY_LOG_BASE_ID: u16 = 50_000;
-pub const AXIS_STOP_TRANSITION_ENTER_LOG_MESSAGE: &str = "axis_stop_transition_enter";
-pub const AXIS_STOP_TRANSITION_COMPLETED_LOG_MESSAGE: &str = "axis_stop_transition_completed";
-const AXIS_STOP_TRANSITION_LOG_BASE_ID: u16 = 51_000;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisStopTransitionPhase {
-    Enter,
-    Completed,
-}
-
-pub const fn axis_fault_policy_log_message_id(
-    severity: AxisFaultSeverity,
-    stop_mode: AxisStopMode,
-    auto_reset_policy: AxisAutoResetPolicy,
-    manual_ack_required: bool,
-    fault_kind: AxisFaultKind,
-) -> u16 {
-    let severity_bits = match severity {
-        AxisFaultSeverity::Recoverable => 0,
-        AxisFaultSeverity::NonRecoverable => 1,
-        AxisFaultSeverity::Safety => 2,
-    };
-    let stop_mode_bits = match stop_mode {
-        AxisStopMode::Controlled => 0,
-        AxisStopMode::Quick => 1,
-        AxisStopMode::Immediate => 2,
-    };
-    let auto_reset_bits = match auto_reset_policy {
-        AxisAutoResetPolicy::Never => 0,
-        AxisAutoResetPolicy::OnClear => 1,
-        AxisAutoResetPolicy::Immediate => 2,
-    };
-    let ack_bits = if manual_ack_required { 1 } else { 0 };
-    let fault_kind_bits = match fault_kind {
-        AxisFaultKind::Reject => 0,
-        AxisFaultKind::Motion => 1,
-        AxisFaultKind::Safety => 2,
-        AxisFaultKind::Vendor { .. } => 3,
-    };
-
-    AXIS_FAULT_POLICY_LOG_BASE_ID
-        + severity_bits
-        + (stop_mode_bits << 2)
-        + (auto_reset_bits << 4)
-        + (ack_bits << 6)
-        + (fault_kind_bits << 7)
-}
-
-pub const fn axis_stop_transition_log_message_id(
-    stop_mode: AxisStopMode,
-    phase: AxisStopTransitionPhase,
-) -> u16 {
-    let stop_mode_bits = match stop_mode {
-        AxisStopMode::Controlled => 0,
-        AxisStopMode::Quick => 1,
-        AxisStopMode::Immediate => 2,
-    };
-    let phase_bits = match phase {
-        AxisStopTransitionPhase::Enter => 0,
-        AxisStopTransitionPhase::Completed => 1,
-    };
-
-    AXIS_STOP_TRANSITION_LOG_BASE_ID + stop_mode_bits + (phase_bits << 2)
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransitionReason {
@@ -378,12 +202,6 @@ pub enum RuntimeError {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CylinderFeedbackFault {
-    OppositeFeedback,
-    ContradictoryFeedback,
-}
-
 #[derive(Debug, PartialEq)]
 pub enum RuntimeTickError<E> {
     Core(RuntimeError),
@@ -497,12 +315,6 @@ pub enum Action {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisMoveKind {
-    Relative,
-    Absolute,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AxisMotionCommand {
     pub target: &'static str,
@@ -537,25 +349,6 @@ pub enum ResourceClaimSource<'a> {
 pub struct ResourceClaimRule<'a> {
     pub source: ResourceClaimSource<'a>,
     pub resource_index: u16,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisFaultRouteKind {
-    Reject,
-    Motion,
-    Safety,
-    Vendor,
-}
-
-impl AxisFaultRouteKind {
-    pub const fn from_fault_kind(kind: AxisFaultKind) -> Self {
-        match kind {
-            AxisFaultKind::Reject => Self::Reject,
-            AxisFaultKind::Motion => Self::Motion,
-            AxisFaultKind::Safety => Self::Safety,
-            AxisFaultKind::Vendor { .. } => Self::Vendor,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -615,27 +408,6 @@ impl AxisFaultRouting {
             .iter()
             .find(|route| route.matches(route_kind, fault.error_code))
             .map_or(primary, |route| route.target)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisMotionResult {
-    Pending,
-    Done,
-    Fault(AxisFault),
-}
-
-impl AxisMotionResult {
-    pub const fn reject(error_code: i32) -> Self {
-        Self::Fault(AxisFault::reject(error_code))
-    }
-
-    pub const fn motion_fault(error_code: i32) -> Self {
-        Self::Fault(AxisFault::motion(error_code))
-    }
-
-    pub const fn safety_fault(error_code: i32) -> Self {
-        Self::Fault(AxisFault::safety(error_code))
     }
 }
 

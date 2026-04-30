@@ -142,33 +142,47 @@ impl<'a> TopologyResolver<'a> {
             return Ok(None);
         }
 
-        let requested_port = state_port_key(
-            port,
-            if expect_extended {
-                CylinderStrokeVerb::Extend.expected_state_port()
-            } else {
-                CylinderStrokeVerb::Retract.expected_state_port()
-            },
-        );
+        let verb = if expect_extended {
+            CylinderStrokeVerb::Extend
+        } else {
+            CylinderStrokeVerb::Retract
+        };
+        let contract = CylinderStrokeContract::closed_loop(verb, port).map_err(|err| match err {
+            CylinderContractError::MissingComplementaryEndState => {
+                BridgeError::UnsupportedGuardExpression {
+                    state: state_name.to_string(),
+                    expression: format!(
+                        "closed-loop cylinder action requires complementary end-state for {device}.{port}.{}",
+                        verb.expected_state_port()
+                    ),
+                }
+            }
+        })?;
+        let requested_port = contract.requested_state_port.as_str();
         let defined_state_ports = self.cylinder_detect_state_ports(device);
         if defined_state_ports.is_empty() {
             return Ok(None);
         }
-        let confirm_ids = self.resolve_detect_state_input_ids(device, &requested_port);
-        let opposing_port = cylinder_complementary_state_port(&requested_port).ok_or_else(|| {
-            BridgeError::UnsupportedGuardExpression {
-                state: state_name.to_string(),
-                expression: format!(
-                    "closed-loop cylinder action requires complementary end-state for {device}.{requested_port}"
-                ),
-            }
-        })?;
-        let opposing_ids = self.resolve_detect_state_input_ids(device, &opposing_port);
+        let confirm_ids = self.resolve_detect_state_input_ids(device, requested_port);
+        let opposing_port =
+            contract
+                .required_opposing_state_port()
+                .map_err(|err| match err {
+                    CylinderContractError::MissingComplementaryEndState => {
+                        BridgeError::UnsupportedGuardExpression {
+                            state: state_name.to_string(),
+                            expression: format!(
+                                "closed-loop cylinder action requires complementary end-state for {device}.{requested_port}"
+                            ),
+                        }
+                    }
+                })?;
+        let opposing_ids = self.resolve_detect_state_input_ids(device, opposing_port);
         if confirm_ids.is_empty() || opposing_ids.is_empty() {
             return Err(BridgeError::IncompleteClosedLoopCylinderMotion {
                 state: state_name.to_string(),
                 device: device.to_string(),
-                requested_state: requested_port,
+                requested_state: requested_port.to_string(),
             });
         }
 

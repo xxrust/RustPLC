@@ -1563,6 +1563,7 @@ version = "0.1.0"
 dependencies = [
  "io-traits",
  "libm",
+ "rustplc-device-semantics",
 ]
 
 [[package]]
@@ -1576,6 +1577,7 @@ dependencies = [
  "pest_derive",
  "petgraph",
  "runtime-core",
+ "rustplc-device-semantics",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1602,6 +1604,10 @@ checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
 dependencies = [
  "semver",
 ]
+
+[[package]]
+name = "rustplc-device-semantics"
+version = "0.1.0"
 
 [[package]]
 name = "rustversion"

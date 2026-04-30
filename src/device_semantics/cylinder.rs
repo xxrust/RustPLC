@@ -4,18 +4,20 @@ use crate::ast::{
 use crate::device_semantics::{DeviceActionContract, DeviceActionResultBucket};
 use crate::error::PlcError;
 use crate::ir::{DeviceKind, TransitionAction};
+pub use rustplc_device_semantics::cylinder::{
+    COMMAND_PORT, CylinderActionDefaults, CylinderActionOutcome, CylinderContractError,
+    CylinderFeedbackFault, CylinderSafetyFault, CylinderStrokeFault, CylinderStrokeVerb,
+    CylinderTopologyContractKind, DEFAULT_ACTION_DEFAULTS, DEFAULT_ALLOW_EXTEND,
+    DEFAULT_ALLOW_RETRACT, DEFAULT_FEEDBACK_DEBOUNCE_MS, DEFAULT_SIMULATION_MODE,
+    DEFAULT_STROKE_TIMEOUT_MS, EXTENDED_STATE_PORT, FAMILY, RETRACTED_STATE_PORT, STROKE_ACTION,
+};
 use std::collections::HashMap;
-
-pub const FAMILY: &str = "cylinder";
-pub const COMMAND_PORT: &str = "cmd";
-pub const EXTENDED_STATE_PORT: &str = "extended";
-pub const RETRACTED_STATE_PORT: &str = "retracted";
 
 /// Capability envelope for cylinder closed-loop stroke actions.
 /// `timeout` is optional; fault routing may be declared without it.
 pub const CLOSED_LOOP_STROKE_CAPABILITY: DeviceActionContract<'static> = DeviceActionContract {
     family: FAMILY,
-    action: "stroke",
+    action: STROKE_ACTION,
     result_buckets: &[
         DeviceActionResultBucket::Complete,
         DeviceActionResultBucket::Timeout,
@@ -23,28 +25,6 @@ pub const CLOSED_LOOP_STROKE_CAPABILITY: DeviceActionContract<'static> = DeviceA
         DeviceActionResultBucket::SafetyFault,
     ],
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CylinderStrokeVerb {
-    Extend,
-    Retract,
-}
-
-impl CylinderStrokeVerb {
-    pub const fn expected_state_port(self) -> &'static str {
-        match self {
-            Self::Extend => EXTENDED_STATE_PORT,
-            Self::Retract => RETRACTED_STATE_PORT,
-        }
-    }
-
-    pub const fn action_keyword(self) -> &'static str {
-        match self {
-            Self::Extend => "extend",
-            Self::Retract => "retract",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct CylinderStrokeActionView<'a> {
@@ -131,22 +111,76 @@ pub fn closed_loop_stroke_target(action: &TransitionAction) -> Option<&str> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CylinderStrokeFault {
-    OppositeFeedbackReasserted,
+pub fn transition_action_uses_closed_loop_stroke(action: &TransitionAction) -> bool {
+    closed_loop_stroke_target(action).is_some()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CylinderSafetyFault {
-    ContradictoryFeedback,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CylinderStrokeContract {
+    pub family: &'static str,
+    pub action: &'static str,
+    pub verb: CylinderStrokeVerb,
+    pub command_port: String,
+    pub requested_state_port: String,
+    pub opposing_state_port: Option<String>,
+    pub topology_contract: CylinderTopologyContractKind,
+    pub defaults: CylinderActionDefaults,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CylinderActionOutcome {
-    Done,
-    Timeout,
-    StrokeFault(CylinderStrokeFault),
-    SafetyFault(CylinderSafetyFault),
+impl CylinderStrokeContract {
+    pub fn new(
+        verb: CylinderStrokeVerb,
+        command_port: &str,
+        topology_contract: CylinderTopologyContractKind,
+    ) -> Result<Self, CylinderContractError> {
+        let requested_state_port = state_port_key(command_port, verb.expected_state_port());
+        let opposing_state_port = match topology_contract {
+            CylinderTopologyContractKind::OpenLoopCommand => None,
+            CylinderTopologyContractKind::ClosedLoopDualEndFeedback => Some(
+                complementary_end_state_port(&requested_state_port)
+                    .ok_or(CylinderContractError::MissingComplementaryEndState)?,
+            ),
+        };
+
+        Ok(Self {
+            family: FAMILY,
+            action: STROKE_ACTION,
+            verb,
+            command_port: command_port.to_string(),
+            requested_state_port,
+            opposing_state_port,
+            topology_contract,
+            defaults: DEFAULT_ACTION_DEFAULTS,
+        })
+    }
+
+    pub fn closed_loop(
+        verb: CylinderStrokeVerb,
+        command_port: &str,
+    ) -> Result<Self, CylinderContractError> {
+        Self::new(
+            verb,
+            command_port,
+            CylinderTopologyContractKind::ClosedLoopDualEndFeedback,
+        )
+    }
+
+    pub fn open_loop(
+        verb: CylinderStrokeVerb,
+        command_port: &str,
+    ) -> Result<Self, CylinderContractError> {
+        Self::new(
+            verb,
+            command_port,
+            CylinderTopologyContractKind::OpenLoopCommand,
+        )
+    }
+
+    pub fn required_opposing_state_port(&self) -> Result<&str, CylinderContractError> {
+        self.opposing_state_port
+            .as_deref()
+            .ok_or(CylinderContractError::MissingComplementaryEndState)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -386,9 +420,11 @@ pub fn state_port_key(port: &str, state: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CylinderSemanticErrorKind, CylinderStrokeVerb, EXTENDED_STATE_PORT, RETRACTED_STATE_PORT,
-        classify_stroke_routing, closed_loop_stroke_target, complementary_end_state_port,
-        is_end_state_port, stroke_action_view, validate_stroke_target_kind,
+        CylinderSemanticErrorKind, CylinderStrokeContract, CylinderStrokeVerb,
+        CylinderTopologyContractKind, DEFAULT_ACTION_DEFAULTS, EXTENDED_STATE_PORT,
+        RETRACTED_STATE_PORT, classify_stroke_routing, closed_loop_stroke_target,
+        complementary_end_state_port, is_end_state_port, stroke_action_view,
+        validate_stroke_target_kind,
     };
     use crate::ast::{
         ActionStatement, ActionTarget, DurationValue, GotoDirective, TimeUnit, TimeoutDirective,
@@ -440,6 +476,42 @@ mod tests {
         );
         assert_eq!(CylinderStrokeVerb::Extend.action_keyword(), "extend");
         assert_eq!(CylinderStrokeVerb::Retract.action_keyword(), "retract");
+    }
+
+    #[test]
+    fn closed_loop_stroke_contract_carries_defaults_and_end_feedback_contract() {
+        let contract = CylinderStrokeContract::closed_loop(CylinderStrokeVerb::Extend, "cmd")
+            .expect("default cylinder ports should have a complementary end state");
+
+        assert_eq!(contract.family, "cylinder");
+        assert_eq!(contract.action, "stroke");
+        assert_eq!(contract.verb, CylinderStrokeVerb::Extend);
+        assert_eq!(contract.command_port, "cmd");
+        assert_eq!(contract.requested_state_port, "cmd.extended");
+        assert_eq!(contract.required_opposing_state_port(), Ok("cmd.retracted"));
+        assert_eq!(
+            contract.topology_contract,
+            CylinderTopologyContractKind::ClosedLoopDualEndFeedback
+        );
+        assert_eq!(contract.defaults, DEFAULT_ACTION_DEFAULTS);
+        assert_eq!(contract.defaults.feedback_debounce_ms, 20);
+        assert_eq!(contract.defaults.stroke_timeout_ms, 3000);
+        assert!(contract.defaults.allow_extend);
+        assert!(contract.defaults.allow_retract);
+        assert!(!contract.defaults.simulation_mode);
+    }
+
+    #[test]
+    fn open_loop_stroke_contract_does_not_require_feedback() {
+        let contract = CylinderStrokeContract::open_loop(CylinderStrokeVerb::Retract, "cmd")
+            .expect("open-loop contract should not need complementary feedback");
+
+        assert_eq!(contract.requested_state_port, "cmd.retracted");
+        assert_eq!(contract.opposing_state_port, None);
+        assert_eq!(
+            contract.topology_contract,
+            CylinderTopologyContractKind::OpenLoopCommand
+        );
     }
 
     #[test]

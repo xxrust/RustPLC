@@ -1,5 +1,5 @@
 ﻿use crate::device_semantics::cylinder::{
-    CylinderStrokeVerb, complementary_end_state_port as cylinder_complementary_state_port,
+    CylinderContractError, CylinderStrokeContract, CylinderStrokeVerb,
     is_end_state_port as is_cylinder_end_state_port, state_port_key,
 };
 use crate::ir::{

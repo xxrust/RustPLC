@@ -12,6 +12,7 @@ use std::collections::HashMap;
 pub enum DeviceActionResultBucket {
     Complete,
     Timeout,
+    Reject,
     MotionFault,
     SafetyFault,
 }

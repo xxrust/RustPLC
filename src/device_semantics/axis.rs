@@ -1,4 +1,4 @@
-use super::device_kind_name;
+use super::{DeviceActionContract, DeviceActionResultBucket, device_kind_name};
 use crate::ast::{
     ActionStatement, AxisFaultRouteDirective as AstAxisFaultRouteDirective,
     AxisFaultRouteKind as AstAxisFaultRouteKind, ComparisonOperator, DeviceType, LiteralValue,
@@ -7,12 +7,120 @@ use crate::ast::{
 use crate::axis_profile::resolve_axis_profiles;
 use crate::error::PlcError;
 use crate::ir::{AxisBrakeConfig, AxisOrientation, BinaryValue as IrBinaryValue, DeviceKind};
+use rustplc_device_semantics::axis::AxisFaultRouteKind;
+pub use rustplc_device_semantics::axis::{
+    DEFAULT_PORT, DEFAULT_REQUIRE_HOMED, FAMILY, MOVE_ABSOLUTE_ACTION, MOVE_RELATIVE_ACTION,
+};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
 const AXIS_MOTION_PARAM_SETS_DIR: &str = "axis_motion_param_sets";
+
+pub const AXIS_MOTION_CAPABILITY: DeviceActionContract<'static> = DeviceActionContract {
+    family: FAMILY,
+    action: "move_*",
+    result_buckets: &[
+        DeviceActionResultBucket::Complete,
+        DeviceActionResultBucket::Timeout,
+        DeviceActionResultBucket::Reject,
+        DeviceActionResultBucket::MotionFault,
+        DeviceActionResultBucket::SafetyFault,
+    ],
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisMotionBranchKind {
+    Timeout,
+    Reject,
+    MotionFault,
+    SafetyFault,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisMotionRequiredBranch {
+    pub kind: AxisMotionBranchKind,
+    pub name: &'static str,
+    pub diagnostic_code: &'static str,
+    pub fix: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisFaultRouteBucket {
+    pub branch_name: &'static str,
+    pub allowed_kinds: &'static [AxisFaultRouteKind],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisMotionActionContract {
+    pub family: &'static str,
+    pub relative_action: &'static str,
+    pub absolute_action: &'static str,
+    pub default_port: &'static str,
+    pub default_require_homed: bool,
+    pub required_branches: &'static [AxisMotionRequiredBranch],
+    pub route_buckets: &'static [AxisFaultRouteBucket],
+}
+
+const AXIS_REJECT_ROUTE_KINDS: &[AxisFaultRouteKind] =
+    &[AxisFaultRouteKind::Reject, AxisFaultRouteKind::Vendor];
+const AXIS_MOTION_FAULT_ROUTE_KINDS: &[AxisFaultRouteKind] =
+    &[AxisFaultRouteKind::Motion, AxisFaultRouteKind::Vendor];
+const AXIS_SAFETY_FAULT_ROUTE_KINDS: &[AxisFaultRouteKind] =
+    &[AxisFaultRouteKind::Safety, AxisFaultRouteKind::Vendor];
+
+pub const AXIS_MOTION_REQUIRED_BRANCHES: &[AxisMotionRequiredBranch] = &[
+    AxisMotionRequiredBranch {
+        kind: AxisMotionBranchKind::Timeout,
+        name: "timeout",
+        diagnostic_code: "AXIS-001",
+        fix: "Add timeout: <duration> -> <task.step> branch.",
+    },
+    AxisMotionRequiredBranch {
+        kind: AxisMotionBranchKind::Reject,
+        name: "on_reject",
+        diagnostic_code: "AXIS-002",
+        fix: "Add on_reject -> <task.step> branch.",
+    },
+    AxisMotionRequiredBranch {
+        kind: AxisMotionBranchKind::MotionFault,
+        name: "on_motion_fault",
+        diagnostic_code: "AXIS-003",
+        fix: "Add on_motion_fault -> <task.step> branch.",
+    },
+    AxisMotionRequiredBranch {
+        kind: AxisMotionBranchKind::SafetyFault,
+        name: "on_safety_fault",
+        diagnostic_code: "AXIS-004",
+        fix: "Add on_safety_fault -> <task.step> branch.",
+    },
+];
+
+pub const AXIS_FAULT_ROUTE_BUCKETS: &[AxisFaultRouteBucket] = &[
+    AxisFaultRouteBucket {
+        branch_name: "on_reject",
+        allowed_kinds: AXIS_REJECT_ROUTE_KINDS,
+    },
+    AxisFaultRouteBucket {
+        branch_name: "on_motion_fault",
+        allowed_kinds: AXIS_MOTION_FAULT_ROUTE_KINDS,
+    },
+    AxisFaultRouteBucket {
+        branch_name: "on_safety_fault",
+        allowed_kinds: AXIS_SAFETY_FAULT_ROUTE_KINDS,
+    },
+];
+
+pub const AXIS_MOTION_ACTION_CONTRACT: AxisMotionActionContract = AxisMotionActionContract {
+    family: FAMILY,
+    relative_action: MOVE_RELATIVE_ACTION,
+    absolute_action: MOVE_ABSOLUTE_ACTION,
+    default_port: DEFAULT_PORT,
+    default_require_homed: DEFAULT_REQUIRE_HOMED,
+    required_branches: AXIS_MOTION_REQUIRED_BRANCHES,
+    route_buckets: AXIS_FAULT_ROUTE_BUCKETS,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -216,66 +324,40 @@ fn validate_axis_motion_actions_in_statements(
                 on_safety_fault_routes,
                 ..
             }) => {
-                if timeout.is_none() {
-                    errors.push(axis_motion_branch_error(
-                        line,
-                        "AXIS-001",
-                        step_name,
-                        "timeout",
-                        "添加 timeout: <duration> -> <task.step> 分支。",
-                    ));
+                for branch in AXIS_MOTION_ACTION_CONTRACT.required_branches {
+                    let present = match branch.kind {
+                        AxisMotionBranchKind::Timeout => timeout.is_some(),
+                        AxisMotionBranchKind::Reject => on_reject.is_some(),
+                        AxisMotionBranchKind::MotionFault => on_motion_fault.is_some(),
+                        AxisMotionBranchKind::SafetyFault => on_safety_fault.is_some(),
+                    };
+                    if !present {
+                        errors.push(axis_motion_branch_error(
+                            line,
+                            branch.diagnostic_code,
+                            step_name,
+                            branch.name,
+                            branch.fix,
+                        ));
+                    }
                 }
-                if on_reject.is_none() {
-                    errors.push(axis_motion_branch_error(
+
+                for bucket in AXIS_MOTION_ACTION_CONTRACT.route_buckets {
+                    let routes: &[AstAxisFaultRouteDirective] = match bucket.branch_name {
+                        "on_reject" => on_reject_routes.as_slice(),
+                        "on_motion_fault" => on_motion_fault_routes.as_slice(),
+                        "on_safety_fault" => on_safety_fault_routes.as_slice(),
+                        _ => &[],
+                    };
+                    validate_axis_fault_routes(
                         line,
-                        "AXIS-002",
                         step_name,
-                        "on_reject",
-                        "添加 on_reject -> <task.step> 分支。",
-                    ));
+                        bucket.branch_name,
+                        routes,
+                        bucket.allowed_kinds,
+                        errors,
+                    );
                 }
-                if on_motion_fault.is_none() {
-                    errors.push(axis_motion_branch_error(
-                        line,
-                        "AXIS-003",
-                        step_name,
-                        "on_motion_fault",
-                        "添加 on_motion_fault -> <task.step> 分支。",
-                    ));
-                }
-                if on_safety_fault.is_none() {
-                    errors.push(axis_motion_branch_error(
-                        line,
-                        "AXIS-004",
-                        step_name,
-                        "on_safety_fault",
-                        "添加 on_safety_fault -> <task.step> 分支。",
-                    ));
-                }
-                validate_axis_fault_routes(
-                    line,
-                    step_name,
-                    "on_reject",
-                    on_reject_routes,
-                    &[AstAxisFaultRouteKind::Reject, AstAxisFaultRouteKind::Vendor],
-                    errors,
-                );
-                validate_axis_fault_routes(
-                    line,
-                    step_name,
-                    "on_motion_fault",
-                    on_motion_fault_routes,
-                    &[AstAxisFaultRouteKind::Motion, AstAxisFaultRouteKind::Vendor],
-                    errors,
-                );
-                validate_axis_fault_routes(
-                    line,
-                    step_name,
-                    "on_safety_fault",
-                    on_safety_fault_routes,
-                    &[AstAxisFaultRouteKind::Safety, AstAxisFaultRouteKind::Vendor],
-                    errors,
-                );
                 validate_axis_motion_target_kind(
                     line,
                     step_name,
@@ -344,11 +426,12 @@ fn validate_axis_fault_routes(
     step_name: &str,
     branch_name: &str,
     routes: &[AstAxisFaultRouteDirective],
-    allowed_kinds: &[AstAxisFaultRouteKind],
+    allowed_kinds: &[AxisFaultRouteKind],
     errors: &mut Vec<PlcError>,
 ) {
     for route in routes {
         if let Some(kind) = route.kind {
+            let kind = axis_fault_route_kind_from_ast(kind);
             if !allowed_kinds.contains(&kind) {
                 errors.push(PlcError::semantic_with_reason(
                     line,
@@ -366,6 +449,15 @@ fn validate_axis_fault_routes(
                 ));
             }
         }
+    }
+}
+
+fn axis_fault_route_kind_from_ast(kind: AstAxisFaultRouteKind) -> AxisFaultRouteKind {
+    match kind {
+        AstAxisFaultRouteKind::Reject => AxisFaultRouteKind::Reject,
+        AstAxisFaultRouteKind::Motion => AxisFaultRouteKind::Motion,
+        AstAxisFaultRouteKind::Safety => AxisFaultRouteKind::Safety,
+        AstAxisFaultRouteKind::Vendor => AxisFaultRouteKind::Vendor,
     }
 }
 
@@ -963,5 +1055,61 @@ fn load_axis_motion_param_sets() -> Result<HashMap<String, AxisMotionParamSetDef
         Ok(defs)
     } else {
         Err(errors)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AXIS_MOTION_ACTION_CONTRACT, AXIS_MOTION_CAPABILITY, AxisMotionBranchKind};
+    use crate::device_semantics::DeviceActionResultBucket;
+    use rustplc_device_semantics::axis::{
+        DEFAULT_PORT, DEFAULT_REQUIRE_HOMED, FAMILY, MOVE_ABSOLUTE_ACTION, MOVE_RELATIVE_ACTION,
+    };
+
+    #[test]
+    fn axis_motion_contract_carries_shared_defaults_and_actions() {
+        assert_eq!(AXIS_MOTION_ACTION_CONTRACT.family, FAMILY);
+        assert_eq!(
+            AXIS_MOTION_ACTION_CONTRACT.relative_action,
+            MOVE_RELATIVE_ACTION
+        );
+        assert_eq!(
+            AXIS_MOTION_ACTION_CONTRACT.absolute_action,
+            MOVE_ABSOLUTE_ACTION
+        );
+        assert_eq!(AXIS_MOTION_ACTION_CONTRACT.default_port, DEFAULT_PORT);
+        assert_eq!(
+            AXIS_MOTION_ACTION_CONTRACT.default_require_homed,
+            DEFAULT_REQUIRE_HOMED
+        );
+    }
+
+    #[test]
+    fn axis_motion_contract_requires_all_blocking_outcome_branches() {
+        let kinds = AXIS_MOTION_ACTION_CONTRACT
+            .required_branches
+            .iter()
+            .map(|branch| branch.kind)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            kinds,
+            vec![
+                AxisMotionBranchKind::Timeout,
+                AxisMotionBranchKind::Reject,
+                AxisMotionBranchKind::MotionFault,
+                AxisMotionBranchKind::SafetyFault,
+            ]
+        );
+        assert_eq!(
+            AXIS_MOTION_CAPABILITY.result_buckets,
+            &[
+                DeviceActionResultBucket::Complete,
+                DeviceActionResultBucket::Timeout,
+                DeviceActionResultBucket::Reject,
+                DeviceActionResultBucket::MotionFault,
+                DeviceActionResultBucket::SafetyFault,
+            ]
+        );
     }
 }
