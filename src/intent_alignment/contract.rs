@@ -727,6 +727,13 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
     }
 
+    fn current_architecture_digest() -> String {
+        sha256_hex(&fixture_path(
+            "docs/architecture/intent_alignment_verification.md",
+        ))
+        .expect("architecture source digest should be readable")
+    }
+
     #[test]
     fn source_binding_verification_detects_digest_mismatch() {
         let mut contract = read_intent_contract(fixture_path(
@@ -743,8 +750,7 @@ mod tests {
             IntentContractSourceBindingError::DigestMismatch {
                 path: "docs/architecture/intent_alignment_verification.md".to_string(),
                 expected: "deadbeef".to_string(),
-                actual: "6793be8964362b3c71fe069f822722854547bf4c74787730bd1c88be20ed69ef"
-                    .to_string(),
+                actual: current_architecture_digest(),
             }
         );
     }
@@ -755,6 +761,7 @@ mod tests {
             "tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json",
         ))
         .expect("fixture should load");
+        contract.source_digest.value = current_architecture_digest();
         contract.metadata.authoritative_intent_source.path =
             "examples/dual_axis_platform.plc".to_string();
 
@@ -776,6 +783,7 @@ mod tests {
             "tests/fixtures/intent_alignment/contracts/cylinder_sequence_contract.json",
         ))
         .expect("fixture should load");
+        contract.source_digest.value = current_architecture_digest();
         contract.metadata.review_basis[0].source.path = "docs/architecture/missing.md".to_string();
 
         let error = verify_intent_contract_source_binding(&contract, fixture_path("."))
