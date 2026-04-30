@@ -160,6 +160,72 @@ task main:
 }
 
 #[test]
+fn source_state_machine_entry_rejects_raw_controller_port_bypass() {
+    let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+
+[constraints]
+
+[tasks]
+task main:
+    step start:
+        action: set plc_main.Y0 on
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let errors =
+        build_state_machine(&program).expect_err("raw controller output should be rejected");
+    let rendered = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered.contains("SEM-110") && rendered.contains("plc_main.Y0"),
+        "expected raw controller port bypass rejection, got: {rendered}"
+    );
+}
+
+#[test]
+fn source_state_machine_entry_rejects_raw_valve_and_process_command_bypass() {
+    let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device valve_A: solenoid_valve
+device heater_A: heater
+device camera_A: vision_sensor
+
+[constraints]
+
+[tasks]
+task main:
+    step start:
+        action: set valve_A.coil on
+        action: set heater_A.power on
+        action: set camera_A.trigger on
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let errors =
+        build_state_machine(&program).expect_err("raw device command ports should be rejected");
+    let rendered = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered.contains("SEM-110")
+            && rendered.contains("valve_A.coil")
+            && rendered.contains("heater_A.power")
+            && rendered.contains("camera_A.trigger"),
+        "expected raw command port bypass rejections, got: {rendered}"
+    );
+}
+
+#[test]
 fn source_topology_gate_accepts_channel_bindings_not_io_devices() {
     let input = r#"
 [topology]

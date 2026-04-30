@@ -137,3 +137,39 @@ pub const VISION_ACTION_CONTRACTS: &[DeviceActionContract<'static>] = &[
         ],
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CONVEYOR_ACTION_CONTRACTS, GRIPPER_ACTION_CONTRACTS, HEATER_ACTION_CONTRACTS,
+        PROPORTIONAL_VALVE_ACTION_CONTRACTS, PUMP_ACTION_CONTRACTS, VISION_ACTION_CONTRACTS,
+    };
+    use crate::device_semantics::DeviceActionResultBucket;
+
+    #[test]
+    fn process_device_contracts_expose_result_buckets() {
+        let families = [
+            PROPORTIONAL_VALVE_ACTION_CONTRACTS,
+            GRIPPER_ACTION_CONTRACTS,
+            CONVEYOR_ACTION_CONTRACTS,
+            PUMP_ACTION_CONTRACTS,
+            HEATER_ACTION_CONTRACTS,
+            VISION_ACTION_CONTRACTS,
+        ];
+
+        for contracts in families {
+            assert!(!contracts.is_empty());
+            for contract in contracts {
+                assert!(!contract.family.is_empty());
+                assert!(!contract.action.is_empty());
+                assert!(
+                    contract
+                        .result_buckets
+                        .contains(&DeviceActionResultBucket::Complete),
+                    "{:?} should expose a completion bucket",
+                    contract
+                );
+            }
+        }
+    }
+}
