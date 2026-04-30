@@ -238,6 +238,8 @@ export const en = {
       showSidebar: 'Show sidebar',
       showProperties: 'Show properties',
       noProjectSelected: 'No project selected',
+      sharedTopologyTitle: 'Shared topology view',
+      sharedTopologyHint: 'Scenario, run, diagnosis, replay, and audit now stay anchored to the same topology canvas.',
     },
 
     // Replay
@@ -409,13 +411,32 @@ export const en = {
     // Run Page
     run: {
       title: 'Run Monitor',
-      intro: 'Review the latest run first. Trigger a new run only when you deliberately want fresh evidence.',
+      intro: 'Use the current project quick actions first. Open Advanced mode only when you intentionally need custom file paths.',
       statusPass: 'PASS',
       statusFail: 'FAIL',
       statusRunning: 'RUNNING',
       triggerGate: 'Trigger Run',
       triggerCardTitle: 'Submit run request',
       triggerHint: 'Enter repo-relative paths as the backend will resolve them. Leave fields blank until you know which PLC, topology, and scenario you want to execute.',
+      currentProjectCardTitle: 'Run the current project',
+      currentProjectSummary: 'Current project: {{project}}',
+      currentProjectHint: 'The quick actions here run against the project currently shown in the shared workspace on the left.',
+      currentProject: 'Current project',
+      sourcePath: 'Source path',
+      quickPlcDesc: 'Run no-board gate against the current PLC project.',
+      quickTopologyDesc: 'Run component simulation against the current topology project.',
+      runCurrentPlc: 'Run current PLC gate',
+      runCurrentTopology: 'Run current topology sim',
+      quickDisabledNoProject: 'Select a project first.',
+      quickDisabledLocalBuffer: 'This project was opened from a local buffer. Quick run needs a real filesystem path; use Advanced mode after saving it into the repo.',
+      quickDisabledMissingPlc: 'The current project is not a PLC run target.',
+      quickDisabledMissingTopology: 'The current project is not a topology simulation target.',
+      quickDisabledPlcOnlyProject: 'The current project is a PLC project, not a topology.json project. Use the PLC gate above, switch to component_model, or use Advanced mode with a topology path.',
+      quickDisabledMissingScenario: 'This project has no built-in scenario pair yet. Use Advanced mode and enter the scenario path explicitly.',
+      topologyUnavailableForCurrentProject: 'This current project only supports PLC gate here, so the topology simulation action is hidden instead of shown as a dead option.',
+      advancedTitle: 'Advanced mode: manual paths',
+      advancedIntro: 'Use this only when the current project has no built-in run pair, or when you deliberately want to run another file set.',
+      formPrefilled: 'When possible, the fields below are prefilled from the current project.',
       runMode: 'Run Mode',
       runModeRequired: 'Please select run mode',
       modeNoBoard: 'No-Board Gate (PLC)',
@@ -436,8 +457,8 @@ export const en = {
       reviewSignal: 'Review signal',
       reviewSignalFailedNoSummary: 'Failed, but no failure summary was exported.',
       reviewSignalRunning: 'Still running. Review the latest trace snapshot.',
-      reviewSignalPassed: 'Passed. Open review to inspect the final story and evidence.',
-      noRunsAvailable: 'No runs are available yet. Trigger one below.',
+      reviewSignalPassed: 'Passed. Open review to inspect the available trace and evidence.',
+      noRunsAvailable: 'No runs are available yet. Use the run actions on this page to trigger one.',
       submitRunRequest: 'Submit run request',
       requestSubmitted: 'Run request submitted',
       requestSubmittedDesc: 'Run ID: {{runId}}. The run is queued or executing; inspect status above for the actual result.',
@@ -576,6 +597,10 @@ export const en = {
       portBindingUnavailable:
         'Cannot bind edge to unique source/target handles for this node pair.',
       dismissWarning: 'Dismiss warning',
+      reviewReadonlyNotice:
+        'This linked review canvas is read-only so replay, audit, and run inspection do not silently modify the project topology.',
+      liveControlsUnavailableNotice:
+        'The bundled web workspace is currently review/edit only. Live inject, force, and fault controls stay hidden until the matching backend control plane exists.',
     },
 
     // Notifications

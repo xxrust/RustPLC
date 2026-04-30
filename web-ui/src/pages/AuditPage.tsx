@@ -4,13 +4,34 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import RunReviewCockpit from '../components/review/RunReviewCockpit';
 import { geometryApi, runApi, traceApi } from '../services/api';
+import { useAppStore } from '../stores/appStore';
 import type { RunStatus } from '../types';
 import { formatTimestamp } from '../utils/time';
 
 const { Paragraph, Text, Title } = Typography;
 
-function pickDefaultRun(runs: RunStatus[]): string | null {
+const RUN_PRESETS: Record<
+  string,
+  { plcFile?: string; topologyFile?: string; scenarioFile?: string }
+> = {
+  demo: {
+    plcFile: 'examples/demo.plc',
+    scenarioFile: 'examples/demo.scenario.json',
+  },
+  component_model: {
+    topologyFile: 'examples/component_model/topology.json',
+    scenarioFile: 'examples/component_model/scenario_normal.json',
+  },
+  topology_perf_500: {
+    plcFile: 'examples/topology_perf_500.plc',
+    topologyFile: 'examples/topology_perf_500.topology.json',
+    scenarioFile: 'examples/topology_perf_500.scenario.json',
+  },
+};
+
+function pickDefaultRun(runs: RunStatus[], currentProject: string | null): string | null {
   return (
+    runs.find((run) => runMatchesCurrentProject(run, currentProject))?.run_id ??
     runs.find((run) => run.status === 'fail')?.run_id ??
     runs.find((run) => run.status === 'running')?.run_id ??
     runs[0]?.run_id ??
@@ -20,6 +41,7 @@ function pickDefaultRun(runs: RunStatus[]): string | null {
 
 const AuditPage: React.FC = () => {
   const { t } = useTranslation();
+  const { currentProject } = useAppStore();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   const { data: runsData, isLoading: isRunsLoading } = useQuery({
@@ -32,9 +54,9 @@ const AuditPage: React.FC = () => {
 
   useEffect(() => {
     if (!selectedRunId && runs.length > 0) {
-      setSelectedRunId(pickDefaultRun(runs));
+      setSelectedRunId(pickDefaultRun(runs, currentProject));
     }
-  }, [runs, selectedRunId]);
+  }, [currentProject, runs, selectedRunId]);
 
   const selectedRun = useMemo(
     () => runs.find((run) => run.run_id === selectedRunId),
@@ -158,3 +180,26 @@ const AuditPage: React.FC = () => {
 };
 
 export default AuditPage;
+
+function normalizePath(path?: string | null): string | undefined {
+  return path?.replace(/\\/g, '/');
+}
+
+function runMatchesCurrentProject(
+  run: RunStatus,
+  currentProject: string | null
+): boolean {
+  if (!currentProject) {
+    return false;
+  }
+  const preset = RUN_PRESETS[currentProject];
+  if (!preset) {
+    return false;
+  }
+
+  return (
+    normalizePath(run.plc_file) === preset.plcFile ||
+    normalizePath(run.topology_file) === preset.topologyFile ||
+    normalizePath(run.scenario_file) === preset.scenarioFile
+  );
+}

@@ -171,6 +171,20 @@ function readNumericOutput(
   return typeof value === 'number' ? value : undefined;
 }
 
+function formatBooleanVector(values: boolean[] | undefined, noneLabel: string): string {
+  if (!Array.isArray(values) || values.length === 0) {
+    return noneLabel;
+  }
+  return values.map((value, index) => `${index}:${value ? 1 : 0}`).join(' | ');
+}
+
+function formatNumberVector(values: number[] | undefined, noneLabel: string): string {
+  if (!Array.isArray(values) || values.length === 0) {
+    return noneLabel;
+  }
+  return values.map((value, index) => `${index}:${value}`).join(' | ');
+}
+
 function componentStorySummary(trace: TraceData | undefined, t: Translate): ComponentStoryLine[] {
   const ticks = trace?.ticks ?? [];
   const stats = new Map<
@@ -381,7 +395,16 @@ const RunReviewCockpit: React.FC<RunReviewCockpitProps> = ({
   const activeSnapshot = useMemo(() => {
     const ticks = trace?.ticks ?? [];
     if (ticks.length === 0) return undefined;
-    if (typeof currentTick === 'number') return ticks[Math.min(currentTick, ticks.length - 1)];
+    if (typeof currentTick === 'number') {
+      const exactIndex = ticks.findIndex((snapshot) => snapshot.tick === currentTick);
+      if (exactIndex >= 0) {
+        return ticks[exactIndex];
+      }
+      const nextIndex = ticks.findIndex((snapshot) => snapshot.tick >= currentTick);
+      if (nextIndex >= 0) {
+        return ticks[nextIndex];
+      }
+    }
     return ticks[ticks.length - 1];
   }, [currentTick, trace?.ticks]);
 
@@ -400,6 +423,34 @@ const RunReviewCockpit: React.FC<RunReviewCockpitProps> = ({
           : t('review.none'),
     }));
   }, [activeSnapshot?.component_states, t]);
+  const ioSnapshotLines = useMemo(() => {
+    if (!activeSnapshot || activeComponents.length > 0) {
+      return [];
+    }
+
+    return [
+      {
+        key: 'di',
+        label: t('replayPage.digitalInputs'),
+        value: formatBooleanVector(activeSnapshot.digital_inputs, t('review.none')),
+      },
+      {
+        key: 'do',
+        label: t('replayPage.digitalOutputs'),
+        value: formatBooleanVector(activeSnapshot.digital_outputs, t('review.none')),
+      },
+      {
+        key: 'ai',
+        label: 'AI',
+        value: formatNumberVector(activeSnapshot.analog_inputs, t('review.none')),
+      },
+      {
+        key: 'ao',
+        label: 'AO',
+        value: formatNumberVector(activeSnapshot.analog_outputs, t('review.none')),
+      },
+    ];
+  }, [activeComponents.length, activeSnapshot, t]);
 
   const evidenceLinks = [
     { key: 'trace', label: t('review.trace'), href: run?.artifacts?.trace },
@@ -431,11 +482,9 @@ const RunReviewCockpit: React.FC<RunReviewCockpitProps> = ({
                 {run ? formatTimestamp(run.triggered_at, run.triggered_at_ms) : t('review.noTimestamp')}
               </Text>
               <Text type="secondary">
-                {typeof currentTick === 'number'
-                  ? t('review.tickLabel', { tick: currentTick })
-                  : activeSnapshot
-                    ? t('review.tickLabel', { tick: activeSnapshot.tick })
-                    : t('review.noTraceSnapshot')}
+                {activeSnapshot
+                  ? t('review.tickLabel', { tick: activeSnapshot.tick })
+                  : t('review.noTraceSnapshot')}
               </Text>
             </Space>
             <Paragraph style={{ marginBottom: 0 }}>
@@ -532,21 +581,36 @@ const RunReviewCockpit: React.FC<RunReviewCockpitProps> = ({
         </Card>
 
         <Card title={t('review.componentSnapshotRaw')}>
-          <Table
-            dataSource={activeComponents}
-            pagination={false}
-            size="small"
-            scroll={{ x: 900 }}
-            locale={{ emptyText: t('review.noComponentSnapshot') }}
-            columns={[
-              { title: t('review.component'), dataIndex: 'componentId', key: 'componentId' },
-              { title: t('review.type'), dataIndex: 'type', key: 'type' },
-              { title: t('review.state'), dataIndex: 'state', key: 'state' },
-              { title: t('review.inputs'), dataIndex: 'inputs', key: 'inputs' },
-              { title: t('review.outputs'), dataIndex: 'outputs', key: 'outputs' },
-              { title: t('review.faults'), dataIndex: 'faults', key: 'faults' },
-            ]}
-          />
+          {activeComponents.length > 0 ? (
+            <Table
+              dataSource={activeComponents}
+              pagination={false}
+              size="small"
+              scroll={{ x: 900 }}
+              locale={{ emptyText: t('review.noComponentSnapshot') }}
+              columns={[
+                { title: t('review.component'), dataIndex: 'componentId', key: 'componentId' },
+                { title: t('review.type'), dataIndex: 'type', key: 'type' },
+                { title: t('review.state'), dataIndex: 'state', key: 'state' },
+                { title: t('review.inputs'), dataIndex: 'inputs', key: 'inputs' },
+                { title: t('review.outputs'), dataIndex: 'outputs', key: 'outputs' },
+                { title: t('review.faults'), dataIndex: 'faults', key: 'faults' },
+              ]}
+            />
+          ) : ioSnapshotLines.length > 0 ? (
+            <List
+              size="small"
+              dataSource={ioSnapshotLines}
+              renderItem={(item) => (
+                <List.Item key={item.key}>
+                  <Text strong>{item.label}</Text>
+                  <Text code>{item.value}</Text>
+                </List.Item>
+              )}
+            />
+          ) : (
+            <Text type="secondary">{t('review.noComponentSnapshot')}</Text>
+          )}
         </Card>
       </Space>
     </Card>

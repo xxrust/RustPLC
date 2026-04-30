@@ -5,6 +5,7 @@ import type { NodeData } from '../../stores/topologyStore';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useAppStore } from '../../stores/appStore';
 import { simulationApi } from '../../services/api';
+import { useCanvasInteraction } from '../canvas/CanvasInteractionContext';
 import NodePortHandles, { PortMetadataFallbackBadge } from './NodePortHandles';
 
 const SwitchNode: React.FC<NodeProps> = ({ data, selected, id }) => {
@@ -15,7 +16,8 @@ const SwitchNode: React.FC<NodeProps> = ({ data, selected, id }) => {
 
   const { updateNodeData } = useTopologyStore();
   const { runMode, currentUser } = useAppStore();
-  const showControls = runMode === 'no_board';
+  const { liveSimulationEnabled, readOnly } = useCanvasInteraction();
+  const showControls = runMode === 'no_board' && liveSimulationEnabled && !readOnly;
   const [loading, setLoading] = useState(false);
 
   const handleToggle = async (e: React.MouseEvent) => {

@@ -60,6 +60,10 @@ export interface RunStatus {
   triggered_by: string;
   triggered_at: string;
   triggered_at_ms?: number;
+  plc_file?: string;
+  scenario_file?: string;
+  topology_file?: string;
+  tick_ms?: number;
   artifacts: {
     trace?: string;
     diff?: string;

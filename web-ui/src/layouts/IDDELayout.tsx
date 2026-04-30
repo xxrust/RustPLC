@@ -30,6 +30,7 @@ let tabCounter = 1;
 
 const SIDEBAR_WIDTH = 280;
 const PANEL_WIDTH = 320;
+const SHARED_TOPOLOGY_VIEWS: Tab['view'][] = ['scenario', 'run', 'diagnosis', 'replay', 'audit'];
 
 const IDDELayout: React.FC = () => {
   const { t } = useTranslation();
@@ -125,6 +126,9 @@ const IDDELayout: React.FC = () => {
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const showEditorChrome = activeTab?.view === 'topology';
+  const showSharedTopologyWorkspace = Boolean(
+    activeTab && SHARED_TOPOLOGY_VIEWS.includes(activeTab.view)
+  );
 
   const handleTabClick = (id: string) => setActiveTabId(id);
 
@@ -253,6 +257,49 @@ const IDDELayout: React.FC = () => {
                 <ViewContent view={activeTab?.view || 'topology'} />
               </div>
             </>
+          ) : showSharedTopologyWorkspace ? (
+            <div
+              style={{
+                flex: 1,
+                display: 'grid',
+                gridTemplateColumns: 'minmax(520px, 1.25fr) minmax(420px, 0.95fr)',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minWidth: 0,
+                  borderRight: '1px solid #2d2d2d',
+                  background: '#161616',
+                }}
+              >
+                <div
+                  style={{
+                    padding: '10px 14px',
+                    borderBottom: '1px solid #2d2d2d',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                >
+                  <span style={{ color: '#e5e7eb', fontSize: 13, fontWeight: 600 }}>
+                    {t('idde.sharedTopologyTitle')}
+                  </span>
+                  <span style={{ color: '#94a3b8', fontSize: 12 }}>
+                    {t('idde.sharedTopologyHint')}
+                  </span>
+                </div>
+                <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+                  <TopologyCanvas readOnly />
+                </div>
+              </div>
+
+              <div style={{ flex: 1, overflowY: 'auto', background: '#1e1e1e' }}>
+                <ViewContent view={activeTab.view} embedded />
+              </div>
+            </div>
           ) : (
             <div style={{ flex: 1, overflowY: 'auto', background: '#1e1e1e' }}>
               <ViewContent view={activeTab.view} />
@@ -325,20 +372,25 @@ const IDDELayout: React.FC = () => {
 };
 
 // View content dispatcher
-const ViewContent: React.FC<{ view: Tab['view'] }> = ({ view }) => {
+const ViewContent: React.FC<{ view: Tab['view']; embedded?: boolean }> = ({
+  view,
+  embedded = false,
+}) => {
+  const pageStyle = { padding: embedded ? 20 : 24 };
+
   switch (view) {
     case 'topology':
       return <TopologyCanvas />;
     case 'scenario':
-      return <div style={{ padding: 24 }}><ScenarioPage /></div>;
+      return <div style={pageStyle}><ScenarioPage /></div>;
     case 'run':
-      return <div style={{ padding: 24 }}><RunPage /></div>;
+      return <div style={pageStyle}><RunPage /></div>;
     case 'diagnosis':
-      return <div style={{ padding: 24 }}><DiagnosisPage /></div>;
+      return <div style={pageStyle}><DiagnosisPage /></div>;
     case 'audit':
-      return <div style={{ padding: 24 }}><AuditPage /></div>;
+      return <div style={pageStyle}><AuditPage /></div>;
     case 'replay':
-      return <div style={{ padding: 24 }}><ReplayPage /></div>;
+      return <div style={pageStyle}><ReplayPage /></div>;
     default:
       return null;
   }

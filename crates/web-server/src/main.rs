@@ -1,4 +1,4 @@
-﻿use axum::{
+use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
@@ -786,6 +786,7 @@ async fn execute_run(
     let mut record_updates = RunArtifacts::default();
     let mut status = "fail".to_string();
     let mut failure_summary: Option<String> = None;
+    let parsed_tick_ms = parse_tick_ms_from_scenario(&state.workspace_root, &payload.scenario_file);
 
     if let Some(topology_file) = payload.topology_file.clone() {
         let trace_path = out_dir.join("component_trace.jsonl");
@@ -846,9 +847,9 @@ async fn execute_run(
 
         let args = vec![
             "no-board-gate".to_string(),
-            plc_file,
+            plc_file.clone(),
             "--scenario".to_string(),
-            scenario_file,
+            scenario_file.clone(),
             "--out-dir".to_string(),
             out_dir.display().to_string(),
             "--output".to_string(),
@@ -889,6 +890,29 @@ async fn execute_run(
                 .map(|path| artifact_href_any(&state.workspace_root, path));
         }
 
+        // Replay needs per-tick IO snapshots, while no-board-gate primarily exports event traces.
+        // Generate the snapshot sidecar without disturbing the main gate artifacts.
+        let io_snapshot_path = out_dir.join("io_snapshot.json");
+        let replay_trace_path = out_dir.join("replay_support_trace.jsonl");
+        let replay_args = vec![
+            "sim-plc".to_string(),
+            plc_file.clone(),
+            "--scenario".to_string(),
+            scenario_file.clone(),
+            "--out".to_string(),
+            replay_trace_path.display().to_string(),
+            "--io-snapshot-out".to_string(),
+            io_snapshot_path.display().to_string(),
+        ];
+        let replay_command = run_rust_plc(&state.workspace_root, &replay_args).await?;
+        if !replay_command.success {
+            info!(
+                "run {} replay snapshot generation failed: {}",
+                run_id,
+                first_failure_message(&replay_command.stderr, &replay_command.stdout)
+            );
+        }
+
         if let Some(geometry_href) = generate_geometry_for_run(
             &state.workspace_root,
             &out_dir,
@@ -907,6 +931,7 @@ async fn execute_run(
         run.status = status;
         run.failure_summary = failure_summary;
         run.artifacts = record_updates;
+        run.tick_ms = parsed_tick_ms;
     }
     Ok(())
 }
@@ -1034,13 +1059,14 @@ async fn build_trace_payload(
 
     let trace_path = resolve_artifact_reference(&state.workspace_root, &trace_ref)
         .ok_or_else(|| not_found("trace artifact path is invalid".to_string()))?;
+    let replay_trace_path = preferred_replay_trace_path(&trace_path);
 
-    if trace_path.extension().and_then(|s| s.to_str()) == Some("json") {
-        let value = read_json_file(&trace_path)?.0;
+    if replay_trace_path.extension().and_then(|s| s.to_str()) == Some("json") {
+        let value = read_json_file(&replay_trace_path)?.0;
         return Ok(Json(value));
     }
 
-    let text = std::fs::read_to_string(&trace_path).map_err(internal_error)?;
+    let text = std::fs::read_to_string(&replay_trace_path).map_err(internal_error)?;
     let mut ticks = Vec::<Value>::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let Ok(row) = serde_json::from_str::<Value>(line) else {
@@ -1081,6 +1107,21 @@ async fn build_trace_payload(
     })))
 }
 
+fn preferred_replay_trace_path(trace_path: &StdPath) -> PathBuf {
+    let Some(file_name) = trace_path.file_name().and_then(|value| value.to_str()) else {
+        return trace_path.to_path_buf();
+    };
+
+    if file_name == "sil_trace.jsonl" {
+        let io_snapshot_path = trace_path.with_file_name("io_snapshot.json");
+        if io_snapshot_path.exists() {
+            return io_snapshot_path;
+        }
+    }
+
+    trace_path.to_path_buf()
+}
+
 async fn generate_geometry_for_run(
     workspace_root: &StdPath,
     out_dir: &StdPath,
@@ -1093,8 +1134,14 @@ async fn generate_geometry_for_run(
     };
 
     let out_path = out_dir.join("geometry.json");
-    generate_geometry_artifact(workspace_root, &out_path, plc_file, trace_href, intent_report_href)
-        .await
+    generate_geometry_artifact(
+        workspace_root,
+        &out_path,
+        plc_file,
+        trace_href,
+        intent_report_href,
+    )
+    .await
 }
 
 async fn generate_geometry_artifact(
@@ -1104,7 +1151,13 @@ async fn generate_geometry_artifact(
     trace_href: Option<&str>,
     intent_report_href: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let args = build_geometry_export_args(workspace_root, out_path, plc_file, trace_href, intent_report_href);
+    let args = build_geometry_export_args(
+        workspace_root,
+        out_path,
+        plc_file,
+        trace_href,
+        intent_report_href,
+    );
     let command = run_rust_plc(workspace_root, &args).await?;
     if !command.success {
         return Err(first_failure_message(&command.stderr, &command.stdout));
@@ -1597,15 +1650,17 @@ fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, Json<Value>) {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_geometry_export_args, get_geometry, normalize_topology_tags_in_place,
-        parse_plc_topology, resolve_artifact_reference, AppState, ParsePlcTopologyRequest,
-        RunArtifacts, RunRecord, TAGS_SCHEMA_VERSION,
+        build_geometry_export_args, get_geometry, get_keypoints, get_trace, get_trace_range,
+        normalize_topology_tags_in_place, parse_plc_topology, resolve_artifact_reference, AppState,
+        ParsePlcTopologyRequest, RunArtifacts, RunRecord, TickRangeQuery, TAGS_SCHEMA_VERSION,
     };
-    use axum::extract::{Path, State};
+    use axum::extract::{Path, Query, State};
     use axum::response::Json;
     use serde_json::{json, Value};
+    use std::fs;
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::RwLock;
 
     fn find_component<'a>(payload: &'a Value, id: &str) -> &'a Value {
@@ -1632,6 +1687,16 @@ mod tests {
                 })
             })
             .unwrap_or(false)
+    }
+
+    fn temp_workspace_root(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rustplc-web-server-{label}-{unique}"));
+        fs::create_dir_all(&root).expect("temp workspace root should be created");
+        root
     }
 
     #[test]
@@ -1853,13 +1918,17 @@ task main:
 
         assert_eq!(args[0], "geometry-export");
         assert!(
-            args.contains(&workspace_root.join("examples/demo.plc").display().to_string()),
+            args.contains(
+                &workspace_root
+                    .join("examples/demo.plc")
+                    .display()
+                    .to_string()
+            ),
             "expected absolute plc path in args: {args:?}"
         );
         assert!(args.contains(&"--trace".to_string()));
         assert!(args.iter().any(|arg| {
-            PathBuf::from(arg)
-                .ends_with(PathBuf::from("out/web_runs/run-1/sil_trace.jsonl"))
+            PathBuf::from(arg).ends_with(PathBuf::from("out/web_runs/run-1/sil_trace.jsonl"))
         }));
         assert!(args.contains(&"--intent-report".to_string()));
         assert!(args.iter().any(|arg| {
@@ -1872,11 +1941,9 @@ task main:
     #[test]
     fn resolve_artifact_reference_understands_geometry_artifact_href() {
         let workspace_root = PathBuf::from("E:/workspace");
-        let resolved = resolve_artifact_reference(
-            &workspace_root,
-            "/artifacts/web_runs/run-1/geometry.json",
-        )
-        .expect("geometry artifact href should resolve");
+        let resolved =
+            resolve_artifact_reference(&workspace_root, "/artifacts/web_runs/run-1/geometry.json")
+                .expect("geometry artifact href should resolve");
         assert_eq!(
             resolved,
             workspace_root.join("out/web_runs/run-1/geometry.json")
@@ -1912,7 +1979,249 @@ task main:
         assert_eq!(payload["status"], json!("missing"));
         assert_eq!(payload["artifact_kind"], json!("semantic_twin_geometry"));
     }
+
+    #[tokio::test]
+    async fn get_trace_returns_empty_ticks_when_run_has_no_trace_artifact() {
+        let state = Arc::new(AppState {
+            workspace_root: PathBuf::from("E:/workspace"),
+            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
+                "run-1".to_string(),
+                RunRecord {
+                    run_id: "run-1".to_string(),
+                    status: "pass".to_string(),
+                    triggered_by: "test".to_string(),
+                    triggered_at: "0".to_string(),
+                    triggered_at_ms: 0,
+                    mode: "no_board_gate".to_string(),
+                    artifacts: RunArtifacts::default(),
+                    failure_summary: None,
+                    plc_file: Some("examples/demo.plc".to_string()),
+                    scenario_file: Some("examples/demo.scenario.json".to_string()),
+                    topology_file: None,
+                    tick_ms: Some(10),
+                },
+            )]))),
+        });
+
+        let Json(payload) = get_trace(State(state), Path("run-1".to_string()))
+            .await
+            .expect("trace endpoint should return a payload");
+        assert_eq!(payload["tick_ms"], json!(10));
+        assert_eq!(payload["ticks"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn get_trace_converts_component_trace_jsonl_into_replay_ticks() {
+        let workspace_root = temp_workspace_root("component-trace");
+        let trace_path = workspace_root.join("out/web_runs/run-1/component_trace.jsonl");
+        fs::create_dir_all(trace_path.parent().expect("trace parent")).expect("trace dir");
+        fs::write(
+            &trace_path,
+            concat!(
+                "{\"tick\":0,\"components\":{\"s_start\":{\"state\":\"on\",\"component_type\":\"switch\"}}}\n",
+                "{\"tick\":1,\"components\":{\"m1\":{\"state\":\"enabled\",\"component_type\":\"stepper_pd\",\"outputs\":{\"position_steps\":42}}}}\n"
+            ),
+        )
+        .expect("component trace should be written");
+
+        let state = Arc::new(AppState {
+            workspace_root: workspace_root.clone(),
+            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
+                "run-1".to_string(),
+                RunRecord {
+                    run_id: "run-1".to_string(),
+                    status: "pass".to_string(),
+                    triggered_by: "test".to_string(),
+                    triggered_at: "0".to_string(),
+                    triggered_at_ms: 0,
+                    mode: "component_sim".to_string(),
+                    artifacts: RunArtifacts {
+                        trace: Some("/artifacts/web_runs/run-1/component_trace.jsonl".to_string()),
+                        ..RunArtifacts::default()
+                    },
+                    failure_summary: None,
+                    plc_file: None,
+                    scenario_file: Some(
+                        "examples/component_model/scenario_normal.json".to_string(),
+                    ),
+                    topology_file: Some("examples/component_model/topology.json".to_string()),
+                    tick_ms: Some(20),
+                },
+            )]))),
+        });
+
+        let Json(payload) = get_trace(State(state), Path("run-1".to_string()))
+            .await
+            .expect("trace endpoint should parse component trace");
+
+        assert_eq!(payload["tick_ms"], json!(20));
+        assert_eq!(payload["ticks"][0]["tick"], json!(0));
+        assert_eq!(
+            payload["ticks"][0]["component_states"]["s_start"]["state"],
+            json!("on")
+        );
+        assert_eq!(
+            payload["ticks"][1]["component_states"]["m1"]["outputs"]["position_steps"],
+            json!(42)
+        );
+    }
+
+    #[tokio::test]
+    async fn get_trace_prefers_io_snapshot_sidecar_for_sil_trace_replay() {
+        let workspace_root = temp_workspace_root("io-snapshot-replay");
+        let trace_path = workspace_root.join("out/web_runs/run-1/sil_trace.jsonl");
+        let io_snapshot_path = workspace_root.join("out/web_runs/run-1/io_snapshot.json");
+        fs::create_dir_all(trace_path.parent().expect("trace parent")).expect("trace dir");
+        fs::write(
+            &trace_path,
+            "{\"tick\":0,\"task\":0,\"from_step\":0,\"to_step\":1,\"reason\":\"action\"}\n",
+        )
+        .expect("sil trace should be written");
+        fs::write(
+            &io_snapshot_path,
+            serde_json::to_string_pretty(&json!({
+                "schema_version": 1,
+                "tick_ms": 25,
+                "ticks": [
+                    {
+                        "tick": 0,
+                        "digital_inputs": [false, true],
+                        "analog_inputs": [],
+                        "digital_outputs": [true],
+                        "analog_outputs": []
+                    },
+                    {
+                        "tick": 1,
+                        "digital_inputs": [true, true],
+                        "analog_inputs": [],
+                        "digital_outputs": [true],
+                        "analog_outputs": []
+                    }
+                ]
+            }))
+            .expect("serialize io snapshot"),
+        )
+        .expect("io snapshot should be written");
+
+        let state = Arc::new(AppState {
+            workspace_root: workspace_root.clone(),
+            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
+                "run-1".to_string(),
+                RunRecord {
+                    run_id: "run-1".to_string(),
+                    status: "pass".to_string(),
+                    triggered_by: "test".to_string(),
+                    triggered_at: "0".to_string(),
+                    triggered_at_ms: 0,
+                    mode: "no_board_gate".to_string(),
+                    artifacts: RunArtifacts {
+                        trace: Some("/artifacts/web_runs/run-1/sil_trace.jsonl".to_string()),
+                        ..RunArtifacts::default()
+                    },
+                    failure_summary: None,
+                    plc_file: Some("examples/demo.plc".to_string()),
+                    scenario_file: Some("examples/demo.scenario.json".to_string()),
+                    topology_file: None,
+                    tick_ms: Some(25),
+                },
+            )]))),
+        });
+
+        let Json(payload) = get_trace(State(state), Path("run-1".to_string()))
+            .await
+            .expect("trace endpoint should prefer io snapshot");
+
+        assert_eq!(payload["tick_ms"], json!(25));
+        assert_eq!(payload["ticks"][0]["digital_inputs"][1], json!(true));
+        assert_eq!(payload["ticks"][1]["tick"], json!(1));
+    }
+
+    #[tokio::test]
+    async fn get_trace_range_filters_ticks_in_jsonl_trace() {
+        let workspace_root = temp_workspace_root("trace-range");
+        let trace_path = workspace_root.join("out/web_runs/run-1/sil_trace.jsonl");
+        fs::create_dir_all(trace_path.parent().expect("trace parent")).expect("trace dir");
+        fs::write(
+            &trace_path,
+            concat!(
+                "{\"tick\":0,\"digital_inputs\":[false],\"analog_inputs\":[],\"digital_outputs\":[false],\"analog_outputs\":[]}\n",
+                "{\"tick\":1,\"digital_inputs\":[true],\"analog_inputs\":[],\"digital_outputs\":[true],\"analog_outputs\":[]}\n",
+                "{\"tick\":2,\"digital_inputs\":[false],\"analog_inputs\":[],\"digital_outputs\":[false],\"analog_outputs\":[]}\n"
+            ),
+        )
+        .expect("trace should be written");
+
+        let state = Arc::new(AppState {
+            workspace_root: workspace_root.clone(),
+            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
+                "run-1".to_string(),
+                RunRecord {
+                    run_id: "run-1".to_string(),
+                    status: "pass".to_string(),
+                    triggered_by: "test".to_string(),
+                    triggered_at: "0".to_string(),
+                    triggered_at_ms: 0,
+                    mode: "no_board_gate".to_string(),
+                    artifacts: RunArtifacts {
+                        trace: Some("/artifacts/web_runs/run-1/sil_trace.jsonl".to_string()),
+                        ..RunArtifacts::default()
+                    },
+                    failure_summary: None,
+                    plc_file: Some("examples/demo.plc".to_string()),
+                    scenario_file: Some("examples/demo.scenario.json".to_string()),
+                    topology_file: None,
+                    tick_ms: Some(10),
+                },
+            )]))),
+        });
+
+        let Json(payload) = get_trace_range(
+            State(state),
+            Path("run-1".to_string()),
+            Query(TickRangeQuery {
+                start: Some(1),
+                end: Some(1),
+            }),
+        )
+        .await
+        .expect("trace range endpoint should filter trace");
+
+        assert_eq!(
+            payload["ticks"].as_array().map(|ticks| ticks.len()),
+            Some(1)
+        );
+        assert_eq!(payload["ticks"][0]["tick"], json!(1));
+    }
+
+    #[tokio::test]
+    async fn get_keypoints_returns_empty_payload_when_artifact_is_missing() {
+        let state = Arc::new(AppState {
+            workspace_root: PathBuf::from("E:/workspace"),
+            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
+                "run-1".to_string(),
+                RunRecord {
+                    run_id: "run-1".to_string(),
+                    status: "pass".to_string(),
+                    triggered_by: "test".to_string(),
+                    triggered_at: "0".to_string(),
+                    triggered_at_ms: 0,
+                    mode: "component_sim".to_string(),
+                    artifacts: RunArtifacts::default(),
+                    failure_summary: None,
+                    plc_file: None,
+                    scenario_file: Some(
+                        "examples/component_model/scenario_normal.json".to_string(),
+                    ),
+                    topology_file: Some("examples/component_model/topology.json".to_string()),
+                    tick_ms: Some(10),
+                },
+            )]))),
+        });
+
+        let Json(payload) = get_keypoints(State(state), Path("run-1".to_string()))
+            .await
+            .expect("keypoints endpoint should return fallback payload");
+        assert_eq!(payload["tick_ms"], json!(10));
+        assert_eq!(payload["keypoints"], json!([]));
+    }
 }
-
-
-

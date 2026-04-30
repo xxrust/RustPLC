@@ -28,6 +28,7 @@ import InputTerminalNode from '../nodes/InputTerminalNode';
 import OutputTerminalNode from '../nodes/OutputTerminalNode';
 import ContextMenu, { type MenuItem } from '../ContextMenu';
 import type { NodeData } from '../../stores/topologyStore';
+import { CanvasInteractionProvider } from './CanvasInteractionContext';
 import {
   buildTagGroupColorMap,
   getPrimaryTagValue,
@@ -62,7 +63,11 @@ interface PortResolution {
   inferredHandle: boolean;
 }
 
-const TopologyCanvas: React.FC = () => {
+interface TopologyCanvasProps {
+  readOnly?: boolean;
+}
+
+const TopologyCanvas: React.FC<TopologyCanvasProps> = ({ readOnly = false }) => {
   const { t } = useTranslation();
   const {
     nodes,
@@ -80,7 +85,8 @@ const TopologyCanvas: React.FC = () => {
   } = useTopologyStore();
 
   const { currentUser } = useAppStore();
-  const [isInteractive, setIsInteractive] = useState(true);
+  const liveSimulationEnabled = false;
+  const [isInteractive, setIsInteractive] = useState(!readOnly);
   const reactFlowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
 
   const [contextMenu, setContextMenu] = useState<{
@@ -272,6 +278,10 @@ const TopologyCanvas: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Delete') {
+        if (readOnly) {
+          return;
+        }
+
         const selectedNodes = nodes.filter(n => n.selected);
         const selectedEdges = edges.filter(e => e.selected);
 
@@ -299,7 +309,11 @@ const TopologyCanvas: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nodes, edges, deleteNode, deleteEdge, t]);
+  }, [nodes, edges, deleteNode, deleteEdge, readOnly, t]);
+
+  useEffect(() => {
+    setIsInteractive(!readOnly);
+  }, [readOnly]);
 
   useEffect(() => {
     if (!locationFocus.active || !focusSets || focusSets.focusNodeIds.size === 0) {
@@ -412,6 +426,9 @@ const TopologyCanvas: React.FC = () => {
 
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
+      if (readOnly || !liveSimulationEnabled) {
+        return;
+      }
       event.preventDefault();
       setContextMenu({
         x: event.clientX,
@@ -419,92 +436,93 @@ const TopologyCanvas: React.FC = () => {
         node,
       });
     },
-    []
+    [liveSimulationEnabled, readOnly]
   );
 
   const getFaultMenuItems = (node: Node): MenuItem[] => {
     const nodeType = node.type || 'generic';
     const items: MenuItem[] = [];
 
-    // Fault injection options based on node type
-    switch (nodeType) {
-      case 'cylinder':
-        items.push(
-          {
-            label: t('contextMenu.injectJammed'),
-            onClick: () => injectFault(node.id, 'jammed'),
-            badge: 'native',
-            danger: true,
-          },
-          {
-            label: t('contextMenu.injectMotionTimeout'),
-            onClick: () => injectFault(node.id, 'motion_timeout'),
-            badge: 'native',
-            danger: true,
-          }
-        );
-        break;
-      case 'sensor':
-        items.push(
-          {
-            label: t('contextMenu.injectStuckOn'),
-            onClick: () => injectFault(node.id, 'stuck_on'),
-            badge: 'native',
-            danger: true,
-          },
-          {
-            label: t('contextMenu.injectStuckOff'),
-            onClick: () => injectFault(node.id, 'stuck_off'),
-            badge: 'native',
-            danger: true,
-          },
-          {
-            label: t('contextMenu.injectChatter'),
-            onClick: () => injectFault(node.id, 'chatter'),
-            badge: 'native',
-            danger: true,
-          }
-        );
-        break;
-      case 'switch':
-        items.push(
-          {
-            label: t('contextMenu.injectStuckOn'),
-            onClick: () => injectFault(node.id, 'stuck_on'),
-            badge: 'native',
-            danger: true,
-          },
-          {
-            label: t('contextMenu.injectStuckOff'),
-            onClick: () => injectFault(node.id, 'stuck_off'),
-            badge: 'native',
-            danger: true,
-          }
-        );
-        break;
-      case 'stepper':
-      case 'stepper_pd':
-        items.push(
-          {
-            label: t('contextMenu.injectLostStep'),
-            onClick: () => injectFault(node.id, 'lost_step'),
-            badge: 'native',
-            danger: true,
-          },
-          {
-            label: t('contextMenu.injectStall'),
-            onClick: () => injectFault(node.id, 'stall'),
-            badge: 'native',
-            danger: true,
-          },
-          {
-            label: t('contextMenu.injectDirectionReversed'),
-            onClick: () => injectFault(node.id, 'direction_reversed'),
-            badge: 'native',
-            danger: true,
-          }
-        );
-        break;
+    if (liveSimulationEnabled) {
+      switch (nodeType) {
+        case 'cylinder':
+          items.push(
+            {
+              label: t('contextMenu.injectJammed'),
+              onClick: () => injectFault(node.id, 'jammed'),
+              badge: 'native',
+              danger: true,
+            },
+            {
+              label: t('contextMenu.injectMotionTimeout'),
+              onClick: () => injectFault(node.id, 'motion_timeout'),
+              badge: 'native',
+              danger: true,
+            }
+          );
+          break;
+        case 'sensor':
+          items.push(
+            {
+              label: t('contextMenu.injectStuckOn'),
+              onClick: () => injectFault(node.id, 'stuck_on'),
+              badge: 'native',
+              danger: true,
+            },
+            {
+              label: t('contextMenu.injectStuckOff'),
+              onClick: () => injectFault(node.id, 'stuck_off'),
+              badge: 'native',
+              danger: true,
+            },
+            {
+              label: t('contextMenu.injectChatter'),
+              onClick: () => injectFault(node.id, 'chatter'),
+              badge: 'native',
+              danger: true,
+            }
+          );
+          break;
+        case 'switch':
+          items.push(
+            {
+              label: t('contextMenu.injectStuckOn'),
+              onClick: () => injectFault(node.id, 'stuck_on'),
+              badge: 'native',
+              danger: true,
+            },
+            {
+              label: t('contextMenu.injectStuckOff'),
+              onClick: () => injectFault(node.id, 'stuck_off'),
+              badge: 'native',
+              danger: true,
+            }
+          );
+          break;
+        case 'stepper':
+        case 'stepper_pd':
+          items.push(
+            {
+              label: t('contextMenu.injectLostStep'),
+              onClick: () => injectFault(node.id, 'lost_step'),
+              badge: 'native',
+              danger: true,
+            },
+            {
+              label: t('contextMenu.injectStall'),
+              onClick: () => injectFault(node.id, 'stall'),
+              badge: 'native',
+              danger: true,
+            },
+            {
+              label: t('contextMenu.injectDirectionReversed'),
+              onClick: () => injectFault(node.id, 'direction_reversed'),
+              badge: 'native',
+              danger: true,
+            }
+          );
+          break;
+      }
     }
 
     if (items.length > 0) {
@@ -633,62 +651,105 @@ const TopologyCanvas: React.FC = () => {
           </button>
         </div>
       )}
-      <ReactFlow
-        nodes={renderNodes}
-        edges={renderEdges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onSelectionChange={onSelectionChange}
-        onNodeContextMenu={onNodeContextMenu}
-        onInit={(instance) => {
-          reactFlowRef.current = instance;
-        }}
-        nodeTypes={nodeTypes}
-        selectionMode={SelectionMode.Partial}
-        nodesDraggable={isInteractive}
-        nodesConnectable={isInteractive}
-        elementsSelectable={isInteractive}
-        fitView
-        style={{ background: '#1e1e1e' }}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={20}
-          size={1}
-          color="#2a2a2a"
-        />
-        <Controls
-          showZoom={false}
-          showFitView={false}
-          showInteractive={false}
+      {readOnly && (
+        <div
           style={{
-            background: '#2d2d2d',
-            border: '1px solid #3a3a3a',
-            borderRadius: 6,
+            position: 'absolute',
+            top: fallbackPortNodeCount > 0 || connectionWarning ? 76 : 12,
+            left: 12,
+            zIndex: 8,
+            background: '#0f172a',
+            border: '1px solid #38bdf8',
+            color: '#dbeafe',
+            borderRadius: 4,
+            padding: '4px 8px',
+            fontSize: 11,
+            maxWidth: 380,
           }}
         >
-          <CanvasControls isInteractive={isInteractive} onToggleInteractive={() => setIsInteractive(v => !v)} />
-        </Controls>
-        <MiniMap
+          {t('canvas.reviewReadonlyNotice')}
+        </div>
+      )}
+      {!readOnly && !liveSimulationEnabled && (
+        <div
           style={{
-            background: '#1a1a1a',
-            border: '1px solid #3a3a3a',
+            position: 'absolute',
+            top: fallbackPortNodeCount > 0 || connectionWarning ? 76 : 12,
+            left: 12,
+            zIndex: 8,
+            background: '#172554',
+            border: '1px solid #60a5fa',
+            color: '#dbeafe',
+            borderRadius: 4,
+            padding: '4px 8px',
+            fontSize: 11,
+            maxWidth: 420,
           }}
-          nodeColor={(node) => {
-            const statusColors: Record<string, string> = {
-              extended: '#00bcd4',
-              on: '#52c41a',
-              fault: '#f5222d',
-              running: '#722ed1',
-            };
-            const d = node.data as any;
-            return statusColors[d?.status] || '#4a4a4a';
+        >
+          {t('canvas.liveControlsUnavailableNotice')}
+        </div>
+      )}
+      <CanvasInteractionProvider value={{ readOnly, liveSimulationEnabled }}>
+        <ReactFlow
+          nodes={renderNodes}
+          edges={renderEdges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={readOnly ? undefined : onConnect}
+          onSelectionChange={onSelectionChange}
+          onNodeContextMenu={readOnly ? undefined : onNodeContextMenu}
+          onInit={(instance) => {
+            reactFlowRef.current = instance;
           }}
-          maskColor="rgba(0,0,0,0.4)"
-        />
-      </ReactFlow>
+          nodeTypes={nodeTypes}
+          selectionMode={SelectionMode.Partial}
+          nodesDraggable={!readOnly && isInteractive}
+          nodesConnectable={!readOnly && isInteractive}
+          elementsSelectable={!readOnly && isInteractive}
+          fitView
+          style={{ background: '#1e1e1e' }}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={20}
+            size={1}
+            color="#2a2a2a"
+          />
+          <Controls
+            showZoom={false}
+            showFitView={false}
+            showInteractive={false}
+            style={{
+              background: '#2d2d2d',
+              border: '1px solid #3a3a3a',
+              borderRadius: 6,
+            }}
+          >
+            <CanvasControls
+              isInteractive={!readOnly && isInteractive}
+              onToggleInteractive={() => setIsInteractive((v) => !v)}
+            />
+          </Controls>
+          <MiniMap
+            style={{
+              background: '#1a1a1a',
+              border: '1px solid #3a3a3a',
+            }}
+            nodeColor={(node) => {
+              const statusColors: Record<string, string> = {
+                extended: '#00bcd4',
+                on: '#52c41a',
+                fault: '#f5222d',
+                running: '#722ed1',
+              };
+              const d = node.data as any;
+              return statusColors[d?.status] || '#4a4a4a';
+            }}
+            maskColor="rgba(0,0,0,0.4)"
+          />
+        </ReactFlow>
+      </CanvasInteractionProvider>
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x}

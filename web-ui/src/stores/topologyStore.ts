@@ -66,7 +66,11 @@ interface TopologyState {
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   setSelectedNodeId: (id: string | null) => void;
-  updateNodeData: (nodeId: string, data: Partial<NodeData>) => void;
+  updateNodeData: (nodeId: string, data: Partial<NodeData>, markDirty?: boolean) => void;
+  mergeNodeDataById: (
+    updates: Record<string, Partial<NodeData>>,
+    markDirty?: boolean
+  ) => void;
   addNode: (node: Node<NodeData>) => void;
   deleteNode: (nodeId: string) => void;
   deleteEdge: (edgeId: string) => void;
@@ -139,7 +143,7 @@ export const useTopologyStore = create<TopologyState>()(
 
       setSelectedNodeId: (id) => set({ selectedNodeId: id }),
 
-      updateNodeData: (nodeId, data) => {
+      updateNodeData: (nodeId, data, markDirty = true) => {
         set({
           nodes: get().nodes.map((node) =>
             node.id === nodeId
@@ -149,7 +153,27 @@ export const useTopologyStore = create<TopologyState>()(
                 })
               : node
           ),
-          hasUnsavedChanges: true,
+          hasUnsavedChanges: markDirty ? true : get().hasUnsavedChanges,
+        });
+      },
+
+      mergeNodeDataById: (updates, markDirty = true) => {
+        if (Object.keys(updates).length === 0) {
+          return;
+        }
+
+        set({
+          nodes: get().nodes.map((node) => {
+            const patch = updates[node.id];
+            if (!patch) {
+              return node;
+            }
+            return normalizeTopologyNode({
+              ...node,
+              data: { ...node.data, ...patch },
+            });
+          }),
+          hasUnsavedChanges: markDirty ? true : get().hasUnsavedChanges,
         });
       },
 
