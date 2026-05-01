@@ -1,0 +1,29 @@
+[topology]
+device plc_main: plc {
+    purpose: "Controller body for a process-device semantic action demo",
+    model_ref: openplc_softplc
+}
+
+device oven: heater {
+    purpose: "Commissioned heater controlled through a high-level process action",
+    open_loop_policy: commissioned_low_risk_fixture,
+    response_time: 50ms
+}
+
+[constraints]
+timing: task.main must_complete_within 500ms
+    reason: "The demo heat command and hold step must finish within the local cycle budget"
+
+[tasks]
+task main:
+    step heat:
+        action: heater.heat_to(oven, 80)
+
+    step hold:
+        delay: 50ms
+
+    on_complete: goto done
+
+task done:
+    step halt:
+        action: log "process device action complete"

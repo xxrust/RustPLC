@@ -1,10 +1,10 @@
 [topology]
 
-device AI0: analog_input { range: 0..360 }
-device AO0: analog_output { range: 0..360 }
+device axis_master: servo_drive { response_time: 20ms }
+device axis_slave: servo_drive { response_time: 20ms }
 device cam_xy: cam_coupling {
-    master: AI0,
-    slave: AO0,
+    master: axis_master,
+    slave: axis_slave,
     table: missing_table,
 }
 

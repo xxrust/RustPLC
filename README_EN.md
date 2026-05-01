@@ -9,7 +9,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-e8630a?style=flat-square&logo=rust" alt="Rust">
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License">
-  <img src="https://img.shields.io/badge/tests-831_passing-2ea44f?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-868_passing-2ea44f?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/code-60K%2B_lines-8250df?style=flat-square" alt="Lines">
   <img src="https://img.shields.io/badge/verification-4_engines-cf222e?style=flat-square" alt="Engines">
 </p>
@@ -162,25 +162,37 @@ device cyl_A: cylinder {
     purpose: "Station A cylinder actuator",
     stroke_time: 300ms
 }
-device sensor_A: sensor { purpose: "Cylinder A position sensor" }
+device sensor_A_ext: sensor { purpose: "Cylinder A extended feedback" }
+device sensor_A_ret: sensor { purpose: "Cylinder A retracted feedback" }
 
 relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
-relation { from: cyl_A.extended, to: sensor_A.sense, via: detects }
-relation { from: sensor_A.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_A_ret.sense, via: detects }
+relation { from: sensor_A_ret.out, to: plc_main.X1, via: reports_to }
 
 [constraints]
-safety: cyl_A.extended requires sensor_A.on
 timing: task.cycle must_complete_within 2000ms
-causality: Y0 -> valve_A -> cyl_A -> sensor_A
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ret
 
 [tasks]
 task cycle:
     step extend:
         action: extend cyl_A
-        wait: sensor_A == true
-        timeout: 500ms -> goto fault_handler
+            timeout: 500ms -> goto fault.timeout
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
     on_complete: goto ready
+
+task fault:
+    step timeout:
+        action: log "cylinder command timed out"
+    step motion_fault:
+        action: log "cylinder feedback did not match the requested motion"
+    step safety_fault:
+        action: log "cylinder feedback is contradictory"
 ```
 
 Three sections, three concerns:
@@ -294,13 +306,12 @@ Available tools for agents:
 | Example | Features | Complexity |
 |---------|----------|------------|
 | `project_scaffold_demo/` | Minimal project structure, scaffolding | ★ |
-| `rp2040_motion_minimal.plc` | Motion control, analog I/O | ★★ |
+| `rp2040_motion_minimal.plc` | Motion control, board I/O mapping | ★★ |
 | `dual_axis_platform.plc` | Dual-axis coordination, parallel, race, conflicts_with | ★★★ |
 | `assembly_station.plc` | Multi-device coordination, parallel, requires | ★★★ |
 | `nuclear_coolant_isolation.plc` | SIL3 nuclear safety, redundant sensors, OR fault tolerance | ★★★★ |
 | `three_station_assembly.plc` | Large-scale topology, assembly workflow | ★★★★ |
-| `thermal_oven.plc` | PID temperature control, analog protection | ★★★ |
-| `hydraulic_bender.plc` | PID hydraulics, worst-case timing | ★★★ |
+| `process_device_demo.plc` | Process-device semantic action, runtime handler boundary | ★★ |
 | `recovery_templates/` | E-stop recovery, fault routing | ★★★ |
 | `force_override_demo.plc` | Online forcing, debug semantics | ★★ |
 
@@ -317,7 +328,7 @@ graph TB
         YAML["Scenario YAML<br/>inputs · faults · tick_ms"]
     end
 
-    subgraph Compiler["⚙️ Compiler Core · 120 Rust files · 60K+ lines"]
+    subgraph Compiler["⚙️ Compiler Core · 123 Rust files · 60K+ lines"]
         PARSE["Parser<br/>PEG 544 rules"] --> AST["AST"]
         AST --> SEM["Semantic<br/>preprocessing + IR lowering"]
         SEM --> IR["IR<br/>petgraph DiGraph"]
@@ -370,15 +381,15 @@ graph TB
 
 | Metric | Value |
 |--------|-------|
-| Rust source files | 120 |
+| Rust source files | 123 |
 | Compiler code | 60,000+ lines |
 | PEG grammar rules | 544 lines |
-| Test cases | 831 |
-| Example .plc files | 29 |
+| Test cases | 868 |
+| Example .plc files | 32 |
 | Workspace crates | 7 |
 | Verification engines | 4 |
 | CLI subcommands | 20+ |
-| Wiki pages | 19 |
+| Wiki pages | 18 |
 | Architecture docs | 7 |
 
 ---
@@ -436,7 +447,7 @@ cargo run --release -- help sim-plc        # Simulation command help
 
 **Compiler Core** — DSL design, four-engine verification, structured error reporting, DSL v2 syntax extensions, optimization pipeline
 
-**I/O & Control** — Analog I/O, PID control, stepper + AB encoder + collision guard
+**Device Semantics** — cylinder and axis action semantics, process-device actions, station protocol contracts
 
 **Simulation & Testing** — SIL simulation, scenario engineering (init/validate/expand/gen/regress), KPI regression
 

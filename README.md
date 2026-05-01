@@ -9,7 +9,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-e8630a?style=flat-square&logo=rust" alt="Rust">
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License">
-  <img src="https://img.shields.io/badge/tests-831_passing-2ea44f?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-868_passing-2ea44f?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/code-60K%2B_lines-8250df?style=flat-square" alt="Lines">
   <img src="https://img.shields.io/badge/verification-4_engines-cf222e?style=flat-square" alt="Engines">
 </p>
@@ -162,25 +162,37 @@ device cyl_A: cylinder {
     purpose: "工位 A 气缸",
     stroke_time: 300ms
 }
-device sensor_A: sensor { purpose: "气缸 A 到位传感器" }
+device sensor_A_ext: sensor { purpose: "气缸 A 伸出到位反馈" }
+device sensor_A_ret: sensor { purpose: "气缸 A 缩回到位反馈" }
 
 relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
-relation { from: cyl_A.extended, to: sensor_A.sense, via: detects }
-relation { from: sensor_A.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_A_ret.sense, via: detects }
+relation { from: sensor_A_ret.out, to: plc_main.X1, via: reports_to }
 
 [constraints]
-safety: cyl_A.extended requires sensor_A.on
 timing: task.cycle must_complete_within 2000ms
-causality: Y0 -> valve_A -> cyl_A -> sensor_A
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ext
+causality: Y0 -> valve_A -> cyl_A -> sensor_A_ret
 
 [tasks]
 task cycle:
     step extend:
         action: extend cyl_A
-        wait: sensor_A == true
-        timeout: 500ms -> goto fault_handler
+            timeout: 500ms -> goto fault.timeout
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
     on_complete: goto ready
+
+task fault:
+    step timeout:
+        action: log "气缸动作超时"
+    step motion_fault:
+        action: log "气缸反馈与目标动作不一致"
+    step safety_fault:
+        action: log "气缸反馈出现矛盾状态"
 ```
 
 三个段落，三件事：
@@ -294,13 +306,12 @@ Agent 可用的工具：
 | 示例 | 特性 | 复杂度 |
 |------|------|--------|
 | `project_scaffold_demo/` | 最小项目结构、脚手架 | ★ |
-| `rp2040_motion_minimal.plc` | 运动控制、模拟量 I/O | ★★ |
+| `rp2040_motion_minimal.plc` | 运动控制、板级 I/O 映射 | ★★ |
 | `dual_axis_platform.plc` | 双轴联动、parallel、race、conflicts_with | ★★★ |
 | `assembly_station.plc` | 多设备协调、parallel、requires | ★★★ |
 | `nuclear_coolant_isolation.plc` | SIL3 核安全、冗余传感器、OR 容错 | ★★★★ |
 | `three_station_assembly.plc` | 大规模拓扑、装配流程 | ★★★★ |
-| `thermal_oven.plc` | PID 温控、模拟量保护 | ★★★ |
-| `hydraulic_bender.plc` | PID 液压、worst_case 时序 | ★★★ |
+| `process_device_demo.plc` | 过程设备语义动作、runtime handler 边界 | ★★ |
 | `recovery_templates/` | 急停恢复、故障分流 | ★★★ |
 | `force_override_demo.plc` | 在线强制、调试语义 | ★★ |
 
@@ -317,7 +328,7 @@ graph TB
         YAML["场景 YAML<br/>inputs · faults · tick_ms"]
     end
 
-    subgraph Compiler["⚙️ 编译器核心 · 120 Rust 源文件 · 60K+ 行"]
+    subgraph Compiler["⚙️ 编译器核心 · 123 Rust 源文件 · 60K+ 行"]
         PARSE["Parser<br/>PEG 544 规则"] --> AST["AST"]
         AST --> SEM["Semantic<br/>预处理 + IR 降级"]
         SEM --> IR["IR<br/>petgraph DiGraph"]
@@ -370,15 +381,15 @@ graph TB
 
 | 指标 | 数值 |
 |------|------|
-| Rust 源文件 | 120 个 |
+| Rust 源文件 | 123 个 |
 | 编译器代码 | 60,000+ 行 |
 | PEG 语法规则 | 544 行 |
-| 测试用例 | 831 个 |
-| 示例 .plc 文件 | 29 个 |
+| 测试用例 | 868 个 |
+| 示例 .plc 文件 | 32 个 |
 | Workspace crate | 7 个 |
 | 验证引擎 | 4 个 |
 | CLI 子命令 | 20+ 个 |
-| Wiki 文档 | 19 篇 |
+| Wiki 文档 | 18 篇 |
 | 架构文档 | 7 篇 |
 
 ---
@@ -436,7 +447,7 @@ cargo run --release -- help sim-plc        # 仿真命令帮助
 
 **编译器核心** — DSL 设计、四引擎验证、结构化错误报告、DSL v2 语法扩展、优化管线
 
-**I/O 与控制** — 模拟量 I/O、PID 控制、步进电机 + AB 编码器 + 碰撞防护
+**设备语义** — 气缸与轴动作语义、过程设备动作、station 协议契约
 
 **仿真与测试** — SIL 仿真、场景工程（init/validate/expand/gen/regress）、KPI 回归
 

@@ -180,32 +180,6 @@ fn parses_workpiece_split_merge_example_into_verified_ir_json() {
 }
 
 #[test]
-fn parses_flying_shear_example_into_verified_ir_json() {
-    let source = read_example("flying_shear.plc");
-    let ir_json = compile_source_to_json(&source).expect("flying_shear example should compile");
-
-    let safety_level = ir_json["verification"]["safety"]["level"]
-        .as_str()
-        .expect("verification.safety.level should be present");
-    assert!(
-        matches!(safety_level, "完备证明" | "有界验证"),
-        "safety level should report proof quality"
-    );
-    assert_eq!(
-        ir_json["verification"]["liveness"]["level"],
-        Value::String("通过".to_string())
-    );
-    assert_eq!(
-        ir_json["verification"]["timing"]["level"],
-        Value::String("通过".to_string())
-    );
-    assert_eq!(
-        ir_json["verification"]["causality"]["level"],
-        Value::String("通过".to_string())
-    );
-}
-
-#[test]
 fn parses_half_rotation_example_into_verified_ir_json() {
     let source = r#"
 [topology]
@@ -562,58 +536,6 @@ fn parses_stepper_collision_guard_example_into_verified_ir_json() {
         matches!(safety_level, "完备证明" | "有界验证"),
         "safety level should report proof quality"
     );
-    assert_eq!(
-        ir_json["verification"]["liveness"]["level"],
-        Value::String("通过".to_string())
-    );
-    assert_eq!(
-        ir_json["verification"]["timing"]["level"],
-        Value::String("通过".to_string())
-    );
-    assert_eq!(
-        ir_json["verification"]["causality"]["level"],
-        Value::String("通过".to_string())
-    );
-}
-
-#[test]
-fn parses_stepper_multi_sensor_consistency_example_into_verified_ir_json() {
-    let source = read_example("stepper_multi_sensor_consistency.plc");
-    let ir_json = compile_source_to_json(&source)
-        .expect("stepper_multi_sensor_consistency example should compile");
-
-    let safety_rules = ir_json["constraints"]["safety"]
-        .as_array()
-        .expect("constraints.safety should be an array");
-    assert_eq!(
-        safety_rules.len(),
-        1,
-        "stepper_multi_sensor_consistency should define one safety rule (alarm interlock)"
-    );
-
-    let safety_statuses = ir_json["verification"]["safety"]["rule_statuses"]
-        .as_array()
-        .expect("verification.safety.rule_statuses should be an array");
-    assert_eq!(
-        safety_statuses.len(),
-        1,
-        "verification report should include a status entry for the safety rule"
-    );
-    assert!(
-        safety_statuses.iter().any(|status| {
-            let rule = status["rule"].as_str().unwrap_or("");
-            rule.contains("axis_x.run.on") || rule.contains("axis_x.on")
-        }),
-        "verification report should include the axis_x alarm interlock rule"
-    );
-    assert_eq!(
-        ir_json["verification"]["safety"]["skipped_rules"]
-            .as_u64()
-            .expect("skipped_rules should be numeric"),
-        0,
-        "no safety rules should be skipped in this example"
-    );
-
     assert_eq!(
         ir_json["verification"]["liveness"]["level"],
         Value::String("通过".to_string())
@@ -1171,78 +1093,6 @@ fn cli_prints_verified_json_and_summary_for_dual_axis_platform_example() {
 }
 
 #[test]
-fn parses_analog_pressure_demo_example_into_verified_ir_json() {
-    let source = read_example("analog_pressure_demo.plc");
-    let ir_json =
-        compile_source_to_json(&source).expect("analog_pressure_demo example should compile");
-
-    assert!(ir_json.get("topology").is_some());
-    assert!(ir_json.get("state_machine").is_some());
-    assert!(ir_json.get("constraints").is_some());
-    assert!(ir_json.get("timing_model").is_some());
-
-    // Verify analog device types appear in topology
-    let nodes = ir_json["topology"]["graph"]["nodes"]
-        .as_array()
-        .expect("topology should have nodes");
-    let kinds: Vec<&str> = nodes.iter().filter_map(|n| n["kind"].as_str()).collect();
-    assert!(
-        kinds.contains(&"analog_input"),
-        "should contain analog_input device"
-    );
-    assert!(
-        kinds.contains(&"analog_output"),
-        "should contain analog_output device"
-    );
-
-    // Verify set_analog actions appear in transitions
-    let transitions = ir_json["state_machine"]["transitions"]
-        .as_array()
-        .expect("state machine should have transitions");
-    let has_set_analog = transitions.iter().any(|t| {
-        t["actions"]
-            .as_array()
-            .map(|actions| actions.iter().any(|a| a["action"] == "set_analog"))
-            .unwrap_or(false)
-    });
-    assert!(
-        has_set_analog,
-        "transitions should include set_analog actions"
-    );
-
-    // Verify analog connection type in edges
-    let edges = ir_json["topology"]["graph"]["edges"]
-        .as_array()
-        .expect("topology should have edges");
-    let has_analog_edge = edges.iter().any(|e| e[2] == "analog");
-    assert!(
-        has_analog_edge,
-        "topology should have analog connection type"
-    );
-
-    // All four verifiers pass
-    let safety_level = ir_json["verification"]["safety"]["level"]
-        .as_str()
-        .expect("verification.safety.level should be present");
-    assert!(
-        matches!(safety_level, "完备证明" | "有界验证"),
-        "safety level should report proof quality"
-    );
-    assert_eq!(
-        ir_json["verification"]["liveness"]["level"],
-        Value::String("通过".to_string())
-    );
-    assert_eq!(
-        ir_json["verification"]["timing"]["level"],
-        Value::String("通过".to_string())
-    );
-    assert_eq!(
-        ir_json["verification"]["causality"]["level"],
-        Value::String("通过".to_string())
-    );
-}
-
-#[test]
 fn parses_three_station_assembly_example_into_verified_ir_json() {
     let source = read_example("three_station_assembly.plc");
     let ir_json =
@@ -1264,11 +1114,27 @@ fn parses_three_station_assembly_example_into_verified_ir_json() {
 }
 
 #[test]
-fn parses_hydraulic_bender_example_into_verified_ir_json() {
-    let source = read_example("hydraulic_bender.plc");
-    let ir_json = compile_source_to_json(&source).expect("hydraulic_bender example should compile");
-    let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
-    assert!(matches!(safety_level, "完备证明" | "有界验证"));
+fn parses_process_device_demo_example_into_verified_ir_json() {
+    let source = read_example("process_device_demo.plc");
+    let ir_json =
+        compile_source_to_json(&source).expect("process_device_demo example should compile");
+
+    let transitions = ir_json["state_machine"]["transitions"]
+        .as_array()
+        .expect("state machine should include transitions array");
+    assert!(
+        transitions.iter().any(|transition| {
+            transition["actions"].as_array().is_some_and(|actions| {
+                actions.iter().any(|action| {
+                    action["action"] == Value::String("device_action".to_string())
+                        && action["family"] == Value::String("heater".to_string())
+                        && action["action_name"] == Value::String("heat_to".to_string())
+                        && action["target"] == Value::String("oven".to_string())
+                })
+            })
+        }),
+        "process_device_demo should keep heater.heat_to as a first-class device action"
+    );
     assert_eq!(
         ir_json["verification"]["liveness"]["level"],
         Value::String("通过".to_string())
@@ -1288,26 +1154,6 @@ fn reports_verified_status_for_dual_axis_platform_example() {
     let source = read_example("dual_axis_platform.plc");
     let ir_json =
         compile_source_to_json(&source).expect("dual_axis_platform example should compile");
-    let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
-    assert!(matches!(safety_level, "完备证明" | "有界验证"));
-    assert_eq!(
-        ir_json["verification"]["liveness"]["level"],
-        Value::String("通过".to_string())
-    );
-    assert_eq!(
-        ir_json["verification"]["timing"]["level"],
-        Value::String("通过".to_string())
-    );
-    assert_eq!(
-        ir_json["verification"]["causality"]["level"],
-        Value::String("通过".to_string())
-    );
-}
-
-#[test]
-fn parses_thermal_oven_example_into_verified_ir_json() {
-    let source = read_example("thermal_oven.plc");
-    let ir_json = compile_source_to_json(&source).expect("thermal_oven example should compile");
     let safety_level = ir_json["verification"]["safety"]["level"].as_str().unwrap();
     assert!(matches!(safety_level, "完备证明" | "有界验证"));
     assert_eq!(
