@@ -73,6 +73,15 @@ name = "fluid_actuator"
 kind = "process_actuator"
 ports = ["drive", "pressure", "flow", "fault"]
 
+[defaults.parameters]
+response_time = "600ms"
+
+[defaults.ports]
+drive = "off"
+pressure = "0"
+flow = "0"
+fault = "off"
+
 [verification_contract]
 safety = ["overpressure conflicts_with continued drive", "dry-run interlock must be modeled when declared"]
 liveness = ["pressure/flow closure required unless open_loop_policy is explicit"]

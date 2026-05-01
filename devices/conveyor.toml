@@ -75,6 +75,15 @@ name = "transport"
 kind = "process_actuator"
 ports = ["drive", "running", "zone", "jam"]
 
+[defaults.parameters]
+response_time = "400ms"
+
+[defaults.ports]
+drive = "off"
+running = "off"
+zone = "empty"
+jam = "off"
+
 [verification_contract]
 safety = ["zone occupancy capacity must not be exceeded", "jam.on conflicts_with continued drive"]
 liveness = ["move_until/index must complete or route to timeout/fault bucket"]

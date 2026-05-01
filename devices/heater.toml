@@ -58,6 +58,14 @@ name = "thermal_actuator"
 kind = "process_actuator"
 ports = ["power", "temperature", "fault"]
 
+[defaults.parameters]
+response_time = "500ms"
+
+[defaults.ports]
+power = "off"
+temperature = "25"
+fault = "off"
+
 [verification_contract]
 safety = ["overtemperature conflicts_with heat output", "sensor_fault prevents false completion"]
 liveness = ["heat_to/hold_temperature require temperature feedback unless open_loop_policy is explicit"]

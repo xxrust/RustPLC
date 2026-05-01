@@ -70,6 +70,16 @@ name = "end_effector"
 kind = "process_actuator"
 ports = ["cmd", "gripped", "released", "part_present", "fault"]
 
+[defaults.parameters]
+response_time = "300ms"
+
+[defaults.ports]
+cmd = "hold"
+gripped = "off"
+released = "on"
+part_present = "off"
+fault = "off"
+
 [verification_contract]
 safety = ["held workpiece must not be simultaneously free at another holder"]
 liveness = ["grip/release must complete or route to timeout/fault bucket"]

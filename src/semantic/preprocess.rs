@@ -74,6 +74,7 @@ fn inject_device_constraints(
             continue;
         };
         validate_device_extra_params(device, type_key, def, &mut errors);
+        inject_device_defaults(device, def);
         let declared_port_ids = known_port_ids(device);
 
         // Inject port states from library into device ports
@@ -88,7 +89,12 @@ fn inject_device_constraints(
                     existing.states = lib_port.states.clone();
                 }
                 if existing.default_state.is_empty() {
-                    existing.default_state = lib_port.default_state.clone();
+                    existing.default_state = def
+                        .defaults
+                        .as_ref()
+                        .and_then(|defaults| defaults.ports.get(&lib_port.name))
+                        .cloned()
+                        .unwrap_or_else(|| lib_port.default_state.clone());
                 }
             }
             // Don't auto-register ports not declared in DSL — the library enriches, not overrides
@@ -163,6 +169,110 @@ fn inject_device_constraints(
         Ok(())
     } else {
         Err(errors)
+    }
+}
+
+fn inject_device_defaults(device: &mut DeviceDeclaration, def: &DeviceDef) {
+    let Some(defaults) = &def.defaults else {
+        return;
+    };
+
+    for (key, value) in &defaults.parameters {
+        match key.as_str() {
+            "response_time" => {
+                if device.attributes.response_time.is_none() {
+                    device.attributes.response_time = duration_default(value);
+                }
+            }
+            "stroke_time" => {
+                if device.attributes.stroke_time.is_none() {
+                    device.attributes.stroke_time = duration_default(value);
+                }
+            }
+            "retract_time" => {
+                if device.attributes.retract_time.is_none() {
+                    device.attributes.retract_time = duration_default(value);
+                }
+            }
+            "ramp_time" => {
+                if device.attributes.ramp_time.is_none() {
+                    device.attributes.ramp_time = duration_default(value);
+                }
+            }
+            "debounce" => {
+                if device.attributes.debounce.is_none() {
+                    device.attributes.debounce = duration_default(value);
+                }
+            }
+            "open_loop_policy" => {
+                if device.attributes.open_loop_policy.is_none() {
+                    device.attributes.open_loop_policy = value.as_str().map(str::to_string);
+                }
+            }
+            "unit" => {
+                if device.attributes.unit.is_none() {
+                    device.attributes.unit = value.as_str().map(str::to_string);
+                }
+            }
+            "external" => {
+                if device.attributes.external.is_none() {
+                    device.attributes.external = value.as_bool();
+                }
+            }
+            "inverted" => {
+                if device.attributes.inverted.is_none() {
+                    device.attributes.inverted = value.as_bool();
+                }
+            }
+            _ => {
+                device
+                    .attributes
+                    .extra_params
+                    .entry(key.clone())
+                    .or_insert_with(|| toml_value_to_default_param(value));
+            }
+        }
+    }
+}
+
+fn duration_default(value: &toml::Value) -> Option<DurationValue> {
+    match value {
+        toml::Value::Integer(ms) if *ms >= 0 => Some(DurationValue {
+            value: *ms as u64,
+            unit: TimeUnit::Ms,
+        }),
+        toml::Value::String(raw) => parse_duration_default(raw),
+        _ => None,
+    }
+}
+
+fn parse_duration_default(raw: &str) -> Option<DurationValue> {
+    let trimmed = raw.trim();
+    if let Some(ms) = trimmed.strip_suffix("ms") {
+        return ms.trim().parse::<u64>().ok().map(|value| DurationValue {
+            value,
+            unit: TimeUnit::Ms,
+        });
+    }
+    if let Some(s) = trimmed.strip_suffix('s') {
+        return s.trim().parse::<u64>().ok().map(|value| DurationValue {
+            value,
+            unit: TimeUnit::S,
+        });
+    }
+    trimmed.parse::<u64>().ok().map(|value| DurationValue {
+        value,
+        unit: TimeUnit::Ms,
+    })
+}
+
+fn toml_value_to_default_param(value: &toml::Value) -> String {
+    match value {
+        toml::Value::String(value) => value.clone(),
+        toml::Value::Integer(value) => value.to_string(),
+        toml::Value::Float(value) => value.to_string(),
+        toml::Value::Boolean(value) => value.to_string(),
+        _ => value.to_string(),
     }
 }
 

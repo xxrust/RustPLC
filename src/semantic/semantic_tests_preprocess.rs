@@ -458,6 +458,71 @@ task main:
 }
 
 #[test]
+fn preprocess_with_library_injects_device_defaults_without_overriding_source() {
+    let input = r#"
+[topology]
+
+device hand: gripper { ports: [cmd:digital:consumer] }
+device oven: heater { response_time: 50ms, ports: [power:digital:consumer] }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let library = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+    let expanded = preprocess_program_with_library(&program, Some(&library))
+        .expect("device defaults should inject during preprocess");
+
+    let hand = expanded
+        .topology
+        .devices
+        .iter()
+        .find(|device| device.name == "hand")
+        .expect("hand device");
+    let hand_response = hand
+        .attributes
+        .response_time
+        .as_ref()
+        .expect("gripper response_time default");
+    assert_eq!(hand_response.value, 300);
+    assert!(matches!(hand_response.unit, crate::ast::TimeUnit::Ms));
+    assert_eq!(
+        hand.attributes
+            .ports
+            .iter()
+            .find(|port| port.id == "cmd")
+            .map(|port| port.default_state.as_str()),
+        Some("hold")
+    );
+
+    let oven = expanded
+        .topology
+        .devices
+        .iter()
+        .find(|device| device.name == "oven")
+        .expect("oven device");
+    let oven_response = oven
+        .attributes
+        .response_time
+        .as_ref()
+        .expect("authored heater response_time");
+    assert_eq!(oven_response.value, 50);
+    assert_eq!(
+        oven.attributes
+            .ports
+            .iter()
+            .find(|port| port.id == "power")
+            .map(|port| port.default_state.as_str()),
+        Some("off")
+    );
+}
+
+#[test]
 fn preprocess_with_library_injects_cam_fault_interlock_constraint() {
     let input = r#"
 [topology]

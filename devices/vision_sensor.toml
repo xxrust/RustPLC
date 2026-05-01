@@ -70,6 +70,16 @@ name = "inspection"
 kind = "process_sensor"
 ports = ["trigger", "ready", "pass", "fail", "fault"]
 
+[defaults.parameters]
+response_time = "250ms"
+
+[defaults.ports]
+trigger = "off"
+ready = "off"
+pass = "off"
+fail = "off"
+fault = "off"
+
 [verification_contract]
 safety = ["inspection result cannot be consumed before acquire/inspect completes"]
 causality = ["trigger must causally precede ready/pass/fail result consumption"]

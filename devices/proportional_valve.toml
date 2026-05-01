@@ -66,6 +66,14 @@ name = "analog_command_actuator"
 kind = "process_actuator"
 ports = ["cmd", "feedback", "fault"]
 
+[defaults.parameters]
+ramp_time = "200ms"
+
+[defaults.ports]
+cmd = "0"
+feedback = "0"
+fault = "off"
+
 [verification_contract]
 safety = ["cmd must stay inside 0..100 percent", "feedback deviation routes to fault bucket"]
 liveness = ["settle tolerance requires feedback unless open_loop_policy is explicit"]
