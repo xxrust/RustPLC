@@ -62,6 +62,7 @@ fn help_subcommand_prints_target_command_usage() {
     assert!(stderr.contains("--force"));
     assert!(stderr.contains("Notes:"));
     assert!(stderr.contains("structured-fragments"));
+    assert!(stderr.contains("station protocol placeholder"));
     assert!(stderr.contains("Examples:"));
     assert!(stderr.contains("rust_plc new demo_project"));
     assert!(stderr.contains("rust_plc new wafer_loader --layout structured-fragments"));

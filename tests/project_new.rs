@@ -83,6 +83,12 @@ fn new_structured_fragments_layout_creates_bundle_project_that_compiles() {
         project_dir.join("00_topology/connections.plc").exists(),
         "topology connections should exist"
     );
+    let station_protocol = fs::read_to_string(project_dir.join("00_topology/_station_protocol.plc"))
+        .expect("read station protocol placeholder");
+    assert!(station_protocol.contains("supported by the compiler"));
+    assert!(station_protocol.contains("tasks: [st01_cycle]"));
+    assert!(!station_protocol.contains("future DSL"));
+    assert!(!station_protocol.contains("not yet supported"));
     assert!(
         project_dir.join("01_init/defaults.plc").exists(),
         "init defaults should exist"
@@ -116,7 +122,7 @@ fn new_structured_fragments_layout_creates_bundle_project_that_compiles() {
         fs::read_to_string(project_dir.join("rustplc.project.toml")).expect("read manifest");
     assert!(manifest.contains("layer = \"station\""));
     assert!(manifest.contains("plc = \"rustplc.bundle.toml\""));
-    assert!(manifest.contains("scenario = \"scenarios/nominal.yaml\""));
+    assert!(manifest.contains("scenario = \"scenarios/nominal/normal.yaml\""));
     assert!(manifest.contains("workpiece = \"config/workpiece.toml\""));
     assert!(project_dir.join("config/workpiece.toml").exists());
 

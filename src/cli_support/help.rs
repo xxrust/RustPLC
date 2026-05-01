@@ -423,6 +423,7 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
             "`single-file` keeps the existing Day-1 scaffold shape.",
             "`structured-fragments` creates a phased directory layout (00_topology/ through 07_hmi/) with a v2 bundle entry for multi-agent projects.",
             "`--delivery-layer` defaults to `station` and is recorded as metadata in rustplc.project.toml.",
+            "Structured scaffolds include a station protocol placeholder using the current `station` / `handshake` / `transfer_point` syntax.",
         ],
         "sim" => &["This command runs the built-in demo program, not a user PLC file."],
         "sim-plc" => &[

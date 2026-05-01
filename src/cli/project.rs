@@ -212,7 +212,7 @@ fn scaffold_files(
     delivery_layer: DeliveryLayer,
 ) -> Vec<(String, String)> {
     let entry_plc = layout.entry_plc_path();
-    let entry_scenario = "scenarios/nominal.yaml";
+    let entry_scenario = "scenarios/nominal/normal.yaml";
     let mut files = vec![
         (
             "README.md".to_string(),
@@ -240,10 +240,11 @@ fn scaffold_files(
             ),
         ),
         (
-            "scenarios/nominal.yaml".to_string(),
+            "scenarios/nominal/normal.yaml".to_string(),
             "tick_ms: 10\nduration_ms: 300\ninputs:\n  - at_ms: 0\n    set:\n      digital_inputs:\n        0: true\n  - at_ms: 50\n    set:\n      digital_inputs:\n        0: false\nforces: []\n".to_string(),
         ),
         ("scenarios/faults/.gitkeep".to_string(), String::new()),
+        ("scenarios/generated/.gitkeep".to_string(), String::new()),
         (
             "config/io_map.toml".to_string(),
             "schema_version = 1\n\n[digital_inputs]\ndi0 = { gpio = 2, pull = \"up\" }\n\n[digital_outputs]\ndo0 = { gpio = 10, active_low = false }\n\n[safe_state]\nmode = \"all_zero\"\non_exit_timeout_ms = 0\n".to_string(),
@@ -278,19 +279,24 @@ fn scaffold_files(
             ".vscode/extensions.json".to_string(),
             "{\n  \"recommendations\": [\n    \"rust-lang.rust-analyzer\",\n    \"redhat.vscode-yaml\",\n    \"tamasfe.even-better-toml\"\n  ]\n}\n".to_string(),
         ),
+        (".vscode/README.md".to_string(), build_vscode_readme()),
         (
             ".vscode/plc.code-snippets".to_string(),
             build_vscode_snippets(layout),
+        ),
+        (
+            "plc/main.system.md".to_string(),
+            build_system_doc(project_title, project_slug, delivery_layer),
+        ),
+        (
+            "docs/project-layout.md".to_string(),
+            build_project_layout_doc(project_title, project_slug, entry_plc, entry_scenario),
         ),
     ];
 
     match layout {
         ProjectLayout::SingleFile => {
             files.push(("plc/main.plc".to_string(), single_file_plc()));
-            files.push((
-                "docs/system.md".to_string(),
-                build_system_doc(project_title, project_slug, delivery_layer),
-            ));
         }
         ProjectLayout::StructuredFragments => {
             files.extend(phased_scaffold_files(project_title, delivery_layer));
@@ -341,7 +347,7 @@ fn phased_scaffold_files(
         (
             "00_topology/_station_protocol.plc".to_string(),
             concat!(
-                "# Station isolation protocol (future DSL - not yet compiled).\n",
+                "# Station isolation protocol.\n",
                 "#\n",
                 "# When a project has multiple stations, this file declares:\n",
                 "#   1. Device partition - which station owns which devices\n",
@@ -351,14 +357,16 @@ fn phased_scaffold_files(
                 "# Without these declarations, multi-station files in 02_process/\n",
                 "# have NO compiler-enforced isolation. Any task can write any device.\n",
                 "#\n",
-                "# Example (not yet supported by compiler):\n",
+                "# Example (supported by the compiler):\n",
                 "#\n",
                 "#   station st01_loading {\n",
                 "#       owns: [valve_push, cyl_push, sensor_push_ext, sensor_push_ret]\n",
+                "#       tasks: [st01_cycle]\n",
                 "#   }\n",
                 "#\n",
                 "#   station st02_assembly {\n",
                 "#       owns: [valve_press, cyl_press, sensor_press_ext, sensor_press_ret]\n",
+                "#       tasks: [st02_cycle]\n",
                 "#   }\n",
                 "#\n",
                 "#   handshake st01_to_st02 {\n",
@@ -542,7 +550,7 @@ fn build_readme(
     };
 
     format!(
-        "# {project_title}\n\n- Slug: `{project_slug}`\n- Layout: `{}`\n- Delivery layer: `{}` ({})\n\n## Structure\n\n{structure}\n\n## Quick Start\n\n```bash\ncargo run --release --bin rust_plc -- project-check {entry_plc} --scenario {entry_scenario} --out-dir out/check --output human\n```\n",
+        "# {project_title}\n\n- Project slug: `{project_slug}`\n- Manifest: `rustplc.project.toml`\n- Layout: `{}`\n- Delivery layer: `{}` ({})\n\n## Structure\n\n{structure}\n\n## Quick Start\n\n```bash\ncargo run --release --bin rust_plc -- project-check {entry_plc} --scenario {entry_scenario} --out-dir out/check --output human\n```\n",
         layout.layout_summary(),
         delivery_layer.cli_name(),
         delivery_layer.label()
@@ -557,7 +565,7 @@ fn build_manifest(
     entry_scenario: &str,
 ) -> String {
     format!(
-        "schema_version = 1\n\n[project]\nname = \"{project_title}\"\nslug = \"{project_slug}\"\n\n[delivery]\nlayer = \"{}\"\n\n[entry]\nplc = \"{entry_plc}\"\nscenario = \"{entry_scenario}\"\nio_map = \"config/io_map.toml\"\nretain = \"config/retain.toml\"\nworkpiece = \"config/workpiece.toml\"\n\n[out]\nir = \"out/ir\"\nsim = \"out/sim\"\ngate = \"out/gate\"\ncodegen = \"out/codegen\"\nrp2040 = \"out/rp2040\"\nrelease = \"out/release\"\n",
+        "schema_version = 1\n\n[project]\nname = \"{project_title}\"\nslug = \"{project_slug}\"\n\n[delivery]\nlayer = \"{}\"\n\n[entry]\nsystem = \"plc/main.system.md\"\nplc = \"{entry_plc}\"\nscenario = \"{entry_scenario}\"\nio_map = \"config/io_map.toml\"\nretain = \"config/retain.toml\"\nworkpiece = \"config/workpiece.toml\"\n\n[out]\nir = \"out/ir\"\nsim = \"out/sim\"\ngate = \"out/gate\"\ncodegen = \"out/codegen\"\nrp2040 = \"out/rp2040\"\nrelease = \"out/release\"\n",
         delivery_layer.cli_name()
     )
 }
@@ -568,10 +576,25 @@ fn build_system_doc(
     delivery_layer: DeliveryLayer,
 ) -> String {
     format!(
-        "# {project_title} System Description\n\n## Identity\n- Name: {project_title}\n- Slug: `{project_slug}`\n- Delivery layer: `{}` ({})\n\n## Process Intent\n1. Wait for the start command.\n2. Energize the run output.\n3. Hold for 20 ms.\n4. De-energize the run output and finish.\n\n## Fault Strategy\n- If the start signal does not arrive within 100 ms, jump to `fault` and de-energize the run output.\n",
+        "# {project_title} System Description\n\n## Identity\n- Name: {project_title}\n- Project slug: `{project_slug}`\n- Delivery layer: `{}` ({})\n\n## Process Intent\n1. Wait for the start command.\n2. Energize the run output.\n3. Hold for 20 ms.\n4. De-energize the run output and finish.\n\n## Fault Strategy\n- If the start signal does not arrive within 100 ms, jump to `fault` and de-energize the run output.\n",
         delivery_layer.cli_name(),
         delivery_layer.label()
     )
+}
+
+fn build_project_layout_doc(
+    project_title: &str,
+    project_slug: &str,
+    entry_plc: &str,
+    entry_scenario: &str,
+) -> String {
+    format!(
+        "# Project Layout\n\nThis scaffold uses the standard RustPLC project layout.\n\n- `rustplc.project.toml`: project manifest and default artifact paths\n- `plc/main.system.md`: human/AI confirmed system intent\n- `{entry_plc}`: executable RustPLC source entry\n- `{entry_scenario}`: nominal regression scenario\n- `config/`: I/O, retain, and workpiece configuration\n- `out/`: rebuildable generated artifacts\n\nCurrent project: `{project_slug}` / `{project_title}`\n\nRecommended commands:\n\n```bash\ncargo run --release --bin rust_plc -- scenario-validate \\\n  {entry_plc} --scenario {entry_scenario} --output human\n\ncargo run --release --bin rust_plc -- sim-plc \\\n  {entry_plc} --scenario {entry_scenario} --out out/sim/normal/trace.jsonl\n\ncargo run --release --bin rust_plc -- no-board-gate \\\n  {entry_plc} --scenario {entry_scenario} \\\n  --out-dir out/gate/no_board/normal --output human\n\ncargo run --release --bin rust_plc -- gen-st \\\n  {entry_plc} --out out/codegen/st/main.st\n```\n"
+    )
+}
+
+fn build_vscode_readme() -> String {
+    "# VS Code Day-1 Support for RustPLC\n\n## What this package provides\n\n- `settings.json`: associates `*.plc` with INI highlighting\n- `plc.code-snippets`: starter snippets for PLC skeletons\n- `tasks.json`: one-click project-check, sim, and gate commands\n- `extensions.json`: recommended Rust/YAML/TOML extensions\n\n## Troubleshooting\n\n1. If snippets do not appear, confirm the file is `*.plc` and reload the window.\n2. If tasks fail with `command not found`, run them from the workspace root with `cargo` on PATH.\n3. If YAML/TOML diagnostics are missing, install the recommended extensions.\n".to_string()
 }
 
 fn build_architecture_doc(project_title: &str, delivery_layer: DeliveryLayer) -> String {
@@ -689,7 +712,7 @@ Agents read exports and the station protocol, not source files from other phases
 
 fn build_verification_doc(project_title: &str) -> String {
     format!(
-        "# {project_title} Verification\n\n## Required Checks\n1. Compile the bundle: `rustplc.bundle.toml`\n2. Run scenario: `scenarios/nominal.yaml`\n3. Run `sim-plc` and inspect trace\n4. Run `no-board-gate` when scenario is stable\n\n## Commands\n```bash\ncargo run --release --bin rust_plc -- project-check rustplc.bundle.toml --scenario scenarios/nominal.yaml --out-dir out/check --output human\ncargo run --release --bin rust_plc -- sim-plc rustplc.bundle.toml --scenario scenarios/nominal.yaml --out out/sim/trace.jsonl\n```\n"
+        "# {project_title} Verification\n\n## Required Checks\n1. Compile the bundle: `rustplc.bundle.toml`\n2. Run scenario: `scenarios/nominal/normal.yaml`\n3. Run `sim-plc` and inspect trace\n4. Run `no-board-gate` when scenario is stable\n\n## Commands\n```bash\ncargo run --release --bin rust_plc -- project-check rustplc.bundle.toml --scenario scenarios/nominal/normal.yaml --out-dir out/check --output human\ncargo run --release --bin rust_plc -- sim-plc rustplc.bundle.toml --scenario scenarios/nominal/normal.yaml --out out/sim/trace.jsonl\n```\n"
     )
 }
 
