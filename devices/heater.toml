@@ -1,0 +1,67 @@
+[identity]
+name = "Generic heater"
+type = "heater"
+
+[[interfaces.ports]]
+name = "power"
+states = ["on", "off"]
+default_state = "off"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "temperature"
+default_state = "25"
+direction = "output"
+port_type = "analog"
+range_min = -50.0
+range_max = 300.0
+unit = "degC"
+
+[[interfaces.ports]]
+name = "fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[interface_contract]
+layer = "task_level_device"
+default_feedback_policy = "feedback_required_unless_explicit_open_loop"
+
+[[interface_contract.actions]]
+name = "heat_to"
+consumes = ["power", "temperature"]
+produces = ["temperature"]
+faults = ["timeout", "reject", "overtemperature", "sensor_fault", "thermal_runaway", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "hold_temperature"
+consumes = ["power", "temperature"]
+produces = ["temperature"]
+faults = ["timeout", "overtemperature", "sensor_fault", "thermal_runaway", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "stop_heat"
+consumes = ["power"]
+produces = ["power"]
+faults = ["timeout"]
+
+[[interface_contract.actions]]
+name = "reset_fault"
+consumes = ["power"]
+produces = ["fault"]
+faults = ["reject", "safety_fault"]
+
+[[capabilities]]
+name = "thermal_actuator"
+kind = "process_actuator"
+ports = ["power", "temperature", "fault"]
+
+[verification_contract]
+safety = ["overtemperature conflicts_with heat output", "sensor_fault prevents false completion"]
+liveness = ["heat_to/hold_temperature require temperature feedback unless open_loop_policy is explicit"]
+
+[codegen_support]
+unsupported_targets = ["st", "runtime-core"]
+notes = "Heater process semantics require explicit thermal backend support."

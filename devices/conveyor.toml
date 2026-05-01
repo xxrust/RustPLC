@@ -1,0 +1,84 @@
+[identity]
+name = "Generic conveyor"
+type = "conveyor"
+
+[[interfaces.ports]]
+name = "drive"
+states = ["on", "off", "reverse"]
+default_state = "off"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "running"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "zone"
+states = ["occupied", "empty"]
+default_state = "empty"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "jam"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[interface_contract]
+layer = "task_level_device"
+default_feedback_policy = "feedback_required_unless_explicit_open_loop"
+
+[[interface_contract.actions]]
+name = "start"
+consumes = ["drive"]
+produces = ["running"]
+faults = ["timeout", "reject", "motion_fault", "safety_fault", "jam", "overload"]
+
+[[interface_contract.actions]]
+name = "stop"
+consumes = ["drive"]
+produces = ["running"]
+faults = ["timeout"]
+
+[[interface_contract.actions]]
+name = "move_until"
+consumes = ["drive", "zone"]
+produces = ["zone"]
+faults = ["timeout", "jam", "overload", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "index"
+consumes = ["drive", "zone"]
+produces = ["zone"]
+faults = ["timeout", "jam", "overload", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "reverse"
+consumes = ["drive"]
+produces = ["running"]
+faults = ["timeout", "jam", "overload", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "clear_jam"
+consumes = ["drive", "jam"]
+produces = ["jam"]
+faults = ["reject", "safety_fault"]
+
+[[capabilities]]
+name = "transport"
+kind = "process_actuator"
+ports = ["drive", "running", "zone", "jam"]
+
+[verification_contract]
+safety = ["zone occupancy capacity must not be exceeded", "jam.on conflicts_with continued drive"]
+liveness = ["move_until/index must complete or route to timeout/fault bucket"]
+
+[codegen_support]
+unsupported_targets = ["st", "runtime-core"]
+notes = "Conveyor actions consume drive capability; raw motor.run writes are not equivalent."

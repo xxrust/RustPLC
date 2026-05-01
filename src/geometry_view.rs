@@ -884,7 +884,12 @@ fn build_geometry_narrative(
         .states
         .iter()
         .map(|state| state.task_name.clone())
-        .chain(state_machine.task_contexts.iter().map(|context| context.task_name.clone()))
+        .chain(
+            state_machine
+                .task_contexts
+                .iter()
+                .map(|context| context.task_name.clone()),
+        )
         .collect::<BTreeSet<_>>();
 
     let mut tasks = Vec::new();
@@ -925,11 +930,7 @@ fn build_geometry_narrative(
             })
             .unwrap_or_default();
 
-        let ordered_states = order_task_states(
-            &entry_state,
-            &step_states,
-            &transitions_by_from,
-        );
+        let ordered_states = order_task_states(&entry_state, &step_states, &transitions_by_from);
         let mut steps = Vec::new();
         for (index, state) in ordered_states.iter().enumerate() {
             let step_id = format!("step:{}", state_key(state));
@@ -948,11 +949,8 @@ fn build_geometry_narrative(
                     )
                 })
                 .collect::<Vec<_>>();
-            let device_chains = build_step_device_chains(
-                &outgoing_raw,
-                &device_catalog,
-                &causality_catalog,
-            );
+            let device_chains =
+                build_step_device_chains(&outgoing_raw, &device_catalog, &causality_catalog);
             let evidence_chain_ids = device_chains
                 .iter()
                 .flat_map(|chain| chain.evidence_chain_ids.iter().cloned())
@@ -1305,7 +1303,12 @@ fn build_device_chain_for_focus(
         .collect::<BTreeSet<_>>();
     let evidence_chain_ids = causality_catalog
         .iter()
-        .filter(|entry| entry.devices.iter().any(|device| chain_device_names.contains(device)))
+        .filter(|entry| {
+            entry
+                .devices
+                .iter()
+                .any(|device| chain_device_names.contains(device))
+        })
         .map(|entry| entry.id.clone())
         .collect::<Vec<_>>();
 
@@ -1348,16 +1351,16 @@ fn push_unique_device_ref(
     target: &mut Vec<GeometryNarrativeDeviceRef>,
     device_ref: GeometryNarrativeDeviceRef,
 ) {
-    if target.iter().any(|existing| existing.device_id == device_ref.device_id) {
+    if target
+        .iter()
+        .any(|existing| existing.device_id == device_ref.device_id)
+    {
         return;
     }
     target.push(device_ref);
 }
 
-fn traverse_device_neighbors(
-    start: &str,
-    adjacency: &HashMap<String, Vec<String>>,
-) -> Vec<String> {
+fn traverse_device_neighbors(start: &str, adjacency: &HashMap<String, Vec<String>>) -> Vec<String> {
     let mut out = Vec::new();
     let mut queue = adjacency.get(start).cloned().unwrap_or_default();
     let mut seen = BTreeSet::new();
@@ -1430,7 +1433,11 @@ fn build_task_headline(
         let preferred_transition_id = release_transitions
             .first()
             .map(|transition| transition.transition_id.clone())
-            .or_else(|| step.outgoing.first().map(|transition| transition.transition_id.clone()));
+            .or_else(|| {
+                step.outgoing
+                    .first()
+                    .map(|transition| transition.transition_id.clone())
+            });
         for transition in step.outgoing.iter().map(narrative_transition_ref) {
             if preferred_transition_id
                 .as_ref()
@@ -1462,7 +1469,9 @@ fn narrative_transition_ref(
 }
 
 fn is_timeout_transition(transition: &GeometryNarrativeTransition) -> bool {
-    transition.guard_kind == "timeout" || transition.guard_kind == "delay" || !transition.timers.is_empty()
+    transition.guard_kind == "timeout"
+        || transition.guard_kind == "delay"
+        || !transition.timers.is_empty()
 }
 
 fn ensure_external_device_node(
@@ -1617,6 +1626,12 @@ fn transition_action_label(action: &TransitionAction) -> String {
         } => {
             format!("cam_phase {target} {offset_expr_raw}")
         }
+        TransitionAction::DeviceAction {
+            family,
+            action_name,
+            target,
+            ..
+        } => format!("device_action {family}.{action_name} {target}"),
         TransitionAction::AxisMoveRelative {
             target,
             distance_raw,
@@ -1648,6 +1663,7 @@ fn action_kind_from_transition(action: &TransitionAction) -> ActionKind {
         TransitionAction::CamDisengage { .. } => ActionKind::CamDisengage,
         TransitionAction::CamSwitch { .. } => ActionKind::CamSwitch,
         TransitionAction::CamPhase { .. } => ActionKind::CamPhase,
+        TransitionAction::DeviceAction { .. } => ActionKind::DeviceAction,
         TransitionAction::AxisMoveRelative { .. } => ActionKind::AxisMoveRelative,
         TransitionAction::AxisMoveAbsolute { .. } => ActionKind::AxisMoveAbsolute,
         TransitionAction::Log { .. } => ActionKind::Log,
@@ -1666,6 +1682,7 @@ fn action_target_name(action: &TransitionAction) -> Option<&str> {
         | TransitionAction::CamDisengage { target, .. }
         | TransitionAction::CamSwitch { target, .. }
         | TransitionAction::CamPhase { target, .. }
+        | TransitionAction::DeviceAction { target, .. }
         | TransitionAction::AxisMoveRelative { target, .. }
         | TransitionAction::AxisMoveAbsolute { target, .. } => Some(target.as_str()),
         TransitionAction::CallExtern { .. } | TransitionAction::Log { .. } => None,
@@ -1741,6 +1758,7 @@ fn action_kind_name(kind: &ActionKind) -> &'static str {
         ActionKind::CamDisengage => "cam_disengage",
         ActionKind::CamSwitch => "cam_switch",
         ActionKind::CamPhase => "cam_phase",
+        ActionKind::DeviceAction => "device_action",
         ActionKind::AxisMoveRelative => "axis_move_relative",
         ActionKind::AxisMoveAbsolute => "axis_move_absolute",
         ActionKind::Log => "log",
@@ -2023,17 +2041,20 @@ mod tests {
         assert_eq!(artifact.summary.step_count, 3);
         assert_eq!(artifact.summary.transition_count, 2);
         assert_eq!(artifact.summary.observed_transition_count, 2);
-        assert!(artifact
-            .nodes
-            .iter()
-            .any(|node| node.id == "task:main" && node.kind == GeometryNodeKind::Task));
+        assert!(
+            artifact
+                .nodes
+                .iter()
+                .any(|node| node.id == "task:main" && node.kind == GeometryNodeKind::Task)
+        );
         assert!(artifact.nodes.iter().any(|node| {
             node.id == "step:main.wait_start" && node.kind == GeometryNodeKind::Step
         }));
-        assert!(artifact
-            .nodes
-            .iter()
-            .any(|node| { node.id == "device:plc_main" && node.kind == GeometryNodeKind::Device }));
+        assert!(
+            artifact.nodes.iter().any(|node| {
+                node.id == "device:plc_main" && node.kind == GeometryNodeKind::Device
+            })
+        );
         assert!(artifact.edges.iter().any(|edge| {
             edge.kind == GeometryEdgeKind::Transition && edge.label == "when X0 == true"
         }));
@@ -2073,15 +2094,13 @@ mod tests {
         assert_eq!(main_task.current_step_id, "step:main.run");
         assert_eq!(main_task.coverage.trace_available, true);
         assert_eq!(main_task.coverage.intent_available, true);
-        assert!(main_task
-            .blocking_points
-            .iter()
-            .any(|point| point.step_id == "step:main.wait_start"
-                && point
-                    .release_transitions
-                    .iter()
-                    .any(|transition| transition.to_step_id == "step:main.run"
-                        && transition.guard_label == "when X0 == true")));
+        assert!(main_task.blocking_points.iter().any(|point| {
+            point.step_id == "step:main.wait_start"
+                && point.release_transitions.iter().any(|transition| {
+                    transition.to_step_id == "step:main.run"
+                        && transition.guard_label == "when X0 == true"
+                })
+        }));
         let run_step = main_task
             .steps
             .iter()

@@ -490,6 +490,16 @@ fn pending_action_descriptor_from_statement(
         ActionStatement::Call { function, .. } => {
             Some((ActionKind::CallExtern, Some(function.clone()), None))
         }
+        ActionStatement::DeviceAction {
+            family,
+            action_name,
+            target,
+            ..
+        } => Some((
+            ActionKind::DeviceAction,
+            Some(target.device.clone()),
+            Some(format!("{family}.{action_name}")),
+        )),
         ActionStatement::Extend { .. }
         | ActionStatement::Retract { .. }
         | ActionStatement::Set { .. }

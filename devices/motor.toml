@@ -109,3 +109,54 @@ solution = "增加 run.on requires fault.off 约束并在任务中先清故障"
 [metadata]
 standards = ["IEC 60947-4-1"]
 tags = ["motor", "actuator", "digital_control"]
+
+[interface_contract]
+version = "1"
+layer = "capability_provider"
+task_level_default = false
+direct_task_mode = "requires_explicit_direct_drive_policy"
+
+[[interface_contract.ports]]
+name = "run"
+required = true
+allowed_states = ["on", "off"]
+direction = "input"
+description = "Discrete run command consumed by drive capability."
+
+[[interface_contract.ports]]
+name = "direction"
+required = false
+allowed_states = ["forward", "reverse"]
+direction = "input"
+description = "Optional direction command."
+
+[[interface_contract.ports]]
+name = "running"
+required = false
+allowed_states = ["on", "off"]
+direction = "output"
+description = "Run feedback for process devices that require closed-loop drive confirmation."
+
+[[interface_contract.ports]]
+name = "fault"
+required = false
+allowed_states = ["on", "off"]
+direction = "output"
+description = "Drive fault feedback."
+
+[[capabilities]]
+name = "discrete_drive"
+kind = "drive"
+ports = ["run", "direction", "running", "fault"]
+parameters = ["accel_time", "decel_time", "rated_power"]
+description = "Discrete run/direction drive capability for conveyor, pump, fan, or mixer process devices."
+
+[verification_contract]
+safety = [
+    "run.on conflicts_with fault.on",
+    "direction.forward conflicts_with direction.reverse",
+    "normal task code must not replace process-device actions with raw motor.run writes"
+]
+causality = [
+    "process device action consumes drive capability instead of treating motor.run as the process action"
+]

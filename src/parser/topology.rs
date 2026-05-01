@@ -1,4 +1,4 @@
-﻿fn parse_plc_pair(pair: Pair<Rule>) -> Result<PlcProgram, PlcError> {
+fn parse_plc_pair(pair: Pair<Rule>) -> Result<PlcProgram, PlcError> {
     let mut topology = None;
     let mut constraints = None;
     let mut tasks = None;
@@ -119,6 +119,11 @@ fn reject_extern_calls_in_action(
         }
         ActionStatement::CamPhase { offset, .. } => {
             reject_extern_calls_in_expression(offset, extern_names, line, task_name, step_name)?;
+        }
+        ActionStatement::DeviceAction { args, .. } => {
+            for arg in args {
+                reject_extern_calls_in_expression(arg, extern_names, line, task_name, step_name)?;
+            }
         }
         ActionStatement::Call { args, .. } => {
             for arg in args {
@@ -1721,6 +1726,10 @@ fn apply_attribute(attributes: &mut DeviceAttributes, pair: Pair<Rule>) -> Resul
             attributes.motion_param_set =
                 Some(expect_identifier_or_string(value, "motion_param_set")?);
         }
+        "open_loop_policy" => {
+            attributes.open_loop_policy =
+                Some(expect_identifier_or_string(value, "open_loop_policy")?);
+        }
         "states" => {
             attributes.custom_states = Some(expect_identifier_list(value, "states")?);
         }
@@ -1825,4 +1834,3 @@ fn legacy_topology_attribute_error(line: usize, col: usize, attr_name: &str) -> 
         ),
     )
 }
-

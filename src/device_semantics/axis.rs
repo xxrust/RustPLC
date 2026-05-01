@@ -32,23 +32,73 @@ pub const AXIS_MOTION_CAPABILITY: DeviceActionContract<'static> = DeviceActionCo
     ],
 };
 
-pub const AXIS_CAPABILITY_DEVICE_TYPES: &[&str] = &["stepper_motor", "servo_drive"];
+pub const MOTION_AXIS_CAPABILITY_NAME: &str = "motion_axis";
+pub const LEGACY_AXIS_DEVICE_TYPES: &[&str] = &["stepper_motor", "servo_drive"];
+pub const AXIS_CAPABILITY_DEVICE_TYPES: &[&str] = &["stepper_motor", "servo_drive", "motor", "vfd"];
 
-pub const fn device_type_supports_axis_motion(device_type: &DeviceType) -> bool {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MotionAxisCapability {
+    pub provider_type: &'static str,
+    pub model_ref: String,
+    pub config_ref: String,
+}
+
+impl MotionAxisCapability {
+    pub fn from_device(device: &crate::ast::DeviceDeclaration) -> Option<Self> {
+        let model_ref = non_empty_attribute(device.attributes.model_ref.as_deref())?;
+        let config_ref = non_empty_attribute(device.attributes.config_ref.as_deref())?;
+        axis_device_type_from_ast(&device.device_type)?;
+
+        Some(Self {
+            provider_type: axis_provider_device_type_name(&device.device_type),
+            model_ref: model_ref.to_string(),
+            config_ref: config_ref.to_string(),
+        })
+    }
+
+    pub fn is_profile_candidate(device: &crate::ast::DeviceDeclaration) -> bool {
+        is_legacy_axis_device_type(&device.device_type)
+            || device
+                .attributes
+                .config_ref
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            || device
+                .attributes
+                .motion_param_set
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+    }
+}
+
+fn non_empty_attribute(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+pub const fn is_legacy_axis_device_type(device_type: &DeviceType) -> bool {
     matches!(
         device_type,
         DeviceType::StepperMotor | DeviceType::ServoDrive
     )
 }
 
-pub const fn device_kind_supports_axis_motion(kind: &DeviceKind) -> bool {
-    matches!(kind, DeviceKind::StepperMotor | DeviceKind::ServoDrive)
+pub const fn device_type_supports_axis_motion(device_type: &DeviceType) -> bool {
+    axis_device_type_from_ast(device_type).is_some()
 }
 
-pub fn axis_device_type_from_ast(device_type: &DeviceType) -> Option<AxisDeviceType> {
+pub const fn device_kind_supports_axis_motion(kind: &DeviceKind) -> bool {
+    matches!(
+        kind,
+        DeviceKind::StepperMotor | DeviceKind::ServoDrive | DeviceKind::Motor | DeviceKind::Vfd
+    )
+}
+
+pub const fn axis_device_type_from_ast(device_type: &DeviceType) -> Option<AxisDeviceType> {
     match device_type {
         DeviceType::StepperMotor => Some(AxisDeviceType::StepperMotor),
         DeviceType::ServoDrive => Some(AxisDeviceType::ServoDrive),
+        DeviceType::Motor => Some(AxisDeviceType::Motor),
+        DeviceType::Vfd => Some(AxisDeviceType::Vfd),
         _ => None,
     }
 }
@@ -57,15 +107,42 @@ pub const fn axis_device_type_name(axis_type: &AxisDeviceType) -> &'static str {
     match axis_type {
         AxisDeviceType::StepperMotor => "stepper_motor",
         AxisDeviceType::ServoDrive => "servo_drive",
+        AxisDeviceType::Motor => "motor",
+        AxisDeviceType::Vfd => "vfd",
+    }
+}
+
+pub const fn axis_provider_device_type_name(device_type: &DeviceType) -> &'static str {
+    match device_type {
+        DeviceType::DigitalOutput => "digital_output",
+        DeviceType::DigitalInput => "digital_input",
+        DeviceType::Plc => "plc",
+        DeviceType::SolenoidValve => "solenoid_valve",
+        DeviceType::Cylinder => "cylinder",
+        DeviceType::Sensor => "sensor",
+        DeviceType::Motor => "motor",
+        DeviceType::StepperMotor => "stepper_motor",
+        DeviceType::Vfd => "vfd",
+        DeviceType::ServoDrive => "servo_drive",
+        DeviceType::CamCoupling => "cam_coupling",
+        DeviceType::AnalogInput => "analog_input",
+        DeviceType::AnalogOutput => "analog_output",
+        DeviceType::Pid => "pid",
+        DeviceType::ProportionalValve => "proportional_valve",
+        DeviceType::Gripper => "gripper",
+        DeviceType::Conveyor => "conveyor",
+        DeviceType::Pump => "pump",
+        DeviceType::Heater => "heater",
+        DeviceType::VisionSensor => "vision_sensor",
     }
 }
 
 pub fn axis_capability_device_type_text() -> &'static str {
-    "stepper_motor or servo_drive"
+    "a device with MotionAxisCapability and a resolved axis profile"
 }
 
 pub fn axis_capability_device_type_text_zh() -> &'static str {
-    "stepper_motor/servo_drive"
+    "declared MotionAxisCapability with model_ref/config_ref"
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,9 +255,16 @@ struct BrakeSequenceProgress {
 
 pub fn validate_axis_motion_actions_in_tasks(
     tasks: &TasksSection,
+    topology: &TopologySection,
     device_kinds: &HashMap<String, DeviceKind>,
     errors: &mut Vec<PlcError>,
 ) {
+    let motion_axis_devices = topology
+        .devices
+        .iter()
+        .filter_map(|device| MotionAxisCapability::from_device(device).map(|_| device.name.clone()))
+        .collect::<HashSet<_>>();
+
     for task in &tasks.tasks {
         for step in &task.steps {
             validate_axis_motion_actions_in_statements(
@@ -188,6 +272,7 @@ pub fn validate_axis_motion_actions_in_tasks(
                 &step.name,
                 step.line.max(1),
                 device_kinds,
+                &motion_axis_devices,
                 errors,
             );
         }
@@ -221,7 +306,7 @@ pub fn resolve_axis_motion_parameters_in_tasks(
 
     let mut device_default_param_sets = HashMap::<String, String>::new();
     for device in &topology.devices {
-        if !device_type_supports_axis_motion(&device.device_type) {
+        if MotionAxisCapability::from_device(device).is_none() {
             continue;
         }
         if let Some(default_set) = device
@@ -330,6 +415,7 @@ fn validate_axis_motion_actions_in_statements(
     step_name: &str,
     line: usize,
     device_kinds: &HashMap<String, DeviceKind>,
+    motion_axis_devices: &HashSet<String>,
     errors: &mut Vec<PlcError>,
 ) {
     for statement in statements {
@@ -395,6 +481,7 @@ fn validate_axis_motion_actions_in_statements(
                     step_name,
                     &target.device,
                     device_kinds,
+                    motion_axis_devices,
                     errors,
                 );
             }
@@ -403,6 +490,7 @@ fn validate_axis_motion_actions_in_statements(
                 step_name,
                 line,
                 device_kinds,
+                motion_axis_devices,
                 errors,
             ),
             StepStatement::Parallel(block) => {
@@ -412,6 +500,7 @@ fn validate_axis_motion_actions_in_statements(
                         step_name,
                         line,
                         device_kinds,
+                        motion_axis_devices,
                         errors,
                     );
                 }
@@ -423,6 +512,7 @@ fn validate_axis_motion_actions_in_statements(
                         step_name,
                         line,
                         device_kinds,
+                        motion_axis_devices,
                         errors,
                     );
                 }
@@ -498,10 +588,11 @@ fn validate_axis_motion_target_kind(
     step_name: &str,
     target: &str,
     device_kinds: &HashMap<String, DeviceKind>,
+    motion_axis_devices: &HashSet<String>,
     errors: &mut Vec<PlcError>,
 ) {
     match device_kinds.get(target) {
-        Some(kind) if device_kind_supports_axis_motion(kind) => {}
+        Some(_) if motion_axis_devices.contains(target) => {}
         Some(kind) => errors.push(PlcError::semantic_with_reason(
             line,
             format!(
@@ -1101,16 +1192,19 @@ fn load_axis_motion_param_sets() -> Result<HashMap<String, AxisMotionParamSetDef
 #[cfg(test)]
 mod tests {
     use super::{
-        AXIS_CAPABILITY_DEVICE_TYPES, AXIS_MOTION_ACTION_CONTRACT, AXIS_MOTION_CAPABILITY,
-        AxisMotionBranchKind, axis_device_type_from_ast, axis_device_type_name,
-        device_kind_supports_axis_motion, device_type_supports_axis_motion,
+        AXIS_MOTION_ACTION_CONTRACT, AXIS_MOTION_CAPABILITY, AxisMotionBranchKind,
+        LEGACY_AXIS_DEVICE_TYPES, MotionAxisCapability, axis_device_type_from_ast,
+        axis_device_type_name, device_kind_supports_axis_motion, device_type_supports_axis_motion,
+        validate_axis_motion_actions_in_tasks,
     };
-    use crate::ast::DeviceType;
+    use crate::ast::{DeviceAttributes, DeviceDeclaration, DeviceType};
     use crate::device_semantics::DeviceActionResultBucket;
     use crate::ir::{AxisDeviceType, DeviceKind};
+    use crate::parser::parse_plc;
     use rustplc_device_semantics::axis::{
         DEFAULT_PORT, DEFAULT_REQUIRE_HOMED, FAMILY, MOVE_ABSOLUTE_ACTION, MOVE_RELATIVE_ACTION,
     };
+    use std::collections::HashMap;
 
     #[test]
     fn axis_motion_contract_carries_shared_defaults_and_actions() {
@@ -1160,19 +1254,71 @@ mod tests {
     }
 
     #[test]
-    fn axis_capability_helper_accepts_current_axis_device_types_only() {
-        assert_eq!(
-            AXIS_CAPABILITY_DEVICE_TYPES,
-            ["stepper_motor", "servo_drive"]
-        );
+    fn axis_capability_helper_keeps_legacy_axis_device_identity_list() {
+        assert_eq!(LEGACY_AXIS_DEVICE_TYPES, ["stepper_motor", "servo_drive"]);
 
         assert!(device_type_supports_axis_motion(&DeviceType::StepperMotor));
         assert!(device_type_supports_axis_motion(&DeviceType::ServoDrive));
-        assert!(!device_type_supports_axis_motion(&DeviceType::Motor));
+        assert!(device_type_supports_axis_motion(&DeviceType::Motor));
+        assert!(device_type_supports_axis_motion(&DeviceType::Vfd));
 
         assert!(device_kind_supports_axis_motion(&DeviceKind::StepperMotor));
         assert!(device_kind_supports_axis_motion(&DeviceKind::ServoDrive));
-        assert!(!device_kind_supports_axis_motion(&DeviceKind::Motor));
+        assert!(device_kind_supports_axis_motion(&DeviceKind::Motor));
+        assert!(device_kind_supports_axis_motion(&DeviceKind::Vfd));
+    }
+
+    #[test]
+    fn motion_axis_capability_requires_profile_refs() {
+        let mut device = DeviceDeclaration {
+            line: 1,
+            name: "axis_x".to_string(),
+            device_type: DeviceType::Motor,
+            attributes: DeviceAttributes::default(),
+        };
+        assert!(MotionAxisCapability::from_device(&device).is_none());
+
+        device.attributes.model_ref = Some("motor_axis_generic".to_string());
+        device.attributes.config_ref = Some("motor_axis_default".to_string());
+        assert!(MotionAxisCapability::from_device(&device).is_some());
+    }
+
+    #[test]
+    fn axis_move_target_validation_accepts_non_stepper_servo_capability_provider() {
+        let source = r#"
+[topology]
+device linear_motor: motor { model_ref: motor_axis_generic, config_ref: motor_axis_default }
+
+[constraints]
+
+[tasks]
+task main:
+    step move:
+        action: axis.move_relative(linear_motor, distance: 10, speed: 5, acc: 5, dec: 5)
+        timeout: 100ms -> fault.timeout
+        on_reject -> fault.reject
+        on_motion_fault -> fault.motion
+        on_safety_fault -> fault.safety
+
+task fault:
+    step timeout:
+    step reject:
+    step motion:
+    step safety:
+"#;
+        let program = parse_plc(source).expect("fixture should parse");
+        let mut device_kinds = HashMap::new();
+        device_kinds.insert("linear_motor".to_string(), DeviceKind::Motor);
+        let mut errors = Vec::new();
+
+        validate_axis_motion_actions_in_tasks(
+            &program.tasks,
+            &program.topology,
+            &device_kinds,
+            &mut errors,
+        );
+
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     }
 
     #[test]
@@ -1185,7 +1331,14 @@ mod tests {
             axis_device_type_from_ast(&DeviceType::ServoDrive),
             Some(AxisDeviceType::ServoDrive)
         );
-        assert_eq!(axis_device_type_from_ast(&DeviceType::Motor), None);
+        assert_eq!(
+            axis_device_type_from_ast(&DeviceType::Motor),
+            Some(AxisDeviceType::Motor)
+        );
+        assert_eq!(
+            axis_device_type_from_ast(&DeviceType::Vfd),
+            Some(AxisDeviceType::Vfd)
+        );
         assert_eq!(
             axis_device_type_name(&AxisDeviceType::StepperMotor),
             "stepper_motor"
@@ -1194,5 +1347,7 @@ mod tests {
             axis_device_type_name(&AxisDeviceType::ServoDrive),
             "servo_drive"
         );
+        assert_eq!(axis_device_type_name(&AxisDeviceType::Motor), "motor");
+        assert_eq!(axis_device_type_name(&AxisDeviceType::Vfd), "vfd");
     }
 }

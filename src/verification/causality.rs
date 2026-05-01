@@ -965,6 +965,15 @@ fn action_to_text_and_target(action: &ActionStatement) -> Option<(String, String
             format!("axis.move_absolute {}", target.device),
             target.device.clone(),
         )),
+        ActionStatement::DeviceAction {
+            family,
+            action_name,
+            target,
+            ..
+        } => Some((
+            format!("{family}.{action_name} {}", target.device),
+            target.device.clone(),
+        )),
         ActionStatement::Compute { target, .. } => {
             Some((format!("compute {target}"), target.clone()))
         }

@@ -526,6 +526,7 @@ fn collect_step_wait_profile_from_statements(
                 | ActionStatement::CamDisengage { .. }
                 | ActionStatement::CamSwitch { .. }
                 | ActionStatement::CamPhase { .. }
+                | ActionStatement::DeviceAction { .. }
                 | ActionStatement::Log { .. } => {}
             },
             StepStatement::Wait(_) => profile.has_wait_condition = true,
@@ -672,6 +673,12 @@ fn collect_action_write_signals(action: &ActionStatement, writes: &mut HashSet<S
         | ActionStatement::CamSwitch { target, .. }
         | ActionStatement::CamPhase { target, .. } => {
             writes.insert(target.clone());
+        }
+        ActionStatement::DeviceAction { target, .. } => {
+            writes.insert(target.device.clone());
+            if target.port != "self" {
+                writes.insert(format!("{}.{}", target.device, target.port));
+            }
         }
         ActionStatement::Call { .. } | ActionStatement::Log { .. } => {}
     }

@@ -261,6 +261,17 @@ fn collect_action_target(action: &ActionStatement, targets: &mut BTreeSet<String
         | ActionStatement::CamPhase { target, .. } => {
             targets.insert(format!("cam:{target}"));
         }
+        ActionStatement::DeviceAction {
+            family,
+            action_name,
+            target,
+            ..
+        } => {
+            targets.insert(format!(
+                "device_action:{family}.{action_name}:{}",
+                target.device
+            ));
+        }
         ActionStatement::Log { message } => {
             targets.insert(format!("log:{message}"));
         }

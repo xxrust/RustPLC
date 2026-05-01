@@ -718,6 +718,14 @@ fn collect_used_controller_port_from_action(
             collect_used_controller_port_reference(target, plc_names, used);
             collect_used_controller_port_from_expression(offset, plc_names, used);
         }
+        ActionStatement::DeviceAction { target, args, .. } => {
+            if plc_names.contains(&target.device) {
+                collect_used_controller_port_reference(&target.port, plc_names, used);
+            }
+            for arg in args {
+                collect_used_controller_port_from_expression(arg, plc_names, used);
+            }
+        }
         ActionStatement::Log { .. } => {}
     }
 }
@@ -888,6 +896,9 @@ fn expand_plc_controller_devices(
                 }
             } else {
                 let mut attributes = DeviceAttributes::default();
+                attributes
+                    .extra_params
+                    .insert("__synthetic_plc_port".to_string(), "true".to_string());
                 if matches!(
                     synthetic_type,
                     DeviceType::AnalogInput | DeviceType::AnalogOutput

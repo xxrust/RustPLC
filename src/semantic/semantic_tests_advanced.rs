@@ -1205,7 +1205,7 @@ task main:
             .map(|err| err.to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(joined.contains("axis_fault_contract 只能绑定到轴设备"));
+        assert!(joined.contains("axis_fault_contract 只能绑定到声明 MotionAxisCapability/profile 的轴设备"));
     }
 
     #[test]
@@ -1291,7 +1291,7 @@ task main:
             .map(|err| err.to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(joined.contains("propagation_targets 只能包含轴设备"));
+        assert!(joined.contains("propagation_targets 只能包含声明 MotionAxisCapability/profile 的轴设备"));
     }
 
     #[test]

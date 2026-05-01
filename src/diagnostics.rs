@@ -375,6 +375,10 @@ impl PlcEvidence {
                     self.action_targets.insert(target.clone());
                     Self::record_first_line(&mut self.first_action_line, step_line);
                 }
+                ActionStatement::DeviceAction { target, .. } => {
+                    self.action_targets.insert(target.device.clone());
+                    Self::record_first_line(&mut self.first_action_line, step_line);
+                }
                 ActionStatement::Log { .. } => {
                     Self::record_first_line(&mut self.first_action_line, step_line);
                 }

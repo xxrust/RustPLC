@@ -1109,6 +1109,11 @@ fn render_action_kind(action: &TransitionAction) -> String {
         TransitionAction::CamDisengage { .. } => "cam_disengage".to_string(),
         TransitionAction::CamSwitch { .. } => "cam_switch".to_string(),
         TransitionAction::CamPhase { .. } => "cam_phase".to_string(),
+        TransitionAction::DeviceAction {
+            family,
+            action_name,
+            ..
+        } => format!("{family}.{action_name}"),
         TransitionAction::AxisMoveRelative { .. } => "axis_move_relative".to_string(),
         TransitionAction::AxisMoveAbsolute { .. } => "axis_move_absolute".to_string(),
         TransitionAction::Log { .. } => "log".to_string(),

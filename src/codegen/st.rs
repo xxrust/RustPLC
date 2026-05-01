@@ -53,6 +53,11 @@ pub enum StCodegenError {
     ClosedLoopCylinderSemanticsUnsupported {
         target: String,
     },
+    DeviceActionUnsupported {
+        family: String,
+        action: String,
+        target: String,
+    },
 }
 
 impl fmt::Display for StCodegenError {
@@ -84,6 +89,14 @@ impl fmt::Display for StCodegenError {
             StCodegenError::ClosedLoopCylinderSemanticsUnsupported { target } => write!(
                 f,
                 "closed-loop cylinder semantics are not supported by the ST backend: {target}"
+            ),
+            StCodegenError::DeviceActionUnsupported {
+                family,
+                action,
+                target,
+            } => write!(
+                f,
+                "device action {family}.{action}({target}) is not supported by the ST backend"
             ),
         }
     }
@@ -182,6 +195,19 @@ pub fn generate_st(
 
     for transition in &erased_state_machine.transitions {
         for action in &transition.actions {
+            if let TransitionAction::DeviceAction {
+                family,
+                action_name,
+                target,
+                ..
+            } = action
+            {
+                errors.push(StCodegenError::DeviceActionUnsupported {
+                    family: family.clone(),
+                    action: action_name.clone(),
+                    target: target.clone(),
+                });
+            }
             if let Some(target) = closed_loop_stroke_target(action)
                 .or_else(|| topology_closed_loop_cylinder_target(topology, action))
             {
@@ -388,6 +414,7 @@ fn collect_variable_candidates_from_transitions(
                 | TransitionAction::CamDisengage { .. }
                 | TransitionAction::CamSwitch { .. }
                 | TransitionAction::CamPhase { .. }
+                | TransitionAction::DeviceAction { .. }
                 | TransitionAction::AxisMoveRelative { .. }
                 | TransitionAction::AxisMoveAbsolute { .. }
                 | TransitionAction::Log { .. } => {}
@@ -822,6 +849,19 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             "(* CAM_PHASE {} := {} *)",
             normalize_identifier_for_st(target),
             offset_expr_raw.trim()
+        ),
+        TransitionAction::DeviceAction {
+            family,
+            action_name,
+            target,
+            args_raw,
+            ..
+        } => format!(
+            "(* DEVICE_ACTION {}.{}({}, {}) *)",
+            normalize_identifier_for_st(family),
+            normalize_identifier_for_st(action_name),
+            normalize_identifier_for_st(target),
+            args_raw.join(", ")
         ),
         TransitionAction::AxisMoveRelative {
             target,

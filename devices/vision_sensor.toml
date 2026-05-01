@@ -1,0 +1,79 @@
+[identity]
+name = "Generic vision sensor"
+type = "vision_sensor"
+
+[[interfaces.ports]]
+name = "trigger"
+states = ["on", "off"]
+default_state = "off"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "ready"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "pass"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "fail"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[interface_contract]
+layer = "task_level_device"
+default_feedback_policy = "feedback_required_unless_explicit_open_loop"
+
+[[interface_contract.actions]]
+name = "trigger"
+consumes = ["trigger", "ready"]
+produces = ["ready"]
+faults = ["timeout", "reject", "communication_fault", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "acquire"
+consumes = ["trigger", "ready"]
+produces = ["ready"]
+faults = ["timeout", "communication_fault", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "inspect"
+consumes = ["trigger", "ready", "pass", "fail"]
+produces = ["pass", "fail"]
+faults = ["timeout", "reject", "communication_fault", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "reset_fault"
+consumes = ["trigger"]
+produces = ["fault"]
+faults = ["reject", "safety_fault"]
+
+[[capabilities]]
+name = "inspection"
+kind = "process_sensor"
+ports = ["trigger", "ready", "pass", "fail", "fault"]
+
+[verification_contract]
+safety = ["inspection result cannot be consumed before acquire/inspect completes"]
+causality = ["trigger must causally precede ready/pass/fail result consumption"]
+
+[codegen_support]
+unsupported_targets = ["st", "runtime-core"]
+notes = "Vision action must preserve trigger/result lifecycle."

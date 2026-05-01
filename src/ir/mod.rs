@@ -38,6 +38,8 @@ pub enum DeviceKind {
 pub enum AxisDeviceType {
     StepperMotor,
     ServoDrive,
+    Motor,
+    Vfd,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -373,6 +375,16 @@ pub enum TransitionAction {
     CamPhase {
         target: String,
         offset_expr_raw: String,
+    },
+    DeviceAction {
+        family: String,
+        action_name: String,
+        target: String,
+        port: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args_raw: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        result_buckets: Vec<String>,
     },
     AxisMoveRelative {
         target: String,
@@ -797,6 +809,7 @@ pub enum ActionKind {
     CamDisengage,
     CamSwitch,
     CamPhase,
+    DeviceAction,
     AxisMoveRelative,
     AxisMoveAbsolute,
     Log,

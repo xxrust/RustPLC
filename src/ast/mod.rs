@@ -391,6 +391,8 @@ pub struct DeviceAttributes {
     pub config_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion_param_set: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_loop_policy: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub extra_params: HashMap<String, String>,
 }
@@ -718,6 +720,13 @@ pub enum ActionStatement {
     CamPhase {
         target: String,
         offset: Expression,
+    },
+    DeviceAction {
+        family: String,
+        action_name: String,
+        target: ActionTarget,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<Expression>,
     },
     AxisMoveRelative {
         target: ActionTarget,

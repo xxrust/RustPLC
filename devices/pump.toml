@@ -1,0 +1,82 @@
+[identity]
+name = "Generic pump"
+type = "pump"
+
+[[interfaces.ports]]
+name = "drive"
+states = ["on", "off"]
+default_state = "off"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "pressure"
+default_state = "0"
+direction = "output"
+port_type = "analog"
+range_min = 0.0
+range_max = 10.0
+unit = "bar"
+
+[[interfaces.ports]]
+name = "flow"
+default_state = "0"
+direction = "output"
+port_type = "analog"
+range_min = 0.0
+range_max = 100.0
+unit = "lpm"
+
+[[interfaces.ports]]
+name = "fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[interface_contract]
+layer = "task_level_device"
+default_feedback_policy = "feedback_required_unless_explicit_open_loop"
+
+[[interface_contract.actions]]
+name = "start"
+consumes = ["drive"]
+produces = ["pressure", "flow"]
+faults = ["timeout", "reject", "dry_run", "no_flow", "low_level", "overpressure", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "stop"
+consumes = ["drive"]
+produces = ["pressure", "flow"]
+faults = ["timeout"]
+
+[[interface_contract.actions]]
+name = "prime"
+consumes = ["drive", "flow"]
+produces = ["flow"]
+faults = ["timeout", "dry_run", "no_flow", "low_level"]
+
+[[interface_contract.actions]]
+name = "hold_pressure"
+consumes = ["drive", "pressure"]
+produces = ["pressure"]
+faults = ["timeout", "overpressure", "no_flow", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "reset_fault"
+consumes = ["drive"]
+produces = ["fault"]
+faults = ["reject", "safety_fault"]
+
+[[capabilities]]
+name = "fluid_actuator"
+kind = "process_actuator"
+ports = ["drive", "pressure", "flow", "fault"]
+
+[verification_contract]
+safety = ["overpressure conflicts_with continued drive", "dry-run interlock must be modeled when declared"]
+liveness = ["pressure/flow closure required unless open_loop_policy is explicit"]
+
+[codegen_support]
+unsupported_targets = ["st", "runtime-core"]
+notes = "Pump process semantics require explicit backend support."

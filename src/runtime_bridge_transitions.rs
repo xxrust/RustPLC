@@ -887,6 +887,17 @@ fn convert_action(
                     offset_expr,
                 })
             }
+            TransitionAction::DeviceAction {
+                family,
+                action_name,
+                target,
+                ..
+            } => Err(BridgeError::UnsupportedAction {
+                state: state_name.to_string(),
+                action: format!(
+                    "device action {family}.{action_name}({target}) requires an explicit runtime backend"
+                ),
+            }),
             TransitionAction::AxisMoveRelative {
                 target,
                 port,

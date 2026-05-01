@@ -233,6 +233,26 @@ fn render_action(action: &ActionStatement) -> String {
         ActionStatement::CamPhase { target, offset } => {
             format!("cam_phase {target} {}", render_expression(offset))
         }
+        ActionStatement::DeviceAction {
+            family,
+            action_name,
+            target,
+            args,
+        } => format!(
+            "{family}.{action_name}({}{})",
+            target,
+            if args.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    ", {}",
+                    args.iter()
+                        .map(render_expression)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        ),
         ActionStatement::AxisMoveRelative {
             target,
             params,

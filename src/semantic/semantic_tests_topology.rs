@@ -149,6 +149,48 @@ task main:
     }
 
     #[test]
+    fn topology_extracts_pid_loop_from_plc_channel_bindings_without_io_devices() {
+        let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device pressure_sensor: sensor { ports: [out:analog:producer] }
+device valve: proportional_valve
+device loop_pressure: pid {
+    pv: AI0,
+    sp: 0.5raw,
+    kp: 2.0,
+    ki: 0.4,
+    kd: 0.05,
+    out: AO0,
+    period_ms: 100,
+    limit: 0..1
+}
+
+relation { from: pressure_sensor.out, to: plc_main.AI0, via: reports_to }
+relation { from: plc_main.AO0, to: valve.cmd, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step hold:
+"#;
+
+        let program = parse_plc(input).expect("parse");
+        validate_source_topology_semantics(&program)
+            .expect("pid source should use channel bindings, not IO devices");
+        let expanded = preprocess_program(&program).expect("controller ports should expand");
+        let topology = build_topology_graph(&expanded).expect("build topology");
+
+        assert_eq!(topology.pid_loops.len(), 1);
+        let pid = &topology.pid_loops[0];
+        assert_eq!(pid.name, "loop_pressure");
+        assert_eq!(pid.pv, "AI0");
+        assert_eq!(pid.out, "AO0");
+        assert_eq!(pid.period_ms, 100);
+    }
+
+    #[test]
     fn reports_error_when_connected_to_references_undefined_device() {
         let input = r#"
 [topology]

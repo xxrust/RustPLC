@@ -96,6 +96,9 @@ fn action_to_timing(
         }
         ActionStatement::CamSwitch { target, .. } => (ActionKind::CamSwitch, Some(target.as_str())),
         ActionStatement::CamPhase { target, .. } => (ActionKind::CamPhase, Some(target.as_str())),
+        ActionStatement::DeviceAction { target, .. } => {
+            (ActionKind::DeviceAction, Some(target.device.as_str()))
+        }
         ActionStatement::Log { .. } => (ActionKind::Log, None),
     };
 
@@ -129,6 +132,7 @@ fn action_to_timing(
         | ActionKind::CamDisengage
         | ActionKind::CamSwitch
         | ActionKind::CamPhase
+        | ActionKind::DeviceAction
         | ActionKind::AxisMoveRelative
         | ActionKind::AxisMoveAbsolute
         | ActionKind::CallExtern
@@ -187,6 +191,7 @@ fn action_kind_name(action_kind: &ActionKind) -> &'static str {
         ActionKind::CamDisengage => "cam_disengage",
         ActionKind::CamSwitch => "cam_switch",
         ActionKind::CamPhase => "cam_phase",
+        ActionKind::DeviceAction => "device_action",
         ActionKind::AxisMoveRelative => "axis_move_relative",
         ActionKind::AxisMoveAbsolute => "axis_move_absolute",
         ActionKind::Log => "log",

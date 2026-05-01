@@ -1,8 +1,10 @@
 pub mod axis;
 pub mod cam;
 pub mod cylinder;
+pub mod drive;
 pub mod motor;
 pub mod process;
+pub mod valve;
 
 use crate::ast::TasksSection;
 use crate::error::PlcError;
@@ -56,4 +58,5 @@ pub fn validate_task_action_semantics(
     errors: &mut Vec<PlcError>,
 ) {
     cylinder::validate_cylinder_actions_in_tasks(tasks, device_kinds, errors);
+    valve::validate_solenoid_valve_actions_in_tasks(tasks, device_kinds, errors);
 }

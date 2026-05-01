@@ -519,6 +519,39 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
             let offset = parse_expression(expr_pair)?;
             Ok(ActionStatement::CamPhase { target, offset })
         }
+        Rule::device_action => {
+            let mut parts = action.into_inner();
+            let family = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "device action 缺少设备族"))?
+                .as_str()
+                .to_string();
+            let action_name = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "device action 缺少动作名"))?
+                .as_str()
+                .to_string();
+            let target_pair = parts
+                .next()
+                .ok_or_else(|| PlcError::parse(line, "device action 缺少目标设备"))?;
+            let target = parse_action_target(target_pair)?;
+            let mut args = Vec::new();
+            for part in parts {
+                if part.as_rule() == Rule::device_action_arg {
+                    let expr_pair = part
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| PlcError::parse(line, "device action 参数缺少表达式"))?;
+                    args.push(parse_expression(expr_pair)?);
+                }
+            }
+            Ok(ActionStatement::DeviceAction {
+                family,
+                action_name,
+                target,
+                args,
+            })
+        }
         Rule::action_set => {
             let mut parts = action.into_inner();
             let target_pair = parts

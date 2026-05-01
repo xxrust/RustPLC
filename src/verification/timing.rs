@@ -356,6 +356,20 @@ impl TimingContext {
             | ActionStatement::CamDisengage { .. }
             | ActionStatement::CamSwitch { .. }
             | ActionStatement::CamPhase { .. } => return None,
+            ActionStatement::DeviceAction {
+                family,
+                action_name,
+                target,
+                ..
+            } => {
+                let profile = self.profiles.get(&target.device)?;
+                let own = profile.ramp_ms.or(profile.response_ms)?;
+                (
+                    target.device.as_str(),
+                    format!("{family}.{action_name} {}", target.device),
+                    own,
+                )
+            }
             ActionStatement::AxisMoveRelative { .. } | ActionStatement::AxisMoveAbsolute { .. } => {
                 return None;
             }
@@ -429,6 +443,7 @@ impl TimingContext {
             | ActionKind::CamDisengage
             | ActionKind::CamSwitch
             | ActionKind::CamPhase
+            | ActionKind::DeviceAction
             | ActionKind::Log => return None,
         };
 
@@ -689,6 +704,7 @@ fn pending_action_kind_label(kind: &ActionKind) -> &'static str {
         ActionKind::CamDisengage => "cam_disengage",
         ActionKind::CamSwitch => "cam_switch",
         ActionKind::CamPhase => "cam_phase",
+        ActionKind::DeviceAction => "device_action",
         ActionKind::AxisMoveRelative => "axis.move_relative",
         ActionKind::AxisMoveAbsolute => "axis.move_absolute",
         ActionKind::Log => "log",

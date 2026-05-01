@@ -88,6 +88,7 @@ attribute_name = {
     | "model_ref"
     | "config_ref"
     | "motion_param_set"
+    | "open_loop_policy"
     // Motor enhancement params
     | "steps_per_rev"
     | "max_speed"
@@ -346,6 +347,8 @@ action_cam_engage = { "cam_engage" ~ identifier }
 action_cam_disengage = { "cam_disengage" ~ identifier }
 action_cam_switch = { "cam_switch" ~ identifier ~ identifier }
 action_cam_phase = { "cam_phase" ~ identifier ~ expression }
+device_action_arg = { expression }
+device_action = { identifier ~ "." ~ identifier ~ "(" ~ action_target ~ ("," ~ device_action_arg)* ~ ")" }
 action_set       = { "set" ~ action_target ~ state_value }
 action_log = { "log" ~ string_literal }
 axis_move_distance_arg = { "distance" ~ ":" ~ number }
@@ -394,6 +397,7 @@ action_command = {
     | action_cam_engage
     | action_cam_switch
     | action_cam_phase
+    | device_action
     | action_set_analog
     | action_set_analog_expr
     | compute_statement

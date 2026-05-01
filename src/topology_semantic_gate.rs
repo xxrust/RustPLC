@@ -36,6 +36,8 @@ pub enum TopologySemanticCode {
     Sem108LegacyIoModelRemoved,
     #[serde(rename = "SEM-109")]
     Sem109VirtualSignalDeviceRemoved,
+    #[serde(rename = "SEM-111")]
+    Sem111ValvePortContractInvalid,
 }
 
 impl TopologySemanticCode {
@@ -50,6 +52,7 @@ impl TopologySemanticCode {
             Self::Sem107PurposeMissing => "SEM-107",
             Self::Sem108LegacyIoModelRemoved => "SEM-108",
             Self::Sem109VirtualSignalDeviceRemoved => "SEM-109",
+            Self::Sem111ValvePortContractInvalid => "SEM-111",
         }
     }
 }
@@ -119,6 +122,7 @@ pub fn validate_topology_semantics(
 ) -> Result<(), TopologySemanticGateError> {
     let mut issues = validate_device_subtypes(topology);
     issues.extend(collect_virtual_signal_device_issues(topology));
+    issues.extend(collect_solenoid_valve_port_contract_issues(topology));
     let mut devices = HashMap::<String, GateDevice>::new();
     for device in &topology.devices {
         devices.insert(
@@ -308,6 +312,9 @@ pub fn validate_removed_legacy_io_model(
 fn collect_non_device_type_issues(topology: &TopologySection) -> Vec<TopologySemanticIssue> {
     let mut issues = Vec::new();
     for device in &topology.devices {
+        if is_synthetic_plc_port_device(device) {
+            continue;
+        }
         if !is_scalar_io_device_type(&device.device_type) {
             continue;
         }
@@ -386,6 +393,9 @@ fn collect_removed_legacy_io_model_issues(
 
     let mut issues = Vec::new();
     for device in &topology.devices {
+        if is_synthetic_plc_port_device(device) {
+            continue;
+        }
         let Some(port) = parse_physical_plc_port_ref(&device.name) else {
             continue;
         };
@@ -528,6 +538,14 @@ fn validate_device_subtypes(topology: &TopologySection) -> Vec<TopologySemanticI
     issues
 }
 
+fn is_synthetic_plc_port_device(device: &DeviceDeclaration) -> bool {
+    device
+        .attributes
+        .extra_params
+        .get("__synthetic_plc_port")
+        .is_some_and(|value| value == "true")
+}
+
 fn collect_virtual_signal_device_issues(topology: &TopologySection) -> Vec<TopologySemanticIssue> {
     let mut connected_devices = HashSet::<String>::new();
     for connection in semantic_connections(topology) {
@@ -565,6 +583,96 @@ fn collect_virtual_signal_device_issues(topology: &TopologySection) -> Vec<Topol
             ),
             suggestion: "请改为真实硬件建模（如 sensor/solenoid_valve/外部设备接口并通过 relation 接到 plc_main.X*/Y*），不要把纯逻辑信号直接声明成 digital_input/digital_output/analog_input/analog_output device".to_string(),
         });
+    }
+
+    issues
+}
+
+fn collect_solenoid_valve_port_contract_issues(
+    topology: &TopologySection,
+) -> Vec<TopologySemanticIssue> {
+    let mut issues = Vec::new();
+
+    for device in &topology.devices {
+        if !matches!(device.device_type, DeviceType::SolenoidValve) {
+            continue;
+        }
+
+        let ports = resolved_device_ports(device);
+        let coil_ports = ports
+            .iter()
+            .filter(|port| {
+                port.id.contains("coil")
+                    && matches!(port.role, PortRole::Consumer | PortRole::Bidirectional)
+            })
+            .collect::<Vec<_>>();
+        let has_pneumatic_output = ports.iter().any(|port| {
+            matches!(port.port_type, PortType::Pneumatic)
+                && matches!(port.role, PortRole::Producer | PortRole::Bidirectional)
+        });
+
+        if coil_ports.is_empty() {
+            issues.push(TopologySemanticIssue {
+                code: TopologySemanticCode::Sem111ValvePortContractInvalid,
+                line: device.line.max(1),
+                relation: None,
+                from: Some(device.name.clone()),
+                to: None,
+                from_port: None,
+                to_port: None,
+                message: format!(
+                    "solenoid_valve `{}` declares no consumer coil port",
+                    device.name
+                ),
+                suggestion:
+                    "declare `coil` for a single-solenoid valve, or `coil_A` and `coil_B` for a double-solenoid valve"
+                        .to_string(),
+            });
+        }
+
+        let has_coil_a = coil_ports.iter().any(|port| port.id == "coil_A");
+        let has_coil_b = coil_ports.iter().any(|port| port.id == "coil_B");
+        if has_coil_a != has_coil_b {
+            issues.push(TopologySemanticIssue {
+                code: TopologySemanticCode::Sem111ValvePortContractInvalid,
+                line: device.line.max(1),
+                relation: None,
+                from: Some(device.name.clone()),
+                to: None,
+                from_port: Some(if has_coil_a {
+                    "coil_A".to_string()
+                } else {
+                    "coil_B".to_string()
+                }),
+                to_port: None,
+                message: format!(
+                    "double-solenoid valve `{}` must declare both `coil_A` and `coil_B`",
+                    device.name
+                ),
+                suggestion:
+                    "add the missing coil port, or use the single-solenoid `coil` port contract"
+                        .to_string(),
+            });
+        }
+
+        if coil_ports.len() >= 2 && !has_pneumatic_output {
+            issues.push(TopologySemanticIssue {
+                code: TopologySemanticCode::Sem111ValvePortContractInvalid,
+                line: device.line.max(1),
+                relation: None,
+                from: Some(device.name.clone()),
+                to: None,
+                from_port: None,
+                to_port: None,
+                message: format!(
+                    "double-solenoid valve `{}` must expose a pneumatic output port",
+                    device.name
+                ),
+                suggestion:
+                    "add `out:pneumatic:producer` so downstream pneumatic consumers bind to valve output semantics"
+                        .to_string(),
+            });
+        }
     }
 
     issues
@@ -743,6 +851,12 @@ fn implicit_ports_for_type(device_type: &DeviceType) -> Vec<GatePort> {
             gate_port(
                 "direction",
                 PortType::Digital,
+                PortRole::Consumer,
+                Some("actuator_cmd"),
+            ),
+            gate_port(
+                "speed_cmd",
+                PortType::Analog,
                 PortRole::Consumer,
                 Some("actuator_cmd"),
             ),
@@ -1514,6 +1628,37 @@ task main:
     }
 
     #[test]
+    fn gate_rejects_analog_input_output_as_source_devices() {
+        let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device AI0: analog_input { range: 0..10 }
+device AO0: analog_output { range: 0..10 }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err =
+            validate_removed_legacy_io_model(&program.topology).expect_err("gate should fail");
+        let rendered = err
+            .issues
+            .iter()
+            .map(|issue| format!("{} {}", issue.code.as_str(), issue.message))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("SEM-108")
+                && rendered.contains("analog_input")
+                && rendered.contains("analog_output"),
+            "analog IO channels must not be source DSL devices"
+        );
+    }
+
+    #[test]
     fn gate_rejects_inline_plc_port_inventory() {
         let input = r#"
 [topology]
@@ -1630,6 +1775,66 @@ task main:
             .map(|issue| issue.code.as_str())
             .collect::<Vec<_>>();
         assert!(codes.contains(&"SEM-101"), "should report missing port");
+    }
+
+    #[test]
+    fn gate_rejects_double_solenoid_missing_peer_coil() {
+        let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device valve_eject: solenoid_valve {
+    ports: [coil_A:digital:consumer, out:pneumatic:producer]
+}
+relation { from: plc_main.Y5, to: valve_eject.coil_A, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err = validate_topology_semantics(&program.topology).expect_err("gate should fail");
+        let codes = err
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&"SEM-111"),
+            "should report incomplete double-solenoid port contract"
+        );
+    }
+
+    #[test]
+    fn gate_rejects_double_solenoid_missing_pneumatic_output() {
+        let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device valve_eject: solenoid_valve {
+    ports: [coil_A:digital:consumer, coil_B:digital:consumer]
+}
+relation { from: plc_main.Y5, to: valve_eject.coil_A, via: driven_by }
+relation { from: plc_main.Y6, to: valve_eject.coil_B, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let err = validate_topology_semantics(&program.topology).expect_err("gate should fail");
+        let rendered = err
+            .issues
+            .iter()
+            .map(|issue| format!("{} {}", issue.code.as_str(), issue.message))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("SEM-111") && rendered.contains("pneumatic output"),
+            "should report missing pneumatic output for double-solenoid valve"
+        );
     }
 
     #[test]

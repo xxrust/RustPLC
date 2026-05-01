@@ -1,0 +1,80 @@
+[identity]
+name = "Generic gripper"
+type = "gripper"
+
+[[interfaces.ports]]
+name = "cmd"
+states = ["grip", "release", "hold"]
+default_state = "hold"
+direction = "input"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "gripped"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "released"
+states = ["on", "off"]
+default_state = "on"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "part_present"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[[interfaces.ports]]
+name = "fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[interface_contract]
+layer = "task_level_device"
+default_feedback_policy = "feedback_required_unless_explicit_open_loop"
+
+[[interface_contract.actions]]
+name = "grip"
+consumes = ["cmd", "part_present"]
+produces = ["gripped"]
+faults = ["timeout", "reject", "motion_fault", "safety_fault", "lost_part", "no_part"]
+
+[[interface_contract.actions]]
+name = "release"
+consumes = ["cmd"]
+produces = ["released"]
+faults = ["timeout", "motion_fault", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "hold"
+consumes = ["cmd"]
+produces = ["gripped"]
+faults = ["lost_part", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "reset_fault"
+consumes = ["cmd"]
+produces = ["fault"]
+faults = ["reject", "safety_fault"]
+
+[[capabilities]]
+name = "end_effector"
+kind = "process_actuator"
+ports = ["cmd", "gripped", "released", "part_present", "fault"]
+
+[verification_contract]
+safety = ["held workpiece must not be simultaneously free at another holder"]
+liveness = ["grip/release must complete or route to timeout/fault bucket"]
+causality = ["part_present and gripped feedback must be reachable from gripper action"]
+
+[codegen_support]
+unsupported_targets = ["st", "runtime-core"]
+notes = "Process action is first-class IR; backend must implement closed-loop gripper semantics explicitly."

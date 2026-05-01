@@ -760,6 +760,62 @@ task main:
     }
 
     #[test]
+    fn rejects_raw_motor_drive_write_when_process_device_exists() {
+        let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device drive_motor: motor
+device conveyor_main: conveyor
+
+[constraints]
+
+[tasks]
+task main:
+    step run:
+        action: set drive_motor.run on
+"#;
+
+        let program = parse_plc(input).expect("source should parse");
+        let errors = build_state_machine(&program).expect_err("raw drive provider write fails");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("SEM-110"));
+        assert!(joined.contains("drive capability provider"));
+    }
+
+    #[test]
+    fn rejects_double_solenoid_coils_energized_together() {
+        let input = r#"
+[topology]
+device valve_shift: solenoid_valve {
+    ports: [coil_A:digital:consumer, coil_B:digital:consumer, out:pneumatic:producer]
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step illegal:
+        action: set valve_shift.coil_A on
+        action: set valve_shift.coil_B on
+"#;
+
+        let program = parse_plc(input).expect("source should parse");
+        let errors = build_state_machine(&program).expect_err("coil conflict fails");
+        let joined = errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("mutually exclusive coils"));
+        assert!(joined.contains("coil_A"));
+        assert!(joined.contains("coil_B"));
+    }
+
+    #[test]
     fn rejects_variable_initial_value_type_mismatch() {
         let input = r#"
 [topology]

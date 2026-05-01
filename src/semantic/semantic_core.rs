@@ -28,6 +28,15 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
     if !source_errors.is_empty() {
         return Err(source_errors);
     }
+    if source_topology_gates_required(program) {
+        device_semantics::process::validate_process_device_source_contracts(
+            &program.topology,
+            &mut source_errors,
+        );
+    }
+    if !source_errors.is_empty() {
+        return Err(source_errors);
+    }
     let mut expanded = preprocess_program(program)?;
     let variable_types = collect_variable_types(&expanded.topology);
     let mut expr_errors = Vec::new();
@@ -59,6 +68,12 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
         &mut expr_errors,
     );
     device_semantics::axis::validate_axis_motion_actions_in_tasks(
+        &expanded.tasks,
+        &expanded.topology,
+        &device_kinds,
+        &mut expr_errors,
+    );
+    device_semantics::process::validate_process_device_actions_in_tasks(
         &expanded.tasks,
         &device_kinds,
         &mut expr_errors,
@@ -110,12 +125,6 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
     build_state_machine_from_ast_with_context(&expanded.tasks, &wait_ctx, Some(&device_kinds))
 }
 
-fn source_topology_gates_required(program: &PlcProgram) -> bool {
-    program.topology.devices.iter().any(|device| {
-        matches!(device.device_type, DeviceType::Plc) && device.attributes.model_ref.is_some()
-    })
-}
-
 fn topology_gate_error_to_plc_errors(error: TopologySemanticGateError) -> Vec<PlcError> {
     error
         .issues
@@ -128,6 +137,12 @@ fn topology_gate_error_to_plc_errors(error: TopologySemanticGateError) -> Vec<Pl
             )
         })
         .collect()
+}
+
+fn source_topology_gates_required(program: &PlcProgram) -> bool {
+    program.topology.devices.iter().any(|device| {
+        matches!(device.device_type, DeviceType::Plc) && device.attributes.model_ref.is_some()
+    })
 }
 
 fn validate_raw_io_bypass_in_tasks(program: &PlcProgram, errors: &mut Vec<PlcError>) {
@@ -212,6 +227,12 @@ fn raw_io_bypass_message(
     }
 
     let device_type = device_types.get(target.device.as_str())?;
+    if let Some(message) =
+        device_semantics::drive::raw_drive_provider_bypass_message(target, device_types)
+    {
+        return Some(message);
+    }
+
     match device_type {
         DeviceType::StepperMotor | DeviceType::ServoDrive
             if matches!(target.port.as_str(), "enable" | "pulse" | "direction") =>

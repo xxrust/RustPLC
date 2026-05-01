@@ -1,23 +1,57 @@
 [identity]
-name = "双线圈电磁阀"
+name = "solenoid valve"
 type = "solenoid_valve"
 
 [[interfaces.ports]]
-name = "coil_A"
+name = "coil"
 states = ["on", "off"]
 default_state = "off"
-direction = "output"
+direction = "input"
 port_type = "digital"
 
 [[interfaces.ports]]
-name = "coil_B"
-states = ["on", "off"]
-default_state = "off"
+name = "out"
 direction = "output"
-port_type = "digital"
+port_type = "pneumatic"
+
+[interface_contract]
+version = "1"
+default_variant = "single_solenoid"
+supported_variants = ["single_solenoid", "double_solenoid", "three_position"]
+
+[[interface_contract.ports]]
+name = "coil"
+required = true
+allowed_states = ["on", "off"]
+direction = "input"
+description = "Single-solenoid command coil. Double-solenoid valves must explicitly declare coil_A and coil_B."
+
+[[interface_contract.ports]]
+name = "out"
+required = true
+direction = "output"
+description = "Pneumatic output consumed by cylinder or pneumatic actuator topology."
+
+[[capabilities]]
+name = "single_solenoid_valve"
+kind = "pneumatic_valve"
+ports = ["coil", "out"]
+description = "Default single-coil pneumatic valve capability."
+
+[[capabilities]]
+name = "double_solenoid_valve"
+kind = "pneumatic_valve"
+ports = ["coil_A", "coil_B", "out"]
+description = "Explicit double-coil variant; coil_A and coil_B are mutually exclusive."
 
 [[device_constraints.safety]]
 left = "coil_A.on"
 right = "coil_B.on"
 relation = "conflicts_with"
-reason = "双线圈不能同时通电"
+reason = "double-solenoid coils must not be energized together"
+
+[verification_contract]
+safety = [
+    "coil_A.on conflicts_with coil_B.on",
+    "normal task code must not bypass cylinder or valve actions with raw coil writes"
+]

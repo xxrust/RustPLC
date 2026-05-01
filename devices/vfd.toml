@@ -30,6 +30,15 @@ direction = "input"
 port_type = "digital"
 
 [[interfaces.ports]]
+name = "speed_cmd"
+default_state = "0"
+direction = "input"
+port_type = "analog"
+range_min = 0.0
+range_max = 50.0
+unit = "Hz"
+
+[[interfaces.ports]]
 name = "running"
 states = ["on", "off"]
 default_state = "off"
@@ -116,3 +125,53 @@ solution = "先 run.off，等待 running.off 后再切 direction"
 [metadata]
 standards = ["IEC 61800-5-1"]
 tags = ["vfd", "speed_control", "energy_saving"]
+
+[interface_contract]
+version = "1"
+layer = "capability_provider"
+task_level_default = false
+direct_task_mode = "requires_explicit_direct_drive_policy"
+
+[[interface_contract.ports]]
+name = "run"
+required = true
+allowed_states = ["on", "off"]
+direction = "input"
+description = "Run command consumed by variable-speed drive capability."
+
+[[interface_contract.ports]]
+name = "speed_cmd"
+required = true
+direction = "input"
+description = "Analog frequency command in Hz; bind set_analog to this port/channel, not to the device name."
+
+[[interface_contract.ports]]
+name = "freq_arrive"
+required = false
+allowed_states = ["on", "off"]
+direction = "output"
+description = "Frequency-arrived feedback; missing feedback requires an explicit open-loop policy."
+
+[[interface_contract.ports]]
+name = "fault"
+required = false
+allowed_states = ["on", "off"]
+direction = "output"
+description = "Drive fault feedback."
+
+[[capabilities]]
+name = "variable_speed_drive"
+kind = "drive"
+ports = ["run", "direction", "speed_cmd", "running", "fault", "freq_arrive"]
+parameters = ["max_speed", "accel_time", "decel_time", "rated_power"]
+description = "Variable-speed drive capability for conveyor, pump, fan, or mixer process devices."
+
+[verification_contract]
+safety = [
+    "run.on conflicts_with fault.on",
+    "speed_cmd must stay within configured range",
+    "normal task code must not replace process-device actions with raw vfd.run or vfd.speed_cmd writes"
+]
+timing = [
+    "ramp and settle checks use accel_time/decel_time plus freq_arrive or explicit open-loop policy"
+]

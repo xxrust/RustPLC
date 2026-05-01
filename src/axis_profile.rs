@@ -1,6 +1,6 @@
 use crate::ast::DeviceDeclaration;
 use crate::device_semantics::axis::{
-    axis_device_type_from_ast, axis_device_type_name, device_type_supports_axis_motion,
+    MotionAxisCapability, axis_device_type_from_ast, axis_device_type_name,
 };
 use crate::error::PlcError;
 use crate::ir::{AxisBrakeConfig, AxisOrientation, AxisProfile, BinaryValue};
@@ -100,7 +100,7 @@ fn resolve_axis_profiles_with_dirs(
 ) -> Result<BTreeMap<String, AxisProfile>, Vec<PlcError>> {
     let axis_devices = devices
         .iter()
-        .filter(|device| device_type_supports_axis_motion(&device.device_type))
+        .filter(|device| MotionAxisCapability::is_profile_candidate(device))
         .collect::<Vec<_>>();
 
     if axis_devices.is_empty() {

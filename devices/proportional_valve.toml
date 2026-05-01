@@ -1,0 +1,75 @@
+[identity]
+name = "Generic proportional valve"
+type = "proportional_valve"
+
+[[interfaces.ports]]
+name = "cmd"
+default_state = "0"
+direction = "input"
+port_type = "analog"
+range_min = 0.0
+range_max = 100.0
+unit = "percent"
+
+[[interfaces.ports]]
+name = "feedback"
+default_state = "0"
+direction = "output"
+port_type = "analog"
+range_min = 0.0
+range_max = 100.0
+unit = "percent"
+
+[[interfaces.ports]]
+name = "fault"
+states = ["on", "off"]
+default_state = "off"
+direction = "output"
+port_type = "digital"
+
+[interface_contract]
+layer = "task_level_device"
+default_feedback_policy = "feedback_required_unless_explicit_open_loop"
+
+[[interface_contract.actions]]
+name = "set_opening"
+consumes = ["cmd", "feedback"]
+produces = ["feedback"]
+faults = ["timeout", "reject", "motion_fault", "safety_fault", "feedback_deviation"]
+
+[[interface_contract.actions]]
+name = "open_to"
+consumes = ["cmd", "feedback"]
+produces = ["feedback"]
+faults = ["timeout", "reject", "motion_fault", "safety_fault", "feedback_deviation"]
+
+[[interface_contract.actions]]
+name = "close"
+consumes = ["cmd", "feedback"]
+produces = ["feedback"]
+faults = ["timeout", "motion_fault", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "hold"
+consumes = ["cmd", "feedback"]
+produces = ["feedback"]
+faults = ["feedback_deviation", "safety_fault"]
+
+[[interface_contract.actions]]
+name = "reset_fault"
+consumes = ["cmd"]
+produces = ["fault"]
+faults = ["reject", "safety_fault"]
+
+[[capabilities]]
+name = "analog_command_actuator"
+kind = "process_actuator"
+ports = ["cmd", "feedback", "fault"]
+
+[verification_contract]
+safety = ["cmd must stay inside 0..100 percent", "feedback deviation routes to fault bucket"]
+liveness = ["settle tolerance requires feedback unless open_loop_policy is explicit"]
+
+[codegen_support]
+unsupported_targets = ["st", "runtime-core"]
+notes = "Proportional valve action must not degrade to raw set_analog."

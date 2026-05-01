@@ -680,6 +680,22 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             target: target.clone(),
             offset_expr_raw: expression_to_raw(offset),
         }),
+        ActionStatement::DeviceAction {
+            family,
+            action_name,
+            target,
+            args,
+        } => Some(TransitionAction::DeviceAction {
+            family: family.clone(),
+            action_name: action_name.clone(),
+            target: target.device.clone(),
+            port: target.port.clone(),
+            args_raw: args.iter().map(expression_to_raw).collect(),
+            result_buckets: crate::device_semantics::process::result_bucket_names_for_device_action(
+                family,
+                action_name,
+            ),
+        }),
         ActionStatement::AxisMoveRelative {
             target,
             params: _,
@@ -1096,7 +1112,10 @@ fn driven_by_connection_type_for(from: &DeviceKind, to: &DeviceKind) -> Option<C
         (DeviceKind::SolenoidValve, DeviceKind::Cylinder) => Some(ConnectionType::Pneumatic),
         (DeviceKind::AnalogOutput, DeviceKind::Motor)
         | (DeviceKind::AnalogOutput, DeviceKind::Vfd) => Some(ConnectionType::Analog),
-        (DeviceKind::AnalogOutput, DeviceKind::CamCoupling) => Some(ConnectionType::Analog),
+        (DeviceKind::AnalogOutput, DeviceKind::CamCoupling)
+        | (DeviceKind::AnalogOutput, DeviceKind::ProportionalValve) => {
+            Some(ConnectionType::Analog)
+        }
         _ => None,
     }
 }

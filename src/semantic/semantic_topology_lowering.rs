@@ -669,16 +669,13 @@ fn extract_axis_fault_contract_defs(
             continue;
         };
 
-        if !matches!(
-            axis_node.kind,
-            DeviceKind::StepperMotor | DeviceKind::ServoDrive
-        ) {
+        if !axis_device_name_set.contains(&contract.axis) {
             errors.push(PlcError::type_mismatch_with_reason(
                 line,
-                "stepper_motor 或 servo_drive",
+                "MotionAxisCapability",
                 device_kind_name(&axis_node.kind),
                 format!("axis_fault_contract {}.axis", contract.name),
-                "axis_fault_contract 只能绑定到轴设备（stepper_motor/servo_drive）",
+                "axis_fault_contract 只能绑定到声明 MotionAxisCapability/profile 的轴设备",
             ));
             continue;
         }
@@ -716,16 +713,13 @@ fn extract_axis_fault_contract_defs(
                     continue;
                 };
 
-                if !matches!(
-                    target_node.kind,
-                    DeviceKind::StepperMotor | DeviceKind::ServoDrive
-                ) {
+                if !axis_device_name_set.contains(target) {
                     errors.push(PlcError::type_mismatch_with_reason(
                         line,
-                        "stepper_motor 或 servo_drive",
+                        "MotionAxisCapability",
                         device_kind_name(&target_node.kind),
                         format!("axis_fault_contract {}.propagation_targets", contract.name),
-                        "propagation_targets 只能包含轴设备（stepper_motor/servo_drive）",
+                        "propagation_targets 只能包含声明 MotionAxisCapability/profile 的轴设备",
                     ));
                     has_invalid_target = true;
                 }
@@ -754,10 +748,7 @@ fn collect_axis_device_names(topology: &TopologySection) -> Vec<String> {
         .devices
         .iter()
         .filter(|device| {
-            matches!(
-                device.device_type,
-                DeviceType::StepperMotor | DeviceType::ServoDrive
-            )
+            crate::device_semantics::axis::MotionAxisCapability::from_device(device).is_some()
         })
         .map(|device| device.name.clone())
         .collect()

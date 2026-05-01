@@ -16,10 +16,8 @@ fn verify_vertical_axis_brake_sequence(program: &PlcProgram) -> Vec<SafetyDiagno
         .iter()
         .filter(|device| {
             disable_targets.contains(&device.name)
-                && matches!(
-                    device.device_type,
-                    DeviceType::StepperMotor | DeviceType::ServoDrive
-                )
+                && crate::device_semantics::axis::MotionAxisCapability::from_device(device)
+                    .is_some()
                 && device
                     .attributes
                     .model_ref
