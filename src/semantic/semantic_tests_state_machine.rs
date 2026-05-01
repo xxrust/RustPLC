@@ -1032,3 +1032,98 @@ task done:
         ));
     }
 
+    #[test]
+    fn validates_station_protocol_and_blocks_cross_station_device_writes() {
+        let input = r#"
+[topology]
+device cyl_load: cylinder
+device cyl_press: cylinder
+site handoff: workpiece_location { capacity: 1 }
+
+station st01 { owns: [cyl_load], tasks: [load_cycle] }
+station st02 { owns: [cyl_press], tasks: [press_cycle] }
+handshake st01_to_st02 {
+    from: st01,
+    to: st02,
+    request: st01_request,
+    allow: st02_allow,
+    complete: st01_complete,
+    timeout: 5000ms -> goto fault.timeout
+}
+transfer_point load_to_press {
+    from_station: st01,
+    to_station: st02,
+    site: handoff,
+    handshake: st01_to_st02
+}
+
+[constraints]
+
+[tasks]
+task load_cycle:
+    step bad:
+        action: extend cyl_press
+task press_cycle:
+    step idle:
+task fault:
+    step timeout:
+"#;
+
+        let program = parse_plc(input).expect("station protocol should parse");
+        let errors = build_state_machine(&program).expect_err("cross-station write should fail");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("[SEM-204]")
+                && rendered.contains("load_cycle")
+                && rendered.contains("cyl_press"),
+            "expected station ownership diagnostic, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_station_handshake_and_transfer_point_contracts() {
+        let input = r#"
+[topology]
+device cyl_load: cylinder
+site handoff: workpiece_location { capacity: 2 }
+
+station st01 { owns: [cyl_load], tasks: [load_cycle] }
+handshake bad_hs {
+    from: st01,
+    to: missing_station,
+    request: hs_request,
+    allow: hs_allow,
+    complete: hs_done,
+    timeout: 5000ms -> goto missing_task
+}
+transfer_point bad_tp {
+    from_station: st01,
+    to_station: missing_station,
+    site: handoff,
+    handshake: bad_hs
+}
+
+[constraints]
+
+[tasks]
+task load_cycle:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("station protocol should parse");
+        let errors = build_state_machine(&program).expect_err("invalid protocol should fail");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("[SEM-211]"), "{rendered}");
+        assert!(rendered.contains("[SEM-214]"), "{rendered}");
+        assert!(rendered.contains("[SEM-221]"), "{rendered}");
+        assert!(rendered.contains("[SEM-223]"), "{rendered}");
+    }
+

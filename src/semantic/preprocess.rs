@@ -944,6 +944,9 @@ fn expand_plc_controller_devices(
 
     Ok(TopologySection {
         devices: rewritten_devices,
+        stations: topology.stations.clone(),
+        handshakes: topology.handshakes.clone(),
+        transfer_points: topology.transfer_points.clone(),
         workpiece_types: topology.workpiece_types.clone(),
         workpiece_sites: topology.workpiece_sites.clone(),
         workpiece_holders: topology.workpiece_holders.clone(),

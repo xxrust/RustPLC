@@ -139,6 +139,10 @@ attribute = { attribute_name ~ ":" ~ attribute_value }
 attribute_block = { "{" ~ attribute ~ ((","? ~ attribute))* ~ ","? ~ "}" }
 
 device_declaration = { "device" ~ identifier ~ ":" ~ device_type ~ attribute_block? }
+station_field_name = { "owns" | "tasks" }
+station_field = { station_field_name ~ ":" ~ identifier_list }
+station_block = { "{" ~ station_field ~ ((","? ~ station_field))* ~ ","? ~ "}" }
+station_declaration = { "station" ~ identifier ~ station_block }
 variable_type = { "float" | "int" | "bool" }
 variable_initializer = { number | integer | boolean_value }
 variable_declaration = {
@@ -172,6 +176,20 @@ axis_fault_contract_block = { "{" ~ axis_fault_contract_entry ~ ((","? ~ axis_fa
 axis_fault_contract_declaration = {
     "axis_fault_contract" ~ identifier ~ axis_fault_contract_block
 }
+station_ref_field_name = { "from" | "to" }
+handshake_signal_field_name = { "request" | "allow" | "complete" }
+handshake_timeout = { "timeout" ~ ":" ~ duration_value ~ "->" ~ goto_statement }
+handshake_field = {
+    station_ref_field_name ~ ":" ~ identifier
+    | handshake_signal_field_name ~ ":" ~ identifier
+    | handshake_timeout
+}
+handshake_block = { "{" ~ handshake_field ~ ((","? ~ handshake_field))* ~ ","? ~ "}" }
+handshake_declaration = { "handshake" ~ identifier ~ handshake_block }
+transfer_point_field_name = { "from_station" | "to_station" | "site" | "handshake" }
+transfer_point_field = { transfer_point_field_name ~ ":" ~ identifier }
+transfer_point_block = { "{" ~ transfer_point_field ~ ((","? ~ transfer_point_field))* ~ ","? ~ "}" }
+transfer_point_declaration = { "transfer_point" ~ identifier ~ transfer_point_block }
 cam_table_mode = { "periodic" | "oneshot" }
 cam_point = { "(" ~ number ~ "," ~ number ~ ")" }
 cam_point_list = { "[" ~ cam_point ~ ("," ~ cam_point)* ~ ","? ~ "]" }
@@ -188,6 +206,9 @@ relation_field = { relation_field_name ~ ":" ~ relation_field_value }
 relation_declaration = { "relation" ~ "{" ~ relation_field ~ ((","? ~ relation_field))* ~ ","? ~ "}" }
 topology_entry = _{
     device_declaration
+    | station_declaration
+    | handshake_declaration
+    | transfer_point_declaration
     | workpiece_type_declaration
     | workpiece_site_declaration
     | workpiece_holder_declaration

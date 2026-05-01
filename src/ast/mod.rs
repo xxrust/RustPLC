@@ -12,6 +12,12 @@ pub struct PlcProgram {
 pub struct TopologySection {
     pub devices: Vec<DeviceDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stations: Vec<StationDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub handshakes: Vec<HandshakeDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transfer_points: Vec<TransferPointDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workpiece_types: Vec<WorkpieceTypeDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workpiece_sites: Vec<WorkpieceSiteDeclaration>,
@@ -31,6 +37,41 @@ pub struct TopologySection {
     pub extern_functions: Vec<ExternFunctionDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub axis_fault_contracts: Vec<AxisFaultContractDeclaration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StationDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HandshakeDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub from: String,
+    pub to: String,
+    pub request: String,
+    pub allow: String,
+    pub complete: String,
+    pub timeout: TimeoutDirective,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransferPointDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub from_station: String,
+    pub to_station: String,
+    pub site: String,
+    pub handshake: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -979,6 +1020,9 @@ mod tests {
                     device_type: DeviceType::DigitalOutput,
                     attributes: DeviceAttributes::default(),
                 }],
+                stations: Vec::new(),
+                handshakes: Vec::new(),
+                transfer_points: Vec::new(),
                 workpiece_types: Vec::new(),
                 workpiece_sites: Vec::new(),
                 workpiece_holders: Vec::new(),

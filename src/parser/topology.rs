@@ -1,3 +1,5 @@
+use crate::ast::{HandshakeDeclaration, StationDeclaration, TransferPointDeclaration};
+
 fn parse_plc_pair(pair: Pair<Rule>) -> Result<PlcProgram, PlcError> {
     let mut topology = None;
     let mut constraints = None;
@@ -226,6 +228,9 @@ fn reject_extern_calls_in_expression(
 
 fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError> {
     let mut devices = Vec::new();
+    let mut stations = Vec::new();
+    let mut handshakes = Vec::new();
+    let mut transfer_points = Vec::new();
     let mut workpiece_types = Vec::new();
     let mut workpiece_sites = Vec::new();
     let mut workpiece_holders = Vec::new();
@@ -240,6 +245,11 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
     for entry in pair.into_inner() {
         match entry.as_rule() {
             Rule::device_declaration => devices.push(parse_device_declaration(entry)?),
+            Rule::station_declaration => stations.push(parse_station_declaration(entry)?),
+            Rule::handshake_declaration => handshakes.push(parse_handshake_declaration(entry)?),
+            Rule::transfer_point_declaration => {
+                transfer_points.push(parse_transfer_point_declaration(entry)?);
+            }
             Rule::workpiece_type_declaration => {
                 workpiece_types.push(parse_workpiece_type_declaration(entry)?);
             }
@@ -272,6 +282,9 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
 
     Ok(TopologySection {
         devices,
+        stations,
+        handshakes,
+        transfer_points,
         workpiece_types,
         workpiece_sites,
         workpiece_holders,
@@ -282,6 +295,203 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
         cam_tables,
         extern_functions,
         axis_fault_contracts,
+    })
+}
+
+fn parse_station_declaration(pair: Pair<Rule>) -> Result<StationDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut owns = Vec::new();
+    let mut tasks = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::station_block => {
+                for field in part.into_inner() {
+                    if field.as_rule() != Rule::station_field {
+                        continue;
+                    }
+                    let field_line = line_of(&field);
+                    let mut inner = field.into_inner();
+                    let field_name = inner
+                        .next()
+                        .ok_or_else(|| PlcError::parse(field_line, "station 字段缺少名称"))?
+                        .as_str()
+                        .to_string();
+                    let list_pair = inner
+                        .next()
+                        .ok_or_else(|| PlcError::parse(field_line, "station 字段缺少列表"))?;
+                    let values = expect_identifier_list(list_pair, &field_name)?;
+                    match field_name.as_str() {
+                        "owns" => owns = values,
+                        "tasks" => tasks = values,
+                        _ => {
+                            return Err(PlcError::parse(
+                                field_line,
+                                format!("不支持的 station 字段: {field_name}"),
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(StationDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "station 声明缺少名称"))?,
+        owns,
+        tasks,
+    })
+}
+
+fn parse_handshake_declaration(pair: Pair<Rule>) -> Result<HandshakeDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut from = None;
+    let mut to = None;
+    let mut request = None;
+    let mut allow = None;
+    let mut complete = None;
+    let mut timeout = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::handshake_block => {
+                for field in part.into_inner() {
+                    if field.as_rule() != Rule::handshake_field {
+                        continue;
+                    }
+                    let field_line = line_of(&field);
+                    let mut inner = field.into_inner();
+                    let first = inner
+                        .next()
+                        .ok_or_else(|| PlcError::parse(field_line, "handshake 字段缺少内容"))?;
+                    match first.as_rule() {
+                        Rule::station_ref_field_name | Rule::handshake_signal_field_name => {
+                            let field_name = first.as_str().to_string();
+                            let value = inner
+                                .next()
+                                .ok_or_else(|| PlcError::parse(field_line, "handshake 字段缺少值"))?
+                                .as_str()
+                                .to_string();
+                            match field_name.as_str() {
+                                "from" => from = Some(value),
+                                "to" => to = Some(value),
+                                "request" => request = Some(value),
+                                "allow" => allow = Some(value),
+                                "complete" => complete = Some(value),
+                                _ => {
+                                    return Err(PlcError::parse(
+                                        field_line,
+                                        format!("不支持的 handshake 字段: {field_name}"),
+                                    ));
+                                }
+                            }
+                        }
+                        Rule::handshake_timeout => {
+                            timeout = Some(parse_handshake_timeout(first)?);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(HandshakeDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "handshake 声明缺少名称"))?,
+        from: from.ok_or_else(|| PlcError::parse(line, "handshake 缺少 from"))?,
+        to: to.ok_or_else(|| PlcError::parse(line, "handshake 缺少 to"))?,
+        request: request.ok_or_else(|| PlcError::parse(line, "handshake 缺少 request"))?,
+        allow: allow.ok_or_else(|| PlcError::parse(line, "handshake 缺少 allow"))?,
+        complete: complete.ok_or_else(|| PlcError::parse(line, "handshake 缺少 complete"))?,
+        timeout: timeout.ok_or_else(|| PlcError::parse(line, "handshake 缺少 timeout"))?,
+    })
+}
+
+fn parse_handshake_timeout(pair: Pair<Rule>) -> Result<TimeoutDirective, PlcError> {
+    let line = line_of(&pair);
+    let mut duration = None;
+    let mut target = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::duration_value => duration = Some(parse_duration_value(part)?),
+            Rule::goto_statement => target = Some(parse_goto_statement(part)?),
+            _ => {}
+        }
+    }
+
+    Ok(TimeoutDirective {
+        duration: duration.ok_or_else(|| PlcError::parse(line, "handshake timeout 缺少时长"))?,
+        target: target.ok_or_else(|| PlcError::parse(line, "handshake timeout 缺少 goto 目标"))?,
+    })
+}
+
+fn parse_transfer_point_declaration(
+    pair: Pair<Rule>,
+) -> Result<TransferPointDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut from_station = None;
+    let mut to_station = None;
+    let mut site = None;
+    let mut handshake = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::transfer_point_block => {
+                for field in part.into_inner() {
+                    if field.as_rule() != Rule::transfer_point_field {
+                        continue;
+                    }
+                    let field_line = line_of(&field);
+                    let mut inner = field.into_inner();
+                    let field_name = inner
+                        .next()
+                        .ok_or_else(|| PlcError::parse(field_line, "transfer_point 字段缺少名称"))?
+                        .as_str()
+                        .to_string();
+                    let value = inner
+                        .next()
+                        .ok_or_else(|| PlcError::parse(field_line, "transfer_point 字段缺少值"))?
+                        .as_str()
+                        .to_string();
+                    match field_name.as_str() {
+                        "from_station" => from_station = Some(value),
+                        "to_station" => to_station = Some(value),
+                        "site" => site = Some(value),
+                        "handshake" => handshake = Some(value),
+                        _ => {
+                            return Err(PlcError::parse(
+                                field_line,
+                                format!("不支持的 transfer_point 字段: {field_name}"),
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(TransferPointDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "transfer_point 声明缺少名称"))?,
+        from_station: from_station
+            .ok_or_else(|| PlcError::parse(line, "transfer_point 缺少 from_station"))?,
+        to_station: to_station
+            .ok_or_else(|| PlcError::parse(line, "transfer_point 缺少 to_station"))?,
+        site: site.ok_or_else(|| PlcError::parse(line, "transfer_point 缺少 site"))?,
+        handshake: handshake
+            .ok_or_else(|| PlcError::parse(line, "transfer_point 缺少 handshake"))?,
     })
 }
 

@@ -1,4 +1,4 @@
-﻿#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::{parse_constraints, parse_plc, parse_tasks, parse_topology};
     use crate::ast::{
@@ -1593,18 +1593,14 @@ task ready:
             .find(|step| step.name == "detect")
             .expect("search 任务应包含 detect step");
 
-        assert!(
-            detect_step
-                .statements
-                .iter()
-                .any(|stmt| matches!(stmt, StepStatement::Race(_)))
-        );
-        assert!(
-            detect_step
-                .statements
-                .iter()
-                .any(|stmt| matches!(stmt, StepStatement::Timeout(_)))
-        );
+        assert!(detect_step
+            .statements
+            .iter()
+            .any(|stmt| matches!(stmt, StepStatement::Race(_))));
+        assert!(detect_step
+            .statements
+            .iter()
+            .any(|stmt| matches!(stmt, StepStatement::Timeout(_))));
 
         let ready_task = ast
             .tasks
@@ -2623,5 +2619,53 @@ task main:
 "#;
 
         assert!(parse_plc(input).is_err(), "缺少 else 分支时应报解析错误");
+    }
+
+    #[test]
+    fn parses_station_handshake_and_transfer_point_into_topology() {
+        let input = r#"
+[topology]
+device cyl_load: cylinder
+device cyl_press: cylinder
+site handoff: workpiece_location { capacity: 1 }
+
+station st01 { owns: [cyl_load], tasks: [load_cycle] }
+station st02 { owns: [cyl_press], tasks: [press_cycle] }
+handshake st01_to_st02 {
+    from: st01,
+    to: st02,
+    request: st01_request,
+    allow: st02_allow,
+    complete: st01_complete,
+    timeout: 5000ms -> goto fault.timeout
+}
+transfer_point load_to_press {
+    from_station: st01,
+    to_station: st02,
+    site: handoff,
+    handshake: st01_to_st02
+}
+
+[constraints]
+
+[tasks]
+task load_cycle:
+    step idle:
+task press_cycle:
+    step idle:
+task fault:
+    step timeout:
+"#;
+
+        let program = parse_plc(input).expect("station protocol should parse");
+        assert_eq!(program.topology.stations.len(), 2);
+        assert_eq!(program.topology.handshakes.len(), 1);
+        assert_eq!(program.topology.transfer_points.len(), 1);
+        assert_eq!(program.topology.stations[0].owns, vec!["cyl_load"]);
+        assert_eq!(program.topology.handshakes[0].timeout.target.task, "fault");
+        assert_eq!(
+            program.topology.transfer_points[0].handshake,
+            "st01_to_st02"
+        );
     }
 }
