@@ -484,7 +484,9 @@ fn collect_step_wait_profiles(
         for pending in &task_ctx.pending_actions {
             if !matches!(
                 pending.action_kind,
-                ActionKind::AxisMoveRelative | ActionKind::AxisMoveAbsolute
+                ActionKind::AxisMoveRelative
+                    | ActionKind::AxisMoveAbsolute
+                    | ActionKind::DeviceAction
             ) {
                 continue;
             }
@@ -515,6 +517,9 @@ fn collect_step_wait_profile_from_statements(
                         profile.has_timeout_escape = true;
                     }
                 }
+                ActionStatement::DeviceAction { .. } => {
+                    profile.has_pending_action = true;
+                }
                 ActionStatement::Extend { .. }
                 | ActionStatement::Retract { .. }
                 | ActionStatement::Set { .. }
@@ -526,7 +531,6 @@ fn collect_step_wait_profile_from_statements(
                 | ActionStatement::CamDisengage { .. }
                 | ActionStatement::CamSwitch { .. }
                 | ActionStatement::CamPhase { .. }
-                | ActionStatement::DeviceAction { .. }
                 | ActionStatement::Log { .. } => {}
             },
             StepStatement::Wait(_) => profile.has_wait_condition = true,

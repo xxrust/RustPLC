@@ -1556,8 +1556,25 @@ fn transition_effects(
             TransitionAction::CamEngage { .. }
             | TransitionAction::CamDisengage { .. }
             | TransitionAction::CamSwitch { .. }
-            | TransitionAction::CamPhase { .. }
-            | TransitionAction::DeviceAction { .. } => {}
+            | TransitionAction::CamPhase { .. } => {}
+            TransitionAction::DeviceAction { target, port, .. } => {
+                let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
+                else {
+                    continue;
+                };
+                let Some(state_id) = device_state_index[device_id]
+                    .get("active")
+                    .or_else(|| device_state_index[device_id].get("on"))
+                    .copied()
+                else {
+                    continue;
+                };
+                effects.ordered_effects.push(ModelEffect::DeviceState {
+                    device_id,
+                    state_id,
+                });
+                effects.device_effects.insert(device_id, state_id);
+            }
             TransitionAction::Extend { target, port, .. } => {
                 let Some(device_id) = lookup_device_domain_id(device_index, target, port, true)
                 else {

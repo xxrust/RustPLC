@@ -3,12 +3,13 @@ use rust_plc::codegen::st::{generate_st, StCodegenConfig, StCodegenError};
 use rust_plc::device_semantics::process::{
     all_process_source_contracts, collect_process_device_source_reports,
 };
-use rust_plc::ir::TransitionAction;
+use rust_plc::ir::{ActionKind, TransitionAction};
 use rust_plc::parser::parse_plc;
 use rust_plc::runtime_bridge::state_machine_to_runtime_program;
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
 };
+use rust_plc::verification::timing::estimate_program_timing;
 use rustplc_device_semantics::{ActionResultBucket, DefaultFeedbackPolicy};
 
 #[test]
@@ -258,6 +259,25 @@ task main:
     assert_eq!(device_action.2, "oven");
     assert!(device_action.3.iter().any(|bucket| bucket == "complete"));
     assert!(device_action.3.iter().any(|bucket| bucket == "timeout"));
+    let pending = state_machine
+        .task_contexts
+        .iter()
+        .flat_map(|ctx| ctx.pending_actions.iter())
+        .find(|pending| pending.action_kind == ActionKind::DeviceAction)
+        .expect("process action should enter verification pending-action context");
+    assert_eq!(pending.target.as_deref(), Some("oven"));
+    assert_eq!(pending.semantic_tag.as_deref(), Some("heater.heat_to"));
+
+    let timing = estimate_program_timing(&expanded, &topology, &state_machine);
+    let heat_timing = timing
+        .step_estimates
+        .get("main.heat")
+        .expect("heat step timing estimate");
+    assert_eq!(heat_timing.pending_action_max_ms, 50);
+    assert!(heat_timing
+        .pending_action_details
+        .iter()
+        .any(|detail| detail.contains("pending device_action oven = 50ms")));
 
     let st_errors = generate_st(
         &topology,

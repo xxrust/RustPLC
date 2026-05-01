@@ -432,6 +432,11 @@ impl TimingContext {
             ActionKind::Set | ActionKind::SetAnalog | ActionKind::SetAnalogExpr => {
                 profile.ramp_ms.or(profile.response_ms)?
             }
+            ActionKind::DeviceAction => profile
+                .response_ms
+                .or(profile.ramp_ms)
+                .or(profile.stroke_ms)
+                .or(profile.retract_ms)?,
             ActionKind::AxisMoveRelative | ActionKind::AxisMoveAbsolute => profile
                 .stroke_ms
                 .or(profile.retract_ms)
@@ -443,7 +448,6 @@ impl TimingContext {
             | ActionKind::CamDisengage
             | ActionKind::CamSwitch
             | ActionKind::CamPhase
-            | ActionKind::DeviceAction
             | ActionKind::Log => return None,
         };
 
