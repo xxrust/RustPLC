@@ -74,6 +74,44 @@ cmd = "0"
 feedback = "0"
 fault = "off"
 
+[alarm_map]
+source = "proportional_valve_status"
+
+[[alarm_map.entries]]
+code = "PVALVE_TIMEOUT"
+condition = "timeout"
+severity = "fault"
+recoverable = true
+description = "Proportional valve action timed out"
+
+[[alarm_map.entries]]
+code = "PVALVE_REJECT"
+condition = "reject"
+severity = "fault"
+recoverable = true
+description = "Proportional valve command rejected"
+
+[[alarm_map.entries]]
+code = "PVALVE_MOTION_FAULT"
+condition = "motion_fault"
+severity = "fault"
+recoverable = true
+description = "Proportional valve motion fault"
+
+[[alarm_map.entries]]
+code = "PVALVE_SAFETY_FAULT"
+condition = "safety_fault"
+severity = "safety"
+recoverable = false
+description = "Proportional valve safety fault"
+
+[[alarm_map.entries]]
+code = "PVALVE_FEEDBACK_DEVIATION"
+condition = "feedback_deviation"
+severity = "fault"
+recoverable = true
+description = "Command and feedback deviation exceeded tolerance"
+
 [verification_contract]
 safety = ["cmd must stay inside 0..100 percent", "feedback deviation routes to fault bucket"]
 liveness = ["settle tolerance requires feedback unless open_loop_policy is explicit"]

@@ -82,6 +82,58 @@ pressure = "0"
 flow = "0"
 fault = "off"
 
+[alarm_map]
+source = "pump_status"
+
+[[alarm_map.entries]]
+code = "PUMP_TIMEOUT"
+condition = "timeout"
+severity = "fault"
+recoverable = true
+description = "Pump action timed out"
+
+[[alarm_map.entries]]
+code = "PUMP_REJECT"
+condition = "reject"
+severity = "fault"
+recoverable = true
+description = "Pump command rejected"
+
+[[alarm_map.entries]]
+code = "PUMP_DRY_RUN"
+condition = "dry_run"
+severity = "safety"
+recoverable = false
+description = "Pump dry run detected"
+
+[[alarm_map.entries]]
+code = "PUMP_NO_FLOW"
+condition = "no_flow"
+severity = "fault"
+recoverable = true
+description = "Pump flow feedback missing"
+
+[[alarm_map.entries]]
+code = "PUMP_LOW_LEVEL"
+condition = "low_level"
+severity = "fault"
+recoverable = true
+description = "Pump source level is low"
+
+[[alarm_map.entries]]
+code = "PUMP_OVERPRESSURE"
+condition = "overpressure"
+severity = "safety"
+recoverable = false
+description = "Pump overpressure detected"
+
+[[alarm_map.entries]]
+code = "PUMP_SAFETY_FAULT"
+condition = "safety_fault"
+severity = "safety"
+recoverable = false
+description = "Pump safety fault"
+
 [verification_contract]
 safety = ["overpressure conflicts_with continued drive", "dry-run interlock must be modeled when declared"]
 liveness = ["pressure/flow closure required unless open_loop_policy is explicit"]

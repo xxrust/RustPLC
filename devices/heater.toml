@@ -66,6 +66,51 @@ power = "off"
 temperature = "25"
 fault = "off"
 
+[alarm_map]
+source = "heater_status"
+
+[[alarm_map.entries]]
+code = "HEATER_TIMEOUT"
+condition = "timeout"
+severity = "fault"
+recoverable = true
+description = "Heater action timed out"
+
+[[alarm_map.entries]]
+code = "HEATER_REJECT"
+condition = "reject"
+severity = "fault"
+recoverable = true
+description = "Heater command rejected"
+
+[[alarm_map.entries]]
+code = "HEATER_OVERTEMP"
+condition = "overtemperature"
+severity = "safety"
+recoverable = false
+description = "Heater exceeded temperature limit"
+
+[[alarm_map.entries]]
+code = "HEATER_SENSOR_FAULT"
+condition = "sensor_fault"
+severity = "fault"
+recoverable = true
+description = "Heater feedback sensor fault"
+
+[[alarm_map.entries]]
+code = "HEATER_THERMAL_RUNAWAY"
+condition = "thermal_runaway"
+severity = "safety"
+recoverable = false
+description = "Heater thermal runaway detected"
+
+[[alarm_map.entries]]
+code = "HEATER_SAFETY_FAULT"
+condition = "safety_fault"
+severity = "safety"
+recoverable = false
+description = "Heater safety fault"
+
 [verification_contract]
 safety = ["overtemperature conflicts_with heat output", "sensor_fault prevents false completion"]
 liveness = ["heat_to/hold_temperature require temperature feedback unless open_loop_policy is explicit"]

@@ -80,6 +80,51 @@ released = "on"
 part_present = "off"
 fault = "off"
 
+[alarm_map]
+source = "gripper_status"
+
+[[alarm_map.entries]]
+code = "GRIPPER_TIMEOUT"
+condition = "timeout"
+severity = "fault"
+recoverable = true
+description = "Gripper action timed out"
+
+[[alarm_map.entries]]
+code = "GRIPPER_REJECT"
+condition = "reject"
+severity = "fault"
+recoverable = true
+description = "Gripper command rejected"
+
+[[alarm_map.entries]]
+code = "GRIPPER_MOTION_FAULT"
+condition = "motion_fault"
+severity = "fault"
+recoverable = true
+description = "Gripper motion fault"
+
+[[alarm_map.entries]]
+code = "GRIPPER_SAFETY_FAULT"
+condition = "safety_fault"
+severity = "safety"
+recoverable = false
+description = "Gripper safety fault"
+
+[[alarm_map.entries]]
+code = "GRIPPER_LOST_PART"
+condition = "lost_part"
+severity = "fault"
+recoverable = true
+description = "Held part was lost"
+
+[[alarm_map.entries]]
+code = "GRIPPER_NO_PART"
+condition = "no_part"
+severity = "fault"
+recoverable = true
+description = "No part detected for grip"
+
 [verification_contract]
 safety = ["held workpiece must not be simultaneously free at another holder"]
 liveness = ["grip/release must complete or route to timeout/fault bucket"]

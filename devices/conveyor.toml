@@ -84,6 +84,51 @@ running = "off"
 zone = "empty"
 jam = "off"
 
+[alarm_map]
+source = "conveyor_status"
+
+[[alarm_map.entries]]
+code = "CONVEYOR_TIMEOUT"
+condition = "timeout"
+severity = "fault"
+recoverable = true
+description = "Conveyor action timed out"
+
+[[alarm_map.entries]]
+code = "CONVEYOR_REJECT"
+condition = "reject"
+severity = "fault"
+recoverable = true
+description = "Conveyor command rejected"
+
+[[alarm_map.entries]]
+code = "CONVEYOR_MOTION_FAULT"
+condition = "motion_fault"
+severity = "fault"
+recoverable = true
+description = "Conveyor motion fault"
+
+[[alarm_map.entries]]
+code = "CONVEYOR_SAFETY_FAULT"
+condition = "safety_fault"
+severity = "safety"
+recoverable = false
+description = "Conveyor safety fault"
+
+[[alarm_map.entries]]
+code = "CONVEYOR_JAM"
+condition = "jam"
+severity = "fault"
+recoverable = true
+description = "Conveyor jam detected"
+
+[[alarm_map.entries]]
+code = "CONVEYOR_OVERLOAD"
+condition = "overload"
+severity = "fault"
+recoverable = true
+description = "Conveyor overload detected"
+
 [verification_contract]
 safety = ["zone occupancy capacity must not be exceeded", "jam.on conflicts_with continued drive"]
 liveness = ["move_until/index must complete or route to timeout/fault bucket"]

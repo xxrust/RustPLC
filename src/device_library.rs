@@ -1,6 +1,6 @@
 use crate::error::PlcError;
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -298,6 +298,54 @@ impl DeviceLibrary {
     pub fn is_empty(&self) -> bool {
         self.defs.is_empty()
     }
+
+    pub fn alarm_coverage_gaps(&self, type_key: &str) -> Option<Vec<String>> {
+        let def = self.defs.get(type_key)?;
+        let declared = declared_fault_conditions(def);
+        if declared.is_empty() {
+            return Some(Vec::new());
+        }
+        let mapped = def
+            .alarm_map
+            .as_ref()
+            .map(mapped_alarm_conditions)
+            .unwrap_or_default();
+        Some(
+            declared
+                .into_iter()
+                .filter(|condition| !mapped.contains(condition))
+                .collect(),
+        )
+    }
+}
+
+fn declared_fault_conditions(def: &DeviceDef) -> BTreeSet<String> {
+    let mut conditions = BTreeSet::new();
+    if let Some(contract) = &def.interface_contract {
+        for action in &contract.actions {
+            for fault in &action.faults {
+                if !fault.trim().is_empty() {
+                    conditions.insert(fault.clone());
+                }
+            }
+        }
+    }
+    conditions
+}
+
+fn mapped_alarm_conditions(alarm_map: &DeviceAlarmMap) -> BTreeSet<String> {
+    alarm_map
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            let condition = entry.condition.trim();
+            if condition.is_empty() {
+                None
+            } else {
+                Some(condition.to_string())
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -496,5 +544,38 @@ notes = "Requires motion FB mapping"
         assert_eq!(codegen_support.targets, vec!["st", "openplc"]);
         assert_eq!(codegen_support.unsupported_targets, vec!["ladder"]);
         assert_eq!(codegen_support.notes, "Requires motion FB mapping");
+    }
+
+    #[test]
+    fn process_device_alarm_maps_cover_declared_fault_conditions() {
+        let lib = DeviceLibrary::load(Path::new("devices")).expect("load device library");
+        for type_key in [
+            "proportional_valve",
+            "gripper",
+            "conveyor",
+            "pump",
+            "heater",
+            "vision_sensor",
+        ] {
+            let def = lib.get(type_key).expect("process device definition");
+            let alarm_map = def
+                .alarm_map
+                .as_ref()
+                .expect("process device should declare alarm_map");
+            assert!(
+                alarm_map
+                    .entries
+                    .iter()
+                    .all(|entry| !entry.code.is_empty() && !entry.severity.is_empty()),
+                "{type_key} alarm_map entries should expose code and severity"
+            );
+            let gaps = lib
+                .alarm_coverage_gaps(type_key)
+                .expect("alarm coverage result");
+            assert!(
+                gaps.is_empty(),
+                "{type_key} alarm_map missing declared faults: {gaps:?}"
+            );
+        }
     }
 }

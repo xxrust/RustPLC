@@ -80,6 +80,37 @@ pass = "off"
 fail = "off"
 fault = "off"
 
+[alarm_map]
+source = "vision_status"
+
+[[alarm_map.entries]]
+code = "VISION_TIMEOUT"
+condition = "timeout"
+severity = "fault"
+recoverable = true
+description = "Vision action timed out"
+
+[[alarm_map.entries]]
+code = "VISION_REJECT"
+condition = "reject"
+severity = "fault"
+recoverable = true
+description = "Vision command rejected"
+
+[[alarm_map.entries]]
+code = "VISION_COMM_FAULT"
+condition = "communication_fault"
+severity = "fault"
+recoverable = true
+description = "Vision communication fault"
+
+[[alarm_map.entries]]
+code = "VISION_SAFETY_FAULT"
+condition = "safety_fault"
+severity = "safety"
+recoverable = false
+description = "Vision safety fault"
+
 [verification_contract]
 safety = ["inspection result cannot be consumed before acquire/inspect completes"]
 causality = ["trigger must causally precede ready/pass/fail result consumption"]
