@@ -1,4 +1,4 @@
-﻿use crate::ast::{
+use crate::ast::{
     ActionStatement, ActionTarget, AxisAutoResetPolicy, AxisFaultContractDeclaration,
     AxisFaultPropagationScope, AxisFaultRouteDirective, AxisFaultRouteKind, AxisFaultSeverity,
     AxisStopMode, BinaryOperator, Branch, CamPoint, CamTableDeclaration, CamTableMode,
@@ -68,7 +68,6 @@ fn reject_deprecated_connected_to(input: &str) -> Result<(), PlcError> {
 
     Ok(())
 }
-
 
 include!("topology.rs");
 include!("constraints.rs");
