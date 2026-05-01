@@ -35,8 +35,15 @@ If the comparator returns `aligned` but also reports only one observed cycle wit
 Typical authored files:
 - `plc/main.system.md`
 - `plc/main.plc`
-- `plc/main.target_semantics.bundle.toml`
-- `plc/target_semantics_fragments/**`
+- `rustplc.bundle.toml`
+- `00_topology/**`
+- `01_init/**`
+- `02_process/**`
+- `03_constraints/**`
+- `04_faults/**`
+- `05_supervision/**`
+- `06_manual/**`
+- `07_hmi/**`
 - `scenarios/nominal/normal.yaml`
 - `*.intent_alignment.contract.json`
 

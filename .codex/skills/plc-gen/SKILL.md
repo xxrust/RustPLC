@@ -69,14 +69,16 @@ For complex projects, do not default to a monolithic `plc/main.plc`.
 
 Prefer a structured source set or explicit target-semantics fragment layout that can be reviewed and validated in parallel.
 
-Use `out/skill_flywheel/plc_gen_wafer_loader/plc/target_semantics_fragments` as the reference shape:
-- `topology/`
-- `constraints/`
-- `architecture/`
-- `auto/`
-- `maintenance/`
-- `manual/`
-- `operator_interface/`
+Use the current `rust_plc new --layout structured-fragments` scaffold as the reference shape:
+- `rustplc.bundle.toml`
+- `00_topology/`
+- `01_init/`
+- `02_process/`
+- `03_constraints/`
+- `04_faults/`
+- `05_supervision/`
+- `06_manual/`
+- `07_hmi/`
 
 But do not treat that fragment tree as the whole authored architecture.
 
@@ -108,7 +110,7 @@ or from the source workspace:
 cargo run --release --bin rust_plc -- new <project_dir> --layout structured-fragments
 ```
 
-Treat `plc/main.target_semantics.bundle.toml` as the source entry and fill the generated fragments under `plc/target_semantics_fragments/`.
+Treat `rustplc.bundle.toml` as the scaffolded source entry and fill the generated phase directories.
 
 ## Hard Guardrail: Replace Scaffold Placeholders Before Calling The Project Generated
 
@@ -116,9 +118,9 @@ For scaffolded complex delivery, the generated tree is only a starter shell.
 
 Before calling the result "generated", "ready", or "validated":
 - replace scaffold placeholder intent sources such as `plc/main.system.md`
-- replace delivery-asset placeholder docs such as `plc/deliveries/station/<slug>/docs/station.system.md`
+- replace scaffold placeholder intent sources such as `plc/main.system.md` and any layer-specific docs you add
 - ensure the delivery-asset doc set, not only the root scaffold doc, carries the confirmed process facts
-- decide which delivery-asset `main.bundle.toml` is the authoritative source entry for this asset
+- decide whether the authoritative source entry is the scaffolded `rustplc.bundle.toml` or a deliberately added delivery-asset bundle
 - either author a real `*.intent_alignment.contract.json` with resolved source binding, or report an explicit blocker
 
 Do not stop at "scaffold succeeded" when the request was to generate a real project from a confirmed `.system.md`.

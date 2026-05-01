@@ -1,78 +1,23 @@
 [topology]
 
 device plc_main: plc {
-    purpose: "控制器本体与工艺 I/O 端口映射",
-    ports: [Y0:digital:producer, Y1:digital:producer, Y2:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer, X5:digital:consumer, X6:digital:consumer]
+    purpose: "Controller profile for a push-clamp-press station"
+    model_ref: openplc_softplc
 }
 
-device start_button: sensor {
-    purpose: "操作员启动按钮，触发推料-压紧-冲压循环",
-    subtype: "push_button",
-    debounce: 20ms
-}
-
-device valve_push: solenoid_valve {
-    purpose: "驱动推料缸伸出/缩回的气动电磁阀",
-    response_time: 20ms
-}
-
-device valve_clamp: solenoid_valve {
-    purpose: "驱动压紧缸伸出/缩回的气动电磁阀",
-    response_time: 20ms
-}
-
-device valve_press: solenoid_valve {
-    purpose: "驱动冲压缸伸出/缩回的气动电磁阀",
-    response_time: 20ms
-}
-
-device cyl_push: cylinder {
-    purpose: "将工件推送到加工位的推料气缸",
-    stroke_time: 300ms,
-    retract_time: 300ms
-}
-
-device cyl_clamp: cylinder {
-    purpose: "在加工位夹紧工件的压紧气缸",
-    stroke_time: 300ms,
-    retract_time: 300ms
-}
-
-device cyl_press: cylinder {
-    purpose: "对夹紧工件执行冲压动作的冲压气缸",
-    stroke_time: 300ms,
-    retract_time: 300ms
-}
-
-device sensor_push_ext: sensor {
-    purpose: "检测推料缸已完全伸出到位的限位开关",
-    subtype: "limit_switch"
-}
-
-device sensor_push_ret: sensor {
-    purpose: "检测推料缸已完全缩回到位的限位开关",
-    subtype: "limit_switch"
-}
-
-device sensor_clamp_ext: sensor {
-    purpose: "检测压紧缸已完全伸出到位的限位开关",
-    subtype: "limit_switch"
-}
-
-device sensor_clamp_ret: sensor {
-    purpose: "检测压紧缸已完全缩回到位的限位开关",
-    subtype: "limit_switch"
-}
-
-device sensor_press_ext: sensor {
-    purpose: "检测冲压缸已完全伸出到位的限位开关",
-    subtype: "limit_switch"
-}
-
-device sensor_press_ret: sensor {
-    purpose: "检测冲压缸已完全缩回到位的限位开关",
-    subtype: "limit_switch"
-}
+device start_button: sensor { purpose: "Operator start request", subtype: "push_button", debounce: 20ms }
+device valve_push: solenoid_valve { purpose: "Push cylinder valve", response_time: 20ms }
+device valve_clamp: solenoid_valve { purpose: "Clamp cylinder valve", response_time: 20ms }
+device valve_press: solenoid_valve { purpose: "Press cylinder valve", response_time: 20ms }
+device cyl_push: cylinder { purpose: "Pushes the part into station", stroke_time: 300ms, retract_time: 300ms }
+device cyl_clamp: cylinder { purpose: "Clamps the part before press", stroke_time: 300ms, retract_time: 300ms }
+device cyl_press: cylinder { purpose: "Presses the clamped part", stroke_time: 300ms, retract_time: 300ms }
+device sensor_push_ext: sensor { purpose: "Push extended feedback", subtype: "limit_switch" }
+device sensor_push_ret: sensor { purpose: "Push retracted feedback", subtype: "limit_switch" }
+device sensor_clamp_ext: sensor { purpose: "Clamp extended feedback", subtype: "limit_switch" }
+device sensor_clamp_ret: sensor { purpose: "Clamp retracted feedback", subtype: "limit_switch" }
+device sensor_press_ext: sensor { purpose: "Press extended feedback", subtype: "limit_switch" }
+device sensor_press_ret: sensor { purpose: "Press retracted feedback", subtype: "limit_switch" }
 
 relation { from: start_button.out, to: plc_main.X6, via: reports_to }
 relation { from: plc_main.Y0, to: valve_push.coil, via: driven_by }
@@ -97,7 +42,7 @@ relation { from: sensor_press_ret.out, to: plc_main.X5, via: reports_to }
 [constraints]
 
 safety: cyl_press.extended requires cyl_clamp.extended
-    reason: "冲压缸动作时必须保持压紧"
+    reason: "Press may extend only while clamp is extended"
 
 causality: Y0 -> valve_push -> cyl_push -> sensor_push_ext
 causality: Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ext
@@ -105,44 +50,38 @@ causality: Y2 -> valve_press -> cyl_press -> sensor_press_ext
 
 [tasks]
 
-task cycle:
-    step push_out:
-        action: extend cyl_push
-        wait: sensor_push_ext == true
-        timeout: 1200ms -> goto fault_handler
-    step clamp_down:
-        action: extend cyl_clamp
-        wait: sensor_clamp_ext == true
-        timeout: 1200ms -> goto fault_handler
-    step press_out:
-        action: extend cyl_press
-        wait: sensor_press_ext == true
-        timeout: 1200ms -> goto fault_handler
-    step press_back:
-        action: retract cyl_press
-        wait: sensor_press_ret == true
-        timeout: 1200ms -> goto fault_handler
-    step unclamp:
-        action: retract cyl_clamp
-        wait: sensor_clamp_ret == true
-        timeout: 1200ms -> goto fault_handler
-    step push_back:
-        action: retract cyl_push
-        wait: sensor_push_ret == true
-        timeout: 1200ms -> goto fault_handler
-    on_complete: goto ready
-
-task fault_handler:
-    step safe:
-        action: retract cyl_press
-        action: retract cyl_clamp
-        action: retract cyl_push
-    step alarm:
-        action: log "fault: timeout"
-    on_complete: goto ready
-
 task ready:
     step wait_start:
         wait: start_button == true
         allow_indefinite_wait: true
     on_complete: goto cycle
+
+task cycle:
+    step push_out:
+        action: extend cyl_push
+        timeout: 1200ms -> goto fault_handler.alarm
+    step clamp_down:
+        action: extend cyl_clamp
+        timeout: 1200ms -> goto fault_handler.alarm
+    step press_out:
+        action: extend cyl_press
+        timeout: 1200ms -> goto fault_handler.alarm
+    step press_back:
+        action: retract cyl_press
+        timeout: 1200ms -> goto fault_handler.alarm
+    step unclamp:
+        action: retract cyl_clamp
+        timeout: 1200ms -> goto fault_handler.alarm
+    step push_back:
+        action: retract cyl_push
+        timeout: 1200ms -> goto fault_handler.alarm
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_outputs:
+        action: set valve_press.coil off
+        action: set valve_clamp.coil off
+        action: set valve_push.coil off
+    step alarm:
+        action: log "fault: actuator did not reach commanded state"
+    on_complete: goto ready

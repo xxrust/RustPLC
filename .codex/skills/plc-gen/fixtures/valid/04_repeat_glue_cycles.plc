@@ -1,36 +1,15 @@
 [topology]
 
 device plc_main: plc {
-    purpose: "控制器本体与工艺 I/O 端口映射",
-    ports: [Y0:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer]
+    purpose: "Controller profile for repeated glue strokes"
+    model_ref: openplc_softplc
 }
 
-device start_button: sensor {
-    purpose: "操作员启动按钮，触发涂胶循环",
-    subtype: "push_button",
-    debounce: 20ms
-}
-
-device valve_glue: solenoid_valve {
-    purpose: "驱动涂胶缸伸出/缩回的气动电磁阀",
-    response_time: 20ms
-}
-
-device cyl_glue: cylinder {
-    purpose: "执行涂胶动作的气缸，循环伸缩 4 次",
-    stroke_time: 300ms,
-    retract_time: 300ms
-}
-
-device sensor_glue_ext: sensor {
-    purpose: "检测涂胶缸已完全伸出到位的限位开关",
-    subtype: "limit_switch"
-}
-
-device sensor_glue_ret: sensor {
-    purpose: "检测涂胶缸已完全缩回到位的限位开关",
-    subtype: "limit_switch"
-}
+device start_button: sensor { purpose: "Operator start request", subtype: "push_button", debounce: 20ms }
+device valve_glue: solenoid_valve { purpose: "Glue cylinder valve", response_time: 20ms }
+device cyl_glue: cylinder { purpose: "Performs repeated glue dispense strokes", stroke_time: 300ms, retract_time: 300ms }
+device sensor_glue_ext: sensor { purpose: "Glue cylinder extended feedback", subtype: "limit_switch" }
+device sensor_glue_ret: sensor { purpose: "Glue cylinder retracted feedback", subtype: "limit_switch" }
 
 relation { from: start_button.out, to: plc_main.X2, via: reports_to }
 relation { from: plc_main.Y0, to: valve_glue.coil, via: driven_by }
@@ -46,26 +25,24 @@ causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ext
 
 [tasks]
 
-task cycle:
-    step glue_cycle:
-        repeat 4:
-            action: extend cyl_glue
-            wait: sensor_glue_ext == true
-            timeout: 1200ms -> goto fault_handler
-            action: retract cyl_glue
-            wait: sensor_glue_ret == true
-            timeout: 1200ms -> goto fault_handler
-    on_complete: goto ready
-
-task fault_handler:
-    step safe:
-        action: retract cyl_glue
-    step alarm:
-        action: log "fault: glue timeout"
-    on_complete: goto ready
-
 task ready:
     step wait_start:
         wait: start_button == true
         allow_indefinite_wait: true
     on_complete: goto cycle
+
+task cycle:
+    step glue_cycle:
+        repeat 4:
+            action: extend cyl_glue
+                timeout: 1200ms -> goto fault_handler.alarm
+            action: retract cyl_glue
+                timeout: 1200ms -> goto fault_handler.alarm
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_outputs:
+        action: set valve_glue.coil off
+    step alarm:
+        action: log "fault: glue stroke did not complete"
+    on_complete: goto ready

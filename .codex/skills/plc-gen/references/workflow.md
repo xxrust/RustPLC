@@ -22,8 +22,8 @@ Use a structured fragment layout by default when the system contract has multipl
 
 Prefer:
 - `rust_plc new <project_dir> --layout structured-fragments`
-- `plc/main.target_semantics.bundle.toml` as the source entry
-- `plc/target_semantics_fragments/` as the authored source tree
+- `rustplc.bundle.toml` as the scaffolded source entry
+- the generated phase directories (`00_topology/` through `07_hmi/`) as the authored source tree
 
 Only stay single-file when the request is truly small or the existing boundary is intentionally single-file.
 
@@ -33,7 +33,7 @@ For project-scale delivery, the sidecar is required by default.
 
 Create a sibling file with the same stem as the source entry:
 - `main.plc` -> `main.intent_alignment.contract.json`
-- `main.target_semantics.bundle.toml` -> `main.target_semantics.bundle.intent_alignment.contract.json`
+- `rustplc.bundle.toml` -> `rustplc.bundle.intent_alignment.contract.json`
 
 The sidecar must:
 - be authored, not treated as a compiler artifact
@@ -78,7 +78,7 @@ If the sidecar is still scaffold-grade or its source binding is unresolved, repo
 When changing `plc-gen` prompts, workflow, or output policy, rerun the structured wafer-loader canary:
 
 ```bash
-target\debug\rust_plc.exe project-check out/wafer_loader_project/plc/main.target_semantics.bundle.toml --scenario out/wafer_loader_project/scenarios/nominal/normal.yaml --out-dir out/wafer_loader_project/out/project_check_with_intent_alignment --output human
+target\debug\rust_plc.exe project-check out/wafer_loader_project/rustplc.bundle.toml --scenario out/wafer_loader_project/scenarios/nominal/normal.yaml --out-dir out/wafer_loader_project/out/project_check_with_intent_alignment --output human
 ```
 
 The point of this canary is to catch the difference between:

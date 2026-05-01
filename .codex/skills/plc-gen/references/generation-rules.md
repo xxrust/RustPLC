@@ -43,16 +43,17 @@ Interpretation rule:
 For complex projects, prefer a structured fragment layout over a monolithic PLC file.
 
 Use semantic domains as the split boundary:
-- `topology/`
-- `constraints/`
-- `architecture/`
-- `auto/`
-- `maintenance/`
-- `manual/`
-- `operator_interface/`
+- `00_topology/`
+- `01_init/`
+- `02_process/`
+- `03_constraints/`
+- `04_faults/`
+- `05_supervision/`
+- `06_manual/`
+- `07_hmi/`
 
 Reference example:
-- `out/skill_flywheel/plc_gen_wafer_loader/plc/target_semantics_fragments`
+- `rust_plc new <project_dir> --layout structured-fragments`
 
 Do not split by arbitrary line count or by temporary implementation convenience.
 Do split by stable ownership and semantic responsibility so the project is suitable for parallel implementation and later review.

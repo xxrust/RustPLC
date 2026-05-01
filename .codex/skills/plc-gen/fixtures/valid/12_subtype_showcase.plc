@@ -1,90 +1,57 @@
-# ============================================================
-# subtype 展示：5 种传感器 subtype + inverted: true（急停按钮）
-# ============================================================
-
 [topology]
 
 device plc_main: plc {
-    purpose: "控制器本体与工艺 I/O 端口映射",
-    ports: [Y0:digital:producer, X0:digital:consumer, X1:digital:consumer, X2:digital:consumer, X3:digital:consumer, X4:digital:consumer]
+    purpose: "Controller profile for subtype showcase"
+    model_ref: openplc_softplc
 }
 
-device start_button: sensor {
-    purpose: "操作员启动按钮，触发工作循环",
-    subtype: "push_button",
-    debounce: 20ms
-}
-
-device e_stop: sensor {
-    purpose: "急停按钮，NC 建模，断开表示触发急停",
-    subtype: "e_stop_button",
-    inverted: true,
-    debounce: 20ms
-}
-
-device sensor_limit: sensor {
-    purpose: "检测气缸伸出到位的限位开关",
-    subtype: "limit_switch"
-}
-
-device sensor_prox: sensor {
-    purpose: "检测工件到达加工位的接近开关",
-    subtype: "proximity_sensor"
-}
-
-device mode_select: sensor {
-    purpose: "模式选择旋钮，选择自动/手动模式",
-    subtype: "selector_switch"
-}
-
-device valve_main: solenoid_valve {
-    purpose: "驱动主气缸伸出/缩回的气动电磁阀",
-    response_time: 20ms
-}
-
-device cyl_main: cylinder {
-    purpose: "执行主工艺动作的气缸",
-    stroke_time: 300ms,
-    retract_time: 300ms
-}
+device start_button: sensor { purpose: "Operator start request", subtype: "push_button", debounce: 20ms }
+device e_stop: sensor { purpose: "Normally-closed emergency stop input", subtype: "e_stop_button", inverted: true, debounce: 20ms }
+device sensor_part_at_station: sensor { purpose: "Independent part-at-station sensor", subtype: "proximity_sensor" }
+device mode_select: sensor { purpose: "Auto/manual selector", subtype: "selector_switch" }
+device valve_main: solenoid_valve { purpose: "Main cylinder valve", response_time: 20ms }
+device cyl_main: cylinder { purpose: "Main process cylinder", stroke_time: 300ms, retract_time: 300ms }
+device sensor_main_ext: sensor { purpose: "Main cylinder extended feedback", subtype: "limit_switch" }
+device sensor_main_ret: sensor { purpose: "Main cylinder retracted feedback", subtype: "limit_switch" }
 
 relation { from: start_button.out, to: plc_main.X0, via: reports_to }
 relation { from: e_stop.out, to: plc_main.X1, via: reports_to }
-relation { from: mode_select.out, to: plc_main.X4, via: reports_to }
+relation { from: sensor_part_at_station.out, to: plc_main.X2, via: reports_to }
+relation { from: mode_select.out, to: plc_main.X3, via: reports_to }
 relation { from: plc_main.Y0, to: valve_main.coil, via: driven_by }
 relation { from: valve_main.out, to: cyl_main.cmd, via: driven_by }
-relation { from: cyl_main.extended, to: sensor_limit.sense, via: detects }
-relation { from: sensor_limit.out, to: plc_main.X2, via: reports_to }
-relation { from: cyl_main.extended, to: sensor_prox.sense, via: detects }
-relation { from: sensor_prox.out, to: plc_main.X3, via: reports_to }
+relation { from: cyl_main.extended, to: sensor_main_ext.sense, via: detects }
+relation { from: sensor_main_ext.out, to: plc_main.X4, via: reports_to }
+relation { from: cyl_main.retracted, to: sensor_main_ret.sense, via: detects }
+relation { from: sensor_main_ret.out, to: plc_main.X5, via: reports_to }
 
 [constraints]
 
-causality: Y0 -> valve_main -> cyl_main -> sensor_limit
+causality: Y0 -> valve_main -> cyl_main -> sensor_main_ext
 
 [tasks]
-
-task cycle:
-    step extend_main:
-        action: extend cyl_main
-        wait: sensor_limit == true
-        timeout: 1200ms -> goto fault_handler
-    step check_prox:
-        wait: sensor_prox == true
-        timeout: 1200ms -> goto fault_handler
-    step retract_main:
-        action: retract cyl_main
-    on_complete: goto ready
-
-task fault_handler:
-    step safe:
-        action: retract cyl_main
-    step alarm:
-        action: log "fault: timeout or e-stop"
-    on_complete: goto ready
 
 task ready:
     step wait_start:
         wait: start_button == true
         allow_indefinite_wait: true
     on_complete: goto cycle
+
+task cycle:
+    step wait_part:
+        wait: sensor_part_at_station == true
+        timeout: 1200ms -> goto fault_handler.alarm
+    step extend_main:
+        action: extend cyl_main
+        timeout: 1200ms -> goto fault_handler.alarm
+    step retract_main:
+        action: retract cyl_main
+        timeout: 1200ms -> goto fault_handler.alarm
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_outputs:
+        action: set valve_main.coil off
+    step alarm:
+        action: log "fault: subtype showcase timeout or e-stop"
+    on_complete: goto ready

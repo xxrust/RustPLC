@@ -43,17 +43,17 @@ The authoring tree follows delivery assets:
 - `station`
 - `line`
 
-The compile surface remains the structured target-semantics fragment layout used by the compiler:
+The compile surface remains the structured fragment layout used by the current scaffold:
 
-- `topology/`
-- `constraints/`
-- `architecture/`
-- `auto/`
-- `faults/`
-- `maintenance/`
-- `manual/`
-- `operator_interface/`
-- optional `io/`, `optimization/`, `step/`
+- `rustplc.bundle.toml`
+- `00_topology/`
+- `01_init/`
+- `02_process/`
+- `03_constraints/`
+- `04_faults/`
+- `05_supervision/`
+- `06_manual/`
+- `07_hmi/`
 
 Do not confuse the compile surface with the whole project architecture.
 
@@ -68,56 +68,31 @@ Each `module`, `station`, or `line` asset must carry:
 
 If these are missing, the delivery asset is structurally incomplete even if the PLC compiles.
 
-## Recommended Repository Shape
+## Recommended Authored Overlay Shape
 
 ```text
-plc/
-  deliveries/
-    module/
-      pick_head/
-        docs/
-          module.system.md
-          module.architecture.md
-          module.intent_alignment.contract.json
-          module.verification.md
-        plc/
-          main.bundle.toml
-          target_semantics_fragments/
-        scenarios/
-          nominal/
-    station/
-      load_station/
-        docs/
-          station.system.md
-          station.architecture.md
-          station.intent_alignment.contract.json
-          station.verification.md
-        plc/
-          main.bundle.toml
-          target_semantics_fragments/
-        scenarios/
-          nominal/
-    line/
-      wafer_line/
-        docs/
-          line.system.md
-          line.architecture.md
-          line.intent_alignment.contract.json
-          line.verification.md
-        plc/
-          main.bundle.toml
-          target_semantics_fragments/
-        scenarios/
-          nominal/
+rustplc.project.toml
+plc/main.system.md
+rustplc.bundle.toml
+00_topology/
+01_init/
+02_process/
+03_constraints/
+04_faults/
+05_supervision/
+06_manual/
+07_hmi/
+scenarios/nominal/normal.yaml
+docs/
+  system.md or <asset>.system.md
+  architecture.md or <asset>.architecture.md
+  verification.md or <asset>.verification.md
+rustplc.bundle.intent_alignment.contract.json
 ```
 
 ## Structured Fragment Layout Still Matters
 
-For the compileable source set, keep the existing structured fragment layout.
-
-Concrete reference:
-
-- `out/skill_flywheel/plc_gen_wafer_loader/plc/target_semantics_fragments`
+For the compileable source set, keep the scaffolded phase layout unless the existing project has already chosen another explicit bundle boundary.
 
 Why this still matters:
 
@@ -131,11 +106,11 @@ When flattening delivery assets into one compile surface, preserve ownership in 
 
 Examples:
 
-- `topology/module_pick_head_devices.plcfrag`
-- `topology/station_load_devices.plcfrag`
-- `topology/line_layout.plcfrag`
-- `auto/station_load_cycle.plcfrag`
-- `faults/module_pick_head_faults.plcfrag`
+- `00_topology/module_pick_head_devices.plc`
+- `00_topology/station_load_devices.plc`
+- `00_topology/line_layout.plc`
+- `02_process/station_load_cycle.plc`
+- `04_faults/module_pick_head_faults.plc`
 
 This keeps lower-layer ownership visible even when the compiler sees a flat source entry.
 
@@ -149,8 +124,8 @@ After scaffold:
 
 1. classify the delivery asset as `module`, `station`, or `line`
 2. create the layer-specific document set
-3. create the layer-specific source entry and scenarios
-4. only then fill the structured fragments
+3. decide whether the scaffolded `rustplc.bundle.toml` remains the authoritative source entry
+4. only then fill the structured phase files
 
 ## Independent Validation Requirement
 

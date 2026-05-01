@@ -41,7 +41,7 @@ rust_plc project-check plc/main.plc --scenario scenarios/nominal/normal.yaml --o
 ```bash
 rust_plc new wafer_loader --layout structured-fragments
 cd wafer_loader
-rust_plc project-check plc/deliveries/station/wafer_loader/plc/main.bundle.toml --scenario plc/deliveries/station/wafer_loader/scenarios/nominal/normal.yaml --out-dir out/project_check/normal --output human
+rust_plc project-check rustplc.bundle.toml --scenario scenarios/nominal/normal.yaml --out-dir out/project_check/normal --output human
 ```
 
 #### 已安装 binary, structured fragments, module asset
@@ -49,7 +49,7 @@ rust_plc project-check plc/deliveries/station/wafer_loader/plc/main.bundle.toml 
 ```bash
 rust_plc new pick_head --layout structured-fragments --delivery-layer module
 cd pick_head
-rust_plc project-check plc/deliveries/module/pick_head/plc/main.bundle.toml --scenario plc/deliveries/module/pick_head/scenarios/nominal/normal.yaml --out-dir out/project_check/normal --output human
+rust_plc project-check rustplc.bundle.toml --scenario scenarios/nominal/normal.yaml --out-dir out/project_check/normal --output human
 ```
 
 #### source workspace
@@ -63,14 +63,14 @@ cargo run --release --bin rust_plc -- project-check out/my_plc_project/plc/main.
 
 ```bash
 cargo run --release --bin rust_plc -- new out/wafer_loader --layout structured-fragments
-cargo run --release --bin rust_plc -- project-check out/wafer_loader/plc/deliveries/station/wafer_loader/plc/main.bundle.toml --scenario out/wafer_loader/plc/deliveries/station/wafer_loader/scenarios/nominal/normal.yaml --out-dir out/wafer_loader/out/project_check/normal --output human
+cargo run --release --bin rust_plc -- project-check out/wafer_loader/rustplc.bundle.toml --scenario out/wafer_loader/scenarios/nominal/normal.yaml --out-dir out/wafer_loader/out/project_check/normal --output human
 ```
 
 #### source workspace, structured fragments, module asset
 
 ```bash
 cargo run --release --bin rust_plc -- new out/pick_head --layout structured-fragments --delivery-layer module
-cargo run --release --bin rust_plc -- project-check out/pick_head/plc/deliveries/module/pick_head/plc/main.bundle.toml --scenario out/pick_head/plc/deliveries/module/pick_head/scenarios/nominal/normal.yaml --out-dir out/pick_head/out/project_check/normal --output human
+cargo run --release --bin rust_plc -- project-check out/pick_head/rustplc.bundle.toml --scenario out/pick_head/scenarios/nominal/normal.yaml --out-dir out/pick_head/out/project_check/normal --output human
 ```
 
 ### 仅当确实需要覆盖已有目录时
