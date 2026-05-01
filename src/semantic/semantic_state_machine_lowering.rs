@@ -685,8 +685,8 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             params: _,
             distance,
             speed,
-            acceleration: _,
-            deceleration: _,
+            acceleration,
+            deceleration,
             timeout,
             on_reject,
             on_motion_fault,
@@ -702,6 +702,8 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             speed_raw: speed
                 .expect("axis.move_relative speed must be resolved in semantic pass")
                 .to_string(),
+            acceleration_raw: acceleration.map(|value| value.to_string()),
+            deceleration_raw: deceleration.map(|value| value.to_string()),
             timeout: lower_axis_timeout_branch(timeout.as_ref()?),
             on_reject: lower_axis_fault_branch(on_reject.as_ref()?, AxisFaultKind::Reject, None),
             on_motion_fault: lower_axis_fault_branch(
@@ -724,8 +726,8 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             params: _,
             position,
             speed,
-            acceleration: _,
-            deceleration: _,
+            acceleration,
+            deceleration,
             timeout,
             on_reject,
             on_motion_fault,
@@ -741,6 +743,8 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             speed_raw: speed
                 .expect("axis.move_absolute speed must be resolved in semantic pass")
                 .to_string(),
+            acceleration_raw: acceleration.map(|value| value.to_string()),
+            deceleration_raw: deceleration.map(|value| value.to_string()),
             require_homed: true,
             timeout: lower_axis_timeout_branch(timeout.as_ref()?),
             on_reject: lower_axis_fault_branch(on_reject.as_ref()?, AxisFaultKind::Reject, None),

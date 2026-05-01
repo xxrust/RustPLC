@@ -1,5 +1,6 @@
 use crate::ast::{
     ActionStatement, ActionTarget, GotoDirective, StepStatement, TasksSection, TimeoutDirective,
+    TopologyRelation, TopologySection,
 };
 use crate::device_semantics::{DeviceActionContract, DeviceActionResultBucket};
 use crate::error::PlcError;
@@ -188,6 +189,7 @@ pub enum CylinderSemanticErrorKind {
     TargetMustBeCylinder,
     MissingMotionFault,
     MissingSafetyFault,
+    MissingClosedLoopFeedback,
 }
 
 impl CylinderSemanticErrorKind {
@@ -196,6 +198,7 @@ impl CylinderSemanticErrorKind {
             Self::TargetMustBeCylinder => "CYL-001",
             Self::MissingMotionFault => "CYL-002",
             Self::MissingSafetyFault => "CYL-003",
+            Self::MissingClosedLoopFeedback => "CYL-004",
         }
     }
 }
@@ -262,6 +265,157 @@ pub fn validate_cylinder_actions_in_tasks(
             );
         }
     }
+}
+
+pub fn validate_closed_loop_feedback_contracts_in_tasks(
+    tasks: &TasksSection,
+    topology: &TopologySection,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            validate_closed_loop_feedback_contracts_in_statements(
+                &step.statements,
+                &step.name,
+                step.line.max(1),
+                topology,
+                device_kinds,
+                errors,
+            );
+        }
+    }
+}
+
+fn validate_closed_loop_feedback_contracts_in_statements(
+    statements: &[StepStatement],
+    step_name: &str,
+    line: usize,
+    topology: &TopologySection,
+    device_kinds: &HashMap<String, DeviceKind>,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(action) => {
+                let Some(view) = stroke_action_view(action) else {
+                    continue;
+                };
+                if !view.uses_closed_loop_semantics() {
+                    continue;
+                }
+                if !matches!(
+                    device_kinds.get(&view.target.device),
+                    Some(DeviceKind::Cylinder)
+                ) {
+                    continue;
+                }
+                let Ok(contract) =
+                    CylinderStrokeContract::closed_loop(view.verb, view.target.port.as_str())
+                else {
+                    continue;
+                };
+                let Ok(opposing_state_port) = contract.required_opposing_state_port() else {
+                    continue;
+                };
+                if !has_reported_cylinder_feedback(
+                    topology,
+                    &view.target.device,
+                    &contract.requested_state_port,
+                ) || !has_reported_cylinder_feedback(
+                    topology,
+                    &view.target.device,
+                    opposing_state_port,
+                ) {
+                    errors.push(cylinder_missing_closed_loop_feedback_error(
+                        line,
+                        step_name,
+                        &view.target.device,
+                        &contract.requested_state_port,
+                    ));
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                validate_closed_loop_feedback_contracts_in_statements(
+                    body,
+                    step_name,
+                    line,
+                    topology,
+                    device_kinds,
+                    errors,
+                )
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_closed_loop_feedback_contracts_in_statements(
+                        &branch.statements,
+                        step_name,
+                        line,
+                        topology,
+                        device_kinds,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_closed_loop_feedback_contracts_in_statements(
+                        &branch.statements,
+                        step_name,
+                        line,
+                        topology,
+                        device_kinds,
+                        errors,
+                    );
+                }
+            }
+            StepStatement::Effect(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn has_reported_cylinder_feedback(
+    topology: &TopologySection,
+    cylinder: &str,
+    state_port: &str,
+) -> bool {
+    topology
+        .connections
+        .iter()
+        .filter(|connection| {
+            connection.from == cylinder
+                && connection.relation == TopologyRelation::Detects
+                && connection.from_port.as_deref() == Some(state_port)
+        })
+        .any(|detects| {
+            topology.connections.iter().any(|reports| {
+                reports.from == detects.to && reports.relation == TopologyRelation::ReportsTo
+            })
+        })
+}
+
+fn cylinder_missing_closed_loop_feedback_error(
+    line: usize,
+    step_name: &str,
+    target: &str,
+    requested_state: &str,
+) -> PlcError {
+    PlcError::semantic_with_reason(
+        line,
+        format!(
+            "[{}] step '{step_name}' declares closed-loop cylinder action for '{target}' without complete dual-end feedback.",
+            CylinderSemanticErrorKind::MissingClosedLoopFeedback.code()
+        ),
+        format!(
+            "closed-loop cylinder action for '{target}.{requested_state}' requires both requested and complementary end-state feedback paths before runtime lowering"
+        ),
+    )
 }
 
 fn validate_cylinder_actions_in_statements(
@@ -384,6 +538,9 @@ fn cylinder_routing_error(
                 "step '{step_name}' 的 extend/retract 目标必须是 cylinder 设备；timeout/on_motion_fault/on_safety_fault 只是叠加在该基础规则上的闭环语义。"
             ),
         ),
+        CylinderSemanticErrorKind::MissingClosedLoopFeedback => {
+            cylinder_missing_closed_loop_feedback_error(line, step_name, target, "")
+        }
     }
 }
 

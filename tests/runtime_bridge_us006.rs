@@ -275,7 +275,11 @@ fn wafer_loader_bundle_keeps_startup_and_production_domains_as_runtime_roots() {
         "out/wafer_loader_project/plc/main.target_semantics.bundle.toml",
         10,
     );
-    let task_names = program.tasks.iter().map(|task| task.name).collect::<Vec<_>>();
+    let task_names = program
+        .tasks
+        .iter()
+        .map(|task| task.name)
+        .collect::<Vec<_>>();
 
     for expected in [
         "startup_initializer",
@@ -696,6 +700,40 @@ task done:
     step halt:
 "#;
 
+const PLC_CYLINDER_FULL_FEEDBACK_RAW_FIXTURE: &str = r#"
+[topology]
+
+device plc_main: plc {
+    model_ref: openplc_softplc
+}
+
+device valve_A: solenoid_valve
+device cyl_A: cylinder
+device sensor_ext: sensor
+device sensor_ret: sensor
+
+relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
+relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step extend:
+        action: extend cyl_A
+
+    step done:
+        goto done.halt
+
+task done:
+    step halt:
+"#;
+
 const PLC_CYLINDER_PARTIAL_FEEDBACK_FIXTURE: &str = r#"
 [topology]
 
@@ -719,13 +757,9 @@ relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
 task main:
     step extend:
         action: extend cyl_A
-        timeout: 50ms -> goto fault
 
     step done:
         goto done.halt
-
-task fault:
-    step halt:
 
 task done:
     step halt:
@@ -918,6 +952,39 @@ fn bridge_lowers_closed_loop_cylinder_action_timeout_into_pending_motion() {
                 assert_eq!(*confirm_inputs, [DigitalInputId(0)]);
                 assert_eq!(*opposing_inputs, [DigitalInputId(1)]);
                 assert_eq!(timeout.after_ticks, 5);
+            }
+            other => panic!("expected single cylinder motion action, got {other:?}"),
+        },
+        other => panic!("expected Action instr, got {other:?}"),
+    }
+}
+
+#[test]
+fn bridge_lowers_dual_feedback_cylinder_action_without_routes_into_pending_motion() {
+    let program = compile_to_runtime(PLC_CYLINDER_FULL_FEEDBACK_RAW_FIXTURE, 10);
+    let extend_step = program.tasks[0]
+        .steps
+        .iter()
+        .find(|step| step.name == "main.extend")
+        .expect("extend step exists");
+
+    match extend_step.instr {
+        Instr::Action { actions, .. } => match actions {
+            [
+                runtime_core::Action::CylinderMotion {
+                    target,
+                    expect_extended,
+                    confirm_inputs,
+                    opposing_inputs,
+                    timeout: None,
+                    fault_routing: None,
+                    ..
+                },
+            ] => {
+                assert_eq!(*target, "cyl_A");
+                assert!(*expect_extended);
+                assert_eq!(*confirm_inputs, [DigitalInputId(0)]);
+                assert_eq!(*opposing_inputs, [DigitalInputId(1)]);
             }
             other => panic!("expected single cylinder motion action, got {other:?}"),
         },
@@ -1425,7 +1492,7 @@ device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_d
 [tasks]
 task motion:
     step run:
-        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2)
+        action: axis.move_relative(axis_x, distance: 10, params: stepper_default_fast, speed: 2, acc: 3, dec: 4)
             timeout: 500ms -> fault.timeout
             on_reject -> fault.reject
             on_motion_fault -> fault.motion_fault
@@ -1651,6 +1718,9 @@ fn bridge_maps_axis_move_actions_without_unsupported_action() {
                         saw_axis = true;
                         assert_eq!(command.target, "axis_x");
                         assert_eq!(command.kind, AxisMoveKind::Relative);
+                        assert_eq!(command.speed, 2.0);
+                        assert_eq!(command.acceleration, 3.0);
+                        assert_eq!(command.deceleration, 4.0);
                         assert!(!command.require_homed);
                     }
                 }

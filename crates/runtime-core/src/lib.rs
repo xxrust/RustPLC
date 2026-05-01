@@ -322,6 +322,8 @@ pub struct AxisMotionCommand {
     pub kind: AxisMoveKind,
     pub value: f32,
     pub speed: f32,
+    pub acceleration: f32,
+    pub deceleration: f32,
     pub semantic_tag: Option<&'static str>,
     pub require_homed: bool,
     pub timeout: Option<Timeout>,

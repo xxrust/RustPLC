@@ -379,6 +379,10 @@ pub enum TransitionAction {
         port: String,
         distance_raw: String,
         speed_raw: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        acceleration_raw: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deceleration_raw: Option<String>,
         timeout: AxisTimeoutBranch,
         on_reject: AxisFaultBranch,
         on_motion_fault: AxisFaultBranch,
@@ -397,6 +401,10 @@ pub enum TransitionAction {
         port: String,
         position_raw: String,
         speed_raw: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        acceleration_raw: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deceleration_raw: Option<String>,
         #[serde(default = "default_true", skip_serializing_if = "is_true")]
         require_homed: bool,
         timeout: AxisTimeoutBranch,
@@ -1056,6 +1064,8 @@ mod tests {
                         port: "self".to_string(),
                         distance_raw: "10".to_string(),
                         speed_raw: "2".to_string(),
+                        acceleration_raw: Some("2".to_string()),
+                        deceleration_raw: Some("2".to_string()),
                         semantic_tag: None,
                         timeout: AxisTimeoutBranch {
                             duration_ms: 500,

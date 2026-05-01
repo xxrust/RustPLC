@@ -270,7 +270,7 @@ fn format_action(a: &Action) -> String {
             format_expr_program(&offset_expr)
         ),
         Action::AxisMove { command } => format!(
-            "Action::AxisMove {{ command: AxisMotionCommand {{ target: {:?}, port: {:?}, kind: AxisMoveKind::{}, value: {}, speed: {}, require_homed: {}, timeout: {}, fault_routing: {} }} }}",
+            "Action::AxisMove {{ command: AxisMotionCommand {{ target: {:?}, port: {:?}, kind: AxisMoveKind::{}, value: {}, speed: {}, acceleration: {}, deceleration: {}, semantic_tag: {}, require_homed: {}, timeout: {}, fault_routing: {} }} }}",
             command.target,
             command.port,
             match command.kind {
@@ -279,6 +279,9 @@ fn format_action(a: &Action) -> String {
             },
             format_f32(command.value),
             format_f32(command.speed),
+            format_f32(command.acceleration),
+            format_f32(command.deceleration),
+            format_optional_static_str(command.semantic_tag),
             command.require_homed,
             format_axis_timeout(command.timeout),
             format_axis_fault_routing(command.fault_routing),
@@ -423,6 +426,13 @@ fn format_timeout_option(timeout: Option<Timeout>) -> String {
             "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
             timeout.after_ticks, timeout.target.0
         ),
+        None => "None".to_string(),
+    }
+}
+
+fn format_optional_static_str(value: Option<&'static str>) -> String {
+    match value {
+        Some(value) => format!("Some({value:?})"),
         None => "None".to_string(),
     }
 }

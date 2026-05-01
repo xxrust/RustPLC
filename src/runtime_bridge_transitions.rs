@@ -892,6 +892,8 @@ fn convert_action(
                 port,
                 distance_raw,
                 speed_raw,
+                acceleration_raw,
+                deceleration_raw,
                 semantic_tag,
                 timeout: timeout_branch,
                 on_reject,
@@ -933,6 +935,22 @@ fn convert_action(
                         max_speed: profile.max_speed,
                     });
                 }
+                let acceleration = parse_axis_optional_positive(
+                    state_name,
+                    target,
+                    "acceleration",
+                    acceleration_raw,
+                    speed,
+                    profile.max_acceleration,
+                )?;
+                let deceleration = parse_axis_optional_positive(
+                    state_name,
+                    target,
+                    "deceleration",
+                    deceleration_raw,
+                    speed,
+                    profile.max_acceleration,
+                )?;
                 let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
                 let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
                 let timeout_target = lookup_branch_target(
@@ -996,6 +1014,8 @@ fn convert_action(
                         kind: AxisMoveKind::Relative,
                         value: distance,
                         speed,
+                        acceleration,
+                        deceleration,
                         semantic_tag: semantic_tag
                             .as_ref()
                             .map(|tag| Box::leak(tag.clone().into_boxed_str()) as &'static str),
@@ -1020,6 +1040,8 @@ fn convert_action(
                 port,
                 position_raw,
                 speed_raw,
+                acceleration_raw,
+                deceleration_raw,
                 require_homed,
                 semantic_tag,
                 timeout: timeout_branch,
@@ -1062,6 +1084,22 @@ fn convert_action(
                         max_speed: profile.max_speed,
                     });
                 }
+                let acceleration = parse_axis_optional_positive(
+                    state_name,
+                    target,
+                    "acceleration",
+                    acceleration_raw,
+                    speed,
+                    profile.max_acceleration,
+                )?;
+                let deceleration = parse_axis_optional_positive(
+                    state_name,
+                    target,
+                    "deceleration",
+                    deceleration_raw,
+                    speed,
+                    profile.max_acceleration,
+                )?;
                 let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
                 let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
                 let timeout_target = lookup_branch_target(
@@ -1125,6 +1163,8 @@ fn convert_action(
                         kind: AxisMoveKind::Absolute,
                         value: position,
                         speed,
+                        acceleration,
+                        deceleration,
                         semantic_tag: semantic_tag
                             .as_ref()
                             .map(|tag| Box::leak(tag.clone().into_boxed_str()) as &'static str),
@@ -1284,4 +1324,43 @@ fn render_workpiece_effect(effect: &crate::ir::WorkpieceEffect) -> String {
             format!("transform carrier {carrier} to frame {frame}")
         }
     }
+}
+
+fn parse_axis_optional_positive(
+    state_name: &str,
+    target: &str,
+    field: &str,
+    value_raw: &Option<String>,
+    fallback: f32,
+    max_acceleration: f32,
+) -> Result<f32, BridgeError> {
+    let Some(value_raw) = value_raw else {
+        return Ok(fallback);
+    };
+    let value = value_raw
+        .parse::<f32>()
+        .map_err(|_| BridgeError::InvalidAxisLiteral {
+            state: state_name.to_string(),
+            target: target.to_string(),
+            field: field.to_string(),
+            value_raw: value_raw.clone(),
+        })?;
+    if value <= 0.0 {
+        return Err(BridgeError::InvalidAxisLiteral {
+            state: state_name.to_string(),
+            target: target.to_string(),
+            field: field.to_string(),
+            value_raw: value_raw.clone(),
+        });
+    }
+    if value > max_acceleration {
+        return Err(BridgeError::AxisAccelerationOutOfRange {
+            state: state_name.to_string(),
+            target: target.to_string(),
+            field: field.to_string(),
+            value,
+            max_acceleration,
+        });
+    }
+    Ok(value)
 }

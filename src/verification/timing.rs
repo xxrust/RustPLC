@@ -1088,6 +1088,10 @@ task cooldown:
 
 device Y0: digital_output
 device Y1: digital_output
+device X0: digital_input
+device X1: digital_input
+device X2: digital_input
+device X3: digital_input
 
 device valve_A: solenoid_valve {
     response_time: 50ms
@@ -1107,10 +1111,23 @@ device cyl_B: cylinder {
     retract_time: 200ms
 }
 
+device sensor_A_ext: sensor
+device sensor_A_ret: sensor
+device sensor_B_ext: sensor
+device sensor_B_ret: sensor
+
 relation { from: Y0.out, to: valve_A.coil, via: driven_by }
 relation { from: valve_A.out, to: cyl_A.cmd, via: driven_by }
 relation { from: Y1.out, to: valve_B.coil, via: driven_by }
 relation { from: valve_B.out, to: cyl_B.cmd, via: driven_by }
+relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
+relation { from: sensor_A_ext.out, to: X0.in, via: reports_to }
+relation { from: cyl_A.retracted, to: sensor_A_ret.sense, via: detects }
+relation { from: sensor_A_ret.out, to: X1.in, via: reports_to }
+relation { from: cyl_B.extended, to: sensor_B_ext.sense, via: detects }
+relation { from: sensor_B_ext.out, to: X2.in, via: reports_to }
+relation { from: cyl_B.retracted, to: sensor_B_ret.sense, via: detects }
+relation { from: sensor_B_ret.out, to: X3.in, via: reports_to }
 
 [constraints]
 

@@ -1,7 +1,7 @@
 use crate::device_semantics::cylinder::closed_loop_stroke_target;
 use crate::ir::{
-    BinaryValue, ConstraintSet, ExternCallBinding, State, StateMachine, TimerOperationKind,
-    TopologyGraph, Transition, TransitionAction, TransitionGuard, VariableType,
+    BinaryValue, ConnectionType, ConstraintSet, DeviceKind, ExternCallBinding, State, StateMachine,
+    TimerOperationKind, TopologyGraph, Transition, TransitionAction, TransitionGuard, VariableType,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -182,7 +182,9 @@ pub fn generate_st(
 
     for transition in &erased_state_machine.transitions {
         for action in &transition.actions {
-            if let Some(target) = closed_loop_stroke_target(action) {
+            if let Some(target) = closed_loop_stroke_target(action)
+                .or_else(|| topology_closed_loop_cylinder_target(topology, action))
+            {
                 errors.push(StCodegenError::ClosedLoopCylinderSemanticsUnsupported {
                     target: target.to_string(),
                 });
@@ -825,6 +827,8 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             target,
             distance_raw,
             speed_raw,
+            acceleration_raw,
+            deceleration_raw,
             port: _,
             semantic_tag: _,
             timeout,
@@ -835,10 +839,12 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             on_motion_fault_routes,
             on_safety_fault_routes,
         } => format!(
-            "(* AXIS_MOVE_RELATIVE {} distance={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
+            "(* AXIS_MOVE_RELATIVE {} distance={} speed={} acc={} dec={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
             normalize_identifier_for_st(target),
             distance_raw.trim(),
             speed_raw.trim(),
+            acceleration_raw.as_deref().unwrap_or(speed_raw).trim(),
+            deceleration_raw.as_deref().unwrap_or(speed_raw).trim(),
             timeout.duration_ms,
             render_axis_target(&timeout.target_task, timeout.target_step.as_deref()),
             render_axis_fault_target(on_reject),
@@ -852,6 +858,8 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             target,
             position_raw,
             speed_raw,
+            acceleration_raw,
+            deceleration_raw,
             require_homed: _,
             port: _,
             semantic_tag: _,
@@ -863,10 +871,12 @@ fn render_action(action: &TransitionAction, resolved_variables: &ResolvedVariabl
             on_motion_fault_routes,
             on_safety_fault_routes,
         } => format!(
-            "(* AXIS_MOVE_ABSOLUTE {} position={} speed={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
+            "(* AXIS_MOVE_ABSOLUTE {} position={} speed={} acc={} dec={} timeout={}ms->{} on_reject->{} on_motion_fault->{} on_safety_fault->{} routes:{}|{}|{} *)",
             normalize_identifier_for_st(target),
             position_raw.trim(),
             speed_raw.trim(),
+            acceleration_raw.as_deref().unwrap_or(speed_raw).trim(),
+            deceleration_raw.as_deref().unwrap_or(speed_raw).trim(),
             timeout.duration_ms,
             render_axis_target(&timeout.target_task, timeout.target_step.as_deref()),
             render_axis_fault_target(on_reject),
@@ -1256,6 +1266,36 @@ fn is_st_reserved_word(name: &str) -> bool {
             | "not"
             | "xor"
     )
+}
+
+fn topology_closed_loop_cylinder_target<'a>(
+    topology: &'a TopologyGraph,
+    action: &'a TransitionAction,
+) -> Option<&'a str> {
+    let target = match action {
+        TransitionAction::Extend { target, .. } | TransitionAction::Retract { target, .. } => {
+            target.as_str()
+        }
+        _ => return None,
+    };
+    let is_cylinder = topology.graph.node_indices().any(|idx| {
+        topology.graph[idx].name == target && topology.graph[idx].kind == DeviceKind::Cylinder
+    });
+    if !is_cylinder {
+        return None;
+    }
+    topology
+        .links
+        .iter()
+        .any(|link| {
+            link.from == target
+                && link.kind == ConnectionType::Logical
+                && link
+                    .from_port
+                    .as_deref()
+                    .is_some_and(crate::device_semantics::cylinder::is_end_state_port)
+        })
+        .then_some(target)
 }
 
 fn state_key(state: &State) -> (String, String) {
@@ -1840,6 +1880,8 @@ mod tests {
                     port: "self".to_string(),
                     distance_raw: "10".to_string(),
                     speed_raw: "2".to_string(),
+                    acceleration_raw: Some("3".to_string()),
+                    deceleration_raw: Some("4".to_string()),
                     semantic_tag: None,
                     timeout: AxisTimeoutBranch {
                         duration_ms: 500,
@@ -1889,7 +1931,7 @@ mod tests {
             &StCodegenConfig::default(),
         )
         .expect("axis move codegen should succeed");
-        assert!(st.contains("AXIS_MOVE_RELATIVE axis_x distance=10 speed=2"));
+        assert!(st.contains("AXIS_MOVE_RELATIVE axis_x distance=10 speed=2 acc=3 dec=4"));
         assert!(st.contains("timeout=500ms->fault.timeout"));
         assert!(st.contains("on_reject->fault.reject[AXIS_REJECT]"));
         assert!(st.contains("on_motion_fault->fault.motion_fault[AXIS_MOTION]"));
@@ -1977,6 +2019,60 @@ mod tests {
             &StCodegenConfig::default(),
         )
         .expect_err("ST backend should reject closed-loop cylinder semantics");
+
+        assert!(errors.iter().any(|error| {
+            matches!(
+                error,
+                StCodegenError::ClosedLoopCylinderSemanticsUnsupported { target }
+                if target == "cyl_a"
+            )
+        }));
+    }
+
+    #[test]
+    fn generate_st_rejects_topology_closed_loop_cylinder_even_without_routes() {
+        let s0 = state("main", "extend");
+        let s1 = state("done", "halt");
+        let sm = StateMachine {
+            states: vec![s0.clone(), s1.clone()],
+            transitions: vec![Transition {
+                from: s0.clone(),
+                to: s1.clone(),
+                guard: TransitionGuard::Always,
+                actions: vec![TransitionAction::Extend {
+                    target: "cyl_a".to_string(),
+                    port: "self".to_string(),
+                    timeout: None,
+                    on_motion_fault: None,
+                    on_safety_fault: None,
+                }],
+                effects: vec![],
+                timers: vec![],
+            }],
+            initial: s0,
+            analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
+        };
+        let mut topology = empty_topology();
+        topology.add_device(crate::ir::Device {
+            name: "cyl_a".to_string(),
+            kind: DeviceKind::Cylinder,
+        });
+        topology.links.push(crate::ir::TopologyLink {
+            from: "cyl_a".to_string(),
+            to: "sensor_ext".to_string(),
+            from_port: Some("extended".to_string()),
+            to_port: Some("sense".to_string()),
+            kind: ConnectionType::Logical,
+        });
+
+        let errors = generate_st(
+            &topology,
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect_err("ST backend should reject topology closed-loop cylinder semantics");
 
         assert!(errors.iter().any(|error| {
             matches!(

@@ -121,6 +121,17 @@ pub enum BridgeError {
         max_speed: f32,
     },
 
+    #[error(
+        "axis {field} {value} exceeds configured max_acceleration={max_acceleration} for {target} (state {state})"
+    )]
+    AxisAccelerationOutOfRange {
+        state: String,
+        target: String,
+        field: String,
+        value: f32,
+        max_acceleration: f32,
+    },
+
     #[error("unsupported analog wait guard in {state}: {expression}")]
     UnsupportedAnalogWait { state: String, expression: String },
 

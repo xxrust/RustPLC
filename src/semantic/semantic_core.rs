@@ -68,6 +68,12 @@ pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<Plc
         &device_kinds,
         &mut expr_errors,
     );
+    device_semantics::cylinder::validate_closed_loop_feedback_contracts_in_tasks(
+        &expanded.tasks,
+        &expanded.topology,
+        &device_kinds,
+        &mut expr_errors,
+    );
     device_semantics::axis::resolve_axis_motion_parameters_in_tasks(
         &mut expanded.tasks,
         &expanded.topology,
