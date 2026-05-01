@@ -30,8 +30,9 @@ description: "在生成 `.plc` 之前，把工艺需求收敛成可供 RustPLC �
 5. “拓扑已闭合”的判定以及最小结果集合要求，服从 `AGENTS.md` 中“task 中的设备动作必须保持高层语义”的定义。
 6. 当某个 task step 的本意是“让设备动作”，就按 `AGENTS.md` 定义的设备动作结果集合建模，不要把正常闭环写成一串底层 `wait sensor`。
 7. 如果当前 DSL/IR 还承载不了某个设备动作结果，必须把它记成能力缺口与 blocker，而不是省略结果或改写成传感器 choreography。
-8. 必须明确 task 划分、blocking 预期、fault route、shared resource、axis policy。
-9. 输出必须能被 `plc-gen` 直接消费，而不是只留一堆模糊业务描述。
+8. 对加热器、夹爪、输送、泵、比例阀、视觉等过程设备，优先把动作写成设备族语义和结果集合；不要把工程量过程控制下沉成原始 AI/AO 阈值。
+9. 必须明确 task 划分、blocking 预期、fault route、shared resource、axis policy、station handoff。
+10. 输出必须能被 `plc-gen` 直接消费，而不是只留一堆模糊业务描述。
 
 ## Source of Truth
 

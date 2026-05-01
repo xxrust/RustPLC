@@ -268,7 +268,40 @@ Do not push line-level workpiece routing down into modules.
 
 Do not omit station-level workpiece semantics just because a line-level model also exists.
 
-## 12. Scaffold Direction
+## 12. Station Protocol Source Contract
+
+Current RustPLC source can declare station ownership and handoff contracts directly in topology fragments:
+
+```plc
+station st01_loading {
+    owns: [cyl_load, sensor_load_ext, sensor_load_ret]
+    tasks: [load_cycle]
+}
+
+station st02_press {
+    owns: [cyl_press, sensor_press_ext, sensor_press_ret]
+    tasks: [press_cycle]
+}
+
+handshake st01_to_st02 {
+    from: st01_loading, to: st02_press
+    request: st01_request
+    allow: st02_allow
+    complete: st01_complete
+    timeout: 5000ms -> goto fault.timeout
+}
+
+transfer_point load_to_press {
+    from_station: st01_loading
+    to_station: st02_press
+    site: press_infeed
+    handshake: st01_to_st02
+}
+```
+
+These declarations are not placeholder documentation. They are the front-door contract for device ownership, cross-station task writes, handshake signal reuse, timeout target validity, and transfer-point consistency.
+
+## 13. Scaffold Direction
 
 `rust_plc new --layout structured-fragments` is a useful compile-surface scaffold, but it is not yet the full delivery-layer framework.
 
@@ -280,7 +313,7 @@ The target direction is:
 
 Until that exists, skills and human authors should create the delivery-layer document set explicitly instead of treating the current scaffold as sufficient architecture.
 
-## 13. Acceptance Rules
+## 14. Acceptance Rules
 
 A delivery asset is considered architecturally complete only when:
 

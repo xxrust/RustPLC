@@ -153,16 +153,11 @@ Do not leave workpiece semantics as a comment-only placeholder when the main pro
 If the confirmed system is process-only and does not move discrete parts, do not invent fake workpiece flow just to satisfy project policy.
 For scaffolded projects in that case, explicitly set `config/workpiece.toml` to a deliberate no-workpiece exception such as `required = false` before calling validation complete.
 
-## Hard Guardrail: Do Not Fake A Validated Analog/PID Delivery
+## Hard Guardrail: Raw AI/AO Process Control Is Out Of Current Generation Scope
 
-For controller-profile projects, do not assume `plc_main.AI*` / `AO*` automatically give you engineering-unit analog semantics suitable for a process station.
+Do not generate process-control examples that treat raw controller AI/AO channels as first-class devices.
 
-If current validation shows one of these conflicts:
-- `analog_input` / `analog_output` source devices are rejected by semantic gates such as `SEM-108`
-- controller profile ports expose `0..1` scalar range while the process contract needs engineering thresholds like `50`, `145`, or `180`
-- PID `limit` / threshold math cannot be expressed without tripping those range checks
-
-report a concrete blocker or toolchain limitation instead of pretending the project is validated.
+If the request needs engineering-unit pressure, temperature, or PID behavior, model the real process equipment as a semantic device family where possible, or report a blocker for the missing process-device contract. Do not ship a "validated" project by falling back to raw AI/AO thresholds.
 
 ## Hard Guardrail: Intent Alignment Is Default For Complex Project Delivery
 

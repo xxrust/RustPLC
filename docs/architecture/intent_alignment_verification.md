@@ -314,6 +314,31 @@ fault_detected
 
 不要先写 fault route，不要先写 DSL step，不要先写 CLI。
 
+### 9.1 Process Devices And Station Handoff
+
+Intent milestones should follow the business operation, not the low-level mechanism used to observe it.
+
+For current first-class process-device and station protocol semantics, use milestones such as:
+
+```text
+start_cycle
+-> oven_heat_command_accepted
+-> oven_at_process_temperature
+-> st01_handoff_requested
+-> st02_handoff_allowed
+-> part_arrived_at_press_station
+-> cycle_restartable
+```
+
+Do not bind these directly to raw analog channels or generated `task.step` names when a higher semantic object exists:
+
+- process-device actions such as `heater.heat_to(...)`
+- station `handshake` completion
+- `transfer_point` handoff
+- workpiece `acquire/transfer/finish`
+
+If the current runtime evidence cannot observe a process-device result or station handoff milestone, record an intent-alignment blocker instead of substituting raw I/O thresholds.
+
 ## 10. 结论规则
 
 只有同时满足以下 4 条，才能判定“程序与真实工艺意图对齐”：

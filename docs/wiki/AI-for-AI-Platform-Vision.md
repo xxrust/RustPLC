@@ -91,7 +91,7 @@ RustPLC 提供 MCP Server（`rustplc-mcp/`），AI Agent 可直接调用编译�
 可用 Prompt 模板：
 - `two_cylinder` — 双气缸基础示例
 - `extern_function` — 外部函数示例
-- `pid_control` — PID 控制示例
+- `process_device` — 过程设备语义动作示例
 - `generate_from_requirements` — 从需求生成 .plc
 
 ---

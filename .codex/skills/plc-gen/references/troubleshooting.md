@@ -96,17 +96,11 @@ unsupported guard expression in <task.step>: <expr>
 - 把 `config/workpiece.toml` 改成 deliberate no-workpiece exception
 - 然后再继续 compile / sim / gate
 
-## 10. `AI0/AO0` 与 PID / 工程量阈值冲突
+## 10. Raw AI/AO process-control boundary
 
-如果你看到类似：
-- `AI0` / `AO0` 被当成 `range 0..1`
-- `AI0 > 180`、`AI0 >= 145`、`AI0 < 50` 越界
-- PID `limit 0..100` 超出 `AO0` 范围
-- 同时 legacy `analog_input` / `analog_output` 写法又触发 `SEM-108`
+如果需求需要压力、温度、比例阀或 PID 这类工程量过程控制，但当前设备语义库没有对应契约：
 
-说明当前项目撞上了模拟量 / PID authoring 的真实能力边界。
-
-做法：
 - 不要继续把它包装成“只差一点就 validated”
-- 明确报 `blocked by toolchain limitation` 或等价 blocker
-- 在最终答复里写清：是哪条 range / PID 规则拦住了交付
+- 优先改用已经存在的过程设备语义动作
+- 如果缺少设备族契约，明确报 `blocked by toolchain limitation` 或等价 blocker
+- 在最终答复里写清：缺的是哪类过程设备语义，而不是把问题下沉成原始 I/O 阈值

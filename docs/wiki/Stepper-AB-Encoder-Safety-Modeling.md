@@ -11,7 +11,7 @@
 | DSL（RustPLC） | 顺序控制、联锁、wait 条件、安全约束 | 四引擎形式化验证 |
 | 驱动/板卡层 | 脉冲生成、AB 解码、计数、滤波、单位换算 | 实时性保证，不在 DSL 验证范围 |
 
-驱动层的输出以简单信号（digital/analog）回馈 DSL，保持验证可处理。
+驱动层的输出以离散、可验证的语义信号回馈 DSL，保持验证可处理。连续工程量和单位换算不再作为当前公开示例的 source device 写入 DSL。
 
 ---
 
@@ -19,8 +19,8 @@
 
 `zone_code` 是推荐的碰撞窗口抽象信号：
 
-- 拓扑中建模为 `analog_input { external: true }`
-- 语义：`0 = 安全`，`1..N = 碰撞窗口`
+- 拓扑中建模为驱动层导出的离散语义信号
+- 语义：`off = 安全`，`on = 碰撞窗口或危险姿态`
 - 由驱动层产生（含迟滞/LUT/几何逻辑），DSL 消费
 
 好处：
@@ -32,20 +32,22 @@
 
 ## 双向联锁（最小组合）
 
+Bi-directional Interlock:
+
 碰撞防护不能只写单向规则。推荐最小组合：
 
-1. **窗口侧联锁**（状态侧）：`zone_code != 0` 时禁止危险姿态
+1. **窗口侧联锁**（状态侧）：`zone_code.on` 时禁止危险姿态
 2. **指令侧联锁**（命令侧）：发出运动指令时也禁止危险姿态
 
 ```plc
 [topology]
-device zone_code: analog_input { range: 0..3, unit: "zone", external: true }
+device zone_code: sensor { purpose: "驱动层导出的危险窗口信号，on 表示当前姿态处于碰撞窗口" }
 device move_cmd: digital_output
 device cyl_clamp: cylinder
 
 [constraints]
 # 窗口侧：碰撞窗口内禁止危险姿态
-safety: zone_code > 0 conflicts_with cyl_clamp.extended
+safety: zone_code.on conflicts_with cyl_clamp.extended
 
 # 指令侧：运动指令只在安全姿态下合法
 safety: move_cmd.on conflicts_with cyl_clamp.extended

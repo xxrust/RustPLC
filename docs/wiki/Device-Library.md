@@ -136,6 +136,42 @@ task cycle:
 
 ---
 
+## Defaults And Alarm Maps
+
+Current device TOML can also carry semantic defaults and alarm mapping metadata:
+
+```toml
+[defaults.parameters]
+response_time = "50ms"
+open_loop_policy = "commissioned_low_risk_fixture"
+
+[defaults.ports]
+enable = "off"
+
+[alarm_map]
+source = "device_family"
+
+[[alarm_map.entries]]
+condition = "timeout"
+code = "ALM_TIMEOUT"
+severity = "warning"
+recoverable = true
+```
+
+这些字段不是 HMI 装饰项。它们会进入 preprocessing、front-door diagnostics、runtime/verification 消费路径。过程设备族如果声明了动作故障结果，就应通过 `alarm_map` 覆盖这些 fault condition，避免运行时报警与语义动作结果脱节。
+
+过程设备动作应保留为高层语义，例如：
+
+```plc
+task main:
+    step heat:
+        action: heater.heat_to(oven, 80)
+```
+
+如果后端尚不能承载该动作，codegen 必须显式拒绝，而不是把它静默降级成原始 I/O 写入。
+
+---
+
 ## 相关文件
 
 | 文件 | 说明 |

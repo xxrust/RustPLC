@@ -177,13 +177,13 @@ If a milestone keeps comparing as `duplicated_required_step` in a real canary tr
 
 不要用 `conflicts_with` 表达执行顺序。
 
-## 6.1 analog / PID 能力边界
+## 6.1 raw AI/AO process-control boundary
 
-- 当前 complex-project source path 不要默认假设 `plc_main.AI*` / `AO*` 就等于工程量模拟量
-- 如果 controller-profile 端口被当前语义当成 `0..1` 内部标量，而 process contract 需要 `50` / `145` / `180` 这类工程量阈值或 PID `limit 0..100`
-- 且 legacy `analog_input` / `analog_output` 设备又会触发 `SEM-108`
+- 当前 complex-project source path 不要默认把 controller AI/AO 通道当作工程量过程设备
+- 压力、温度、比例阀、加热、夹爪、输送、泵、视觉等应优先进入过程设备语义
+- 如果缺少对应过程设备契约，应标记为能力边界 / blocker
 
-则应把该项目标记为能力边界 / blocker，而不是继续硬凑一个“已验证”的 PID 或温控交付
+不要继续硬凑一个“已验证”的 PID、温控或压力交付。
 
 ## 7. 共享资源与模式切换
 

@@ -395,3 +395,16 @@ verification 应认识：
 - 高层设备动作留在 DSL
 - 设备家族语义集中到 `device_semantics`
 - semantic / IR / runtime / verification / codegen 共享这份语义
+
+## 10. Current Public Contract
+
+The current public device-semantics contract is broader than the original cylinder-first slice:
+
+- `cylinder` keeps closed-loop stroke semantics at the device-action layer.
+- `axis.move_relative` and `axis.move_absolute` are blocking long-running actions with explicit timeout/reject/motion-fault/safety-fault routes.
+- Process families (`proportional_valve`, `gripper`, `conveyor`, `pump`, `heater`, `vision_sensor`) expose family-specific `DeviceAction` contracts.
+- Process-device actions lower to IR and runtime as first-class actions. Runtime execution requires an explicit process-device handler through `tick_with_process_device`; plain `tick()` must reject them instead of guessing a hardware result.
+- ST codegen must explicitly reject unsupported first-class device actions rather than silently lowering them to raw I/O writes.
+- Device-library `[defaults.parameters]`, `[defaults.ports]`, and `[alarm_map]` are part of the semantic front door and must be kept in sync with runtime and verification consumers.
+
+Analog input/output authoring is intentionally outside this public device-semantics contract for now. It remains a lower-level controller I/O and board-mapping concern, not a process-device source model.

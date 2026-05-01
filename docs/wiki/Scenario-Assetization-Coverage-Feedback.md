@@ -87,12 +87,6 @@ digital_inputs:
   - name: start_button
     ticks: [10, 11]
 
-analog_inputs:
-  - name: AI0
-    values:
-      - { tick: 0, value: 0.0 }
-      - { tick: 100, value: 75.5 }
-
 fault_injection:
   - type: sensor_stuck
     target: sensor_A

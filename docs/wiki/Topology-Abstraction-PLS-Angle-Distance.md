@@ -36,15 +36,15 @@ Keep conversion and kinematic logic in the driver/board layer:
 - `pos_mm = g(theta_deg, lead, linkage, LUT, ...)`
 - Nonlinear mechanisms should use LUT/piecewise fits in the driver layer.
 
-DSL should consume output signals, not implement conversion math.
+DSL should consume discrete semantic output signals, not implement conversion math or model raw analog channels as process devices.
 
 ## Standard Signal Set
 
 Recommended interface signals for this topology abstraction:
 
-- Analog: `axis_count`, `axis_theta`, `axis_pos_mm`, `axis_speed`
-- Digital: `range_valid`, `pos_consistent`, `inpos`, `alarm`
-- Analog/encoded: `zone_code` (`0=safe`, `1..N=collision window`)
+- Driver-internal engineering values: `axis_count`, `axis_theta`, `axis_pos_mm`, `axis_speed`
+- DSL-facing discrete signals: `range_valid`, `pos_consistent`, `inpos`, `alarm`
+- DSL-facing collision signal: `zone_code` (`off=safe`, `on=collision window`)
 
 These signals let DSL stay verifiable while preserving engineering semantics.
 
@@ -72,18 +72,14 @@ Suggested policy:
 
 ```plc
 [topology]
-device axis_count: analog_input { range: 0..4000000, unit: "count", external: true }
-device axis_theta: analog_input { range: 0..360, unit: "deg", external: true }
-device axis_pos_mm: analog_input { range: 0..5000, unit: "mm", external: true }
-device axis_speed: analog_input { range: 0..200000, unit: "count_s", external: true }
-device range_valid: digital_input
-device pos_consistent: digital_input
-device zone_code: analog_input { range: 0..3, unit: "zone", external: true }
+device range_valid: sensor { purpose: "驱动层导出的量程有效信号" }
+device pos_consistent: sensor { purpose: "驱动层导出的位置一致性信号" }
+device zone_code: sensor { purpose: "驱动层导出的碰撞窗口信号，on 表示危险窗口" }
 device move_cmd: digital_output
 device cyl_clamp: cylinder
 
 [constraints]
-safety: zone_code > 0 conflicts_with cyl_clamp.extended
+safety: zone_code.on conflicts_with cyl_clamp.extended
 safety: move_cmd.on conflicts_with cyl_clamp.extended
 safety: move_cmd.on requires range_valid.on
 safety: move_cmd.on requires pos_consistent.on

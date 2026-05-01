@@ -42,10 +42,11 @@ task 并发的定义固定为：
 首版默认自动阻塞（blocking step）范围固定为：
 
 1. `axis.move_relative` 与 `axis.move_absolute`
-2. `delay`
-3. `wait`
-4. `timeout` 驱动的等待阶段
-5. 依赖外部反馈完成的动作（例如需要设备反馈/外部函数回执才能判定完成）
+2. first-class process-device actions lowered as `DeviceAction` / runtime `ProcessDeviceAction`
+3. `delay`
+4. `wait`
+5. `timeout` 驱动的等待阶段
+6. 依赖外部反馈完成的动作（例如需要设备反馈/外部函数回执才能判定完成）
 
 不在本名单内的动作默认按 non-blocking 处理，除非后续故事显式扩展并同步文档。
 
