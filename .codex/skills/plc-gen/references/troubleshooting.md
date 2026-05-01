@@ -1,5 +1,61 @@
 # plc-gen Troubleshooting
 
+## Recent generated-project failures to recognize
+
+### Workpiece underflow on the next cycle
+
+Typical diagnostics include:
+
+```text
+workpiece_flow: transfer reads endpoint ... before any free-standing workpiece is available
+```
+
+Likely cause:
+- the generated PLC looped back for another cycle
+- the workpiece ingress was only seeded once
+- no modeled upstream task or scenario event replenished the source site
+
+Fix:
+- if the authored process is a single-piece acceptance flow, make the nominal success path terminal
+- if the process is repeating, model replenishment explicitly before the next `acquire` or `transfer`
+- do not treat `ingress_sites` as infinite supply unless that behavior is part of the system contract and executable evidence
+
+### Terminal state still holds workpieces
+
+Typical diagnostics include:
+
+```text
+reachable terminal state still holds workpieces at ...
+```
+
+Likely cause:
+- a generic fault handler terminates the task without consuming the workpiece
+- the workpiece can be at multiple stages when a fault route fires
+
+Fix:
+- split fault handlers by actual workpiece location or holder
+- finish, reject, or transfer the active workpiece from the stage where it is reachable
+- rerun verification after enumerating all normal and fault terminal paths
+
+### Intent contract source kind is rejected
+
+Typical diagnostics include JSON parse errors such as:
+
+```text
+unknown variant `system_contract`
+unknown variant `patent`
+```
+
+The current intent-contract schema only accepts:
+- `architecture_doc`
+- `canonical_example`
+- `authored_asset`
+
+Fix:
+- represent patent-derived notes, `*.system.md`, and generated delivery docs as `authored_asset`
+- keep the exact source identity in `path`, `description`, and review-basis labels
+- only introduce new source kinds after extending `src/intent_alignment/contract.rs` and its tests
+
 当用户在生成、修复或验证 RustPLC DSL source set 时卡住，用本文排障。
 
 ## 1. `cargo run --release -- new ...` 失败

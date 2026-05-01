@@ -74,6 +74,17 @@ Minimum delivery requirements:
 - include the workpiece fragment in the main compileable bundle if the automatic flow depends on it
 - place `effect: acquire`, `effect: transfer`, and `effect: finish` on the real task steps that change ownership or terminal status
 
+Before running validation, classify the flow as single-shot, finite-batch, or repeating:
+- for single-shot or patent/demo acceptance flows, make the successful path terminal unless the contract explicitly describes replenishment
+- for repeating flows, the source site must be replenished by modeled ingress, scenario evidence, or another upstream task before the next cycle consumes it
+- do not write a loop that reads the same finite ingress token again; the verifier should treat that as workpiece underflow, not as an implicit new part
+
+For every normal or fault terminal path, enumerate the possible active workpiece locations first:
+- if the workpiece may still be at the input site, finish or reject it from that site
+- if it may be in a holder, transfer or finish it from that holder
+- if it may already be at the output, close the terminal state there
+- do not route all faults to one generic terminal handler unless that handler is proven valid for every possible workpiece stage
+
 Process-only exception:
 - if the confirmed system is a valve station, thermal process, pressure loop, or other process-only asset with no discrete part ownership flow, do not invent workpiece semantics
 - in scaffolded projects, explicitly switch `config/workpiece.toml` to a deliberate no-workpiece exception before claiming validation

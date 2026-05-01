@@ -38,6 +38,7 @@ Create a sibling file with the same stem as the source entry:
 The sidecar must:
 - be authored, not treated as a compiler artifact
 - bind to an authoritative intent source such as `plc/main.system.md`
+- use a schema-supported source kind: `architecture_doc`, `canonical_example`, or `authored_asset`
 - describe business milestones rather than using raw `task.step` names as the semantic center
 - bind observations to real evidence that the current comparator can consume
 - for concurrent or pipelined stations, prefer unique workpiece-handoff anchors over repeating prep-loop transitions

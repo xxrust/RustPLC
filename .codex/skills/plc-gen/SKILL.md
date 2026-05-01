@@ -117,7 +117,6 @@ Treat `rustplc.bundle.toml` as the scaffolded source entry and fill the generate
 For scaffolded complex delivery, the generated tree is only a starter shell.
 
 Before calling the result "generated", "ready", or "validated":
-- replace scaffold placeholder intent sources such as `plc/main.system.md`
 - replace scaffold placeholder intent sources such as `plc/main.system.md` and any layer-specific docs you add
 - ensure the delivery-asset doc set, not only the root scaffold doc, carries the confirmed process facts
 - decide whether the authoritative source entry is the scaffolded `rustplc.bundle.toml` or a deliberately added delivery-asset bundle
@@ -152,6 +151,13 @@ Minimum required shape:
 
 Do not leave workpiece semantics as a comment-only placeholder when the main production flow consumes or moves parts.
 
+Before validating a workpiece-carrying flow:
+- decide whether the authored process is single-shot, finite-batch, or repeating
+- if an ingress site represents a finite seed, do not loop back into a second cycle unless the system contract and scenario explicitly replenish another workpiece
+- do not fake infinite supply by repeatedly acquiring or transferring from a source that only had one seeded workpiece
+- ensure every reachable normal or fault terminal path finishes, rejects, or otherwise consumes the workpiece from the exact stage where it may reside
+- do not collapse all fault paths into one generic handler when the active workpiece may be at different locations or holders
+
 If the confirmed system is process-only and does not move discrete parts, do not invent fake workpiece flow just to satisfy project policy.
 For scaffolded projects in that case, explicitly set `config/workpiece.toml` to a deliberate no-workpiece exception such as `required = false` before calling validation complete.
 
@@ -175,6 +181,7 @@ intent alignment is not optional.
 Default requirements:
 - author a sibling `*.intent_alignment.contract.json` sidecar next to the source entry
 - bind it to an authored intent source such as `plc/main.system.md`
+- use only schema-supported source kinds: `architecture_doc`, `canonical_example`, or `authored_asset`; patent excerpts and system contracts should normally be represented as `authored_asset` unless the Rust schema is extended
 - write `source_digest.value` as the real lowercase SHA-256 hex of that authored source
 - run `project-check` so the real `intent_alignment` step is appended after `no-board-gate`
 - report the actual intent-alignment verdict instead of only reporting base-gate success
@@ -188,6 +195,8 @@ For complex projects, do not call the result `validated` if:
 - `project-check` did not actually run the `intent_alignment` step
 - the comparator failed or was blocked and that blocker was not reported
 - the sidecar still contains scaffold placeholders or unresolved source binding
+
+If `intent_alignment` returns `aligned` but also reports cross-cycle evidence warnings, report `validated with warnings` and name the warning.
 
 If the contract exists but anchor choice or cycle boundaries are still uncertain, run:
 

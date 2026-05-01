@@ -339,6 +339,22 @@ Do not bind these directly to raw analog channels or generated `task.step` names
 
 If the current runtime evidence cannot observe a process-device result or station handoff milestone, record an intent-alignment blocker instead of substituting raw I/O thresholds.
 
+### 9.2 Contract source-kind boundary
+
+Phase-2 intent contracts use a closed source-kind enum. Valid `source_ref.kind`,
+`metadata.authoritative_intent_source.kind`, and `review_basis[*].source.kind`
+values are:
+
+- `architecture_doc`
+- `canonical_example`
+- `authored_asset`
+
+Patent-derived notes, `*.system.md`, generated station documents, and other
+project-local authored inputs should use `authored_asset` unless
+`src/intent_alignment/contract.rs` is deliberately extended. Do not invent
+ad-hoc source kinds such as `patent` or `system_contract`; they will be rejected
+as invalid contracts before comparison can run.
+
 ## 10. 结论规则
 
 只有同时满足以下 4 条，才能判定“程序与真实工艺意图对齐”：
