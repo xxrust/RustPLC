@@ -97,6 +97,11 @@ pub enum RuntimeError {
     AxisMotionRequiresHandler {
         target: &'static str,
     },
+    ProcessDeviceActionRequiresHandler {
+        family: &'static str,
+        action: &'static str,
+        target: &'static str,
+    },
     AxisNotHomed {
         target: &'static str,
     },
@@ -132,6 +137,12 @@ pub enum RuntimeError {
     AxisFault {
         target: &'static str,
         fault: AxisFault,
+    },
+    ProcessDeviceActionFault {
+        family: &'static str,
+        action: &'static str,
+        target: &'static str,
+        fault: ProcessDeviceActionFault,
     },
     CylinderFeedbackFault {
         target: &'static str,
@@ -256,6 +267,9 @@ pub enum Action {
     AxisMove {
         command: AxisMotionCommand,
     },
+    ProcessDeviceAction {
+        command: ProcessDeviceActionCommand,
+    },
     WorkpieceAcquire {
         workpiece_type: &'static str,
         holder: &'static str,
@@ -328,6 +342,67 @@ pub struct AxisMotionCommand {
     pub require_homed: bool,
     pub timeout: Option<Timeout>,
     pub fault_routing: Option<AxisFaultRouting>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessDeviceActionCommand {
+    pub family: &'static str,
+    pub action: &'static str,
+    pub target: &'static str,
+    pub port: &'static str,
+    pub args: &'static [&'static str],
+    pub result_buckets: &'static [&'static str],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessDeviceActionFaultKind {
+    Timeout,
+    Reject,
+    MotionFault,
+    SafetyFault,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessDeviceActionFault {
+    pub kind: ProcessDeviceActionFaultKind,
+    pub code: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessDeviceActionResult {
+    Pending,
+    Done,
+    Fault(ProcessDeviceActionFault),
+}
+
+impl ProcessDeviceActionResult {
+    pub const fn timeout(code: i32) -> Self {
+        Self::Fault(ProcessDeviceActionFault {
+            kind: ProcessDeviceActionFaultKind::Timeout,
+            code,
+        })
+    }
+
+    pub const fn reject(code: i32) -> Self {
+        Self::Fault(ProcessDeviceActionFault {
+            kind: ProcessDeviceActionFaultKind::Reject,
+            code,
+        })
+    }
+
+    pub const fn motion_fault(code: i32) -> Self {
+        Self::Fault(ProcessDeviceActionFault {
+            kind: ProcessDeviceActionFaultKind::MotionFault,
+            code,
+        })
+    }
+
+    pub const fn safety_fault(code: i32) -> Self {
+        Self::Fault(ProcessDeviceActionFault {
+            kind: ProcessDeviceActionFaultKind::SafetyFault,
+            code,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -746,6 +821,12 @@ pub enum TaskPendingActionState {
         target: &'static str,
         action_index: usize,
         semantic_tag: Option<&'static str>,
+    },
+    ProcessDeviceAction {
+        family: &'static str,
+        action: &'static str,
+        target: &'static str,
+        action_index: usize,
     },
     CylinderMotion {
         target: &'static str,
@@ -1569,6 +1650,16 @@ impl<'a> Runtime<'a> {
         None
     }
 
+    fn missing_process_device_handler(
+        command: ProcessDeviceActionCommand,
+    ) -> Result<ProcessDeviceActionResult, RuntimeError> {
+        Err(RuntimeError::ProcessDeviceActionRequiresHandler {
+            family: command.family,
+            action: command.action,
+            target: command.target,
+        })
+    }
+
     pub fn tick<IO: Io>(&mut self, io: &mut IO) -> Result<(), RuntimeError> {
         self.tick_with_trace_and_logs(io, |_| {}, |_| {})
     }
@@ -1600,6 +1691,7 @@ impl<'a> Runtime<'a> {
                 target: command.target,
             })
         };
+        let mut missing_process_device = Self::missing_process_device_handler;
         self.tick_with_trace_and_logs_impl(
             io,
             &mut on_event,
@@ -1609,6 +1701,7 @@ impl<'a> Runtime<'a> {
             &mut ignore_error_code,
             &mut missing_axis,
             &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut missing_process_device,
         )
         .map_err(|err| match err {
             RuntimeTickError::Core(err) => err,
@@ -1644,6 +1737,7 @@ impl<'a> Runtime<'a> {
              -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
         let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
         let mut axis_adapter = |command: AxisMotionCommand| Ok(on_axis_motion(command));
+        let mut missing_process_device = Self::missing_process_device_handler;
 
         self.tick_with_trace_and_logs_impl(
             io,
@@ -1654,6 +1748,7 @@ impl<'a> Runtime<'a> {
             &mut ignore_error_code,
             &mut axis_adapter,
             &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut missing_process_device,
         )
         .map_err(|err| match err {
             RuntimeTickError::Core(err) => err,
@@ -1689,6 +1784,7 @@ impl<'a> Runtime<'a> {
              -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
         let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
         let mut axis_adapter = |command: AxisMotionCommand| Ok(on_axis_motion(command));
+        let mut missing_process_device = Self::missing_process_device_handler;
 
         self.tick_with_trace_and_logs_impl(
             io,
@@ -1699,6 +1795,7 @@ impl<'a> Runtime<'a> {
             &mut ignore_error_code,
             &mut axis_adapter,
             &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut missing_process_device,
         )
         .map_err(|err| match err {
             RuntimeTickError::Core(err) => err,
@@ -1734,6 +1831,7 @@ impl<'a> Runtime<'a> {
              -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
         let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
         let mut axis_adapter = |command: AxisMotionCommand| Ok(on_axis_motion(command));
+        let mut missing_process_device = Self::missing_process_device_handler;
 
         self.tick_with_trace_and_logs_impl(
             io,
@@ -1744,6 +1842,7 @@ impl<'a> Runtime<'a> {
             &mut ignore_error_code,
             &mut axis_adapter,
             &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut missing_process_device,
         )
         .map_err(|err| match err {
             RuntimeTickError::Core(err) => err,
@@ -1775,6 +1874,7 @@ impl<'a> Runtime<'a> {
                 target: command.target,
             })
         };
+        let mut missing_process_device = Self::missing_process_device_handler;
         self.tick_with_trace_and_logs_impl(
             io,
             &mut on_event,
@@ -1784,6 +1884,7 @@ impl<'a> Runtime<'a> {
             &mut ignore_error_code,
             &mut missing_axis,
             &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut missing_process_device,
         )
     }
 
@@ -1801,6 +1902,7 @@ impl<'a> Runtime<'a> {
                 target: command.target,
             })
         };
+        let mut missing_process_device = Self::missing_process_device_handler;
         self.tick_with_trace_and_logs_impl(
             io,
             &mut on_event,
@@ -1810,6 +1912,7 @@ impl<'a> Runtime<'a> {
             &mut map_error_code,
             &mut missing_axis,
             &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut missing_process_device,
         )
     }
 
@@ -1826,6 +1929,7 @@ impl<'a> Runtime<'a> {
                 target: command.target,
             })
         };
+        let mut missing_process_device = Self::missing_process_device_handler;
         self.tick_with_trace_and_logs_impl(
             io,
             &mut on_event,
@@ -1835,6 +1939,7 @@ impl<'a> Runtime<'a> {
             &mut ignore_error_code,
             &mut missing_axis,
             &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut missing_process_device,
         )
     }
 
@@ -1851,6 +1956,7 @@ impl<'a> Runtime<'a> {
                 target: command.target,
             })
         };
+        let mut missing_process_device = Self::missing_process_device_handler;
         self.tick_with_trace_and_logs_impl(
             io,
             &mut on_event,
@@ -1860,7 +1966,60 @@ impl<'a> Runtime<'a> {
             &mut ignore_error_code,
             &mut missing_axis,
             &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut missing_process_device,
         )
+    }
+
+    pub fn tick_with_process_device<IO: Io>(
+        &mut self,
+        io: &mut IO,
+        mut on_process_device: impl FnMut(ProcessDeviceActionCommand) -> ProcessDeviceActionResult,
+    ) -> Result<(), RuntimeError> {
+        #[derive(Debug)]
+        struct MissingExternHandler;
+
+        let mut on_event = |_| {};
+        let mut on_log = |_| {};
+        let mut missing_extern =
+            |_function: &'static str,
+             _args: &[f32],
+             _results: &mut [f32]|
+             -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
+        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
+        let mut missing_axis = |command: AxisMotionCommand| {
+            Err(RuntimeError::AxisMotionRequiresHandler {
+                target: command.target,
+            })
+        };
+        let mut process_adapter =
+            |command: ProcessDeviceActionCommand| Ok(on_process_device(command));
+
+        self.tick_with_trace_and_logs_impl(
+            io,
+            &mut on_event,
+            &mut on_log,
+            &mut missing_extern,
+            None,
+            &mut ignore_error_code,
+            &mut missing_axis,
+            &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut process_adapter,
+        )
+        .map_err(|err| match err {
+            RuntimeTickError::Core(err) => err,
+            RuntimeTickError::ExternCallFailed { function, .. } => {
+                RuntimeError::ExternCallRequiresHandler { function }
+            }
+            RuntimeTickError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            } => RuntimeError::ExternReturnArityMismatch {
+                function,
+                expected,
+                got,
+            },
+        })
     }
 
     fn tick_with_trace_and_logs_impl<IO: Io, E>(
@@ -1873,6 +2032,9 @@ impl<'a> Runtime<'a> {
         map_extern_error_code: &mut impl FnMut(&'static str, &E) -> f32,
         on_axis_motion: &mut impl FnMut(AxisMotionCommand) -> Result<AxisMotionResult, RuntimeError>,
         on_axis_fault_policy: &mut impl FnMut(AxisMotionCommand, AxisFault),
+        on_process_device: &mut impl FnMut(
+            ProcessDeviceActionCommand,
+        ) -> Result<ProcessDeviceActionResult, RuntimeError>,
     ) -> Result<(), RuntimeTickError<E>> {
         let now = io.tick();
 
@@ -1954,6 +2116,29 @@ impl<'a> Runtime<'a> {
                                 }) = actions.get(action_index)
                                 {
                                     if *action_target == target {
+                                        action_start_index = action_index;
+                                    } else {
+                                        self.task_contexts[task_idx].pending_action_state =
+                                            TaskPendingActionState::Idle;
+                                    }
+                                } else {
+                                    self.task_contexts[task_idx].pending_action_state =
+                                        TaskPendingActionState::Idle;
+                                }
+                            }
+                            TaskPendingActionState::ProcessDeviceAction {
+                                family,
+                                action,
+                                target,
+                                action_index,
+                            } => {
+                                if let Some(Action::ProcessDeviceAction { command }) =
+                                    actions.get(action_index)
+                                {
+                                    if command.family == family
+                                        && command.action == action
+                                        && command.target == target
+                                    {
                                         action_start_index = action_index;
                                     } else {
                                         self.task_contexts[task_idx].pending_action_state =
@@ -2161,6 +2346,45 @@ impl<'a> Runtime<'a> {
                                             }
                                             return Err(RuntimeTickError::Core(
                                                 RuntimeError::AxisFault {
+                                                    target: command.target,
+                                                    fault,
+                                                },
+                                            ));
+                                        }
+                                    }
+                                }
+                                Action::ProcessDeviceAction { command } => {
+                                    let result = match on_process_device(command) {
+                                        Ok(result) => result,
+                                        Err(err) => {
+                                            self.task_contexts[task_idx].pending_action_state =
+                                                TaskPendingActionState::Idle;
+                                            return Err(RuntimeTickError::Core(err));
+                                        }
+                                    };
+                                    match result {
+                                        ProcessDeviceActionResult::Pending => {
+                                            self.task_contexts[task_idx].pending_action_state =
+                                                TaskPendingActionState::ProcessDeviceAction {
+                                                    family: command.family,
+                                                    action: command.action,
+                                                    target: command.target,
+                                                    action_index,
+                                                };
+                                            action_completion = ActionCompletionState::Pending;
+                                            break;
+                                        }
+                                        ProcessDeviceActionResult::Done => {
+                                            self.task_contexts[task_idx].pending_action_state =
+                                                TaskPendingActionState::Idle;
+                                        }
+                                        ProcessDeviceActionResult::Fault(fault) => {
+                                            self.task_contexts[task_idx].pending_action_state =
+                                                TaskPendingActionState::Idle;
+                                            return Err(RuntimeTickError::Core(
+                                                RuntimeError::ProcessDeviceActionFault {
+                                                    family: command.family,
+                                                    action: command.action,
                                                     target: command.target,
                                                     fault,
                                                 },

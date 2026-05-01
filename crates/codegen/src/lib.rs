@@ -121,7 +121,7 @@ pub fn generate_program_module(
     out.push_str(
         "  use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, AnalogOutputId};\n",
     );
-    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, AxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting, AxisMotionCommand, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, DigitalCondition, ExprOp, ExprProgram, Instr, PidConfig, Program, Step, StepId, Task, Timeout};\n\n");
+    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, AxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting, AxisMotionCommand, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, DigitalCondition, ExprOp, ExprProgram, Instr, PidConfig, ProcessDeviceActionCommand, Program, Step, StepId, Task, Timeout};\n\n");
 
     // Emit actions arrays, then steps, then tasks, then program.
     for (tidx, task) in program.tasks.iter().enumerate() {
@@ -286,6 +286,15 @@ fn format_action(a: &Action) -> String {
             format_axis_timeout(command.timeout),
             format_axis_fault_routing(command.fault_routing),
         ),
+        Action::ProcessDeviceAction { command } => format!(
+            "Action::ProcessDeviceAction {{ command: ProcessDeviceActionCommand {{ family: {:?}, action: {:?}, target: {:?}, port: {:?}, args: &{}, result_buckets: &{} }} }}",
+            command.family,
+            command.action,
+            command.target,
+            command.port,
+            format_static_str_slice(command.args),
+            format_static_str_slice(command.result_buckets),
+        ),
         Action::WorkpieceAcquire {
             workpiece_type,
             holder,
@@ -415,6 +424,15 @@ fn format_digital_input_id_slice(values: &[DigitalInputId]) -> String {
     let rendered = values
         .iter()
         .map(|id| format!("DigitalInputId({})", id.0))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{}]", rendered)
+}
+
+fn format_static_str_slice(values: &[&'static str]) -> String {
+    let rendered = values
+        .iter()
+        .map(|value| format!("{value:?}"))
         .collect::<Vec<_>>()
         .join(", ");
     format!("[{}]", rendered)

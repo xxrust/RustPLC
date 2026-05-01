@@ -1,4 +1,5 @@
-use rust_plc::codegen::st::{StCodegenConfig, StCodegenError, generate_st};
+use runtime_core::{Action, Instr, ProcessDeviceActionResult, Runtime, RuntimeError, StepId};
+use rust_plc::codegen::st::{generate_st, StCodegenConfig, StCodegenError};
 use rust_plc::device_semantics::process::{
     all_process_source_contracts, collect_process_device_source_reports,
 };
@@ -215,7 +216,7 @@ task main:
 }
 
 #[test]
-fn process_device_action_lowers_to_first_class_ir_and_backends_reject_explicitly() {
+fn process_device_action_lowers_to_first_class_ir_and_runtime_requires_handler() {
     let input = r#"
 [topology]
 device plc_main: plc { model_ref: openplc_softplc }
@@ -270,14 +271,46 @@ task main:
         StCodegenError::DeviceActionUnsupported { target, .. } if target == "oven"
     )));
 
-    let runtime_error =
+    let runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
-            .expect_err("runtime bridge must reject missing process action backend explicitly")
-            .to_string();
-    assert!(
-        runtime_error.contains("device action heater.heat_to(oven)"),
-        "expected explicit runtime backend rejection, got: {runtime_error}"
+            .expect("runtime bridge should preserve first-class process action");
+    let Instr::Action { actions, next } = runtime_program.tasks[0].steps[0].instr else {
+        panic!("process action step should lower to runtime action instruction");
+    };
+    assert_eq!(next, StepId(1));
+    let Action::ProcessDeviceAction { command } = actions[0] else {
+        panic!("process device action should remain first-class runtime action");
+    };
+    assert_eq!(command.family, "heater");
+    assert_eq!(command.action, "heat_to");
+    assert_eq!(command.target, "oven");
+    assert_eq!(command.args, &["80"]);
+
+    let mut runtime = Runtime::new(&runtime_program).expect("runtime init");
+    let mut io = sim::SimIo::new(0, 0, 0, 0);
+    assert_eq!(
+        runtime
+            .tick(&mut io)
+            .expect_err("plain runtime tick must require process handler"),
+        RuntimeError::ProcessDeviceActionRequiresHandler {
+            family: "heater",
+            action: "heat_to",
+            target: "oven",
+        }
     );
+
+    runtime
+        .tick_with_process_device(&mut io, |command| {
+            assert_eq!(command.target, "oven");
+            ProcessDeviceActionResult::Pending
+        })
+        .expect("handler pending should keep step active");
+    assert_eq!(runtime.location().step, StepId(0));
+
+    runtime
+        .tick_with_process_device(&mut io, |_| ProcessDeviceActionResult::Done)
+        .expect("handler done should advance");
+    assert_eq!(runtime.location().step, StepId(1));
 }
 
 #[test]

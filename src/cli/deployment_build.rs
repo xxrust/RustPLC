@@ -920,6 +920,7 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                             Action::Compute { .. }
                             | Action::CallExtern { .. }
                             | Action::AxisMove { .. }
+                            | Action::ProcessDeviceAction { .. }
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }
@@ -1110,6 +1111,7 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                             Action::Compute { .. }
                             | Action::CallExtern { .. }
                             | Action::AxisMove { .. }
+                            | Action::ProcessDeviceAction { .. }
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }

@@ -121,5 +121,6 @@ mod tests {
     include!("runtime_scheduler_tests.rs");
     include!("runtime_math_tests.rs");
     include!("runtime_axis_tests.rs");
+    include!("runtime_process_device_tests.rs");
     include!("runtime_misc_tests.rs");
 }

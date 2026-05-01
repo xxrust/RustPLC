@@ -1014,6 +1014,13 @@
         let mut map_extern_error_code = |_function: &'static str, _error: &()| 0.0;
         let mut on_axis_motion =
             |_command: AxisMotionCommand| Ok(AxisMotionResult::safety_fault(55));
+        let mut on_process_device = |command: ProcessDeviceActionCommand| {
+            Err(RuntimeError::ProcessDeviceActionRequiresHandler {
+                family: command.family,
+                action: command.action,
+                target: command.target,
+            })
+        };
         let mut applied_targets = std::vec::Vec::new();
 
         let err = rt.tick_with_trace_and_logs_impl(
@@ -1027,6 +1034,7 @@
             &mut |command: AxisMotionCommand, _fault: AxisFault| {
                 applied_targets.push(command.target)
             },
+            &mut on_process_device,
         );
 
         assert!(matches!(

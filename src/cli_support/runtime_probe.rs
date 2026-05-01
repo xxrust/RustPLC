@@ -51,6 +51,7 @@ pub(crate) fn io_sizes_for_program_and_scenario(
                             Action::Compute { .. }
                             | Action::CallExtern { .. }
                             | Action::AxisMove { .. }
+                            | Action::ProcessDeviceAction { .. }
                             | Action::CamEngage { .. }
                             | Action::CamDisengage { .. }
                             | Action::CamSwitch { .. }

@@ -891,12 +891,18 @@ fn convert_action(
                 family,
                 action_name,
                 target,
-                ..
-            } => Err(BridgeError::UnsupportedAction {
-                state: state_name.to_string(),
-                action: format!(
-                    "device action {family}.{action_name}({target}) requires an explicit runtime backend"
-                ),
+                port,
+                args_raw,
+                result_buckets,
+            } => Ok(Action::ProcessDeviceAction {
+                command: ProcessDeviceActionCommand {
+                    family: Box::leak(family.clone().into_boxed_str()),
+                    action: Box::leak(action_name.clone().into_boxed_str()),
+                    target: Box::leak(target.clone().into_boxed_str()),
+                    port: Box::leak(port.clone().into_boxed_str()),
+                    args: leak_str_slice(args_raw),
+                    result_buckets: leak_str_slice(result_buckets),
+                },
             }),
             TransitionAction::AxisMoveRelative {
                 target,
