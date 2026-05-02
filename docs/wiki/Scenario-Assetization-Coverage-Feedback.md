@@ -21,15 +21,15 @@
 
 ```bash
 # 1. 生成场景骨架
-cargo run --release -- scenario-init examples/assembly_station.plc \
+cargo run --release -- scenario-init examples/project_scaffold_demo/plc/main.plc \
   --out scenarios/normal.yaml --preset normal
 
 # 2. 校验场景合法性
-cargo run --release -- scenario-validate examples/assembly_station.plc \
+cargo run --release -- scenario-validate examples/project_scaffold_demo/plc/main.plc \
   --scenario scenarios/normal.yaml --output human
 
 # 3. SIL 仿真
-cargo run --release -- sim-plc examples/assembly_station.plc \
+cargo run --release -- sim-plc examples/project_scaffold_demo/plc/main.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
 
 # 4. 批量回归
@@ -101,7 +101,7 @@ fault_injection:
 
 ```bash
 cargo run --release -- scenario-gen \
-  --plc examples/assembly_station.plc \
+  --plc examples/project_scaffold_demo/plc/main.plc \
   --template-library scenarios/templates/metadata.json \
   --out-dir out/scenario_gen
 ```

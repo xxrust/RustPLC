@@ -1,6 +1,0 @@
-log "boot ok"
-log "TICK tick=0 ts_ms=0"
-log "TRACE tick=0 task=0 from=0 to=1 reason=action ts_ms=0"
-log "TICK tick=1 ts_ms=1"
-log "TRACE tick=1 task=0 from=1 to=2 reason=goto ts_ms=1"
-quit

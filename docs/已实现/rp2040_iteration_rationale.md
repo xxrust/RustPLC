@@ -74,7 +74,7 @@ SIL 主线完成后，板级链路的瓶颈集中在三点：
 
 ### 6) 文档与流程固化
 
-- 文件：`README.md`、`docs/board_rp2040.md`、`docs/board_semantics_contract_v1.md`、`examples/rp2040_end_to_end/*`
+- 文件：`README.md`、`docs/board_rp2040.md`、`docs/board_semantics_contract_v1.md`、`examples/rp2040_motion_minimal.plc`、`examples/rp2040_motion_minimal.io_map.toml`
 - 改动：
   - 明确 `analog_contract.toml`、AI/AO 语义、PIL/板级脚本入口；
   - 新增 Board Semantics Contract v1；

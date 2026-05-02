@@ -106,5 +106,5 @@ cargo run --release -- no-board-gate plc/main.plc \
 ## 边界说明
 
 - 项目的正式需求入口是 `plc/main.system.md`
-- `examples/*.system.md` 是示例资产，不是项目入口
+- 公开示例中的系统契约应优先使用 `examples/project_scaffold_demo/plc/main.system.md` 这类项目内入口；不要再在 `examples/` 根目录堆放游离的 `*.system.md`
 - 项目级布局契约见 `docs/已实现/generated_project_layout_spec.md`

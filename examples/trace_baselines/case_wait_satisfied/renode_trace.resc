@@ -1,4 +1,0 @@
-log "boot ok"
-log "TRACE tick=0 task=0 from=0 to=1 reason=action ts_ms=0"
-log "TRACE tick=3 task=0 from=1 to=2 reason=wait_satisfied ts_ms=3"
-quit

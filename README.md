@@ -109,11 +109,11 @@ cargo run --release -- gen-st examples/dual_axis_platform.plc --out out/dual_axi
 
 ```bash
 # 生成场景骨架
-cargo run --release -- scenario-init examples/assembly_station.plc \
+cargo run --release -- scenario-init examples/project_scaffold_demo/plc/main.plc \
   --out scenarios/normal.yaml --preset normal
 
 # SIL 仿真
-cargo run --release -- sim-plc examples/assembly_station.plc \
+cargo run --release -- sim-plc examples/project_scaffold_demo/plc/main.plc \
   --scenario scenarios/normal.yaml --out trace.jsonl
 ```
 
@@ -252,7 +252,7 @@ sim-regress       # 批量回归仿真
 
 ```bash
 # SIL vs 虚拟板对比 + 实时阈值检查
-cargo run --release -- no-board-gate examples/assembly_station.plc \
+cargo run --release -- no-board-gate examples/project_scaffold_demo/plc/main.plc \
   --scenario scenarios/normal.yaml \
   --max-p99-exec-us 500 --max-overrun-count 0
 ```
@@ -308,7 +308,7 @@ Agent 可用的工具：
 | `project_scaffold_demo/` | 最小项目结构、脚手架 | ★ |
 | `rp2040_motion_minimal.plc` | 运动控制、板级 I/O 映射 | ★★ |
 | `dual_axis_platform.plc` | 双轴联动、parallel、race、conflicts_with | ★★★ |
-| `assembly_station.plc` | 多设备协调、parallel、requires | ★★★ |
+| `load_unload_concurrent_tasks.plc` | 多设备协调、parallel、requires | ★★★ |
 | `nuclear_coolant_isolation.plc` | SIL3 核安全、冗余传感器、OR 容错 | ★★★★ |
 | `three_station_assembly.plc` | 大规模拓扑、装配流程 | ★★★★ |
 | `process_device_demo.plc` | 过程设备语义动作、runtime handler 边界 | ★★ |
