@@ -94,11 +94,14 @@ fn collect_workpiece_contract_warnings(
     else {
         return Vec::new();
     };
-    let reachable_transition_indices = collect_reachable_workpiece_transition_indices(
+    let root_state_indices =
+        collect_reachable_workpiece_root_state_indices(state_machine, &state_index)
+            .unwrap_or_else(|| vec![initial_state_idx]);
+    let reachable_transition_indices = collect_reachable_workpiece_transition_indices_from_roots(
         state_machine,
         &state_index,
         &outgoing,
-        initial_state_idx,
+        &root_state_indices,
     );
     let reachable_transitions = reachable_transition_indices
         .iter()
@@ -284,9 +287,28 @@ fn collect_reachable_workpiece_transition_indices(
     outgoing: &[Vec<usize>],
     initial_state_idx: usize,
 ) -> HashSet<usize> {
+    collect_reachable_workpiece_transition_indices_from_roots(
+        state_machine,
+        state_index,
+        outgoing,
+        &[initial_state_idx],
+    )
+}
+
+fn collect_reachable_workpiece_transition_indices_from_roots(
+    state_machine: &StateMachine,
+    state_index: &HashMap<(String, String), usize>,
+    outgoing: &[Vec<usize>],
+    root_state_indices: &[usize],
+) -> HashSet<usize> {
     let mut reachable_transitions = HashSet::new();
-    let mut visited_states = HashSet::from([initial_state_idx]);
-    let mut queue = VecDeque::from([initial_state_idx]);
+    let mut visited_states = HashSet::new();
+    let mut queue = VecDeque::new();
+    for &root_state_idx in root_state_indices {
+        if visited_states.insert(root_state_idx) {
+            queue.push_back(root_state_idx);
+        }
+    }
 
     while let Some(state_idx) = queue.pop_front() {
         for transition_idx in outgoing.get(state_idx).into_iter().flatten() {
@@ -305,6 +327,86 @@ fn collect_reachable_workpiece_transition_indices(
     }
 
     reachable_transitions
+}
+
+fn collect_reachable_workpiece_root_state_indices(
+    state_machine: &StateMachine,
+    state_index: &HashMap<(String, String), usize>,
+) -> Option<Vec<usize>> {
+    let task_entry_states = state_machine
+        .task_contexts
+        .iter()
+        .filter_map(|ctx| {
+            state_index
+                .get(&workpiece_state_key(&ctx.entry_state))
+                .copied()
+                .map(|state_idx| (ctx.task_name.clone(), state_idx))
+        })
+        .collect::<HashMap<_, _>>();
+    if task_entry_states.is_empty() {
+        return None;
+    }
+
+    let roots = crate::task_root_selection::select_root_task_contexts(
+        state_machine,
+        axis_branch_target_task_names_for_workpiece_roots,
+    );
+    let root_indices = roots
+        .into_iter()
+        .filter_map(|task_name| task_entry_states.get(&task_name).copied())
+        .collect::<Vec<_>>();
+
+    (!root_indices.is_empty()).then_some(root_indices)
+}
+
+fn axis_branch_target_task_names_for_workpiece_roots(actions: &[TransitionAction]) -> Vec<String> {
+    let mut targets = Vec::new();
+    for action in actions {
+        match action {
+            TransitionAction::AxisMoveRelative {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+                ..
+            }
+            | TransitionAction::AxisMoveAbsolute {
+                timeout,
+                on_reject,
+                on_motion_fault,
+                on_safety_fault,
+                on_reject_routes,
+                on_motion_fault_routes,
+                on_safety_fault_routes,
+                ..
+            } => {
+                targets.push(timeout.target_task.clone());
+                targets.push(on_reject.target_task.clone());
+                targets.push(on_motion_fault.target_task.clone());
+                targets.push(on_safety_fault.target_task.clone());
+                targets.extend(
+                    on_reject_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+                targets.extend(
+                    on_motion_fault_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+                targets.extend(
+                    on_safety_fault_routes
+                        .iter()
+                        .map(|route| route.target_task.clone()),
+                );
+            }
+            _ => {}
+        }
+    }
+    targets
 }
 
 #[derive(Debug, Clone)]

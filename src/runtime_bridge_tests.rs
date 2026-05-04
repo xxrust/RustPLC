@@ -56,4 +56,17 @@ mod tests {
             "extended"
         ));
     }
+
+    #[test]
+    fn runtime_branch_lowering_recognizes_if_else_complement_guards() {
+        assert!(super::is_not_of("NOT(loaded_count >= 2)", "loaded_count >= 2"));
+        assert!(super::is_not_of(
+            "NOT( pickup_buffer_ready == true )",
+            "pickup_buffer_ready == true"
+        ));
+        assert!(!super::is_not_of(
+            "NOT(loaded_count < 1)",
+            "loaded_count >= 1"
+        ));
+    }
 }
