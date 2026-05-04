@@ -1,4 +1,4 @@
-﻿use std::fs;
+use std::fs;
 use std::process::Command;
 
 const PLC_FIXTURE: &str = r#"
@@ -630,6 +630,3 @@ fn cli_build_rp2040_emit_uf2_reports_missing_elf_output() {
         "stderr should mention missing ELF, got: {stderr}"
     );
 }
-
-
-

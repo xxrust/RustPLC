@@ -55,9 +55,13 @@ task main:
         expanded.topology.devices.iter().any(|d| d.name == "AI3"),
         "expected imported analog input AI3 to expand into an internal IO node"
     );
-    assert!(expanded.topology.connections.iter().any(|c| {
-        c.from == "pressure_sensor" && c.to == "AI3"
-    }));
+    assert!(
+        expanded
+            .topology
+            .connections
+            .iter()
+            .any(|c| { c.from == "pressure_sensor" && c.to == "AI3" })
+    );
 }
 
 #[test]

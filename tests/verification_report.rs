@@ -260,7 +260,11 @@ fn deny_warnings_fails_process_when_warns_exist() {
     let output = run_compile_report(
         &plc_path,
         &report_path,
-        &["--budget-max-actions-per-transition", "0", "--deny-warnings"],
+        &[
+            "--budget-max-actions-per-transition",
+            "0",
+            "--deny-warnings",
+        ],
     );
     assert!(
         !output.status.success(),
@@ -398,7 +402,10 @@ fn runtime_budget_reports_per_task_scope_for_two_active_tasks() {
         report["runtime_budget"]["transition_budget_scope"].as_str(),
         Some("per_task_per_tick")
     );
-    assert_eq!(report["runtime_budget"]["active_task_count"].as_u64(), Some(2));
+    assert_eq!(
+        report["runtime_budget"]["active_task_count"].as_u64(),
+        Some(2)
+    );
     assert_eq!(
         report["runtime_budget"]["max_transitions_per_tick_cap"].as_u64(),
         Some(cap)
@@ -432,7 +439,10 @@ fn runtime_budget_cycle_warning_keeps_per_task_cap_with_two_active_tasks() {
 
     let report = read_report(&report_path);
     let cap = MAX_TRANSITIONS_PER_TASK_PER_TICK as u64;
-    assert_eq!(report["runtime_budget"]["active_task_count"].as_u64(), Some(2));
+    assert_eq!(
+        report["runtime_budget"]["active_task_count"].as_u64(),
+        Some(2)
+    );
     assert_eq!(
         report["runtime_budget"]["max_transitions_same_tick_upper_bound"].as_u64(),
         Some(cap)
@@ -463,7 +473,11 @@ fn runtime_budget_cycle_warning_keeps_per_task_cap_with_two_active_tasks() {
 #[test]
 fn report_emits_axis_blocking_migration_warning_with_stable_code() {
     let base = temp_dir("rust_plc_axis_blocking_migration_warning");
-    let plc_path = write_plc(&base, "axis_blocking_warning.plc", axis_blocking_warning_source());
+    let plc_path = write_plc(
+        &base,
+        "axis_blocking_warning.plc",
+        axis_blocking_warning_source(),
+    );
     let report_path = base.join("axis_blocking_warning_report.json");
 
     let output = run_compile_report(&plc_path, &report_path, &[]);

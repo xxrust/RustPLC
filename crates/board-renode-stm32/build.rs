@@ -43,14 +43,21 @@ fn main() {
         Ok(path) => {
             let path = resolve_input_path(&workspace_root, &path);
             let contents = fs::read_to_string(&path).unwrap_or_else(|e| {
-                panic!("failed to read RUST_PLC_SCENARIO_YAML={}: {e}", path.display())
+                panic!(
+                    "failed to read RUST_PLC_SCENARIO_YAML={}: {e}",
+                    path.display()
+                )
             });
             let scenario = parse_scenario(&contents);
-            fs::write(&scenario_rs_path, render_scenario_rs(&scenario)).expect("write scenario_data.rs");
+            fs::write(&scenario_rs_path, render_scenario_rs(&scenario))
+                .expect("write scenario_data.rs");
         }
         Err(_) => {
-            fs::write(&scenario_rs_path, render_scenario_rs(&ScenarioData::default()))
-                .expect("write default scenario_data.rs");
+            fs::write(
+                &scenario_rs_path,
+                render_scenario_rs(&ScenarioData::default()),
+            )
+            .expect("write default scenario_data.rs");
         }
     }
 }
@@ -130,10 +137,12 @@ fn parse_scenario(yaml: &str) -> ScenarioData {
         );
         let at_tick = event.at_ms / file.tick_ms;
         for (id, value) in event.set.digital_inputs {
-            out.digital_events.push(DigitalInputEvent { at_tick, id, value });
+            out.digital_events
+                .push(DigitalInputEvent { at_tick, id, value });
         }
         for (id, value) in event.set.analog_inputs {
-            out.analog_events.push(AnalogInputEvent { at_tick, id, value });
+            out.analog_events
+                .push(AnalogInputEvent { at_tick, id, value });
         }
     }
     out.digital_events.sort_by_key(|e| (e.at_tick, e.id));
@@ -157,7 +166,10 @@ fn render_scenario_rs(data: &ScenarioData) -> String {
     out.push_str("    pub value: f32,\n");
     out.push_str("}\n");
     out.push_str(&format!("pub const TICK_MS: u64 = {};\n", data.tick_ms));
-    out.push_str(&format!("pub const DURATION_MS: u64 = {};\n", data.duration_ms));
+    out.push_str(&format!(
+        "pub const DURATION_MS: u64 = {};\n",
+        data.duration_ms
+    ));
     out.push_str("pub const DIGITAL_INPUT_EVENTS: &[DigitalInputEvent] = &[\n");
     for event in &data.digital_events {
         out.push_str(&format!(

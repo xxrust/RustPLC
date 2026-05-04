@@ -303,7 +303,9 @@ fn evaluate_postconditions(
                         || {
                             let cycle_groups: Vec<(&(usize, u64), &Vec<usize>)> = groups
                                 .iter()
-                                .filter(|((group_cycle_index, _), _)| *group_cycle_index == cycle_index)
+                                .filter(|((group_cycle_index, _), _)| {
+                                    *group_cycle_index == cycle_index
+                                })
                                 .collect();
                             let mut next_fact = 0usize;
                             for (_, indices) in cycle_groups {
@@ -438,22 +440,12 @@ fn detect_cross_cycle_drift(
         let missing_terminal = previous
             .successful_cycle_end_snapshot
             .as_ref()
-            .map(|snapshot| {
-                missing_snapshot_facts(
-                    snapshot,
-                    &terminal_snapshot_facts,
-                )
-            })
+            .map(|snapshot| missing_snapshot_facts(snapshot, &terminal_snapshot_facts))
             .unwrap_or_default();
         let missing_next_start = next
             .first_observed_snapshot
             .as_ref()
-            .map(|snapshot| {
-                missing_snapshot_facts(
-                    snapshot,
-                    &next_start_snapshot_facts,
-                )
-            })
+            .map(|snapshot| missing_snapshot_facts(snapshot, &next_start_snapshot_facts))
             .unwrap_or_default();
 
         let handoff_tick_ready = previous
@@ -550,7 +542,8 @@ fn missing_snapshot_facts(
 fn snapshot_evaluable_facts(
     facts: &[super::expected_behavior::ObservedFact],
 ) -> Vec<super::expected_behavior::ObservedFact> {
-    facts.iter()
+    facts
+        .iter()
         .filter(|fact| fact.key.starts_with("vars."))
         .cloned()
         .collect()
@@ -771,13 +764,11 @@ fn matched_occurrences(
 
     let mut matches = raw_matches
         .into_iter()
-        .map(|matched| {
-            MatchedOccurrence {
-                milestone_id: matched.milestone_id,
-                cycle_index: matched.cycle_index,
-                tick: matched.tick,
-                evidence_indices: matched.evidence_indices,
-            }
+        .map(|matched| MatchedOccurrence {
+            milestone_id: matched.milestone_id,
+            cycle_index: matched.cycle_index,
+            tick: matched.tick,
+            evidence_indices: matched.evidence_indices,
         })
         .collect::<Vec<_>>();
 

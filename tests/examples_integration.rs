@@ -82,7 +82,8 @@ fn compile_source_to_json(source: &str) -> Result<Value, Vec<String>> {
 #[test]
 fn parses_dual_axis_platform_example_into_verified_ir_json() {
     let source = read_example("dual_axis_platform.plc");
-    let ir_json = compile_source_to_json(&source).expect("dual_axis_platform example should compile");
+    let ir_json =
+        compile_source_to_json(&source).expect("dual_axis_platform example should compile");
 
     assert!(ir_json.get("topology").is_some());
     assert!(ir_json.get("state_machine").is_some());

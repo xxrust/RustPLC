@@ -1,5 +1,5 @@
 use runtime_core::{Action, Instr, ProcessDeviceActionResult, Runtime, RuntimeError, StepId};
-use rust_plc::codegen::st::{generate_st, StCodegenConfig, StCodegenError};
+use rust_plc::codegen::st::{StCodegenConfig, StCodegenError, generate_st};
 use rust_plc::device_semantics::process::{
     all_process_source_contracts, collect_process_device_source_reports,
 };
@@ -274,10 +274,12 @@ task main:
         .get("main.heat")
         .expect("heat step timing estimate");
     assert_eq!(heat_timing.pending_action_max_ms, 50);
-    assert!(heat_timing
-        .pending_action_details
-        .iter()
-        .any(|detail| detail.contains("pending device_action oven = 50ms")));
+    assert!(
+        heat_timing
+            .pending_action_details
+            .iter()
+            .any(|detail| detail.contains("pending device_action oven = 50ms"))
+    );
 
     let st_errors = generate_st(
         &topology,

@@ -8,7 +8,11 @@ fn cli_build_renode_stm32_emits_expected_artifacts() {
         .output()
         .ok()
         .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|stdout| stdout.lines().any(|line| line.trim() == "thumbv7em-none-eabi"))
+        .map(|stdout| {
+            stdout
+                .lines()
+                .any(|line| line.trim() == "thumbv7em-none-eabi")
+        })
         .unwrap_or(false);
     if !target_available {
         eprintln!("skip: host thumbv7em-none-eabi target not installed");

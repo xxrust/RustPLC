@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::report::{
-    IntentAlignmentBlockerKind, IntentAlignmentReport,
-    IntentAlignmentVerdict, IntentMismatchKind,
+    IntentAlignmentBlockerKind, IntentAlignmentReport, IntentAlignmentVerdict, IntentMismatchKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

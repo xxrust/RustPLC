@@ -1,22 +1,22 @@
 use crate::cli_support::common::{
-    display_path_relative_to_cwd, write_json_pretty, CliOutputMode, DispatchResult,
+    CliOutputMode, DispatchResult, display_path_relative_to_cwd, write_json_pretty,
 };
 use crate::cli_support::help::command_usage;
 use crate::cli_support::plc_pipeline::{
     compile_loaded_codegen_semantics, format_loaded_plc_errors,
     parse_loaded_plc_with_required_purpose,
 };
-use rust_plc::codegen::st::{generate_st, StCodegenConfig, StCodegenError};
-use rust_plc::geometry_view::{export_geometry_artifact, GeometryArtifact};
+use rust_plc::codegen::st::{StCodegenConfig, StCodegenError, generate_st};
+use rust_plc::geometry_view::{GeometryArtifact, export_geometry_artifact};
 use rust_plc::intent_alignment::{
+    IntentAlignmentBlockerKind, IntentAlignmentVerdict, IntentContract, IntentMismatchKind,
     compare_trace_jsonl, compile_expected_behavior_spec, read_intent_contract,
     reduce_intent_alignment_report, verify_intent_contract_delivery_readiness,
-    verify_intent_contract_source_binding, IntentAlignmentBlockerKind, IntentAlignmentVerdict,
-    IntentContract, IntentMismatchKind,
+    verify_intent_contract_source_binding,
 };
 use rust_plc::semantic::preprocess_program;
 use rust_plc::sequence_lint::{
-    lint_critical_wait_recovery, CriticalWaitExemption, LintLevel, SequenceLintConfig,
+    CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
 };
 use rust_plc::source_bundle::{is_supported_plc_source_path, load_plc_source};
 use rust_plc::trace_diff::parse_trace_jsonl;

@@ -74,9 +74,7 @@ fn write_intent_alignment_fixture(contract_path: &PathBuf) {
     let source_text =
         fs::read_to_string(&source_path).expect("read intent alignment architecture doc");
     let normalized_source = source_text.replace("\r\n", "\n").replace('\r', "\n");
-    let digest = hex::encode(Sha256::digest(
-        normalized_source.as_bytes(),
-    ));
+    let digest = hex::encode(Sha256::digest(normalized_source.as_bytes()));
     let contract = format!(
         r#"
 {{

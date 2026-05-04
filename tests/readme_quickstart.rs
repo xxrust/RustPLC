@@ -22,4 +22,3 @@ fn readme_compile_quickstart_command_succeeds() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
-

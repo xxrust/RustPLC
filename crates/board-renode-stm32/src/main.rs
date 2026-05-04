@@ -58,7 +58,8 @@ mod firmware {
         }
 
         fn apply_events_for_current_tick(&mut self) {
-            while let Some(event) = scenario_data::DIGITAL_INPUT_EVENTS.get(self.next_digital_event) {
+            while let Some(event) = scenario_data::DIGITAL_INPUT_EVENTS.get(self.next_digital_event)
+            {
                 if event.at_tick != self.tick.0 {
                     break;
                 }

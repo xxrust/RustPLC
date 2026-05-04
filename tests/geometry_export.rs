@@ -96,12 +96,16 @@ fn geometry_export_writes_artifact_and_json_summary() {
         .get("nodes")
         .and_then(Value::as_array)
         .expect("nodes array");
-    assert!(nodes
-        .iter()
-        .any(|node| { node.get("id").and_then(Value::as_str) == Some("task:main") }));
-    assert!(nodes
-        .iter()
-        .any(|node| { node.get("id").and_then(Value::as_str) == Some("step:main.wait_start") }));
+    assert!(
+        nodes
+            .iter()
+            .any(|node| { node.get("id").and_then(Value::as_str) == Some("task:main") })
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|node| { node.get("id").and_then(Value::as_str) == Some("step:main.wait_start") })
+    );
 
     let narrative_tasks = artifact
         .get("narrative")
@@ -128,8 +132,10 @@ fn geometry_export_writes_artifact_and_json_summary() {
             .and_then(Value::as_bool),
         Some(false)
     );
-    assert!(main_task
-        .get("blocking_points")
-        .and_then(Value::as_array)
-        .is_some_and(|points| !points.is_empty()));
+    assert!(
+        main_task
+            .get("blocking_points")
+            .and_then(Value::as_array)
+            .is_some_and(|points| !points.is_empty())
+    );
 }

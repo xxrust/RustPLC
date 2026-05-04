@@ -132,7 +132,10 @@ fn st_codegen_project_scaffold_and_dual_axis_generate() {
     let scaffold_st = dir.join("project_scaffold_demo.st");
     let dual_axis_st = dir.join("dual_axis_platform.st");
 
-    run_gen_st(&example_path("project_scaffold_demo/plc/main.plc"), &scaffold_st);
+    run_gen_st(
+        &example_path("project_scaffold_demo/plc/main.plc"),
+        &scaffold_st,
+    );
     run_gen_st(&example_path("dual_axis_platform.plc"), &dual_axis_st);
 
     let scaffold = fs::read_to_string(&scaffold_st).expect("should read generated st");

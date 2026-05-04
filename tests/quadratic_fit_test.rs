@@ -195,4 +195,3 @@ fn quadratic_fit_uses_correct_number_of_variables() {
         "should have variable sum_y"
     );
 }
-
