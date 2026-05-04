@@ -476,9 +476,10 @@ fn same_source(left: &ContractSourceRef, right: &ContractSourceRef) -> bool {
 }
 
 fn sha256_hex(path: &Path) -> Result<String, std::io::Error> {
-    let bytes = fs::read(path)?;
+    let text = fs::read_to_string(path)?;
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     let mut hasher = Sha256::new();
-    hasher.update(bytes);
+    hasher.update(normalized.as_bytes());
     Ok(hex::encode(hasher.finalize()))
 }
 
@@ -732,6 +733,23 @@ mod tests {
             "docs/architecture/intent_alignment_verification.md",
         ))
         .expect("architecture source digest should be readable")
+    }
+
+    #[test]
+    fn source_digest_normalizes_text_line_endings() {
+        let mut hasher = Sha256::new();
+        hasher.update(b"line1\nline2\n");
+        let expected = hex::encode(hasher.finalize());
+
+        let temp_path = std::env::temp_dir().join(format!(
+            "rustplc-intent-digest-crlf-{}.md",
+            std::process::id()
+        ));
+        fs::write(&temp_path, b"line1\r\nline2\r\n").expect("temp source should be writable");
+        let actual = sha256_hex(&temp_path).expect("temp source digest should be readable");
+        let _ = fs::remove_file(&temp_path);
+
+        assert_eq!(actual, expected);
     }
 
     #[test]

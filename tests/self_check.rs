@@ -71,8 +71,11 @@ task main:
 fn write_intent_alignment_fixture(contract_path: &PathBuf) {
     let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("docs/architecture/intent_alignment_verification.md");
+    let source_text =
+        fs::read_to_string(&source_path).expect("read intent alignment architecture doc");
+    let normalized_source = source_text.replace("\r\n", "\n").replace('\r', "\n");
     let digest = hex::encode(Sha256::digest(
-        fs::read(&source_path).expect("read intent alignment architecture doc"),
+        normalized_source.as_bytes(),
     ));
     let contract = format!(
         r#"
