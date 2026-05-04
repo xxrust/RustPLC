@@ -32,13 +32,37 @@ description: "在生成 `.plc` 之前，把工艺需求收敛成可供 RustPLC �
 7. 如果当前 DSL/IR 还承载不了某个设备动作结果，必须把它记成能力缺口与 blocker，而不是省略结果或改写成传感器 choreography。
 8. 对加热器、夹爪、输送、泵、比例阀、视觉等过程设备，优先把动作写成设备族语义和结果集合；不要把工程量过程控制下沉成原始 AI/AO 阈值。
 9. 必须明确 task 划分、blocking 预期、fault route、shared resource、axis policy、station handoff。
-10. 输出必须能被 `plc-gen` 直接消费，而不是只留一堆模糊业务描述。
+10. 离散工件流必须明确每个 `workpiece_location` / `workpiece_holder` / `workpiece_carrier` 的容量语义。
+11. 名称或需求中出现储料盒、料仓、料盒、托盘、缓存位、废料盒、box、bin、rack、magazine、cassette、tray、buffer、hopper 时，默认它是有限多件容器；必须写出容量。未知容量时，写“容量待确认，临时按 N 建模”，不要静默写成 1。
+12. 单件工位、夹持位、取料位、加工位、交接位才默认倾向 `capacity: 1`。
+13. 输出必须能被 `plc-gen` 直接消费，而不是只留一堆模糊业务描述。
+
+## Operator Boundary Rule
+
+操作者不是普通设备。按钮、选择开关、复位、人工确认和 HMI 命令应作为 operator front-door 进入 system contract，而不是把人塞进设备拓扑闭环。
+
+写 `.system.md` 时，凡是涉及人工输入，必须记录：
+
+- actor / role
+- command 名称
+- 物理来源或 HMI 来源
+- trigger 类型，默认按钮为 rising_edge
+- allowed_when / rejects_when
+- 禁止状态下的 reject_policy
+- PLC 必须给操作者的 visible feedback，例如灯、蜂鸣器、HMI 状态或报警文本
+
+底层 `relation { from: start_button.out, to: plc_main.start_cycle_cmd, via: reports_to }` 仍然只表达电气输入映射；front-door 契约表达人的操作语义。
+复杂项目应在 `controller.plc` 中用 `controller_io plc_main { ... }` 给 PLC 物理点位定义业务别名；system.md 应优先写这些别名的语义名，而不是把 `X0/Y0` 散落在连接说明里。
+
+设计源：`docs/architecture/operator-boundary-front-door.md`、`docs/architecture/controller-io-aliases.md`。
 
 ## Source of Truth
 
 优先服从：
 
 - `docs/architecture/signal-direction.md`
+- `docs/architecture/operator-boundary-front-door.md`
+- `docs/architecture/controller-io-aliases.md`
 - `AGENTS.md`
 
 如果这些长期语义源与临时直觉冲突，服从前者。

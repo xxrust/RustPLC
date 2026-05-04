@@ -46,7 +46,10 @@ fn project_sources_require_workpiece_by_default() {
     );
 
     let output = run_cli(&[
-        project_dir.join("plc/main.plc").to_str().expect("utf8 path"),
+        project_dir
+            .join("plc/main.plc")
+            .to_str()
+            .expect("utf8 path"),
         "--no-print-ir",
     ]);
     assert!(
@@ -79,7 +82,10 @@ fn project_sources_reject_placeholder_workpiece_without_effects() {
     );
 
     let output = run_cli(&[
-        project_dir.join("plc/main.plc").to_str().expect("utf8 path"),
+        project_dir
+            .join("plc/main.plc")
+            .to_str()
+            .expect("utf8 path"),
         "--no-print-ir",
     ]);
     assert!(
@@ -88,6 +94,27 @@ fn project_sources_reject_placeholder_workpiece_without_effects() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("no task uses any `effect:` statement"));
+}
+
+#[test]
+fn standalone_compile_warns_on_container_like_single_capacity_location() {
+    let project_dir = temp_dir("rust_plc_capacity_warning");
+    let plc_path = project_dir.join("capacity_warning.plc");
+    write(
+        &plc_path,
+        "[topology]\n\nworkpiece part: workpiece_type {\n    normal_terminal_states: [finished]\n    abnormal_terminal_states: [rejected]\n    ingress_sites: [storage_box]\n    normal_egress_sites: [outfeed]\n    abnormal_egress_sites: [reject_bin]\n}\n\nlocation storage_box: workpiece_location { capacity: 1 }\nlocation outfeed: workpiece_location { capacity: 1 }\nlocation reject_bin: workpiece_location { capacity: 20 }\n\n[constraints]\n\n[tasks]\n\ntask main:\n    step idle:\n",
+    );
+
+    let output = run_cli(&[plc_path.to_str().expect("utf8 path"), "--no-print-ir"]);
+    assert!(
+        output.status.success(),
+        "standalone compile should keep the capacity lint as a warning, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("WARNING [topology]"));
+    assert!(stderr.contains("WORKPIECE-CAP-001"));
+    assert!(stderr.contains("storage_box"));
 }
 
 #[test]
@@ -111,7 +138,10 @@ fn project_sources_can_opt_out_with_explicit_workpiece_policy() {
     );
 
     let output = run_cli(&[
-        project_dir.join("plc/main.plc").to_str().expect("utf8 path"),
+        project_dir
+            .join("plc/main.plc")
+            .to_str()
+            .expect("utf8 path"),
         "--no-print-ir",
     ]);
     assert!(

@@ -15,8 +15,8 @@ use rust_plc::topology_semantic_gate::{
 };
 use rust_plc::verification::verify_all;
 use serde::Deserialize;
-use std::fs;
 use std::fmt::Write as _;
+use std::fs;
 use std::path::Path;
 
 pub(crate) struct RuntimeSemantics {
@@ -108,7 +108,7 @@ pub(crate) fn compile_loaded_codegen_semantics(
 ) -> Result<CodegenSemantics, Vec<String>> {
     let program = parse_loaded_plc_with_required_purpose(input).map_err(|err| vec![err])?;
     for warning in collect_topology_deprecation_warnings(&program.topology) {
-        eprintln!("WARNING [deprecation] {warning}");
+        eprintln!("WARNING [topology] {warning}");
     }
 
     let devices_dir = Path::new("devices");
@@ -285,7 +285,10 @@ fn format_topology_gate_error(
     rendered.trim_end().to_string()
 }
 
-fn enforce_project_workpiece_policy(program: &PlcProgram, source_path: &Path) -> Result<(), String> {
+fn enforce_project_workpiece_policy(
+    program: &PlcProgram,
+    source_path: &Path,
+) -> Result<(), String> {
     let Some(project_root) = find_project_root(source_path) else {
         return Ok(());
     };

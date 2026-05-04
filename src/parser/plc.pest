@@ -197,6 +197,15 @@ cam_table_declaration = {
     "cam_table" ~ identifier ~ ":" ~ cam_table_mode ~ cam_point_list
 }
 
+controller_io_direction = { "input" | "output" }
+controller_io_field_name = { "purpose" | "safe_state" }
+controller_io_field_value = { string_literal | identifier }
+controller_io_field = { controller_io_field_name ~ ":" ~ controller_io_field_value }
+controller_io_alias_block = { "{" ~ controller_io_field ~ ((","? ~ controller_io_field))* ~ ","? ~ "}" }
+controller_io_alias = { controller_io_direction ~ identifier ~ ":" ~ identifier ~ controller_io_alias_block? }
+controller_io_block = { "{" ~ controller_io_alias* ~ "}" }
+controller_io_declaration = { "controller_io" ~ identifier ~ controller_io_block }
+
 port_reference = @{ identifier ~ "." ~ identifier }
 endpoint_reference = _{ port_reference | identifier }
 topology_relation = { "driven_by" | "reports_to" | "detects" }
@@ -206,6 +215,7 @@ relation_field = { relation_field_name ~ ":" ~ relation_field_value }
 relation_declaration = { "relation" ~ "{" ~ relation_field ~ ((","? ~ relation_field))* ~ ","? ~ "}" }
 topology_entry = _{
     device_declaration
+    | controller_io_declaration
     | station_declaration
     | handshake_declaration
     | transfer_point_declaration

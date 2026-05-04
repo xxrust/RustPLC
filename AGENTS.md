@@ -222,6 +222,7 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `src/plc_port.rs`
 - `src/topology_semantic_gate.rs`
 - `src/runtime_bridge.rs`
+- `docs/architecture/controller-io-aliases.md`
 
 ### 7. CLI 命令、脚手架与交付管线问题
 
@@ -345,6 +346,14 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 6. `src/runtime_bridge.rs`
 7. 相关 tests
 
+控制器 I/O 长期分层：
+
+- `devices/controllers/*.toml` 只表达控制器硬件端口清单与能力
+- 项目级业务点名写在 DSL 的 `controller_io <plc> { ... }`
+- `connections.plc` 可优先使用 `plc_main.<alias>`，由 semantic/preprocess 降级为 `plc_main.X0/Y0/AI0/AO0`
+- IR、runtime、verification、codegen 继续消费 canonical 合成 I/O 节点，不把别名当作新设备
+- task 不得直接写 `plc_main.<alias>` 或 `plc_main.Y0`，应操作语义设备
+
 ## 长期工程原则
 
 ### 1. IR 是唯一语义汇合点
@@ -401,6 +410,16 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - 对于双端反馈机构，这些显式异常结果至少要覆盖对侧反馈与矛盾反馈
 - task 只应消费这些设备动作结果，不应在 step 内重写机构正常到位闭环，也不应手写底层 `wait sensor`、互斥判定或假状态确认变量
 - 如果某类机构动作结果还不能进入 IR、verification 与 runtime，就先补语义模型；在补齐之前应标记 blocker，而不是在 DSL task 中用显式传感器脚本临时兜底
+
+### 10. 操作者边界属于 front-door 契约，不属于普通设备闭环
+
+- 操作者不是普通 `device`，不得为了让按钮形成闭环而把人加入设备拓扑
+- 按钮、选择开关、复位、人工确认、HMI 命令等属于系统 I/O 边界的 operator front-door
+- 底层拓扑仍使用 `device sensor + relation { from: <button>.out, to: plc_main.<input_alias>, via: reports_to }` 表达物理输入；`input_alias` 由 `controller_io` 降级到 `X*`
+- PLC 返回给人的灯、蜂鸣器、HMI 状态、报警文本属于 feedback obligation
+- 人工输入的 actor、trigger、allowed_when、reject_policy、visible feedback 应进入 system contract / IR / verification，而不是下沉到普通设备库
+- 不允许补造 `plc_main -> start_button` 这类反向物理关系来假装按钮有输入侧
+- 稳定设计入口是 `docs/architecture/operator-boundary-front-door.md` 与 `docs/architecture/controller-io-aliases.md`
 
 ## 典型专题的稳定入口
 

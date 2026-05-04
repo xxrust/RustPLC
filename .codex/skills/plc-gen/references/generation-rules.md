@@ -74,6 +74,12 @@ Minimum delivery requirements:
 - include the workpiece fragment in the main compileable bundle if the automatic flow depends on it
 - place `effect: acquire`, `effect: transfer`, and `effect: finish` on the real task steps that change ownership or terminal status
 
+Capacity requirements:
+- use `capacity: 1` for true single-part positions such as pickup positions, process stations, sleeve entries, handoff points, and holders
+- use `capacity > 1` for finite containers such as storage boxes, bins, racks, magazines, cassettes, trays, buffers, hoppers, reject bins, and scrap boxes
+- if the system contract names a container but gives no number, choose a conservative finite capacity and record the assumption in `main.system.md`
+- do not let a one-cycle nominal scenario collapse a real container to `capacity: 1`
+
 Before running validation, classify the flow as single-shot, finite-batch, or repeating:
 - for single-shot or patent/demo acceptance flows, make the successful path terminal unless the contract explicitly describes replenishment
 - for repeating flows, the source site must be replenished by modeled ingress, scenario evidence, or another upstream task before the next cycle consumes it
@@ -84,6 +90,7 @@ For every normal or fault terminal path, enumerate the possible active workpiece
 - if it may be in a holder, transfer or finish it from that holder
 - if it may already be at the output, close the terminal state there
 - do not route all faults to one generic terminal handler unless that handler is proven valid for every possible workpiece stage
+- treat `storage_box`, `reject_bin`, `tray`, `rack`, or `buffer` with `capacity: 1` as suspicious unless the system contract explicitly says it is a single-position station
 
 Process-only exception:
 - if the confirmed system is a valve station, thermal process, pressure loop, or other process-only asset with no discrete part ownership flow, do not invent workpiece semantics
@@ -168,10 +175,11 @@ If a milestone keeps comparing as `duplicated_required_step` in a real canary tr
 ## 6. topology / device 质量
 
 - `plc` controller 优先使用 `model_ref` profile，而不是在业务 DSL 里内联 `ports: [...]`
+- 复杂项目优先在 `controller.plc` 中用 `controller_io plc_main { ... }` 给 PLC 物理点位定义业务别名
 - 复杂项目里，如果 `X0` / `Y0` 这类名字只是控制器通道，不要直接把它们建成 `digital_input` / `digital_output` 设备
 - `device` 只用于真实硬件对象；不要把 mode bit、manual jog bit、vacuum command bit、alias signal 之类的名字直接建成 `device`
 - 操作员按钮、模式选择开关、点动请求优先建模成语义输入设备，例如 `sensor` + `push_button` / `selector_switch`
-- 优先把现场对象建模成 `sensor`、`solenoid_valve`、`lamp`、`motor`、`cylinder` 等语义设备，再用 `relation { from, to, via }` 接到 `plc_main.<port>`
+- 优先把现场对象建模成 `sensor`、`solenoid_valve`、`lamp`、`motor`、`cylinder` 等语义设备，再用 `relation { from, to, via }` 接到 `plc_main.<alias>`；小型测试可临时使用 `plc_main.<port>`
 - 如果 system contract 只给了原始 I/O 名称，把它们当 mapping hint，而不是最终业务 topology
 - 一旦出现 `SEM-108` 或 `SCN-MAP-010`，先重写 controller / IO topology，再继续修 task 或 scenario
 

@@ -1147,7 +1147,7 @@ workpiece part: workpiece_type {
 
 holder arm: workpiece_holder { capacity: 1 }
 location outfeed: workpiece_location { capacity: 1 }
-location reject_bin: workpiece_location { capacity: 1 }
+location reject_bin: workpiece_location { capacity: 20 }
 carrier tray_a: workpiece_carrier { slots: 4 }
 
 [tasks]

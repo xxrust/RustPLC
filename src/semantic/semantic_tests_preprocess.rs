@@ -45,6 +45,126 @@ task main:
 }
 
 #[test]
+fn controller_io_aliases_are_lowered_to_canonical_plc_ports() {
+    let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device valve_A: solenoid_valve { ports: [coil:digital:consumer] }
+device start_button: sensor { ports: [out:digital:producer] }
+
+controller_io plc_main {
+    input start_cycle_cmd: X0 { purpose: "start command" }
+    output valve_A_open_cmd: Y0 { purpose: "open valve A", safe_state: off }
+}
+
+relation { from: plc_main.valve_A_open_cmd, to: valve_A.coil, via: driven_by }
+relation { from: start_button.out, to: plc_main.start_cycle_cmd, via: reports_to }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    validate_source_topology_semantics(&program).expect("alias ports should pass source gate");
+    let expanded = preprocess_program(&program).expect("preprocess");
+
+    assert!(
+        expanded.topology.controller_io.is_empty(),
+        "controller_io is authoring metadata and should not leak after preprocess"
+    );
+    assert!(expanded.topology.devices.iter().any(|d| d.name == "Y0"));
+    assert!(expanded.topology.devices.iter().any(|d| d.name == "X0"));
+    assert!(expanded.topology.connections.iter().any(|c| {
+        c.from == "Y0"
+            && c.to == "valve_A"
+            && c.from_port.is_none()
+            && c.to_port.as_deref() == Some("coil")
+    }));
+    assert!(expanded.topology.connections.iter().any(|c| {
+        c.from == "start_button"
+            && c.to == "X0"
+            && c.from_port.as_deref() == Some("out")
+            && c.to_port.is_none()
+    }));
+}
+
+#[test]
+fn controller_io_aliases_reject_invalid_contracts() {
+    let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device start_cycle_cmd: sensor
+
+controller_io plc_main {
+    input start_cycle_cmd: Y0 { purpose: "wrong direction", safe_state: off }
+    output valve_cmd: Y0 { purpose: "first output", safe_state: off }
+    output valve_cmd_2: Y0 { purpose: "duplicate physical output", safe_state: off }
+    output Y1: Y1 { purpose: "physical-looking alias", safe_state: off }
+    input missing_purpose: X1
+    output missing_port: Y999 { purpose: "missing profile port", safe_state: off }
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let errors = preprocess_program(&program).expect_err("invalid aliases should fail");
+    let rendered = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("不能与设备名称冲突"), "{rendered}");
+    assert!(rendered.contains("只适用于 output"), "{rendered}");
+    assert!(rendered.contains("input 别名只能绑定 X/AI"), "{rendered}");
+    assert!(rendered.contains("只能声明一个项目级别名"), "{rendered}");
+    assert!(rendered.contains("不能使用物理端口命名"), "{rendered}");
+    assert!(rendered.contains("缺少 purpose"), "{rendered}");
+    assert!(rendered.contains("profile 中不存在"), "{rendered}");
+}
+
+#[test]
+fn source_state_machine_entry_rejects_controller_io_alias_bypass() {
+    let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+
+controller_io plc_main {
+    output run_lamp_cmd: Y0 { purpose: "run lamp output", safe_state: off }
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step start:
+        action: set plc_main.run_lamp_cmd on
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let errors =
+        build_state_machine(&program).expect_err("controller alias writes should be rejected");
+    let rendered = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered.contains("SEM-110") && rendered.contains("plc_main.run_lamp_cmd"),
+        "expected controller alias bypass rejection, got: {rendered}"
+    );
+}
+
+#[test]
 fn preprocess_rejects_inline_plc_port_inventory() {
     let input = r#"
 [topology]

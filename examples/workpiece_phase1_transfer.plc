@@ -11,7 +11,7 @@ workpiece part: workpiece_type {
 
 location infeed: workpiece_location { capacity: 1 }
 location outfeed: workpiece_location { capacity: 1 }
-location reject_bin: workpiece_location { capacity: 1 }
+location reject_bin: workpiece_location { capacity: 20 }
 holder arm: workpiece_holder { capacity: 1 }
 
 [constraints]

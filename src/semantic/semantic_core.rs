@@ -562,6 +562,16 @@ fn validate_raw_io_bypass_in_tasks(program: &PlcProgram, errors: &mut Vec<PlcErr
         .iter()
         .map(|device| (device.name.as_str(), &device.device_type))
         .collect::<HashMap<_, _>>();
+    let controller_io_aliases = program
+        .topology
+        .controller_io
+        .iter()
+        .flat_map(|decl| {
+            decl.aliases
+                .iter()
+                .map(move |alias| (decl.controller.as_str(), alias.alias.as_str()))
+        })
+        .collect::<HashSet<_>>();
 
     for task in &program.tasks.tasks {
         for step in &task.steps {
@@ -569,6 +579,7 @@ fn validate_raw_io_bypass_in_tasks(program: &PlcProgram, errors: &mut Vec<PlcErr
                 &step.statements,
                 step.line.max(task.line).max(1),
                 &device_types,
+                &controller_io_aliases,
                 errors,
             );
         }
@@ -579,6 +590,7 @@ fn validate_raw_io_bypass_in_statements(
     statements: &[StepStatement],
     line: usize,
     device_types: &HashMap<&str, &DeviceType>,
+    controller_io_aliases: &HashSet<(&str, &str)>,
     errors: &mut Vec<PlcError>,
 ) {
     for statement in statements {
@@ -586,7 +598,9 @@ fn validate_raw_io_bypass_in_statements(
             StepStatement::Action(ActionStatement::Set { target, .. })
             | StepStatement::Action(ActionStatement::SetAnalog { target, .. })
             | StepStatement::Action(ActionStatement::SetAnalogExpr { target, .. }) => {
-                if let Some(message) = raw_io_bypass_message(target, device_types) {
+                if let Some(message) =
+                    raw_io_bypass_message(target, device_types, controller_io_aliases)
+                {
                     errors.push(PlcError::semantic_with_reason(
                         line,
                         format!("[SEM-110] {message}"),
@@ -595,7 +609,13 @@ fn validate_raw_io_bypass_in_statements(
                 }
             }
             StepStatement::Repeat { body, .. } => {
-                validate_raw_io_bypass_in_statements(body, line, device_types, errors);
+                validate_raw_io_bypass_in_statements(
+                    body,
+                    line,
+                    device_types,
+                    controller_io_aliases,
+                    errors,
+                );
             }
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
@@ -603,6 +623,7 @@ fn validate_raw_io_bypass_in_statements(
                         &branch.statements,
                         line,
                         device_types,
+                        controller_io_aliases,
                         errors,
                     );
                 }
@@ -613,6 +634,7 @@ fn validate_raw_io_bypass_in_statements(
                         &branch.statements,
                         line,
                         device_types,
+                        controller_io_aliases,
                         errors,
                     );
                 }
@@ -625,10 +647,16 @@ fn validate_raw_io_bypass_in_statements(
 fn raw_io_bypass_message(
     target: &ActionTarget,
     device_types: &HashMap<&str, &DeviceType>,
+    controller_io_aliases: &HashSet<(&str, &str)>,
 ) -> Option<String> {
     if target.port != "self" && parse_physical_plc_port_ref(&target.port).is_some() {
         return Some(format!(
             "normal task action writes controller port `{target}` directly"
+        ));
+    }
+    if controller_io_aliases.contains(&(target.device.as_str(), target.port.as_str())) {
+        return Some(format!(
+            "normal task action writes controller IO alias `{target}` directly"
         ));
     }
 

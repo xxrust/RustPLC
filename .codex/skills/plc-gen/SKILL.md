@@ -56,12 +56,25 @@ If a wait depends on ordinary PLC inputs or sensor devices that are not topology
 Examples:
 - homing / target sensors for a motion platform
 - presence sensors, cooling sensors, or manual reset inputs
-- any `plc_main.X*` mapped field signal that runtime will not synthesize for you
+- any `plc_main.<alias>` or `plc_main.X*` mapped field signal that runtime will not synthesize for you
 
 Only topology-closed semantic device actions, such as a cylinder action with built-in endpoint semantics, may advance without hand-authored nominal sensor events.
 
 Before freezing intent anchors, run a real trace and confirm it covers the intended cycle boundary.
 If the trace stalls because the scenario only drove operator start and never drove the dependent field inputs, repair the scenario first instead of guessing the contract.
+
+## Hard Guardrail: Operator Boundary Is Not A Device
+
+Do not model a human operator as a normal `device`, and do not invent reverse topology links from the PLC back into a push button.
+
+For buttons, selectors, reset inputs, manual acknowledgements, and HMI commands:
+- keep the physical input as a semantic field device plus `relation { from: <button>.out, to: plc_main.<input_alias>, via: reports_to }`
+- define that alias in `controller_io plc_main { ... }` inside `controller.plc`; use raw `plc_main.X*` only for minimal fixtures or when no project alias exists yet
+- record the operator front-door semantics in the system/project docs: actor, command name, trigger type, allowed state, reject behavior, and required visible feedback
+- for complex projects, scenario input events should carry `actor` / `source` provenance when the event represents an operator action
+- outputs back to the human, such as lamps, buzzers, HMI status, and alarm messages, are feedback obligations, not proof that the button has an input side
+
+Use `docs/architecture/operator-boundary-front-door.md` as the design source for this boundary.
 
 ## Hard Guardrail: Prefer Structured Source Sets
 
@@ -149,6 +162,12 @@ Minimum required shape:
 - include the workpiece fragment in the compileable bundle when automatic tasks use the flow
 - write `effect: acquire ...`, `effect: transfer ...`, `effect: finish ...` on the actual task steps
 
+Capacity rules:
+- use `capacity: 1` for true single-part positions such as pickup positions, process stations, sleeve entries, handoff points, and robot holders
+- use `capacity > 1` for finite containers such as storage boxes, bins, racks, magazines, cassettes, trays, buffers, hoppers, reject bins, and scrap boxes
+- if the source contract names a box/bin/rack/buffer but does not provide a number, choose a conservative finite capacity and record that assumption in `main.system.md`
+- never let the one-cycle nominal scenario alone justify collapsing a real storage container to `capacity: 1`
+
 Do not leave workpiece semantics as a comment-only placeholder when the main production flow consumes or moves parts.
 
 Before validating a workpiece-carrying flow:
@@ -213,6 +232,7 @@ When editing the `plc-gen` skill, prompts, or workflow references themselves, re
 Prefer these stable sources:
 - `AGENTS.md`
 - `docs/architecture/signal-direction.md`
+- `docs/architecture/operator-boundary-front-door.md`
 - `docs/architecture/intent_alignment_verification.md`
 - the confirmed authored intent source such as `plc/main.system.md`
 
@@ -223,9 +243,11 @@ Do not proceed from mojibake or partially decoded system text.
 
 Controller / IO modeling guardrail:
 - for scaffold delivery or any complex project that must survive real toolchain validation, prefer `device plc_main: plc { model_ref: ... }` backed by `devices/controllers/*.toml`
+- for complex projects, define project-level names in `controller_io plc_main { input/output <alias>: X0/Y0/... { purpose: "...", safe_state: off } }`
+- prefer using `plc_main.<alias>` in `connections.plc`; let semantic/preprocess lower aliases to canonical `X/Y/AI/AO` synthetic nodes
 - do not invent inline controller `ports: [...]` in business DSL
 - do not use raw `digital_input` / `digital_output` devices as the default topology backbone for complex projects when those names are only controller channels
-- prefer semantic field devices plus explicit `relation { from, to, via }` mapping to `plc_main.<port>`
+- prefer semantic field devices plus explicit `relation { from, to, via }` mapping to `plc_main.<alias>`; raw `plc_main.<port>` is acceptable for small tests but should not be the complex-project default
 - if validation reports `SEM-108` or `SCN-MAP-010`, rewrite the topology first
 
 General rules:

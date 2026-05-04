@@ -168,11 +168,10 @@ impl Default for RuntimeBudgetThresholds {
 }
 
 pub(in crate::cli) fn compile_pipeline(input: &LoadedPlcSource) -> Result<IrBundle, Vec<String>> {
-    let program =
-        crate::cli_support::plc_pipeline::parse_loaded_plc_with_required_purpose(input)
-            .map_err(|err| vec![err])?;
+    let program = crate::cli_support::plc_pipeline::parse_loaded_plc_with_required_purpose(input)
+        .map_err(|err| vec![err])?;
     for warning in collect_topology_deprecation_warnings(&program.topology) {
-        eprintln!("WARNING [deprecation] {warning}");
+        eprintln!("WARNING [topology] {warning}");
     }
 
     let devices_dir = Path::new("devices");

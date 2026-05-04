@@ -20,10 +20,18 @@ pub fn preprocess_program_with_library(
     device_library: Option<&crate::device_library::DeviceLibrary>,
 ) -> Result<PlcProgram, Vec<PlcError>> {
     let expanded_tasks = expand_repeat_blocks(&program.tasks)?;
-    let used_controller_ports =
-        collect_used_controller_port_ids(&program.topology, &program.constraints, &expanded_tasks);
-    let expanded_topology =
-        expand_plc_controller_devices(&program.topology, &used_controller_ports)?;
+    let controller_io_aliases = resolve_controller_io_aliases(&program.topology)?;
+    let used_controller_ports = collect_used_controller_port_ids(
+        &program.topology,
+        &program.constraints,
+        &expanded_tasks,
+        &controller_io_aliases,
+    );
+    let expanded_topology = expand_plc_controller_devices(
+        &program.topology,
+        &used_controller_ports,
+        &controller_io_aliases,
+    )?;
     let mut rewritten = program.clone();
     rewritten.tasks = expanded_tasks;
     rewritten.topology = expanded_topology;
@@ -636,10 +644,228 @@ struct ResolvedControllerPort {
     external: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+struct ControllerIoAliasMap {
+    by_controller_alias: HashMap<(String, String), ResolvedControllerIoAlias>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedControllerIoAlias {
+    canonical_port: String,
+}
+
+impl ControllerIoAliasMap {
+    fn canonical_for(&self, controller: &str, alias: &str) -> Option<&str> {
+        self.by_controller_alias
+            .get(&(controller.to_string(), alias.to_string()))
+            .map(|resolved| resolved.canonical_port.as_str())
+    }
+}
+
+fn resolve_controller_io_aliases(
+    topology: &TopologySection,
+) -> Result<ControllerIoAliasMap, Vec<PlcError>> {
+    let mut errors = Vec::<PlcError>::new();
+    let mut resolved = ControllerIoAliasMap::default();
+    let devices_by_name = topology
+        .devices
+        .iter()
+        .map(|device| (device.name.as_str(), device))
+        .collect::<HashMap<_, _>>();
+    let device_names = devices_by_name
+        .keys()
+        .copied()
+        .collect::<HashSet<&str>>();
+    let mut seen_aliases = HashSet::<(String, String)>::new();
+    let mut seen_ports = HashSet::<(String, String)>::new();
+
+    for declaration in &topology.controller_io {
+        let Some(controller) = devices_by_name.get(declaration.controller.as_str()) else {
+            errors.push(PlcError::undefined_reference_with_reason(
+                declaration.line.max(1),
+                "controller_io.controller",
+                &declaration.controller,
+                "controller_io 必须引用已声明的 plc 控制器",
+            ));
+            continue;
+        };
+        if !matches!(controller.device_type, DeviceType::Plc) {
+            errors.push(PlcError::type_mismatch_with_reason(
+                declaration.line.max(1),
+                "plc",
+                device_type_name(&controller.device_type),
+                format!("controller_io {}", declaration.controller),
+                "controller_io 只能绑定到 plc 控制器设备",
+            ));
+            continue;
+        }
+
+        let controller_ports = match resolve_plc_ports(controller) {
+            Ok(ports) => ports,
+            Err(mut local_errors) => {
+                errors.append(&mut local_errors);
+                continue;
+            }
+        };
+        let mut ports_by_canonical = HashMap::<String, &ResolvedControllerPort>::new();
+        for port in &controller_ports {
+            if let Some(port_ref) = parse_plc_port_ref(&port.port.id) {
+                ports_by_canonical.insert(
+                    canonical_physical_device_name(port_ref.kind, port_ref.id),
+                    port,
+                );
+            }
+        }
+
+        for alias in &declaration.aliases {
+            if alias.purpose.as_deref().map(str::trim).unwrap_or("").is_empty() {
+                errors.push(PlcError::semantic_with_reason(
+                    alias.line.max(1),
+                    format!(
+                        "controller_io {}.{} 缺少 purpose",
+                        declaration.controller, alias.alias
+                    ),
+                    "为 I/O 别名写明现场语义，例如 purpose: \"启动按钮输入\"",
+                ));
+            }
+            if parse_plc_port_ref(&alias.alias).is_some() {
+                errors.push(PlcError::semantic_with_reason(
+                    alias.line.max(1),
+                    format!(
+                        "controller_io 别名 {}.{} 不能使用物理端口命名",
+                        declaration.controller, alias.alias
+                    ),
+                    "别名应表达业务语义，例如 start_cycle_cmd 或 feed_belt_run",
+                ));
+            }
+            if device_names.contains(alias.alias.as_str()) {
+                errors.push(PlcError::duplicate_definition_with_reason(
+                    alias.line.max(1),
+                    "controller_io alias",
+                    &alias.alias,
+                    "I/O 别名不能与设备名称冲突",
+                ));
+            }
+            if !seen_aliases.insert((declaration.controller.clone(), alias.alias.clone())) {
+                errors.push(PlcError::duplicate_definition_with_reason(
+                    alias.line.max(1),
+                    "controller_io alias",
+                    &format!("{}.{}", declaration.controller, alias.alias),
+                    "同一控制器下 I/O 别名不能重复",
+                ));
+            }
+            if matches!(alias.direction, ControllerIoDirection::Input) && alias.safe_state.is_some()
+            {
+                errors.push(PlcError::semantic_with_reason(
+                    alias.line.max(1),
+                    format!(
+                        "controller_io input {}.{} 不支持 safe_state",
+                        declaration.controller, alias.alias
+                    ),
+                    "safe_state 只适用于 output 别名；输入安全语义应由上层设备/联锁建模",
+                ));
+            }
+
+            let Some(port_ref) = parse_plc_port_ref(&alias.port) else {
+                errors.push(PlcError::semantic_with_reason(
+                    alias.line.max(1),
+                    format!(
+                        "controller_io {}.{} 绑定了非法 PLC 端口 `{}`",
+                        declaration.controller, alias.alias, alias.port
+                    ),
+                    "端口应写为 X0/Y0/AI0/AO0，兼容 DI0/DO0 也会降级为 X/Y",
+                ));
+                continue;
+            };
+            let canonical_port = canonical_physical_device_name(port_ref.kind, port_ref.id);
+            let Some(profile_port) = ports_by_canonical.get(&canonical_port) else {
+                errors.push(PlcError::semantic_with_reason(
+                    alias.line.max(1),
+                    format!(
+                        "controller_io {}.{} 引用了 profile 中不存在的端口 `{}`",
+                        declaration.controller, alias.alias, alias.port
+                    ),
+                    "请检查 controller model_ref 对应的 devices/controllers/*.toml 端口清单",
+                ));
+                continue;
+            };
+
+            if !controller_io_direction_matches(&alias.direction, port_ref.kind) {
+                errors.push(PlcError::type_mismatch_with_reason(
+                    alias.line.max(1),
+                    controller_io_direction_name(&alias.direction),
+                    controller_io_direction_name_for_port(port_ref.kind),
+                    format!(
+                        "controller_io {}.{} -> {}",
+                        declaration.controller, alias.alias, canonical_port
+                    ),
+                    "input 别名只能绑定 X/AI，output 别名只能绑定 Y/AO",
+                ));
+            }
+            if profile_port.port.port_type != expected_plc_port_type(port_ref.kind) {
+                errors.push(PlcError::type_mismatch_with_reason(
+                    alias.line.max(1),
+                    port_type_name(&expected_plc_port_type(port_ref.kind)),
+                    port_type_name(&profile_port.port.port_type),
+                    format!("controller_io {}.{}", declaration.controller, alias.alias),
+                    "controller profile 中的端口类型必须与端口前缀一致",
+                ));
+            }
+            if !seen_ports.insert((declaration.controller.clone(), canonical_port.clone())) {
+                errors.push(PlcError::duplicate_definition_with_reason(
+                    alias.line.max(1),
+                    "controller_io port",
+                    &format!("{}.{}", declaration.controller, canonical_port),
+                    "同一物理 PLC 端口只能声明一个项目级别名",
+                ));
+            }
+
+            resolved.by_controller_alias.insert(
+                (declaration.controller.clone(), alias.alias.clone()),
+                ResolvedControllerIoAlias { canonical_port },
+            );
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(resolved)
+    } else {
+        Err(errors)
+    }
+}
+
+fn controller_io_direction_matches(direction: &ControllerIoDirection, kind: PlcPortKind) -> bool {
+    matches!(
+        (direction, kind),
+        (
+            ControllerIoDirection::Input,
+            PlcPortKind::DigitalInput | PlcPortKind::AnalogInput
+        ) | (
+            ControllerIoDirection::Output,
+            PlcPortKind::DigitalOutput | PlcPortKind::AnalogOutput
+        )
+    )
+}
+
+fn controller_io_direction_name(direction: &ControllerIoDirection) -> &'static str {
+    match direction {
+        ControllerIoDirection::Input => "input",
+        ControllerIoDirection::Output => "output",
+    }
+}
+
+fn controller_io_direction_name_for_port(kind: PlcPortKind) -> &'static str {
+    match kind {
+        PlcPortKind::DigitalInput | PlcPortKind::AnalogInput => "input",
+        PlcPortKind::DigitalOutput | PlcPortKind::AnalogOutput => "output",
+    }
+}
+
 fn collect_used_controller_port_ids(
     topology: &TopologySection,
     constraints: &ConstraintsSection,
     tasks: &TasksSection,
+    aliases: &ControllerIoAliasMap,
 ) -> HashSet<String> {
     let plc_names = topology
         .devices
@@ -654,19 +880,21 @@ fn collect_used_controller_port_ids(
             &connection.from,
             connection.from_port.as_deref(),
             &plc_names,
+            aliases,
             &mut used,
         );
         collect_used_controller_port_from_relation_endpoint(
             &connection.to,
             connection.to_port.as_deref(),
             &plc_names,
+            aliases,
             &mut used,
         );
     }
 
     for rule in &constraints.safety {
-        collect_used_controller_port_from_safety_operand(&rule.left, &plc_names, &mut used);
-        collect_used_controller_port_from_safety_operand(&rule.right, &plc_names, &mut used);
+        collect_used_controller_port_from_safety_operand(&rule.left, &plc_names, aliases, &mut used);
+        collect_used_controller_port_from_safety_operand(&rule.right, &plc_names, aliases, &mut used);
     }
 
     for task in &tasks.tasks {
@@ -674,6 +902,7 @@ fn collect_used_controller_port_ids(
             collect_used_controller_port_ids_from_statements(
                 &step.statements,
                 &plc_names,
+                aliases,
                 &mut used,
             );
         }
@@ -686,33 +915,41 @@ fn collect_used_controller_port_from_relation_endpoint(
     device: &str,
     port: Option<&str>,
     plc_names: &HashSet<String>,
+    aliases: &ControllerIoAliasMap,
     used: &mut HashSet<String>,
 ) {
     if let Some(port) = port {
         if plc_names.contains(device) {
-            collect_used_controller_port_reference(port, plc_names, used);
+            collect_used_controller_port_reference(port, plc_names, aliases, used);
+            if let Some(canonical) = aliases.canonical_for(device, port) {
+                used.insert(canonical.to_string());
+            }
         }
         return;
     }
 
-    collect_used_controller_port_reference(device, plc_names, used);
+    collect_used_controller_port_reference(device, plc_names, aliases, used);
 }
 
 fn collect_used_controller_port_from_safety_operand(
     operand: &SafetyOperand,
     plc_names: &HashSet<String>,
+    aliases: &ControllerIoAliasMap,
     used: &mut HashSet<String>,
 ) {
     match operand {
         SafetyOperand::State(state) => {
             if plc_names.contains(&state.device) {
-                collect_used_controller_port_reference(&state.port, plc_names, used);
+                collect_used_controller_port_reference(&state.port, plc_names, aliases, used);
+                if let Some(canonical) = aliases.canonical_for(&state.device, &state.port) {
+                    used.insert(canonical.to_string());
+                }
             } else {
-                collect_used_controller_port_reference(&state.device, plc_names, used);
+                collect_used_controller_port_reference(&state.device, plc_names, aliases, used);
             }
         }
         SafetyOperand::Threshold { device, .. } => {
-            collect_used_controller_port_reference(device, plc_names, used);
+            collect_used_controller_port_reference(device, plc_names, aliases, used);
         }
     }
 }
@@ -720,12 +957,13 @@ fn collect_used_controller_port_from_safety_operand(
 fn collect_used_controller_port_ids_from_statements(
     statements: &[StepStatement],
     plc_names: &HashSet<String>,
+    aliases: &ControllerIoAliasMap,
     used: &mut HashSet<String>,
 ) {
     for statement in statements {
         match statement {
             StepStatement::Action(action) => {
-                collect_used_controller_port_from_action(action, plc_names, used);
+                collect_used_controller_port_from_action(action, plc_names, aliases, used);
             }
             StepStatement::Wait(wait) => {
                 let conditions = match &wait.condition {
@@ -736,29 +974,30 @@ fn collect_used_controller_port_ids_from_statements(
                 };
                 for condition in conditions {
                     if let Some((left_expr, right_expr)) = condition.expression_pair() {
-                        collect_used_controller_port_from_expression(left_expr, plc_names, used);
-                        collect_used_controller_port_from_expression(right_expr, plc_names, used);
+                        collect_used_controller_port_from_expression(left_expr, plc_names, aliases, used);
+                        collect_used_controller_port_from_expression(right_expr, plc_names, aliases, used);
                     } else {
-                        collect_used_controller_port_reference(&condition.left, plc_names, used);
+                        collect_used_controller_port_reference(&condition.left, plc_names, aliases, used);
                     }
                 }
             }
             StepStatement::IfElse { condition, .. } => {
                 if let Some((left_expr, right_expr)) = condition.expression_pair() {
-                    collect_used_controller_port_from_expression(left_expr, plc_names, used);
-                    collect_used_controller_port_from_expression(right_expr, plc_names, used);
+                    collect_used_controller_port_from_expression(left_expr, plc_names, aliases, used);
+                    collect_used_controller_port_from_expression(right_expr, plc_names, aliases, used);
                 } else {
-                    collect_used_controller_port_reference(&condition.left, plc_names, used);
+                    collect_used_controller_port_reference(&condition.left, plc_names, aliases, used);
                 }
             }
             StepStatement::Repeat { body, .. } => {
-                collect_used_controller_port_ids_from_statements(body, plc_names, used);
+                collect_used_controller_port_ids_from_statements(body, plc_names, aliases, used);
             }
             StepStatement::Parallel(block) => {
                 for branch in &block.branches {
                     collect_used_controller_port_ids_from_statements(
                         &branch.statements,
                         plc_names,
+                        aliases,
                         used,
                     );
                 }
@@ -768,6 +1007,7 @@ fn collect_used_controller_port_ids_from_statements(
                     collect_used_controller_port_ids_from_statements(
                         &branch.statements,
                         plc_names,
+                        aliases,
                         used,
                     );
                 }
@@ -784,6 +1024,7 @@ fn collect_used_controller_port_ids_from_statements(
 fn collect_used_controller_port_from_action(
     action: &ActionStatement,
     plc_names: &HashSet<String>,
+    aliases: &ControllerIoAliasMap,
     used: &mut HashSet<String>,
 ) {
     match action {
@@ -795,26 +1036,29 @@ fn collect_used_controller_port_from_action(
         | ActionStatement::AxisMoveRelative { target, .. }
         | ActionStatement::AxisMoveAbsolute { target, .. } => {
             if plc_names.contains(&target.device) {
-                collect_used_controller_port_reference(&target.port, plc_names, used);
+                collect_used_controller_port_reference(&target.port, plc_names, aliases, used);
+                if let Some(canonical) = aliases.canonical_for(&target.device, &target.port) {
+                    used.insert(canonical.to_string());
+                }
             } else {
-                collect_used_controller_port_reference(&target.device, plc_names, used);
+                collect_used_controller_port_reference(&target.device, plc_names, aliases, used);
             }
         }
         ActionStatement::Compute { target, expr } => {
-            collect_used_controller_port_reference(target, plc_names, used);
-            collect_used_controller_port_from_expression(expr, plc_names, used);
+            collect_used_controller_port_reference(target, plc_names, aliases, used);
+            collect_used_controller_port_from_expression(expr, plc_names, aliases, used);
         }
         ActionStatement::Call { args, binding, .. } => {
             for arg in args {
-                collect_used_controller_port_from_expression(arg, plc_names, used);
+                collect_used_controller_port_from_expression(arg, plc_names, aliases, used);
             }
             match binding {
                 AstExternCallBinding::Single(target) => {
-                    collect_used_controller_port_reference(target, plc_names, used);
+                    collect_used_controller_port_reference(target, plc_names, aliases, used);
                 }
                 AstExternCallBinding::Tuple(targets) => {
                     for target in targets {
-                        collect_used_controller_port_reference(target, plc_names, used);
+                        collect_used_controller_port_reference(target, plc_names, aliases, used);
                     }
                 }
             }
@@ -822,18 +1066,21 @@ fn collect_used_controller_port_from_action(
         ActionStatement::CamEngage { target }
         | ActionStatement::CamDisengage { target }
         | ActionStatement::CamSwitch { target, .. } => {
-            collect_used_controller_port_reference(target, plc_names, used);
+            collect_used_controller_port_reference(target, plc_names, aliases, used);
         }
         ActionStatement::CamPhase { target, offset } => {
-            collect_used_controller_port_reference(target, plc_names, used);
-            collect_used_controller_port_from_expression(offset, plc_names, used);
+            collect_used_controller_port_reference(target, plc_names, aliases, used);
+            collect_used_controller_port_from_expression(offset, plc_names, aliases, used);
         }
         ActionStatement::DeviceAction { target, args, .. } => {
             if plc_names.contains(&target.device) {
-                collect_used_controller_port_reference(&target.port, plc_names, used);
+                collect_used_controller_port_reference(&target.port, plc_names, aliases, used);
+                if let Some(canonical) = aliases.canonical_for(&target.device, &target.port) {
+                    used.insert(canonical.to_string());
+                }
             }
             for arg in args {
-                collect_used_controller_port_from_expression(arg, plc_names, used);
+                collect_used_controller_port_from_expression(arg, plc_names, aliases, used);
             }
         }
         ActionStatement::Log { .. } => {}
@@ -843,22 +1090,23 @@ fn collect_used_controller_port_from_action(
 fn collect_used_controller_port_from_expression(
     expr: &AstExpression,
     plc_names: &HashSet<String>,
+    aliases: &ControllerIoAliasMap,
     used: &mut HashSet<String>,
 ) {
     match expr {
         AstExpression::Variable(name) => {
-            collect_used_controller_port_reference(name, plc_names, used);
+            collect_used_controller_port_reference(name, plc_names, aliases, used);
         }
         AstExpression::UnaryNeg(inner) | AstExpression::UnaryNot(inner) => {
-            collect_used_controller_port_from_expression(inner, plc_names, used);
+            collect_used_controller_port_from_expression(inner, plc_names, aliases, used);
         }
         AstExpression::BinaryOp { left, right, .. } => {
-            collect_used_controller_port_from_expression(left, plc_names, used);
-            collect_used_controller_port_from_expression(right, plc_names, used);
+            collect_used_controller_port_from_expression(left, plc_names, aliases, used);
+            collect_used_controller_port_from_expression(right, plc_names, aliases, used);
         }
         AstExpression::FunctionCall { args, .. } => {
             for arg in args {
-                collect_used_controller_port_from_expression(arg, plc_names, used);
+                collect_used_controller_port_from_expression(arg, plc_names, aliases, used);
             }
         }
         AstExpression::Literal(_) | AstExpression::Boolean(_) => {}
@@ -868,6 +1116,7 @@ fn collect_used_controller_port_from_expression(
 fn collect_used_controller_port_reference(
     reference: &str,
     plc_names: &HashSet<String>,
+    aliases: &ControllerIoAliasMap,
     used: &mut HashSet<String>,
 ) {
     if let Some(port_ref) = parse_plc_port_ref(reference) {
@@ -879,6 +1128,8 @@ fn collect_used_controller_port_reference(
         if plc_names.contains(device) {
             if let Some(port_ref) = parse_plc_port_ref(port) {
                 used.insert(canonical_physical_device_name(port_ref.kind, port_ref.id));
+            } else if let Some(canonical) = aliases.canonical_for(device, port) {
+                used.insert(canonical.to_string());
             }
         }
     }
@@ -887,6 +1138,7 @@ fn collect_used_controller_port_reference(
 fn expand_plc_controller_devices(
     topology: &TopologySection,
     used_controller_ports: &HashSet<String>,
+    aliases: &ControllerIoAliasMap,
 ) -> Result<TopologySection, Vec<PlcError>> {
     let mut errors = Vec::<PlcError>::new();
     let mut rewritten_devices = topology
@@ -976,6 +1228,13 @@ fn expand_plc_controller_devices(
                     name: synthetic_name.clone(),
                 },
             );
+            let canonical_id = canonical_physical_device_name(port_ref.kind, port_ref.id);
+            port_lookup.insert(
+                (plc.name.clone(), canonical_id),
+                ResolvedPlcEndpoint {
+                    name: synthetic_name.clone(),
+                },
+            );
             if !used_controller_ports.contains(&synthetic_name) {
                 continue;
             }
@@ -1034,6 +1293,15 @@ fn expand_plc_controller_devices(
         }
     }
 
+    for ((controller, alias), resolved_alias) in &aliases.by_controller_alias {
+        port_lookup.insert(
+            (controller.clone(), alias.clone()),
+            ResolvedPlcEndpoint {
+                name: resolved_alias.canonical_port.clone(),
+            },
+        );
+    }
+
     let mut rewritten_connections = Vec::<TopologyConnection>::new();
     for connection in &topology.connections {
         let Some(rewritten) =
@@ -1054,6 +1322,7 @@ fn expand_plc_controller_devices(
 
     Ok(TopologySection {
         devices: rewritten_devices,
+        controller_io: Vec::new(),
         stations: topology.stations.clone(),
         handshakes: topology.handshakes.clone(),
         transfer_points: topology.transfer_points.clone(),

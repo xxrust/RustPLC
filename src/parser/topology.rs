@@ -228,6 +228,7 @@ fn reject_extern_calls_in_expression(
 
 fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError> {
     let mut devices = Vec::new();
+    let mut controller_io = Vec::new();
     let mut stations = Vec::new();
     let mut handshakes = Vec::new();
     let mut transfer_points = Vec::new();
@@ -245,6 +246,9 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
     for entry in pair.into_inner() {
         match entry.as_rule() {
             Rule::device_declaration => devices.push(parse_device_declaration(entry)?),
+            Rule::controller_io_declaration => {
+                controller_io.push(parse_controller_io_declaration(entry)?);
+            }
             Rule::station_declaration => stations.push(parse_station_declaration(entry)?),
             Rule::handshake_declaration => handshakes.push(parse_handshake_declaration(entry)?),
             Rule::transfer_point_declaration => {
@@ -282,6 +286,7 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
 
     Ok(TopologySection {
         devices,
+        controller_io,
         stations,
         handshakes,
         transfer_points,
@@ -295,6 +300,111 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
         cam_tables,
         extern_functions,
         axis_fault_contracts,
+    })
+}
+
+fn parse_controller_io_declaration(pair: Pair<Rule>) -> Result<ControllerIoDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut controller = None;
+    let mut aliases = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => controller = Some(part.as_str().to_string()),
+            Rule::controller_io_block => {
+                for alias in part.into_inner() {
+                    if alias.as_rule() == Rule::controller_io_alias {
+                        aliases.push(parse_controller_io_alias(alias)?);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ControllerIoDeclaration {
+        line,
+        controller: controller
+            .ok_or_else(|| PlcError::parse(line, "controller_io 声明缺少控制器名称"))?,
+        aliases,
+    })
+}
+
+fn parse_controller_io_alias(
+    pair: Pair<Rule>,
+) -> Result<ControllerIoAliasDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut direction = None;
+    let mut alias = None;
+    let mut port = None;
+    let mut purpose = None;
+    let mut safe_state = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::controller_io_direction => {
+                direction = Some(match part.as_str() {
+                    "input" => ControllerIoDirection::Input,
+                    "output" => ControllerIoDirection::Output,
+                    other => {
+                        return Err(PlcError::parse(
+                            line_of(&part),
+                            format!("controller_io 方向不支持 `{other}`"),
+                        ));
+                    }
+                });
+            }
+            Rule::identifier => {
+                if alias.is_none() {
+                    alias = Some(part.as_str().to_string());
+                } else if port.is_none() {
+                    port = Some(part.as_str().to_string());
+                }
+            }
+            Rule::controller_io_alias_block => {
+                for field in part.into_inner() {
+                    if field.as_rule() != Rule::controller_io_field {
+                        continue;
+                    }
+                    let field_line = line_of(&field);
+                    let mut inner = field.into_inner();
+                    let field_name = inner
+                        .next()
+                        .ok_or_else(|| {
+                            PlcError::parse(field_line, "controller_io 字段缺少名称")
+                        })?
+                        .as_str()
+                        .to_string();
+                    let value_wrapper = inner
+                        .next()
+                        .ok_or_else(|| {
+                            PlcError::parse(field_line, "controller_io 字段缺少值")
+                        })?;
+                    let value = first_inner(value_wrapper, field_line, "controller_io 字段值")?;
+                    let value = expect_identifier_or_string(value, &field_name)?;
+                    match field_name.as_str() {
+                        "purpose" => purpose = Some(value),
+                        "safe_state" => safe_state = Some(value),
+                        _ => {
+                            return Err(PlcError::parse(
+                                field_line,
+                                format!("不支持的 controller_io 字段: {field_name}"),
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ControllerIoAliasDeclaration {
+        line,
+        direction: direction.ok_or_else(|| PlcError::parse(line, "controller_io 别名缺少方向"))?,
+        alias: alias.ok_or_else(|| PlcError::parse(line, "controller_io 别名缺少名称"))?,
+        port: port.ok_or_else(|| PlcError::parse(line, "controller_io 别名缺少物理端口"))?,
+        purpose,
+        safe_state,
     })
 }
 

@@ -40,6 +40,10 @@ fn new_single_file_layout_still_creates_main_plc() {
 
     assert!(project_dir.join("plc/main.plc").exists());
     assert!(!project_dir.join("rustplc.bundle.toml").exists());
+    let main_plc = fs::read_to_string(project_dir.join("plc/main.plc")).expect("read main plc");
+    assert!(main_plc.contains("controller_io plc_main"));
+    assert!(main_plc.contains("plc_main.start_cycle_cmd"));
+    assert!(main_plc.contains("location reject_bin: workpiece_location { capacity: 20 }"));
 
     let manifest =
         fs::read_to_string(project_dir.join("rustplc.project.toml")).expect("read manifest");
@@ -71,6 +75,13 @@ fn new_structured_fragments_layout_creates_bundle_project_that_compiles() {
         project_dir.join("00_topology/controller.plc").exists(),
         "topology controller should exist"
     );
+    let controller = fs::read_to_string(project_dir.join("00_topology/controller.plc"))
+        .expect("read controller");
+    assert!(controller.contains("controller_io plc_main"));
+    let connections = fs::read_to_string(project_dir.join("00_topology/connections.plc"))
+        .expect("read connections");
+    assert!(connections.contains("plc_main.start_cycle_cmd"));
+    assert!(connections.contains("plc_main.run_lamp_cmd"));
     assert!(
         project_dir.join("00_topology/devices.plc").exists(),
         "topology devices should exist"
@@ -79,12 +90,16 @@ fn new_structured_fragments_layout_creates_bundle_project_that_compiles() {
         project_dir.join("00_topology/workpieces.plc").exists(),
         "topology workpieces should exist"
     );
+    let workpieces = fs::read_to_string(project_dir.join("00_topology/workpieces.plc"))
+        .expect("read workpieces");
+    assert!(workpieces.contains("location reject_bin: workpiece_location { capacity: 20 }"));
     assert!(
         project_dir.join("00_topology/connections.plc").exists(),
         "topology connections should exist"
     );
-    let station_protocol = fs::read_to_string(project_dir.join("00_topology/_station_protocol.plc"))
-        .expect("read station protocol placeholder");
+    let station_protocol =
+        fs::read_to_string(project_dir.join("00_topology/_station_protocol.plc"))
+            .expect("read station protocol placeholder");
     assert!(station_protocol.contains("supported by the compiler"));
     assert!(station_protocol.contains("tasks: [st01_cycle]"));
     assert!(!station_protocol.contains("future DSL"));
@@ -152,6 +167,10 @@ fn new_structured_fragments_layout_creates_bundle_project_that_compiles() {
         compile.status.success(),
         "structured bundle scaffold should compile, stderr: {}",
         String::from_utf8_lossy(&compile.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&compile.stderr).contains("WORKPIECE-CAP-001"),
+        "fresh scaffold should not emit suspicious container capacity warnings"
     );
 }
 

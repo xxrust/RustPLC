@@ -12,6 +12,8 @@ pub struct PlcProgram {
 pub struct TopologySection {
     pub devices: Vec<DeviceDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controller_io: Vec<ControllerIoDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stations: Vec<StationDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub handshakes: Vec<HandshakeDeclaration>,
@@ -37,6 +39,35 @@ pub struct TopologySection {
     pub extern_functions: Vec<ExternFunctionDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub axis_fault_contracts: Vec<AxisFaultContractDeclaration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControllerIoDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub controller: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<ControllerIoAliasDeclaration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControllerIoAliasDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub direction: ControllerIoDirection,
+    pub alias: String,
+    pub port: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safe_state: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerIoDirection {
+    Input,
+    Output,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1020,6 +1051,7 @@ mod tests {
                     device_type: DeviceType::DigitalOutput,
                     attributes: DeviceAttributes::default(),
                 }],
+                controller_io: Vec::new(),
                 stations: Vec::new(),
                 handshakes: Vec::new(),
                 transfer_points: Vec::new(),

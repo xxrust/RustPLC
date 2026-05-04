@@ -1,12 +1,14 @@
 use crate::ast::{
     DeviceDeclaration, DevicePort, DeviceType, PortRole, PortType, TopologyConnection,
-    TopologyRelation, TopologySection,
+    TopologyRelation, TopologySection, WorkpieceSiteKind,
 };
 use crate::device_library::DeviceDef;
 use crate::device_subtype::{
     normalize_subtype, subtype_compatible_base_types, subtype_matches_device_type,
 };
-use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
+use crate::plc_port::{
+    PlcPortKind, canonical_physical_device_name, parse_physical_plc_port_ref, parse_plc_port_ref,
+};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -133,6 +135,7 @@ pub fn validate_topology_semantics(
             },
         );
     }
+    add_controller_io_alias_ports(topology, &mut devices);
 
     let mut used_explicit_ports = HashSet::<(String, String)>::new();
 
@@ -289,8 +292,54 @@ pub fn validate_topology_semantics(
 }
 
 pub fn collect_topology_deprecation_warnings(topology: &TopologySection) -> Vec<String> {
-    let _ = topology;
-    Vec::new()
+    collect_workpiece_capacity_modeling_warnings(topology)
+}
+
+fn collect_workpiece_capacity_modeling_warnings(topology: &TopologySection) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    for site in &topology.workpiece_sites {
+        if site.kind != WorkpieceSiteKind::WorkpieceLocation || site.capacity > 1 {
+            continue;
+        }
+        if !looks_like_multi_workpiece_container(&site.name) {
+            continue;
+        }
+
+        warnings.push(format!(
+            "WORKPIECE-CAP-001 line {}: workpiece location `{}` looks like a box/bin/rack/buffer container but declares capacity: 1; use capacity > 1 for finite multi-part storage, or rename it as a single-position station if only one part can exist there",
+            site.line.max(1),
+            site.name
+        ));
+    }
+
+    warnings
+}
+
+fn looks_like_multi_workpiece_container(name: &str) -> bool {
+    let normalized = name.to_ascii_lowercase();
+    [
+        "box",
+        "bin",
+        "rack",
+        "magazine",
+        "cassette",
+        "tray",
+        "buffer",
+        "hopper",
+        "storage",
+        "store",
+        "warehouse",
+        "料盒",
+        "料仓",
+        "储料",
+        "储存",
+        "缓存",
+        "托盘",
+        "废料",
+    ]
+    .iter()
+    .any(|token| normalized.contains(token))
 }
 
 pub fn validate_removed_legacy_io_model(
@@ -711,6 +760,56 @@ fn compatible_base_types(subtype: &str) -> Vec<&'static str> {
 
 fn semantic_connections(topology: &TopologySection) -> Vec<TopologyConnection> {
     topology.connections.clone()
+}
+
+fn add_controller_io_alias_ports(
+    topology: &TopologySection,
+    devices: &mut HashMap<String, GateDevice>,
+) {
+    for declaration in &topology.controller_io {
+        let Some(controller) = devices.get(&declaration.controller) else {
+            continue;
+        };
+        if !matches!(controller.kind, DeviceType::Plc) {
+            continue;
+        }
+
+        let profile_ports = controller.ports.clone();
+        let mut alias_ports = Vec::new();
+        for alias in &declaration.aliases {
+            let Some(alias_ref) = parse_plc_port_ref(&alias.port) else {
+                continue;
+            };
+            let canonical = canonical_physical_device_name(alias_ref.kind, alias_ref.id);
+            let Some(profile_port) =
+                find_gate_port_by_canonical_controller_port(&profile_ports, &canonical)
+            else {
+                continue;
+            };
+            alias_ports.push(GatePort {
+                id: alias.alias.clone(),
+                port_type: profile_port.port_type.clone(),
+                role: profile_port.role.clone(),
+                semantic_role: profile_port.semantic_role,
+                explicit: true,
+            });
+        }
+
+        if let Some(controller) = devices.get_mut(&declaration.controller) {
+            controller.ports.extend(alias_ports);
+        }
+    }
+}
+
+fn find_gate_port_by_canonical_controller_port<'a>(
+    ports: &'a [GatePort],
+    canonical: &str,
+) -> Option<&'a GatePort> {
+    ports.iter().find(|port| {
+        parse_plc_port_ref(&port.id)
+            .map(|port_ref| canonical_physical_device_name(port_ref.kind, port_ref.id) == canonical)
+            .unwrap_or(false)
+    })
 }
 
 fn resolved_device_ports(device: &DeviceDeclaration) -> Vec<GatePort> {
@@ -1515,8 +1614,8 @@ fn topology_connection_line(topology: &TopologySection, connection: &TopologyCon
 #[cfg(test)]
 mod tests {
     use super::{
-        validate_device_purpose_required, validate_removed_legacy_io_model,
-        validate_topology_semantics,
+        collect_topology_deprecation_warnings, validate_device_purpose_required,
+        validate_removed_legacy_io_model, validate_topology_semantics,
     };
     use crate::parser::parse_plc;
 
@@ -1570,6 +1669,50 @@ task main:
         assert!(
             codes.contains(&"SEM-108"),
             "legacy IO model should now be rejected"
+        );
+    }
+
+    #[test]
+    fn topology_warning_flags_container_like_single_capacity_workpiece_locations() {
+        let input = r#"
+[topology]
+workpiece part: workpiece_type {
+    normal_terminal_states: [loaded]
+    abnormal_terminal_states: [rejected]
+    ingress_sites: [storage_box]
+    normal_egress_sites: [pickup_position]
+    abnormal_egress_sites: [reject_bin]
+}
+
+location storage_box: workpiece_location { capacity: 1 }
+location pickup_position: workpiece_location { capacity: 1 }
+location reject_bin: workpiece_location { capacity: 20 }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+        let program = parse_plc(input).expect("parse");
+        let warnings = collect_topology_deprecation_warnings(&program.topology);
+        assert!(
+            warnings.iter().any(|warning| {
+                warning.contains("WORKPIECE-CAP-001") && warning.contains("storage_box")
+            }),
+            "container-like single-capacity storage_box should warn: {warnings:?}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| !warning.contains("pickup_position")),
+            "single-position workpiece locations should not warn: {warnings:?}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| !warning.contains("reject_bin")),
+            "multi-capacity container locations should not warn: {warnings:?}"
         );
     }
 
