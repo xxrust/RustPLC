@@ -775,7 +775,9 @@ fn transition_guard_min_interval_ms(guard: &TransitionGuard) -> u64 {
         TransitionGuard::Timeout { duration_ms } | TransitionGuard::Delay { duration_ms } => {
             *duration_ms
         }
-        TransitionGuard::Always | TransitionGuard::Condition { .. } => 0,
+        TransitionGuard::Always
+        | TransitionGuard::Condition { .. }
+        | TransitionGuard::Edge { .. } => 0,
     }
 }
 
@@ -783,8 +785,18 @@ fn transition_guard_name(guard: &TransitionGuard) -> String {
     match guard {
         TransitionGuard::Always => "always".to_string(),
         TransitionGuard::Condition { expression } => format!("condition({expression})"),
+        TransitionGuard::Edge { edge, operand } => {
+            format!("{}({operand})", transition_edge_name(*edge))
+        }
         TransitionGuard::Timeout { duration_ms } => format!("timeout({duration_ms}ms)"),
         TransitionGuard::Delay { duration_ms } => format!("delay({duration_ms}ms)"),
+    }
+}
+
+fn transition_edge_name(edge: crate::ir::EdgeKind) -> &'static str {
+    match edge {
+        crate::ir::EdgeKind::Rising => "rising_edge",
+        crate::ir::EdgeKind::Falling => "falling_edge",
     }
 }
 

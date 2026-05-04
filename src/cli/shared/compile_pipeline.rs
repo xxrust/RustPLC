@@ -479,6 +479,7 @@ fn guard_can_fire_same_tick(guard: &rust_plc::ir::TransitionGuard) -> bool {
     match guard {
         rust_plc::ir::TransitionGuard::Always => true,
         rust_plc::ir::TransitionGuard::Condition { .. } => true,
+        rust_plc::ir::TransitionGuard::Edge { .. } => true,
         rust_plc::ir::TransitionGuard::Timeout { duration_ms } => *duration_ms == 0,
         rust_plc::ir::TransitionGuard::Delay { duration_ms } => *duration_ms == 0,
     }

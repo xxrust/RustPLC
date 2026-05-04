@@ -503,6 +503,14 @@ fn render_wait(wait: &WaitStatement) -> String {
             .map(render_condition)
             .collect::<Vec<_>>()
             .join(" OR "),
+        WaitCondition::Edge(edge) => render_edge_condition(edge.edge, &edge.operand),
+    }
+}
+
+fn render_edge_condition(edge: crate::ast::EdgeKind, operand: &str) -> String {
+    match edge {
+        crate::ast::EdgeKind::Rising => format!("rising_edge({operand})"),
+        crate::ast::EdgeKind::Falling => format!("falling_edge({operand})"),
     }
 }
 

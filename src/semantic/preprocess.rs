@@ -971,6 +971,15 @@ fn collect_used_controller_port_ids_from_statements(
                     WaitCondition::And(conditions) | WaitCondition::Or(conditions) => {
                         conditions.iter().collect::<Vec<_>>()
                     }
+                    WaitCondition::Edge(edge) => {
+                        collect_used_controller_port_reference(
+                            &edge.operand,
+                            plc_names,
+                            aliases,
+                            used,
+                        );
+                        Vec::new()
+                    }
                 };
                 for condition in conditions {
                     if let Some((left_expr, right_expr)) = condition.expression_pair() {

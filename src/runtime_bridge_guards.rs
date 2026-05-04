@@ -50,6 +50,92 @@
     }
 }
 
+fn edge_guard_to_instr(
+    resolver: &TopologyResolver,
+    state_name: &str,
+    edge: IrEdgeKind,
+    operand: &str,
+    variable_indices: &HashMap<String, u16>,
+    next: StepId,
+    timeout: Option<Timeout>,
+) -> Result<Instr<'static>, BridgeError> {
+    let rt_edge = match edge {
+        IrEdgeKind::Rising => RtEdgeKind::Rising,
+        IrEdgeKind::Falling => RtEdgeKind::Falling,
+    };
+    match parse_bool_guard_operand(operand).ok_or_else(|| BridgeError::UnsupportedGuardExpression {
+        state: state_name.to_string(),
+        expression: format!("edge({operand})"),
+    })? {
+        BoolGuardOperand::Identifier(name) => {
+            if let Some(index) = variable_indices.get(&name).copied() {
+                Ok(Instr::WaitVariableEdge {
+                    index,
+                    edge: rt_edge,
+                    next,
+                    timeout,
+                })
+            } else {
+                if resolver.sensor_is_cylinder_end_feedback(&name) {
+                    return Err(BridgeError::UnsupportedGuardExpression {
+                        state: state_name.to_string(),
+                        expression: format!("edge({name})"),
+                    });
+                }
+                let id = resolver.resolve_digital_input_id(state_name, &name)?;
+                if resolver.digital_input_is_cylinder_end_feedback(id) {
+                    return Err(BridgeError::UnsupportedGuardExpression {
+                        state: state_name.to_string(),
+                        expression: format!("edge({name})"),
+                    });
+                }
+                Ok(Instr::WaitDigitalEdge {
+                    id,
+                    edge: rt_edge,
+                    next,
+                    timeout,
+                })
+            }
+        }
+        BoolGuardOperand::PlcPort(raw) => {
+            let port = raw
+                .split('.')
+                .next_back()
+                .and_then(parse_physical_plc_port_ref)
+                .ok_or_else(|| BridgeError::UnsupportedGuardExpression {
+                    state: state_name.to_string(),
+                    expression: raw.clone(),
+                })?;
+            if !matches!(port.kind, PlcPortKind::DigitalInput) {
+                return Err(BridgeError::UnsupportedGuardExpression {
+                    state: state_name.to_string(),
+                    expression: raw,
+                });
+            }
+            let id = DigitalInputId(port.id);
+            if resolver.digital_input_is_cylinder_end_feedback(id) {
+                return Err(BridgeError::UnsupportedGuardExpression {
+                    state: state_name.to_string(),
+                    expression: raw,
+                });
+            }
+            Ok(Instr::WaitDigitalEdge {
+                id,
+                edge: rt_edge,
+                next,
+                timeout,
+            })
+        }
+        BoolGuardOperand::StateRef(state_ref) => Err(BridgeError::UnsupportedGuardExpression {
+            state: state_name.to_string(),
+            expression: format!(
+                "edge({}.{}.{})",
+                state_ref.device, state_ref.port, state_ref.state
+            ),
+        }),
+    }
+}
+
 fn parse_analog_region_guard(expr: &str) -> Option<(String, Vec<usize>)> {
     // Expected: "<device> in {region_1, region_2}"
     let (lhs, rhs) = expr.split_once(" in ")?;

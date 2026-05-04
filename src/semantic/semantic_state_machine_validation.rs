@@ -2,7 +2,7 @@
 struct AnalyzedStatements {
     actions: Vec<TransitionAction>,
     effects: Vec<IrWorkpieceEffect>,
-    waits: Vec<String>,
+    waits: Vec<TransitionGuard>,
     delays_ms: Vec<u64>,
     gotos: Vec<GotoDirective>,
     timeouts: Vec<TimeoutDirective>,
@@ -1972,6 +1972,7 @@ fn wait_asserts_brake_confirmed(
         WaitCondition::Single(term) => vec![term],
         WaitCondition::And(terms) => terms.iter().collect(),
         WaitCondition::Or(_) => return false,
+        WaitCondition::Edge(_) => return false,
     };
 
     terms.into_iter().any(|term| {
@@ -2223,6 +2224,15 @@ fn validate_wait_device_references_in_statements(
     for statement in statements {
         match statement {
             StepStatement::Wait(wait) => {
+                if let WaitCondition::Edge(edge) = &wait.condition {
+                    validate_wait_operand_device(
+                        &edge.operand,
+                        line,
+                        "边沿触发操作数",
+                        device_kinds,
+                        errors,
+                    );
+                }
                 let should_validate_references =
                     matches!(wait.condition, WaitCondition::And(_) | WaitCondition::Or(_));
                 for condition in wait_condition_terms(&wait.condition) {
@@ -2324,6 +2334,7 @@ fn wait_condition_terms(condition: &WaitCondition) -> Vec<&ConditionExpression> 
     match condition {
         WaitCondition::Single(term) => vec![term],
         WaitCondition::And(terms) | WaitCondition::Or(terms) => terms.iter().collect(),
+        WaitCondition::Edge(_) => Vec::new(),
     }
 }
 

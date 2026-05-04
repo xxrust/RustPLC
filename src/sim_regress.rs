@@ -762,6 +762,9 @@ fn io_sizes_for_program_and_scenario(
                 Instr::WaitDigital { id, .. } => {
                     max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
                 }
+                Instr::WaitDigitalEdge { id, .. } => {
+                    max_di = Some(max_di.map_or(id.0, |m| m.max(id.0)));
+                }
                 Instr::WaitAnalog { id, .. } => {
                     max_ai = Some(max_ai.map_or(id.0, |m| m.max(id.0)));
                 }

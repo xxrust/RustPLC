@@ -227,6 +227,32 @@ fn convert_single_transition(
                 })
             }
         }
+        TransitionGuard::Edge { edge, operand } => {
+            let target = lookup_target_step(state_name, &t.to, state_to_step)?;
+            let next = if t.actions.is_empty() && t.effects.is_empty() {
+                target
+            } else {
+                push_action_step(
+                    steps,
+                    &format!("{state_name}__edge_actions"),
+                    resolver,
+                    state_name,
+                    &t.actions,
+                    &t.effects,
+                    workpiece_ctx,
+                    target,
+                    state_to_step,
+                    task_entry_steps,
+                    tick_ms,
+                    variable_indices,
+                    cam_indices,
+                    cam_table_indices,
+                    extern_signatures,
+                    None,
+                )?
+            };
+            edge_guard_to_instr(resolver, state_name, *edge, operand, variable_indices, next, None)
+        }
         TransitionGuard::Timeout { .. } => Err(BridgeError::UnsupportedTransitionShape {
             state: state_name.to_string(),
             details: "timeout-only transition is not supported (expected wait+timeout)".to_string(),
@@ -294,13 +320,19 @@ fn convert_two_transitions(
 
     let (cond, fallback_transition, after_ticks) = if let Some((cond, timeout)) = match pair {
         (a, b)
-            if matches!(a.guard, TransitionGuard::Condition { .. })
+            if matches!(
+                a.guard,
+                TransitionGuard::Condition { .. } | TransitionGuard::Edge { .. }
+            )
                 && matches!(b.guard, TransitionGuard::Timeout { .. }) =>
         {
             Some((a, b))
         }
         (a, b)
-            if matches!(b.guard, TransitionGuard::Condition { .. })
+            if matches!(
+                b.guard,
+                TransitionGuard::Condition { .. } | TransitionGuard::Edge { .. }
+            )
                 && matches!(a.guard, TransitionGuard::Timeout { .. }) =>
         {
             Some((b, a))
@@ -317,13 +349,19 @@ fn convert_two_transitions(
         )
     } else if let Some((cond, fallback)) = match pair {
         (a, b)
-            if matches!(a.guard, TransitionGuard::Condition { .. })
+            if matches!(
+                a.guard,
+                TransitionGuard::Condition { .. } | TransitionGuard::Edge { .. }
+            )
                 && matches!(b.guard, TransitionGuard::Always) =>
         {
             Some((a, b))
         }
         (a, b)
-            if matches!(b.guard, TransitionGuard::Condition { .. })
+            if matches!(
+                b.guard,
+                TransitionGuard::Condition { .. } | TransitionGuard::Edge { .. }
+            )
                 && matches!(a.guard, TransitionGuard::Always) =>
         {
             Some((b, a))
@@ -331,15 +369,13 @@ fn convert_two_transitions(
         _ => None,
     } {
         (cond, fallback, 0)
+    } else if let Some((cond, fallback)) = complementary_condition_pair(pair) {
+        (cond, fallback, 0)
     } else {
         return Err(BridgeError::UnsupportedTransitionShape {
             state: state_name.to_string(),
             details: "expected condition+timeout, condition+always, or always+timeout".to_string(),
         });
-    };
-
-    let TransitionGuard::Condition { expression } = &cond.guard else {
-        unreachable!();
     };
 
     let cond_target = lookup_target_step(state_name, &cond.to, state_to_step)?;
@@ -391,19 +427,63 @@ fn convert_two_transitions(
             )?
         };
 
-    condition_to_wait_instr(
-        resolver,
-        state_name,
-        &expression,
-        sm,
-        variable_indices,
-        cam_indices,
-        cond_next,
-        Some(Timeout {
-            after_ticks,
-            target: fallback_next,
-        }),
-    )
+    let timeout = Some(Timeout {
+        after_ticks,
+        target: fallback_next,
+    });
+    match &cond.guard {
+        TransitionGuard::Condition { expression } => condition_to_wait_instr(
+            resolver,
+            state_name,
+            expression,
+            sm,
+            variable_indices,
+            cam_indices,
+            cond_next,
+            timeout,
+        ),
+        TransitionGuard::Edge { edge, operand } => edge_guard_to_instr(
+            resolver,
+            state_name,
+            *edge,
+            operand,
+            variable_indices,
+            cond_next,
+            timeout,
+        ),
+        _ => unreachable!(),
+    }
+}
+
+fn complementary_condition_pair<'a>(
+    pair: (&'a Transition, &'a Transition),
+) -> Option<(&'a Transition, &'a Transition)> {
+    let TransitionGuard::Condition {
+        expression: first,
+    } = &pair.0.guard
+    else {
+        return None;
+    };
+    let TransitionGuard::Condition { expression: second } = &pair.1.guard else {
+        return None;
+    };
+
+    if is_not_of(second, first) {
+        Some((pair.0, pair.1))
+    } else if is_not_of(first, second) {
+        Some((pair.1, pair.0))
+    } else {
+        None
+    }
+}
+
+fn is_not_of(candidate: &str, expression: &str) -> bool {
+    let candidate = candidate.trim();
+    let expression = expression.trim();
+    candidate
+        .strip_prefix("NOT(")
+        .and_then(|inner| inner.strip_suffix(')'))
+        .is_some_and(|inner| inner.trim() == expression)
 }
 
 

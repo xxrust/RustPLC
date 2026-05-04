@@ -994,6 +994,11 @@ fn infer_wait_observed(wait: &WaitStatement, observed_names: &HashSet<String>) -
     let mut observed = Vec::new();
     let mut seen = HashSet::new();
 
+    if let WaitCondition::Edge(edge) = &wait.condition {
+        collect_observed_operand(&edge.operand, observed_names, &mut seen, &mut observed);
+        return observed;
+    }
+
     for condition in wait_conditions(wait) {
         if let Some((left, right)) = condition.expression_pair() {
             for candidate in expression_variables(left)
@@ -1034,12 +1039,32 @@ fn infer_wait_observed(wait: &WaitStatement, observed_names: &HashSet<String>) -
     observed
 }
 
+fn collect_observed_operand(
+    operand: &str,
+    observed_names: &HashSet<String>,
+    seen: &mut HashSet<String>,
+    observed: &mut Vec<String>,
+) {
+    let operand = operand.trim();
+    if observed_names.contains(operand) && seen.insert(operand.to_string()) {
+        observed.push(operand.to_string());
+        return;
+    }
+    if let Some(candidate) = operand.split('.').next()
+        && observed_names.contains(candidate)
+        && seen.insert(candidate.to_string())
+    {
+        observed.push(candidate.to_string());
+    }
+}
+
 fn wait_conditions(wait: &WaitStatement) -> Vec<&ConditionExpression> {
     match &wait.condition {
         WaitCondition::Single(condition) => vec![condition],
         WaitCondition::And(conditions) | WaitCondition::Or(conditions) => {
             conditions.iter().collect()
         }
+        WaitCondition::Edge(_) => Vec::new(),
     }
 }
 
@@ -1056,6 +1081,14 @@ fn wait_to_text(wait: &WaitStatement) -> String {
             .map(condition_to_text)
             .collect::<Vec<_>>()
             .join(" OR "),
+        WaitCondition::Edge(edge) => edge_condition_to_text(edge.edge, &edge.operand),
+    }
+}
+
+fn edge_condition_to_text(edge: crate::ast::EdgeKind, operand: &str) -> String {
+    match edge {
+        crate::ast::EdgeKind::Rising => format!("rising_edge({operand})"),
+        crate::ast::EdgeKind::Falling => format!("falling_edge({operand})"),
     }
 }
 

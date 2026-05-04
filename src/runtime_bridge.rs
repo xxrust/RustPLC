@@ -1,19 +1,19 @@
 use crate::device_semantics::cylinder::{
-    is_end_state_port as is_cylinder_end_state_port, state_port_key, CylinderContractError,
-    CylinderStrokeContract, CylinderStrokeVerb,
+    CylinderContractError, CylinderStrokeContract, CylinderStrokeVerb,
+    is_end_state_port as is_cylinder_end_state_port, state_port_key,
 };
 use crate::ir::{
     AxisAutoResetPolicy as IrAxisAutoResetPolicy,
     AxisFaultPropagationScope as IrAxisFaultPropagationScope,
     AxisFaultRouteKind as IrAxisFaultRouteKind, AxisFaultSeverity as IrAxisFaultSeverity,
     AxisStopMode as IrAxisStopMode, BinaryValue as IrBinaryValue,
-    CamInterpolation as IrCamInterpolation, ConstraintSet, DeviceKind, State, StateMachine,
-    TopologyGraph, Transition, TransitionAction, TransitionGuard,
+    CamInterpolation as IrCamInterpolation, ConstraintSet, DeviceKind, EdgeKind as IrEdgeKind,
+    State, StateMachine, TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
-use crate::plc_port::{parse_physical_plc_port_ref, PlcPortKind};
+use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
-use petgraph::graph::NodeIndex;
 use petgraph::Direction;
+use petgraph::graph::NodeIndex;
 use runtime_core::{
     Action, AnalogRange, AntiWindup, AxisAutoResetPolicy as RtAxisAutoResetPolicy, AxisFaultPolicy,
     AxisFaultPropagationScope as RtAxisFaultPropagationScope,
@@ -21,13 +21,14 @@ use runtime_core::{
     AxisFaultSeverity as RtAxisFaultSeverity, AxisMotionCommand, AxisMoveKind,
     AxisStopMode as RtAxisStopMode, CamAnalogField, CamCouplingConfig, CamDigitalField,
     CamInterpolation as RtCamInterpolation, CamTableData, CompareOp, CylinderFaultRouting,
-    DigitalCondition, ExprOp, ExprProgram, Instr, PidConfig, ProcessDeviceActionCommand, Program,
-    ResourceClaimRule as RtResourceClaimRule, ResourceClaimSource as RtResourceClaimSource,
-    SemanticResource as RtSemanticResource, SemanticResourceMode as RtSemanticResourceMode,
-    SplineCoeff as RtSplineCoeff, Step, StepId, Task, Timeout,
-    WorkpieceHolderDef as RtWorkpieceHolderDef, WorkpieceSiteDef as RtWorkpieceSiteDef,
-    WorkpieceSiteKind as RtWorkpieceSiteKind, WorkpieceTypeDef as RtWorkpieceTypeDef,
-    MAX_CAM_POINTS, MAX_TRACKED_DIGITAL_OUTPUTS, MAX_TRANSITIONS_PER_TASK_PER_TICK,
+    DigitalCondition, EdgeKind as RtEdgeKind, ExprOp, ExprProgram, Instr, MAX_CAM_POINTS,
+    MAX_TRACKED_DIGITAL_OUTPUTS, MAX_TRANSITIONS_PER_TASK_PER_TICK, PidConfig,
+    ProcessDeviceActionCommand, Program, ResourceClaimRule as RtResourceClaimRule,
+    ResourceClaimSource as RtResourceClaimSource, SemanticResource as RtSemanticResource,
+    SemanticResourceMode as RtSemanticResourceMode, SplineCoeff as RtSplineCoeff, Step, StepId,
+    Task, Timeout, WorkpieceHolderDef as RtWorkpieceHolderDef,
+    WorkpieceSiteDef as RtWorkpieceSiteDef, WorkpieceSiteKind as RtWorkpieceSiteKind,
+    WorkpieceTypeDef as RtWorkpieceTypeDef,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -85,9 +86,7 @@ pub enum BridgeError {
     )]
     UnresolvableDigitalOutput { state: String, device: String },
 
-    #[error(
-        "unable to resolve a unique physical analog input for device {device} (state {state})"
-    )]
+    #[error("unable to resolve a unique physical analog input for device {device} (state {state})")]
     UnresolvableAnalogInput { state: String, device: String },
 
     #[error(

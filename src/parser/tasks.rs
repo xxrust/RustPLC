@@ -1312,6 +1312,16 @@ fn parse_wait_statement(pair: Pair<Rule>) -> Result<WaitStatement, PlcError> {
         .find(|part| part.as_rule() == Rule::wait_condition)
         .ok_or_else(|| PlcError::parse(line, "wait 缺少条件表达式"))?;
 
+    if let Some(edge_pair) = condition_pair
+        .clone()
+        .into_inner()
+        .find(|part| part.as_rule() == Rule::edge_condition)
+    {
+        return Ok(WaitStatement {
+            condition: WaitCondition::Edge(parse_edge_condition(edge_pair)?),
+        });
+    }
+
     let mut conditions = Vec::new();
     let mut relation = None::<&str>;
 
@@ -1353,6 +1363,39 @@ fn parse_wait_statement(pair: Pair<Rule>) -> Result<WaitStatement, PlcError> {
     };
 
     Ok(WaitStatement { condition })
+}
+
+fn parse_edge_condition(pair: Pair<Rule>) -> Result<crate::ast::EdgeCondition, PlcError> {
+    let line = line_of(&pair);
+    let mut edge = None;
+    let mut operand = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::edge_kind => {
+                edge = Some(match part.as_str() {
+                    "rising_edge" => crate::ast::EdgeKind::Rising,
+                    "falling_edge" => crate::ast::EdgeKind::Falling,
+                    other => {
+                        return Err(PlcError::parse(
+                            line,
+                            format!("未知边沿触发类型: {other}"),
+                        ));
+                    }
+                });
+            }
+            Rule::condition_operand => {
+                let inner = first_inner(part, line, "边沿触发操作数")?;
+                operand = Some(inner.as_str().to_string());
+            }
+            _ => {}
+        }
+    }
+
+    Ok(crate::ast::EdgeCondition {
+        edge: edge.ok_or_else(|| PlcError::parse(line, "边沿触发缺少类型"))?,
+        operand: operand.ok_or_else(|| PlcError::parse(line, "边沿触发缺少操作数"))?,
+    })
 }
 
 fn parse_simple_condition(pair: Pair<Rule>) -> Result<ConditionExpression, PlcError> {

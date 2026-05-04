@@ -3,8 +3,8 @@
 use io_traits::DigitalInputId;
 use runtime_core::{
     Action, AxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting, AxisMoveKind, CamAnalogField,
-    CamDigitalField, CompareOp, CylinderFaultRouting, ExprOp, ExprProgram, Instr, Program, StepId,
-    Timeout,
+    CamDigitalField, CompareOp, CylinderFaultRouting, EdgeKind, ExprOp, ExprProgram, Instr,
+    Program, StepId, Timeout,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +43,9 @@ pub fn generate_program_module(
                     }
                 }
                 Instr::WaitAllDigital { next, timeout, .. }
-                | Instr::WaitDigital { next, timeout, .. } => {
+                | Instr::WaitDigital { next, timeout, .. }
+                | Instr::WaitDigitalEdge { next, timeout, .. }
+                | Instr::WaitVariableEdge { next, timeout, .. } => {
                     if !check(next, task.steps.len()) {
                         return Err(CodegenError::StepIdOutOfRange);
                     }
@@ -121,7 +123,7 @@ pub fn generate_program_module(
     out.push_str(
         "  use io_traits::{AnalogInputId, DigitalInputId, DigitalOutputId, AnalogOutputId};\n",
     );
-    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, AxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting, AxisMotionCommand, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, DigitalCondition, ExprOp, ExprProgram, Instr, PidConfig, ProcessDeviceActionCommand, Program, Step, StepId, Task, Timeout};\n\n");
+    out.push_str("  use runtime_core::{Action, AnalogRange, AntiWindup, AxisFaultRouteKind, AxisFaultRouteRule, AxisFaultRouting, AxisMotionCommand, AxisMoveKind, CamAnalogField, CamDigitalField, CompareOp, DigitalCondition, EdgeKind, ExprOp, ExprProgram, Instr, PidConfig, ProcessDeviceActionCommand, Program, Step, StepId, Task, Timeout};\n\n");
 
     // Emit actions arrays, then steps, then tasks, then program.
     for (tidx, task) in program.tasks.iter().enumerate() {
@@ -601,19 +603,40 @@ fn format_instr(tidx: usize, sidx: usize, instr: &Instr<'_>) -> String {
             next,
             timeout,
         } => {
-            let tmo = match timeout {
-                None => "None".to_string(),
-                Some(Timeout {
-                    after_ticks,
-                    target,
-                }) => format!(
-                    "Some(Timeout {{ after_ticks: {}, target: StepId({}) }})",
-                    after_ticks, target.0
-                ),
-            };
+            let tmo = format_timeout_option(timeout);
             format!(
                 "Instr::WaitDigital {{ id: DigitalInputId({}), equals: {}, next: StepId({}), timeout: {} }}",
                 id.0, equals, next.0, tmo
+            )
+        }
+        Instr::WaitDigitalEdge {
+            id,
+            edge,
+            next,
+            timeout,
+        } => {
+            let tmo = format_timeout_option(timeout);
+            format!(
+                "Instr::WaitDigitalEdge {{ id: DigitalInputId({}), edge: {}, next: StepId({}), timeout: {} }}",
+                id.0,
+                format_edge_kind(edge),
+                next.0,
+                tmo
+            )
+        }
+        Instr::WaitVariableEdge {
+            index,
+            edge,
+            next,
+            timeout,
+        } => {
+            let tmo = format_timeout_option(timeout);
+            format!(
+                "Instr::WaitVariableEdge {{ index: {}, edge: {}, next: StepId({}), timeout: {} }}",
+                index,
+                format_edge_kind(edge),
+                next.0,
+                tmo
             )
         }
         Instr::WaitAnalog {
@@ -739,6 +762,13 @@ fn format_compare_op(op: CompareOp) -> &'static str {
         CompareOp::Lt => "CompareOp::Lt",
         CompareOp::Ge => "CompareOp::Ge",
         CompareOp::Le => "CompareOp::Le",
+    }
+}
+
+fn format_edge_kind(edge: EdgeKind) -> &'static str {
+    match edge {
+        EdgeKind::Rising => "EdgeKind::Rising",
+        EdgeKind::Falling => "EdgeKind::Falling",
     }
 }
 

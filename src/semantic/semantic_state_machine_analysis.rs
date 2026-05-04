@@ -257,9 +257,7 @@ fn analyze_statements(
                 analyzed.effects.push(effect_to_transition_effect(effect));
             }
             StepStatement::Wait(wait) => {
-                analyzed
-                    .waits
-                    .push(wait_to_guard_expression(wait, wait_ctx));
+                analyzed.waits.push(wait_to_transition_guard(wait, wait_ctx));
             }
             StepStatement::IfElse {
                 condition,

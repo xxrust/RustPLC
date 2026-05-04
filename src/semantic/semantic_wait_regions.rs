@@ -85,6 +85,7 @@ fn collect_threshold_values_from_statements(
                     WaitCondition::And(conditions) | WaitCondition::Or(conditions) => {
                         conditions.iter().collect()
                     }
+                    WaitCondition::Edge(_) => Vec::new(),
                 };
 
                 for condition in terms {

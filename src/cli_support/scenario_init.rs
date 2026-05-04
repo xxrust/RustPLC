@@ -83,6 +83,9 @@ pub(crate) fn collect_scenario_init_hints(
                 Instr::WaitDigital { id, .. } => {
                     used_di.insert(id.0);
                 }
+                Instr::WaitDigitalEdge { id, .. } => {
+                    used_di.insert(id.0);
+                }
                 Instr::WaitAnalog { id, .. } => {
                     used_ai.insert(id.0);
                 }
@@ -92,6 +95,7 @@ pub(crate) fn collect_scenario_init_hints(
                     }
                 }
                 Instr::WaitExpr { .. }
+                | Instr::WaitVariableEdge { .. }
                 | Instr::WaitCamDigital { .. }
                 | Instr::WaitCamAnalog { .. }
                 | Instr::Action { .. }

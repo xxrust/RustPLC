@@ -280,6 +280,7 @@ fn wait_asserts_brake_confirmed(
         WaitCondition::Single(term) => vec![term],
         WaitCondition::And(terms) => terms.iter().collect(),
         WaitCondition::Or(_) => return false,
+        WaitCondition::Edge(_) => return false,
     };
 
     terms.into_iter().any(|term| {

@@ -897,6 +897,9 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                 Instr::WaitDigital { id, .. } => {
                     dis.insert(id.0);
                 }
+                Instr::WaitDigitalEdge { id, .. } => {
+                    dis.insert(id.0);
+                }
                 Instr::WaitAnalog { id, .. } => {
                     ais.insert(id.0);
                 }
@@ -938,6 +941,7 @@ fn io_map_template_for_program(program: &Program<'_>) -> String {
                     }
                 }
                 Instr::WaitExpr { .. }
+                | Instr::WaitVariableEdge { .. }
                 | Instr::WaitCamDigital { .. }
                 | Instr::WaitCamAnalog { .. }
                 | Instr::Delay { .. }
@@ -1088,6 +1092,9 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                 Instr::WaitDigital { id, .. } => {
                     dis.insert(id.0);
                 }
+                Instr::WaitDigitalEdge { id, .. } => {
+                    dis.insert(id.0);
+                }
                 Instr::WaitAnalog { id, .. } => {
                     ais.insert(id.0);
                 }
@@ -1129,6 +1136,7 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
                     }
                 }
                 Instr::WaitExpr { .. }
+                | Instr::WaitVariableEdge { .. }
                 | Instr::WaitCamDigital { .. }
                 | Instr::WaitCamAnalog { .. }
                 | Instr::Delay { .. }

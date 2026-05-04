@@ -169,6 +169,7 @@ fn reject_extern_calls_in_wait(
                 )?;
             }
         }
+        WaitCondition::Edge(_) => {}
     }
 
     Ok(())

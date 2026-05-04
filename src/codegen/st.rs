@@ -3,7 +3,7 @@ use crate::ir::{
     BinaryValue, ConnectionType, ConstraintSet, DeviceKind, ExternCallBinding, State, StateMachine,
     TimerOperationKind, TopologyGraph, Transition, TransitionAction, TransitionGuard, VariableType,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 
 const STATE_ID_STRIDE: i32 = 10;
@@ -244,6 +244,7 @@ pub fn generate_st(
         .expect("initial state must exist when all state references are valid");
     let transitions_by_state = collect_transitions_by_state(&erased_state_machine, &state_ids);
     let timers = collect_timers(&erased_state_machine, &state_ids);
+    let edge_operands = collect_edge_operands(&erased_state_machine);
 
     let mut out = String::new();
     emit_header(&mut out, config, workpiece_semantics_erased);
@@ -253,6 +254,8 @@ pub fn generate_st(
         initial_id,
         &timers,
         &resolved_variables.declarations,
+        &edge_operands,
+        &resolved_variables,
     );
     emit_trace_var_block(&mut out);
     emit_state_constants_comment(&mut out, &erased_state_machine, &state_ids);
@@ -265,6 +268,7 @@ pub fn generate_st(
         &transitions_by_state,
         &resolved_variables,
     );
+    emit_edge_snapshot_updates(&mut out, &edge_operands, &resolved_variables);
     out.push_str("END_PROGRAM\n\n");
     emit_openplc_configuration(&mut out, config);
 
@@ -442,6 +446,11 @@ fn collect_variable_candidates_from_transitions(
                     });
                 }
             }
+        } else if let TransitionGuard::Edge { operand, .. } = &transition.guard {
+            candidates.push(VariableCandidate {
+                original: operand.clone(),
+                var_type: StVarType::Bool,
+            });
         }
     }
 }
@@ -569,7 +578,9 @@ fn collect_timers(
                     .and_modify(|existing| *existing = (*existing).max(duration_ms))
                     .or_insert(duration_ms);
             }
-            TransitionGuard::Always | TransitionGuard::Condition { .. } => {}
+            TransitionGuard::Always
+            | TransitionGuard::Condition { .. }
+            | TransitionGuard::Edge { .. } => {}
         }
 
         for timer in &transition.timers {
@@ -611,11 +622,23 @@ fn emit_var_block(
     initial_id: i32,
     timers: &BTreeMap<i32, u64>,
     declarations: &BTreeMap<String, StVarType>,
+    edge_operands: &[String],
+    resolved_variables: &ResolvedVariables,
 ) {
     out.push_str("VAR\n");
     out.push_str(&format!("    {INTERNAL_STATE_VAR}: INT := {initial_id};\n"));
     for timer_id in timers.keys() {
         out.push_str(&format!("    {INTERNAL_TIMER_PREFIX}{timer_id}: TON;\n"));
+    }
+    if !edge_operands.is_empty() {
+        out.push_str("    _edge_initialized: BOOL := FALSE;\n");
+        for operand in edge_operands {
+            let current = resolved_variables.resolve_identifier(operand);
+            out.push_str(&format!(
+                "    {}: BOOL := FALSE;\n",
+                edge_prev_var_name(&current)
+            ));
+        }
     }
     for (name, var_type) in declarations {
         let (st_type, init) = match var_type {
@@ -1029,6 +1052,43 @@ fn render_expression_for_st(expr_raw: &str) -> String {
     out
 }
 
+fn collect_edge_operands(state_machine: &StateMachine) -> Vec<String> {
+    let mut operands = BTreeSet::new();
+    for transition in &state_machine.transitions {
+        if let TransitionGuard::Edge { operand, .. } = &transition.guard {
+            operands.insert(operand.clone());
+        }
+    }
+    operands.into_iter().collect()
+}
+
+fn edge_prev_var_name(current_st_name: &str) -> String {
+    format!("_edge_prev_{current_st_name}")
+}
+
+fn emit_edge_snapshot_updates(
+    out: &mut String,
+    edge_operands: &[String],
+    resolved_variables: &ResolvedVariables,
+) {
+    if edge_operands.is_empty() {
+        return;
+    }
+
+    out.push_str("IF NOT _edge_initialized THEN\n");
+    out.push_str("    _edge_initialized := TRUE;\n");
+    out.push_str("END_IF;\n");
+    for operand in edge_operands {
+        let current = resolved_variables.resolve_identifier(operand);
+        out.push_str(&format!(
+            "{} := {};\n",
+            edge_prev_var_name(&current),
+            current
+        ));
+    }
+    out.push('\n');
+}
+
 fn emit_guard_branches(
     out: &mut String,
     from_state_id: i32,
@@ -1055,6 +1115,12 @@ fn emit_guard_branches(
                     .expect("condition was pre-validated before code generation");
                 conditional_branches
                     .push((render_condition(&parsed, resolved_variables), target_id));
+            }
+            TransitionGuard::Edge { edge, operand } => {
+                conditional_branches.push((
+                    render_edge_condition(*edge, operand, resolved_variables),
+                    target_id,
+                ));
             }
             TransitionGuard::Timeout { .. } | TransitionGuard::Delay { .. } => {
                 conditional_branches.push((
@@ -1118,6 +1184,23 @@ fn render_condition(parsed: &ParsedCondition, resolved_variables: &ResolvedVaria
                 ConditionValue::Identifier(raw) => resolved_variables.resolve_identifier(raw),
             };
             format!("{left} {op} {right}")
+        }
+    }
+}
+
+fn render_edge_condition(
+    edge: crate::ir::EdgeKind,
+    operand: &str,
+    resolved_variables: &ResolvedVariables,
+) -> String {
+    let current = resolved_variables.resolve_identifier(operand);
+    let previous = edge_prev_var_name(&current);
+    match edge {
+        crate::ir::EdgeKind::Rising => {
+            format!("(_edge_initialized AND {current} AND NOT {previous})")
+        }
+        crate::ir::EdgeKind::Falling => {
+            format!("(_edge_initialized AND NOT {current} AND {previous})")
         }
     }
 }
@@ -1351,7 +1434,7 @@ mod tests {
     use super::*;
     use crate::ir::{
         AxisFaultBranch, AxisFaultCategory, AxisFaultKind, AxisTimeoutBranch, ConstraintSet,
-        StateMachine, TimerOperation, Transition, TransitionAction, TransitionGuard,
+        EdgeKind, StateMachine, TimerOperation, Transition, TransitionAction, TransitionGuard,
         WorkpieceCarrierDef, WorkpieceCarrierLayoutDef, WorkpieceEffect, WorkpieceHolderDef,
         WorkpiecePropertyDef, WorkpiecePropertyTypeDef, WorkpieceSiteDef, WorkpieceSiteKind,
         WorkpieceTypeDef,
@@ -1870,6 +1953,44 @@ mod tests {
         assert!(st.contains("_state := 20;"));
         assert!(st.contains("CONFIGURATION Config0"));
         assert!(st.contains("TASK MainTask(INTERVAL := T#10ms, PRIORITY := 0);"));
+    }
+
+    #[test]
+    fn generate_st_renders_edge_guard_with_baseline_snapshot() {
+        let s0 = state("ready", "wait_start");
+        let s1 = state("ready", "done");
+        let sm = StateMachine {
+            states: vec![s0.clone(), s1.clone()],
+            transitions: vec![Transition {
+                from: s0.clone(),
+                to: s1,
+                guard: TransitionGuard::Edge {
+                    edge: EdgeKind::Rising,
+                    operand: "start_button".to_string(),
+                },
+                actions: vec![],
+                effects: vec![],
+                timers: vec![],
+            }],
+            initial: s0,
+            analog_regions: BTreeMap::new(),
+            task_contexts: vec![],
+        };
+
+        let st = generate_st(
+            &empty_topology(),
+            &ConstraintSet::default(),
+            &sm,
+            &StCodegenConfig::default(),
+        )
+        .expect("codegen should support edge guards");
+
+        assert!(st.contains("_edge_initialized: BOOL := FALSE;"));
+        assert!(st.contains("_edge_prev_start_button: BOOL := FALSE;"));
+        assert!(st.contains(
+            "IF (_edge_initialized AND start_button AND NOT _edge_prev_start_button) THEN"
+        ));
+        assert!(st.contains("_edge_prev_start_button := start_button;"));
     }
 
     #[test]

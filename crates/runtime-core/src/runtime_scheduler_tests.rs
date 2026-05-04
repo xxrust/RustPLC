@@ -199,6 +199,160 @@
     }
 
     #[test]
+    fn digital_edge_wait_samples_initial_level_without_firing() {
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "wait_start_edge",
+                instr: Instr::WaitDigitalEdge {
+                    id: DigitalInputId(0),
+                    edge: EdgeKind::Rising,
+                    next: StepId(1),
+                    timeout: None,
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "ready",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        io.di[0] = true;
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+
+        rt.tick(&mut io).expect("first tick should only sample baseline");
+        assert_eq!(rt.task_context(0).unwrap().current_step, StepId(0));
+
+        io.di[0] = false;
+        rt.tick(&mut io).expect("falling level should not satisfy rising edge");
+        assert_eq!(rt.task_context(0).unwrap().current_step, StepId(0));
+
+        io.di[0] = true;
+        rt.tick(&mut io).expect("false-to-true should satisfy rising edge");
+        assert_eq!(rt.task_context(0).unwrap().current_step, StepId(1));
+    }
+
+    #[test]
+    fn digital_falling_edge_wait_requires_true_to_false_transition() {
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "wait_stop_edge",
+                instr: Instr::WaitDigitalEdge {
+                    id: DigitalInputId(0),
+                    edge: EdgeKind::Falling,
+                    next: StepId(1),
+                    timeout: None,
+                },
+            },
+            Step {
+                name: "halt",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "ready",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+
+        rt.tick(&mut io).expect("first low sample is baseline only");
+        assert_eq!(rt.task_context(0).unwrap().current_step, StepId(0));
+
+        io.di[0] = true;
+        rt.tick(&mut io).expect("rising level should not satisfy falling edge");
+        assert_eq!(rt.task_context(0).unwrap().current_step, StepId(0));
+
+        io.di[0] = false;
+        rt.tick(&mut io).expect("true-to-false should satisfy falling edge");
+        assert_eq!(rt.task_context(0).unwrap().current_step, StepId(1));
+    }
+
+    #[test]
+    fn digital_edge_wait_is_consumed_once_per_task_tick() {
+        static STEPS: [Step<'static>; 2] = [
+            Step {
+                name: "wait_start_edge",
+                instr: Instr::WaitDigitalEdge {
+                    id: DigitalInputId(0),
+                    edge: EdgeKind::Rising,
+                    next: StepId(1),
+                    timeout: None,
+                },
+            },
+            Step {
+                name: "return_to_wait",
+                instr: Instr::Goto { target: StepId(0) },
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "ready",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &[],
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init should succeed");
+        let mut events: std::vec::Vec<TraceEvent> = std::vec::Vec::new();
+
+        rt.tick(&mut io).expect("initial low sample is baseline");
+        io.di[0] = true;
+        rt.tick_with_trace(&mut io, |event| events.push(event))
+            .expect("rising edge should be consumed once");
+
+        assert_eq!(rt.task_context(0).unwrap().current_step, StepId(0));
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].reason, TransitionReason::WaitSatisfied);
+        assert_eq!(events[1].reason, TransitionReason::Goto);
+    }
+
+    #[test]
     fn runtime_tick_schedules_tasks_in_fixed_index_order() {
         static TASK0_ACTIONS: [Action; 1] = [Action::Log {
             message_id: 10,

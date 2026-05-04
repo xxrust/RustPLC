@@ -460,6 +460,7 @@ impl PlcEvidence {
                     self.collect_wait_left_operand(&expr.left);
                 }
             }
+            WaitCondition::Edge(edge) => self.collect_wait_left_operand(&edge.operand),
         }
     }
 

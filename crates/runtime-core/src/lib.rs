@@ -134,6 +134,14 @@ pub enum RuntimeError {
         function: &'static str,
         variable: u16,
     },
+    DigitalEdgeInputOutOfRange {
+        id: u16,
+        max: usize,
+    },
+    VariableEdgeIndexOutOfRange {
+        index: u16,
+        max: usize,
+    },
     AxisFault {
         target: &'static str,
         fault: AxisFault,
@@ -628,6 +636,12 @@ pub enum AntiWindup {
     ConditionalIntegration,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeKind {
+    Rising,
+    Falling,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PidConfig {
     pub pv: AnalogInputId,
@@ -659,6 +673,18 @@ pub enum Instr<'a> {
     WaitDigital {
         id: DigitalInputId,
         equals: bool,
+        next: StepId,
+        timeout: Option<Timeout>,
+    },
+    WaitDigitalEdge {
+        id: DigitalInputId,
+        edge: EdgeKind,
+        next: StepId,
+        timeout: Option<Timeout>,
+    },
+    WaitVariableEdge {
+        index: u16,
+        edge: EdgeKind,
         next: StepId,
         timeout: Option<Timeout>,
     },
@@ -845,6 +871,7 @@ pub struct TaskRuntimeContext {
     pub wait_state: TaskWaitState,
     pub timeout_state: TaskTimeoutState,
     pub pending_action_state: TaskPendingActionState,
+    pub edge_consumed_at: Option<Tick>,
 }
 
 impl Default for TaskRuntimeContext {
@@ -855,6 +882,7 @@ impl Default for TaskRuntimeContext {
             wait_state: TaskWaitState::Ready,
             timeout_state: TaskTimeoutState::Inactive,
             pending_action_state: TaskPendingActionState::Idle,
+            edge_consumed_at: None,
         }
     }
 }
@@ -875,6 +903,14 @@ pub struct Runtime<'a> {
     pid_states: [PidState; MAX_PID_LOOPS],
     variables: [f32; MAX_VARIABLES],
     cam_states: [CamState; MAX_CAM_COUPLINGS],
+    digital_edge_registered: [bool; MAX_TRACKED_DIGITAL_INPUTS],
+    digital_edge_previous: [bool; MAX_TRACKED_DIGITAL_INPUTS],
+    digital_edge_current: [bool; MAX_TRACKED_DIGITAL_INPUTS],
+    digital_edge_initialized: [bool; MAX_TRACKED_DIGITAL_INPUTS],
+    variable_edge_registered: [bool; MAX_VARIABLES],
+    variable_edge_previous: [bool; MAX_VARIABLES],
+    variable_edge_current: [bool; MAX_VARIABLES],
+    variable_edge_initialized: [bool; MAX_VARIABLES],
     digital_output_shadow: [bool; MAX_TRACKED_DIGITAL_OUTPUTS],
     workpiece_tokens: WorkpieceTokenStore<'a>,
     workpiece_lineage: WorkpieceLineageStore,
@@ -964,6 +1000,8 @@ impl<'a> Runtime<'a> {
             cam_states[idx].active_table = cfg.table_index;
             cam_states[idx].phase_offset = cfg.initial_phase_offset;
         }
+        let (digital_edge_registered, variable_edge_registered) =
+            Self::collect_edge_subscriptions(program)?;
         let (workpiece_tokens, next_workpiece_token_id) = Self::seed_workpiece_tokens(program)?;
 
         Ok(Self {
@@ -977,11 +1015,56 @@ impl<'a> Runtime<'a> {
             pid_states: [PidState::default(); MAX_PID_LOOPS],
             variables,
             cam_states,
+            digital_edge_registered,
+            digital_edge_previous: [false; MAX_TRACKED_DIGITAL_INPUTS],
+            digital_edge_current: [false; MAX_TRACKED_DIGITAL_INPUTS],
+            digital_edge_initialized: [false; MAX_TRACKED_DIGITAL_INPUTS],
+            variable_edge_registered,
+            variable_edge_previous: [false; MAX_VARIABLES],
+            variable_edge_current: [false; MAX_VARIABLES],
+            variable_edge_initialized: [false; MAX_VARIABLES],
             digital_output_shadow: [false; MAX_TRACKED_DIGITAL_OUTPUTS],
             workpiece_tokens,
             workpiece_lineage: WorkpieceLineageStore::new(),
             next_workpiece_token_id,
         })
+    }
+
+    fn collect_edge_subscriptions(
+        program: &Program<'a>,
+    ) -> Result<([bool; MAX_TRACKED_DIGITAL_INPUTS], [bool; MAX_VARIABLES]), RuntimeError> {
+        let mut digital = [false; MAX_TRACKED_DIGITAL_INPUTS];
+        let mut variables = [false; MAX_VARIABLES];
+
+        for task in program.tasks {
+            for step in task.steps {
+                match step.instr {
+                    Instr::WaitDigitalEdge { id, .. } => {
+                        let idx = id.0 as usize;
+                        if idx >= MAX_TRACKED_DIGITAL_INPUTS {
+                            return Err(RuntimeError::DigitalEdgeInputOutOfRange {
+                                id: id.0,
+                                max: MAX_TRACKED_DIGITAL_INPUTS,
+                            });
+                        }
+                        digital[idx] = true;
+                    }
+                    Instr::WaitVariableEdge { index, .. } => {
+                        let idx = index as usize;
+                        if idx >= MAX_VARIABLES {
+                            return Err(RuntimeError::VariableEdgeIndexOutOfRange {
+                                index,
+                                max: MAX_VARIABLES,
+                            });
+                        }
+                        variables[idx] = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok((digital, variables))
     }
 
     pub fn location(&self) -> Location {
@@ -2038,6 +2121,8 @@ impl<'a> Runtime<'a> {
     ) -> Result<(), RuntimeTickError<E>> {
         let now = io.tick();
 
+        self.sample_edge_inputs(io);
+
         // PID loops are executed once per tick before state-machine evaluation. This keeps the
         // execution deterministic, and allows task actions to override the output when needed.
         self.update_pid_loops(now, io);
@@ -2610,6 +2695,40 @@ impl<'a> Runtime<'a> {
                             StepCompletionDecision::StayOnStep => break,
                         }
                     }
+                    Instr::WaitDigitalEdge {
+                        id,
+                        edge,
+                        next,
+                        timeout,
+                    } => {
+                        let satisfied =
+                            self.digital_edge_satisfied_for_task(task_idx, now, id, edge);
+                        match Self::wait_completion_decision(satisfied, elapsed, timeout, next) {
+                            StepCompletionDecision::ContinueWith { target, reason } => {
+                                self.transition(task_idx, now, target, reason, on_event)
+                                    .map_err(RuntimeTickError::Core)?;
+                                continue;
+                            }
+                            StepCompletionDecision::StayOnStep => break,
+                        }
+                    }
+                    Instr::WaitVariableEdge {
+                        index,
+                        edge,
+                        next,
+                        timeout,
+                    } => {
+                        let satisfied =
+                            self.variable_edge_satisfied_for_task(task_idx, now, index, edge);
+                        match Self::wait_completion_decision(satisfied, elapsed, timeout, next) {
+                            StepCompletionDecision::ContinueWith { target, reason } => {
+                                self.transition(task_idx, now, target, reason, on_event)
+                                    .map_err(RuntimeTickError::Core)?;
+                                continue;
+                            }
+                            StepCompletionDecision::StayOnStep => break,
+                        }
+                    }
                     Instr::WaitAnalog {
                         id,
                         ranges,
@@ -2761,12 +2880,96 @@ impl<'a> Runtime<'a> {
         StepCompletionDecision::StayOnStep
     }
 
+    fn sample_edge_inputs<IO: Io>(&mut self, io: &IO) {
+        for idx in 0..MAX_TRACKED_DIGITAL_INPUTS {
+            if !self.digital_edge_registered[idx] {
+                continue;
+            }
+            let current = io.read_digital_input(DigitalInputId(idx as u16));
+            if self.digital_edge_initialized[idx] {
+                self.digital_edge_previous[idx] = self.digital_edge_current[idx];
+                self.digital_edge_current[idx] = current;
+            } else {
+                self.digital_edge_previous[idx] = current;
+                self.digital_edge_current[idx] = current;
+                self.digital_edge_initialized[idx] = true;
+            }
+        }
+
+        for idx in 0..MAX_VARIABLES {
+            if !self.variable_edge_registered[idx] {
+                continue;
+            }
+            let current = self.variables[idx] != 0.0;
+            if self.variable_edge_initialized[idx] {
+                self.variable_edge_previous[idx] = self.variable_edge_current[idx];
+                self.variable_edge_current[idx] = current;
+            } else {
+                self.variable_edge_previous[idx] = current;
+                self.variable_edge_current[idx] = current;
+                self.variable_edge_initialized[idx] = true;
+            }
+        }
+    }
+
+    fn digital_edge_satisfied_for_task(
+        &mut self,
+        task_idx: usize,
+        now: Tick,
+        id: DigitalInputId,
+        edge: EdgeKind,
+    ) -> bool {
+        if self.task_contexts[task_idx].edge_consumed_at == Some(now) {
+            return false;
+        }
+        let idx = id.0 as usize;
+        if idx >= MAX_TRACKED_DIGITAL_INPUTS || !self.digital_edge_initialized[idx] {
+            return false;
+        }
+        let satisfied = edge_satisfied(
+            self.digital_edge_previous[idx],
+            self.digital_edge_current[idx],
+            edge,
+        );
+        if satisfied {
+            self.task_contexts[task_idx].edge_consumed_at = Some(now);
+        }
+        satisfied
+    }
+
+    fn variable_edge_satisfied_for_task(
+        &mut self,
+        task_idx: usize,
+        now: Tick,
+        index: u16,
+        edge: EdgeKind,
+    ) -> bool {
+        if self.task_contexts[task_idx].edge_consumed_at == Some(now) {
+            return false;
+        }
+        let idx = index as usize;
+        if idx >= MAX_VARIABLES || !self.variable_edge_initialized[idx] {
+            return false;
+        }
+        let satisfied = edge_satisfied(
+            self.variable_edge_previous[idx],
+            self.variable_edge_current[idx],
+            edge,
+        );
+        if satisfied {
+            self.task_contexts[task_idx].edge_consumed_at = Some(now);
+        }
+        satisfied
+    }
+
     fn sync_task_context_for_instr(&mut self, task: usize, instr: Instr<'a>) {
         let ctx = &mut self.task_contexts[task];
         ctx.wait_state = match instr {
             Instr::Delay { .. } => TaskWaitState::Delay,
             Instr::WaitAllDigital { .. }
             | Instr::WaitDigital { .. }
+            | Instr::WaitDigitalEdge { .. }
+            | Instr::WaitVariableEdge { .. }
             | Instr::WaitAnalog { .. }
             | Instr::WaitExpr { .. }
             | Instr::WaitCamDigital { .. }
@@ -2780,6 +2983,14 @@ impl<'a> Runtime<'a> {
                 ..
             }
             | Instr::WaitDigital {
+                timeout: Some(timeout),
+                ..
+            }
+            | Instr::WaitDigitalEdge {
+                timeout: Some(timeout),
+                ..
+            }
+            | Instr::WaitVariableEdge {
                 timeout: Some(timeout),
                 ..
             }

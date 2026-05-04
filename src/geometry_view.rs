@@ -1582,6 +1582,9 @@ fn transition_guard_label(guard: &TransitionGuard) -> String {
     match guard {
         TransitionGuard::Always => "always".to_string(),
         TransitionGuard::Condition { expression } => format!("when {expression}"),
+        TransitionGuard::Edge { edge, operand } => {
+            format!("{}({operand})", transition_edge_name(*edge))
+        }
         TransitionGuard::Timeout { duration_ms } => format!("timeout {duration_ms}ms"),
         TransitionGuard::Delay { duration_ms } => format!("delay {duration_ms}ms"),
     }
@@ -1591,8 +1594,16 @@ fn transition_guard_kind(guard: &TransitionGuard) -> &'static str {
     match guard {
         TransitionGuard::Always => "always",
         TransitionGuard::Condition { .. } => "condition",
+        TransitionGuard::Edge { .. } => "edge",
         TransitionGuard::Timeout { .. } => "timeout",
         TransitionGuard::Delay { .. } => "delay",
+    }
+}
+
+fn transition_edge_name(edge: crate::ir::EdgeKind) -> &'static str {
+    match edge {
+        crate::ir::EdgeKind::Rising => "rising_edge",
+        crate::ir::EdgeKind::Falling => "falling_edge",
     }
 }
 

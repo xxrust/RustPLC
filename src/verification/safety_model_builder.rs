@@ -361,6 +361,7 @@ fn compile_model_guard(
         TransitionGuard::Always => ModelGuard::Always,
         TransitionGuard::Timeout { .. } => ModelGuard::Timeout,
         TransitionGuard::Delay { .. } => ModelGuard::Delay,
+        TransitionGuard::Edge { .. } => ModelGuard::Unsupported,
         TransitionGuard::Condition { expression } => compile_condition_guard(
             expression,
             device_index,
@@ -1090,6 +1091,7 @@ fn collect_threshold_values_from_wait(
         WaitCondition::And(conditions) | WaitCondition::Or(conditions) => {
             conditions.iter().collect()
         }
+        WaitCondition::Edge(_) => Vec::new(),
     };
 
     for condition in terms {
@@ -1726,6 +1728,7 @@ fn guard_name(guard: &TransitionGuard) -> &'static str {
     match guard {
         TransitionGuard::Always => "always",
         TransitionGuard::Condition { .. } => "condition",
+        TransitionGuard::Edge { .. } => "edge",
         TransitionGuard::Timeout { .. } => "timeout",
         TransitionGuard::Delay { .. } => "delay",
     }

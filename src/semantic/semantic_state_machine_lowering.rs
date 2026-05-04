@@ -170,13 +170,11 @@
             }
         }
 
-        for wait_expression in &analyzed.waits {
+        for wait_guard in &analyzed.waits {
             builder.add_transition(
                 branch_state.clone(),
                 branch_done_state.clone(),
-                TransitionGuard::Condition {
-                    expression: wait_expression.clone(),
-                },
+                wait_guard.clone(),
                 analyzed.actions.clone(),
                 analyzed.effects.clone(),
                 Vec::new(),
@@ -459,14 +457,12 @@ fn build_race_block(
             }
         }
 
-        for wait_expression in &analyzed.waits {
+        for wait_guard in &analyzed.waits {
             if let Some(target) = branch_completion_target.clone() {
                 builder.add_transition(
                     branch_state.clone(),
                     target,
-                    TransitionGuard::Condition {
-                        expression: wait_expression.clone(),
-                    },
+                    wait_guard.clone(),
                     analyzed.actions.clone(),
                     analyzed.effects.clone(),
                     Vec::new(),
@@ -901,8 +897,19 @@ fn set_enum_to_binary(value: &str) -> Option<IrBinaryValue> {
     }
 }
 
-fn wait_to_guard_expression(wait: &WaitStatement, wait_ctx: &WaitExpressionContext) -> String {
-    wait_condition_to_expression(&wait.condition, wait_ctx)
+fn wait_to_transition_guard(wait: &WaitStatement, wait_ctx: &WaitExpressionContext) -> TransitionGuard {
+    match &wait.condition {
+        WaitCondition::Edge(edge) => TransitionGuard::Edge {
+            edge: match edge.edge {
+                crate::ast::EdgeKind::Rising => IrEdgeKind::Rising,
+                crate::ast::EdgeKind::Falling => IrEdgeKind::Falling,
+            },
+            operand: edge.operand.clone(),
+        },
+        _ => TransitionGuard::Condition {
+            expression: wait_condition_to_expression(&wait.condition, wait_ctx),
+        },
+    }
 }
 
 fn wait_condition_to_expression(
@@ -921,6 +928,10 @@ fn wait_condition_to_expression(
             .map(|condition| wait_term_to_expression(condition, wait_ctx))
             .collect::<Vec<_>>()
             .join(" OR "),
+        WaitCondition::Edge(edge) => match edge.edge {
+            crate::ast::EdgeKind::Rising => format!("rising_edge({})", edge.operand),
+            crate::ast::EdgeKind::Falling => format!("falling_edge({})", edge.operand),
+        },
     }
 }
 

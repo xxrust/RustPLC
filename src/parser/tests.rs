@@ -2481,6 +2481,50 @@ task main:
     }
 
     #[test]
+    fn parses_edge_wait_conditions() {
+        let input = r#"
+[topology]
+device start_button: sensor
+device reset_button: sensor
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_start:
+        wait: rising_edge(start_button)
+
+    step wait_reset:
+        wait: falling_edge(reset_button)
+"#;
+
+        let ast = parse_plc(input).expect("edge wait should parse");
+        let first = &ast.tasks.tasks[0].steps[0].statements[0];
+        match first {
+            StepStatement::Wait(wait) => match &wait.condition {
+                WaitCondition::Edge(edge) => {
+                    assert_eq!(edge.edge, crate::ast::EdgeKind::Rising);
+                    assert_eq!(edge.operand, "start_button");
+                }
+                other => panic!("expected rising edge wait, got {other:?}"),
+            },
+            other => panic!("expected wait statement, got {other:?}"),
+        }
+
+        let second = &ast.tasks.tasks[0].steps[1].statements[0];
+        match second {
+            StepStatement::Wait(wait) => match &wait.condition {
+                WaitCondition::Edge(edge) => {
+                    assert_eq!(edge.edge, crate::ast::EdgeKind::Falling);
+                    assert_eq!(edge.operand, "reset_button");
+                }
+                other => panic!("expected falling edge wait, got {other:?}"),
+            },
+            other => panic!("expected wait statement, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_expression_conditions_in_wait_and_if() {
         let input = r#"
 [topology]

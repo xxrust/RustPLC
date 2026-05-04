@@ -1085,6 +1085,7 @@ fn wait_asserts_brake_confirmed(wait: &WaitStatement, axis: &str, brake: &AxisBr
         WaitCondition::Single(term) => vec![term],
         WaitCondition::And(terms) => terms.iter().collect(),
         WaitCondition::Or(_) => return false,
+        WaitCondition::Edge(_) => return false,
     };
 
     terms.into_iter().any(|term| {

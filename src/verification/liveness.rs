@@ -718,6 +718,13 @@ fn collect_wait_signals_from_wait(wait: &WaitStatement, signals: &mut HashSet<St
     let conditions = match &wait.condition {
         WaitCondition::Single(cond) => vec![cond],
         WaitCondition::And(conds) | WaitCondition::Or(conds) => conds.iter().collect::<Vec<_>>(),
+        WaitCondition::Edge(edge) => {
+            let operand = edge.operand.trim();
+            if !operand.is_empty() {
+                signals.insert(operand.to_string());
+            }
+            Vec::new()
+        }
     };
 
     for condition in conditions {
@@ -945,6 +952,14 @@ fn wait_to_text(wait: &WaitStatement) -> String {
             .map(condition_to_text)
             .collect::<Vec<_>>()
             .join(" OR "),
+        WaitCondition::Edge(edge) => edge_condition_to_text(edge.edge, &edge.operand),
+    }
+}
+
+fn edge_condition_to_text(edge: crate::ast::EdgeKind, operand: &str) -> String {
+    match edge {
+        crate::ast::EdgeKind::Rising => format!("rising_edge({operand})"),
+        crate::ast::EdgeKind::Falling => format!("falling_edge({operand})"),
     }
 }
 

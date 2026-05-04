@@ -907,6 +907,20 @@ pub enum WaitCondition {
     Single(ConditionExpression),
     And(Vec<ConditionExpression>),
     Or(Vec<ConditionExpression>),
+    Edge(EdgeCondition),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EdgeCondition {
+    pub edge: EdgeKind,
+    pub operand: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeKind {
+    Rising,
+    Falling,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

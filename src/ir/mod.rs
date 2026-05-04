@@ -305,6 +305,10 @@ pub enum TransitionGuard {
     Condition {
         expression: String,
     },
+    Edge {
+        edge: EdgeKind,
+        operand: String,
+    },
     Timeout {
         duration_ms: u64,
     },
@@ -312,6 +316,13 @@ pub enum TransitionGuard {
     Delay {
         duration_ms: u64,
     },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeKind {
+    Rising,
+    Falling,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

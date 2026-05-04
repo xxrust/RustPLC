@@ -243,14 +243,12 @@ fn build_state_machine_from_ast_with_context(
                 }
             }
 
-            for wait_expression in &analyzed.waits {
+            for wait_guard in &analyzed.waits {
                 if let Some(target) = completion_target.clone() {
                     builder.add_transition(
                         from_state.clone(),
                         target,
-                        TransitionGuard::Condition {
-                            expression: wait_expression.clone(),
-                        },
+                        wait_guard.clone(),
                         analyzed.actions.clone(),
                         analyzed.effects.clone(),
                         Vec::new(),

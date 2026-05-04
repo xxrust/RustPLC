@@ -245,6 +245,7 @@ pub const MAX_CAM_COUPLINGS: usize = 8;
 pub const MAX_AXIS_HOMING_TARGETS: usize = 32;
 pub const MAX_EXTERN_ARGS: usize = 16;
 pub const MAX_EXTERN_RETURNS: usize = 8;
+pub const MAX_TRACKED_DIGITAL_INPUTS: usize = 1024;
 pub const MAX_TRACKED_DIGITAL_OUTPUTS: usize = 1024;
 pub const MAX_WORKPIECE_TOKENS: usize = 256;
 pub const MAX_WORKPIECE_LINEAGE_RECORDS: usize = MAX_WORKPIECE_TOKENS * 4;
@@ -508,3 +509,9 @@ fn compare_f32(left: f32, op: CompareOp, right: f32) -> bool {
     }
 }
 
+fn edge_satisfied(previous: bool, current: bool, edge: EdgeKind) -> bool {
+    match edge {
+        EdgeKind::Rising => !previous && current,
+        EdgeKind::Falling => previous && !current,
+    }
+}

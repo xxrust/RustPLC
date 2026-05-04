@@ -108,6 +108,46 @@ task ready:
     }
 
     #[test]
+    fn lowers_edge_wait_into_structured_transition_guard() {
+        let input = r#"
+[topology]
+device start_button: sensor
+
+[constraints]
+
+[tasks]
+task ready:
+    step wait_start:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+
+    step done:
+"#;
+
+        let program = parse_plc(input).expect("edge wait should parse");
+        let state_machine = build_state_machine(&program).expect("edge wait should lower");
+
+        let transition = state_machine
+            .transitions
+            .iter()
+            .find(|transition| {
+                transition.from.task_name == "ready"
+                    && transition.from.step_name == "wait_start"
+                    && transition.to.task_name == "ready"
+                    && transition.to.step_name == "done"
+            })
+            .expect("edge transition should exist");
+
+        assert!(matches!(
+            transition.guard,
+            TransitionGuard::Edge {
+                edge: crate::ir::EdgeKind::Rising,
+                ref operand,
+            } if operand == "start_button"
+        ));
+    }
+
+    #[test]
     fn lowers_delay_statement_into_bounded_transition_to_next_step() {
         let input = r#"
 [topology]

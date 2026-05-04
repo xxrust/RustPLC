@@ -66,6 +66,34 @@ fn compile_example_to_runtime(file_name: &str, tick_ms: u64) -> runtime_core::Pr
     compile_to_runtime(&source, tick_ms)
 }
 
+#[test]
+fn bridge_lowers_edge_waits_to_runtime_edge_instructions() {
+    let source = r#"
+[topology]
+device X0: digital_input
+
+[constraints]
+
+[tasks]
+task ready:
+    step wait_start:
+        wait: rising_edge(X0)
+        allow_indefinite_wait: true
+
+    step done:
+"#;
+
+    let program = compile_to_runtime(source, 10);
+    match program.tasks[0].steps[0].instr {
+        Instr::WaitDigitalEdge { id, edge, next, .. } => {
+            assert_eq!(id, DigitalInputId(0));
+            assert_eq!(edge, runtime_core::EdgeKind::Rising);
+            assert_eq!(next, runtime_core::StepId(1));
+        }
+        other => panic!("expected runtime edge wait instruction, got {other:?}"),
+    }
+}
+
 fn variable_index(topology: &TopologyGraph, name: &str) -> u16 {
     topology
         .variables
