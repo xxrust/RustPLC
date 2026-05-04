@@ -41,7 +41,29 @@ jobs:
       - name: Cam regression gate
         run: bash scripts/cam_regression_gate.sh
       - name: Cargo test (workspace)
-        run: cargo test --workspace
+        run: |
+          set -o pipefail
+          {
+            rustc --version
+            cargo --version
+            cargo test --workspace
+          } 2>&1 | tee /tmp/rustplc-workspace-test.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+from pathlib import Path
+
+log = Path("/tmp/rustplc-workspace-test.log").read_text(errors="replace")
+tail = "\n".join(log.splitlines()[-160:])
+escaped = (
+    tail.replace("%", "%25")
+    .replace("\r", "%0D")
+    .replace("\n", "%0A")
+)
+print(f"::error file=.github/workflows/rp2040_regression.yml,line=25::{escaped}")
+PY
+            exit "$status"
+          fi
 
   topology-perf-gate:
     runs-on: ubuntu-latest
