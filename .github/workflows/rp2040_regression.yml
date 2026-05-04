@@ -43,12 +43,14 @@ jobs:
       - name: Cargo test (workspace)
         run: |
           set -o pipefail
+          set +e
           {
             rustc --version
             cargo --version
             cargo test --workspace
           } 2>&1 | tee /tmp/rustplc-workspace-test.log
           status=${PIPESTATUS[0]}
+          set -e
           if [ "$status" -ne 0 ]; then
             python3 - <<'PY'
           from pathlib import Path
