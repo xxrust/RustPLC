@@ -29,7 +29,7 @@ causality: Y0 -> valve_lift -> cyl_lift -> sensor_lift_ext
 
 task ready:
     step wait_start:
-        wait: start_button == true
+        wait: rising_edge(start_button)
         allow_indefinite_wait: true
     on_complete: goto cycle
 

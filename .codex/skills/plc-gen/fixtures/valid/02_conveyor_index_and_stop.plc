@@ -36,7 +36,7 @@ causality: Y1 -> valve_stopper -> cyl_stopper -> sensor_stop_ext
 
 task ready:
     step wait_start:
-        wait: start_button == true
+        wait: rising_edge(start_button)
         allow_indefinite_wait: true
     on_complete: goto cycle
 

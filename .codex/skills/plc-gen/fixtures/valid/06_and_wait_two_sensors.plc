@@ -21,7 +21,7 @@ relation { from: plc_main.Y0, to: pass_lamp.coil, via: driven_by }
 
 task ready:
     step wait_start:
-        wait: start_button == true
+        wait: rising_edge(start_button)
         allow_indefinite_wait: true
     on_complete: goto cycle
 

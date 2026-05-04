@@ -58,6 +58,16 @@ Reference example:
 Do not split by arbitrary line count or by temporary implementation convenience.
 Do split by stable ownership and semantic responsibility so the project is suitable for parallel implementation and later review.
 
+## Task and step comment rule
+
+Every generated or repaired `task` and `step` must have a concise Chinese `#` comment immediately before it.
+
+The task comment should name the task responsibility and boundary.
+The step comment should explain operational intent plus the exit/completion condition, such as wait satisfaction, timeout route, semantic device-action completion, workpiece transfer, or terminal logging.
+
+Do not emit bare task/step blocks in project delivery sources.
+Do not use comments that only repeat the identifier in Chinese; make the comment useful for a reviewer who does not already know the sequence.
+
 ## Workpiece rule for physical part flow
 
 If the system contract describes a real physical part moving through the station, do not leave that flow implicit in sensors and actuators only.
@@ -142,6 +152,7 @@ If a milestone keeps comparing as `duplicated_required_step` in a real canary tr
 ## 3. wait / timeout 规则
 
 - manual wait 必须显式使用 `allow_indefinite_wait: true`
+- start/reset/acknowledge 等瞬时人工命令应生成 `wait: rising_edge(<alias_or_button>)`；只有明确等待释放时才使用 `falling_edge(...)`，不要再用额外的 `wait: <button> == false` 步骤模拟边沿触发
 - 非 manual wait 默认应有 timeout 或可解释的收敛路径
 - recovery / fault target 必须是实际 `task.step` 路径，不是抽象注释
 

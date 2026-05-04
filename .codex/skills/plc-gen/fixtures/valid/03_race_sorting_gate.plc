@@ -39,7 +39,7 @@ causality: Y1 -> valve_gate -> cyl_gate -> sensor_gate_B
 
 task ready:
     step wait_start:
-        wait: start_button == true
+        wait: rising_edge(start_button)
         allow_indefinite_wait: true
     on_complete: goto search
 

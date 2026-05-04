@@ -71,12 +71,12 @@ operator intent
 | `operator_boundary` | 操作者、权限、命令入口、反馈义务 | `operator main_operator` |
 | `operator_panel` | 一组按钮、选择开关、HMI 命令和指示输出 | `main_panel` |
 | `front-door contract` | 命令触发方式、允许状态、确认/反馈要求 | `start_cycle` 只能在 `ready.wait_start` 生效 |
-| `task` | 消费已经建模的命令语义 | `wait: start_button == true` 或后续 `wait command start_cycle` |
+| `task` | 消费已经建模的命令语义 | `wait: rising_edge(start_button)` 或后续 `wait command start_cycle` |
 | `verification` | 验证命令可达性、禁止状态、反馈覆盖、人工确认闭环 | 故障后必须给出可见报警并等待复位 |
 
 ## 4. DSL 方向
 
-第一阶段不要求立即替换已有 `wait: start_button == true`。
+当前编译器已支持一等边沿等待；新生成的瞬时人工命令不应再使用 `wait: start_button == true` + 释放等待步模拟边沿。
 
 推荐新增可向后兼容的声明语义：
 

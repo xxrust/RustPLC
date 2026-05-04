@@ -70,6 +70,7 @@ Do not model a human operator as a normal `device`, and do not invent reverse to
 For buttons, selectors, reset inputs, manual acknowledgements, and HMI commands:
 - keep the physical input as a semantic field device plus `relation { from: <button>.out, to: plc_main.<input_alias>, via: reports_to }`
 - define that alias in `controller_io plc_main { ... }` inside `controller.plc`; use raw `plc_main.X*` only for minimal fixtures or when no project alias exists yet
+- for momentary operator commands such as start/reset/acknowledge, generate `wait: rising_edge(<alias_or_button>)`; use `falling_edge(...)` only when the contract explicitly waits for release. Do not synthesize a separate release-wait step to emulate edge triggering
 - record the operator front-door semantics in the system/project docs: actor, command name, trigger type, allowed state, reject behavior, and required visible feedback
 - for complex projects, scenario input events should carry `actor` / `source` provenance when the event represents an operator action
 - outputs back to the human, such as lamps, buzzers, HMI status, and alarm messages, are feedback obligations, not proof that the button has an input side
@@ -108,6 +109,35 @@ Then ensure that asset owns its own:
 
 The structured fragment tree is the compile surface.
 The delivery asset and its document set are the architecture surface.
+
+## Hard Guardrail: Comment Every Task And Step
+
+When generating or repairing PLC task sources, every `task` and every `step` must have a concise Chinese `#` comment immediately before it.
+
+Task comments must state the task's responsibility and boundary, for example whether it is startup, automatic cycle, fault recovery, manual operation, HMI/supervision, or a station-owned task.
+
+Step comments must state the step's operational intent and the condition that lets it leave the step, including blocking waits, timeouts, device-action completion, workpiece movement, or terminal logging.
+
+Do not write filler comments that simply restate the identifier. The comment should explain why the step exists in the machine flow.
+
+Example:
+
+```plc
+# 待机任务：只等待操作者启动命令，设备保持初始化后的安全状态。
+task ready:
+    # 等待启动步：允许无限等待，因为这是人工启动边界。
+    step wait_start:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+
+    on_complete: goto cycle.feed_start
+
+# 自动循环任务：完成一次送料、处理和出料的正常生产周期。
+task cycle:
+    # 送料启动步：打开送料机构，直到下游取料位传感器确认到料。
+    step feed_start:
+        action: set feed_motor.run on
+```
 
 ## Scaffold Rule
 
