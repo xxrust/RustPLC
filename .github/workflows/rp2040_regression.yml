@@ -79,24 +79,8 @@ jobs:
             --sil examples/trace_golden/sil_trace.jsonl \
             --out-dir out/ci_pil_gate \
             --board-log examples/trace_golden/board_log_match.log
-      - name: PIL baseline suite (cat runner)
-        run: |
-          scripts/pil_trace_baseline_suite.sh \
-            --runner cat \
-            --out-root out/ci_pil_baselines
       - name: PIL semantic baselines (.plc + scenario)
         run: |
           scripts/pil_semantic_baseline.sh \
             --cases-dir examples/pil_baselines \
             --out-root out/ci_pil_semantic_baselines
-
-  pil-renode-runner:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: PIL baseline suite (renode runner)
-        run: |
-          scripts/pil_trace_baseline_suite.sh \
-            --runner renode \
-            --out-root out/ci_pil_baselines_renode

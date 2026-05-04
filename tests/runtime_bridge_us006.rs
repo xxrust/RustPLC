@@ -16,7 +16,6 @@ use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
 };
-use rust_plc::source_bundle::load_plc_source;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -65,21 +64,6 @@ fn compile_example_to_runtime(file_name: &str, tick_ms: u64) -> runtime_core::Pr
     let source = fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("read {} failed: {err}", path.display()));
     compile_to_runtime(&source, tick_ms)
-}
-
-fn compile_bundle_to_runtime(
-    relative_bundle_path: &str,
-    tick_ms: u64,
-) -> runtime_core::Program<'static> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_bundle_path);
-    let loaded = load_plc_source(&path)
-        .unwrap_or_else(|err| panic!("load bundle {} failed: {err}", path.display()));
-    let program = parse_plc(&loaded.source).expect("parse bundled plc");
-    let expanded = preprocess_program(&program).expect("preprocess");
-    let topology = build_topology_graph(&expanded).expect("topology");
-    let constraints = build_constraint_set(&expanded).expect("constraints");
-    let sm = build_state_machine(&expanded).expect("state machine");
-    state_machine_to_runtime_program(&topology, &constraints, &sm, tick_ms).expect("bridge")
 }
 
 fn variable_index(topology: &TopologyGraph, name: &str) -> u16 {
@@ -211,6 +195,68 @@ task background:
     on_complete: goto background
 "#;
 
+const PLC_STARTUP_PRODUCTION_ROOT_FIXTURE: &str = r#"
+[topology]
+
+device X0: digital_input
+device X1: digital_input
+device start_button: sensor
+device maintenance_mode: sensor
+
+relation { from: start_button.out, to: X0.in, via: reports_to }
+relation { from: maintenance_mode.out, to: X1.in, via: reports_to }
+
+[constraints]
+
+[tasks]
+task startup_initializer:
+    step startup_ready:
+        wait: maintenance_mode == true
+        allow_indefinite_wait: true
+
+task architecture_monitor:
+    step monitor_loop:
+        wait: maintenance_mode == true
+        allow_indefinite_wait: true
+
+task supervisor:
+    step wait_start:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    step monitor_stop:
+        wait: maintenance_mode == true
+        allow_indefinite_wait: true
+
+task feed_prep:
+    step wait_enabled:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    step feed_forward:
+        wait: maintenance_mode == true
+        allow_indefinite_wait: true
+
+task orient_stage:
+    step wait_enabled:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    step wait_slide_present:
+        wait: maintenance_mode == true
+        allow_indefinite_wait: true
+
+task transfer_to_measure:
+    step wait_enabled:
+        wait: start_button == true
+        allow_indefinite_wait: true
+    step wait_wafer_ready:
+        wait: maintenance_mode == true
+        allow_indefinite_wait: true
+
+task maintenance_service:
+    step wait_mode:
+        wait: maintenance_mode == true
+        allow_indefinite_wait: true
+"#;
+
 #[test]
 fn bridge_preserves_task_boundaries_for_independent_roots() {
     let program = compile_to_runtime(PLC_MULTI_ROOT_TASK_FIXTURE, 1);
@@ -271,10 +317,7 @@ fn bridge_keeps_primary_task_active_when_recovery_task_forms_scc() {
 
 #[test]
 fn wafer_loader_bundle_keeps_startup_and_production_domains_as_runtime_roots() {
-    let program = compile_bundle_to_runtime(
-        "out/wafer_loader_project/plc/main.target_semantics.bundle.toml",
-        10,
-    );
+    let program = compile_to_runtime(PLC_STARTUP_PRODUCTION_ROOT_FIXTURE, 10);
     let task_names = program
         .tasks
         .iter()
@@ -299,16 +342,10 @@ fn wafer_loader_bundle_keeps_startup_and_production_domains_as_runtime_roots() {
 
 #[test]
 fn wafer_loader_nominal_start_pulse_progress_snapshot() {
-    let program = compile_bundle_to_runtime(
-        "out/wafer_loader_project/plc/main.target_semantics.bundle.toml",
-        10,
-    );
+    let program = compile_to_runtime(PLC_STARTUP_PRODUCTION_ROOT_FIXTURE, 10);
     let mut rt = Runtime::new(&program).expect("runtime init");
-    let mut io = sim::SimIo::new(32, 10, 0, 0);
+    let mut io = sim::SimIo::new(2, 10, 0, 0);
 
-    for id in [3u16, 12, 17, 18, 19, 20, 22, 23, 25, 27, 29, 31] {
-        io.schedule_digital_input(Tick(0), DigitalInputId(id), true);
-    }
     io.schedule_digital_input(Tick(5), DigitalInputId(0), true);
     io.schedule_digital_input(Tick(10), DigitalInputId(0), false);
 

@@ -51,7 +51,7 @@ function Invoke-GenerateAndCompile {
     }
 }
 
-Invoke-GenerateAndCompile -PlcPath "examples/two_cylinder.plc" -Stem "two_cylinder"
-Invoke-GenerateAndCompile -PlcPath "examples/assembly_station.plc" -Stem "assembly_station"
+Invoke-GenerateAndCompile -PlcPath "examples/project_scaffold_demo/plc/main.plc" -Stem "project_scaffold_demo"
+Invoke-GenerateAndCompile -PlcPath "examples/dual_axis_platform.plc" -Stem "dual_axis_platform"
 
 Write-Host "[ST-MATIEC] OK - generated ST files compile with MATIEC"

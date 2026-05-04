@@ -63,7 +63,7 @@ generate_and_compile() {
   )
 }
 
-generate_and_compile "examples/two_cylinder.plc" "two_cylinder"
-generate_and_compile "examples/assembly_station.plc" "assembly_station"
+generate_and_compile "examples/project_scaffold_demo/plc/main.plc" "project_scaffold_demo"
+generate_and_compile "examples/dual_axis_platform.plc" "dual_axis_platform"
 
 echo "[ST-MATIEC] OK - generated ST files compile with MATIEC"

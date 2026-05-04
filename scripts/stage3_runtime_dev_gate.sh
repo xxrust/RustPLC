@@ -17,7 +17,7 @@ cargo test --test no_board_playbook_doc
 
 echo "[stage3-gate] Checking scenario-gen summary contract"
 cargo run --bin rust_plc -- scenario-gen \
-  --plc examples/assembly_station.plc \
+  --plc examples/rp2040_motion_minimal.plc \
   --config examples/scenario_gen/basic.yaml \
   --out-dir "$TMP_DIR/scenario_gen" \
   --coverage-mode boundary-first \

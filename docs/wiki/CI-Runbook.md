@@ -132,6 +132,5 @@ UART 输出中应包含：
 
 | 工作流 | 说明 |
 |--------|------|
-| `openplc_trace_phase2.yml` | OpenPLC trace 测试 |
 | `rp2040_hil_nightly.yml` | RP2040 硬件在环夜间测试 |
 | `st_codegen_matiec.yml` | ST 代码生成 + matiec 验证 |
