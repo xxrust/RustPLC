@@ -1,77 +1,103 @@
+# 转运任务：摆缸从辨相台取片并交付测片台，同时处理取片失败与掉片。
 task transfer_to_measure:
+    # 自动使能等待步：自动循环未锁存时保持转运待机。
     step wait_enabled:
         wait: auto_cycle_enabled == true
         allow_indefinite_wait: true
 
+    # 自动模式确认步：自动模式有效才执行转运。
     step wait_mode:
         wait: mode_auto == true
         allow_indefinite_wait: true
 
+    # 停止清除步：停止请求期间不启动新的转运动作。
     step wait_stop_clear:
         wait: stop_button == false
         allow_indefinite_wait: true
 
+    # 辨相台有片等待步：等待辨相台完成持片交接并由传感器确认有片。
     step wait_wafer_ready:
         wait: wafer_on_orient == true
         allow_indefinite_wait: true
 
+    # 测片台可接收等待步：下游测片台准备好才允许放片。
     step wait_measure_ready:
         wait: measure_stage_ready == true
         allow_indefinite_wait: true
 
+    # 转运计数步：记录一次转运尝试，用于长期掉片率统计。
     step count_attempt:
         action: compute transfer_attempt_count = transfer_attempt_count + 1.0
 
+    # 摆缸下摆步：摆缸进入取片窗口，超时进入转运气缸警告。
     step swing_down:
         action: extend cyl_swing
             timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
 
+    # 升降下行步：升降气缸下行到取片高度。
     step lift_down:
         action: extend cyl_lift
             timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
 
+    # 转运真空打开步：打开转运吸嘴真空准备取片。
     step transfer_vacuum_on:
         action: set vac_transfer_valve.coil on
 
+    # 转运吸片确认步：确认从辨相台取片并登记 holder acquire。
     step wait_transfer_vacuum:
         wait: sensor_transfer_vac_ok == true
         timeout: 1000ms -> goto transfer_to_measure.record_pick_failure
         effect: acquire holder transfer_nozzle from orient_inspection_site
 
+    # 辨相台取空确认步：源位传感器必须变空，防止同一辨相台高电平被重复转运。
+    step wait_orient_empty_after_pick:
+        wait: wafer_on_orient == false
+        allow_indefinite_wait: true
+
+    # 辨相台释放步：关闭辨相台真空，转运吸嘴成为当前持片位置。
     step release_orient:
         action: set vac_orient_valve.coil off
 
+    # 升降上行步：带片上升离开辨相台。
     step lift_up:
         action: retract cyl_lift
             timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
 
+    # 摆缸上摆步：带片离开辨相危险区。
     step swing_up:
         action: retract cyl_swing
             timeout: 700ms -> goto transfer_warning.transfer_cyl_warn
 
+    # 转运前进步：转运气缸前进到测片台放片位置。
     step move_front:
         action: extend cyl_transfer
             timeout: 900ms -> goto transfer_warning.transfer_cyl_warn
 
+    # 掉片检测步：若途中掉片则进入掉片路径，否则继续放片。
     step check_drop_sensor:
         wait: wafer_drop_detect == false
         timeout: 10ms -> goto transfer_to_measure.record_drop_after_pick
 
+    # 放片步：关闭转运真空并登记从吸嘴到测片台的 transfer。
     step place_wafer:
         action: set vac_transfer_valve.coil off
         effect: transfer from transfer_nozzle to measure_stage_site
 
-    step transfer_back:
+    # 交付完成步：后退转运气缸并以 handed_to_measure 关闭正常工件路径。
+    step finish_handoff:
         action: retract cyl_transfer
             timeout: 900ms -> goto transfer_warning.transfer_cyl_warn
         effect: finish workpiece at measure_stage_site as handed_to_measure
 
+    # 掉片连续计数清零步：正常交付后清除连续掉片计数。
     step clear_drop_streak:
         action: compute consecutive_drop_count = 0.0
 
+    # 成功完成步：结束本次转运并回到等待。
     step finish_success:
         goto transfer_to_measure.wait_enabled
 
+    # 取片失败记录步：辨相台上未取起时将当前片转入 reject_bin 并进入掉片统计检查。
     step record_pick_failure:
         action: set vac_transfer_valve.coil off
         action: retract cyl_lift
@@ -81,7 +107,9 @@ task transfer_to_measure:
         action: compute consecutive_drop_count = consecutive_drop_count + 1.0
         effect: transfer from orient_inspection_site to reject_bin
         effect: finish workpiece at reject_bin as rejected
+        goto transfer_to_measure.check_drop_streak
 
+    # 取起后掉片记录步：已在转运吸嘴上的晶片掉落时以 dropped 关闭。
     step record_drop_after_pick:
         action: set vac_transfer_valve.coil off
         action: retract cyl_lift
@@ -90,12 +118,14 @@ task transfer_to_measure:
         action: compute drop_total = drop_total + 1.0
         action: compute consecutive_drop_count = consecutive_drop_count + 1.0
         effect: transfer from transfer_nozzle to reject_bin
-        effect: finish workpiece at reject_bin as rejected
+        effect: finish workpiece at reject_bin as dropped
 
+    # 连续掉片检查步：连续两次掉片时进入停机故障。
     step check_drop_streak:
         wait: consecutive_drop_count < 2
         timeout: 10ms -> goto transfer_fault.drop_consecutive_fault
 
+    # 长期掉片率检查步：长期掉片率越限时进入停机故障。
     step check_drop_rate:
         wait: drop_rate_exceeded == false
         timeout: 10ms -> goto transfer_fault.drop_rate_fault

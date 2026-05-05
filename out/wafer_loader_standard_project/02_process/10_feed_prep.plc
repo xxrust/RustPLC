@@ -1,0 +1,53 @@
+# 出片准备任务：在滑轨空闲且出料盒有源片时，将一片晶片准备到滑轨取料位。
+task feed_prep:
+    # 自动使能等待步：只有监督任务锁存自动循环后才允许出片。
+    step wait_enabled:
+        wait: auto_cycle_enabled == true
+        allow_indefinite_wait: true
+
+    # 自动模式确认步：模式丢失时暂停本任务。
+    step wait_mode:
+        wait: mode_auto == true
+        allow_indefinite_wait: true
+
+    # 停止清除步：停止按钮保持时不继续引入新晶片。
+    step wait_stop_clear:
+        wait: stop_button == false
+        allow_indefinite_wait: true
+
+    # 滑轨容量等待步：滑轨取料位为空才允许下一次出片。
+    step wait_slide_free:
+        wait: wafer_on_slide == false
+        allow_indefinite_wait: true
+
+    # 出料盒源等待步：当前 nominal 只播种一片，后续补料必须由上游或场景重新声明。
+    step wait_cassette_source:
+        wait: feed_cassette_has_seed == true
+        allow_indefinite_wait: true
+
+    # 出料前进步：出料气缸前进到取片窗口，超时进入出料气缸警告。
+    step feed_forward:
+        action: extend cyl_feed
+            timeout: 800ms -> goto feed_warning.feed_cyl_warn
+
+    # 出料真空打开步：打开出料真空以吸附单片晶片。
+    step feed_vacuum_on:
+        action: set vac_feed_valve.coil on
+
+    # 出料真空确认步：1 秒内确认吸附，否则进入未吸到片故障。
+    step wait_feed_vacuum:
+        wait: sensor_feed_vac_ok == true
+        timeout: 1000ms -> goto feed_fault.feed_vacuum_timeout
+
+    # 出料后退步：出料气缸后退，将晶片留在滑轨取料位。
+    step feed_back:
+        action: retract cyl_feed
+            timeout: 800ms -> goto feed_warning.feed_cyl_warn
+
+    # 滑轨交接步：关闭出料真空并登记工件从出料盒到滑轨位。
+    step release_to_slide:
+        action: set vac_feed_valve.coil off
+        action: compute feed_cassette_has_seed = false
+        effect: transfer from feed_cassette to slide_pick_site
+
+    on_complete: goto feed_prep.wait_enabled

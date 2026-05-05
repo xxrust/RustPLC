@@ -1,0 +1,180 @@
+{
+  "contract_version": "phase-2.v1",
+  "source_ref": {
+    "kind": "authored_asset",
+    "path": "out/wafer_loader_standard_project/plc/main.system.md",
+    "description": "测角机上料器标准项目的顶层 system contract。"
+  },
+  "source_digest": {
+    "algorithm": "sha256",
+    "value": "94f46bde431a7816c09e0764486d84babed48d8d78e045a2d9af311051089a72"
+  },
+  "metadata": {
+    "contract_id": "wafer-loader-standard-nominal-handoff",
+    "title": "测角机上料器标准项目 nominal handoff intent contract",
+    "business_owner": "wafer-loader-review-owner",
+    "authoritative_intent_source": {
+      "kind": "authored_asset",
+      "path": "out/wafer_loader_standard_project/plc/main.system.md",
+      "description": "测角机上料器标准项目的顶层 system contract。"
+    },
+    "review_basis": [
+      {
+        "label": "System contract review",
+        "source": {
+          "kind": "authored_asset",
+          "path": "out/wafer_loader_standard_project/plc/main.system.md",
+          "description": "确认工艺使命、front-door、异常策略和候选操作。"
+        }
+      },
+      {
+        "label": "Process operation model review",
+        "source": {
+          "kind": "authored_asset",
+          "path": "out/wafer_loader_standard_project/process_model/process_operation_model.toml",
+          "description": "确认 source availability、destination capacity 和工件转移候选操作。"
+        }
+      }
+    ]
+  },
+  "contract_core": {
+    "expected_milestones": [
+      {
+        "milestone_id": "cycle_started",
+        "business_milestone": {
+          "label": "自动循环已锁存",
+          "description": "操作者启动 front-door 被接受，系统进入自动循环使能状态。"
+        }
+      },
+      {
+        "milestone_id": "slide_pick_closed",
+        "business_milestone": {
+          "label": "滑轨取片闭合",
+          "description": "旋臂已经从滑轨取走晶片，并确认滑轨取料位恢复为空。"
+        }
+      },
+      {
+        "milestone_id": "orient_stage_secured",
+        "business_milestone": {
+          "label": "辨相台持片确认",
+          "description": "晶片已从旋臂交付到辨相台，辨相台真空确认持片。"
+        }
+      },
+      {
+        "milestone_id": "measure_handoff_completed",
+        "business_milestone": {
+          "label": "测片台交付完成",
+          "description": "转运任务完成测片台交付并回到等待下一次转运的入口。"
+        }
+      }
+    ],
+    "required_edges": [
+      {
+        "predecessor": "cycle_started",
+        "successor": "slide_pick_closed"
+      },
+      {
+        "predecessor": "slide_pick_closed",
+        "successor": "orient_stage_secured"
+      },
+      {
+        "predecessor": "orient_stage_secured",
+        "successor": "measure_handoff_completed"
+      }
+    ],
+    "postconditions": [
+      {
+        "postcondition_id": "station_ready_for_next_transfer",
+        "description": "正常交付路径完成后，转运任务回到可接收下一片的等待入口。"
+      }
+    ],
+    "cycle_semantics": {
+      "cycle_start_milestone": "cycle_started",
+      "cycle_complete_milestone": "measure_handoff_completed",
+      "restart_semantics": {
+        "restartable_milestone": "measure_handoff_completed",
+        "next_cycle_start_milestone": "cycle_started",
+        "required_postconditions": [
+          "station_ready_for_next_transfer"
+        ]
+      }
+    }
+  },
+  "observation_bindings": [
+    {
+      "binding_id": "cycle_started_transition",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "cycle_started"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "transition",
+          "expected": "task=0;from=6;to=7;reason=action"
+        }
+      ]
+    },
+    {
+      "binding_id": "slide_pick_closed_transition",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "slide_pick_closed"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "transition",
+          "expected": "task=3;from=17;to=18;reason=wait_satisfied"
+        }
+      ]
+    },
+    {
+      "binding_id": "orient_stage_secured_transition",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "orient_stage_secured"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "transition",
+          "expected": "task=3;from=20;to=50;reason=wait_satisfied"
+        }
+      ]
+    },
+    {
+      "binding_id": "measure_handoff_completed_transition",
+      "subject": {
+        "kind": "milestone",
+        "milestone_id": "measure_handoff_completed"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "transition",
+          "expected": "task=4;from=27;to=8;reason=goto"
+        }
+      ]
+    },
+    {
+      "binding_id": "station_ready_postcondition_transition",
+      "subject": {
+        "kind": "postcondition",
+        "postcondition_id": "station_ready_for_next_transfer"
+      },
+      "combination": "all_of",
+      "evidence": [
+        {
+          "source": "trace_event",
+          "key": "transition",
+          "expected": "task=4;from=27;to=8;reason=goto"
+        }
+      ]
+    }
+  ]
+}

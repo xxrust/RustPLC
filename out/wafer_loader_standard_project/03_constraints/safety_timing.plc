@@ -1,0 +1,34 @@
+claim: cyl_feed.extended occupies slide_pick_zone
+claim: action_tag arm_pick_to_slide occupies slide_pick_zone
+claim: cyl_swing.extended occupies arm_orient_zone
+claim: action_tag arm_turn_to_orient occupies arm_orient_zone
+
+safety: mode_auto.on conflicts_with mode_manual.on
+    reason: "Auto and manual modes must be mutually exclusive"
+
+safety: mode_auto.on conflicts_with mode_step.on
+    reason: "Auto and step modes must be mutually exclusive"
+
+safety: mode_auto.on conflicts_with mode_maintenance.on
+    reason: "Auto and maintenance modes must be mutually exclusive"
+
+safety: mode_manual.on conflicts_with mode_step.on
+    reason: "Manual and step modes must be mutually exclusive"
+
+safety: mode_manual.on conflicts_with mode_maintenance.on
+    reason: "Manual and maintenance modes must be mutually exclusive"
+
+safety: mode_step.on conflicts_with mode_maintenance.on
+    reason: "Step and maintenance modes must be mutually exclusive"
+
+safety: axis_arm.enable.off conflicts_with axis_arm.pulse.active
+    reason: "Axis pulse output must not toggle while the drive is disabled"
+
+timing: task.feed_prep must_complete_within_worst_case 4000ms
+    reason: "Feed preparation should finish within one wafer feed window"
+
+timing: task.orient_stage must_complete_within_worst_case 12000ms
+    reason: "Pick, orient, and return should finish within the rotary arm cycle budget"
+
+timing: task.transfer_to_measure must_complete_within_worst_case 18000ms
+    reason: "Transfer handoff should finish within the transfer cycle budget"

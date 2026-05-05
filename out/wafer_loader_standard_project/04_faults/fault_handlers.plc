@@ -1,0 +1,177 @@
+# 初始化故障任务：初始化基线无法建立时停机并等待人工刷新。
+task startup_fault:
+    # 初始化超时步：关闭自动循环并记录初始化姿态故障。
+    step init_pose_timeout:
+        action: compute auto_cycle_enabled = false
+        action: compute system_initialized = false
+        action: log "startup fault: failed to reach initialized baseline"
+
+    # 初始化刷新等待步：等待操作员确认修复后重跑初始化。
+    step wait_refresh:
+        wait: rising_edge(refresh_button)
+        allow_indefinite_wait: true
+
+    on_complete: goto startup_initializer.drive_safe_outputs
+
+# 出料警告任务：出料气缸不到位时挂起自动循环并等待刷新。
+task feed_warning:
+    # 出料气缸警告步：关闭出料真空、收回气缸并停止自动节拍。
+    step feed_cyl_warn:
+        action: compute auto_cycle_enabled = false
+        action: set vac_feed_valve.coil off
+        action: retract cyl_feed
+        action: log "feed warning: feed cylinder position not confirmed"
+
+    # 出料刷新等待步：等待操作员修复气缸/磁性开关后刷新。
+    step wait_refresh:
+        wait: rising_edge(refresh_button)
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_mode_auto
+
+# 辨相警告任务：辨相翻转气缸不到位时挂起自动循环并等待刷新。
+task orient_warning:
+    # 辨相气缸警告步：收回翻转气缸并停止自动节拍。
+    step orient_cyl_warn:
+        action: compute auto_cycle_enabled = false
+        action: retract cyl_orient_rotate
+        action: log "orient warning: orient cylinder position not confirmed"
+
+    # 辨相刷新等待步：等待操作员修复后刷新。
+    step wait_refresh:
+        wait: rising_edge(refresh_button)
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_mode_auto
+
+# 转运警告任务：摆缸、升降或转运气缸不到位时挂起自动循环并等待刷新。
+task transfer_warning:
+    # 转运气缸警告步：关闭转运真空、收回转运机构并停止自动节拍。
+    step transfer_cyl_warn:
+        action: compute auto_cycle_enabled = false
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: log "transfer warning: transfer cylinder position not confirmed"
+
+    # 转运刷新等待步：等待操作员修复后刷新。
+    step wait_refresh:
+        wait: rising_edge(refresh_button)
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_mode_auto
+
+# 出料故障任务：出料真空 1 秒内未确认时停机等待处理。
+task feed_fault:
+    # 出料真空超时步：关闭出料真空、收回气缸并停止自动节拍。
+    step feed_vacuum_timeout:
+        action: set vac_feed_valve.coil off
+        action: retract cyl_feed
+        action: compute auto_cycle_enabled = false
+        action: log "feed fault: wafer was not held within 1 second"
+
+    # 出料故障刷新等待步：等待人工处理后返回监督等待。
+    step wait_refresh:
+        wait: rising_edge(refresh_button)
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_mode_auto
+
+# 辨相故障任务：旋臂取片、辨相吸附、连续异常或轴恢复失败时停机。
+task orient_fault:
+    # 旋臂取片超时步：关闭旋臂真空并停止自动节拍。
+    step arm_pick_timeout:
+        action: set vac_arm_valve.coil off
+        action: compute auto_cycle_enabled = false
+        action: log "orient fault: arm vacuum did not pick the wafer"
+
+    # 辨相吸附超时步：关闭旋臂与辨相真空并停止自动节拍。
+    step orient_vacuum_timeout:
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: compute auto_cycle_enabled = false
+        action: log "orient fault: orient vacuum did not confirm hold"
+
+    # 连续辨相异常步：连续三片异常时停止自动节拍。
+    step orient_reject_streak_fault:
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: compute auto_cycle_enabled = false
+        action: log "orient fault: three consecutive wafers rejected to IR"
+
+    # 轴不可恢复步：轴恢复次数耗尽后停止自动节拍。
+    step axis_unrecoverable:
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: compute auto_cycle_enabled = false
+        action: log "orient fault: arm axis recovery exhausted"
+
+    # 辨相故障刷新等待步：等待人工处理后返回监督等待。
+    step wait_refresh:
+        wait: rising_edge(refresh_button)
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_mode_auto
+
+# 轴故障恢复任务：对旋臂轴 timeout/reject/motion/safety fault 进行有限重试。
+task orient_axis_fault:
+    # 轴超时计数步：记录一次 timeout 恢复尝试。
+    step move_timeout:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    # 轴拒绝计数步：记录一次 reject 恢复尝试。
+    step move_reject:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    # 轴运动故障计数步：记录一次 motion_fault 恢复尝试。
+    step move_motion_fault:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    # 轴安全故障计数步：记录一次 safety_fault 恢复尝试。
+    step move_safety_fault:
+        action: compute axis_recover_attempts = axis_recover_attempts + 1.0
+
+    # 轴重试判定步：超过两次自动恢复则转入不可恢复故障。
+    step decide_retry:
+        wait: axis_recover_attempts <= 2
+        timeout: 10ms -> goto orient_fault.axis_unrecoverable
+
+    # 轴重试暂停步：关闭相关真空并等待机械稳定。
+    step retry_pause:
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        delay: 200ms
+
+    # 轴重新使能步：恢复轴使能后回到辨相任务等待。
+    step retry_enable:
+        action: set axis_arm.enable on
+
+    on_complete: goto orient_stage.wait_enabled
+
+# 转运故障任务：连续掉片或长期掉片率越限时停机。
+task transfer_fault:
+    # 连续掉片故障步：连续两次掉片时关闭真空、收回机构并停机。
+    step drop_consecutive_fault:
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: compute auto_cycle_enabled = false
+        action: log "transfer fault: two consecutive wafer drops"
+
+    # 长期掉片率故障步：长期掉片率超过 1/1000 时停机。
+    step drop_rate_fault:
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: retract cyl_transfer
+        action: compute auto_cycle_enabled = false
+        action: log "transfer fault: long-term wafer drop rate exceeded 1/1000"
+
+    # 转运故障刷新等待步：等待人工处理后返回监督等待。
+    step wait_refresh:
+        wait: rising_edge(refresh_button)
+        allow_indefinite_wait: true
+
+    on_complete: goto supervisor.wait_mode_auto

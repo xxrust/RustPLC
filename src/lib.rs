@@ -24,6 +24,7 @@ pub mod ir;
 pub mod optimization;
 pub mod parser;
 pub mod plc_port;
+pub mod process_operation;
 pub mod runtime_bridge;
 pub mod scenario_resolve;
 pub mod semantic;

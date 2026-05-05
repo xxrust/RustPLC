@@ -1,0 +1,38 @@
+# 启动初始化任务：建立真空关闭、气缸回安全位、旋臂原点确认的初始化基线。
+task startup_initializer:
+    # 安全输出步：关闭真空、收回机构并打开轴使能，设备动作完成或超时后离开。
+    step drive_safe_outputs:
+        action: set vac_feed_valve.coil off
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_feed
+        action: retract cyl_orient_rotate
+        action: retract cyl_swing
+        action: retract cyl_lift
+        action: retract cyl_transfer
+        action: set axis_arm.enable on
+
+    # 原点确认步：等待旋臂原点传感器确认，超时进入初始化故障。
+    step wait_arm_home:
+        wait: sensor_arm_home == true
+        timeout: 5000ms -> goto startup_fault.init_pose_timeout
+
+    # 初始化完成步：锁存架构初始化状态并进入监督等待。
+    step mark_initialized:
+        action: compute system_initialized = true
+        action: log "startup baseline ready"
+
+    on_complete: goto supervisor.wait_mode_auto
+
+# 架构监控任务：周期性派生掉片率等全局架构状态。
+task architecture_monitor:
+    # 掉片率派生步：由累计转运次数与掉片总数计算长期掉片率越限状态。
+    step derive_drop_rate:
+        action: compute drop_rate_exceeded = transfer_attempt_count >= 1000 AND drop_total * 1000 > transfer_attempt_count
+
+    # 监控节拍步：等待一个短周期后重新派生，不阻塞其他生产 task。
+    step monitor_loop:
+        delay: 20ms
+
+    on_complete: goto architecture_monitor.derive_drop_rate

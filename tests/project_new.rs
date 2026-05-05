@@ -121,6 +121,12 @@ fn new_structured_fragments_layout_creates_bundle_project_that_compiles() {
         "fault handlers should exist"
     );
     assert!(
+        project_dir
+            .join("process_model/process_operation_model.toml")
+            .exists(),
+        "source-side process operation model should exist"
+    );
+    assert!(
         project_dir.join("05_supervision/_placeholder.plc").exists(),
         "supervision placeholder should exist"
     );
@@ -171,6 +177,23 @@ fn new_structured_fragments_layout_creates_bundle_project_that_compiles() {
     assert!(
         !String::from_utf8_lossy(&compile.stderr).contains("WORKPIECE-CAP-001"),
         "fresh scaffold should not emit suspicious container capacity warnings"
+    );
+
+    let process_model_check = run_cli(&[
+        "process-model-check",
+        bundle_path.to_str().expect("utf8 bundle path"),
+        "--model",
+        project_dir
+            .join("process_model/process_operation_model.toml")
+            .to_str()
+            .expect("utf8 model path"),
+        "--output",
+        "json",
+    ]);
+    assert!(
+        process_model_check.status.success(),
+        "structured scaffold process model should refine the task flow, stderr: {}",
+        String::from_utf8_lossy(&process_model_check.stderr)
     );
 }
 

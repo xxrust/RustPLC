@@ -119,6 +119,13 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `devices/*.toml`：设备库定义
 - `scenarios/*.yaml`：仿真场景
 
+### 工艺操作调度层
+
+- `docs/architecture/process-operation-layer.md`：拓扑与 task/step 之间的工艺操作模型说明
+- `process_model/process_operation_model.toml`：项目级源侧调度意图，复杂工件流项目应在 task/step 之前由 `.system.md` 正向写出
+- `rust_plc process-model-check`：验证 task/step 是否 refine 源侧 process model
+- `rust_plc operation-model`：仅作为已有 task/step 的迁移/审计反推工具，不作为新项目默认前置生成器
+
 ## 阅读顺序
 
 如果此前没接触过本项目，建议按以下顺序阅读：
@@ -475,6 +482,25 @@ RustPLC 的本质不是“写一门 PLC DSL”，而是构建一个：
 - `src/component_library.rs`
 - `devices/*.toml`
 - `src/semantic/mod.rs`
+
+### 工艺操作调度层
+
+先看：
+
+- `docs/architecture/process-operation-layer.md`
+- `src/process_operation.rs`
+- `src/ir/mod.rs`
+- `src/semantic/mod.rs`
+- `src/verification/safety_workpiece.rs`
+
+原则：
+
+- 拓扑只给出物理可行性与资源边界，不能直接推出唯一最优程序流
+- `ProcessOperationModel` 承载 source 可用、destination 容量、resource claim、operator/program guard 等 admission 语义
+- 项目内工艺操作模型应作为源侧 TOML 文件放在类似 `process_model/process_operation_model.toml` 的目录，不应默认放入 `out/`，也不应伪装成 `00/01/02` 编译片段阶段
+- `task/step` 是调度意图的可执行投影；`process-model-check` 必须验证程序流 refine 工艺操作模型，而不是把程序顺序当作唯一真相
+- 当项目存在 `process_model/process_operation_model.toml` 时，`project-check` 应自动运行 `process_model_check` 步骤；失败表示源侧调度契约和 task/step 已经漂移
+- 同一 task 内真实相邻的工艺操作若没有共享工件端点或共享资源，则视为无依据串行化，应由 OP-002 暴露；普通 operator/program guard 只属于 admission，不能自动证明前驱依赖
 
 ### 轴资源与运动参数
 

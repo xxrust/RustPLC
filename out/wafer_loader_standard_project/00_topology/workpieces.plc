@@ -1,0 +1,18 @@
+workpiece wafer: workpiece_type {
+    normal_terminal_states: [handed_to_measure]
+    abnormal_terminal_states: [rejected, dropped]
+    ingress_sites: [feed_cassette]
+    normal_egress_sites: [measure_stage_site]
+    abnormal_egress_sites: [reject_bin]
+}
+
+location feed_cassette: workpiece_location { capacity: 25 }
+location slide_pick_site: workpiece_location { capacity: 1 }
+location orient_inspection_site: workpiece_location { capacity: 1 }
+location measure_stage_site: workpiece_location { capacity: 1 }
+location reject_bin: workpiece_location { capacity: 20 }
+holder arm_nozzle: workpiece_holder { capacity: 1 }
+holder transfer_nozzle: workpiece_holder { capacity: 1 }
+
+resource slide_pick_zone: semantic_resource { mode: exclusive }
+resource arm_orient_zone: semantic_resource { mode: exclusive }

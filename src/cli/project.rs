@@ -306,6 +306,177 @@ fn scaffold_files(
     files
 }
 
+fn scaffold_process_operation_model() -> String {
+    r#"schema_version = 1
+policy = "opportunistic_admission"
+diagnostics = []
+
+# Source-side scheduling intent. Keep this file ahead of task/step flow:
+# plc/main.system.md -> process_model/process_operation_model.toml -> 02_process/ -> process-model-check.
+# `operation-model` is only a migration or audit helper for an existing task/step source.
+
+[[operation_classes]]
+key = "move:Acquire:infeed->part_handler"
+operation_ids = ["auto_cycle.pick.op1"]
+source_patterns = ["infeed"]
+destination_patterns = ["part_handler"]
+effect_kinds = ["Acquire"]
+
+[[operation_classes]]
+key = "move:Transfer:part_handler->outfeed"
+operation_ids = ["auto_cycle.place.op2"]
+source_patterns = ["part_handler"]
+destination_patterns = ["outfeed"]
+effect_kinds = ["Transfer"]
+
+[[operation_classes]]
+key = "finish:outfeed:finished"
+operation_ids = ["auto_cycle.stop.op3"]
+source_patterns = ["outfeed"]
+effect_kinds = ["Finish"]
+
+[[operation_classes]]
+key = "move:Transfer:infeed->reject_bin+finish:reject_bin:rejected"
+operation_ids = ["fault.reject_unstarted.op4"]
+source_patterns = ["infeed", "reject_bin"]
+destination_patterns = ["reject_bin"]
+effect_kinds = ["Finish", "Transfer"]
+
+[[operations]]
+id = "auto_cycle.pick.op1"
+contract_key = 'effects=[WorkpieceMove { effect: Acquire, from: "infeed", to: "part_handler" }];admissions=[dest:part_handler|source:infeed];resources=[]'
+operation_class = "move:Acquire:infeed->part_handler"
+task_name = "auto_cycle"
+step_name = "pick"
+
+[operations.from_state]
+task_name = "auto_cycle"
+step_name = "pick"
+
+[operations.to_state]
+task_name = "auto_cycle"
+step_name = "run"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "infeed"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "part_handler"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "acquire"
+from = "infeed"
+to = "part_handler"
+
+[[operations]]
+id = "auto_cycle.place.op2"
+contract_key = 'effects=[WorkpieceMove { effect: Transfer, from: "part_handler", to: "outfeed" }];admissions=[dest:outfeed|source:part_handler];resources=[]'
+operation_class = "move:Transfer:part_handler->outfeed"
+task_name = "auto_cycle"
+step_name = "place"
+
+[operations.from_state]
+task_name = "auto_cycle"
+step_name = "place"
+
+[operations.to_state]
+task_name = "auto_cycle"
+step_name = "stop"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "part_handler"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "outfeed"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "part_handler"
+to = "outfeed"
+
+[[operations]]
+id = "auto_cycle.stop.op3"
+contract_key = 'effects=[WorkpieceFinish { at: "outfeed", terminal_state: "finished" }];admissions=[source:outfeed];resources=[]'
+operation_class = "finish:outfeed:finished"
+task_name = "auto_cycle"
+step_name = "stop"
+
+[operations.from_state]
+task_name = "auto_cycle"
+step_name = "stop"
+
+[operations.to_state]
+task_name = "done"
+step_name = "halt"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "outfeed"
+
+[[operations.effects]]
+kind = "workpiece_finish"
+at = "outfeed"
+terminal_state = "finished"
+
+[[operations]]
+id = "fault.reject_unstarted.op4"
+contract_key = 'effects=[WorkpieceFinish { at: "reject_bin", terminal_state: "rejected" }|WorkpieceMove { effect: Transfer, from: "infeed", to: "reject_bin" }];admissions=[dest:reject_bin|source:infeed|source:reject_bin];resources=[]'
+operation_class = "move:Transfer:infeed->reject_bin+finish:reject_bin:rejected"
+task_name = "fault"
+step_name = "reject_unstarted"
+
+[operations.from_state]
+task_name = "fault"
+step_name = "reject_unstarted"
+
+[operations.to_state]
+task_name = "done"
+step_name = "halt"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "infeed"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "reject_bin"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "reject_bin"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "infeed"
+to = "reject_bin"
+
+[[operations.effects]]
+kind = "workpiece_finish"
+at = "reject_bin"
+terminal_state = "rejected"
+"#
+    .to_string()
+}
+
 // ---------------------------------------------------------------------------
 // Single-file layout
 // ---------------------------------------------------------------------------
@@ -325,6 +496,10 @@ fn phased_scaffold_files(
     vec![
         // -- bundle entry --
         ("rustplc.bundle.toml".to_string(), build_bundle_v2()),
+        (
+            "process_model/process_operation_model.toml".to_string(),
+            scaffold_process_operation_model(),
+        ),
         // -- 00_topology: devices, connections, workpieces --
         (
             "00_topology/controller.plc".to_string(),
@@ -447,6 +622,7 @@ fn build_bundle_v2() -> String {
 # Each phase assumes the state established by all previous phases.
 #
 #   00_topology     -> declare devices, workpieces, connections, station protocol
+#   process_model   -> author admissible workpiece operations before task/step
 #   01_init         -> establish safe state (all outputs off, defaults set)
 #   02_process      -> automatic production cycle (assumes safe-state entry)
 #   03_constraints  -> safety/timing rules (references devices + steps)
@@ -545,7 +721,7 @@ fn build_readme(
             "- `plc/main.plc`: all-in-one PLC source\n- `config/`: deployment configuration\n- `scenarios/`: test scenarios"
         }
         ProjectLayout::StructuredFragments => {
-            "- `00_topology/`: device declarations, workpieces, connections\n- `01_init/`: initialization and startup tasks\n- `02_process/`: automatic production cycle\n- `03_constraints/`: safety and timing rules\n- `04_faults/`: fault handling tasks\n- `05_supervision/`: mode management (placeholder)\n- `06_manual/`: manual-mode tasks (placeholder)\n- `07_hmi/`: HMI interface (placeholder)\n- `config/`: deployment configuration\n- `scenarios/`: test scenarios\n- `docs/`: project documentation"
+            "- `00_topology/`: device declarations, workpieces, connections\n- `process_model/`: authored process operation scheduling intent\n- `01_init/`: initialization and startup tasks\n- `02_process/`: automatic production cycle\n- `03_constraints/`: safety and timing rules\n- `04_faults/`: fault handling tasks\n- `05_supervision/`: mode management (placeholder)\n- `06_manual/`: manual-mode tasks (placeholder)\n- `07_hmi/`: HMI interface (placeholder)\n- `config/`: deployment configuration\n- `scenarios/`: test scenarios\n- `docs/`: project documentation"
         }
     };
 
@@ -589,7 +765,7 @@ fn build_project_layout_doc(
     entry_scenario: &str,
 ) -> String {
     format!(
-        "# Project Layout\n\nThis scaffold uses the standard RustPLC project layout.\n\n- `rustplc.project.toml`: project manifest and default artifact paths\n- `plc/main.system.md`: human/AI confirmed system intent\n- `{entry_plc}`: executable RustPLC source entry\n- `{entry_scenario}`: nominal regression scenario\n- `config/`: I/O, retain, and workpiece configuration\n- `out/`: rebuildable generated artifacts\n\nCurrent project: `{project_slug}` / `{project_title}`\n\nRecommended commands:\n\n```bash\ncargo run --release --bin rust_plc -- scenario-validate \\\n  {entry_plc} --scenario {entry_scenario} --output human\n\ncargo run --release --bin rust_plc -- sim-plc \\\n  {entry_plc} --scenario {entry_scenario} --out out/sim/normal/trace.jsonl\n\ncargo run --release --bin rust_plc -- no-board-gate \\\n  {entry_plc} --scenario {entry_scenario} \\\n  --out-dir out/gate/no_board/normal --output human\n\ncargo run --release --bin rust_plc -- gen-st \\\n  {entry_plc} --out out/codegen/st/main.st\n```\n"
+        "# Project Layout\n\nThis scaffold uses the standard RustPLC project layout.\n\n- `rustplc.project.toml`: project manifest and default artifact paths\n- `plc/main.system.md`: human/AI confirmed system intent\n- `process_model/process_operation_model.toml`: authored operation scheduling intent, before task/step\n- `{entry_plc}`: executable RustPLC source entry\n- `{entry_scenario}`: nominal regression scenario\n- `config/`: I/O, retain, and workpiece configuration\n- `out/`: rebuildable generated artifacts\n\nCurrent project: `{project_slug}` / `{project_title}`\n\nRecommended commands:\n\n```bash\ncargo run --release --bin rust_plc -- process-model-check \\\n  {entry_plc} --model process_model/process_operation_model.toml --output human\n\ncargo run --release --bin rust_plc -- scenario-validate \\\n  {entry_plc} --scenario {entry_scenario} --output human\n\ncargo run --release --bin rust_plc -- sim-plc \\\n  {entry_plc} --scenario {entry_scenario} --out out/sim/normal/trace.jsonl\n\ncargo run --release --bin rust_plc -- no-board-gate \\\n  {entry_plc} --scenario {entry_scenario} \\\n  --out-dir out/gate/no_board/normal --output human\n\ncargo run --release --bin rust_plc -- gen-st \\\n  {entry_plc} --out out/codegen/st/main.st\n```\n"
     )
 }
 
@@ -712,7 +888,7 @@ Agents read exports and the station protocol, not source files from other phases
 
 fn build_verification_doc(project_title: &str) -> String {
     format!(
-        "# {project_title} Verification\n\n## Required Checks\n1. Compile the bundle: `rustplc.bundle.toml`\n2. Run scenario: `scenarios/nominal/normal.yaml`\n3. Run `sim-plc` and inspect trace\n4. Run `no-board-gate` when scenario is stable\n\n## Commands\n```bash\ncargo run --release --bin rust_plc -- project-check rustplc.bundle.toml --scenario scenarios/nominal/normal.yaml --out-dir out/check --output human\ncargo run --release --bin rust_plc -- sim-plc rustplc.bundle.toml --scenario scenarios/nominal/normal.yaml --out out/sim/trace.jsonl\n```\n"
+        "# {project_title} Verification\n\n## Required Checks\n1. Compile the bundle: `rustplc.bundle.toml`\n2. Check the source-side process model: `process_model/process_operation_model.toml`\n3. Run scenario: `scenarios/nominal/normal.yaml`\n4. Run `sim-plc` and inspect trace\n5. Run `no-board-gate` when scenario is stable\n\n## Commands\n```bash\ncargo run --release --bin rust_plc -- process-model-check rustplc.bundle.toml --model process_model/process_operation_model.toml --output human\ncargo run --release --bin rust_plc -- project-check rustplc.bundle.toml --scenario scenarios/nominal/normal.yaml --out-dir out/check --output human\ncargo run --release --bin rust_plc -- sim-plc rustplc.bundle.toml --scenario scenarios/nominal/normal.yaml --out out/sim/trace.jsonl\n```\n"
     )
 }
 

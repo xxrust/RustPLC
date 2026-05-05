@@ -148,6 +148,26 @@ cargo run --release --bin rust_plc -- gen-st <source.bundle.toml> --out <output.
 <run> gen-st <source.plc|source.bundle.toml> --out <output.st>
 ```
 
+### Process operation scheduling-intent model
+
+Prefer TOML and source-side placement:
+
+```bash
+<run> process-model-check <source.plc|source.bundle.toml> --model process_model/process_operation_model.toml
+```
+
+For new projects, author `process_model/process_operation_model.toml` from the confirmed `.system.md` before task/step generation.
+
+For migration or audit of an existing task/step source, `operation-model` can produce a reverse-extracted review draft:
+
+```bash
+cargo run --release --bin rust_plc -- operation-model out/<project>/rustplc.bundle.toml --out out/<project>/process_model/process_operation_model.toml
+```
+
+Do not use `out/process_operation_model.json` as the default. `out/` is for rebuildable artifacts; `process_model/process_operation_model.toml` is source-side scheduling intent and must not be confused with numbered compile fragments.
+
+If `process_model/process_operation_model.toml` exists, `project-check` auto-runs `process_model_check`. Treat `OP-002` as a real scheduling-thought failure, not as a cosmetic warning.
+
 ### 仿真
 
 ```bash

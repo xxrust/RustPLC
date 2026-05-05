@@ -47,6 +47,7 @@ The compile surface remains the structured fragment layout used by the current s
 
 - `rustplc.bundle.toml`
 - `00_topology/`
+- `process_model/`
 - `01_init/`
 - `02_process/`
 - `03_constraints/`
@@ -75,6 +76,8 @@ rustplc.project.toml
 plc/main.system.md
 rustplc.bundle.toml
 00_topology/
+process_model/
+  process_operation_model.toml
 01_init/
 02_process/
 03_constraints/
@@ -139,6 +142,31 @@ That means each asset should own:
 - its own validation command path
 
 Do not rely on a line-level run to prove a module or station is correct.
+
+## Process Operation Model Placement
+
+`process_model/process_operation_model.toml` is the preferred source-side location for the process operation scheduling-intent model.
+
+This file is not a compiler output. It belongs between topology and task flow and should be authored before task/step generation:
+
+```text
+00_topology/
+process_model/
+01_init/
+02_process/
+```
+
+Do not default it to `out/`. `out/` remains rebuildable artifacts such as verification reports, traces, codegen, gates, and release bundles.
+
+Use TOML by default because the model is meant to be reviewed as project knowledge. JSON is only for explicit machine interchange.
+
+Validation command after task/step generation:
+
+```bash
+rust_plc process-model-check rustplc.bundle.toml --model process_model/process_operation_model.toml
+```
+
+`project-check` auto-runs this check when the model file exists.
 
 ## Special Rule For Workpiece Flow
 

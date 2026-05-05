@@ -1,0 +1,402 @@
+schema_version = 1
+policy = "opportunistic_admission"
+diagnostics = []
+
+# 源侧工艺操作模型：由 main.system.md 正向写出，task/step 必须 refine 本模型。
+
+[[operation_classes]]
+key = "move:Transfer:feed_cassette->slide_pick_site"
+operation_ids = ["feed_prep.release_to_slide.op1"]
+source_patterns = ["feed_cassette"]
+destination_patterns = ["slide_pick_site"]
+effect_kinds = ["Transfer"]
+
+[[operation_classes]]
+key = "move:Acquire:slide_pick_site->arm_nozzle"
+operation_ids = ["orient_stage.wait_arm_vacuum.op2"]
+source_patterns = ["slide_pick_site"]
+destination_patterns = ["arm_nozzle"]
+effect_kinds = ["Acquire"]
+
+[[operation_classes]]
+key = "move:Transfer:arm_nozzle->orient_inspection_site"
+operation_ids = ["orient_stage.wait_orient_vacuum.op3"]
+source_patterns = ["arm_nozzle"]
+destination_patterns = ["orient_inspection_site"]
+effect_kinds = ["Transfer"]
+
+[[operation_classes]]
+key = "move:Transfer:orient_inspection_site->reject_bin+finish:reject_bin:rejected"
+operation_ids = [
+    "orient_stage.reject_to_ir.op4",
+    "transfer_to_measure.record_pick_failure.op8",
+]
+source_patterns = ["orient_inspection_site", "reject_bin"]
+destination_patterns = ["reject_bin"]
+effect_kinds = ["Finish", "Transfer"]
+
+[[operation_classes]]
+key = "move:Acquire:orient_inspection_site->transfer_nozzle"
+operation_ids = ["transfer_to_measure.wait_transfer_vacuum.op5"]
+source_patterns = ["orient_inspection_site"]
+destination_patterns = ["transfer_nozzle"]
+effect_kinds = ["Acquire"]
+
+[[operation_classes]]
+key = "move:Transfer:transfer_nozzle->measure_stage_site"
+operation_ids = ["transfer_to_measure.place_wafer.op6"]
+source_patterns = ["transfer_nozzle"]
+destination_patterns = ["measure_stage_site"]
+effect_kinds = ["Transfer"]
+
+[[operation_classes]]
+key = "finish:measure_stage_site:handed_to_measure"
+operation_ids = ["transfer_to_measure.finish_handoff.op7"]
+source_patterns = ["measure_stage_site"]
+effect_kinds = ["Finish"]
+
+[[operation_classes]]
+key = "move:Transfer:transfer_nozzle->reject_bin+finish:reject_bin:dropped"
+operation_ids = ["transfer_to_measure.record_drop_after_pick.op9"]
+source_patterns = ["transfer_nozzle", "reject_bin"]
+destination_patterns = ["reject_bin"]
+effect_kinds = ["Finish", "Transfer"]
+
+[[operations]]
+id = "feed_prep.release_to_slide.op1"
+contract_key = 'effects=[WorkpieceMove { effect: Transfer, from: "feed_cassette", to: "slide_pick_site" }];admissions=[dest:slide_pick_site|source:feed_cassette];resources=[]'
+operation_class = "move:Transfer:feed_cassette->slide_pick_site"
+task_name = "feed_prep"
+step_name = "release_to_slide"
+action_targets = ["vac_feed_valve"]
+
+[operations.from_state]
+task_name = "feed_prep"
+step_name = "release_to_slide"
+
+[operations.to_state]
+task_name = "feed_prep"
+step_name = "wait_enabled"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "feed_cassette"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "slide_pick_site"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "feed_cassette"
+to = "slide_pick_site"
+
+[[operations]]
+id = "orient_stage.wait_arm_vacuum.op2"
+contract_key = 'effects=[WorkpieceMove { effect: Acquire, from: "slide_pick_site", to: "arm_nozzle" }];admissions=[dest:arm_nozzle|guard:sensor_arm_vac_ok == true|source:slide_pick_site];resources=[]'
+operation_class = "move:Acquire:slide_pick_site->arm_nozzle"
+task_name = "orient_stage"
+step_name = "wait_arm_vacuum"
+
+[operations.from_state]
+task_name = "orient_stage"
+step_name = "wait_arm_vacuum"
+
+[operations.to_state]
+task_name = "orient_stage"
+step_name = "move_to_orient"
+
+[operations.guard]
+kind = "condition"
+expression = "sensor_arm_vac_ok == true"
+
+[[operations.admissions]]
+kind = "program_guard"
+expression = "sensor_arm_vac_ok == true"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "slide_pick_site"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "arm_nozzle"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "acquire"
+from = "slide_pick_site"
+to = "arm_nozzle"
+
+[[operations]]
+id = "orient_stage.wait_orient_vacuum.op3"
+contract_key = 'effects=[WorkpieceMove { effect: Transfer, from: "arm_nozzle", to: "orient_inspection_site" }];admissions=[dest:orient_inspection_site|guard:sensor_orient_vac_ok == true|source:arm_nozzle];resources=[]'
+operation_class = "move:Transfer:arm_nozzle->orient_inspection_site"
+task_name = "orient_stage"
+step_name = "wait_orient_vacuum"
+
+[operations.from_state]
+task_name = "orient_stage"
+step_name = "wait_orient_vacuum"
+
+[operations.to_state]
+task_name = "orient_stage"
+step_name = "release_arm"
+
+[operations.guard]
+kind = "condition"
+expression = "sensor_orient_vac_ok == true"
+
+[[operations.admissions]]
+kind = "program_guard"
+expression = "sensor_orient_vac_ok == true"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "arm_nozzle"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "orient_inspection_site"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "arm_nozzle"
+to = "orient_inspection_site"
+
+[[operations]]
+id = "orient_stage.reject_to_ir.op4"
+contract_key = 'effects=[WorkpieceFinish { at: "reject_bin", terminal_state: "rejected" }|WorkpieceMove { effect: Transfer, from: "orient_inspection_site", to: "reject_bin" }];admissions=[dest:reject_bin|source:orient_inspection_site|source:reject_bin];resources=[]'
+operation_class = "move:Transfer:orient_inspection_site->reject_bin+finish:reject_bin:rejected"
+task_name = "orient_stage"
+step_name = "reject_to_ir"
+action_targets = ["vac_orient_valve"]
+
+[operations.from_state]
+task_name = "orient_stage"
+step_name = "reject_to_ir"
+
+[operations.to_state]
+task_name = "orient_stage"
+step_name = "move_back_home_reject"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "orient_inspection_site"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "reject_bin"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "reject_bin"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "orient_inspection_site"
+to = "reject_bin"
+
+[[operations.effects]]
+kind = "workpiece_finish"
+at = "reject_bin"
+terminal_state = "rejected"
+
+[[operations]]
+id = "transfer_to_measure.wait_transfer_vacuum.op5"
+contract_key = 'effects=[WorkpieceMove { effect: Acquire, from: "orient_inspection_site", to: "transfer_nozzle" }];admissions=[dest:transfer_nozzle|guard:sensor_transfer_vac_ok == true|source:orient_inspection_site];resources=[]'
+operation_class = "move:Acquire:orient_inspection_site->transfer_nozzle"
+task_name = "transfer_to_measure"
+step_name = "wait_transfer_vacuum"
+
+[operations.from_state]
+task_name = "transfer_to_measure"
+step_name = "wait_transfer_vacuum"
+
+[operations.to_state]
+task_name = "transfer_to_measure"
+step_name = "release_orient"
+
+[operations.guard]
+kind = "condition"
+expression = "sensor_transfer_vac_ok == true"
+
+[[operations.admissions]]
+kind = "program_guard"
+expression = "sensor_transfer_vac_ok == true"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "orient_inspection_site"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "transfer_nozzle"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "acquire"
+from = "orient_inspection_site"
+to = "transfer_nozzle"
+
+[[operations]]
+id = "transfer_to_measure.place_wafer.op6"
+contract_key = 'effects=[WorkpieceMove { effect: Transfer, from: "transfer_nozzle", to: "measure_stage_site" }];admissions=[dest:measure_stage_site|source:transfer_nozzle];resources=[]'
+operation_class = "move:Transfer:transfer_nozzle->measure_stage_site"
+task_name = "transfer_to_measure"
+step_name = "place_wafer"
+action_targets = ["vac_transfer_valve"]
+
+[operations.from_state]
+task_name = "transfer_to_measure"
+step_name = "place_wafer"
+
+[operations.to_state]
+task_name = "transfer_to_measure"
+step_name = "finish_handoff"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "transfer_nozzle"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "measure_stage_site"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "transfer_nozzle"
+to = "measure_stage_site"
+
+[[operations]]
+id = "transfer_to_measure.finish_handoff.op7"
+contract_key = 'effects=[WorkpieceFinish { at: "measure_stage_site", terminal_state: "handed_to_measure" }];admissions=[source:measure_stage_site];resources=[]'
+operation_class = "finish:measure_stage_site:handed_to_measure"
+task_name = "transfer_to_measure"
+step_name = "finish_handoff"
+action_targets = ["cyl_transfer"]
+
+[operations.from_state]
+task_name = "transfer_to_measure"
+step_name = "finish_handoff"
+
+[operations.to_state]
+task_name = "transfer_to_measure"
+step_name = "clear_drop_streak"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "measure_stage_site"
+
+[[operations.effects]]
+kind = "workpiece_finish"
+at = "measure_stage_site"
+terminal_state = "handed_to_measure"
+
+[[operations.program_predecessors]]
+operation_id = "transfer_to_measure.place_wafer.op6"
+justified = true
+
+[operations.program_predecessors.reason]
+kind = "shared_endpoint"
+endpoint = "measure_stage_site"
+
+[[operations]]
+id = "transfer_to_measure.record_pick_failure.op8"
+contract_key = 'effects=[WorkpieceFinish { at: "reject_bin", terminal_state: "rejected" }|WorkpieceMove { effect: Transfer, from: "orient_inspection_site", to: "reject_bin" }];admissions=[dest:reject_bin|source:orient_inspection_site|source:reject_bin];resources=[]'
+operation_class = "move:Transfer:orient_inspection_site->reject_bin+finish:reject_bin:rejected"
+task_name = "transfer_to_measure"
+step_name = "record_pick_failure"
+action_targets = ["cyl_lift", "cyl_swing", "cyl_transfer", "vac_transfer_valve"]
+
+[operations.from_state]
+task_name = "transfer_to_measure"
+step_name = "record_pick_failure"
+
+[operations.to_state]
+task_name = "transfer_to_measure"
+step_name = "check_drop_streak"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "orient_inspection_site"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "reject_bin"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "reject_bin"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "orient_inspection_site"
+to = "reject_bin"
+
+[[operations.effects]]
+kind = "workpiece_finish"
+at = "reject_bin"
+terminal_state = "rejected"
+
+[[operations]]
+id = "transfer_to_measure.record_drop_after_pick.op9"
+contract_key = 'effects=[WorkpieceFinish { at: "reject_bin", terminal_state: "dropped" }|WorkpieceMove { effect: Transfer, from: "transfer_nozzle", to: "reject_bin" }];admissions=[dest:reject_bin|source:reject_bin|source:transfer_nozzle];resources=[]'
+operation_class = "move:Transfer:transfer_nozzle->reject_bin+finish:reject_bin:dropped"
+task_name = "transfer_to_measure"
+step_name = "record_drop_after_pick"
+action_targets = ["cyl_lift", "cyl_swing", "cyl_transfer", "vac_transfer_valve"]
+
+[operations.from_state]
+task_name = "transfer_to_measure"
+step_name = "record_drop_after_pick"
+
+[operations.to_state]
+task_name = "transfer_to_measure"
+step_name = "check_drop_streak"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "transfer_nozzle"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "reject_bin"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "reject_bin"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "transfer_nozzle"
+to = "reject_bin"
+
+[[operations.effects]]
+kind = "workpiece_finish"
+at = "reject_bin"
+terminal_state = "dropped"

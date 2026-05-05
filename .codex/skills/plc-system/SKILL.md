@@ -37,6 +37,40 @@ description: "在生成 `.plc` 之前，把工艺需求收敛成可供 RustPLC �
 12. 单件工位、夹持位、取料位、加工位、交接位才默认倾向 `capacity: 1`。
 13. 输出必须能被 `plc-gen` 直接消费，而不是只留一堆模糊业务描述。
 
+## Process Operation Scheduling Intent
+
+When the system has discrete workpiece flow, pipelined station behavior, or "which station may accept the next part" decisions, the system contract must include a process-operation scheduling-intent section.
+
+This section must describe:
+
+- candidate operation classes, such as feed, acquire, transfer, process, reject, finish
+- source availability rules
+- destination capacity rules
+- predecessor completion rules
+- semantic-resource / interference constraints
+- scheduling policy, normally opportunistic admission rather than fixed part numbering
+
+Do not describe the flow as "first workpiece, then second workpiece" unless the source contract truly requires that fixed batch order.
+Prefer "when source is available, destination has capacity, required resources are free, and predecessor operation is complete, this operation is admissible."
+
+Handoff to `plc-gen` should expect `plc-gen` to author a source-side model file before generating task/step flow:
+
+```text
+process_model/process_operation_model.toml
+```
+
+This file is peer-level authored project knowledge, not an `out/` artifact and not a reverse-extraction artifact. Prefer TOML for review; JSON is only for explicit machine interchange.
+
+The handoff order is:
+
+```text
+confirmed system contract -> authored process_model/process_operation_model.toml -> task/step flow -> process-model-check
+```
+
+`operation-model` may be used only as a migration aid for an existing task/step program or as a comparison scaffold; it must not replace the authored process model when the system contract is still being generated.
+
+The handoff must require `plc-gen` to run `process-model-check` after task/step generation. `OP-002` is not a naming problem; it means the generated program flow has serialized candidate process operations without a modeled endpoint/resource reason. Ordinary operator/program guards are admission facts, not predecessor-completion proof.
+
 ## Operator Boundary Rule
 
 操作者不是普通设备。按钮、选择开关、复位、人工确认和 HMI 命令应作为 operator front-door 进入 system contract，而不是把人塞进设备拓扑闭环。

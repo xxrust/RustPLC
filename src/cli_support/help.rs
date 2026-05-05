@@ -85,8 +85,8 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
     CliCommandHelp {
         section: "Deployment",
         name: "project-check",
-        summary: "Run the unified project regression check across compile, lint, doctor, and gate steps.",
-        usage_template: "Usage: {program} project-check <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--intent-contract <contract.json> --intent-evidence <trace.jsonl>] [--output <human|json>]",
+        summary: "Run the unified project regression check across compile, lint, optional process-model, doctor, and gate steps.",
+        usage_template: "Usage: {program} project-check <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--require-process-model] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--intent-contract <contract.json> --intent-evidence <trace.jsonl>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Deployment",
@@ -111,6 +111,18 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         name: "geometry-export",
         summary: "Export a semantic-twin geometry artifact from topology, state-machine, constraints, and optional evidence.",
         usage_template: "Usage: {program} geometry-export <source.plc|source.bundle.toml> --out <geometry.json> [--trace <trace.jsonl>] [--intent-report <report.json>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
+        name: "operation-model",
+        summary: "Reverse-extract a process operation model draft from existing task/step flow.",
+        usage_template: "Usage: {program} operation-model <source.plc|source.bundle.toml> --out <process_operation_model.toml|json> [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
+        name: "process-model-check",
+        summary: "Verify that task/step program flow refines the authored process operation model.",
+        usage_template: "Usage: {program} process-model-check <source.plc|source.bundle.toml> [--model <process_operation_model.toml|json>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Diagnostics",
@@ -305,6 +317,7 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--out-dir <dir>              Required output directory for per-step artifacts.",
             "--max-p99-exec-us <us>       Realtime threshold forwarded to no-board-gate.",
             "--max-overrun-count <n>      Overrun threshold forwarded to no-board-gate.",
+            "--require-process-model      Fail if process_model/process_operation_model.toml is missing.",
             "--intent-contract <file>     Optional intent-alignment contract fixture for an extra project-check step.",
             "--intent-evidence <file>     Optional observed trace JSONL paired with --intent-contract.",
             "--output <human|json>        Select CLI output format.",
@@ -322,6 +335,14 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--out <geometry.json>        Required semantic-twin geometry artifact output.",
             "--trace <trace.jsonl>        Optional runtime trace overlay input.",
             "--intent-report <report.json> Optional intent-alignment report overlay input.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "operation-model" => &[
+            "--out <process_operation_model.toml|json> Required scheduling-intent model output.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "process-model-check" => &[
+            "--model <process_operation_model.toml|json> Optional authored process model; defaults to process_model/process_operation_model.toml next to the source project.",
             "--output <human|json>        Select CLI output format.",
         ],
         "trace-diff" => &[
@@ -421,7 +442,7 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
         }
         "new" => &[
             "`single-file` keeps the existing Day-1 scaffold shape.",
-            "`structured-fragments` creates a phased directory layout (00_topology/ through 07_hmi/) with a v2 bundle entry for multi-agent projects.",
+            "`structured-fragments` creates a phased directory layout with source-side process_model/ plus 00_topology/ through 07_hmi/ and a v2 bundle entry.",
             "`--delivery-layer` defaults to `station` and is recorded as metadata in rustplc.project.toml.",
             "Structured scaffolds include a station protocol placeholder using the current `station` / `handshake` / `transfer_point` syntax.",
         ],
@@ -443,12 +464,23 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
             "If `--sil-scenario` or `--board-scenario` is omitted, the shared `--scenario` path is reused.",
         ],
         "project-check" => &[
-            "This command orchestrates `compile`, `sequence-lint`, `scenario-doctor`, and `no-board-gate` as one reproducible release check.",
+            "This command orchestrates `compile`, `sequence-lint`, optional `process-model-check`, `scenario-doctor`, and `no-board-gate` as one reproducible release check.",
+            "When `process_model/process_operation_model.toml` exists next to the source project, `process_model_check` is inserted automatically; use `--require-process-model` for workpiece-flow deliveries where missing model must fail.",
             "When `--intent-contract` and `--intent-evidence` are both provided, an `intent_alignment` step is appended and reduced from the library report without reinterpreting its verdict.",
         ],
         "geometry-export" => &[
             "This command writes a stable JSON artifact for later SVG, web, or animation rendering; it does not render UI directly.",
             "When `--trace` is provided, runtime task and step names are resolved with a best-effort mapping from semantic task contexts.",
+        ],
+        "operation-model" => &[
+            "This command is for migration, audit, and comparison against an existing task/step flow; new projects should author process_model/process_operation_model.toml from the system contract first.",
+            "Workpiece source availability, destination capacity, operator/program guards, and semantic-resource claims are normalized into admission rules.",
+            "For project sources, prefer a source-side TOML path such as `process_model/process_operation_model.toml`; `out/` is for rebuildable artifacts.",
+        ],
+        "process-model-check" => &[
+            "The check reads the authored process model and compares it with the current task/step-derived operation model.",
+            "It fails on missing, extra, or changed operations, and on derived scheduling diagnostics such as unjustified same-task serialization.",
+            "project-check auto-runs this step when `process_model/process_operation_model.toml` exists next to the source project.",
         ],
         "trace-doctor" => &["At least one of `--trace` or `--diff` is required."],
         "intent-doctor" => &[
@@ -522,6 +554,12 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         "geometry-export" => &[
             "rust_plc geometry-export examples/rp2040_motion_minimal.plc --out out/geometry/rp2040_motion_minimal.geometry.json",
             "rust_plc geometry-export out/wafer_loader_project/plc/main.target_semantics.bundle.toml --trace out/wafer_loader_project/out/project_check_with_auto_sim_v4/no_board_gate/artifacts/sil_trace.jsonl --intent-report out/wafer_loader_project/out/project_check_with_auto_sim_v4/intent_alignment/report.json --out out/geometry/wafer_loader.geometry.json --output json",
+        ],
+        "operation-model" => &[
+            "rust_plc operation-model examples/workpiece_phase1_transfer.plc --out process_model/process_operation_model.toml",
+        ],
+        "process-model-check" => &[
+            "rust_plc process-model-check rustplc.bundle.toml --model process_model/process_operation_model.toml --output json",
         ],
         "trace-diff" => &[
             "rust_plc trace-diff --sil out/sil_trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json --fail-on-mismatch",

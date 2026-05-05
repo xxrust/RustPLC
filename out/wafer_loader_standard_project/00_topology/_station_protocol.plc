@@ -1,0 +1,36 @@
+# Station isolation protocol.
+#
+# When a project has multiple stations, this file declares:
+#   1. Device partition - which station owns which devices
+#   2. Handshake signals - how stations communicate
+#   3. Transfer points - where workpieces cross station boundaries
+#
+# Without these declarations, multi-station files in 02_process/
+# have NO compiler-enforced isolation. Any task can write any device.
+#
+# Example (supported by the compiler):
+#
+#   station st01_loading {
+#       owns: [valve_push, cyl_push, sensor_push_ext, sensor_push_ret]
+#       tasks: [st01_cycle]
+#   }
+#
+#   station st02_assembly {
+#       owns: [valve_press, cyl_press, sensor_press_ext, sensor_press_ret]
+#       tasks: [st02_cycle]
+#   }
+#
+#   handshake st01_to_st02 {
+#       from: st01_loading, to: st02_assembly
+#       request: st01_outflow_request
+#       allow: st02_inflow_allow
+#       complete: st01_outflow_done
+#       timeout: 5000ms -> goto fault
+#   }
+#
+#   transfer_point st01_st02_handoff {
+#       from_station: st01_loading
+#       to_station: st02_assembly
+#       site: press_position
+#       handshake: st01_to_st02
+#   }

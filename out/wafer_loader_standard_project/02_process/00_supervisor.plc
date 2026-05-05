@@ -1,0 +1,52 @@
+# 自动监督任务：处理自动模式 front-door、启动命令和正常停止请求。
+task supervisor:
+    # 等待自动模式步：只有自动模式选择有效时才允许进入启动等待。
+    step wait_mode_auto:
+        wait: mode_auto == true
+        allow_indefinite_wait: true
+
+    # 等待启动步：使用上升沿锁存启动命令，避免按钮保持导致重复启动。
+    step wait_start:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+
+    # 初始化确认步：自动循环启动前必须已经达到初始化基线。
+    step wait_initialized:
+        wait: system_initialized == true
+        allow_indefinite_wait: true
+
+    # 运行锁存步：启动自动循环并清除停止请求和轴恢复计数。
+    step latch_run:
+        action: compute auto_cycle_enabled = true
+        action: compute stop_requested = false
+        action: compute axis_recover_attempts = 0.0
+
+    # 停止监听步：短周期监听停止按钮，超时后继续检查模式是否丢失。
+    step monitor_stop:
+        wait: rising_edge(stop_button)
+        timeout: 100ms -> goto supervisor.monitor_mode_lost
+
+    # 模式丢失监听步：自动模式失效时请求停止，否则回到停止监听。
+    step monitor_mode_lost:
+        wait: mode_auto == false
+        timeout: 100ms -> goto supervisor.monitor_stop
+
+    # 停止请求步：关闭自动节拍并让机构回到安全位。
+    step request_stop:
+        action: compute stop_requested = true
+        action: compute auto_cycle_enabled = false
+        action: set vac_feed_valve.coil off
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_feed
+        action: retract cyl_orient_rotate
+        action: retract cyl_swing
+        action: retract cyl_lift
+        action: retract cyl_transfer
+
+    # 停止清理步：清除停止请求后回到自动模式等待。
+    step clear_stop:
+        action: compute stop_requested = false
+
+    on_complete: goto supervisor.wait_mode_auto

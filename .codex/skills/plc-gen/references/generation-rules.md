@@ -44,6 +44,7 @@ For complex projects, prefer a structured fragment layout over a monolithic PLC 
 
 Use semantic domains as the split boundary:
 - `00_topology/`
+- `process_model/` for source-side process operation scheduling-intent TOML when the project has discrete workpiece flow or pipelined admission/resource policy
 - `01_init/`
 - `02_process/`
 - `03_constraints/`
@@ -57,6 +58,38 @@ Reference example:
 
 Do not split by arbitrary line count or by temporary implementation convenience.
 Do split by stable ownership and semantic responsibility so the project is suitable for parallel implementation and later review.
+
+## Process operation model rule
+
+For discrete workpiece flow, do not let the generated task sequence be the only place where scheduling intent exists.
+
+Author or refresh before writing task/step:
+
+```text
+process_model/process_operation_model.toml
+```
+
+Then validate after task/step generation with:
+
+```bash
+rust_plc process-model-check <source.plc|source.bundle.toml> --model process_model/process_operation_model.toml
+```
+
+If migrating an existing task/step source, `operation-model` may bootstrap a review draft:
+
+```bash
+cargo run --release --bin rust_plc -- operation-model out/<project>/rustplc.bundle.toml --out out/<project>/process_model/process_operation_model.toml
+```
+
+Review requirements:
+- `operation_classes` should normalize repeated physical slots, for example `storage_box.slot[0]` and `storage_box.slot[1]` should appear as one class like `storage_box.slot[*]`
+- `admissions` should expose source availability, destination capacity, program/operator guards, and semantic-resource availability where applicable
+- the model should be treated as source-side scheduling intent, not as a disposable verification artifact
+- `process-model-check` must pass before delivery; `OP-002` means the task/step flow added unjustified same-task serialization
+- generic program/operator guards must not be used as the reason to suppress OP-002; only shared endpoint/resource or an explicitly modeled predecessor relation should justify ordering
+
+Do not place the default output at `out/process_operation_model.json`.
+Use JSON only when a machine consumer explicitly needs it; prefer TOML for human review and project authoring.
 
 ## Task and step comment rule
 

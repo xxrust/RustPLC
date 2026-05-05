@@ -6,13 +6,14 @@ For a project-scale RustPLC delivery, the default path is:
 
 1. Confirm the authored intent source, usually `plc/main.system.md`.
 2. Choose the source shape.
-3. Generate or repair the DSL source entry.
-4. Generate or repair `scenarios/nominal/normal.yaml`.
-5. Run `sim-plc` or equivalent trace-producing validation to confirm the scenario actually drives one real nominal cycle.
-6. Author or repair a sibling `*.intent_alignment.contract.json`.
-7. Run `project-check`.
-8. Confirm that `project-check` actually ran `intent_alignment`.
-9. Report the real verdict and the real blocker or mismatch if it did not align.
+3. For discrete workpiece or pipelined station flow, author `process_model/process_operation_model.toml` from the system contract.
+4. Generate or repair the DSL source entry so task/step refines the process model.
+5. Generate or repair `scenarios/nominal/normal.yaml`.
+6. Run `process-model-check` and `sim-plc` or equivalent trace-producing validation.
+7. Author or repair a sibling `*.intent_alignment.contract.json`.
+8. Run `project-check`.
+9. Confirm that `project-check` actually ran `process_model_check` when the model exists and `intent_alignment` when the sidecar exists.
+10. Report the real verdict and the real blocker or mismatch if it did not align.
 
 For complex projects, this is the default, not an optional extra.
 

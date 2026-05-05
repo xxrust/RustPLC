@@ -389,8 +389,8 @@ graph TB
 | Workspace crates | 7 |
 | Verification engines | 4 |
 | CLI subcommands | 20+ |
-| Wiki pages | 18 |
-| Architecture docs | 7 |
+| Wiki pages | 19 |
+| Architecture docs | 8 |
 
 ---
 
@@ -402,14 +402,34 @@ graph TB
 |----------|---------|
 | [`AGENTS.md`](AGENTS.md) | Project charter, layering principles, code navigation |
 | [`docs/architecture/signal-direction.md`](docs/architecture/signal-direction.md) | Concurrent task / blocking step semantics (frozen) |
+| [`docs/architecture/process-operation-layer.md`](docs/architecture/process-operation-layer.md) | Process-operation scheduling layer between topology and task/step |
 | [`docs/architecture/device-semantics-library.md`](docs/architecture/device-semantics-library.md) | Device family semantic abstraction |
 | [`docs/architecture/intent_alignment_verification.md`](docs/architecture/intent_alignment_verification.md) | Intent contract verification |
+
+### Standard Project Organization
+
+Complex projects should not collapse every concern into one `main.plc`. The structured layout separates semantic phases:
+
+```text
+plc/main.system.md
+  -> 00_topology/
+  -> process_model/process_operation_model.toml
+  -> 01_init/
+  -> 02_process/
+  -> 03_constraints/
+  -> 04_faults/
+  -> 05_supervision/  06_manual/  07_hmi/
+  -> rustplc.bundle.toml
+```
+
+`05_supervision/`, `06_manual/`, and `07_hmi/` are reserved runtime layers, not leftover production-flow folders. A `supervisor` task owns operator front-door commands, automatic-cycle latching, mode arbitration, and safe return to the initialization baseline; it is not a process device and is not the same kind of logic as `02_process/` candidate operations.
 
 ### Wiki
 
 | Page | Content |
 |------|---------|
 | [AI-for-AI Platform Vision](docs/wiki/AI-for-AI-Platform-Vision.md) | AI agent engineering platform direction |
+| [Structured Project Layout](docs/wiki/Structured-Fragment-Project-Layout.md) | The organization model from `00_topology` to `07_hmi` |
 | [PLC Optimization Pipeline](docs/wiki/PLC-Optimization-Pipeline.md) | Optimization candidate generation & ranking |
 | [Device Library](docs/wiki/Device-Library.md) | TOML device definitions & constraints |
 | [Scenario Assetization](docs/wiki/Scenario-Assetization-Coverage-Feedback.md) | Scenario engineering & coverage feedback |

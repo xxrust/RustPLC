@@ -1,27 +1,35 @@
+# 辨相任务：旋臂从滑轨取片，交给辨相台并根据两次数字判定决定流向。
 task orient_stage:
+    # 自动使能等待步：自动循环未锁存时保持本任务待机。
     step wait_enabled:
         wait: auto_cycle_enabled == true
         allow_indefinite_wait: true
 
+    # 自动模式确认步：自动模式有效才执行辨相流程。
     step wait_mode:
         wait: mode_auto == true
         allow_indefinite_wait: true
 
+    # 停止清除步：停止请求期间不进入新的旋臂动作。
     step wait_stop_clear:
         wait: stop_button == false
         allow_indefinite_wait: true
 
+    # 滑轨有片等待步：等出片任务完成滑轨交接并由取料位传感器确认有片。
     step wait_slide_present:
         wait: wafer_on_slide == true
         allow_indefinite_wait: true
 
+    # 辨相台空闲等待步：辨相台没有待转运晶片时才允许放片。
     step wait_orient_free:
         wait: wafer_on_orient == false
         allow_indefinite_wait: true
 
+    # 轴使能步：确认旋臂轴处于可运动状态。
     step enable_axis:
         action: set axis_arm.enable on
 
+    # 旋臂到滑轨步：旋臂进入滑轨取片区，动作占用 slide_pick_zone。
     step move_to_pick:
         action: axis.move_relative(axis_arm, distance: 45, params: stepper_default_fast, speed: 5)
             timeout: 1500ms -> orient_axis_fault.move_timeout
@@ -30,14 +38,22 @@ task orient_stage:
             on_safety_fault -> orient_axis_fault.move_safety_fault
             semantic_tag: arm_pick_to_slide
 
+    # 旋臂真空打开步：打开旋臂吸嘴真空准备取片。
     step arm_vacuum_on:
         action: set vac_arm_valve.coil on
 
+    # 旋臂吸片确认步：确认旋臂吸到滑轨晶片并登记 holder acquire。
     step wait_arm_vacuum:
         wait: sensor_arm_vac_ok == true
         timeout: 1000ms -> goto orient_fault.arm_pick_timeout
         effect: acquire holder arm_nozzle from slide_pick_site
 
+    # 滑轨取空确认步：源位传感器必须变空，防止同一高电平被下一轮重复消费。
+    step wait_slide_empty_after_pick:
+        wait: wafer_on_slide == false
+        allow_indefinite_wait: true
+
+    # 旋臂到辨相台步：旋臂进入辨相台区域，动作占用 arm_orient_zone。
     step move_to_orient:
         action: axis.move_absolute(axis_arm, position: 90, params: stepper_default_fast, speed: 5)
             timeout: 1500ms -> orient_axis_fault.move_timeout
@@ -46,28 +62,35 @@ task orient_stage:
             on_safety_fault -> orient_axis_fault.move_safety_fault
             semantic_tag: arm_turn_to_orient
 
+    # 辨相台真空打开步：打开辨相台真空准备接片。
     step orient_vacuum_on:
         action: set vac_orient_valve.coil on
 
+    # 辨相台吸附确认步：确认辨相台持片并登记从旋臂到辨相台的 transfer。
     step wait_orient_vacuum:
         wait: sensor_orient_vac_ok == true
         timeout: 800ms -> goto orient_fault.orient_vacuum_timeout
         effect: transfer from arm_nozzle to orient_inspection_site
 
+    # 旋臂释放步：关闭旋臂真空，辨相台成为当前持片位置。
     step release_arm:
         action: set vac_arm_valve.coil off
 
+    # 初始朝向判定步：若初始数字判定合格则走原向路径，否则进入翻转。
     step decide_first_view:
         wait: orient_side_a_ok == true
         timeout: 10ms -> goto orient_stage.flip_orient
 
+    # 保持原向步：确保翻转气缸回原位，完成原向姿态确认。
     step keep_original:
         action: retract cyl_orient_rotate
             timeout: 600ms -> goto orient_warning.orient_cyl_warn
 
+    # 原向发布步：清零连续辨相异常计数。
     step publish_oriented_normal:
         action: compute orient_reject_streak = 0.0
 
+    # 原向回零步：旋臂回到 home，释放辨相危险区。
     step move_back_home_normal:
         action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
             timeout: 1500ms -> orient_axis_fault.move_timeout
@@ -75,20 +98,25 @@ task orient_stage:
             on_motion_fault -> orient_axis_fault.move_motion_fault
             on_safety_fault -> orient_axis_fault.move_safety_fault
 
+    # 原向完成步：结束本次辨相任务并回到等待。
     step finish_normal:
         goto orient_stage.wait_enabled
 
+    # 翻转步：初始判定不合格时执行 180 度翻转。
     step flip_orient:
         action: extend cyl_orient_rotate
             timeout: 600ms -> goto orient_warning.orient_cyl_warn
 
+    # 翻转判定步：翻转后判定合格则发布，否则进入 IR/reject。
     step decide_flip_result:
         wait: orient_side_b_ok == true
         timeout: 10ms -> goto orient_stage.reject_to_ir
 
+    # 翻转发布步：清零连续辨相异常计数并保持翻转后位置。
     step keep_flipped:
         action: compute orient_reject_streak = 0.0
 
+    # 翻转回零步：旋臂回 home，晶片留在辨相台等待转运。
     step move_back_home_flipped:
         action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
             timeout: 1500ms -> orient_axis_fault.move_timeout
@@ -96,15 +124,18 @@ task orient_stage:
             on_motion_fault -> orient_axis_fault.move_motion_fault
             on_safety_fault -> orient_axis_fault.move_safety_fault
 
+    # 翻转完成步：结束本次辨相任务并回到等待。
     step finish_flipped:
         goto orient_stage.wait_enabled
 
+    # 辨相拒收步：两次判定均不合格时将当前晶片转入 reject_bin。
     step reject_to_ir:
         action: set vac_orient_valve.coil off
         action: compute orient_reject_streak = orient_reject_streak + 1.0
         effect: transfer from orient_inspection_site to reject_bin
         effect: finish workpiece at reject_bin as rejected
 
+    # 拒收回零步：拒收后旋臂回 home，释放辨相危险区。
     step move_back_home_reject:
         action: axis.move_absolute(axis_arm, position: 0, params: stepper_default_fast, speed: 5)
             timeout: 1500ms -> orient_axis_fault.move_timeout
@@ -112,6 +143,7 @@ task orient_stage:
             on_motion_fault -> orient_axis_fault.move_motion_fault
             on_safety_fault -> orient_axis_fault.move_safety_fault
 
+    # 连续异常检查步：连续三片异常时进入停机故障，否则回到等待。
     step check_reject_limit:
         wait: orient_reject_streak < 3
         timeout: 10ms -> goto orient_fault.orient_reject_streak_fault

@@ -1,0 +1,68 @@
+device start_button: sensor { purpose: "Auto start request", subtype: "push_button", debounce: 20ms }
+device refresh_button: sensor { purpose: "Refresh after warning or repair", subtype: "push_button", debounce: 20ms }
+device stop_button: sensor { purpose: "Normal stop request", subtype: "push_button", debounce: 20ms }
+
+device mode_auto: sensor { purpose: "Auto mode selector", subtype: "selector_switch" }
+device mode_manual: sensor { purpose: "Manual mode selector", subtype: "selector_switch" }
+device mode_step: sensor { purpose: "Step mode selector", subtype: "selector_switch" }
+device mode_maintenance: sensor { purpose: "Maintenance mode selector", subtype: "selector_switch" }
+
+device measure_stage_ready: sensor { purpose: "Measurement stage is ready to receive wafer", subtype: "proximity_sensor" }
+device wafer_on_slide: sensor { purpose: "Wafer detected on slide pick position", subtype: "proximity_sensor" }
+device wafer_on_orient: sensor { purpose: "Wafer detected on orient stage", subtype: "proximity_sensor" }
+device wafer_drop_detect: sensor { purpose: "Drop detector during transfer path", subtype: "proximity_sensor" }
+device orient_side_a_ok: sensor { purpose: "First orient inspection result is acceptable", subtype: "proximity_sensor" }
+device orient_side_b_ok: sensor { purpose: "Flipped orient inspection result is acceptable", subtype: "proximity_sensor" }
+
+device vac_feed_valve: solenoid_valve { purpose: "Feed vacuum command valve", response_time: 20ms }
+device vac_arm_valve: solenoid_valve { purpose: "Arm vacuum command valve", response_time: 20ms }
+device vac_orient_valve: solenoid_valve { purpose: "Orient stage vacuum command valve", response_time: 20ms }
+device vac_transfer_valve: solenoid_valve { purpose: "Transfer vacuum command valve", response_time: 20ms }
+
+device sensor_feed_vac_ok: sensor { purpose: "Feed vacuum confirmation", subtype: "proximity_sensor" }
+device sensor_arm_vac_ok: sensor { purpose: "Arm vacuum confirmation", subtype: "proximity_sensor" }
+device sensor_orient_vac_ok: sensor { purpose: "Orient vacuum confirmation", subtype: "proximity_sensor" }
+device sensor_transfer_vac_ok: sensor { purpose: "Transfer vacuum confirmation", subtype: "proximity_sensor" }
+
+device valve_feed: solenoid_valve { purpose: "Feed cylinder directional valve", response_time: 20ms }
+device cyl_feed: cylinder { purpose: "Feed cylinder that pushes the wafer box to pick position", stroke_time: 350ms, retract_time: 350ms }
+device sensor_feed_ext: sensor { purpose: "Feed cylinder extended feedback", subtype: "limit_switch" }
+device sensor_feed_ret: sensor { purpose: "Feed cylinder retracted feedback", subtype: "limit_switch" }
+
+device axis_arm: stepper_motor {
+    purpose: "Pick-and-place rotary arm"
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+axis_fault_contract arm_axis_fault_policy {
+    axis: axis_arm
+    severity: recoverable
+    stop_mode: controlled
+    auto_reset_policy: immediate
+    manual_ack_required: true
+    propagation_scope: self
+}
+
+device sensor_arm_home: sensor { purpose: "Arm home proof sensor", subtype: "limit_switch" }
+
+device valve_orient_rotate: solenoid_valve { purpose: "Orient flip cylinder directional valve", response_time: 20ms }
+device cyl_orient_rotate: cylinder { purpose: "Orient stage 180-degree flip cylinder", stroke_time: 250ms, retract_time: 250ms }
+device sensor_orient_ext: sensor { purpose: "Orient cylinder flipped feedback", subtype: "limit_switch" }
+device sensor_orient_ret: sensor { purpose: "Orient cylinder home feedback", subtype: "limit_switch" }
+
+device valve_swing: solenoid_valve { purpose: "Swing cylinder directional valve", response_time: 20ms }
+device cyl_swing: cylinder { purpose: "Swing cylinder for transfer arm down and up motion", stroke_time: 250ms, retract_time: 250ms }
+device sensor_swing_down: sensor { purpose: "Swing cylinder down feedback", subtype: "limit_switch" }
+device sensor_swing_up: sensor { purpose: "Swing cylinder up feedback", subtype: "limit_switch" }
+
+device valve_lift: solenoid_valve { purpose: "Lift cylinder directional valve", response_time: 20ms }
+device cyl_lift: cylinder { purpose: "Lift cylinder for transfer pick height", stroke_time: 250ms, retract_time: 250ms }
+device sensor_lift_down: sensor { purpose: "Lift cylinder down feedback", subtype: "limit_switch" }
+device sensor_lift_up: sensor { purpose: "Lift cylinder up feedback", subtype: "limit_switch" }
+
+device valve_transfer: solenoid_valve { purpose: "Transfer cylinder directional valve", response_time: 20ms }
+device cyl_transfer: cylinder { purpose: "Transfer cylinder that moves wafer to measure stage", stroke_time: 300ms, retract_time: 300ms }
+device sensor_transfer_front: sensor { purpose: "Transfer cylinder front feedback", subtype: "limit_switch" }
+device sensor_transfer_back: sensor { purpose: "Transfer cylinder back feedback", subtype: "limit_switch" }

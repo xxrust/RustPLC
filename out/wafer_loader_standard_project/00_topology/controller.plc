@@ -1,0 +1,57 @@
+variable orient_reject_streak: float = 0.0
+variable transfer_attempt_count: float = 0.0
+variable drop_total: float = 0.0
+variable consecutive_drop_count: float = 0.0
+variable axis_recover_attempts: float = 0.0
+variable drop_rate_exceeded: bool = false
+variable auto_cycle_enabled: bool = false
+variable stop_requested: bool = false
+variable system_initialized: bool = false
+variable feed_cassette_has_seed: bool = true
+
+device plc_main: plc {
+    purpose: "Wafer loader controller"
+    model_ref: openplc_softplc
+}
+
+controller_io plc_main {
+    input start_cycle_cmd: X0 { purpose: "Auto start request" }
+    input refresh_cmd: X1 { purpose: "Operator refresh after repair" }
+    input stop_cmd: X2 { purpose: "Normal stop request" }
+    input mode_auto_cmd: X3 { purpose: "Auto mode selector" }
+    input mode_manual_cmd: X4 { purpose: "Manual mode selector" }
+    input mode_step_cmd: X5 { purpose: "Step mode selector" }
+    input mode_maintenance_cmd: X6 { purpose: "Maintenance mode selector" }
+    input wafer_drop_detected: X7 { purpose: "Wafer drop detection" }
+    input measure_stage_ready_in: X12 { purpose: "Measure stage ready" }
+    input wafer_on_slide_in: X13 { purpose: "Slide pick site presence" }
+    input wafer_on_orient_in: X14 { purpose: "Orient stage presence" }
+    input orient_side_a_ok_in: X15 { purpose: "Initial orientation accepted" }
+    input orient_side_b_ok_in: X16 { purpose: "Flipped orientation accepted" }
+    input feed_vac_ok_in: X17 { purpose: "Feed vacuum confirmation" }
+    input arm_vac_ok_in: X18 { purpose: "Arm vacuum confirmation" }
+    input orient_vac_ok_in: X19 { purpose: "Orient vacuum confirmation" }
+    input transfer_vac_ok_in: X20 { purpose: "Transfer vacuum confirmation" }
+    input feed_ext_in: X21 { purpose: "Feed cylinder extended feedback" }
+    input feed_ret_in: X22 { purpose: "Feed cylinder retracted feedback" }
+    input arm_home_in: X23 { purpose: "Arm home proof" }
+    input orient_ext_in: X24 { purpose: "Orient flip cylinder extended feedback" }
+    input orient_ret_in: X25 { purpose: "Orient flip cylinder retracted feedback" }
+    input swing_down_in: X26 { purpose: "Swing cylinder down feedback" }
+    input swing_up_in: X27 { purpose: "Swing cylinder up feedback" }
+    input lift_down_in: X28 { purpose: "Lift cylinder down feedback" }
+    input lift_up_in: X29 { purpose: "Lift cylinder up feedback" }
+    input transfer_front_in: X30 { purpose: "Transfer cylinder front feedback" }
+    input transfer_back_in: X31 { purpose: "Transfer cylinder back feedback" }
+
+    output feed_valve_cmd: Y0 { purpose: "Feed cylinder valve command", safe_state: off }
+    output orient_rotate_valve_cmd: Y1 { purpose: "Orient flip cylinder valve command", safe_state: off }
+    output swing_valve_cmd: Y2 { purpose: "Swing cylinder valve command", safe_state: off }
+    output lift_valve_cmd: Y3 { purpose: "Lift cylinder valve command", safe_state: off }
+    output transfer_valve_cmd: Y4 { purpose: "Transfer cylinder valve command", safe_state: off }
+    output feed_vac_cmd: Y5 { purpose: "Feed vacuum valve command", safe_state: off }
+    output arm_vac_cmd: Y6 { purpose: "Arm vacuum valve command", safe_state: off }
+    output orient_vac_cmd: Y7 { purpose: "Orient vacuum valve command", safe_state: off }
+    output transfer_vac_cmd: Y8 { purpose: "Transfer vacuum valve command", safe_state: off }
+    output axis_arm_enable_cmd: Y9 { purpose: "Arm axis enable command", safe_state: off }
+}

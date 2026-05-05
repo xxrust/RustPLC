@@ -1,0 +1,11 @@
+{
+  "RustPLC: Phase File": {
+    "scope": "ini",
+    "prefix": "plc-phase",
+    "body": [
+      "# Phase: ${1:00_topology}",
+      "# Add device, constraint, or task declarations here"
+    ],
+    "description": "Insert a phase file header"
+  }
+}

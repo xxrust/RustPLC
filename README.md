@@ -389,8 +389,8 @@ graph TB
 | Workspace crate | 7 个 |
 | 验证引擎 | 4 个 |
 | CLI 子命令 | 20+ 个 |
-| Wiki 文档 | 18 篇 |
-| 架构文档 | 7 篇 |
+| Wiki 文档 | 19 篇 |
+| 架构文档 | 8 篇 |
 
 ---
 
@@ -402,14 +402,34 @@ graph TB
 |------|------|
 | [`AGENTS.md`](AGENTS.md) | 项目总纲、分层原则、源码导航 |
 | [`docs/architecture/signal-direction.md`](docs/architecture/signal-direction.md) | 并发 task / blocking step 语义（冻结） |
+| [`docs/architecture/process-operation-layer.md`](docs/architecture/process-operation-layer.md) | 拓扑与 task/step 之间的工艺操作调度层 |
 | [`docs/architecture/device-semantics-library.md`](docs/architecture/device-semantics-library.md) | 设备族语义抽象 |
 | [`docs/architecture/intent_alignment_verification.md`](docs/architecture/intent_alignment_verification.md) | 意图合约验证 |
+
+### 标准项目组织
+
+复杂项目不应把所有逻辑平铺成一个 `main.plc`。推荐的结构化项目按语义阶段组织：
+
+```text
+plc/main.system.md
+  -> 00_topology/
+  -> process_model/process_operation_model.toml
+  -> 01_init/
+  -> 02_process/
+  -> 03_constraints/
+  -> 04_faults/
+  -> 05_supervision/  06_manual/  07_hmi/
+  -> rustplc.bundle.toml
+```
+
+`05_supervision/`、`06_manual/`、`07_hmi/` 是预留的运行层，不是主生产流程的残余目录。`supervisor` 的职责是接收 operator front-door、锁存自动循环、管理模式切换，并在停止或异常时把系统拉回安全基线；它不是普通工艺设备，也不等同于 `02_process/` 中的候选工艺操作。
 
 ### Wiki
 
 | 页面 | 内容 |
 |------|------|
 | [AI for AI 平台愿景](docs/wiki/AI-for-AI-Platform-Vision.md) | AI Agent 工程平台方向 |
+| [结构化项目布局](docs/wiki/Structured-Fragment-Project-Layout.md) | `00_topology` 到 `07_hmi` 的组织思想 |
 | [PLC 优化管线](docs/wiki/PLC-Optimization-Pipeline.md) | 优化候选生成与排序 |
 | [设备库](docs/wiki/Device-Library.md) | TOML 设备定义与约束 |
 | [场景资产化](docs/wiki/Scenario-Assetization-Coverage-Feedback.md) | 场景工程与覆盖反馈 |

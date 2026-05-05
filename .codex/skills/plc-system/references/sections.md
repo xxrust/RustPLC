@@ -16,9 +16,29 @@
 ## 生成 `.plc` 所必需的章节
 
 - concurrent task partition
+- process operation scheduling intent
 - blocking step expectations
 - key constraints
 - AI generation guidance
+
+## process operation scheduling intent
+
+When the process moves discrete workpieces or has pipelined station admission, include a section that can be lowered forward into `process_model/process_operation_model.toml` before task/step generation.
+
+It should specify:
+
+- operation classes: feed / acquire / transfer / process / reject / finish
+- source and destination locations
+- source availability and destination capacity rules
+- predecessor completion rules
+- shared resources and interference constraints
+- scheduling policy, normally opportunistic admission
+
+This section should not be a fixed "part 1, part 2" narrative unless the machine contract truly requires fixed numbering.
+
+The generated task/step flow must later pass `process-model-check`. A system contract that implies opportunistic admission should explicitly say that unrelated candidate operations must not be serialized merely because they appear in one written sequence.
+
+Do not write this section as a retrospective summary of the final task/step code. It is the scheduling source that constrains how task/step may be written.
 
 ## 有 axis 时必须补充的章节
 

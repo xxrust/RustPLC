@@ -280,7 +280,7 @@ inputs:
     assert_eq!(
         steps.len(),
         4,
-        "project-check should run four concrete checks"
+        "project-check without a process model should run the four baseline checks"
     );
 
     for step_name in [
@@ -387,6 +387,59 @@ inputs:
     assert!(
         out_dir.join("scenario_doctor/stderr.log").exists(),
         "failed step stderr log should be preserved"
+    );
+}
+
+#[test]
+fn project_check_can_require_process_model_contract() {
+    let base = temp_dir("rust_plc_project_check_require_process_model");
+    let plc = base.join("fixture.plc");
+    let scenario = base.join("scenario.yaml");
+    let out_dir = base.join("artifacts");
+    write_fixture_plc(&plc);
+    fs::write(
+        &scenario,
+        r#"
+tick_ms: 10
+duration_ms: 40
+inputs:
+  - at_ms: 10
+    set:
+      digital_inputs:
+        0: true
+"#,
+    )
+    .expect("write fixture scenario");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust_plc"))
+        .arg("project-check")
+        .arg(&plc)
+        .arg("--scenario")
+        .arg(&scenario)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .arg("--require-process-model")
+        .arg("--output")
+        .arg("json")
+        .output()
+        .expect("run project-check requiring process model");
+
+    assert!(
+        !output.status.success(),
+        "project-check should fail when --require-process-model is set and the model is missing"
+    );
+    let report: Value =
+        serde_json::from_slice(&output.stdout).expect("project-check should print JSON");
+    let steps = report
+        .get("steps")
+        .and_then(Value::as_array)
+        .expect("steps array");
+    assert!(
+        steps.iter().any(|step| {
+            step.get("name").and_then(Value::as_str) == Some("process_model_check")
+                && step.get("status").and_then(Value::as_str) == Some("fail")
+        }),
+        "missing process model should be reported as a failed process_model_check step"
     );
 }
 

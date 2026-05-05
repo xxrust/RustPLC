@@ -86,6 +86,7 @@ Prefer a structured source set or explicit target-semantics fragment layout that
 Use the current `rust_plc new --layout structured-fragments` scaffold as the reference shape:
 - `rustplc.bundle.toml`
 - `00_topology/`
+- `process_model/` for source-side process operation scheduling intent, when the project moves discrete workpieces or needs explicit admission/resource policy
 - `01_init/`
 - `02_process/`
 - `03_constraints/`
@@ -109,6 +110,50 @@ Then ensure that asset owns its own:
 
 The structured fragment tree is the compile surface.
 The delivery asset and its document set are the architecture surface.
+
+## Hard Guardrail: Process Operation Model Comes Before Task/Step
+
+When a project has discrete workpiece flow, pipelined station behavior, or admission/resource scheduling questions, generate or repair the source-side process operation model.
+
+Default forward path:
+
+```text
+confirmed system contract
+    -> process_model/process_operation_model.toml
+    -> task/step program flow
+    -> process-model-check
+```
+
+Treat `operation-model` output as a migration or audit scaffold for existing task/step flow. It becomes the authored contract only after review, because the command derives the first shape from current task/step flow. Do not use it as the default source of process intent for a new project.
+
+Correct authored path:
+
+```text
+process_model/process_operation_model.toml
+```
+
+Correct check command:
+
+```bash
+rust_plc process-model-check <source.plc|source.bundle.toml> --model process_model/process_operation_model.toml
+```
+
+For migration of an existing task/step source, the reverse scaffold command is allowed, but it must be reviewed against the system contract before being accepted:
+
+```bash
+cargo run --release --bin rust_plc -- operation-model out/<project>/rustplc.bundle.toml --out out/<project>/process_model/process_operation_model.toml
+```
+
+Do not default this model to `out/process_operation_model.json`.
+`out/` is for rebuildable compiler, simulation, gate, and codegen artifacts. The process operation model is an authored scheduling-intent layer between topology and task flow, so it belongs in a peer-level `process_model/` directory, not in a numbered compile-fragment phase.
+
+Prefer TOML for this model because reviewers need to inspect and edit scheduling classes, admissions, source/destination patterns, and resource assumptions. JSON is acceptable only for machine-only interchange or an explicit user request.
+
+After generating or repairing task/step flow, run `process-model-check`.
+Do not call a generated workpiece-flow project complete if the check reports `OP-002`; that means the task flow serialized operations without a resource or endpoint reason.
+Do not silence OP-002 by adding a generic `if` or operator edge; ordinary guards are admission facts, not predecessor-completion proof.
+If `OP-003` appears, report the split/merge/carrier process-model limitation instead of claiming the operation flow is fully checked.
+When `process_model/process_operation_model.toml` exists, `project-check` will auto-run the same refinement step.
 
 ## Hard Guardrail: Comment Every Task And Step
 
