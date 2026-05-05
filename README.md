@@ -76,7 +76,7 @@ RustPLC 的回答是 **"写时即证"**：
 
 ## 标准项目分层
 
-RustPLC 的标准项目不是把所有控制逻辑塞进一个 `main.plc`。复杂设备必须按语义层组织，让拓扑、工艺调度、PLC 程序流、故障、人机入口各自有明确边界：
+RustPLC 的标准项目按语义层组织控制意图，让拓扑、工艺调度、PLC 程序流、故障、人机入口各自有明确边界：
 
 ```text
 plc/main.system.md
@@ -113,9 +113,9 @@ process_model/process_operation_model.toml
 rustplc.bundle.toml -> IR -> verification / runtime bridge / codegen
 ```
 
-`supervisor` 不是生产工艺设备，也不是 `02_process/` 里的普通生产步骤。它负责 operator front-door、自动循环锁存、启动/停止、模式仲裁和安全回退。`05_supervision/`、`06_manual/`、`07_hmi/` 默认禁用时，不表示主流程没写完，而是表示这些运行入口层在当前交付中暂未启用。
+`supervisor` 属于运行入口和模式管理层，负责 operator front-door、自动循环锁存、启动/停止、模式仲裁和安全回退。`05_supervision/`、`06_manual/`、`07_hmi/` 是可按交付面启用的运行入口层，当前项目可以先聚焦自动主流程。
 
-这层设计的核心原因是：拓扑只能证明物理连接和资源边界，不能直接推出最合适的程序流。`process_model` 是拓扑和 task/step 之间缺失的调度意图层，`process-model-check` 再验证 task/step 是否 refine 这份源侧模型。
+这层设计的核心原因是：拓扑负责物理连接和资源边界，`process_model` 负责拓扑和 task/step 之间的调度意图，`process-model-check` 再验证 task/step 是否 refine 这份源侧模型。
 
 ---
 
@@ -201,7 +201,7 @@ my_plc_project/
 
 ## DSL 一览
 
-RustPLC 的 DSL 不是另一种编程语言 — 它是工控意图的声明式描述。工程师（或 AI）声明 **"有什么设备、什么约束、要做什么"**，编译器负责证明这些声明是否自洽。
+RustPLC 的 DSL 是工控意图的声明式描述。工程师（或 AI）声明 **"有什么设备、什么约束、要做什么"**，编译器负责证明这些声明是否自洽。
 
 ```plc
 [topology]
@@ -253,7 +253,7 @@ task fault:
 三个段落，三件事：
 
 - **topology** — 有什么设备，怎么连接
-- **constraints** — 什么不能发生，什么必须满足
+- **constraints** — 安全边界、互斥条件和必须满足的约束
 - **tasks** — 按什么顺序做什么
 
 编译器读取这三段，构建统一 IR，然后用四个引擎证明约束在所有可能的执行路径上都成立。
@@ -264,7 +264,7 @@ task fault:
 
 ### 四引擎形式化验证
 
-编译器内置四个并行验证引擎，不是测试，是数学证明：
+编译器内置四个并行验证引擎，用数学证明覆盖安全性、活性、时序和因果性：
 
 | 引擎 | 方法 | 证明什么 |
 |------|------|---------|
@@ -324,7 +324,7 @@ tick 级时序采样，p50/p95/p99 统计，超限自动拦截。发布包包含
   <img src="docs/assets/ai-for-ai-platform.png" alt="Agent-native PLC 工程平台：人输入需求专利设计意图，agent 规划、并行实现、编译验证、自主修复并输出证据" width="900">
 </p>
 
-这就是 RustPLC 的 **AI for AI**：不是让 AI 给人类编辑器补一个助手，而是把 PLC 工程拆成 agent 能稳定执行、验证和恢复的结构化任务。
+这就是 RustPLC 的 **AI for AI**：PLC 工程被拆成 agent 能稳定执行、验证和恢复的结构化任务。
 
 1. 输入层面：支持从需求、专利、设备清单、工艺意图进入 `main.system.md`
 2. 规划层面：先建立拓扑、设备语义、工件模型、front-door 和 `process_model`
@@ -332,7 +332,7 @@ tick 级时序采样，p50/p95/p99 统计，超限自动拦截。发布包包含
 4. 验证层面：编译器把产物收敛到 IR，并用 verification / runtime bridge / codegen 统一约束
 5. 修复层面：结构化诊断、report、trace 和 gate 结果能被 agent 用来继续推理和修复
 
-差异化不是 "又一个生成器"，而是一个面向 agent 的 PLC 工程系统：agent 能从意图出发，把项目推进到 **可验证、可执行、可审计、可复现**。
+RustPLC 的差异化在于面向 agent 的 PLC 工程系统：agent 能从意图出发，把项目推进到 **可验证、可执行、可审计、可复现**。
 
 ### MCP 集成
 
@@ -497,7 +497,7 @@ cargo run --release -- help sim-plc        # 仿真命令帮助
 
 - 语义必须先于实现
 - IR 是唯一语义汇合点
-- Verification 是主路径，不是插件
+- Verification 是编译主路径
 - Runtime 和 Codegen 只消费已闭合的 IR 语义
 - 文档、示例、测试、skills 必须与编译器契约同步
 

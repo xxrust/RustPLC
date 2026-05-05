@@ -1,14 +1,12 @@
 # AI for AI 平台愿景
 
-RustPLC 不是 "AI 帮人写 PLC 程序" 的工具，也不是传统 PLC 编辑器外面套一层聊天助手。
-
 传统 PLC 编辑器的设计对象是人：让工程师更方便地写梯形图、查变量、点设备、在线调试。RustPLC 的设计对象是 agent：让 agent 能从需求、专利或设计意图出发，完成文档创建、工程规划、串行或并行写代码、编译器验证、自主推理修复和证据化交付。
 
 ---
 
 ## 定位
 
-AI for AI 的含义不是“AI 帮人点 PLC 编辑器”，而是“PLC 工程系统本身按 agent 可执行任务来设计”。
+AI for AI 的含义是：PLC 工程系统本身按 agent 可执行任务来设计。
 
 大多数 "AI for 软件" 产品止步于文本生成。对工业控制来说，这远远不够。缺失的层次是：
 
@@ -41,7 +39,7 @@ verification / runtime bridge / codegen / no-board gate
 通过 → release bundle + evidence → 人类审查批准
 ```
 
-关键：AI 的输出不是一段“看起来像 PLC 的代码文本”，而是一个按工程层级组织、能被编译器验证、能被 runtime/codegen 消费、能被 trace/report 追责的项目。
+关键：AI 的输出是一份按工程层级组织、能被编译器验证、能被 runtime/codegen 消费、能被 trace/report 追责的项目。
 
 这才是 RustPLC 和 "prompt wrapper" 或传统 PLC 编辑器插件的本质区别。
 
@@ -51,12 +49,12 @@ verification / runtime bridge / codegen / no-board gate
 
 | 契约 | 含义 |
 |------|------|
-| Agent-first 输入 | 人给需求、专利或设计意图，不要求人先写 PLC 程序 |
+| Agent-first 输入 | 人给需求、专利或设计意图，agent 负责收敛 PLC 工程资产 |
 | 源侧结构化 | AI 生成物必须落到 system / topology / process_model / task / scenario 等层 |
-| 统一语义入口 | 最终控制语义必须经过 Parser → AST → Semantic → IR，不能绕过 |
-| 验证是主路径 | 验证不是可选插件，是编译流水线的一等公民 |
-| 运行时不发明语义 | runtime-core 只执行 IR 定义的语义，不能自行补充 |
-| 代码生成显式擦除 | Codegen 必须明确哪些语义被保留、哪些被擦除，不能静默丢弃 |
+| 统一语义入口 | 最终控制语义统一经过 Parser → AST → Semantic → IR |
+| 验证是主路径 | 验证是编译流水线的一等公民 |
+| 运行时语义闭合 | runtime-core 执行 IR 定义的语义 |
+| 代码生成显式擦除 | Codegen 明确哪些语义被保留、哪些被擦除 |
 | 反馈可机器消费 | diagnostics / verification_report.json / trace.jsonl / manifest.json 必须能反哺 agent 推理 |
 
 ---
@@ -107,8 +105,6 @@ RustPLC 提供 MCP Server（`rustplc-mcp/`），AI Agent 可直接调用编译�
 ---
 
 ## 底线
-
-RustPLC 的差异化不是 "又一个生成器"。
 
 差异化是：RustPLC 的语言、目录、验证、诊断、场景和交付物都围绕 agent 执行工程任务设计。
 

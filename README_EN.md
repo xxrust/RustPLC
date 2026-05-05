@@ -76,7 +76,7 @@ The last row is the key: when AI agents can generate industrial control programs
 
 ## Standard Project Layers
 
-A standard RustPLC project does not collapse all control logic into one `main.plc`. Complex machines should be organized by semantic layer, so topology, process scheduling, executable PLC flow, faults, and operator-facing entry points each have a clear boundary:
+A standard RustPLC project organizes control intent by semantic layer, so topology, process scheduling, executable PLC flow, faults, and operator-facing entry points each have a clear boundary:
 
 ```text
 plc/main.system.md
@@ -113,9 +113,9 @@ process_model/process_operation_model.toml
 rustplc.bundle.toml -> IR -> verification / runtime bridge / codegen
 ```
 
-`supervisor` is not a production device and not a normal production step under `02_process/`. It owns operator front-door commands, automatic-cycle latching, start/stop handling, mode arbitration, and safe fallback. When `05_supervision/`, `06_manual/`, or `07_hmi/` are disabled by default, that does not mean the main production flow is incomplete; it means those runtime entry layers are not enabled for the current delivery surface.
+`supervisor` belongs to the runtime entry and mode-management layer. It owns operator front-door commands, automatic-cycle latching, start/stop handling, mode arbitration, and safe fallback. `05_supervision/`, `06_manual/`, and `07_hmi/` are runtime entry layers that can be enabled by delivery scope while the current project focuses on the automatic main flow.
 
-The reason for this layer is precise: topology can prove physical connectivity and resource boundaries, but it cannot directly infer the best program flow. `process_model` is the missing scheduling-intent layer between topology and task/step, and `process-model-check` verifies whether task/step refines that source-side model.
+The reason for this layer is precise: topology owns physical connectivity and resource boundaries, `process_model` owns the scheduling intent between topology and task/step, and `process-model-check` verifies whether task/step refines that source-side model.
 
 ---
 
@@ -201,7 +201,7 @@ my_plc_project/
 
 ## The DSL at a Glance
 
-RustPLC's DSL is not another programming language — it's a declarative description of industrial control intent. Engineers (or AI agents) declare **"what devices exist, what constraints apply, what to do"**, and the compiler proves whether those declarations are consistent.
+RustPLC's DSL is a declarative description of industrial control intent. Engineers (or AI agents) declare **"what devices exist, what constraints apply, what to do"**, and the compiler proves whether those declarations are consistent.
 
 ```plc
 [topology]
@@ -324,7 +324,7 @@ Traditional PLC editors are designed for humans: the UI, ladder diagrams, variab
   <img src="docs/assets/ai-for-ai-platform.png" alt="Agent-native PLC engineering platform: humans provide requirements patents or design intent, agents plan, implement in parallel, verify, repair, and deliver evidence" width="900">
 </p>
 
-That is RustPLC's **AI for AI** direction: not an AI assistant bolted onto a human-centered PLC editor, but a PLC engineering system decomposed into structured tasks that agents can execute, verify, and recover from.
+That is RustPLC's **AI for AI** direction: PLC engineering decomposed into structured tasks that agents can execute, verify, and recover from.
 
 1. Input: requirements, patents, device lists, and process intent become `main.system.md`
 2. Planning: agents establish topology, device semantics, workpiece models, front-door contracts, and `process_model`
@@ -332,7 +332,7 @@ That is RustPLC's **AI for AI** direction: not an AI assistant bolted onto a hum
 4. Verification: the compiler converges artifacts into IR and constrains them through verification, runtime bridge, and codegen
 5. Repair: structured diagnostics, reports, traces, and gate results give agents the material needed for further reasoning and repair
 
-The differentiator is not "yet another generator." RustPLC is an agent-native PLC engineering system that can take intent and drive it toward something **verifiable, executable, auditable, and reproducible**.
+RustPLC's differentiator is an agent-native PLC engineering system that can take intent and drive it toward something **verifiable, executable, auditable, and reproducible**.
 
 ### MCP Integration
 
@@ -497,7 +497,7 @@ cargo run --release -- help sim-plc        # Simulation command help
 
 - Semantics must precede implementation
 - IR is the single semantic convergence point
-- Verification is the main path, not a plugin
+- Verification is the main compile path
 - Runtime and codegen only consume closed IR semantics
 - Docs, examples, tests, and skills must stay in sync with compiler contracts
 
