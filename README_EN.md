@@ -318,21 +318,21 @@ Tick-level timing sampling, p50/p95/p99 statistics, automatic threshold enforcem
 
 ## AI for AI
 
-RustPLC isn't just "AI helps humans write PLC programs." The stronger direction is becoming an **AI-for-AI engineering platform**: one AI can author control semantics, while another AI can verify, critique, repair, optimize, or deliver them from the same structured evidence.
+Traditional PLC editors are designed for humans: the UI, ladder diagrams, variable tables, and debugging flow all optimize for engineers writing code by hand. RustPLC is designed for agents: a human provides requirements, a patent, or design intent, and agents create documents, plan the project, implement serially or in parallel, call the compiler for verification, reason from diagnostics, repair the program, and produce reviewable delivery evidence.
 
 <p align="center">
-  <img src="docs/assets/ai-for-ai-platform.png" alt="AI-for-AI semantic supply chain: human boundaries, multi-agent authoring, RustPLC semantic spine, verification runtime codegen, and evidence artifacts" width="900">
+  <img src="docs/assets/ai-for-ai-platform.png" alt="Agent-native PLC engineering platform: humans provide requirements patents or design intent, agents plan, implement in parallel, verify, repair, and deliver evidence" width="900">
 </p>
 
-This direction is not just a bug-fixing loop. It depends on five engineering contracts:
+That is RustPLC's **AI for AI** direction: not an AI assistant bolted onto a human-centered PLC editor, but a PLC engineering system decomposed into structured tasks that agents can execute, verify, and recover from.
 
-1. Humans define the device boundary, process boundary, safety boundary, and delivery boundary first
-2. AI-authored artifacts must land in `system contract -> topology -> process_model -> task/step`
-3. `process_model` declares schedulable process operations before task/step becomes the executable projection
-4. Verification, runtime bridge, and codegen must consume the same IR
-5. Verification reports, traces, timing reports, and release bundles must be reproducible by another AI or engineer
+1. Input: requirements, patents, device lists, and process intent become `main.system.md`
+2. Planning: agents establish topology, device semantics, workpiece models, front-door contracts, and `process_model`
+3. Implementation: agents can divide the structured project tree and generate task/step, fault, scenario, and config files serially or in parallel
+4. Verification: the compiler converges artifacts into IR and constrains them through verification, runtime bridge, and codegen
+5. Repair: structured diagnostics, reports, traces, and gate results give agents the material needed for further reasoning and repair
 
-The differentiator isn't "yet another generator." RustPLC turns AI output into an engineering evidence chain that is **verifiable, executable, auditable, and reproducible**.
+The differentiator is not "yet another generator." RustPLC is an agent-native PLC engineering system that can take intent and drive it toward something **verifiable, executable, auditable, and reproducible**.
 
 ### MCP Integration
 

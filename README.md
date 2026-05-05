@@ -318,21 +318,21 @@ tick 级时序采样，p50/p95/p99 统计，超限自动拦截。发布包包含
 
 ## AI for AI 方向
 
-RustPLC 不只是 "AI 帮人写 PLC 程序"。更强的方向是成为 **AI for AI 工程平台**：一个 AI 生成控制语义，另一个 AI 能基于同一份结构化证据进行验证、批评、修复、优化或交付。
+传统 PLC 编辑器的默认用户是人：界面、梯形图、变量表和调试体验都围绕“让工程师更好地手写代码”设计。RustPLC 的默认用户是 agent：人输入需求、专利或设计意图，agent 负责生成文档、规划工程、串行或并行写代码、调用编译器验证、根据诊断自主推理修复，并输出可审查的交付证据。
 
 <p align="center">
-  <img src="docs/assets/ai-for-ai-platform.png" alt="AI for AI 语义供应链：人类边界、多 AI 协作、RustPLC 语义主干、验证运行时代码生成和证据链" width="900">
+  <img src="docs/assets/ai-for-ai-platform.png" alt="Agent-native PLC 工程平台：人输入需求专利设计意图，agent 规划、并行实现、编译验证、自主修复并输出证据" width="900">
 </p>
 
-这个方向成立的前提不是“循环修 bug”，而是五个工程契约：
+这就是 RustPLC 的 **AI for AI**：不是让 AI 给人类编辑器补一个助手，而是把 PLC 工程拆成 agent 能稳定执行、验证和恢复的结构化任务。
 
-1. 人类先定义设备边界、工艺边界、安全边界和交付边界
-2. AI 生成的产物必须落到 `system contract -> topology -> process_model -> task/step`
-3. `process_model` 先表达可调度工艺操作，task/step 只是它的可执行投影
-4. verification、runtime bridge、codegen 必须同源消费 IR
-5. verification report、trace、timing report、release bundle 必须可被另一个 AI 或工程师复现
+1. 输入层面：支持从需求、专利、设备清单、工艺意图进入 `main.system.md`
+2. 规划层面：先建立拓扑、设备语义、工件模型、front-door 和 `process_model`
+3. 实现层面：agent 可按结构化目录分工，串行或并行生成 task/step、fault、scenario 和配置
+4. 验证层面：编译器把产物收敛到 IR，并用 verification / runtime bridge / codegen 统一约束
+5. 修复层面：结构化诊断、report、trace 和 gate 结果能被 agent 用来继续推理和修复
 
-差异化不是 "又一个生成器"，而是把 AI 输出收敛成 **可验证、可执行、可审计、可复现** 的工程证据链。
+差异化不是 "又一个生成器"，而是一个面向 agent 的 PLC 工程系统：agent 能从意图出发，把项目推进到 **可验证、可执行、可审计、可复现**。
 
 ### MCP 集成
 
