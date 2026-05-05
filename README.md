@@ -318,20 +318,21 @@ tick 级时序采样，p50/p95/p99 统计，超限自动拦截。发布包包含
 
 ## AI for AI 方向
 
-RustPLC 不只是 "AI 帮人写 PLC 程序"。更强的方向是成为 **AI for AI 工程平台**：
+RustPLC 不只是 "AI 帮人写 PLC 程序"。更强的方向是成为 **AI for AI 工程平台**：一个 AI 生成控制语义，另一个 AI 能基于同一份结构化证据进行验证、批评、修复、优化或交付。
 
 <p align="center">
-  <img src="docs/assets/ai-loop.svg" alt="AI for AI 工程闭环" width="750">
+  <img src="docs/assets/ai-for-ai-platform.png" alt="AI for AI 语义供应链：人类边界、多 AI 协作、RustPLC 语义主干、验证运行时代码生成和证据链" width="900">
 </p>
 
-这个方向成立的前提是四个契约：
+这个方向成立的前提不是“循环修 bug”，而是五个工程契约：
 
-1. AI 生成的产物必须进入统一语义模型，而不是停留在 prompt 文本
-2. 生成结果必须受验证、仿真、可追溯性约束
-3. 代码生成必须明确哪些语义被保留、哪些被擦除
-4. 发布包必须可被另一个 AI 系统或另一个工程师复现
+1. 人类先定义设备边界、工艺边界、安全边界和交付边界
+2. AI 生成的产物必须落到 `system contract -> topology -> process_model -> task/step`
+3. `process_model` 先表达可调度工艺操作，task/step 只是它的可执行投影
+4. verification、runtime bridge、codegen 必须同源消费 IR
+5. verification report、trace、timing report、release bundle 必须可被另一个 AI 或工程师复现
 
-差异化不是 "又一个生成器"，而是一个工程闭环：AI 的输出是 **可验证、可执行、可审计、可复现** 的。
+差异化不是 "又一个生成器"，而是把 AI 输出收敛成 **可验证、可执行、可审计、可复现** 的工程证据链。
 
 ### MCP 集成
 

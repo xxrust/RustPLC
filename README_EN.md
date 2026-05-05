@@ -318,20 +318,21 @@ Tick-level timing sampling, p50/p95/p99 statistics, automatic threshold enforcem
 
 ## AI for AI
 
-RustPLC isn't just "AI helps humans write PLC programs." The stronger direction is becoming an **AI-for-AI engineering platform**:
+RustPLC isn't just "AI helps humans write PLC programs." The stronger direction is becoming an **AI-for-AI engineering platform**: one AI can author control semantics, while another AI can verify, critique, repair, optimize, or deliver them from the same structured evidence.
 
 <p align="center">
-  <img src="docs/assets/ai-loop.svg" alt="AI for AI Engineering Loop" width="750">
+  <img src="docs/assets/ai-for-ai-platform.png" alt="AI-for-AI semantic supply chain: human boundaries, multi-agent authoring, RustPLC semantic spine, verification runtime codegen, and evidence artifacts" width="900">
 </p>
 
-This direction holds if four contracts stay intact:
+This direction is not just a bug-fixing loop. It depends on five engineering contracts:
 
-1. AI-generated artifacts must enter a unified semantic model, not stay as prompt text
-2. Generated results must be constrained by verification, simulation, and traceability
-3. Code generation must be explicit about preserved vs. erased semantics
-4. Release bundles must be reproducible by another AI system or another engineer
+1. Humans define the device boundary, process boundary, safety boundary, and delivery boundary first
+2. AI-authored artifacts must land in `system contract -> topology -> process_model -> task/step`
+3. `process_model` declares schedulable process operations before task/step becomes the executable projection
+4. Verification, runtime bridge, and codegen must consume the same IR
+5. Verification reports, traces, timing reports, and release bundles must be reproducible by another AI or engineer
 
-The differentiator isn't "yet another generator." It's an engineering loop where AI output is **verifiable, executable, auditable, and repeatable**.
+The differentiator isn't "yet another generator." RustPLC turns AI output into an engineering evidence chain that is **verifiable, executable, auditable, and reproducible**.
 
 ### MCP Integration
 
