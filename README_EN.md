@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero-banner.svg" alt="RustPLC — Formally Verified Industrial Control Compiler" width="700">
+  <img src="docs/assets/rustplc-promo.png" alt="RustPLC promotional banner: from industrial topology to formal verification and code generation" width="900">
 </p>
 
 <p align="center">

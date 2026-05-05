@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero-banner.svg" alt="RustPLC — Formally Verified Industrial Control Compiler" width="700">
+  <img src="docs/assets/rustplc-promo.png" alt="RustPLC 宣传页：从工业拓扑到形式化验证再到代码生成" width="900">
 </p>
 
 <p align="center">
