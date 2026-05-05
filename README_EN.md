@@ -21,6 +21,7 @@
 <p align="center">
   <a href="#understand-rustplc-in-30-seconds">30-Second Overview</a> •
   <a href="#why-rustplc">Why RustPLC</a> •
+  <a href="#standard-project-layers">Project Layers</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#core-capabilities">Capabilities</a> •
   <a href="#ai-for-ai">AI for AI</a> •
@@ -70,6 +71,51 @@ RustPLC's answer is **"prove as you write"**:
 </p>
 
 The last row is the key: when AI agents can generate industrial control programs, **who guarantees the AI's code is safe?** RustPLC is that guarantee.
+
+---
+
+## Standard Project Layers
+
+A standard RustPLC project does not collapse all control logic into one `main.plc`. Complex machines should be organized by semantic layer, so topology, process scheduling, executable PLC flow, faults, and operator-facing entry points each have a clear boundary:
+
+```text
+plc/main.system.md
+    |
+    v
+00_topology/
+    devices, connections, workpiece locations, capacities, resource boundaries
+    |
+    v
+process_model/process_operation_model.toml
+    schedulable operations: source available / destination capacity / shared resource / predecessor
+    |
+    v
+01_init/
+    initialization baseline, defaults, safe initial state
+    |
+    v
+02_process/
+    automatic production tasks: how the PLC executes operations admitted by process_model
+    |
+    v
+03_constraints/
+    safety, mutual exclusion, timing, and causality constraints
+    |
+    v
+04_faults/
+    fault paths, alarm mapping, recovery, and convergence
+    |
+    v
+05_supervision/  06_manual/  07_hmi/
+    runtime entry layers: supervisor / manual maintenance / HMI display and interaction
+    |
+    v
+rustplc.bundle.toml -> IR -> verification / runtime bridge / codegen
+```
+
+`supervisor` is not a production device and not a normal production step under `02_process/`. It owns operator front-door commands, automatic-cycle latching, start/stop handling, mode arbitration, and safe fallback. When `05_supervision/`, `06_manual/`, or `07_hmi/` are disabled by default, that does not mean the main production flow is incomplete; it means those runtime entry layers are not enabled for the current delivery surface.
+
+The reason for this layer is precise: topology can prove physical connectivity and resource boundaries, but it cannot directly infer the best program flow. `process_model` is the missing scheduling-intent layer between topology and task/step, and `process-model-check` verifies whether task/step refines that source-side model.
 
 ---
 
@@ -127,15 +173,24 @@ cargo run --release -- build-rp2040 examples/rp2040_motion_minimal.plc \
 ### Create a New Project
 
 ```bash
-cargo run --release -- new my_plc_project
+cargo run --release -- new my_plc_project --layout structured-fragments
 ```
 
 ```
 my_plc_project/
 ├── rustplc.project.toml
-├── plc/
-│   ├── main.system.md      # Requirements doc (AI reads this to generate .plc)
-│   └── main.plc
+├── plc/main.system.md
+├── 00_topology/
+├── process_model/
+│   └── process_operation_model.toml
+├── 01_init/
+├── 02_process/
+├── 03_constraints/
+├── 04_faults/
+├── 05_supervision/
+├── 06_manual/
+├── 07_hmi/
+├── rustplc.bundle.toml
 ├── scenarios/
 │   ├── nominal/
 │   └── faults/
@@ -408,21 +463,7 @@ graph TB
 
 ### Standard Project Organization
 
-Complex projects should not collapse every concern into one `main.plc`. The structured layout separates semantic phases:
-
-```text
-plc/main.system.md
-  -> 00_topology/
-  -> process_model/process_operation_model.toml
-  -> 01_init/
-  -> 02_process/
-  -> 03_constraints/
-  -> 04_faults/
-  -> 05_supervision/  06_manual/  07_hmi/
-  -> rustplc.bundle.toml
-```
-
-`05_supervision/`, `06_manual/`, and `07_hmi/` are reserved runtime layers, not leftover production-flow folders. A `supervisor` task owns operator front-door commands, automatic-cycle latching, mode arbitration, and safe return to the initialization baseline; it is not a process device and is not the same kind of logic as `02_process/` candidate operations.
+The standard project layer model is now a primary README section. See [Standard Project Layers](#standard-project-layers). For the fuller organization model, see [`docs/wiki/Structured-Fragment-Project-Layout.md`](docs/wiki/Structured-Fragment-Project-Layout.md).
 
 ### Wiki
 

@@ -21,6 +21,7 @@
 <p align="center">
   <a href="#30-秒理解-rustplc">30 秒理解</a> •
   <a href="#为什么需要-rustplc">为什么需要</a> •
+  <a href="#标准项目分层">项目分层</a> •
   <a href="#快速开始">快速开始</a> •
   <a href="#核心能力">核心能力</a> •
   <a href="#ai-for-ai-方向">AI for AI</a> •
@@ -70,6 +71,51 @@ RustPLC 的回答是 **"写时即证"**：
 </p>
 
 最后一行是关键：当 AI Agent 能生成工控程序时，**谁来保证 AI 生成的代码是安全的？** RustPLC 就是这个保证。
+
+---
+
+## 标准项目分层
+
+RustPLC 的标准项目不是把所有控制逻辑塞进一个 `main.plc`。复杂设备必须按语义层组织，让拓扑、工艺调度、PLC 程序流、故障、人机入口各自有明确边界：
+
+```text
+plc/main.system.md
+    |
+    v
+00_topology/
+    设备、连接、工件位置、容量、资源边界
+    |
+    v
+process_model/process_operation_model.toml
+    可调度工艺操作：source available / destination capacity / shared resource / predecessor
+    |
+    v
+01_init/
+    初始化基线、默认值、安全初态
+    |
+    v
+02_process/
+    自动生产任务：PLC 怎样执行 process_model 中允许的候选操作
+    |
+    v
+03_constraints/
+    安全、互斥、节拍、因果约束
+    |
+    v
+04_faults/
+    故障路径、报警映射、恢复与收敛
+    |
+    v
+05_supervision/  06_manual/  07_hmi/
+    运行入口层：supervisor / 手动维护 / HMI 展示与交互
+    |
+    v
+rustplc.bundle.toml -> IR -> verification / runtime bridge / codegen
+```
+
+`supervisor` 不是生产工艺设备，也不是 `02_process/` 里的普通生产步骤。它负责 operator front-door、自动循环锁存、启动/停止、模式仲裁和安全回退。`05_supervision/`、`06_manual/`、`07_hmi/` 默认禁用时，不表示主流程没写完，而是表示这些运行入口层在当前交付中暂未启用。
+
+这层设计的核心原因是：拓扑只能证明物理连接和资源边界，不能直接推出最合适的程序流。`process_model` 是拓扑和 task/step 之间缺失的调度意图层，`process-model-check` 再验证 task/step 是否 refine 这份源侧模型。
 
 ---
 
@@ -127,15 +173,24 @@ cargo run --release -- build-rp2040 examples/rp2040_motion_minimal.plc \
 ### 创建新项目
 
 ```bash
-cargo run --release -- new my_plc_project
+cargo run --release -- new my_plc_project --layout structured-fragments
 ```
 
 ```
 my_plc_project/
 ├── rustplc.project.toml
-├── plc/
-│   ├── main.system.md      # 需求描述（AI 读取此文件生成 .plc）
-│   └── main.plc
+├── plc/main.system.md
+├── 00_topology/
+├── process_model/
+│   └── process_operation_model.toml
+├── 01_init/
+├── 02_process/
+├── 03_constraints/
+├── 04_faults/
+├── 05_supervision/
+├── 06_manual/
+├── 07_hmi/
+├── rustplc.bundle.toml
 ├── scenarios/
 │   ├── nominal/
 │   └── faults/
@@ -408,21 +463,7 @@ graph TB
 
 ### 标准项目组织
 
-复杂项目不应把所有逻辑平铺成一个 `main.plc`。推荐的结构化项目按语义阶段组织：
-
-```text
-plc/main.system.md
-  -> 00_topology/
-  -> process_model/process_operation_model.toml
-  -> 01_init/
-  -> 02_process/
-  -> 03_constraints/
-  -> 04_faults/
-  -> 05_supervision/  06_manual/  07_hmi/
-  -> rustplc.bundle.toml
-```
-
-`05_supervision/`、`06_manual/`、`07_hmi/` 是预留的运行层，不是主生产流程的残余目录。`supervisor` 的职责是接收 operator front-door、锁存自动循环、管理模式切换，并在停止或异常时把系统拉回安全基线；它不是普通工艺设备，也不等同于 `02_process/` 中的候选工艺操作。
+标准项目分层是 README 的主模型，详见上文 [标准项目分层](#标准项目分层)。更完整的组织思想见 [`docs/wiki/Structured-Fragment-Project-Layout.md`](docs/wiki/Structured-Fragment-Project-Layout.md)。
 
 ### Wiki
 
