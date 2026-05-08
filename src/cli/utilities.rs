@@ -26,6 +26,10 @@ use rust_plc::sequence_lint::{
     CriticalWaitExemption, LintLevel, SequenceLintConfig, lint_critical_wait_recovery,
 };
 use rust_plc::source_bundle::{is_supported_plc_source_path, load_plc_source};
+use rust_plc::state_proof::{
+    StateProofIssue, StateProofSeverity, StateProofStatus, analyze_program,
+    load_state_proof_config, should_auto_run_state_proof_check,
+};
 use rust_plc::trace_diff::parse_trace_jsonl;
 use serde::Serialize;
 use std::env;
@@ -58,6 +62,10 @@ pub(super) fn try_dispatch(
         "process-model-check" => (
             Some("[OPMODEL-010]"),
             run_process_model_check_subcommand(program, remaining.iter().cloned()),
+        ),
+        "state-proof-check" => (
+            Some("[SPF-000]"),
+            run_state_proof_check_subcommand(program, remaining.iter().cloned()),
         ),
         "project-check" => (
             Some("[PROJCHECK-000]"),
@@ -93,6 +101,19 @@ struct ProcessModelCheckCliReport {
     actual_operation_count: usize,
     issue_count: usize,
     issues: Vec<ProcessOperationRefinementIssue>,
+}
+
+#[derive(Debug, Serialize)]
+struct StateProofCheckCliReport {
+    schema_version: u32,
+    command: &'static str,
+    output: &'static str,
+    source_plc: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_path: Option<String>,
+    status: StateProofStatus,
+    issue_count: usize,
+    issues: Vec<StateProofIssue>,
 }
 
 fn run_operation_model_subcommand(
@@ -364,6 +385,158 @@ fn write_operation_model(path: &Path, model: &ProcessOperationModel) -> Result<(
     } else {
         write_json_pretty(path, model)
     }
+}
+
+fn run_state_proof_check_subcommand(
+    program: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(), String> {
+    let usage = command_usage(program, "state-proof-check");
+
+    let Some(plc_path) = args.next() else {
+        return Err(usage);
+    };
+
+    let mut config_path: Option<PathBuf> = None;
+    let mut output_mode = CliOutputMode::Human;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--config" => {
+                config_path = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    "Missing value for --config <config/state_proof.toml>".to_string()
+                })?));
+            }
+            "--output" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| "Missing value for --output <human|json>".to_string())?;
+                output_mode = CliOutputMode::parse(&raw).ok_or_else(|| {
+                    format!("Invalid value for --output `{raw}` (expected human or json)")
+                })?;
+            }
+            "-h" | "--help" => return Err(usage.clone()),
+            other => {
+                return Err(format!(
+                    "Unknown argument for state-proof-check: {other}\n{usage}"
+                ));
+            }
+        }
+    }
+
+    if !is_supported_plc_source_path(Path::new(&plc_path)) {
+        return Err(format!(
+            "state-proof-check expects a supported PLC source path, got: {plc_path}"
+        ));
+    }
+
+    let plc_path_buf = PathBuf::from(&plc_path);
+    let loaded = load_plc_source(&plc_path_buf)?;
+    let program = parse_loaded_plc_with_required_purpose(&loaded)?;
+    let loaded_config = load_state_proof_config(&plc_path_buf, config_path.as_deref())?;
+    let mut issues = analyze_program(&program, &loaded_config.config);
+    remap_state_proof_issues(&mut issues, &loaded, &plc_path_buf);
+
+    let error_count = issues
+        .iter()
+        .filter(|issue| issue.severity.is_error())
+        .count();
+    let report = StateProofCheckCliReport {
+        schema_version: 1,
+        command: "state-proof-check",
+        output: output_mode.as_str(),
+        source_plc: display_path_relative_to_cwd(&plc_path_buf),
+        config_path: loaded_config
+            .path
+            .as_ref()
+            .map(|path| display_path_relative_to_cwd(path)),
+        status: if error_count == 0 {
+            StateProofStatus::Pass
+        } else {
+            StateProofStatus::Fail
+        },
+        issue_count: issues.len(),
+        issues,
+    };
+
+    match output_mode {
+        CliOutputMode::Json => {
+            let mut body = serde_json::to_string_pretty(&report)
+                .map_err(|err| format!("Failed to serialize state-proof-check JSON: {err}"))?;
+            body.push('\n');
+            print!("{body}");
+        }
+        CliOutputMode::Human => {
+            eprintln!(
+                "state-proof-check: {} (issues={})",
+                match report.status {
+                    StateProofStatus::Pass => "PASS",
+                    StateProofStatus::Fail => "FAIL",
+                },
+                report.issue_count
+            );
+            eprintln!("  source: {}", report.source_plc);
+            eprintln!(
+                "  config: {}",
+                report.config_path.as_deref().unwrap_or("<none>")
+            );
+            for issue in &report.issues {
+                eprintln!(
+                    "  [{}] {}:{}{}{}{}",
+                    match issue.severity {
+                        StateProofSeverity::Error => "ERROR",
+                        StateProofSeverity::Warning => "WARN",
+                    },
+                    issue.code,
+                    issue
+                        .source_file
+                        .as_deref()
+                        .unwrap_or(report.source_plc.as_str()),
+                    ":",
+                    issue.line,
+                    issue
+                        .task
+                        .as_ref()
+                        .zip(issue.step.as_ref())
+                        .map(|(task, step)| format!(" ({task}.{step})"))
+                        .unwrap_or_default(),
+                );
+                eprintln!("    reason: {}", issue.message);
+                eprintln!("    fix: {}", issue.fix);
+            }
+        }
+    }
+
+    if error_count > 0 {
+        return Err(format!(
+            "state-proof-check failed: {} issue(s)",
+            report.issue_count
+        ));
+    }
+
+    Ok(())
+}
+
+fn remap_state_proof_issues(
+    issues: &mut [StateProofIssue],
+    loaded: &rust_plc::source_bundle::LoadedPlcSource,
+    requested_path: &Path,
+) {
+    for issue in issues.iter_mut() {
+        if let Some(location) = loaded.source_map.remap_location(issue.line.max(1), 1) {
+            issue.line = location.line.max(1);
+            issue.source_file = Some(display_path_relative_to_cwd(Path::new(&location.file)));
+        } else if issue.source_file.is_none() {
+            issue.source_file = Some(display_path_relative_to_cwd(requested_path));
+        }
+    }
+    issues.sort_by(|left, right| {
+        left.severity
+            .is_error()
+            .cmp(&right.severity.is_error())
+            .reverse()
+            .then(left.line.cmp(&right.line))
+            .then(left.code.cmp(&right.code))
+    });
 }
 
 #[derive(Debug, Serialize)]
@@ -1185,6 +1358,28 @@ fn run_project_check_subcommand(
     let lint_step =
         run_project_check_child(&executable, "sequence_lint", &lint_args, &lint_dir, None)?;
 
+    let state_proof_step = load_plc_source(&plc_path_buf)
+        .ok()
+        .and_then(|loaded| parse_loaded_plc_with_required_purpose(&loaded).ok())
+        .filter(|program| should_auto_run_state_proof_check(program, &plc_path_buf))
+        .map(|_| {
+            let state_proof_dir = out_dir.join("state_proof_check");
+            let state_proof_args = vec![
+                "state-proof-check".to_string(),
+                plc_arg.clone(),
+                "--output".to_string(),
+                "json".to_string(),
+            ];
+            run_project_check_child(
+                &executable,
+                "state_proof_check",
+                &state_proof_args,
+                &state_proof_dir,
+                Some("report.json"),
+            )
+        })
+        .transpose()?;
+
     let default_process_model = default_process_model_path(&plc_path_buf);
     let process_model_step = match default_process_model.filter(|path| path.is_file()) {
         Some(model_path) => {
@@ -1300,6 +1495,9 @@ fn run_project_check_subcommand(
     gate_step.artifacts_dir = Some(display_path_relative_to_cwd(&gate_artifacts_dir));
 
     let mut steps = vec![compile_step, lint_step];
+    if let Some(step) = state_proof_step {
+        steps.push(step);
+    }
     if let Some(step) = process_model_step {
         steps.push(step);
     }

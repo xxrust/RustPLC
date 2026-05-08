@@ -31,6 +31,7 @@ pub mod semantic;
 pub mod sequence_lint;
 pub mod sim_regress;
 pub mod source_bundle;
+pub mod state_proof;
 mod task_root_selection;
 pub mod tick_timing;
 pub mod timing_report;

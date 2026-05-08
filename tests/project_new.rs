@@ -44,11 +44,13 @@ fn new_single_file_layout_still_creates_main_plc() {
     assert!(main_plc.contains("controller_io plc_main"));
     assert!(main_plc.contains("plc_main.start_cycle_cmd"));
     assert!(main_plc.contains("location reject_bin: workpiece_location { capacity: 20 }"));
+    assert!(main_plc.contains("task startup_initializer:"));
 
     let manifest =
         fs::read_to_string(project_dir.join("rustplc.project.toml")).expect("read manifest");
     assert!(manifest.contains("plc = \"plc/main.plc\""));
     assert!(project_dir.join("config/workpiece.toml").exists());
+    assert!(project_dir.join("config/state_proof.toml").exists());
 }
 
 #[test]
@@ -146,6 +148,7 @@ fn new_structured_fragments_layout_creates_bundle_project_that_compiles() {
     assert!(manifest.contains("scenario = \"scenarios/nominal/normal.yaml\""));
     assert!(manifest.contains("workpiece = \"config/workpiece.toml\""));
     assert!(project_dir.join("config/workpiece.toml").exists());
+    assert!(project_dir.join("config/state_proof.toml").exists());
 
     assert!(
         project_dir.join("docs/system.md").exists(),

@@ -85,7 +85,7 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
     CliCommandHelp {
         section: "Deployment",
         name: "project-check",
-        summary: "Run the unified project regression check across compile, lint, optional process-model, doctor, and gate steps.",
+        summary: "Run the unified project regression check across compile, lint, optional state-proof/process-model, doctor, and gate steps.",
         usage_template: "Usage: {program} project-check <source.plc|source.bundle.toml> --scenario <scenario.yaml> --out-dir <dir> [--require-process-model] [--max-p99-exec-us <us>] [--max-overrun-count <n>] [--intent-contract <contract.json> --intent-evidence <trace.jsonl>] [--output <human|json>]",
     },
     CliCommandHelp {
@@ -123,6 +123,12 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         name: "process-model-check",
         summary: "Verify that task/step program flow refines the authored process operation model.",
         usage_template: "Usage: {program} process-model-check <source.plc|source.bundle.toml> [--model <process_operation_model.toml|json>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
+        name: "state-proof-check",
+        summary: "Audit startup proof chains for physical-state flags and residual workpiece handling.",
+        usage_template: "Usage: {program} state-proof-check <source.plc|source.bundle.toml> [--config <config/state_proof.toml>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Diagnostics",
@@ -345,6 +351,10 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--model <process_operation_model.toml|json> Optional authored process model; defaults to process_model/process_operation_model.toml next to the source project.",
             "--output <human|json>        Select CLI output format.",
         ],
+        "state-proof-check" => &[
+            "--config <config/state_proof.toml> Optional exception file for no-feedback steps and trusted startup baselines.",
+            "--output <human|json>        Select CLI output format.",
+        ],
         "trace-diff" => &[
             "--sil <trace.jsonl>          SIL trace JSONL input.",
             "--board <trace.jsonl>        Board or virtual-board trace JSONL input.",
@@ -464,8 +474,9 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
             "If `--sil-scenario` or `--board-scenario` is omitted, the shared `--scenario` path is reused.",
         ],
         "project-check" => &[
-            "This command orchestrates `compile`, `sequence-lint`, optional `process-model-check`, `scenario-doctor`, and `no-board-gate` as one reproducible release check.",
+            "This command orchestrates `compile`, `sequence-lint`, optional `state-proof-check`, optional `process-model-check`, `scenario-doctor`, and `no-board-gate` as one reproducible release check.",
             "When `process_model/process_operation_model.toml` exists next to the source project, `process_model_check` is inserted automatically; use `--require-process-model` for workpiece-flow deliveries where missing model must fail.",
+            "`state_proof_check` is auto-inserted for bundles, variable-backed sources, and workpiece-flow projects so seeded flags and residual-part assumptions are reviewed before release.",
             "When `--intent-contract` and `--intent-evidence` are both provided, an `intent_alignment` step is appended and reduced from the library report without reinterpreting its verdict.",
         ],
         "geometry-export" => &[
@@ -481,6 +492,11 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
             "The check reads the authored process model and compares it with the current task/step-derived operation model.",
             "It fails on missing, extra, or changed operations, and on derived scheduling diagnostics such as unjustified same-task serialization.",
             "project-check auto-runs this step when `process_model/process_operation_model.toml` exists next to the source project.",
+        ],
+        "state-proof-check" => &[
+            "Use this to catch startup assumptions such as `*_ready = true` and workpiece projects that resume without a reviewed residual-part baseline.",
+            "`config/state_proof.toml` is for narrow, auditable exceptions only: `no_feedback_steps` and `trusted_initial_state` entries both require `reason` and `proof_basis`.",
+            "project-check auto-runs this step for bundles, variable-backed projects, and workpiece-flow sources.",
         ],
         "trace-doctor" => &["At least one of `--trace` or `--diff` is required."],
         "intent-doctor" => &[
@@ -560,6 +576,9 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         ],
         "process-model-check" => &[
             "rust_plc process-model-check rustplc.bundle.toml --model process_model/process_operation_model.toml --output json",
+        ],
+        "state-proof-check" => &[
+            "rust_plc state-proof-check rustplc.bundle.toml --config config/state_proof.toml --output json",
         ],
         "trace-diff" => &[
             "rust_plc trace-diff --sil out/sil_trace.jsonl --board out/board_trace.jsonl --out out/diff_report.json --fail-on-mismatch",

@@ -209,3 +209,24 @@ fn detailed_help_for_geometry_export_includes_overlay_options() {
     assert!(stderr.contains("Examples:"));
     assert!(stderr.contains("rust_plc geometry-export examples/rp2040_motion_minimal.plc"));
 }
+
+#[test]
+fn detailed_help_for_state_proof_check_mentions_config_and_project_check_integration() {
+    let output = run_cli(&["help", "state-proof-check"]);
+    assert!(
+        output.status.success(),
+        "help state-proof-check should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(
+        "state-proof-check <source.plc|source.bundle.toml> [--config <config/state_proof.toml>]"
+    ));
+    assert!(stderr.contains("Options:"));
+    assert!(stderr.contains("--config <config/state_proof.toml>"));
+    assert!(stderr.contains("Notes:"));
+    assert!(stderr.contains("project-check auto-runs this step"));
+    assert!(stderr.contains("Examples:"));
+    assert!(stderr.contains("rust_plc state-proof-check rustplc.bundle.toml"));
+}

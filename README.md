@@ -91,7 +91,7 @@ process_model/process_operation_model.toml
     |
     v
 01_init/
-    初始化基线、默认值、安全初态
+    初始化基线、残料检测、清理/回收/人工确认
     |
     v
 02_process/
@@ -110,12 +110,16 @@ process_model/process_operation_model.toml
     运行入口层：supervisor / 手动维护 / HMI 展示与交互
     |
     v
+config/state_proof.toml
+    机器可读的 no-feedback 与 trusted initial state 例外
+    |
+    v
 rustplc.bundle.toml -> IR -> verification / runtime bridge / codegen
 ```
 
 `supervisor` 属于运行入口和模式管理层，负责 operator front-door、自动循环锁存、启动/停止、模式仲裁和安全回退。`05_supervision/`、`06_manual/`、`07_hmi/` 是可按交付面启用的运行入口层，当前项目可以先聚焦自动主流程。
 
-这层设计的核心原因是：拓扑负责物理连接和资源边界，`process_model` 负责拓扑和 task/step 之间的调度意图，`process-model-check` 再验证 task/step 是否 refine 这份源侧模型。
+这层设计的核心原因是：拓扑负责物理连接和资源边界，`process_model` 负责拓扑和 task/step 之间的调度意图，`process-model-check` 再验证 task/step 是否 refine 这份源侧模型；`state-proof-check` 再审查物理状态是否由传感器、操作者输入、工件 token、闭环动作或显式例外证明，而不是被变量初值和内部 flag 预设为成立。
 
 ---
 
@@ -142,6 +146,18 @@ Verification passed:
 ```
 
 四个验证引擎并行运行，数学证明你的程序没有碰撞、死锁、超时和断链。
+
+### 项目级门禁
+
+```bash
+cargo run --release --bin rust_plc -- project-check my_plc_project/rustplc.bundle.toml --output human
+cargo run --release --bin rust_plc -- state-proof-check my_plc_project/rustplc.bundle.toml \
+  --config my_plc_project/config/state_proof.toml --output json
+```
+
+`project-check` 是复杂项目的默认交付门禁。对 `.bundle.toml`、包含 `variable`、或包含 workpiece flow 的项目，它会在 `sequence-lint` 之后、`process-model-check` 之前自动运行 `state_proof_check`。明显错误会失败，并在 `out/project-check/state_proof_check/report.json` 保留机器可读报告。
+
+`state-proof-check` 专门拦截两类高风险问题：一是把必须由现场输入证明的状态用 `bool = true`、`*_ready`、`*_done`、`*_available` 等内部 flag 预设为成立；二是设备停机/急停恢复后可能残留工件，但 `01_init` 或 startup task 没有检测、清理、回收、人工确认或显式阻断。项目级例外写在 `config/state_proof.toml`，支持 `[[no_feedback_steps]]` 与 `[[trusted_initial_state]]`，每条都必须包含 `reason` 和 `proof_basis`。
 
 ### 生成 IEC 61131-3 ST 代码
 
@@ -183,6 +199,8 @@ my_plc_project/
 ├── 00_topology/
 ├── process_model/
 │   └── process_operation_model.toml
+├── config/
+│   └── state_proof.toml
 ├── 01_init/
 ├── 02_process/
 ├── 03_constraints/
@@ -445,7 +463,7 @@ graph TB
 | Workspace crate | 7 个 |
 | 验证引擎 | 4 个 |
 | CLI 子命令 | 20+ 个 |
-| Wiki 文档 | 19 篇 |
+| Wiki 文档 | 20 篇 |
 | 架构文档 | 8 篇 |
 
 ---
@@ -472,6 +490,7 @@ graph TB
 |------|------|
 | [AI for AI 平台愿景](docs/wiki/AI-for-AI-Platform-Vision.md) | AI Agent 工程平台方向 |
 | [结构化项目布局](docs/wiki/Structured-Fragment-Project-Layout.md) | `00_topology` 到 `07_hmi` 的组织思想 |
+| [状态证明检查](docs/wiki/State-Proof-Check.md) | `state-proof-check`、残料策略与机器可读例外 |
 | [PLC 优化管线](docs/wiki/PLC-Optimization-Pipeline.md) | 优化候选生成与排序 |
 | [设备库](docs/wiki/Device-Library.md) | TOML 设备定义与约束 |
 | [场景资产化](docs/wiki/Scenario-Assetization-Coverage-Feedback.md) | 场景工程与覆盖反馈 |

@@ -257,6 +257,10 @@ fn scaffold_files(
             "config/workpiece.toml".to_string(),
             "schema_version = 1\n\n[workpiece]\nrequired = true\n".to_string(),
         ),
+        (
+            "config/state_proof.toml".to_string(),
+            scaffold_state_proof_config(),
+        ),
         ("out/ir/.gitkeep".to_string(), String::new()),
         ("out/sim/.gitkeep".to_string(), String::new()),
         ("out/gate/.gitkeep".to_string(), String::new()),
@@ -477,12 +481,28 @@ terminal_state = "rejected"
     .to_string()
 }
 
+fn scaffold_state_proof_config() -> String {
+    r#"schema_version = 1
+
+[[trusted_initial_state]]
+symbol = "outfeed"
+reason = "Starter scaffold assumes the finished-part outfeed is emptied before startup."
+proof_basis = "commissioning checklist"
+
+[[trusted_initial_state]]
+symbol = "part_handler"
+reason = "Starter scaffold assumes the transfer handler is empty before startup."
+proof_basis = "commissioning checklist"
+"#
+    .to_string()
+}
+
 // ---------------------------------------------------------------------------
 // Single-file layout
 // ---------------------------------------------------------------------------
 
 fn single_file_plc() -> String {
-    "[topology]\n\ndevice plc_main: plc {\n    purpose: \"Controller with minimal digital I/O mapping\",\n    model_ref: openplc_softplc\n}\n\ncontroller_io plc_main {\n    input start_cycle_cmd: X0 { purpose: \"Start request input\" }\n    output run_lamp_cmd: Y0 { purpose: \"Run lamp command\", safe_state: off }\n}\n\ndevice start_button: sensor { purpose: \"Start request\", subtype: \"push_button\", debounce: 20ms }\ndevice run_lamp: solenoid_valve { purpose: \"Demo run output\", response_time: 20ms }\n\nworkpiece part: workpiece_type {\n    normal_terminal_states: [finished]\n    abnormal_terminal_states: [rejected]\n    ingress_sites: [infeed]\n    normal_egress_sites: [outfeed]\n    abnormal_egress_sites: [reject_bin]\n}\n\nlocation infeed: workpiece_location { capacity: 1 }\nlocation outfeed: workpiece_location { capacity: 1 }\nlocation reject_bin: workpiece_location { capacity: 20 }\nholder part_handler: workpiece_holder { capacity: 1 }\n\nrelation { from: start_button.out, to: plc_main.start_cycle_cmd, via: reports_to }\nrelation { from: plc_main.run_lamp_cmd, to: run_lamp.coil, via: driven_by }\n\n[constraints]\n\n[tasks]\n\ntask main:\n    step wait_start:\n        wait: start_button == true\n        timeout: 100ms -> goto fault.reject_unstarted\n\n    step pick:\n        effect: acquire holder part_handler from infeed\n\n    step run:\n        action: set run_lamp.coil on\n        delay: 20ms\n\n    step place:\n        effect: transfer from part_handler to outfeed\n\n    step stop:\n        effect: finish workpiece at outfeed as finished\n        action: set run_lamp.coil off\n\n    on_complete: goto done\n\ntask fault:\n    step reject_unstarted:\n        action: set run_lamp.coil off\n        effect: transfer from infeed to reject_bin\n        effect: finish workpiece at reject_bin as rejected\n    on_complete: goto done\n\ntask done:\n    step halt:\n".to_string()
+    "[topology]\n\ndevice plc_main: plc {\n    purpose: \"Controller with minimal digital I/O mapping\",\n    model_ref: openplc_softplc\n}\n\ncontroller_io plc_main {\n    input start_cycle_cmd: X0 { purpose: \"Start request input\" }\n    output run_lamp_cmd: Y0 { purpose: \"Run lamp command\", safe_state: off }\n}\n\ndevice start_button: sensor { purpose: \"Start request\", subtype: \"push_button\", debounce: 20ms }\ndevice run_lamp: solenoid_valve { purpose: \"Demo run output\", response_time: 20ms }\n\nworkpiece part: workpiece_type {\n    normal_terminal_states: [finished]\n    abnormal_terminal_states: [rejected]\n    ingress_sites: [infeed]\n    normal_egress_sites: [outfeed]\n    abnormal_egress_sites: [reject_bin]\n}\n\nlocation infeed: workpiece_location { capacity: 1 }\nlocation outfeed: workpiece_location { capacity: 1 }\nlocation reject_bin: workpiece_location { capacity: 20 }\nholder part_handler: workpiece_holder { capacity: 1 }\n\nrelation { from: start_button.out, to: plc_main.start_cycle_cmd, via: reports_to }\nrelation { from: plc_main.run_lamp_cmd, to: run_lamp.coil, via: driven_by }\n\n[constraints]\n\n[tasks]\n\ntask startup_initializer:\n    step safe_outputs_off:\n        action: set run_lamp.coil off\n\n    on_complete: goto main.wait_start\n\ntask main:\n    step wait_start:\n        wait: start_button == true\n        timeout: 100ms -> goto fault.reject_unstarted\n\n    step pick:\n        effect: acquire holder part_handler from infeed\n\n    step run:\n        action: set run_lamp.coil on\n        delay: 20ms\n\n    step place:\n        effect: transfer from part_handler to outfeed\n\n    step stop:\n        effect: finish workpiece at outfeed as finished\n        action: set run_lamp.coil off\n\n    on_complete: goto done\n\ntask fault:\n    step reject_unstarted:\n        action: set run_lamp.coil off\n        effect: transfer from infeed to reject_bin\n        effect: finish workpiece at reject_bin as rejected\n    on_complete: goto done\n\ntask done:\n    step halt:\n".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -563,7 +583,7 @@ fn phased_scaffold_files(
         // -- 01_init: initialization defaults --
         (
             "01_init/defaults.plc".to_string(),
-            "task startup_initializer:\n    step drive_safe_output:\n        action: set run_lamp.coil off\n\n    on_complete: goto supervisor.wait_start\n".to_string(),
+            "task startup_initializer:\n    step safe_outputs_off:\n        action: set run_lamp.coil off\n\n    on_complete: goto supervisor.wait_start\n".to_string(),
         ),
         // -- 02_process: automatic production cycle --
         (
@@ -765,7 +785,7 @@ fn build_project_layout_doc(
     entry_scenario: &str,
 ) -> String {
     format!(
-        "# Project Layout\n\nThis scaffold uses the standard RustPLC project layout.\n\n- `rustplc.project.toml`: project manifest and default artifact paths\n- `plc/main.system.md`: human/AI confirmed system intent\n- `process_model/process_operation_model.toml`: authored operation scheduling intent, before task/step\n- `{entry_plc}`: executable RustPLC source entry\n- `{entry_scenario}`: nominal regression scenario\n- `config/`: I/O, retain, and workpiece configuration\n- `out/`: rebuildable generated artifacts\n\nCurrent project: `{project_slug}` / `{project_title}`\n\nRecommended commands:\n\n```bash\ncargo run --release --bin rust_plc -- process-model-check \\\n  {entry_plc} --model process_model/process_operation_model.toml --output human\n\ncargo run --release --bin rust_plc -- scenario-validate \\\n  {entry_plc} --scenario {entry_scenario} --output human\n\ncargo run --release --bin rust_plc -- sim-plc \\\n  {entry_plc} --scenario {entry_scenario} --out out/sim/normal/trace.jsonl\n\ncargo run --release --bin rust_plc -- no-board-gate \\\n  {entry_plc} --scenario {entry_scenario} \\\n  --out-dir out/gate/no_board/normal --output human\n\ncargo run --release --bin rust_plc -- gen-st \\\n  {entry_plc} --out out/codegen/st/main.st\n```\n"
+        "# Project Layout\n\nThis scaffold uses the standard RustPLC project layout.\n\n- `rustplc.project.toml`: project manifest and default artifact paths\n- `plc/main.system.md`: human/AI confirmed system intent\n- `process_model/process_operation_model.toml`: authored operation scheduling intent, before task/step\n- `{entry_plc}`: executable RustPLC source entry\n- `{entry_scenario}`: nominal regression scenario\n- `config/`: I/O, retain, workpiece, and state-proof configuration\n- `out/`: rebuildable generated artifacts\n\nCurrent project: `{project_slug}` / `{project_title}`\n\nRecommended commands:\n\n```bash\ncargo run --release --bin rust_plc -- process-model-check \\\n  {entry_plc} --model process_model/process_operation_model.toml --output human\n\ncargo run --release --bin rust_plc -- state-proof-check \\\n  {entry_plc} --config config/state_proof.toml --output human\n\ncargo run --release --bin rust_plc -- scenario-validate \\\n  {entry_plc} --scenario {entry_scenario} --output human\n\ncargo run --release --bin rust_plc -- sim-plc \\\n  {entry_plc} --scenario {entry_scenario} --out out/sim/normal/trace.jsonl\n\ncargo run --release --bin rust_plc -- no-board-gate \\\n  {entry_plc} --scenario {entry_scenario} \\\n  --out-dir out/gate/no_board/normal --output human\n\ncargo run --release --bin rust_plc -- gen-st \\\n  {entry_plc} --out out/codegen/st/main.st\n```\n"
     )
 }
 

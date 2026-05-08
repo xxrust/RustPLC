@@ -6,6 +6,7 @@ RustPLC 的复杂项目用结构化目录表达完整工程意图。标准项目
 plc/main.system.md
   -> 00_topology/
   -> process_model/process_operation_model.toml
+  -> config/state_proof.toml
   -> 01_init/
   -> 02_process/
   -> 03_constraints/
@@ -20,7 +21,8 @@ plc/main.system.md
 
 - `00_topology/`：设备、连接、工件位置、容量、资源边界。
 - `process_model/`：候选工艺操作的源侧调度意图，先于 task/step。
-- `01_init/`：初始化和安全基线。
+- `config/`：I/O、retain、workpiece 和状态证明配置；`state_proof.toml` 只承载机器可读例外。
+- `01_init/`：初始化、安全基线、残料检测、清理/回收/人工确认。
 - `02_process/`：自动生产主流程。
 - `03_constraints/`：安全与节拍约束。
 - `04_faults/`：故障收敛与恢复。
@@ -43,7 +45,17 @@ plc/main.system.md
 
 - 让 `process_model` 先表达“什么操作被允许”。
 - 让 `02_process` 再表达“PLC 怎样执行这些操作”。
+- 让 `state-proof-check` 审查物理状态证明链，避免用变量初值或内部 flag 假装传感器/残料证明已经成立。
 - 让 `04_faults` 专注异常收敛，不污染主流程。
 - 让 `supervisor`、`manual`、`hmi` 从主工艺流里分离出去。
 
 这样做的目标很直接：项目可以更容易审查、分工、并行开发和做形式化验证。
+
+## 状态证明配置
+
+`config/state_proof.toml` 支持两类例外：
+
+- `[[no_feedback_steps]]`：声明某个 step 是经过审查的 no-feedback 动作。
+- `[[trusted_initial_state]]`：声明某个初始状态由外部流程保证，例如启动前确认缓存、夹爪或料道为空。
+
+每条例外必须有 `reason` 和 `proof_basis`。如果项目有 workpiece flow，`01_init` 或 startup task 应优先用检测、清理、回收、拒绝启动或人工确认建立残料基线；只有这些证明无法进入 PLC 源时，才把例外写入 `state_proof.toml`。
