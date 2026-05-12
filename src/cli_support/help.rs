@@ -114,6 +114,12 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
     },
     CliCommandHelp {
         section: "Diagnostics",
+        name: "flowchart",
+        summary: "Render a PLC source or bundle into a human-reviewable static HTML flowchart report.",
+        usage_template: "Usage: {program} flowchart <source.plc|source.bundle.toml> [--out-dir <dir>] [--title <title>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Diagnostics",
         name: "operation-model",
         summary: "Reverse-extract a process operation model draft from existing task/step flow.",
         usage_template: "Usage: {program} operation-model <source.plc|source.bundle.toml> --out <process_operation_model.toml|json> [--output <human|json>]",
@@ -343,6 +349,11 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--intent-report <report.json> Optional intent-alignment report overlay input.",
             "--output <human|json>        Select CLI output format.",
         ],
+        "flowchart" => &[
+            "--out-dir <dir>              Output directory; defaults to out/flowchart/<source-stem>.",
+            "--title <title>              Override the HTML report title.",
+            "--output <human|json>        Select CLI output format.",
+        ],
         "operation-model" => &[
             "--out <process_operation_model.toml|json> Required scheduling-intent model output.",
             "--output <human|json>        Select CLI output format.",
@@ -352,7 +363,7 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--output <human|json>        Select CLI output format.",
         ],
         "state-proof-check" => &[
-            "--config <config/state_proof.toml> Optional exception file for no-feedback steps and trusted startup baselines.",
+            "--config <config/state_proof.toml> Optional exception file for no-feedback steps, trusted startup baselines, and explicit self-check exemptions.",
             "--output <human|json>        Select CLI output format.",
         ],
         "trace-diff" => &[
@@ -483,6 +494,11 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
             "This command writes a stable JSON artifact for later SVG, web, or animation rendering; it does not render UI directly.",
             "When `--trace` is provided, runtime task and step names are resolved with a best-effort mapping from semantic task contexts.",
         ],
+        "flowchart" => &[
+            "The default artifact is a single `index.html` with an overview page, a topology/workpiece page, and one tab per task.",
+            "Each task tab includes an offline IEC 61131-3 SFC-style SVG: step boxes, transition bars, side action blocks, and source line references for human-to-agent review.",
+            "The command lowers the source through parser and semantic/state-machine stages, but it is a review renderer rather than a release gate.",
+        ],
         "operation-model" => &[
             "This command is for migration, audit, and comparison against an existing task/step flow; new projects should author process_model/process_operation_model.toml from the system contract first.",
             "Workpiece source availability, destination capacity, operator/program guards, and semantic-resource claims are normalized into admission rules.",
@@ -495,7 +511,7 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
         ],
         "state-proof-check" => &[
             "Use this to catch startup assumptions such as `*_ready = true` and workpiece projects that resume without a reviewed residual-part baseline.",
-            "`config/state_proof.toml` is for narrow, auditable exceptions only: `no_feedback_steps` and `trusted_initial_state` entries both require `reason` and `proof_basis`.",
+            "`config/state_proof.toml` is for narrow, auditable exceptions only: `no_feedback_steps`, `trusted_initial_state`, and `self_check_exempt_devices` entries all require `reason` and `proof_basis`.",
             "project-check auto-runs this step for bundles, variable-backed projects, and workpiece-flow sources.",
         ],
         "trace-doctor" => &["At least one of `--trace` or `--diff` is required."],
@@ -570,6 +586,10 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         "geometry-export" => &[
             "rust_plc geometry-export examples/rp2040_motion_minimal.plc --out out/geometry/rp2040_motion_minimal.geometry.json",
             "rust_plc geometry-export out/wafer_loader_project/plc/main.target_semantics.bundle.toml --trace out/wafer_loader_project/out/project_check_with_auto_sim_v4/no_board_gate/artifacts/sil_trace.jsonl --intent-report out/wafer_loader_project/out/project_check_with_auto_sim_v4/intent_alignment/report.json --out out/geometry/wafer_loader.geometry.json --output json",
+        ],
+        "flowchart" => &[
+            "rust_plc flowchart rustplc.bundle.toml --out-dir out/flowchart/review --output human",
+            "rust_plc flowchart examples/workpiece_phase1_transfer.plc --output json",
         ],
         "operation-model" => &[
             "rust_plc operation-model examples/workpiece_phase1_transfer.plc --out process_model/process_operation_model.toml",
