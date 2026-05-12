@@ -725,13 +725,23 @@ fn render_task_svg(task: &TaskDiagram) -> String {
     let lane_center_x = |lane: i32| left_margin + lane * lane_gap + step_w / 2;
     let step_left_x = |lane: i32| left_margin + lane * lane_gap;
     let note_x = |step_x: i32| step_x + step_w + cluster_gap;
+    let entry_gap = |idx: usize| {
+        let incoming = internal_by_target.get(&idx).map_or(0, Vec::len);
+        if incoming > 1 {
+            54
+        } else if incoming == 1 {
+            22
+        } else {
+            0
+        }
+    };
 
     for idx in 0..step_count {
         if !internal_by_target.contains_key(&idx) {
             continue;
         }
         let center_x = lane_center_x(lanes[idx]);
-        let entry_y = layouts[idx].y - 18;
+        let entry_y = layouts[idx].y - entry_gap(idx);
         let _ = writeln!(
             connectors,
             r#"<line class="task-main-line" x1="{center_x}" y1="{entry_y}" x2="{center_x}" y2="{}"/>"#,
@@ -789,7 +799,7 @@ fn render_task_svg(task: &TaskDiagram) -> String {
                     continue;
                 };
                 let target_center_x = lane_center_x(lanes[to_idx]);
-                let target_entry_y = layouts[to_idx].y - 18;
+                let target_entry_y = layouts[to_idx].y - entry_gap(to_idx);
 
                 if to_idx > idx {
                     if target_center_x != source_center_x {
@@ -986,6 +996,7 @@ fn render_task_svg(task: &TaskDiagram) -> String {
     out
 }
 
+#[allow(dead_code)]
 fn render_overview_svg(model: &FlowchartArtifact) -> String {
     let node_w = 260;
     let node_h = 62;
@@ -1208,6 +1219,7 @@ fn render_svg_lines(
     }
 }
 
+#[allow(dead_code)]
 fn render_svg_node(
     out: &mut String,
     x: i32,
@@ -1236,6 +1248,7 @@ fn render_svg_node(
     );
 }
 
+#[allow(dead_code)]
 fn render_svg_label(out: &mut String, x: i32, y: i32, label: &str) {
     let clipped = truncate_label(label, 62);
     let text_len = clipped.chars().count() as i32;
@@ -1250,6 +1263,7 @@ fn render_svg_label(out: &mut String, x: i32, y: i32, label: &str) {
     );
 }
 
+#[allow(dead_code)]
 fn truncate_label(value: &str, max_chars: usize) -> String {
     let mut out = String::new();
     for ch in value.chars().take(max_chars) {
@@ -1271,154 +1285,1065 @@ fn short_source(value: &str) -> String {
 }
 
 fn render_html(model: &FlowchartArtifact) -> String {
+    let style = r####"
+    :root {
+      --bg: #f4efe5;
+      --paper: rgba(255, 250, 240, 0.93);
+      --panel: rgba(255, 252, 246, 0.96);
+      --line: #d8c6a1;
+      --ink: #1e293b;
+      --muted: #6b7280;
+      --accent: #0f766e;
+      --accent-dark: #134e4a;
+      --process: #0f4c81;
+      --startup: #0f766e;
+      --supervisor: #7c2d12;
+      --service: #7c3aed;
+      --fault: #b45309;
+      --glow: rgba(15, 118, 110, 0.18);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: Cambria, Georgia, "Noto Serif SC", "Songti SC", serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.10), transparent 24%),
+        radial-gradient(circle at top right, rgba(15, 76, 129, 0.08), transparent 22%),
+        linear-gradient(180deg, #f8f4ec 0%, #f1eadf 100%);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(116, 97, 68, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(116, 97, 68, 0.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.4), transparent 78%);
+    }
+    header.hero {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      padding: 26px 34px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(247, 241, 230, 0.88);
+      backdrop-filter: blur(14px);
+    }
+    .hero h1 {
+      margin: 0;
+      font-size: 48px;
+      letter-spacing: -0.03em;
+      font-family: Bahnschrift, "Cascadia Code", Consolas, monospace;
+    }
+    .hero-summary {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .hero-summary code {
+      font-family: "Cascadia Code", Consolas, monospace;
+      background: rgba(15, 118, 110, 0.08);
+      border-radius: 999px;
+      padding: 2px 10px;
+      color: var(--accent-dark);
+    }
+    .atlas-app {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 24px;
+      padding: 24px;
+      align-items: start;
+    }
+    .command-rail {
+      position: sticky;
+      top: 116px;
+      background: rgba(255, 250, 240, 0.9);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 18px;
+      box-shadow: 0 22px 50px rgba(37, 43, 56, 0.10);
+    }
+    .rail-title {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+    .section-jumps,
+    .task-nav {
+      display: grid;
+      gap: 8px;
+    }
+    .rail-button,
+    .task-button {
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: 14px;
+      background: transparent;
+      color: var(--ink);
+      padding: 11px 12px;
+      text-align: left;
+      cursor: pointer;
+      font: inherit;
+      transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+    }
+    .rail-button:hover,
+    .task-button:hover,
+    .task-button.active {
+      background: rgba(15, 118, 110, 0.11);
+      border-color: rgba(15, 118, 110, 0.18);
+      transform: translateX(2px);
+    }
+    .task-button small {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .scene-stack {
+      display: grid;
+      gap: 24px;
+      min-width: 0;
+    }
+    .scene-panel {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      padding: 22px;
+      box-shadow: 0 20px 48px rgba(37, 43, 56, 0.09);
+    }
+    .scene-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    .scene-head h2 {
+      margin: 0;
+      font-size: 34px;
+      letter-spacing: -0.02em;
+      font-family: Bahnschrift, "Cascadia Code", Consolas, monospace;
+    }
+    .scene-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      max-width: 720px;
+      line-height: 1.5;
+    }
+    .atlas-frame {
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(15, 118, 110, 0.10), transparent 32%),
+        radial-gradient(circle at 100% 20%, rgba(15, 76, 129, 0.08), transparent 28%),
+        linear-gradient(180deg, rgba(255,255,255,0.60), rgba(255,252,246,0.96));
+      border: 1px solid #e5d8bf;
+      border-radius: 22px;
+      padding: 16px;
+    }
+    .atlas-caption {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 14px;
+      min-height: 34px;
+    }
+    .caption-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(255, 250, 240, 0.92);
+      border: 1px solid #dfcfaf;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+      color: var(--ink);
+    }
+    .atlas-canvas {
+      overflow: auto;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.48);
+    }
+    .atlas-svg {
+      display: block;
+      width: 100%;
+      min-width: 1460px;
+      height: auto;
+    }
+    .journey-strip {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(240px, 280px);
+      gap: 14px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scroll-snap-type: x proximity;
+    }
+    .journey-card {
+      border: 1px solid #e0cfaf;
+      background: linear-gradient(180deg, rgba(255,255,255,0.78), rgba(255,248,237,0.95));
+      border-radius: 20px;
+      padding: 16px;
+      cursor: pointer;
+      scroll-snap-align: start;
+      transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+      box-shadow: 0 10px 28px rgba(37, 43, 56, 0.05);
+    }
+    .journey-card:hover,
+    .journey-card.active {
+      transform: translateY(-2px);
+      border-color: #c09a54;
+      box-shadow: 0 16px 32px rgba(192, 154, 84, 0.18);
+    }
+    .journey-kicker {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      font-family: "Cascadia Code", Consolas, monospace;
+    }
+    .journey-title {
+      margin-top: 10px;
+      font-size: 24px;
+      font-family: Bahnschrift, "Cascadia Code", Consolas, monospace;
+      line-height: 1.05;
+    }
+    .journey-meta {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr) 320px;
+      gap: 18px;
+      align-items: start;
+    }
+    .detail-rail,
+    .detail-side {
+      display: grid;
+      gap: 14px;
+    }
+    .detail-card,
+    .step-card {
+      background: var(--panel);
+      border: 1px solid #e5d8bf;
+      border-radius: 18px;
+      padding: 14px;
+    }
+    .step-card {
+      cursor: pointer;
+      transition: transform 160ms ease, border-color 160ms ease;
+    }
+    .step-card:hover {
+      transform: translateX(2px);
+      border-color: rgba(15, 118, 110, 0.35);
+    }
+    .step-card-index {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      font-family: "Cascadia Code", Consolas, monospace;
+    }
+    .step-card h3,
+    .detail-card h3 {
+      margin: 8px 0 8px;
+      font-size: 20px;
+      font-family: Bahnschrift, "Cascadia Code", Consolas, monospace;
+      line-height: 1.1;
+    }
+    .step-card p,
+    .detail-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .detail-meta,
+    .chip-cloud {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .meta-pill,
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(15, 118, 110, 0.09);
+      border: 1px solid rgba(15, 118, 110, 0.14);
+      color: var(--accent-dark);
+      font-size: 12px;
+      font-family: "Cascadia Code", Consolas, monospace;
+    }
+    .chip.role-supervisor { background: rgba(124, 45, 18, 0.10); border-color: rgba(124, 45, 18, 0.16); color: #7c2d12; }
+    .chip.role-startup { background: rgba(15, 118, 110, 0.10); border-color: rgba(15, 118, 110, 0.16); color: #134e4a; }
+    .chip.role-process { background: rgba(15, 76, 129, 0.10); border-color: rgba(15, 76, 129, 0.16); color: #0f4c81; }
+    .chip.role-service { background: rgba(124, 58, 237, 0.10); border-color: rgba(124, 58, 237, 0.16); color: #6d28d9; }
+    .chip.role-fault { background: rgba(180, 83, 9, 0.10); border-color: rgba(180, 83, 9, 0.16); color: #b45309; }
+    .detail-diagram {
+      overflow: auto;
+      background: #fffdf7;
+      border: 1px solid #eadcc1;
+      border-radius: 20px;
+      padding: 12px;
+      min-height: 720px;
+    }
+    .topology-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+    .topology-grid .card {
+      background: var(--panel);
+      border: 1px solid #e5d8bf;
+      border-radius: 18px;
+      padding: 14px;
+    }
+    .topology-grid .card h3 {
+      margin-top: 0;
+      font-family: Bahnschrift, "Cascadia Code", Consolas, monospace;
+    }
+    .topology-grid ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .task-templates { display: none; }
+    .sfc-review { width: 100%; }
+    .task-sfc-svg { display: block; width: 100%; min-width: 980px; height: auto; }
+    .task-step { fill: #fffaf0; stroke: #0f766e; stroke-width: 3; }
+    .task-step.generated { fill: #f8fafc; stroke: #94a3b8; stroke-dasharray: 8 6; }
+    .task-step-initial { fill: none; stroke: #0f766e; stroke-width: 3; }
+    .task-step-index { fill: #94a3b8; font: 700 14px "Cascadia Code", Consolas, monospace; }
+    .task-step-title { fill: #093f3b; font: 700 16px "Cascadia Code", Consolas, monospace; }
+    .task-step-source { fill: #64748b; font: 12px Cambria, Georgia, serif; }
+    .task-action-link { stroke: #94a3b8; stroke-width: 1.3; }
+    .task-action { fill: #f8fbff; stroke: #c9d6e2; stroke-width: 1.2; }
+    .task-action-line { fill: #111827; font: 12px "Cascadia Code", Consolas, monospace; }
+    .task-main-line { stroke: #111827; stroke-width: 2; }
+    .task-transition-bar { stroke: #111827; stroke-width: 6; stroke-linecap: square; }
+    .task-transition-branch-bus { stroke: #7c6750; stroke-width: 1.7; }
+    .task-transition-branch-bar { stroke: #111827; stroke-width: 5; stroke-linecap: square; }
+    .task-transition-link { stroke: #c7b28a; stroke-width: 1.6; }
+    .task-transition-note { fill: #fffdf7; stroke: #d7ccb7; stroke-width: 1.1; }
+    .task-transition-note.external { stroke: #d7b674; }
+    .task-transition-note.terminal { stroke: #b8c3cf; }
+    .task-transition-guard { fill: #111827; font: 700 12px "Cascadia Code", Consolas, monospace; }
+    .task-transition-fact { fill: #475569; font: 11px "Cascadia Code", Consolas, monospace; }
+    .task-transition-target { fill: #134e4a; font: 700 11px "Cascadia Code", Consolas, monospace; }
+    .task-transition-target.external { fill: #b7791f; }
+    .task-transition-target.terminal { fill: #64748b; }
+    code {
+      font-family: "Cascadia Code", Consolas, monospace;
+      background: rgba(15, 118, 110, 0.08);
+      color: var(--accent-dark);
+      border-radius: 999px;
+      padding: 2px 9px;
+    }
+    @media (max-width: 1280px) {
+      .atlas-app { grid-template-columns: 1fr; }
+      .command-rail { position: static; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .detail-diagram { min-height: auto; }
+      .hero { position: static; }
+    }
+    "####;
+
+    let script = r####"
+    (() => {
+      const model = JSON.parse(document.getElementById('flowchart-model').textContent);
+      const taskTemplates = new Map(
+        Array.from(document.querySelectorAll('#task-templates template')).map((tpl) => [
+          tpl.dataset.task,
+          tpl.innerHTML,
+        ])
+      );
+
+      const roleLabels = {
+        supervisor: 'Control Gate',
+        startup: 'Startup / Self-check',
+        process: 'Process / Motion',
+        service: 'Manual / Maintenance',
+        fault: 'Fault / Warning',
+      };
+      const roleClasses = {
+        supervisor: 'role-supervisor',
+        startup: 'role-startup',
+        process: 'role-process',
+        service: 'role-service',
+        fault: 'role-fault',
+      };
+      const roleColors = {
+        supervisor: '#7c2d12',
+        startup: '#0f766e',
+        process: '#0f4c81',
+        service: '#6d28d9',
+        fault: '#b45309',
+      };
+
+      const taskButtons = Array.from(document.querySelectorAll('.task-button'));
+      const topologyNodes = buildPhysicalNodes(model);
+      const nodeMap = new Map(topologyNodes.map((node, index) => [node.name, { ...node, index }]));
+      const journey = buildJourney(model);
+      const taskMeta = buildTaskMeta(model);
+      const taskMetaMap = new Map(taskMeta.map((task) => [task.task_name, task]));
+      const initialSelection = chooseInitialSelection(taskMeta, journey, model.tasks);
+      const state = {
+        selectedTask: initialSelection.taskName,
+        activeJourneyIndex: initialSelection.journeyIndex,
+      };
+
+      bindInteractions();
+      renderAll();
+
+      if (journey.length > 1) {
+        setInterval(() => {
+          if (document.hidden) return;
+          state.activeJourneyIndex = (state.activeJourneyIndex + 1) % journey.length;
+          renderAtlas();
+          renderJourney();
+          renderCaption();
+        }, 2600);
+      }
+
+      function bindInteractions() {
+        document.querySelectorAll('.rail-button').forEach((button) => {
+          button.addEventListener('click', () => {
+            const target = document.getElementById(button.dataset.section);
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        });
+        taskButtons.forEach((button) => {
+          button.addEventListener('click', () => selectTask(button.dataset.task, true));
+        });
+      }
+
+      function buildPhysicalNodes(model) {
+        const seen = new Set();
+        const ordered = [];
+        const push = (name, kind) => {
+          if (!name || seen.has(name)) return;
+          seen.add(name);
+          ordered.push({ name, kind: kind || classifyNode(name) });
+        };
+
+        model.tasks.forEach((task) => {
+          task.transitions.forEach((edge) => {
+            edge.effects.forEach((effect) => {
+              const parsed = parseEffect(effect);
+              if (!parsed) return;
+              push(parsed.from, classifyNode(parsed.from));
+              push(parsed.to, classifyNode(parsed.to));
+            });
+          });
+        });
+
+        model.topology.workpiece_sites.forEach((entry) => push(entry.split(':')[0], 'site'));
+        model.topology.workpiece_holders.forEach((entry) => push(entry.split(':')[0], 'holder'));
+
+        return ordered;
+      }
+
+      function classifyNode(name) {
+        const lower = name.toLowerCase();
+        if (
+          lower.includes('nozzle') ||
+          lower.includes('holder') ||
+          lower.includes('ejector')
+        ) {
+          return 'holder';
+        }
+        if (lower.includes('bin')) return 'terminal';
+        return 'site';
+      }
+
+      function parseEffect(effect) {
+        let match;
+        if ((match = /^acquire (.+) from (.+)$/.exec(effect))) {
+          return { kind: 'acquire', from: match[2], to: match[1], label: `${match[2]} → ${match[1]}` };
+        }
+        if ((match = /^transfer (.+) -> (.+)$/.exec(effect))) {
+          return { kind: 'transfer', from: match[1], to: match[2], label: `${match[1]} → ${match[2]}` };
+        }
+        if ((match = /^finish (.+) as (.+)$/.exec(effect))) {
+          return { kind: 'finish', from: match[1], to: match[2], label: `${match[1]} → ${match[2]}` };
+        }
+        if ((match = /^mount (.+) at (.+)$/.exec(effect))) {
+          return { kind: 'mount', from: match[1], to: match[2], label: `${match[1]} @ ${match[2]}` };
+        }
+        if ((match = /^unmount (.+) from (.+) to (.+)$/.exec(effect))) {
+          return { kind: 'unmount', from: match[2], to: match[3], label: `${match[2]} → ${match[3]}` };
+        }
+        return null;
+      }
+
+      function buildJourney(model) {
+        const events = [];
+        model.tasks.forEach((task) => {
+          task.transitions.forEach((edge, edgeIndex) => {
+            edge.effects.forEach((effect, effectIndex) => {
+              const parsed = parseEffect(effect);
+              if (!parsed) return;
+              events.push({
+                id: `${task.task_name}-${edge.from_step}-${edgeIndex}-${effectIndex}`,
+                task_name: task.task_name,
+                from_step: edge.from_step,
+                to_step: edge.to_step,
+                from_task: edge.from_task,
+                to_task: edge.to_task,
+                guard: edge.guard,
+                effect,
+                ...parsed,
+              });
+            });
+          });
+        });
+        return events;
+      }
+
+      function roleForTask(taskName) {
+        const lower = taskName.toLowerCase();
+        if (lower.includes('fault') || lower.includes('warning')) return 'fault';
+        if (lower.includes('manual') || lower.includes('maintenance') || lower.includes('check')) return 'service';
+        if (lower.includes('startup')) return 'startup';
+        if (lower.includes('supervisor') || lower.includes('monitor') || lower.includes('architecture')) return 'supervisor';
+        return 'process';
+      }
+
+      function collectTouches(task) {
+        const haystack = JSON.stringify(task).toLowerCase();
+        return topologyNodes
+          .filter((node) => haystack.includes(node.name.toLowerCase()))
+          .map((node) => node.name);
+      }
+
+      function buildTaskMeta(model) {
+        return model.tasks.map((task, taskIndex) => {
+          const touches = collectTouches(task);
+          const touchIndices = touches
+            .map((name) => nodeMap.get(name)?.index)
+            .filter((value) => value !== undefined);
+          const handoffs = [];
+          task.transitions.forEach((edge) => {
+            edge.effects.forEach((effect) => {
+              const parsed = parseEffect(effect);
+              if (parsed) handoffs.push({ effect, ...parsed });
+            });
+          });
+          const externalRoutes = task.transitions.filter((edge) => edge.to_task !== task.task_name);
+          const anchor = touchIndices.length
+            ? touchIndices.reduce((sum, value) => sum + value, 0) / touchIndices.length
+            : taskIndex;
+          return {
+            ...task,
+            role: roleForTask(task.task_name),
+            touches,
+            handoffs,
+            externalRoutes,
+            anchor,
+          };
+        });
+      }
+
+      function chooseInitialSelection(taskMeta, journey, tasks) {
+        const preferredTask =
+          taskMeta.find((task) => task.role === 'process' && task.handoffs.length) ||
+          taskMeta.find((task) => task.handoffs.length) ||
+          taskMeta.find((task) => task.role === 'process') ||
+          taskMeta[0] ||
+          tasks[0] ||
+          null;
+        if (!preferredTask) {
+          return { taskName: null, journeyIndex: 0 };
+        }
+        const journeyIndex = journey.findIndex((event) => event.task_name === preferredTask.task_name);
+        return {
+          taskName: preferredTask.task_name,
+          journeyIndex: journeyIndex >= 0 ? journeyIndex : 0,
+        };
+      }
+
+      function selectTask(taskName, scrollIntoView) {
+        if (!taskName) return;
+        state.selectedTask = taskName;
+        taskButtons.forEach((button) => button.classList.toggle('active', button.dataset.task === taskName));
+        renderDetail();
+        renderAtlas();
+        renderJourney();
+        if (scrollIntoView) {
+          document.getElementById('section-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+
+      function renderAll() {
+        renderAtlas();
+        renderJourney();
+        renderDetail();
+        renderCaption();
+        taskButtons.forEach((button) => button.classList.toggle('active', button.dataset.task === state.selectedTask));
+      }
+
+      function renderCaption() {
+        const caption = document.getElementById('atlas-caption');
+        const active = journey[state.activeJourneyIndex];
+        const selected = taskMetaMap.get(state.selectedTask);
+        const chips = [];
+        if (active) {
+          chips.push(`<span class="caption-chip">active journey: ${escapeHtml(active.label)} via ${escapeHtml(active.task_name)}</span>`);
+        }
+        if (selected) {
+          chips.push(`<span class="caption-chip">selected task: ${escapeHtml(selected.task_name)} / ${escapeHtml(roleLabels[selected.role])}</span>`);
+          chips.push(`<span class="caption-chip">touched nodes: ${selected.touches.length}</span>`);
+        }
+        caption.innerHTML = chips.join('');
+      }
+
+      function renderAtlas() {
+        const host = document.getElementById('atlas-canvas');
+        const width = Math.max(1540, host.clientWidth || 1540);
+        const height = 860;
+        const routeY = 110;
+        const left = 120;
+        const right = width - 120;
+        const spacing = topologyNodes.length > 1 ? (right - left) / (topologyNodes.length - 1) : 0;
+        const positions = new Map(
+          topologyNodes.map((node, index) => [node.name, { x: left + index * spacing, y: routeY }])
+        );
+
+        const bands = [
+          { key: 'supervisor', y: 250 },
+          { key: 'startup', y: 380 },
+          { key: 'process', y: 540 },
+          { key: 'service', y: 690 },
+          { key: 'fault', y: 780 },
+        ];
+
+        const selected = taskMetaMap.get(state.selectedTask);
+        const active = journey[state.activeJourneyIndex];
+        const taskPositions = new Map();
+        const groupMarkup = [];
+
+        bands.forEach((band) => {
+          const cards = taskMeta.filter((task) => task.role === band.key);
+          const placed = layoutBand(cards, band.y, left + 40, right - 40);
+          groupMarkup.push(`
+            <text x="30" y="${band.y + 8}" fill="${roleColors[band.key]}" font-size="14" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(roleLabels[band.key])}</text>
+          `);
+          placed.forEach((item) => {
+            taskPositions.set(item.task_name, item);
+          });
+        });
+
+        const routeEdges = [];
+        for (let index = 0; index < topologyNodes.length - 1; index += 1) {
+          const from = positions.get(topologyNodes[index].name);
+          const to = positions.get(topologyNodes[index + 1].name);
+          const isActive =
+            active &&
+            ((active.from === topologyNodes[index].name && active.to === topologyNodes[index + 1].name) ||
+              (active.to === topologyNodes[index].name && active.from === topologyNodes[index + 1].name));
+          routeEdges.push(`
+            <line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"
+              stroke="${isActive ? '#c08a2f' : '#d2c1a0'}"
+              stroke-width="${isActive ? '7' : '4'}"
+              stroke-linecap="round"
+              opacity="${isActive ? '1' : '0.8'}" />
+          `);
+        }
+
+        const nodeMarkup = topologyNodes
+          .map((node) => {
+            const pos = positions.get(node.name);
+            const isTouched = selected && selected.touches.includes(node.name);
+            const isActiveFrom = active && active.from === node.name;
+            const isActiveTo = active && active.to === node.name;
+            const stroke = node.kind === 'holder' ? '#0f4c81' : node.kind === 'terminal' ? '#b45309' : '#0f766e';
+            const fill = isActiveFrom || isActiveTo ? 'rgba(255,246,220,0.98)' : 'rgba(255,252,246,0.98)';
+            return `
+              <g>
+                <rect x="${pos.x - 88}" y="${pos.y - 32}" width="176" height="64" rx="20"
+                  fill="${fill}" stroke="${stroke}" stroke-width="${isTouched ? '3.6' : '2.2'}" />
+                <text x="${pos.x}" y="${pos.y - 4}" text-anchor="middle"
+                  fill="${stroke}" font-size="16" font-family="Bahnschrift, Cascadia Code, Consolas, monospace">${escapeHtml(node.name)}</text>
+                <text x="${pos.x}" y="${pos.y + 18}" text-anchor="middle"
+                  fill="#6b7280" font-size="11" font-family="Cascadia Code, Consolas, monospace">${node.kind}</text>
+              </g>
+            `;
+          })
+          .join('');
+
+        const taskLinkMarkup = [];
+        const taskCardMarkup = [];
+        taskMeta.forEach((task) => {
+          const pos = taskPositions.get(task.task_name);
+          if (!pos) return;
+          const selectedTask = state.selectedTask === task.task_name;
+          const cardX = pos.x - 98;
+          const cardY = pos.y - 34;
+          const accent = roleColors[task.role];
+          task.touches.forEach((touchName, touchIndex) => {
+            const nodePos = positions.get(touchName);
+            if (!nodePos) return;
+            const opacity = selectedTask ? 0.42 : 0.14;
+            const path = [
+              `M ${pos.x} ${cardY}`,
+              `C ${pos.x} ${pos.y - 92}, ${nodePos.x} ${routeY + 72}, ${nodePos.x} ${routeY + 34}`,
+            ].join(' ');
+            taskLinkMarkup.push(`
+              <path d="${path}" fill="none" stroke="${accent}" stroke-width="${selectedTask ? '2.2' : '1.2'}" opacity="${opacity}" />
+            `);
+          });
+
+          if (selectedTask) {
+            task.externalRoutes.forEach((route, routeIndex) => {
+              const target = taskPositions.get(route.to_task);
+              if (!target) return;
+              const sx = pos.x + 98;
+              const sy = pos.y;
+              const tx = target.x - 98;
+              const ty = target.y;
+              const mx = (sx + tx) / 2;
+              taskLinkMarkup.push(`
+                <path d="M ${sx} ${sy} C ${mx} ${sy - 60 - routeIndex * 14}, ${mx} ${ty - 60 - routeIndex * 14}, ${tx} ${ty}"
+                  fill="none" stroke="#c08a2f" stroke-width="1.8" stroke-dasharray="8 6" opacity="0.72" />
+              `);
+            });
+          }
+
+          taskCardMarkup.push(`
+            <g class="atlas-task-hit" data-task="${escapeHtml(task.task_name)}" style="cursor:pointer">
+              <rect x="${cardX}" y="${cardY}" width="196" height="68" rx="18"
+                fill="${selectedTask ? 'rgba(255,255,255,0.98)' : 'rgba(255,250,242,0.94)'}"
+                stroke="${accent}" stroke-width="${selectedTask ? '3.2' : '1.8'}" />
+              <text x="${pos.x}" y="${cardY + 28}" text-anchor="middle"
+                fill="${accent}" font-size="18" font-family="Bahnschrift, Cascadia Code, Consolas, monospace">${escapeHtml(task.task_name)}</text>
+              <text x="${pos.x}" y="${cardY + 49}" text-anchor="middle"
+                fill="#6b7280" font-size="11" font-family="Cascadia Code, Consolas, monospace">${task.steps.length} steps · ${task.transitions.length} transitions</text>
+            </g>
+          `);
+        });
+
+        const activePulse = active && positions.get(active.from) && positions.get(active.to)
+          ? (() => {
+              const from = positions.get(active.from);
+              const to = positions.get(active.to);
+              return `
+                <circle cx="${from.x}" cy="${from.y}" r="9" fill="#c08a2f">
+                  <animate attributeName="cx" values="${from.x};${to.x}" dur="2.2s" repeatCount="indefinite" />
+                  <animate attributeName="cy" values="${from.y};${to.y}" dur="2.2s" repeatCount="indefinite" />
+                </circle>
+              `;
+            })()
+          : '';
+
+        host.innerHTML = `
+          <svg class="atlas-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="system atlas">
+            <defs>
+              <filter id="atlasGlow" x="-40%" y="-40%" width="180%" height="180%">
+                <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="rgba(15,118,110,0.18)" />
+              </filter>
+            </defs>
+            <rect x="0" y="0" width="${width}" height="${height}" rx="24" fill="rgba(255,255,255,0.32)" />
+            <text x="${left}" y="54" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">physical skeleton</text>
+            ${routeEdges.join('')}
+            ${nodeMarkup}
+            ${groupMarkup.join('')}
+            ${taskLinkMarkup.join('')}
+            ${taskCardMarkup.join('')}
+            ${activePulse}
+          </svg>
+        `;
+
+        host.querySelectorAll('.atlas-task-hit').forEach((node) => {
+          node.addEventListener('click', () => selectTask(node.dataset.task, true));
+        });
+      }
+
+      function layoutBand(cards, y, left, right) {
+        const sorted = cards
+          .slice()
+          .sort((a, b) => a.anchor - b.anchor || a.task_name.localeCompare(b.task_name));
+        const minGap = 220;
+        let cursor = left;
+        const placed = sorted.map((task, index) => {
+          const anchorRatio = topologyNodes.length > 1 ? task.anchor / (topologyNodes.length - 1) : 0.5;
+          const desired = left + anchorRatio * (right - left);
+          const x = Math.max(cursor, desired);
+          cursor = x + minGap;
+          return { ...task, x, y: y + (cards.length > 4 && index % 2 ? 88 : 0) };
+        });
+        const overflow = cursor - minGap - right;
+        if (overflow > 0 && placed.length > 1) {
+          placed.forEach((task, index) => {
+            task.x -= overflow * (index / (placed.length - 1));
+          });
+        }
+        return placed;
+      }
+
+      function renderJourney() {
+        const host = document.getElementById('journey-track');
+        host.innerHTML = journey
+          .map((event, index) => {
+            const active = index === state.activeJourneyIndex;
+            return `
+              <button class="journey-card ${active ? 'active' : ''}" data-index="${index}">
+                <div class="journey-kicker">${escapeHtml(event.task_name)} · ${escapeHtml(event.from_step)}</div>
+                <div class="journey-title">${escapeHtml(event.label)}</div>
+                <div class="journey-meta">${escapeHtml(event.effect)}<br>${escapeHtml(event.guard)}</div>
+              </button>
+            `;
+          })
+          .join('');
+
+        host.querySelectorAll('.journey-card').forEach((card) => {
+          card.addEventListener('click', () => {
+            const index = Number(card.dataset.index);
+            state.activeJourneyIndex = index;
+            selectTask(journey[index].task_name, false);
+            renderAtlas();
+            renderJourney();
+            renderCaption();
+          });
+        });
+      }
+
+      function renderDetail() {
+        const task = taskMetaMap.get(state.selectedTask);
+        if (!task) return;
+        document.getElementById('detail-title').textContent = task.task_name;
+        document.getElementById('detail-summary').textContent =
+          `This theater keeps one control task in focus while the atlas above keeps the global machine skeleton visible.`;
+        document.getElementById('detail-meta').innerHTML = `
+          <span class="meta-pill ${roleClasses[task.role]}">${escapeHtml(roleLabels[task.role])}</span>
+          <span class="meta-pill">${task.steps.length} steps</span>
+          <span class="meta-pill">${task.transitions.length} transitions</span>
+          <span class="meta-pill">${task.handoffs.length} material handoffs</span>
+        `;
+
+        document.getElementById('detail-step-rail').innerHTML = task.steps
+          .map((step, index) => {
+            const summary = step.statements.slice(0, 2).join(' · ') || 'generated semantic state';
+            return `
+              <div class="step-card">
+                <div class="step-card-index">step ${index + 1}</div>
+                <h3>${escapeHtml(step.step_name)}</h3>
+                <p>${escapeHtml(summary)}</p>
+              </div>
+            `;
+          })
+          .join('');
+
+        document.getElementById('detail-sfc-host').innerHTML =
+          taskTemplates.get(task.task_name) || '<p>missing task template</p>';
+
+        document.getElementById('detail-touches').innerHTML =
+          task.touches.length
+            ? `<div class="chip-cloud">${task.touches
+                .map((touch) => `<span class="chip">${escapeHtml(touch)}</span>`)
+                .join('')}</div>`
+            : '<p>no direct workpiece site/holder references</p>';
+
+        document.getElementById('detail-handoffs').innerHTML =
+          task.handoffs.length
+            ? task.handoffs
+                .map(
+                  (handoff) => `
+                    <div class="detail-card">
+                      <h3>${escapeHtml(handoff.label)}</h3>
+                      <p>${escapeHtml(handoff.effect)}</p>
+                    </div>
+                  `
+                )
+                .join('')
+            : '<p>no explicit workpiece effect in this task</p>';
+
+        document.getElementById('detail-external').innerHTML =
+          task.externalRoutes.length
+            ? task.externalRoutes
+                .map(
+                  (route) => `
+                    <div class="detail-card">
+                      <h3>${escapeHtml(route.guard)}</h3>
+                      <p>${escapeHtml(`goto ${route.to_task}.${route.to_step}`)}</p>
+                    </div>
+                  `
+                )
+                .join('')
+            : '<p>no cross-task route from this task</p>';
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+    })();
+    "####;
+
     let mut task_nav = String::new();
-    let mut task_sections = String::new();
-    for (idx, task) in model.tasks.iter().enumerate() {
-        let tab_id = format!("task-{idx}");
+    for task in &model.tasks {
         let _ = writeln!(
             task_nav,
-            "<button class=\"tab-button\" data-target=\"{tab_id}\">{}</button>",
-            html_escape(&task.task_name)
+            "<button class=\"task-button\" data-task=\"{}\">{}<small>{}</small></button>",
+            html_escape(&task.task_name),
+            html_escape(&task.task_name),
+            html_escape(task_role_label(&task.task_name))
         );
+    }
+
+    let mut task_templates = String::new();
+    for task in &model.tasks {
         let _ = writeln!(
-            task_sections,
-            "<section id=\"{tab_id}\" class=\"tab-panel\"><h2>{}</h2><div class=\"diagram\">{}</div></section>",
+            task_templates,
+            "<template data-task=\"{}\">{}</template>",
             html_escape(&task.task_name),
             render_task_svg(task)
         );
     }
 
-    format!(
-        r#"<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{title}</title>
-  <style>
-    :root {{
-      --bg: #f5f1e8;
-      --ink: #1f2933;
-      --muted: #617080;
-      --card: #fffaf0;
-      --line: #d8c7a5;
-      --accent: #0f766e;
-      --accent-dark: #134e4a;
-      --warn: #b7791f;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{ margin: 0; font-family: Georgia, "Noto Serif SC", "Songti SC", serif; background: linear-gradient(135deg, #f5f1e8, #e8f2ef); color: var(--ink); }}
-    header {{ padding: 28px 34px 18px; border-bottom: 1px solid var(--line); background: rgba(255, 250, 240, 0.88); position: sticky; top: 0; z-index: 2; backdrop-filter: blur(10px); }}
-    h1 {{ margin: 0 0 8px; font-size: 30px; letter-spacing: -0.02em; }}
-    .subtitle {{ color: var(--muted); font-size: 14px; }}
-    main {{ display: grid; grid-template-columns: 280px 1fr; gap: 22px; padding: 22px; }}
-    nav {{ align-self: start; position: sticky; top: 112px; background: rgba(255,250,240,0.92); border: 1px solid var(--line); border-radius: 18px; padding: 14px; box-shadow: 0 14px 40px rgba(31,41,51,0.08); }}
-    .nav-title {{ color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; margin: 8px 8px 10px; }}
-    button.tab-button {{ display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 10px 12px; border-radius: 12px; color: var(--ink); cursor: pointer; font: inherit; }}
-    button.tab-button:hover, button.tab-button.active {{ background: #d9f3ee; color: var(--accent-dark); }}
-    .content {{ min-width: 0; }}
-    .tab-panel {{ display: none; background: rgba(255,250,240,0.92); border: 1px solid var(--line); border-radius: 22px; padding: 22px; box-shadow: 0 20px 60px rgba(31,41,51,0.08); }}
-    .tab-panel.active {{ display: block; animation: rise 160ms ease-out; }}
-    @keyframes rise {{ from {{ opacity: 0; transform: translateY(6px); }} to {{ opacity: 1; transform: translateY(0); }} }}
-    .diagram {{ overflow: auto; background: #fffdf7; border: 1px solid #eadcc1; border-radius: 16px; padding: 12px; margin: 14px 0 4px; }}
-    .flow-svg {{ display: block; min-width: 680px; max-width: none; }}
-    .sfc-review {{ width: 100%; }}
-    .task-sfc-svg {{ display: block; width: 100%; min-width: 980px; height: auto; }}
-    .task-step {{ fill: #fffaf0; stroke: #0f766e; stroke-width: 3; }}
-    .task-step.generated {{ fill: #f8fafc; stroke: #94a3b8; stroke-dasharray: 8 6; }}
-    .task-step-initial {{ fill: none; stroke: #0f766e; stroke-width: 3; }}
-    .task-step-index {{ fill: #94a3b8; font: 700 14px "Cascadia Mono", Consolas, monospace; }}
-    .task-step-title {{ fill: #093f3b; font: 700 16px "Cascadia Mono", Consolas, monospace; }}
-    .task-step-source {{ fill: #64748b; font: 12px Georgia, "Noto Serif SC", serif; }}
-    .task-action-link {{ stroke: #94a3b8; stroke-width: 1.3; }}
-    .task-action {{ fill: #f8fbff; stroke: #c9d6e2; stroke-width: 1.2; }}
-    .task-action-line {{ fill: #111827; font: 12px "Cascadia Mono", Consolas, monospace; }}
-    .task-main-line {{ stroke: #111827; stroke-width: 2; }}
-    .task-transition-bar {{ stroke: #111827; stroke-width: 6; stroke-linecap: square; }}
-    .task-transition-branch-bus {{ stroke: #7c6750; stroke-width: 1.7; }}
-    .task-transition-branch-bar {{ stroke: #111827; stroke-width: 5; stroke-linecap: square; }}
-    .task-transition-link {{ stroke: #c7b28a; stroke-width: 1.6; }}
-    .task-transition-note {{ fill: #fffdf7; stroke: #d7ccb7; stroke-width: 1.1; }}
-    .task-transition-note.external {{ stroke: #d7b674; }}
-    .task-transition-note.terminal {{ stroke: #b8c3cf; }}
-    .task-transition-guard {{ fill: #111827; font: 700 12px "Cascadia Mono", Consolas, monospace; }}
-    .task-transition-fact {{ fill: #475569; font: 11px "Cascadia Mono", Consolas, monospace; }}
-    .task-transition-target {{ fill: #134e4a; font: 700 11px "Cascadia Mono", Consolas, monospace; }}
-    .task-transition-target.external {{ fill: #b7791f; }}
-    .task-transition-target.terminal {{ fill: #64748b; }}
-    .flow-node {{ fill: #fffaf0; stroke: #0f766e; stroke-width: 1.6; }}
-    .flow-node.generated {{ fill: #f8fafc; stroke: #94a3b8; stroke-dasharray: 6 4; }}
-    .flow-node.external {{ fill: #fff3cd; stroke: #b7791f; }}
-    .flow-title {{ font: 700 14px "Cascadia Mono", Consolas, monospace; fill: #134e4a; }}
-    .flow-subtitle {{ font: 12px Georgia, "Noto Serif SC", serif; fill: #617080; }}
-    .flow-edge {{ fill: none; stroke: #64748b; stroke-width: 1.5; marker-end: url(#arrow); }}
-    .flow-edge.external {{ stroke: #b7791f; }}
-    .flow-label-bg {{ fill: #fffdf7; stroke: #eadcc1; }}
-    .flow-label {{ font: 12px "Cascadia Mono", Consolas, monospace; fill: #334155; }}
-    table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-    th, td {{ border-bottom: 1px solid #eadcc1; padding: 9px 8px; vertical-align: top; }}
-    th {{ color: var(--muted); text-align: left; font-weight: 600; }}
-    code {{ font-family: "Cascadia Mono", Consolas, monospace; background: #eef7f5; color: #0f4f46; border-radius: 6px; padding: 1px 5px; }}
-    .pill {{ display: inline-block; margin: 2px 4px 2px 0; padding: 2px 7px; border-radius: 999px; background: #edf7f4; color: var(--accent-dark); font-size: 12px; }}
-    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }}
-    .card {{ background: #fffdf7; border: 1px solid #eadcc1; border-radius: 16px; padding: 14px; }}
-    .card h3 {{ margin-top: 0; }}
-    ul.compact {{ margin: 0; padding-left: 18px; }}
-    @media (max-width: 900px) {{ main {{ grid-template-columns: 1fr; }} nav {{ position: static; }} header {{ position: static; }} }}
-  </style>
-</head>
-<body>
-  <header>
-    <h1>{title}</h1>
-    <div class="subtitle">source: <code>{source}</code> | tasks: {task_count} | transitions: {transition_count}</div>
-  </header>
-  <main>
-    <nav>
-      <div class="nav-title">Project</div>
-      <button class="tab-button active" data-target="overview">Overview</button>
-      <button class="tab-button" data-target="topology">Topology</button>
-      <div class="nav-title">Tasks</div>
-      {task_nav}
-    </nav>
-    <div class="content">
-      <section id="overview" class="tab-panel active">
-        <h2>Overview</h2>
-        <div class="diagram">{overview}</div>
-      </section>
-      <section id="topology" class="tab-panel">
-        <h2>Topology</h2>
-        {topology}
-      </section>
-      {task_sections}
-    </div>
-  </main>
-  <script>
-    document.querySelectorAll('.tab-button').forEach(button => {{
-      button.addEventListener('click', () => {{
-        document.querySelectorAll('.tab-button').forEach(item => item.classList.remove('active'));
-        document.querySelectorAll('.tab-panel').forEach(item => item.classList.remove('active'));
-        button.classList.add('active');
-        const target = document.getElementById(button.dataset.target);
-        if (target) target.classList.add('active');
-      }});
-    }});
-  </script>
-</body>
-</html>
-"#,
-        title = html_escape(&model.title),
-        source = html_escape(&model.source_plc),
-        task_count = model.tasks.len(),
-        transition_count = model
+    let model_json = embed_json_for_html(model);
+    let mut out = String::new();
+    out.push_str("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+    let _ = write!(
+        out,
+        "<title>{}</title><style>{style}</style></head><body>",
+        html_escape(&model.title)
+    );
+    out.push_str("<header class=\"hero\">");
+    let _ = write!(out, "<h1>{}</h1>", html_escape(&model.title));
+    let _ = write!(
+        out,
+        "<div class=\"hero-summary\"><span>source: <code>{}</code></span><span>tasks: {}</span><span>transitions: {}</span></div>",
+        html_escape(&model.source_plc),
+        model.tasks.len(),
+        model
             .tasks
             .iter()
             .map(|task| task.transitions.len())
-            .sum::<usize>(),
-        task_nav = task_nav,
-        overview = render_overview_svg(model),
-        topology = render_topology_html(&model.topology),
-        task_sections = task_sections
-    )
+            .sum::<usize>()
+    );
+    out.push_str("</header>");
+    out.push_str("<main class=\"atlas-app\">");
+    out.push_str("<aside class=\"command-rail\">");
+    out.push_str("<p class=\"rail-title\">Sections</p>");
+    out.push_str(
+        "<div class=\"section-jumps\">\
+          <button class=\"rail-button\" data-section=\"section-atlas\">System Atlas</button>\
+          <button class=\"rail-button\" data-section=\"section-journey\">Journey Reel</button>\
+          <button class=\"rail-button\" data-section=\"section-detail\">Task Theater</button>\
+          <button class=\"rail-button\" data-section=\"section-topology\">Topology</button>\
+        </div>",
+    );
+    out.push_str(
+        "<p class=\"rail-title\" style=\"margin-top:18px\">Tasks</p><div class=\"task-nav\">",
+    );
+    out.push_str(&task_nav);
+    out.push_str("</div></aside>");
+    out.push_str("<div class=\"scene-stack\">");
+    out.push_str(
+        "<section id=\"section-atlas\" class=\"scene-panel\">\
+          <div class=\"scene-head\">\
+            <div><h2>System Atlas</h2><p>One global skeleton for stations, holders, control bands, and task-to-material coupling. The moving caption is not decoration: it is the current material handoff extracted from explicit workpiece effects.</p></div>\
+          </div>\
+          <div class=\"atlas-frame\">\
+            <div id=\"atlas-caption\" class=\"atlas-caption\"></div>\
+            <div id=\"atlas-canvas\" class=\"atlas-canvas\"></div>\
+          </div>\
+        </section>"
+    );
+    out.push_str(
+        "<section id=\"section-journey\" class=\"scene-panel\">\
+          <div class=\"scene-head\">\
+            <div><h2>Journey Reel</h2><p>This strip is the machine narrative in handoff order. Selecting a card drives the atlas highlight and the task theater below.</p></div>\
+          </div>\
+          <div id=\"journey-track\" class=\"journey-strip\"></div>\
+        </section>"
+    );
+    out.push_str(
+        "<section id=\"section-detail\" class=\"scene-panel\">\
+          <div class=\"scene-head\">\
+            <div><h2 id=\"detail-title\">Task Theater</h2><p id=\"detail-summary\"></p></div>\
+            <div id=\"detail-meta\" class=\"detail-meta\"></div>\
+          </div>\
+          <div class=\"detail-grid\">\
+            <div id=\"detail-step-rail\" class=\"detail-rail\"></div>\
+            <div id=\"detail-sfc-host\" class=\"detail-diagram\"></div>\
+            <div class=\"detail-side\">\
+              <div class=\"detail-card\"><h3>Material Touches</h3><div id=\"detail-touches\"></div></div>\
+              <div class=\"detail-card\"><h3>Handoffs</h3><div id=\"detail-handoffs\"></div></div>\
+              <div class=\"detail-card\"><h3>External Routes</h3><div id=\"detail-external\"></div></div>\
+            </div>\
+          </div>\
+        </section>"
+    );
+    out.push_str("<section id=\"section-topology\" class=\"scene-panel\"><div class=\"scene-head\"><div><h2>Topology Ledger</h2><p>Keep the raw audit tables, but move them to the end. They support the atlas instead of pretending to be the atlas.</p></div></div>");
+    out.push_str(&render_topology_html(&model.topology));
+    out.push_str("</section>");
+    out.push_str("</div></main>");
+    let _ = write!(
+        out,
+        "<script id=\"flowchart-model\" type=\"application/json\">{}</script>",
+        model_json
+    );
+    let _ = write!(
+        out,
+        "<div id=\"task-templates\" class=\"task-templates\">{}</div>",
+        task_templates
+    );
+    let _ = write!(out, "<script>{script}</script>");
+    out.push_str("</body></html>");
+    out
+}
+
+fn embed_json_for_html(model: &FlowchartArtifact) -> String {
+    serde_json::to_string(model)
+        .expect("flowchart model should serialize")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+}
+
+fn task_role_label(task_name: &str) -> &'static str {
+    let lower = task_name.to_ascii_lowercase();
+    if lower.contains("fault") || lower.contains("warning") {
+        "fault / warning"
+    } else if lower.contains("manual") || lower.contains("maintenance") || lower.contains("check") {
+        "manual / maintenance"
+    } else if lower.contains("startup") {
+        "startup / self-check"
+    } else if lower.contains("supervisor")
+        || lower.contains("monitor")
+        || lower.contains("architecture")
+    {
+        "control gate"
+    } else {
+        "process / motion"
+    }
 }
 
 #[allow(dead_code)]
@@ -1479,7 +2404,7 @@ fn render_task_table(task: &TaskDiagram) -> String {
 
 fn render_topology_html(topology: &TopologySummary) -> String {
     format!(
-        "<div class=\"grid\"><div class=\"card\"><h3>计数</h3><p>devices: <code>{}</code></p><p>links: <code>{}</code></p></div><div class=\"card\"><h3>Variables</h3>{}</div><div class=\"card\"><h3>Workpieces</h3>{}</div><div class=\"card\"><h3>Links</h3>{}</div></div>",
+        "<div class=\"topology-grid\"><div class=\"card\"><h3>Counts</h3><p>devices: <code>{}</code></p><p>links: <code>{}</code></p></div><div class=\"card\"><h3>Variables</h3>{}</div><div class=\"card\"><h3>Workpieces</h3>{}</div><div class=\"card\"><h3>Links</h3>{}</div></div>",
         topology.device_count,
         topology.link_count,
         render_compact_list(&topology.variables),
