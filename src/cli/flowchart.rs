@@ -1,4 +1,4 @@
-use crate::cli_support::common::{
+﻿use crate::cli_support::common::{
     CliOutputMode, DispatchResult, display_path_relative_to_cwd, write_json_pretty,
 };
 use crate::cli_support::help::command_usage;
@@ -1421,6 +1421,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
       border-radius: 28px;
       padding: 22px;
       box-shadow: 0 20px 48px rgba(37, 43, 56, 0.09);
+      min-width: 0;
     }
     .scene-head {
       display: flex;
@@ -1452,6 +1453,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
       border: 1px solid #e5d8bf;
       border-radius: 22px;
       padding: 16px;
+      min-width: 0;
     }
     .atlas-caption {
       display: flex;
@@ -1477,11 +1479,13 @@ fn render_html(model: &FlowchartArtifact) -> String {
       overflow: auto;
       border-radius: 18px;
       background: rgba(255,255,255,0.48);
+      max-width: 100%;
+      min-width: 0;
     }
     .atlas-svg {
       display: block;
       width: 100%;
-      min-width: 1460px;
+      min-width: 0;
       height: auto;
     }
     .atlas-node-marker {
@@ -1625,6 +1629,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
       padding: 12px;
       max-height: 78vh;
       min-height: 620px;
+      min-width: 0;
     }
     .topology-grid {
       display: grid;
@@ -1801,19 +1806,19 @@ fn render_html(model: &FlowchartArtifact) -> String {
       function parseEffect(effect) {
         let match;
         if ((match = /^acquire (.+) from (.+)$/.exec(effect))) {
-          return { kind: 'acquire', from: match[2], to: match[1], label: `${match[2]} → ${match[1]}` };
+          return { kind: 'acquire', from: match[2], to: match[1], label: `${match[2]} -> ${match[1]}` };
         }
         if ((match = /^transfer (.+) -> (.+)$/.exec(effect))) {
-          return { kind: 'transfer', from: match[1], to: match[2], label: `${match[1]} → ${match[2]}` };
+          return { kind: 'transfer', from: match[1], to: match[2], label: `${match[1]} -> ${match[2]}` };
         }
         if ((match = /^finish (.+) as (.+)$/.exec(effect))) {
-          return { kind: 'finish', from: match[1], to: match[2], label: `${match[1]} → ${match[2]}` };
+          return { kind: 'finish', from: match[1], to: match[2], label: `${match[1]} -> ${match[2]}` };
         }
         if ((match = /^mount (.+) at (.+)$/.exec(effect))) {
           return { kind: 'mount', from: match[1], to: match[2], label: `${match[1]} @ ${match[2]}` };
         }
         if ((match = /^unmount (.+) from (.+) to (.+)$/.exec(effect))) {
-          return { kind: 'unmount', from: match[2], to: match[3], label: `${match[2]} → ${match[3]}` };
+          return { kind: 'unmount', from: match[2], to: match[3], label: `${match[2]} -> ${match[3]}` };
         }
         return null;
       }
@@ -1942,38 +1947,36 @@ fn render_html(model: &FlowchartArtifact) -> String {
       function renderAtlas() {
         const host = document.getElementById('atlas-canvas');
         const width = Math.max(1540, host.clientWidth || 1540);
-        const height = 860;
-        const routeY = 110;
-        const left = 120;
-        const right = width - 120;
+        const height = 760;
+        const routeY = 130;
+        const eventY = 235;
+        const left = 110;
+        const right = width - 110;
         const spacing = topologyNodes.length > 1 ? (right - left) / (topologyNodes.length - 1) : 0;
         const positions = new Map(
           topologyNodes.map((node, index) => [node.name, { x: left + index * spacing, y: routeY }])
         );
-
-        const bands = [
-          { key: 'supervisor', y: 250 },
-          { key: 'startup', y: 380 },
-          { key: 'process', y: 540 },
-          { key: 'service', y: 690 },
-          { key: 'fault', y: 780 },
-        ];
-
+        const stages = buildStageSpans(positions);
         const selected = taskMetaMap.get(state.selectedTask);
         const active = journey[state.activeJourneyIndex];
-        const taskPositions = new Map();
-        const groupMarkup = [];
+        const bands = [
+          { key: 'supervisor', y: 330, label: 'control gate' },
+          { key: 'startup', y: 405, label: 'startup / self-check' },
+          { key: 'process', y: 500, label: 'process / motion' },
+          { key: 'service', y: 595, label: 'manual / maintenance' },
+          { key: 'fault', y: 680, label: 'fault / warning' },
+        ];
 
-        bands.forEach((band) => {
-          const cards = taskMeta.filter((task) => task.role === band.key);
-          const placed = layoutBand(cards, band.y, left + 40, right - 40);
-          groupMarkup.push(`
-            <text x="30" y="${band.y + 8}" fill="${roleColors[band.key]}" font-size="14" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(roleLabels[band.key])}</text>
-          `);
-          placed.forEach((item) => {
-            taskPositions.set(item.task_name, item);
-          });
-        });
+        const selectedBands = selected
+          ? selected.touches
+              .map((name) => positions.get(name))
+              .filter(Boolean)
+              .map((pos) => `
+                <rect x="${pos.x - 44}" y="${routeY - 66}" width="88" height="${height - routeY + 20}" rx="24"
+                  fill="rgba(15,118,110,0.055)" stroke="rgba(15,118,110,0.10)" stroke-width="1" />
+              `)
+              .join('')
+          : '';
 
         const routeEdges = [];
         for (let index = 0; index < topologyNodes.length - 1; index += 1) {
@@ -1988,9 +1991,22 @@ fn render_html(model: &FlowchartArtifact) -> String {
               stroke="${isActive ? '#c08a2f' : '#d2c1a0'}"
               stroke-width="${isActive ? '7' : '4'}"
               stroke-linecap="round"
-              opacity="${isActive ? '1' : '0.8'}" />
+              opacity="${isActive ? '1' : '0.74'}" />
           `);
         }
+
+        const stageMarkup = stages
+          .map((stage) => `
+            <g>
+              <line x1="${stage.x1}" y1="${routeY - 38}" x2="${stage.x1}" y2="${routeY + 18}"
+                stroke="#d8c6a1" stroke-width="1" opacity="0.45" />
+              <line x1="${stage.x2}" y1="${routeY - 38}" x2="${stage.x2}" y2="${routeY + 18}"
+                stroke="#d8c6a1" stroke-width="1" opacity="0.25" />
+              <text x="${(stage.x1 + stage.x2) / 2}" y="${routeY - 46}" text-anchor="middle"
+                fill="#64748b" font-size="10" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(stage.label)}</text>
+            </g>
+          `)
+          .join('');
 
         const nodeMarkup = topologyNodes
           .map((node) => {
@@ -2012,7 +2028,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
                     fill="${fill}" stroke="${stroke}" stroke-width="${isTouched ? '3.2' : '2.1'}" />`;
             return `
               <g class="atlas-node">
-                <title>${escapeHtml(node.name)} · ${escapeHtml(node.kind)}</title>
+                <title>${escapeHtml(node.name)} / ${escapeHtml(node.kind)}</title>
                 ${marker}
                 <g class="atlas-node-name">
                   <rect x="${pos.x - labelWidth / 2}" y="${pos.y - 58}" width="${labelWidth}" height="30" rx="9"
@@ -2025,55 +2041,75 @@ fn render_html(model: &FlowchartArtifact) -> String {
           })
           .join('');
 
-        const taskLinkMarkup = [];
-        const taskCardMarkup = [];
-        taskMeta.forEach((task) => {
-          const pos = taskPositions.get(task.task_name);
-          if (!pos) return;
-          const selectedTask = state.selectedTask === task.task_name;
-          const cardX = pos.x - 98;
-          const cardY = pos.y - 34;
-          const accent = roleColors[task.role];
-          task.touches.forEach((touchName, touchIndex) => {
-            const nodePos = positions.get(touchName);
-            if (!nodePos) return;
-            const opacity = selectedTask ? 0.42 : 0.14;
+        const journeyMarkup = journey
+          .map((event, index) => {
+            const from = positions.get(event.from);
+            const to = positions.get(event.to);
+            if (!from || !to) return '';
+            const activeEvent = index === state.activeJourneyIndex;
+            const taskSelected = event.task_name === state.selectedTask;
+            const lift = 38 + (index % 4) * 18;
+            const sweep = from.x <= to.x ? 1 : -1;
+            const midX = (from.x + to.x) / 2;
+            const eventLabel = `${stageName(event.from)} -> ${stageName(event.to)}`;
             const path = [
-              `M ${pos.x} ${cardY}`,
-              `C ${pos.x} ${pos.y - 92}, ${nodePos.x} ${routeY + 72}, ${nodePos.x} ${routeY + 34}`,
+              `M ${from.x} ${routeY + 18}`,
+              `C ${from.x + sweep * 28} ${eventY - lift}, ${to.x - sweep * 28} ${eventY - lift}, ${to.x} ${routeY + 18}`,
             ].join(' ');
-            taskLinkMarkup.push(`
-              <path d="${path}" fill="none" stroke="${accent}" stroke-width="${selectedTask ? '2.2' : '1.2'}" opacity="${opacity}" />
+            return `
+              <g class="atlas-journey-hit" data-index="${index}" style="cursor:pointer">
+                <title>${escapeHtml(event.task_name)}: ${escapeHtml(event.effect)}</title>
+                <path d="${path}" fill="none" stroke="${activeEvent ? '#c08a2f' : taskSelected ? roleColors.process : '#b8c8d2'}"
+                  stroke-width="${activeEvent ? '4.8' : taskSelected ? '3.1' : '1.5'}"
+                  opacity="${activeEvent ? '0.98' : taskSelected ? '0.74' : '0.36'}"
+                  marker-end="${activeEvent ? 'url(#journeyArrowActive)' : 'url(#journeyArrow)'}" />
+                <circle cx="${midX}" cy="${eventY - lift}" r="${activeEvent ? '13' : '8'}"
+                  fill="${activeEvent ? '#c08a2f' : '#fffdf7'}" stroke="${activeEvent ? '#8b5a10' : '#b8c8d2'}" stroke-width="1.4" />
+                <text x="${midX}" y="${eventY - lift + 4}" text-anchor="middle"
+                  fill="${activeEvent ? '#fffdf7' : '#64748b'}" font-size="${activeEvent ? '10' : '8'}"
+                  font-family="Cascadia Code, Consolas, monospace">${index + 1}</text>
+                ${activeEvent ? `
+                  <rect x="${midX - 58}" y="${eventY - lift + 18}" width="116" height="24" rx="7"
+                    fill="rgba(255,252,246,0.96)" stroke="#c08a2f" stroke-width="1" />
+                  <text x="${midX}" y="${eventY - lift + 34}" text-anchor="middle"
+                    fill="#8b5a10" font-size="10" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(eventLabel)}</text>
+                ` : ''}
+              </g>
+            `;
+          })
+          .join('');
+
+        const taskCardMarkup = [];
+        bands.forEach((band) => {
+          taskCardMarkup.push(`
+            <line x1="${left}" y1="${band.y}" x2="${right}" y2="${band.y}" stroke="${roleColors[band.key]}" stroke-width="1" opacity="0.13" />
+            <text x="28" y="${band.y + 4}" fill="${roleColors[band.key]}" font-size="12" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(band.label)}</text>
+          `);
+          const cards = taskMeta
+            .filter((task) => task.role === band.key)
+            .slice()
+            .sort((a, b) => a.anchor - b.anchor || a.task_name.localeCompare(b.task_name));
+          layoutTaskRow(cards, band.y, left + 190, right - 80).forEach((task) => {
+            const selectedTask = state.selectedTask === task.task_name;
+            const accent = roleColors[task.role];
+            const cardW = selectedTask ? 180 : 150;
+            const cardH = selectedTask ? 54 : 42;
+            const cardX = task.x - cardW / 2;
+            const cardY = task.y - cardH / 2;
+            const label = compactTaskLabel(task.task_name);
+            taskCardMarkup.push(`
+              <g class="atlas-task-hit" data-task="${escapeHtml(task.task_name)}" style="cursor:pointer">
+                <title>${escapeHtml(task.task_name)} / ${task.steps.length} steps / ${task.transitions.length} transitions</title>
+                <rect x="${cardX}" y="${cardY}" width="${cardW}" height="${cardH}" rx="8"
+                  fill="${selectedTask ? 'rgba(255,255,255,0.98)' : 'rgba(255,250,242,0.82)'}"
+                  stroke="${accent}" stroke-width="${selectedTask ? '2.8' : '1.4'}" />
+                <text x="${task.x}" y="${cardY + (selectedTask ? 24 : 18)}" text-anchor="middle"
+                  fill="${accent}" font-size="${selectedTask ? '14' : '11'}" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(label)}</text>
+                <text x="${task.x}" y="${cardY + (selectedTask ? 42 : 33)}" text-anchor="middle"
+                  fill="#64748b" font-size="9" font-family="Cascadia Code, Consolas, monospace">${task.steps.length} st / ${task.handoffs.length} flow</text>
+              </g>
             `);
           });
-
-          if (selectedTask) {
-            task.externalRoutes.forEach((route, routeIndex) => {
-              const target = taskPositions.get(route.to_task);
-              if (!target) return;
-              const sx = pos.x + 98;
-              const sy = pos.y;
-              const tx = target.x - 98;
-              const ty = target.y;
-              const mx = (sx + tx) / 2;
-              taskLinkMarkup.push(`
-                <path d="M ${sx} ${sy} C ${mx} ${sy - 60 - routeIndex * 14}, ${mx} ${ty - 60 - routeIndex * 14}, ${tx} ${ty}"
-                  fill="none" stroke="#c08a2f" stroke-width="1.8" stroke-dasharray="8 6" opacity="0.72" />
-              `);
-            });
-          }
-
-          taskCardMarkup.push(`
-            <g class="atlas-task-hit" data-task="${escapeHtml(task.task_name)}" style="cursor:pointer">
-              <rect x="${cardX}" y="${cardY}" width="196" height="68" rx="18"
-                fill="${selectedTask ? 'rgba(255,255,255,0.98)' : 'rgba(255,250,242,0.94)'}"
-                stroke="${accent}" stroke-width="${selectedTask ? '3.2' : '1.8'}" />
-              <text x="${pos.x}" y="${cardY + 28}" text-anchor="middle"
-                fill="${accent}" font-size="18" font-family="Bahnschrift, Cascadia Code, Consolas, monospace">${escapeHtml(task.task_name)}</text>
-              <text x="${pos.x}" y="${cardY + 49}" text-anchor="middle"
-                fill="#6b7280" font-size="11" font-family="Cascadia Code, Consolas, monospace">${task.steps.length} steps · ${task.transitions.length} transitions</text>
-            </g>
-          `);
         });
 
         const activePulse = active && positions.get(active.from) && positions.get(active.to)
@@ -2095,13 +2131,22 @@ fn render_html(model: &FlowchartArtifact) -> String {
               <filter id="atlasGlow" x="-40%" y="-40%" width="180%" height="180%">
                 <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="rgba(15,118,110,0.18)" />
               </filter>
+              <marker id="journeyArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <path d="M0,0 L8,4 L0,8 z" fill="#b8c8d2" />
+              </marker>
+              <marker id="journeyArrowActive" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+                <path d="M0,0 L9,4.5 L0,9 z" fill="#c08a2f" />
+              </marker>
             </defs>
             <rect x="0" y="0" width="${width}" height="${height}" rx="24" fill="rgba(255,255,255,0.32)" pointer-events="none" />
-            <text x="${left}" y="54" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">physical skeleton</text>
+            <text x="${left}" y="58" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">space axis</text>
+            <text x="${left}" y="${eventY + 28}" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">material journey</text>
+            <text x="${left}" y="305" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">control projection</text>
+            ${selectedBands}
+            ${stageMarkup}
             ${routeEdges.join('')}
             ${nodeMarkup}
-            ${groupMarkup.join('')}
-            ${taskLinkMarkup.join('')}
+            ${journeyMarkup}
             ${taskCardMarkup.join('')}
             ${activePulse}
           </svg>
@@ -2110,20 +2155,65 @@ fn render_html(model: &FlowchartArtifact) -> String {
         host.querySelectorAll('.atlas-task-hit').forEach((node) => {
           node.addEventListener('click', () => selectTask(node.dataset.task, true));
         });
+        host.querySelectorAll('.atlas-journey-hit').forEach((node) => {
+          node.addEventListener('click', () => {
+            state.activeJourneyIndex = Number(node.dataset.index);
+            const event = journey[state.activeJourneyIndex];
+            if (event) selectTask(event.task_name, false);
+            renderAtlas();
+            renderJourney();
+            renderCaption();
+          });
+        });
       }
 
-      function layoutBand(cards, y, left, right) {
-        const sorted = cards
-          .slice()
-          .sort((a, b) => a.anchor - b.anchor || a.task_name.localeCompare(b.task_name));
-        const minGap = 220;
+      function compactTaskLabel(name) {
+        return name.length <= 20 ? name : `${name.slice(0, 17)}...`;
+      }
+
+      function stageName(name) {
+        const lower = String(name).toLowerCase();
+        if (lower.includes('feed') || lower.includes('cassette')) return 'FEED';
+        if (lower.includes('slide')) return 'SLIDE';
+        if (lower.includes('arm')) return 'ARM';
+        if (lower.includes('orient')) return 'ORIENT';
+        if (lower.includes('transfer')) return 'TRANSFER';
+        if (lower.includes('measure') || lower.includes('handed')) return 'MEASURE';
+        if (lower.includes('reject') || lower.includes('drop')) return 'REJECT';
+        return 'SITE';
+      }
+
+      function buildStageSpans(positions) {
+        const spans = [];
+        let current = null;
+        topologyNodes.forEach((node) => {
+          const pos = positions.get(node.name);
+          if (!pos) return;
+          const label = stageName(node.name);
+          if (!current || current.label !== label) {
+            current = { label, x1: pos.x, x2: pos.x };
+            spans.push(current);
+          } else {
+            current.x2 = pos.x;
+          }
+        });
+        return spans.map((span) => ({
+          ...span,
+          x1: span.x1 - 34,
+          x2: span.x2 + 34,
+        }));
+      }
+
+      function layoutTaskRow(cards, y, left, right) {
+        const placed = [];
+        const minGap = 170;
         let cursor = left;
-        const placed = sorted.map((task, index) => {
+        cards.forEach((task, index) => {
           const anchorRatio = topologyNodes.length > 1 ? task.anchor / (topologyNodes.length - 1) : 0.5;
           const desired = left + anchorRatio * (right - left);
           const x = Math.max(cursor, desired);
+          placed.push({ ...task, x, y: y + (index % 2 ? 28 : -18) });
           cursor = x + minGap;
-          return { ...task, x, y: y + (cards.length > 4 && index % 2 ? 88 : 0) };
         });
         const overflow = cursor - minGap - right;
         if (overflow > 0 && placed.length > 1) {
@@ -2141,7 +2231,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
             const active = index === state.activeJourneyIndex;
             return `
               <button class="journey-card ${active ? 'active' : ''}" data-index="${index}">
-                <div class="journey-kicker">${escapeHtml(event.task_name)} · ${escapeHtml(event.from_step)}</div>
+                <div class="journey-kicker">${escapeHtml(event.task_name)} / ${escapeHtml(event.from_step)}</div>
                 <div class="journey-title">${escapeHtml(event.label)}</div>
                 <div class="journey-meta">${escapeHtml(event.effect)}<br>${escapeHtml(event.guard)}</div>
               </button>
@@ -2176,7 +2266,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
 
         document.getElementById('detail-step-rail').innerHTML = task.steps
           .map((step, index) => {
-            const summary = step.statements.slice(0, 2).join(' · ') || 'generated semantic state';
+            const summary = step.statements.slice(0, 2).join(' / ') || 'generated semantic state';
             return `
               <div class="step-card">
                 <div class="step-card-index">step ${index + 1}</div>
@@ -2381,7 +2471,7 @@ fn task_role_label(task_name: &str) -> &'static str {
 #[allow(dead_code)]
 fn render_task_table(task: &TaskDiagram) -> String {
     let mut out = String::new();
-    out.push_str("<h3>Step 明细</h3><table><thead><tr><th>Step</th><th>Source</th><th>Statements</th></tr></thead><tbody>");
+    out.push_str("<h3>Step 鏄庣粏</h3><table><thead><tr><th>Step</th><th>Source</th><th>Statements</th></tr></thead><tbody>");
     for step in &task.steps {
         let source = match (&step.source, step.line) {
             (Some(source), Some(line)) => format!("{source}:{line}"),
@@ -2406,7 +2496,7 @@ fn render_task_table(task: &TaskDiagram) -> String {
             statements
         );
     }
-    out.push_str("</tbody></table><h3>Transition 明细</h3><table><thead><tr><th>From</th><th>To</th><th>Guard</th><th>Actions / Effects</th></tr></thead><tbody>");
+    out.push_str("</tbody></table><h3>Transition 鏄庣粏</h3><table><thead><tr><th>From</th><th>To</th><th>Guard</th><th>Actions / Effects</th></tr></thead><tbody>");
     for edge in &task.transitions {
         let mut facts = edge.actions.clone();
         facts.extend(edge.effects.clone());
