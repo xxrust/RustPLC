@@ -87,6 +87,8 @@ task fault:
     assert!(html.contains("Journey Reel"));
     assert!(html.contains("Task Theater"));
     assert!(html.contains("task-sfc-svg"));
+    assert!(html.contains("class=\"task-sfc-svg\" width=\""));
+    assert!(!html.contains(".task-sfc-svg { display: block; width: 100%;"));
     assert!(!html.contains("action: compute run_latched = true"));
     assert!(html.contains("goto fault.handle"));
     assert!(html.contains("task-transition-branch-bus"));

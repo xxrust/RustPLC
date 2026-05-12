@@ -987,7 +987,7 @@ fn render_task_svg(task: &TaskDiagram) -> String {
     let mut out = String::new();
     let _ = write!(
         out,
-        r#"<div class="sfc-review"><svg class="task-sfc-svg" viewBox="0 0 {width} {height}" role="img" aria-label="{} SFC chart" xmlns="http://www.w3.org/2000/svg">"#,
+        r#"<div class="sfc-review"><svg class="task-sfc-svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="{} SFC chart" xmlns="http://www.w3.org/2000/svg">"#,
         html_escape(&task.task_name)
     );
     out.push_str(&connectors);
@@ -1605,7 +1605,8 @@ fn render_html(model: &FlowchartArtifact) -> String {
       border: 1px solid #eadcc1;
       border-radius: 20px;
       padding: 12px;
-      min-height: 720px;
+      max-height: 78vh;
+      min-height: 620px;
     }
     .topology-grid {
       display: grid;
@@ -1630,8 +1631,8 @@ fn render_html(model: &FlowchartArtifact) -> String {
       line-height: 1.55;
     }
     .task-templates { display: none; }
-    .sfc-review { width: 100%; }
-    .task-sfc-svg { display: block; width: 100%; min-width: 980px; height: auto; }
+    .sfc-review { min-width: 100%; width: max-content; }
+    .task-sfc-svg { display: block; width: auto; height: auto; max-width: none; }
     .task-step { fill: #fffaf0; stroke: #0f766e; stroke-width: 3; }
     .task-step.generated { fill: #f8fafc; stroke: #94a3b8; stroke-dasharray: 8 6; }
     .task-step-initial { fill: none; stroke: #0f766e; stroke-width: 3; }
