@@ -471,154 +471,379 @@ fn summarize_topology(program: &PlcProgram, topology: &TopologyGraph) -> Topolog
 }
 
 fn render_task_svg(task: &TaskDiagram) -> String {
-    let mut outgoing = BTreeMap::<String, Vec<&EdgeSummary>>::new();
-    for edge in &task.transitions {
-        outgoing
-            .entry(edge.from_step.clone())
-            .or_default()
-            .push(edge);
-    }
-
-    let step_x = 84;
-    let step_w = 304;
-    let action_x = 430;
-    let action_w = 540;
-    let chain_x = step_x + step_w / 2;
-    let transition_text_x = 430;
-    let top_y = 28;
-    let segment_gap = 34;
-    let connector_gap = 18;
-
+    #[derive(Clone)]
     struct TransitionLayout {
         guard_lines: Vec<String>,
         fact_lines: Vec<String>,
         target_lines: Vec<String>,
+        show_note: bool,
         target_external: bool,
         terminal: bool,
-        block_h: i32,
+        note_h: i32,
+        slot_h: i32,
     }
 
-    struct SegmentLayout {
+    struct StepLayout {
         step_name_lines: Vec<String>,
         source_lines: Vec<String>,
-        action_lines: Vec<String>,
+        body_lines: Vec<String>,
         transitions: Vec<TransitionLayout>,
         step_h: i32,
         action_h: i32,
-        transition_total_h: i32,
-        segment_h: i32,
+        core_h: i32,
+        y: i32,
     }
 
+    let step_index = task
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(idx, step)| (step.step_name.clone(), idx))
+        .collect::<HashMap<_, _>>();
+    let step_count = task.steps.len();
+
+    let mut internal_by_source = BTreeMap::<usize, Vec<&EdgeSummary>>::new();
+    let mut internal_by_target = BTreeMap::<usize, Vec<&EdgeSummary>>::new();
+    let mut outgoing_by_source = BTreeMap::<usize, Vec<&EdgeSummary>>::new();
+    for edge in &task.transitions {
+        let Some(&from_idx) = step_index.get(&edge.from_step) else {
+            continue;
+        };
+        outgoing_by_source.entry(from_idx).or_default().push(edge);
+        if edge.to_task == task.task_name {
+            let Some(&to_idx) = step_index.get(&edge.to_step) else {
+                continue;
+            };
+            internal_by_source.entry(from_idx).or_default().push(edge);
+            internal_by_target.entry(to_idx).or_default().push(edge);
+        }
+    }
+    for edges in outgoing_by_source.values_mut() {
+        edges.sort_by_key(|edge| {
+            let to_idx = if edge.to_task == task.task_name {
+                step_index.get(&edge.to_step).copied().unwrap_or(usize::MAX)
+            } else {
+                usize::MAX
+            };
+            (
+                edge.to_task != task.task_name,
+                to_idx,
+                edge.guard.contains("timeout"),
+                edge.guard.clone(),
+                edge.to_task.clone(),
+                edge.to_step.clone(),
+            )
+        });
+    }
+    for edges in internal_by_source.values_mut() {
+        edges.sort_by_key(|edge| {
+            (
+                step_index.get(&edge.to_step).copied().unwrap_or(usize::MAX),
+                edge.guard.clone(),
+                edge.to_step.clone(),
+            )
+        });
+    }
+
+    let mut lanes = vec![0i32; step_count];
+    let mut lane_assigned = vec![false; step_count];
+    if step_count > 0 {
+        lane_assigned[0] = true;
+    }
+    let mut next_lane = 1i32;
+    for idx in 0..step_count {
+        if !lane_assigned[idx] {
+            let pred_lanes = internal_by_target
+                .get(&idx)
+                .into_iter()
+                .flat_map(|edges| edges.iter())
+                .filter_map(|edge| {
+                    let from_idx = step_index.get(&edge.from_step).copied()?;
+                    lane_assigned[from_idx].then_some(lanes[from_idx])
+                })
+                .collect::<Vec<_>>();
+            lanes[idx] = pred_lanes.iter().min().copied().unwrap_or(0);
+            lane_assigned[idx] = true;
+        }
+
+        let mut unique_forward_targets = Vec::new();
+        let mut seen_targets = BTreeSet::new();
+        if let Some(edges) = internal_by_source.get(&idx) {
+            for edge in edges {
+                let Some(&to_idx) = step_index.get(&edge.to_step) else {
+                    continue;
+                };
+                if to_idx > idx && seen_targets.insert(to_idx) {
+                    unique_forward_targets.push(to_idx);
+                }
+            }
+        }
+        unique_forward_targets.sort_unstable();
+        for (order, to_idx) in unique_forward_targets.into_iter().enumerate() {
+            if lane_assigned[to_idx] {
+                continue;
+            }
+            lanes[to_idx] = if order == 0 { lanes[idx] } else { next_lane };
+            if order != 0 {
+                next_lane += 1;
+            }
+            lane_assigned[to_idx] = true;
+        }
+    }
+
+    let step_w = 220;
+    let action_w = 280;
+    let cluster_gap = 28;
+    let lane_gap = 560;
+    let left_margin = 72;
+    let top_y = 72;
+    let max_lane = lanes.iter().copied().max().unwrap_or(0);
+    let chart_w = left_margin + max_lane * lane_gap + step_w + cluster_gap + action_w;
+
     let mut layouts = Vec::new();
-    let mut total_height = top_y;
-    for step in &task.steps {
+    let mut cursor_y = top_y;
+    for (idx, step) in task.steps.iter().enumerate() {
         let source = match (&step.source, step.line) {
             (Some(source), Some(line)) => format!("{}:{}", short_source(source), line),
             _ if step.generated => "generated semantic state".to_string(),
             _ => "source".to_string(),
         };
-        let step_name_lines = wrap_text_lines(&step.step_name, 26, 3);
+        let step_name_lines = wrap_text_lines(&step.step_name, 21, 3);
         let source_lines = wrap_text_lines(&source, 34, 2);
         let step_h =
             30 + (step_name_lines.len() as i32 * 22) + (source_lines.len() as i32 * 16) + 18;
 
-        let action_lines = flatten_statement_lines(&step.statements, 56, 10);
-        let action_h = 18 + (action_lines.len().max(1) as i32 * 16) + 16;
+        let body_lines = flatten_statement_lines(&step_body_lines(&step.statements), 34, 10);
+        let action_h = if body_lines.is_empty() {
+            0
+        } else {
+            18 + (body_lines.len() as i32 * 16) + 16
+        };
 
-        let mut transition_layouts = Vec::new();
-        let transitions = outgoing.get(&step.step_name).cloned().unwrap_or_default();
-        if transitions.is_empty() {
+        let outgoing = outgoing_by_source.get(&idx).cloned().unwrap_or_default();
+        let has_multiple_outgoing = outgoing.len() > 1;
+        let mut transition_layouts = outgoing
+            .into_iter()
+            .map(|edge| {
+                let fact_lines = transition_fact_lines(edge, &step.statements);
+                let guard_lines = if edge.guard == "always" {
+                    Vec::new()
+                } else {
+                    wrap_text_lines(&edge.guard, 34, 3)
+                };
+                let internal_target_idx = if edge.to_task == task.task_name {
+                    step_index.get(&edge.to_step).copied()
+                } else {
+                    None
+                };
+                let show_target = if edge.to_task != task.task_name {
+                    true
+                } else {
+                    match internal_target_idx {
+                        Some(to_idx) => {
+                            to_idx <= idx
+                                || to_idx != idx + 1
+                                || lanes[to_idx] != lanes[idx]
+                                || has_multiple_outgoing
+                        }
+                        None => true,
+                    }
+                };
+                let target_lines = if show_target {
+                    wrap_text_lines(&format!("goto {}.{}", edge.to_task, edge.to_step), 34, 2)
+                } else {
+                    Vec::new()
+                };
+                let show_note =
+                    !guard_lines.is_empty() || !fact_lines.is_empty() || !target_lines.is_empty();
+                let mut note_h = 0;
+                if show_note {
+                    note_h += 14;
+                    note_h += guard_lines.len() as i32 * 16;
+                    if !fact_lines.is_empty() {
+                        if note_h > 14 {
+                            note_h += 6;
+                        }
+                        note_h += fact_lines.len() as i32 * 14;
+                    }
+                    if !target_lines.is_empty() {
+                        if note_h > 14 {
+                            note_h += 6;
+                        }
+                        note_h += target_lines.len() as i32 * 14;
+                    }
+                    note_h += 12;
+                }
+                TransitionLayout {
+                    guard_lines,
+                    fact_lines,
+                    target_lines,
+                    show_note,
+                    target_external: edge.to_task != task.task_name,
+                    terminal: false,
+                    note_h,
+                    slot_h: if show_note { note_h + 30 } else { 30 },
+                }
+            })
+            .collect::<Vec<_>>();
+        if transition_layouts.is_empty() {
             transition_layouts.push(TransitionLayout {
                 guard_lines: Vec::new(),
                 fact_lines: Vec::new(),
                 target_lines: vec!["END".to_string()],
+                show_note: true,
                 target_external: false,
                 terminal: true,
-                block_h: 34,
+                note_h: 40,
+                slot_h: 70,
             });
-        } else {
-            for edge in transitions {
-                let fact_lines = transition_fact_lines(edge, &step.statements);
-                let target = format!("goto {}.{}", edge.to_task, edge.to_step);
-                let guard_lines = if edge.guard == "always" {
-                    Vec::new()
-                } else {
-                    wrap_text_lines(&edge.guard, 48, 3)
-                };
-                let target_lines = wrap_text_lines(&target, 48, 2);
-                let guard_h = guard_lines.len() as i32 * 16;
-                let fact_h = fact_lines.len() as i32 * 14;
-                let target_h = target_lines.len().max(1) as i32 * 14;
-                let block_h =
-                    14 + guard_h + if fact_h > 0 { fact_h + 4 } else { 0 } + target_h + 12;
-                transition_layouts.push(TransitionLayout {
-                    guard_lines,
-                    fact_lines,
-                    target_lines,
-                    target_external: edge.to_task != task.task_name,
-                    terminal: false,
-                    block_h: block_h.max(34),
-                });
-            }
         }
         let transition_total_h = transition_layouts
             .iter()
-            .map(|item| item.block_h + 16)
+            .map(|item| item.slot_h)
             .sum::<i32>();
-        let segment_h = step_h.max(action_h) + connector_gap + transition_total_h + segment_gap;
-        total_height += segment_h;
-        layouts.push(SegmentLayout {
+        let core_h = step_h.max(action_h);
+        let row_h = core_h + 18 + transition_total_h + 24;
+        layouts.push(StepLayout {
             step_name_lines,
             source_lines,
-            action_lines,
+            body_lines,
             transitions: transition_layouts,
             step_h,
             action_h,
-            transition_total_h,
-            segment_h,
+            core_h,
+            y: cursor_y,
         });
+        cursor_y += row_h;
     }
 
-    let width = 1020;
-    let height = total_height + 8;
-    let mut out = String::new();
-    let _ = write!(
-        out,
-        r#"<div class="sfc-review"><svg class="task-sfc-svg" viewBox="0 0 {width} {height}" role="img" aria-label="{} SFC chart" xmlns="http://www.w3.org/2000/svg">"#,
-        html_escape(&task.task_name)
-    );
+    let width = chart_w + 56;
+    let height = cursor_y + 16;
+    let mut connectors = String::new();
+    let mut content = String::new();
 
-    let mut cursor_y = top_y;
-    let mut backbone_start = None;
-    let mut backbone_end = None;
-    for layout in &layouts {
-        let row_h = layout.step_h.max(layout.action_h);
-        let connector_top = cursor_y + layout.step_h;
-        let transition_start_y = cursor_y + row_h + connector_gap;
-        let transition_end_y = transition_start_y + layout.transition_total_h - 16;
-        if backbone_start.is_none() {
-            backbone_start = Some(connector_top);
+    let lane_center_x = |lane: i32| left_margin + lane * lane_gap + step_w / 2;
+    let step_left_x = |lane: i32| left_margin + lane * lane_gap;
+    let note_x = |step_x: i32| step_x + step_w + cluster_gap;
+
+    for idx in 0..step_count {
+        if !internal_by_target.contains_key(&idx) {
+            continue;
         }
-        backbone_end = Some(transition_end_y.max(connector_top));
-        cursor_y += layout.segment_h;
-    }
-    if let (Some(start_y), Some(end_y)) = (backbone_start, backbone_end) {
+        let center_x = lane_center_x(lanes[idx]);
+        let entry_y = layouts[idx].y - 18;
         let _ = writeln!(
-            out,
-            r#"<line class="task-main-line" x1="{chain_x}" y1="{start_y}" x2="{chain_x}" y2="{end_y}"/>"#
+            connectors,
+            r#"<line class="task-main-line" x1="{center_x}" y1="{entry_y}" x2="{center_x}" y2="{}"/>"#,
+            layouts[idx].y
         );
+        if internal_by_target.get(&idx).map_or(0, Vec::len) > 1 {
+            let _ = writeln!(
+                connectors,
+                r#"<line class="task-transition-branch-bar" x1="{}" y1="{entry_y}" x2="{}" y2="{entry_y}"/>"#,
+                center_x - 24,
+                center_x + 24
+            );
+        }
     }
 
-    let mut cursor_y = top_y;
+    for idx in 0..step_count {
+        let Some(edges) = outgoing_by_source.get(&idx) else {
+            continue;
+        };
+        let source_center_x = lane_center_x(lanes[idx]);
+        let source_bottom_y = layouts[idx].y + layouts[idx].step_h;
+        let mut transition_cursor = layouts[idx].y + layouts[idx].core_h + 18;
+        let last_branch_y = transition_cursor
+            + layouts[idx]
+                .transitions
+                .iter()
+                .map(|item| item.slot_h)
+                .sum::<i32>()
+            - layouts[idx]
+                .transitions
+                .last()
+                .map(|item| item.slot_h)
+                .unwrap_or(0)
+            + 12;
+        let _ = writeln!(
+            connectors,
+            r#"<line class="task-main-line" x1="{source_center_x}" y1="{source_bottom_y}" x2="{source_center_x}" y2="{last_branch_y}"/>"#
+        );
+
+        for (edge_idx, edge) in edges.iter().enumerate() {
+            let transition = &layouts[idx].transitions[edge_idx];
+            let branch_y = transition_cursor + 12;
+            let note_left = note_x(step_left_x(lanes[idx]));
+
+            let _ = writeln!(
+                connectors,
+                r#"<line class="task-transition-bar" x1="{}" y1="{branch_y}" x2="{}" y2="{branch_y}"/>"#,
+                source_center_x - 38,
+                source_center_x + 38
+            );
+
+            if edge.to_task == task.task_name {
+                let Some(&to_idx) = step_index.get(&edge.to_step) else {
+                    transition_cursor += transition.slot_h;
+                    continue;
+                };
+                let target_center_x = lane_center_x(lanes[to_idx]);
+                let target_entry_y = layouts[to_idx].y - 18;
+
+                if to_idx > idx {
+                    if target_center_x != source_center_x {
+                        let _ = writeln!(
+                            connectors,
+                            r#"<line class="task-transition-branch-bus" x1="{}" y1="{branch_y}" x2="{}" y2="{branch_y}"/>"#,
+                            source_center_x.min(target_center_x),
+                            source_center_x.max(target_center_x)
+                        );
+                    }
+                    if branch_y != target_entry_y {
+                        let _ = writeln!(
+                            connectors,
+                            r#"<line class="task-main-line" x1="{target_center_x}" y1="{branch_y}" x2="{target_center_x}" y2="{target_entry_y}"/>"#
+                        );
+                    }
+                } else {
+                    let loop_x = left_margin - 42 - lanes[idx] * 24 - edge_idx as i32 * 12;
+                    let _ = writeln!(
+                        connectors,
+                        r#"<line class="task-transition-branch-bus" x1="{loop_x}" y1="{branch_y}" x2="{source_center_x}" y2="{branch_y}"/>"#
+                    );
+                    let _ = writeln!(
+                        connectors,
+                        r#"<line class="task-main-line" x1="{loop_x}" y1="{target_entry_y}" x2="{loop_x}" y2="{branch_y}"/>"#
+                    );
+                    let _ = writeln!(
+                        connectors,
+                        r#"<line class="task-transition-branch-bus" x1="{loop_x}" y1="{target_entry_y}" x2="{target_center_x}" y2="{target_entry_y}"/>"#
+                    );
+                }
+            } else if transition.show_note {
+                let _ = writeln!(
+                    connectors,
+                    r#"<line class="task-transition-link" x1="{}" y1="{branch_y}" x2="{}" y2="{branch_y}"/>"#,
+                    source_center_x + 40,
+                    note_left - 12
+                );
+            }
+            transition_cursor += transition.slot_h;
+        }
+    }
+
     for (idx, step) in task.steps.iter().enumerate() {
         let layout = &layouts[idx];
-        let row_h = layout.step_h.max(layout.action_h);
-        let step_y = cursor_y;
-        let action_y = cursor_y;
+        let step_x = step_left_x(lanes[idx]);
+        let step_y = layout.y;
+        let action_x = note_x(step_x);
+        let action_y = layout.y + (layout.core_h - layout.action_h) / 2;
+        let step_center_y = step_y + layout.step_h / 2 + 4;
 
         if idx == 0 {
             let _ = writeln!(
-                out,
+                content,
                 r#"<rect class="task-step-initial" x="{}" y="{}" width="{}" height="{}" rx="10"/>"#,
                 step_x - 8,
                 step_y - 8,
@@ -633,18 +858,18 @@ fn render_task_svg(task: &TaskDiagram) -> String {
             "task-step"
         };
         let _ = writeln!(
-            out,
+            content,
             r#"<rect class="{step_class}" x="{step_x}" y="{step_y}" width="{step_w}" height="{}" rx="10"/>"#,
             layout.step_h
         );
         let _ = writeln!(
-            out,
-            r#"<text class="task-step-index" x="26" y="{}">{}</text>"#,
-            step_y + layout.step_h / 2 + 4,
+            content,
+            r#"<text class="task-step-index" x="{}" y="{step_center_y}">{}</text>"#,
+            step_x - 48,
             idx + 1
         );
         render_svg_lines(
-            &mut out,
+            &mut content,
             step_x + 16,
             step_y + 28,
             &layout.step_name_lines,
@@ -653,7 +878,7 @@ fn render_task_svg(task: &TaskDiagram) -> String {
             "start",
         );
         render_svg_lines(
-            &mut out,
+            &mut content,
             step_x + 16,
             step_y + 56 + ((layout.step_name_lines.len() as i32 - 1).max(0) * 20),
             &layout.source_lines,
@@ -662,162 +887,71 @@ fn render_task_svg(task: &TaskDiagram) -> String {
             "start",
         );
 
-        let _ = writeln!(
-            out,
-            r#"<rect class="task-action" x="{action_x}" y="{action_y}" width="{action_w}" height="{}" rx="10"/>"#,
-            layout.action_h
-        );
-        if layout.action_lines.is_empty() {
+        if layout.action_h > 0 {
             let _ = writeln!(
-                out,
-                r#"<text class="task-action-line" x="{}" y="{}">-</text>"#,
-                action_x + 16,
-                action_y + 28
+                content,
+                r#"<line class="task-action-link" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+                step_x + step_w,
+                step_y + layout.step_h / 2,
+                action_x,
+                action_y + layout.action_h / 2
             );
-        } else {
+            let _ = writeln!(
+                content,
+                r#"<rect class="task-action" x="{action_x}" y="{action_y}" width="{action_w}" height="{}" rx="10"/>"#,
+                layout.action_h
+            );
             render_svg_lines(
-                &mut out,
+                &mut content,
                 action_x + 16,
                 action_y + 28,
-                &layout.action_lines,
+                &layout.body_lines,
                 "task-action-line",
                 16,
                 "start",
             );
         }
 
-        let transition_start_y = cursor_y + row_h + connector_gap;
-        let mut ty = transition_start_y;
-        let transition_count = layout.transitions.len();
-        if transition_count > 1 {
-            let fork_bar_y = ty + 14;
-            let branch_bus_x = chain_x + 102;
-            let _ = writeln!(
-                out,
-                r#"<line class="task-transition-bar" x1="{}" y1="{fork_bar_y}" x2="{}" y2="{fork_bar_y}"/>"#,
-                chain_x - 42,
-                chain_x + 42
-            );
-            let _ = writeln!(
-                out,
-                r#"<line class="task-transition-link" x1="{}" y1="{fork_bar_y}" x2="{}" y2="{fork_bar_y}"/>"#,
-                chain_x + 42,
-                branch_bus_x - 18
-            );
-            let mut branch_bar_ys = Vec::new();
-            let mut probe_y = ty;
-            for transition in &layout.transitions {
-                branch_bar_ys.push(probe_y + 14);
-                probe_y += transition.block_h + 16;
-            }
-            if let (Some(first_y), Some(last_y)) = (
-                branch_bar_ys.first().copied(),
-                branch_bar_ys.last().copied(),
-            ) {
-                let _ = writeln!(
-                    out,
-                    r#"<line class="task-transition-branch-bus" x1="{branch_bus_x}" y1="{first_y}" x2="{branch_bus_x}" y2="{last_y}"/>"#
-                );
-            }
-            for transition in &layout.transitions {
-                let bar_y = ty + 14;
-                let _ = writeln!(
-                    out,
-                    r#"<line class="task-transition-branch-bar" x1="{}" y1="{bar_y}" x2="{}" y2="{bar_y}"/>"#,
-                    branch_bus_x - 16,
-                    branch_bus_x + 16
-                );
-                let _ = writeln!(
-                    out,
-                    r#"<line class="task-transition-link" x1="{}" y1="{bar_y}" x2="{}" y2="{bar_y}"/>"#,
-                    branch_bus_x + 16,
-                    transition_text_x - 12
-                );
-
-                let mut text_y = ty + 14;
-                if !transition.guard_lines.is_empty() {
-                    render_svg_lines(
-                        &mut out,
-                        transition_text_x,
-                        text_y,
-                        &transition.guard_lines,
-                        "task-transition-guard",
-                        16,
-                        "start",
-                    );
-                    text_y += transition.guard_lines.len() as i32 * 16 + 4;
-                }
-                if !transition.fact_lines.is_empty() {
-                    render_svg_lines(
-                        &mut out,
-                        transition_text_x,
-                        text_y,
-                        &transition.fact_lines,
-                        "task-transition-fact",
-                        14,
-                        "start",
-                    );
-                    text_y += transition.fact_lines.len() as i32 * 14 + 4;
-                }
-                let target_class = if transition.target_external {
-                    "task-transition-target external"
+        let mut transition_cursor = layout.y + layout.core_h + 18;
+        for transition in &layout.transitions {
+            if transition.show_note {
+                let note_top = transition_cursor + 20;
+                let note_class = if transition.target_external {
+                    "task-transition-note external"
+                } else if transition.terminal {
+                    "task-transition-note terminal"
                 } else {
-                    "task-transition-target"
+                    "task-transition-note"
                 };
-                render_svg_lines(
-                    &mut out,
-                    transition_text_x,
-                    text_y,
-                    &transition.target_lines,
-                    target_class,
-                    14,
-                    "start",
-                );
-                ty += transition.block_h + 16;
-            }
-        } else {
-            for transition in &layout.transitions {
-                let bar_half_width = if transition.terminal { 28 } else { 42 };
-                let bar_y = ty + 14;
                 let _ = writeln!(
-                    out,
-                    r#"<line class="task-transition-bar" x1="{}" y1="{bar_y}" x2="{}" y2="{bar_y}"/>"#,
-                    chain_x - bar_half_width,
-                    chain_x + bar_half_width
+                    content,
+                    r#"<rect class="{note_class}" x="{action_x}" y="{note_top}" width="{action_w}" height="{}" rx="10"/>"#,
+                    transition.note_h
                 );
-                if !transition.terminal {
-                    let _ = writeln!(
-                        out,
-                        r#"<line class="task-transition-link" x1="{}" y1="{bar_y}" x2="{}" y2="{bar_y}"/>"#,
-                        chain_x + bar_half_width,
-                        transition_text_x - 12
-                    );
-                }
-
-                let mut text_y = ty + 14;
+                let mut line_y = note_top + 18;
                 if !transition.guard_lines.is_empty() {
                     render_svg_lines(
-                        &mut out,
-                        transition_text_x,
-                        text_y,
+                        &mut content,
+                        action_x + 16,
+                        line_y,
                         &transition.guard_lines,
                         "task-transition-guard",
                         16,
                         "start",
                     );
-                    text_y += transition.guard_lines.len() as i32 * 16 + 4;
+                    line_y += transition.guard_lines.len() as i32 * 16 + 6;
                 }
                 if !transition.fact_lines.is_empty() {
                     render_svg_lines(
-                        &mut out,
-                        transition_text_x,
-                        text_y,
+                        &mut content,
+                        action_x + 16,
+                        line_y,
                         &transition.fact_lines,
                         "task-transition-fact",
                         14,
                         "start",
                     );
-                    text_y += transition.fact_lines.len() as i32 * 14 + 4;
+                    line_y += transition.fact_lines.len() as i32 * 14 + 6;
                 }
                 let target_class = if transition.target_external {
                     "task-transition-target external"
@@ -827,21 +961,27 @@ fn render_task_svg(task: &TaskDiagram) -> String {
                     "task-transition-target"
                 };
                 render_svg_lines(
-                    &mut out,
-                    transition_text_x,
-                    text_y,
+                    &mut content,
+                    action_x + 16,
+                    line_y,
                     &transition.target_lines,
                     target_class,
                     14,
                     "start",
                 );
-                ty += transition.block_h + 16;
             }
+            transition_cursor += transition.slot_h;
         }
-
-        cursor_y += layout.segment_h;
     }
 
+    let mut out = String::new();
+    let _ = write!(
+        out,
+        r#"<div class="sfc-review"><svg class="task-sfc-svg" viewBox="0 0 {width} {height}" role="img" aria-label="{} SFC chart" xmlns="http://www.w3.org/2000/svg">"#,
+        html_escape(&task.task_name)
+    );
+    out.push_str(&connectors);
+    out.push_str(&content);
     out.push_str("</svg></div>");
     out
 }
@@ -951,20 +1091,42 @@ fn transition_fact_lines(edge: &EdgeSummary, step_statements: &[String]) -> Vec<
     facts.extend(edge.effects.iter().map(|item| ("effect", item.as_str())));
     let normalized_step_lines = step_statements
         .iter()
-        .map(|item| canonicalize_flowchart_text(item))
+        .map(|item| canonicalize_flowchart_compare_key(item))
         .collect::<Vec<_>>();
     let mut lines = Vec::new();
     for (kind, fact) in facts {
-        let normalized_fact = canonicalize_flowchart_text(fact);
+        let normalized_fact = canonicalize_flowchart_compare_key(fact);
         if normalized_step_lines
             .iter()
             .any(|step_line| step_line.contains(&normalized_fact))
         {
             continue;
         }
-        lines.extend(wrap_text_lines(&format!("{kind}: {fact}"), 54, 2));
+        lines.extend(wrap_text_lines(&format!("{kind}: {fact}"), 34, 3));
     }
     lines
+}
+
+fn step_body_lines(statements: &[String]) -> Vec<String> {
+    statements
+        .iter()
+        .filter(|item| {
+            let normalized = canonicalize_flowchart_text(item);
+            !(normalized.starts_with("wait ")
+                || normalized.starts_with("delay ")
+                || normalized.starts_with("timeout ")
+                || normalized.starts_with("goto "))
+        })
+        .cloned()
+        .collect()
+}
+
+fn canonicalize_flowchart_compare_key(value: &str) -> String {
+    canonicalize_flowchart_text(value)
+        .replace("some(", "")
+        .replace('(', "")
+        .replace(')', "")
+        .replace(".0", "")
 }
 
 fn canonicalize_flowchart_text(value: &str) -> String {
@@ -1168,13 +1330,17 @@ fn render_html(model: &FlowchartArtifact) -> String {
     .task-step-index {{ fill: #94a3b8; font: 700 14px "Cascadia Mono", Consolas, monospace; }}
     .task-step-title {{ fill: #093f3b; font: 700 16px "Cascadia Mono", Consolas, monospace; }}
     .task-step-source {{ fill: #64748b; font: 12px Georgia, "Noto Serif SC", serif; }}
+    .task-action-link {{ stroke: #94a3b8; stroke-width: 1.3; }}
     .task-action {{ fill: #f8fbff; stroke: #c9d6e2; stroke-width: 1.2; }}
     .task-action-line {{ fill: #111827; font: 12px "Cascadia Mono", Consolas, monospace; }}
     .task-main-line {{ stroke: #111827; stroke-width: 2; }}
     .task-transition-bar {{ stroke: #111827; stroke-width: 6; stroke-linecap: square; }}
-    .task-transition-branch-bus {{ stroke: #111827; stroke-width: 2; }}
+    .task-transition-branch-bus {{ stroke: #7c6750; stroke-width: 1.7; }}
     .task-transition-branch-bar {{ stroke: #111827; stroke-width: 5; stroke-linecap: square; }}
     .task-transition-link {{ stroke: #c7b28a; stroke-width: 1.6; }}
+    .task-transition-note {{ fill: #fffdf7; stroke: #d7ccb7; stroke-width: 1.1; }}
+    .task-transition-note.external {{ stroke: #d7b674; }}
+    .task-transition-note.terminal {{ stroke: #b8c3cf; }}
     .task-transition-guard {{ fill: #111827; font: 700 12px "Cascadia Mono", Consolas, monospace; }}
     .task-transition-fact {{ fill: #475569; font: 11px "Cascadia Mono", Consolas, monospace; }}
     .task-transition-target {{ fill: #134e4a; font: 700 11px "Cascadia Mono", Consolas, monospace; }}
@@ -1583,9 +1749,9 @@ fn summarize_expr(expr: &Expression) -> String {
         Expression::UnaryNeg(inner) => format!("-{}", summarize_expr(inner)),
         Expression::UnaryNot(inner) => format!("NOT {}", summarize_expr(inner)),
         Expression::BinaryOp { op, left, right } => format!(
-            "({} {:?} {})",
+            "({} {} {})",
             summarize_expr(left),
-            op,
+            summarize_binary_op(*op),
             summarize_expr(right)
         ),
         Expression::FunctionCall { name, args } => format!(
@@ -1596,6 +1762,24 @@ fn summarize_expr(expr: &Expression) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+    }
+}
+
+fn summarize_binary_op(op: rust_plc::ast::BinaryOperator) -> &'static str {
+    match op {
+        rust_plc::ast::BinaryOperator::Add => "+",
+        rust_plc::ast::BinaryOperator::Sub => "-",
+        rust_plc::ast::BinaryOperator::Mul => "*",
+        rust_plc::ast::BinaryOperator::Div => "/",
+        rust_plc::ast::BinaryOperator::Mod => "%",
+        rust_plc::ast::BinaryOperator::Eq => "==",
+        rust_plc::ast::BinaryOperator::Neq => "!=",
+        rust_plc::ast::BinaryOperator::Gt => ">",
+        rust_plc::ast::BinaryOperator::Lt => "<",
+        rust_plc::ast::BinaryOperator::Gte => ">=",
+        rust_plc::ast::BinaryOperator::Lte => "<=",
+        rust_plc::ast::BinaryOperator::And => "AND",
+        rust_plc::ast::BinaryOperator::Or => "OR",
     }
 }
 
