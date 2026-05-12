@@ -1484,6 +1484,24 @@ fn render_html(model: &FlowchartArtifact) -> String {
       min-width: 1460px;
       height: auto;
     }
+    .atlas-node-marker {
+      transition: filter 140ms ease, stroke-width 140ms ease, transform 140ms ease;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+    .atlas-node:hover .atlas-node-marker {
+      filter: url(#atlasGlow);
+      stroke-width: 3.6;
+      transform: scale(1.12);
+    }
+    .atlas-node-name {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 140ms ease;
+    }
+    .atlas-node:hover .atlas-node-name {
+      opacity: 1;
+    }
     .journey-strip {
       display: grid;
       grid-auto-flow: column;
@@ -1721,6 +1739,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
       if (journey.length > 1) {
         setInterval(() => {
           if (document.hidden) return;
+          if (document.querySelector('.atlas-node:hover')) return;
           state.activeJourneyIndex = (state.activeJourneyIndex + 1) % journey.length;
           renderAtlas();
           renderJourney();
@@ -1981,14 +2000,26 @@ fn render_html(model: &FlowchartArtifact) -> String {
             const isActiveTo = active && active.to === node.name;
             const stroke = node.kind === 'holder' ? '#0f4c81' : node.kind === 'terminal' ? '#b45309' : '#0f766e';
             const fill = isActiveFrom || isActiveTo ? 'rgba(255,246,220,0.98)' : 'rgba(255,252,246,0.98)';
+            const labelWidth = Math.max(88, node.name.length * 7.4 + 22);
+            const marker =
+              node.kind === 'holder'
+                ? `<rect class="atlas-node-marker" x="${pos.x - 19}" y="${pos.y - 13}" width="38" height="26" rx="13"
+                    fill="${fill}" stroke="${stroke}" stroke-width="${isTouched ? '3.2' : '2.1'}" />`
+                : node.kind === 'terminal'
+                  ? `<path class="atlas-node-marker" d="M ${pos.x} ${pos.y - 18} L ${pos.x + 19} ${pos.y} L ${pos.x} ${pos.y + 18} L ${pos.x - 19} ${pos.y} Z"
+                    fill="${fill}" stroke="${stroke}" stroke-width="${isTouched ? '3.2' : '2.1'}" />`
+                  : `<circle class="atlas-node-marker" cx="${pos.x}" cy="${pos.y}" r="${isTouched ? '15' : '12'}"
+                    fill="${fill}" stroke="${stroke}" stroke-width="${isTouched ? '3.2' : '2.1'}" />`;
             return `
-              <g>
-                <rect x="${pos.x - 88}" y="${pos.y - 32}" width="176" height="64" rx="20"
-                  fill="${fill}" stroke="${stroke}" stroke-width="${isTouched ? '3.6' : '2.2'}" />
-                <text x="${pos.x}" y="${pos.y - 4}" text-anchor="middle"
-                  fill="${stroke}" font-size="16" font-family="Bahnschrift, Cascadia Code, Consolas, monospace">${escapeHtml(node.name)}</text>
-                <text x="${pos.x}" y="${pos.y + 18}" text-anchor="middle"
-                  fill="#6b7280" font-size="11" font-family="Cascadia Code, Consolas, monospace">${node.kind}</text>
+              <g class="atlas-node">
+                <title>${escapeHtml(node.name)} · ${escapeHtml(node.kind)}</title>
+                ${marker}
+                <g class="atlas-node-name">
+                  <rect x="${pos.x - labelWidth / 2}" y="${pos.y - 58}" width="${labelWidth}" height="30" rx="9"
+                    fill="rgba(255,252,246,0.98)" stroke="${stroke}" stroke-width="1.2" />
+                  <text x="${pos.x}" y="${pos.y - 38}" text-anchor="middle"
+                    fill="${stroke}" font-size="12" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(node.name)}</text>
+                </g>
               </g>
             `;
           })
@@ -2065,7 +2096,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
                 <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="rgba(15,118,110,0.18)" />
               </filter>
             </defs>
-            <rect x="0" y="0" width="${width}" height="${height}" rx="24" fill="rgba(255,255,255,0.32)" />
+            <rect x="0" y="0" width="${width}" height="${height}" rx="24" fill="rgba(255,255,255,0.32)" pointer-events="none" />
             <text x="${left}" y="54" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">physical skeleton</text>
             ${routeEdges.join('')}
             ${nodeMarkup}

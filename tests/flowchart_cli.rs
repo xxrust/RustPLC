@@ -84,6 +84,7 @@ task fault:
     assert!(html.contains("flowchart-model"));
     assert!(html.contains("task-templates"));
     assert!(html.contains("System Atlas"));
+    assert!(html.contains("atlas-node-name"));
     assert!(html.contains("Journey Reel"));
     assert!(html.contains("Task Theater"));
     assert!(html.contains("task-sfc-svg"));
