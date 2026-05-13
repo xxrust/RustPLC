@@ -84,13 +84,26 @@ task fault:
     assert!(html.contains("flowchart-model"));
     assert!(html.contains("task-templates"));
     assert!(html.contains("System Atlas"));
+    assert!(html.contains("Review Cockpit"));
+    assert!(html.contains("Review Counts"));
+    assert!(html.contains("Task Inventory"));
+    assert!(html.contains("System Contract"));
     assert!(html.contains("atlas-node-name"));
     assert!(html.contains("atlas-journey-hit"));
+    assert!(html.contains("parallel station occupancy map"));
     assert!(html.contains("control projection"));
-    assert!(html.contains("Journey Reel"));
+    assert!(html.contains("pipeline-wave"));
+    assert!(html.contains("material-token-palette"));
+    assert!(html.contains("cycle color key"));
+    assert!(html.contains("steady-state pipeline wave"));
+    assert!(html.contains("not a single-wafer trace"));
+    assert!(html.contains("Effect Reel"));
     assert!(html.contains("Task Theater"));
+    assert!(html.contains("SFC keeps step identity and transitions only"));
     assert!(html.contains("task-sfc-svg"));
     assert!(html.contains("class=\"task-sfc-svg\" width=\""));
+    assert!(html.contains("integrated review cockpit"));
+    assert!(!html.contains("ts_tailwind_review_app"));
     assert!(!html.contains(".task-sfc-svg { display: block; width: 100%;"));
     assert!(!html.contains("action: compute run_latched = true"));
     assert!(html.contains("goto fault.handle"));
@@ -104,7 +117,9 @@ task fault:
     assert!(json.contains("\"tasks\""));
     assert!(json.contains("\"main\""));
     assert!(json.contains("\"fault\""));
+    assert!(json.contains("\"devices\""));
     assert!(!json.contains("mermaid"));
+    assert!(!out_dir.join("ts_tailwind_review_app").exists());
 }
 
 #[test]
@@ -122,4 +137,55 @@ fn flowchart_help_exposes_the_command() {
     );
     assert!(rendered.contains("flowchart"));
     assert!(rendered.contains("out-dir"));
+}
+
+#[test]
+fn gen_keyence_emits_review_package_without_claiming_compile() {
+    let base = temp_dir("rust_plc_gen_keyence_cli");
+    let plc = base.join("minimal.plc");
+    let out_dir = base.join("keyence_out");
+    write(
+        &plc,
+        r#"
+[topology]
+variable start_button: bool = false
+variable run_latched: bool = false
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_start:
+        wait: start_button == true
+        timeout: 10ms -> goto main.lamp_on
+
+    step lamp_on:
+        action: compute run_latched = true
+"#,
+    );
+
+    let output = run_cli(&[
+        "gen-keyence",
+        plc.to_str().expect("utf8 path"),
+        "--out-dir",
+        out_dir.to_str().expect("utf8 path"),
+        "--output",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "gen-keyence command should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mnm = fs::read_to_string(out_dir.join("mnm/Main.mnm")).expect("mnm draft");
+    assert!(mnm.contains("draft_unverified_requires_kv_studio_import_and_compile"));
+    let vars = fs::read_to_string(out_dir.join("variables/variables.csv")).expect("variables");
+    assert!(vars.contains("start_button"));
+    assert!(vars.contains("run_latched"));
+    let fb = fs::read_to_string(out_dir.join("fb/fb_manifest.md")).expect("fb manifest");
+    assert!(fb.contains("Official FBs Imported Directly"));
+    let report =
+        fs::read_to_string(out_dir.join("validation_report.md")).expect("validation report");
+    assert!(report.contains("has not been imported into KV STUDIO"));
 }

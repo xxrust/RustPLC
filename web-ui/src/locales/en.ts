@@ -14,6 +14,7 @@ export const en = {
     // Tabs
     tabs: {
       topology: 'Topology',
+      flowchart: 'Flowchart Review',
       replay: 'Tick Replay',
       scenario: 'Scenario',
       run: 'Run & Gate',

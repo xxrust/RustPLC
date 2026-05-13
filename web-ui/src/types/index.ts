@@ -401,6 +401,58 @@ export interface TraceKeypointArtifact {
   keypoints: TraceKeypoint[];
 }
 
+export interface FlowchartSystemContractSummary {
+  path: string;
+  excerpt: string;
+  byte_count: number;
+}
+
+export interface FlowchartStepSummary {
+  task_name: string;
+  step_name: string;
+  source: string;
+  line: number;
+  generated: boolean;
+  statements: string[];
+}
+
+export interface FlowchartEdgeSummary {
+  from_task: string;
+  from_step: string;
+  to_task: string;
+  to_step: string;
+  label: string;
+  guard: string;
+  actions: string[];
+  effects: string[];
+}
+
+export interface FlowchartTaskDiagram {
+  task_name: string;
+  steps: FlowchartStepSummary[];
+  transitions: FlowchartEdgeSummary[];
+}
+
+export interface FlowchartTopologySummary {
+  device_count: number;
+  link_count: number;
+  devices?: string[];
+  variables: string[];
+  workpiece_sites: string[];
+  workpiece_holders: string[];
+  workpiece_types: string[];
+  links: string[];
+}
+
+export interface FlowchartArtifact {
+  schema_version: number;
+  source_plc: string;
+  title: string;
+  system_contract?: FlowchartSystemContractSummary | null;
+  tasks: FlowchartTaskDiagram[];
+  topology: FlowchartTopologySummary;
+}
+
 export interface TimingReport {
   schema_version: number;
   tick_ms: number;

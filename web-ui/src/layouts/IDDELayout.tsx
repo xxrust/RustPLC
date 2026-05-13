@@ -11,18 +11,19 @@ import DiagnosisPage from '../pages/DiagnosisPage';
 import ScenarioPage from '../pages/ScenarioPage';
 import ReplayPage from '../pages/ReplayPage';
 import AuditPage from '../pages/AuditPage';
+import FlowchartReviewPage, { flowchartTopologyToCanvas } from '../pages/FlowchartReviewPage';
 import { useTopologyStore } from '../stores/topologyStore';
 import { useAppStore } from '../stores/appStore';
 import { topologyApi } from '../services/api';
 import type { NodeData } from '../stores/topologyStore';
-import type { DevicePortMetadata } from '../types';
+import type { DevicePortMetadata, FlowchartArtifact } from '../types';
 import { normalizeDeviceTags } from '../utils/deviceTags';
 import { getDefaultPortsForNodeType, getEdgeSignalLabel } from '../utils/portContract';
 
 interface Tab {
   id: string;
   label: string;
-  view: 'topology' | 'replay' | 'scenario' | 'run' | 'diagnosis' | 'audit';
+  view: 'topology' | 'flowchart' | 'replay' | 'scenario' | 'run' | 'diagnosis' | 'audit';
   dirty?: boolean;
 }
 
@@ -36,6 +37,7 @@ const IDDELayout: React.FC = () => {
   const { t } = useTranslation();
   const [tabs, setTabs] = useState<Tab[]>([
     { id: 'topology-1', label: t('tabs.topology'), view: 'topology' },
+    { id: 'flowchart-1', label: t('tabs.flowchart'), view: 'flowchart' },
     { id: 'scenario-1', label: t('tabs.scenario'), view: 'scenario' },
     { id: 'run-1', label: t('tabs.run'), view: 'run' },
     { id: 'diagnosis-1', label: t('tabs.diagnosis'), view: 'diagnosis' },
@@ -84,6 +86,24 @@ const IDDELayout: React.FC = () => {
       }
     };
 
+    const loadGeneratedFlowchartTopology = async (): Promise<boolean> => {
+      try {
+        const response = await fetch('/flowchart_review/flowchart.json', { cache: 'no-store' });
+        if (!response.ok) {
+          return false;
+        }
+        const artifact = (await response.json()) as FlowchartArtifact;
+        const { nodes, edges } = flowchartTopologyToCanvas(artifact);
+        if (!cancelled && nodes.length > 0) {
+          setNodes(nodes);
+          setEdges(edges);
+        }
+        return nodes.length > 0;
+      } catch {
+        return false;
+      }
+    };
+
     const loadTopology = async () => {
       if (!projectId) {
         clearTopology();
@@ -113,6 +133,9 @@ const IDDELayout: React.FC = () => {
 
         clearTopology();
       } catch {
+        if (await loadGeneratedFlowchartTopology()) {
+          return;
+        }
         clearTopology();
       }
     };
@@ -381,6 +404,8 @@ const ViewContent: React.FC<{ view: Tab['view']; embedded?: boolean }> = ({
   switch (view) {
     case 'topology':
       return <TopologyCanvas />;
+    case 'flowchart':
+      return <FlowchartReviewPage embedded={embedded} />;
     case 'scenario':
       return <div style={pageStyle}><ScenarioPage /></div>;
     case 'run':

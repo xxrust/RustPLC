@@ -1,0 +1,4256 @@
+{
+  "schema_version": 1,
+  "source_plc": "out/wafer_loader_standard_project/rustplc.bundle.toml",
+  "title": "rustplc",
+  "system_contract": {
+    "path": "out/wafer_loader_standard_project\\plc\\main.system.md",
+    "excerpt": "# 测角机上料器系统语义描述\n本文件从 `docs/wafer_loader.system.md` 收敛而来，是本标准 scaffold 项目的顶层 system contract。\n生成顺序固定为：\nmain.system.md -> process_model/process_operation_model.toml -> 00/01/02/03/04 分层 PLC -> verification/runtime/codegen\n## 项目身份\n- 项目名称：测角机上料器\n- 行业：半导体\n- 控制器：Keyence KV-5500\n- 介质：气动 + 步进轴\n- 主要风险：晶片损失、节拍中断、机构干涉\n## 工艺使命\n系统负责从出料盒取出单片晶片，经滑轨取料位、小旋臂、辨相台、摆缸转运后交付到测片台。\n辨相台通过同一个数字探测信号在旋转前后两次采样来判定方向：晶片放到辨相台并吸附后先记录旋转前探测值，再将辨相台旋转 180 度并记录旋转后探测值。\n两次采样必须发生可判别变化；若两次相同，视为辨相传感器/旋光判定异常，当前晶片进入 IR/reject 盒。\n联调临时约定：`before=true, after=false` 表示旋转前 +X 已朝滑轨方向，应回到原向；`before=false, after=true` 表示旋转后 +X 朝滑轨方向，应保持 180 度翻转状态。该映射需随正式光学标定冻结。\n连续 3 片辨相异常时停机告警。\n## 工艺操作调度模型\n本项目不是“一个工件从头跑到尾后再放下一个工件”的固定大循环。调度策略为 opportunistic admission：",
+    "byte_count": 5422
+  },
+  "tasks": [
+    {
+      "task_name": "architecture_monitor",
+      "steps": [
+        {
+          "task_name": "architecture_monitor",
+          "step_name": "derive_drop_rate",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 69,
+          "generated": false,
+          "statements": [
+            "compute drop_rate_exceeded = ((transfer_attempt_count >= 1000) AND ((drop_total * 1000) > transfer_attempt_count))"
+          ]
+        },
+        {
+          "task_name": "architecture_monitor",
+          "step_name": "monitor_loop",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 73,
+          "generated": false,
+          "statements": [
+            "delay 20ms"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "architecture_monitor",
+          "from_step": "derive_drop_rate",
+          "to_task": "architecture_monitor",
+          "to_step": "monitor_loop",
+          "label": "compute drop_rate_exceeded = ((transfer_attempt_count >= 1000) AND ((drop_total * 1000) > transfer_attempt_count))",
+          "guard": "always",
+          "actions": [
+            "compute drop_rate_exceeded = ((transfer_attempt_count >= 1000) AND ((drop_total * 1000) > transfer_attempt_count))"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "architecture_monitor",
+          "from_step": "monitor_loop",
+          "to_task": "architecture_monitor",
+          "to_step": "derive_drop_rate",
+          "label": "delay 20ms",
+          "guard": "delay 20ms",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "feed_fault",
+      "steps": [
+        {
+          "task_name": "feed_fault",
+          "step_name": "feed_vacuum_timeout",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 150,
+          "generated": false,
+          "statements": [
+            "set vac_feed_valve.coil off",
+            "retract cyl_feed",
+            "compute auto_cycle_enabled = false",
+            "log feed fault: wafer was not held within 1 second",
+            "goto feed_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "feed_fault",
+          "step_name": "slide_receive_timeout",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 158,
+          "generated": false,
+          "statements": [
+            "set vac_feed_valve.coil off",
+            "retract cyl_feed",
+            "compute auto_cycle_enabled = false",
+            "log feed fault: slide did not prove wafer receipt",
+            "goto feed_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "feed_fault",
+          "step_name": "wait_refresh",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 166,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(refresh_button)",
+            "allow_indefinite_wait true"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "feed_fault",
+          "from_step": "feed_vacuum_timeout",
+          "to_task": "feed_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_feed_valve.coil Off; retract cyl_feed",
+          "guard": "always",
+          "actions": [
+            "set vac_feed_valve.coil Off",
+            "retract cyl_feed",
+            "compute auto_cycle_enabled = false",
+            "log feed fault: wafer was not held within 1 second"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "feed_fault",
+          "from_step": "slide_receive_timeout",
+          "to_task": "feed_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_feed_valve.coil Off; retract cyl_feed",
+          "guard": "always",
+          "actions": [
+            "set vac_feed_valve.coil Off",
+            "retract cyl_feed",
+            "compute auto_cycle_enabled = false",
+            "log feed fault: slide did not prove wafer receipt"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "feed_fault",
+          "from_step": "wait_refresh",
+          "to_task": "startup_initializer",
+          "to_step": "drive_safe_outputs",
+          "label": "Rising_edge(refresh_button)",
+          "guard": "Rising_edge(refresh_button)",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "feed_prep",
+      "steps": [
+        {
+          "task_name": "feed_prep",
+          "step_name": "wait_enabled",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 4,
+          "generated": false,
+          "statements": [
+            "wait auto_cycle_enabled == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "feed_prep",
+          "step_name": "wait_mode",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 9,
+          "generated": false,
+          "statements": [
+            "wait mode_auto == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "feed_prep",
+          "step_name": "wait_stop_clear",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 14,
+          "generated": false,
+          "statements": [
+            "wait stop_button == false",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "feed_prep",
+          "step_name": "wait_slide_free",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 19,
+          "generated": false,
+          "statements": [
+            "wait wafer_on_slide == false",
+            "timeout 1500ms -> startup_manual_assist.slide_residue_required"
+          ]
+        },
+        {
+          "task_name": "feed_prep",
+          "step_name": "wait_cassette_source",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 24,
+          "generated": false,
+          "statements": [
+            "wait feed_cassette_present == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "feed_prep",
+          "step_name": "feed_forward",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 29,
+          "generated": false,
+          "statements": [
+            "extend cyl_feed"
+          ]
+        },
+        {
+          "task_name": "feed_prep",
+          "step_name": "feed_vacuum_on",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 34,
+          "generated": false,
+          "statements": [
+            "set vac_feed_valve.coil on"
+          ]
+        },
+        {
+          "task_name": "feed_prep",
+          "step_name": "wait_feed_vacuum",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 38,
+          "generated": false,
+          "statements": [
+            "wait sensor_feed_vac_ok == true",
+            "timeout 1000ms -> feed_fault.feed_vacuum_timeout",
+            "acquire feed_ejector from feed_cassette"
+          ]
+        },
+        {
+          "task_name": "feed_prep",
+          "step_name": "feed_back",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 44,
+          "generated": false,
+          "statements": [
+            "retract cyl_feed"
+          ]
+        },
+        {
+          "task_name": "feed_prep",
+          "step_name": "release_to_slide",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 49,
+          "generated": false,
+          "statements": [
+            "set vac_feed_valve.coil off"
+          ]
+        },
+        {
+          "task_name": "feed_prep",
+          "step_name": "wait_slide_receives_wafer",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\10_feed_prep.plc",
+          "line": 53,
+          "generated": false,
+          "statements": [
+            "wait wafer_on_slide == true",
+            "timeout 1000ms -> feed_fault.slide_receive_timeout",
+            "transfer feed_ejector -> slide_pick_site"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "feed_prep",
+          "from_step": "wait_enabled",
+          "to_task": "feed_prep",
+          "to_step": "wait_mode",
+          "label": "when auto_cycle_enabled == true",
+          "guard": "when auto_cycle_enabled == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "wait_mode",
+          "to_task": "feed_prep",
+          "to_step": "wait_stop_clear",
+          "label": "when mode_auto == true",
+          "guard": "when mode_auto == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "wait_stop_clear",
+          "to_task": "feed_prep",
+          "to_step": "wait_slide_free",
+          "label": "when stop_button == false",
+          "guard": "when stop_button == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "wait_slide_free",
+          "to_task": "startup_manual_assist",
+          "to_step": "slide_residue_required",
+          "label": "timeout 1500ms",
+          "guard": "timeout 1500ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "wait_slide_free",
+          "to_task": "feed_prep",
+          "to_step": "wait_cassette_source",
+          "label": "when wafer_on_slide == false",
+          "guard": "when wafer_on_slide == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "wait_cassette_source",
+          "to_task": "feed_prep",
+          "to_step": "feed_forward",
+          "label": "when feed_cassette_present == true",
+          "guard": "when feed_cassette_present == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "feed_forward",
+          "to_task": "feed_prep",
+          "to_step": "feed_vacuum_on",
+          "label": "extend cyl_feed",
+          "guard": "always",
+          "actions": [
+            "extend cyl_feed"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "feed_vacuum_on",
+          "to_task": "feed_prep",
+          "to_step": "wait_feed_vacuum",
+          "label": "set vac_feed_valve.coil On",
+          "guard": "always",
+          "actions": [
+            "set vac_feed_valve.coil On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "wait_feed_vacuum",
+          "to_task": "feed_fault",
+          "to_step": "feed_vacuum_timeout",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "wait_feed_vacuum",
+          "to_task": "feed_prep",
+          "to_step": "feed_back",
+          "label": "when sensor_feed_vac_ok == true; acquire feed_ejector from feed_cassette",
+          "guard": "when sensor_feed_vac_ok == true",
+          "actions": [],
+          "effects": [
+            "acquire feed_ejector from feed_cassette"
+          ]
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "feed_back",
+          "to_task": "feed_prep",
+          "to_step": "release_to_slide",
+          "label": "retract cyl_feed",
+          "guard": "always",
+          "actions": [
+            "retract cyl_feed"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "release_to_slide",
+          "to_task": "feed_prep",
+          "to_step": "wait_slide_receives_wafer",
+          "label": "set vac_feed_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_feed_valve.coil Off"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "wait_slide_receives_wafer",
+          "to_task": "feed_fault",
+          "to_step": "slide_receive_timeout",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "feed_prep",
+          "from_step": "wait_slide_receives_wafer",
+          "to_task": "feed_prep",
+          "to_step": "wait_enabled",
+          "label": "when wafer_on_slide == true; transfer feed_ejector -> slide_pick_site",
+          "guard": "when wafer_on_slide == true",
+          "actions": [],
+          "effects": [
+            "transfer feed_ejector -> slide_pick_site"
+          ]
+        }
+      ]
+    },
+    {
+      "task_name": "feed_warning",
+      "steps": [
+        {
+          "task_name": "feed_warning",
+          "step_name": "feed_cyl_warn",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 101,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = false",
+            "set vac_feed_valve.coil off",
+            "retract cyl_feed",
+            "log feed warning: feed cylinder position not confirmed"
+          ]
+        },
+        {
+          "task_name": "feed_warning",
+          "step_name": "wait_refresh",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 108,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(refresh_button)",
+            "allow_indefinite_wait true"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "feed_warning",
+          "from_step": "feed_cyl_warn",
+          "to_task": "feed_warning",
+          "to_step": "wait_refresh",
+          "label": "compute auto_cycle_enabled = false; set vac_feed_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = false",
+            "set vac_feed_valve.coil Off",
+            "retract cyl_feed",
+            "log feed warning: feed cylinder position not confirmed"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "feed_warning",
+          "from_step": "wait_refresh",
+          "to_task": "startup_initializer",
+          "to_step": "drive_safe_outputs",
+          "label": "Rising_edge(refresh_button)",
+          "guard": "Rising_edge(refresh_button)",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "maintenance_manual_assist",
+      "steps": [
+        {
+          "task_name": "maintenance_manual_assist",
+          "step_name": "vacuum_self_check_failed",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 66,
+          "generated": false,
+          "statements": [
+            "set vac_feed_valve.coil off",
+            "set vac_arm_valve.coil off",
+            "set vac_orient_valve.coil off",
+            "set vac_transfer_valve.coil off",
+            "log maintenance self-check failed: vacuum loop",
+            "goto maintenance_manual_assist.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "maintenance_manual_assist",
+          "step_name": "cylinder_self_check_failed",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 75,
+          "generated": false,
+          "statements": [
+            "retract cyl_feed",
+            "retract cyl_orient_rotate",
+            "retract cyl_swing",
+            "retract cyl_lift",
+            "retract cyl_transfer",
+            "log maintenance self-check failed: cylinder loop",
+            "goto maintenance_manual_assist.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "maintenance_manual_assist",
+          "step_name": "axis_self_check_failed",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 85,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil off",
+            "set vac_orient_valve.coil off",
+            "log maintenance self-check failed: arm axis loop",
+            "goto maintenance_manual_assist.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "maintenance_manual_assist",
+          "step_name": "wait_refresh",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 92,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(refresh_button)",
+            "allow_indefinite_wait true"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "maintenance_manual_assist",
+          "from_step": "vacuum_self_check_failed",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "wait_refresh",
+          "label": "set vac_feed_valve.coil Off; set vac_arm_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_feed_valve.coil Off",
+            "set vac_arm_valve.coil Off",
+            "set vac_orient_valve.coil Off",
+            "set vac_transfer_valve.coil Off",
+            "log maintenance self-check failed: vacuum loop"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_manual_assist",
+          "from_step": "cylinder_self_check_failed",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "wait_refresh",
+          "label": "retract cyl_feed; retract cyl_orient_rotate",
+          "guard": "always",
+          "actions": [
+            "retract cyl_feed",
+            "retract cyl_orient_rotate",
+            "retract cyl_swing",
+            "retract cyl_lift",
+            "retract cyl_transfer",
+            "log maintenance self-check failed: cylinder loop"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_manual_assist",
+          "from_step": "axis_self_check_failed",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "wait_refresh",
+          "label": "set vac_arm_valve.coil Off; set vac_orient_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_arm_valve.coil Off",
+            "set vac_orient_valve.coil Off",
+            "log maintenance self-check failed: arm axis loop"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_manual_assist",
+          "from_step": "wait_refresh",
+          "to_task": "maintenance_self_check",
+          "to_step": "wait_maintenance_mode",
+          "label": "Rising_edge(refresh_button)",
+          "guard": "Rising_edge(refresh_button)",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "maintenance_self_check",
+      "steps": [
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "wait_maintenance_mode",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 4,
+          "generated": false,
+          "statements": [
+            "wait mode_maintenance == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "wait_self_check_request",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 9,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(refresh_button)",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "prepare_safe_baseline",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 14,
+          "generated": false,
+          "statements": [
+            "set vac_feed_valve.coil off",
+            "set vac_arm_valve.coil off",
+            "set vac_orient_valve.coil off",
+            "set vac_transfer_valve.coil off",
+            "retract cyl_feed",
+            "retract cyl_orient_rotate",
+            "retract cyl_swing",
+            "retract cyl_lift",
+            "retract cyl_transfer",
+            "set axis_arm.enable on"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_feed_vacuum_on",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 27,
+          "generated": false,
+          "statements": [
+            "set vac_feed_valve.coil on",
+            "wait sensor_feed_vac_ok == true",
+            "timeout 1000ms -> maintenance_manual_assist.vacuum_self_check_failed"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_feed_vacuum_off",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 33,
+          "generated": false,
+          "statements": [
+            "set vac_feed_valve.coil off",
+            "wait sensor_feed_vac_ok == false",
+            "timeout 1000ms -> maintenance_manual_assist.vacuum_self_check_failed"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_arm_vacuum_on",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 39,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil on",
+            "wait sensor_arm_vac_ok == true",
+            "timeout 1000ms -> maintenance_manual_assist.vacuum_self_check_failed"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_arm_vacuum_off",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 45,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil off",
+            "wait sensor_arm_vac_ok == false",
+            "timeout 1000ms -> maintenance_manual_assist.vacuum_self_check_failed"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_orient_vacuum_on",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 51,
+          "generated": false,
+          "statements": [
+            "set vac_orient_valve.coil on",
+            "wait sensor_orient_vac_ok == true",
+            "timeout 1000ms -> maintenance_manual_assist.vacuum_self_check_failed"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_orient_vacuum_off",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 57,
+          "generated": false,
+          "statements": [
+            "set vac_orient_valve.coil off",
+            "wait sensor_orient_vac_ok == false",
+            "timeout 1000ms -> maintenance_manual_assist.vacuum_self_check_failed"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_transfer_vacuum_on",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 63,
+          "generated": false,
+          "statements": [
+            "set vac_transfer_valve.coil on",
+            "wait sensor_transfer_vac_ok == true",
+            "timeout 1000ms -> maintenance_manual_assist.vacuum_self_check_failed"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_transfer_vacuum_off",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 69,
+          "generated": false,
+          "statements": [
+            "set vac_transfer_valve.coil off",
+            "wait sensor_transfer_vac_ok == false",
+            "timeout 1000ms -> maintenance_manual_assist.vacuum_self_check_failed"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_feed_cylinder",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 75,
+          "generated": false,
+          "statements": [
+            "extend cyl_feed",
+            "retract cyl_feed"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_orient_rotate_cylinder",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 82,
+          "generated": false,
+          "statements": [
+            "extend cyl_orient_rotate",
+            "retract cyl_orient_rotate"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_swing_cylinder",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 89,
+          "generated": false,
+          "statements": [
+            "extend cyl_swing",
+            "retract cyl_swing"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_lift_cylinder",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 96,
+          "generated": false,
+          "statements": [
+            "extend cyl_lift",
+            "retract cyl_lift"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_transfer_cylinder",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 103,
+          "generated": false,
+          "statements": [
+            "extend cyl_transfer",
+            "retract cyl_transfer"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_axis_motion",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 110,
+          "generated": false,
+          "statements": [
+            "axis.move_relative axis_arm distance=5 speed=Some(2.0)"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "check_axis_home",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 118,
+          "generated": false,
+          "statements": [
+            "axis.move_absolute axis_arm position=0 speed=Some(2.0)",
+            "wait sensor_arm_home == true",
+            "timeout 1000ms -> maintenance_manual_assist.axis_self_check_failed"
+          ]
+        },
+        {
+          "task_name": "maintenance_self_check",
+          "step_name": "self_check_done",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\40_maintenance_self_check.plc",
+          "line": 128,
+          "generated": false,
+          "statements": [
+            "log maintenance self-check passed"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "wait_maintenance_mode",
+          "to_task": "maintenance_self_check",
+          "to_step": "wait_self_check_request",
+          "label": "when mode_maintenance == true",
+          "guard": "when mode_maintenance == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "wait_self_check_request",
+          "to_task": "maintenance_self_check",
+          "to_step": "prepare_safe_baseline",
+          "label": "Rising_edge(refresh_button)",
+          "guard": "Rising_edge(refresh_button)",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "prepare_safe_baseline",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_feed_vacuum_on",
+          "label": "set vac_feed_valve.coil Off; set vac_arm_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_feed_valve.coil Off",
+            "set vac_arm_valve.coil Off",
+            "set vac_orient_valve.coil Off",
+            "set vac_transfer_valve.coil Off",
+            "retract cyl_feed",
+            "retract cyl_orient_rotate",
+            "retract cyl_swing",
+            "retract cyl_lift",
+            "retract cyl_transfer",
+            "set axis_arm.enable On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_feed_vacuum_on",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "vacuum_self_check_failed",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_feed_vacuum_on",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_feed_vacuum_off",
+          "label": "when sensor_feed_vac_ok == true; set vac_feed_valve.coil On",
+          "guard": "when sensor_feed_vac_ok == true",
+          "actions": [
+            "set vac_feed_valve.coil On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_feed_vacuum_off",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "vacuum_self_check_failed",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_feed_vacuum_off",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_arm_vacuum_on",
+          "label": "when sensor_feed_vac_ok == false; set vac_feed_valve.coil Off",
+          "guard": "when sensor_feed_vac_ok == false",
+          "actions": [
+            "set vac_feed_valve.coil Off"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_arm_vacuum_on",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "vacuum_self_check_failed",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_arm_vacuum_on",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_arm_vacuum_off",
+          "label": "when sensor_arm_vac_ok == true; set vac_arm_valve.coil On",
+          "guard": "when sensor_arm_vac_ok == true",
+          "actions": [
+            "set vac_arm_valve.coil On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_arm_vacuum_off",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "vacuum_self_check_failed",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_arm_vacuum_off",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_orient_vacuum_on",
+          "label": "when sensor_arm_vac_ok == false; set vac_arm_valve.coil Off",
+          "guard": "when sensor_arm_vac_ok == false",
+          "actions": [
+            "set vac_arm_valve.coil Off"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_orient_vacuum_on",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "vacuum_self_check_failed",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_orient_vacuum_on",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_orient_vacuum_off",
+          "label": "when sensor_orient_vac_ok == true; set vac_orient_valve.coil On",
+          "guard": "when sensor_orient_vac_ok == true",
+          "actions": [
+            "set vac_orient_valve.coil On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_orient_vacuum_off",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "vacuum_self_check_failed",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_orient_vacuum_off",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_transfer_vacuum_on",
+          "label": "when sensor_orient_vac_ok == false; set vac_orient_valve.coil Off",
+          "guard": "when sensor_orient_vac_ok == false",
+          "actions": [
+            "set vac_orient_valve.coil Off"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_transfer_vacuum_on",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "vacuum_self_check_failed",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_transfer_vacuum_on",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_transfer_vacuum_off",
+          "label": "when sensor_transfer_vac_ok == true; set vac_transfer_valve.coil On",
+          "guard": "when sensor_transfer_vac_ok == true",
+          "actions": [
+            "set vac_transfer_valve.coil On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_transfer_vacuum_off",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "vacuum_self_check_failed",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_transfer_vacuum_off",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_feed_cylinder",
+          "label": "when sensor_transfer_vac_ok == false; set vac_transfer_valve.coil Off",
+          "guard": "when sensor_transfer_vac_ok == false",
+          "actions": [
+            "set vac_transfer_valve.coil Off"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_feed_cylinder",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_orient_rotate_cylinder",
+          "label": "extend cyl_feed; retract cyl_feed",
+          "guard": "always",
+          "actions": [
+            "extend cyl_feed",
+            "retract cyl_feed"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_orient_rotate_cylinder",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_swing_cylinder",
+          "label": "extend cyl_orient_rotate; retract cyl_orient_rotate",
+          "guard": "always",
+          "actions": [
+            "extend cyl_orient_rotate",
+            "retract cyl_orient_rotate"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_swing_cylinder",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_lift_cylinder",
+          "label": "extend cyl_swing; retract cyl_swing",
+          "guard": "always",
+          "actions": [
+            "extend cyl_swing",
+            "retract cyl_swing"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_lift_cylinder",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_transfer_cylinder",
+          "label": "extend cyl_lift; retract cyl_lift",
+          "guard": "always",
+          "actions": [
+            "extend cyl_lift",
+            "retract cyl_lift"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_transfer_cylinder",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_axis_motion",
+          "label": "extend cyl_transfer; retract cyl_transfer",
+          "guard": "always",
+          "actions": [
+            "extend cyl_transfer",
+            "retract cyl_transfer"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_axis_motion",
+          "to_task": "maintenance_self_check",
+          "to_step": "check_axis_home",
+          "label": "axis.move_relative axis_arm distance=5 speed=2",
+          "guard": "always",
+          "actions": [
+            "axis.move_relative axis_arm distance=5 speed=2"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_axis_home",
+          "to_task": "maintenance_manual_assist",
+          "to_step": "axis_self_check_failed",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "check_axis_home",
+          "to_task": "maintenance_self_check",
+          "to_step": "self_check_done",
+          "label": "when sensor_arm_home == true; axis.move_absolute axis_arm position=0 speed=2",
+          "guard": "when sensor_arm_home == true",
+          "actions": [
+            "axis.move_absolute axis_arm position=0 speed=2"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "maintenance_self_check",
+          "from_step": "self_check_done",
+          "to_task": "maintenance_self_check",
+          "to_step": "wait_maintenance_mode",
+          "label": "log maintenance self-check passed",
+          "guard": "always",
+          "actions": [
+            "log maintenance self-check passed"
+          ],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "orient_axis_fault",
+      "steps": [
+        {
+          "task_name": "orient_axis_fault",
+          "step_name": "move_timeout",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 228,
+          "generated": false,
+          "statements": [
+            "compute axis_recover_attempts = (axis_recover_attempts + 1)"
+          ]
+        },
+        {
+          "task_name": "orient_axis_fault",
+          "step_name": "move_reject",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 232,
+          "generated": false,
+          "statements": [
+            "compute axis_recover_attempts = (axis_recover_attempts + 1)"
+          ]
+        },
+        {
+          "task_name": "orient_axis_fault",
+          "step_name": "move_motion_fault",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 236,
+          "generated": false,
+          "statements": [
+            "compute axis_recover_attempts = (axis_recover_attempts + 1)"
+          ]
+        },
+        {
+          "task_name": "orient_axis_fault",
+          "step_name": "move_safety_fault",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 240,
+          "generated": false,
+          "statements": [
+            "compute axis_recover_attempts = (axis_recover_attempts + 1)"
+          ]
+        },
+        {
+          "task_name": "orient_axis_fault",
+          "step_name": "decide_retry",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 244,
+          "generated": false,
+          "statements": [
+            "wait axis_recover_attempts <= 2",
+            "timeout 10ms -> orient_fault.axis_unrecoverable"
+          ]
+        },
+        {
+          "task_name": "orient_axis_fault",
+          "step_name": "retry_pause",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 249,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil off",
+            "set vac_orient_valve.coil off",
+            "delay 200ms"
+          ]
+        },
+        {
+          "task_name": "orient_axis_fault",
+          "step_name": "retry_enable",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 255,
+          "generated": false,
+          "statements": [
+            "set axis_arm.enable on"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "orient_axis_fault",
+          "from_step": "move_timeout",
+          "to_task": "orient_axis_fault",
+          "to_step": "move_reject",
+          "label": "compute axis_recover_attempts = (axis_recover_attempts + 1)",
+          "guard": "always",
+          "actions": [
+            "compute axis_recover_attempts = (axis_recover_attempts + 1)"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_axis_fault",
+          "from_step": "move_reject",
+          "to_task": "orient_axis_fault",
+          "to_step": "move_motion_fault",
+          "label": "compute axis_recover_attempts = (axis_recover_attempts + 1)",
+          "guard": "always",
+          "actions": [
+            "compute axis_recover_attempts = (axis_recover_attempts + 1)"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_axis_fault",
+          "from_step": "move_motion_fault",
+          "to_task": "orient_axis_fault",
+          "to_step": "move_safety_fault",
+          "label": "compute axis_recover_attempts = (axis_recover_attempts + 1)",
+          "guard": "always",
+          "actions": [
+            "compute axis_recover_attempts = (axis_recover_attempts + 1)"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_axis_fault",
+          "from_step": "move_safety_fault",
+          "to_task": "orient_axis_fault",
+          "to_step": "decide_retry",
+          "label": "compute axis_recover_attempts = (axis_recover_attempts + 1)",
+          "guard": "always",
+          "actions": [
+            "compute axis_recover_attempts = (axis_recover_attempts + 1)"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_axis_fault",
+          "from_step": "decide_retry",
+          "to_task": "orient_fault",
+          "to_step": "axis_unrecoverable",
+          "label": "timeout 10ms",
+          "guard": "timeout 10ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_axis_fault",
+          "from_step": "decide_retry",
+          "to_task": "orient_axis_fault",
+          "to_step": "retry_pause",
+          "label": "when axis_recover_attempts <= 2",
+          "guard": "when axis_recover_attempts <= 2",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_axis_fault",
+          "from_step": "retry_pause",
+          "to_task": "orient_axis_fault",
+          "to_step": "retry_enable",
+          "label": "delay 200ms",
+          "guard": "delay 200ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_axis_fault",
+          "from_step": "retry_enable",
+          "to_task": "orient_stage",
+          "to_step": "wait_enabled",
+          "label": "set axis_arm.enable On",
+          "guard": "always",
+          "actions": [
+            "set axis_arm.enable On"
+          ],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "orient_fault",
+      "steps": [
+        {
+          "task_name": "orient_fault",
+          "step_name": "arm_pick_timeout",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 175,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil off",
+            "compute auto_cycle_enabled = false",
+            "log orient fault: arm vacuum did not pick the wafer",
+            "goto orient_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "orient_fault",
+          "step_name": "orient_vacuum_timeout",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 182,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil off",
+            "set vac_orient_valve.coil off",
+            "compute auto_cycle_enabled = false",
+            "log orient fault: orient vacuum did not confirm hold",
+            "goto orient_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "orient_fault",
+          "step_name": "slide_sensor_stuck_after_pick",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 190,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil off",
+            "compute auto_cycle_enabled = false",
+            "log orient fault: slide sensor did not clear after arm pickup",
+            "goto orient_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "orient_fault",
+          "step_name": "orient_stage_not_ready",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 197,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = false",
+            "log orient fault: orient stage did not present a wafer for transfer",
+            "goto orient_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "orient_fault",
+          "step_name": "orient_reject_streak_fault",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 203,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil off",
+            "set vac_orient_valve.coil off",
+            "compute auto_cycle_enabled = false",
+            "log orient fault: three consecutive wafers rejected to IR",
+            "goto orient_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "orient_fault",
+          "step_name": "axis_unrecoverable",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 211,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil off",
+            "set vac_orient_valve.coil off",
+            "compute auto_cycle_enabled = false",
+            "log orient fault: arm axis recovery exhausted",
+            "goto orient_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "orient_fault",
+          "step_name": "wait_refresh",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 219,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(refresh_button)",
+            "allow_indefinite_wait true"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "orient_fault",
+          "from_step": "arm_pick_timeout",
+          "to_task": "orient_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_arm_valve.coil Off; compute auto_cycle_enabled = false",
+          "guard": "always",
+          "actions": [
+            "set vac_arm_valve.coil Off",
+            "compute auto_cycle_enabled = false",
+            "log orient fault: arm vacuum did not pick the wafer"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_fault",
+          "from_step": "orient_vacuum_timeout",
+          "to_task": "orient_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_arm_valve.coil Off; set vac_orient_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_arm_valve.coil Off",
+            "set vac_orient_valve.coil Off",
+            "compute auto_cycle_enabled = false",
+            "log orient fault: orient vacuum did not confirm hold"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_fault",
+          "from_step": "slide_sensor_stuck_after_pick",
+          "to_task": "orient_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_arm_valve.coil Off; compute auto_cycle_enabled = false",
+          "guard": "always",
+          "actions": [
+            "set vac_arm_valve.coil Off",
+            "compute auto_cycle_enabled = false",
+            "log orient fault: slide sensor did not clear after arm pickup"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_fault",
+          "from_step": "orient_stage_not_ready",
+          "to_task": "orient_fault",
+          "to_step": "wait_refresh",
+          "label": "compute auto_cycle_enabled = false; log orient fault: orient stage did not present a wafer for transfer",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = false",
+            "log orient fault: orient stage did not present a wafer for transfer"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_fault",
+          "from_step": "orient_reject_streak_fault",
+          "to_task": "orient_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_arm_valve.coil Off; set vac_orient_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_arm_valve.coil Off",
+            "set vac_orient_valve.coil Off",
+            "compute auto_cycle_enabled = false",
+            "log orient fault: three consecutive wafers rejected to IR"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_fault",
+          "from_step": "axis_unrecoverable",
+          "to_task": "orient_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_arm_valve.coil Off; set vac_orient_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_arm_valve.coil Off",
+            "set vac_orient_valve.coil Off",
+            "compute auto_cycle_enabled = false",
+            "log orient fault: arm axis recovery exhausted"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_fault",
+          "from_step": "wait_refresh",
+          "to_task": "startup_initializer",
+          "to_step": "drive_safe_outputs",
+          "label": "Rising_edge(refresh_button)",
+          "guard": "Rising_edge(refresh_button)",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "orient_stage",
+      "steps": [
+        {
+          "task_name": "orient_stage",
+          "step_name": "wait_enabled",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 4,
+          "generated": false,
+          "statements": [
+            "wait auto_cycle_enabled == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "clear_orient_transfer_ready",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 9,
+          "generated": false,
+          "statements": [
+            "compute orient_transfer_ready = false"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "wait_mode",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 13,
+          "generated": false,
+          "statements": [
+            "wait mode_auto == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "wait_stop_clear",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 18,
+          "generated": false,
+          "statements": [
+            "wait stop_button == false",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "wait_slide_present",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 23,
+          "generated": false,
+          "statements": [
+            "wait wafer_on_slide == true",
+            "timeout 2000ms -> feed_fault.slide_receive_timeout"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "wait_orient_free",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 28,
+          "generated": false,
+          "statements": [
+            "wait wafer_on_orient == false",
+            "timeout 1500ms -> startup_manual_assist.orient_residue_required"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "reset_orient_pose_before_place",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 33,
+          "generated": false,
+          "statements": [
+            "retract cyl_orient_rotate"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "enable_axis",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 38,
+          "generated": false,
+          "statements": [
+            "set axis_arm.enable on"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "move_to_pick",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 42,
+          "generated": false,
+          "statements": [
+            "axis.move_relative axis_arm distance=45 speed=Some(5.0)"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "arm_vacuum_on",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 51,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil on"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "wait_arm_vacuum",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 55,
+          "generated": false,
+          "statements": [
+            "wait sensor_arm_vac_ok == true",
+            "timeout 1000ms -> orient_fault.arm_pick_timeout",
+            "acquire arm_nozzle from slide_pick_site"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "wait_slide_empty_after_pick",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 61,
+          "generated": false,
+          "statements": [
+            "wait wafer_on_slide == false",
+            "timeout 1000ms -> orient_fault.slide_sensor_stuck_after_pick"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "move_to_orient",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 66,
+          "generated": false,
+          "statements": [
+            "axis.move_absolute axis_arm position=90 speed=Some(5.0)"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "orient_vacuum_on",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 75,
+          "generated": false,
+          "statements": [
+            "set vac_orient_valve.coil on"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "wait_orient_vacuum",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 79,
+          "generated": false,
+          "statements": [
+            "wait sensor_orient_vac_ok == true",
+            "timeout 800ms -> orient_fault.orient_vacuum_timeout",
+            "transfer arm_nozzle -> orient_inspection_site"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "release_arm",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 85,
+          "generated": false,
+          "statements": [
+            "set vac_arm_valve.coil off"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "decide_probe_before_high",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 89,
+          "generated": false,
+          "statements": [
+            "wait sensor_orient_probe == true",
+            "timeout 10ms -> orient_stage.rotate_after_low_probe"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "rotate_after_high_probe",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 94,
+          "generated": false,
+          "statements": [
+            "extend cyl_orient_rotate"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "expect_low_after_high",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 99,
+          "generated": false,
+          "statements": [
+            "wait sensor_orient_probe == false",
+            "timeout 10ms -> orient_stage.reject_to_ir"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "return_original_pose",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 104,
+          "generated": false,
+          "statements": [
+            "retract cyl_orient_rotate"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "publish_oriented_normal",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 109,
+          "generated": false,
+          "statements": [
+            "compute orient_reject_streak = 0",
+            "compute orient_transfer_ready = true"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "move_back_home_normal",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 114,
+          "generated": false,
+          "statements": [
+            "axis.move_absolute axis_arm position=0 speed=Some(5.0)"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "finish_normal",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 122,
+          "generated": false,
+          "statements": [
+            "goto orient_stage.wait_enabled"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "rotate_after_low_probe",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 126,
+          "generated": false,
+          "statements": [
+            "extend cyl_orient_rotate"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "expect_high_after_low",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 131,
+          "generated": false,
+          "statements": [
+            "wait sensor_orient_probe == true",
+            "timeout 10ms -> orient_stage.reject_to_ir"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "keep_flipped",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 136,
+          "generated": false,
+          "statements": [
+            "compute orient_reject_streak = 0",
+            "compute orient_transfer_ready = true"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "move_back_home_flipped",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 141,
+          "generated": false,
+          "statements": [
+            "axis.move_absolute axis_arm position=0 speed=Some(5.0)"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "finish_flipped",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 149,
+          "generated": false,
+          "statements": [
+            "goto orient_stage.wait_enabled"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "reject_to_ir",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 153,
+          "generated": false,
+          "statements": [
+            "set vac_orient_valve.coil off",
+            "compute orient_reject_streak = (orient_reject_streak + 1)",
+            "compute orient_transfer_ready = false"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "finish_reject_to_ir",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 159,
+          "generated": false,
+          "statements": [
+            "transfer orient_inspection_site -> reject_bin",
+            "finish reject_bin as rejected"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "move_back_home_reject",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 164,
+          "generated": false,
+          "statements": [
+            "axis.move_absolute axis_arm position=0 speed=Some(5.0)"
+          ]
+        },
+        {
+          "task_name": "orient_stage",
+          "step_name": "check_reject_limit",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\20_orient_stage.plc",
+          "line": 172,
+          "generated": false,
+          "statements": [
+            "wait orient_reject_streak < 3",
+            "timeout 10ms -> orient_fault.orient_reject_streak_fault"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_enabled",
+          "to_task": "orient_stage",
+          "to_step": "clear_orient_transfer_ready",
+          "label": "when auto_cycle_enabled == true",
+          "guard": "when auto_cycle_enabled == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "clear_orient_transfer_ready",
+          "to_task": "orient_stage",
+          "to_step": "wait_mode",
+          "label": "compute orient_transfer_ready = false",
+          "guard": "always",
+          "actions": [
+            "compute orient_transfer_ready = false"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_mode",
+          "to_task": "orient_stage",
+          "to_step": "wait_stop_clear",
+          "label": "when mode_auto == true",
+          "guard": "when mode_auto == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_stop_clear",
+          "to_task": "orient_stage",
+          "to_step": "wait_slide_present",
+          "label": "when stop_button == false",
+          "guard": "when stop_button == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_slide_present",
+          "to_task": "feed_fault",
+          "to_step": "slide_receive_timeout",
+          "label": "timeout 2000ms",
+          "guard": "timeout 2000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_slide_present",
+          "to_task": "orient_stage",
+          "to_step": "wait_orient_free",
+          "label": "when wafer_on_slide == true",
+          "guard": "when wafer_on_slide == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_orient_free",
+          "to_task": "startup_manual_assist",
+          "to_step": "orient_residue_required",
+          "label": "timeout 1500ms",
+          "guard": "timeout 1500ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_orient_free",
+          "to_task": "orient_stage",
+          "to_step": "reset_orient_pose_before_place",
+          "label": "when wafer_on_orient == false",
+          "guard": "when wafer_on_orient == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "reset_orient_pose_before_place",
+          "to_task": "orient_stage",
+          "to_step": "enable_axis",
+          "label": "retract cyl_orient_rotate",
+          "guard": "always",
+          "actions": [
+            "retract cyl_orient_rotate"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "enable_axis",
+          "to_task": "orient_stage",
+          "to_step": "move_to_pick",
+          "label": "set axis_arm.enable On",
+          "guard": "always",
+          "actions": [
+            "set axis_arm.enable On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "move_to_pick",
+          "to_task": "orient_stage",
+          "to_step": "arm_vacuum_on",
+          "label": "axis.move_relative axis_arm distance=45 speed=5",
+          "guard": "always",
+          "actions": [
+            "axis.move_relative axis_arm distance=45 speed=5"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "arm_vacuum_on",
+          "to_task": "orient_stage",
+          "to_step": "wait_arm_vacuum",
+          "label": "set vac_arm_valve.coil On",
+          "guard": "always",
+          "actions": [
+            "set vac_arm_valve.coil On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_arm_vacuum",
+          "to_task": "orient_fault",
+          "to_step": "arm_pick_timeout",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_arm_vacuum",
+          "to_task": "orient_stage",
+          "to_step": "wait_slide_empty_after_pick",
+          "label": "when sensor_arm_vac_ok == true; acquire arm_nozzle from slide_pick_site",
+          "guard": "when sensor_arm_vac_ok == true",
+          "actions": [],
+          "effects": [
+            "acquire arm_nozzle from slide_pick_site"
+          ]
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_slide_empty_after_pick",
+          "to_task": "orient_fault",
+          "to_step": "slide_sensor_stuck_after_pick",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_slide_empty_after_pick",
+          "to_task": "orient_stage",
+          "to_step": "move_to_orient",
+          "label": "when wafer_on_slide == false",
+          "guard": "when wafer_on_slide == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "move_to_orient",
+          "to_task": "orient_stage",
+          "to_step": "orient_vacuum_on",
+          "label": "axis.move_absolute axis_arm position=90 speed=5",
+          "guard": "always",
+          "actions": [
+            "axis.move_absolute axis_arm position=90 speed=5"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "orient_vacuum_on",
+          "to_task": "orient_stage",
+          "to_step": "wait_orient_vacuum",
+          "label": "set vac_orient_valve.coil On",
+          "guard": "always",
+          "actions": [
+            "set vac_orient_valve.coil On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_orient_vacuum",
+          "to_task": "orient_fault",
+          "to_step": "orient_vacuum_timeout",
+          "label": "timeout 800ms",
+          "guard": "timeout 800ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "wait_orient_vacuum",
+          "to_task": "orient_stage",
+          "to_step": "release_arm",
+          "label": "when sensor_orient_vac_ok == true; transfer arm_nozzle -> orient_inspection_site",
+          "guard": "when sensor_orient_vac_ok == true",
+          "actions": [],
+          "effects": [
+            "transfer arm_nozzle -> orient_inspection_site"
+          ]
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "release_arm",
+          "to_task": "orient_stage",
+          "to_step": "decide_probe_before_high",
+          "label": "set vac_arm_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_arm_valve.coil Off"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "decide_probe_before_high",
+          "to_task": "orient_stage",
+          "to_step": "rotate_after_low_probe",
+          "label": "timeout 10ms",
+          "guard": "timeout 10ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "decide_probe_before_high",
+          "to_task": "orient_stage",
+          "to_step": "rotate_after_high_probe",
+          "label": "when sensor_orient_probe == true",
+          "guard": "when sensor_orient_probe == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "rotate_after_high_probe",
+          "to_task": "orient_stage",
+          "to_step": "expect_low_after_high",
+          "label": "extend cyl_orient_rotate",
+          "guard": "always",
+          "actions": [
+            "extend cyl_orient_rotate"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "expect_low_after_high",
+          "to_task": "orient_stage",
+          "to_step": "reject_to_ir",
+          "label": "timeout 10ms",
+          "guard": "timeout 10ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "expect_low_after_high",
+          "to_task": "orient_stage",
+          "to_step": "return_original_pose",
+          "label": "when sensor_orient_probe == false",
+          "guard": "when sensor_orient_probe == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "return_original_pose",
+          "to_task": "orient_stage",
+          "to_step": "publish_oriented_normal",
+          "label": "retract cyl_orient_rotate",
+          "guard": "always",
+          "actions": [
+            "retract cyl_orient_rotate"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "publish_oriented_normal",
+          "to_task": "orient_stage",
+          "to_step": "move_back_home_normal",
+          "label": "compute orient_reject_streak = 0; compute orient_transfer_ready = true",
+          "guard": "always",
+          "actions": [
+            "compute orient_reject_streak = 0",
+            "compute orient_transfer_ready = true"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "move_back_home_normal",
+          "to_task": "orient_stage",
+          "to_step": "finish_normal",
+          "label": "axis.move_absolute axis_arm position=0 speed=5",
+          "guard": "always",
+          "actions": [
+            "axis.move_absolute axis_arm position=0 speed=5"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "finish_normal",
+          "to_task": "orient_stage",
+          "to_step": "wait_enabled",
+          "label": "next",
+          "guard": "always",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "rotate_after_low_probe",
+          "to_task": "orient_stage",
+          "to_step": "expect_high_after_low",
+          "label": "extend cyl_orient_rotate",
+          "guard": "always",
+          "actions": [
+            "extend cyl_orient_rotate"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "expect_high_after_low",
+          "to_task": "orient_stage",
+          "to_step": "reject_to_ir",
+          "label": "timeout 10ms",
+          "guard": "timeout 10ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "expect_high_after_low",
+          "to_task": "orient_stage",
+          "to_step": "keep_flipped",
+          "label": "when sensor_orient_probe == true",
+          "guard": "when sensor_orient_probe == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "keep_flipped",
+          "to_task": "orient_stage",
+          "to_step": "move_back_home_flipped",
+          "label": "compute orient_reject_streak = 0; compute orient_transfer_ready = true",
+          "guard": "always",
+          "actions": [
+            "compute orient_reject_streak = 0",
+            "compute orient_transfer_ready = true"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "move_back_home_flipped",
+          "to_task": "orient_stage",
+          "to_step": "finish_flipped",
+          "label": "axis.move_absolute axis_arm position=0 speed=5",
+          "guard": "always",
+          "actions": [
+            "axis.move_absolute axis_arm position=0 speed=5"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "finish_flipped",
+          "to_task": "orient_stage",
+          "to_step": "wait_enabled",
+          "label": "next",
+          "guard": "always",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "reject_to_ir",
+          "to_task": "orient_stage",
+          "to_step": "finish_reject_to_ir",
+          "label": "set vac_orient_valve.coil Off; compute orient_reject_streak = (orient_reject_streak + 1)",
+          "guard": "always",
+          "actions": [
+            "set vac_orient_valve.coil Off",
+            "compute orient_reject_streak = (orient_reject_streak + 1)",
+            "compute orient_transfer_ready = false"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "finish_reject_to_ir",
+          "to_task": "orient_stage",
+          "to_step": "move_back_home_reject",
+          "label": "transfer orient_inspection_site -> reject_bin; finish reject_bin as rejected",
+          "guard": "always",
+          "actions": [],
+          "effects": [
+            "transfer orient_inspection_site -> reject_bin",
+            "finish reject_bin as rejected"
+          ]
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "move_back_home_reject",
+          "to_task": "orient_stage",
+          "to_step": "check_reject_limit",
+          "label": "axis.move_absolute axis_arm position=0 speed=5",
+          "guard": "always",
+          "actions": [
+            "axis.move_absolute axis_arm position=0 speed=5"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "check_reject_limit",
+          "to_task": "orient_fault",
+          "to_step": "orient_reject_streak_fault",
+          "label": "timeout 10ms",
+          "guard": "timeout 10ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "orient_stage",
+          "from_step": "check_reject_limit",
+          "to_task": "orient_stage",
+          "to_step": "wait_enabled",
+          "label": "when orient_reject_streak < 3",
+          "guard": "when orient_reject_streak < 3",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "orient_warning",
+      "steps": [
+        {
+          "task_name": "orient_warning",
+          "step_name": "orient_cyl_warn",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 117,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = false",
+            "retract cyl_orient_rotate",
+            "log orient warning: orient cylinder position not confirmed"
+          ]
+        },
+        {
+          "task_name": "orient_warning",
+          "step_name": "wait_refresh",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 123,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(refresh_button)",
+            "allow_indefinite_wait true"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "orient_warning",
+          "from_step": "orient_cyl_warn",
+          "to_task": "orient_warning",
+          "to_step": "wait_refresh",
+          "label": "compute auto_cycle_enabled = false; retract cyl_orient_rotate",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = false",
+            "retract cyl_orient_rotate",
+            "log orient warning: orient cylinder position not confirmed"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "orient_warning",
+          "from_step": "wait_refresh",
+          "to_task": "startup_initializer",
+          "to_step": "drive_safe_outputs",
+          "label": "Rising_edge(refresh_button)",
+          "guard": "Rising_edge(refresh_button)",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "startup_fault",
+      "steps": [
+        {
+          "task_name": "startup_fault",
+          "step_name": "init_pose_timeout",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 4,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "log startup fault: failed to reach initialized baseline"
+          ]
+        },
+        {
+          "task_name": "startup_fault",
+          "step_name": "wait_refresh",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 10,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(refresh_button)",
+            "allow_indefinite_wait true"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "startup_fault",
+          "from_step": "init_pose_timeout",
+          "to_task": "startup_fault",
+          "to_step": "wait_refresh",
+          "label": "compute auto_cycle_enabled = false; compute system_initialized = false",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "log startup fault: failed to reach initialized baseline"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "startup_fault",
+          "from_step": "wait_refresh",
+          "to_task": "startup_initializer",
+          "to_step": "drive_safe_outputs",
+          "label": "Rising_edge(refresh_button)",
+          "guard": "Rising_edge(refresh_button)",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "startup_initializer",
+      "steps": [
+        {
+          "task_name": "startup_initializer",
+          "step_name": "drive_safe_outputs",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 4,
+          "generated": false,
+          "statements": [
+            "set vac_feed_valve.coil off",
+            "set vac_arm_valve.coil off",
+            "set vac_orient_valve.coil off",
+            "set vac_transfer_valve.coil off",
+            "retract cyl_feed",
+            "retract cyl_orient_rotate",
+            "retract cyl_swing",
+            "retract cyl_lift",
+            "retract cyl_transfer",
+            "set axis_arm.enable on"
+          ]
+        },
+        {
+          "task_name": "startup_initializer",
+          "step_name": "command_arm_home",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 17,
+          "generated": false,
+          "statements": [
+            "axis.move_relative axis_arm distance=5 speed=Some(2.0)"
+          ]
+        },
+        {
+          "task_name": "startup_initializer",
+          "step_name": "wait_arm_home",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 25,
+          "generated": false,
+          "statements": [
+            "wait sensor_arm_home == true",
+            "timeout 5000ms -> startup_fault.init_pose_timeout"
+          ]
+        },
+        {
+          "task_name": "startup_initializer",
+          "step_name": "check_slide_empty",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 30,
+          "generated": false,
+          "statements": [
+            "wait wafer_on_slide == false",
+            "timeout 5000ms -> startup_manual_assist.slide_residue_required"
+          ]
+        },
+        {
+          "task_name": "startup_initializer",
+          "step_name": "check_orient_empty",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 35,
+          "generated": false,
+          "statements": [
+            "wait wafer_on_orient == false",
+            "timeout 5000ms -> startup_manual_assist.orient_residue_required"
+          ]
+        },
+        {
+          "task_name": "startup_initializer",
+          "step_name": "check_measure_ready",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 40,
+          "generated": false,
+          "statements": [
+            "wait measure_stage_ready == true",
+            "timeout 5000ms -> startup_fault.init_pose_timeout"
+          ]
+        },
+        {
+          "task_name": "startup_initializer",
+          "step_name": "check_arm_vacuum_clear",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 45,
+          "generated": false,
+          "statements": [
+            "wait sensor_arm_vac_ok == false",
+            "timeout 5000ms -> startup_manual_assist.arm_vacuum_clear_required"
+          ]
+        },
+        {
+          "task_name": "startup_initializer",
+          "step_name": "check_orient_vacuum_clear",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 50,
+          "generated": false,
+          "statements": [
+            "wait sensor_orient_vac_ok == false",
+            "timeout 5000ms -> startup_manual_assist.orient_vacuum_clear_required"
+          ]
+        },
+        {
+          "task_name": "startup_initializer",
+          "step_name": "check_transfer_vacuum_clear",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 55,
+          "generated": false,
+          "statements": [
+            "wait sensor_transfer_vac_ok == false",
+            "timeout 5000ms -> startup_manual_assist.transfer_vacuum_clear_required"
+          ]
+        },
+        {
+          "task_name": "startup_initializer",
+          "step_name": "mark_initialized",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\01_init\\defaults.plc",
+          "line": 60,
+          "generated": false,
+          "statements": [
+            "compute system_initialized = true",
+            "log startup baseline ready"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "startup_initializer",
+          "from_step": "drive_safe_outputs",
+          "to_task": "startup_initializer",
+          "to_step": "command_arm_home",
+          "label": "set vac_feed_valve.coil Off; set vac_arm_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_feed_valve.coil Off",
+            "set vac_arm_valve.coil Off",
+            "set vac_orient_valve.coil Off",
+            "set vac_transfer_valve.coil Off",
+            "retract cyl_feed",
+            "retract cyl_orient_rotate",
+            "retract cyl_swing",
+            "retract cyl_lift",
+            "retract cyl_transfer",
+            "set axis_arm.enable On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "command_arm_home",
+          "to_task": "startup_initializer",
+          "to_step": "wait_arm_home",
+          "label": "axis.move_relative axis_arm distance=5 speed=2",
+          "guard": "always",
+          "actions": [
+            "axis.move_relative axis_arm distance=5 speed=2"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "wait_arm_home",
+          "to_task": "startup_fault",
+          "to_step": "init_pose_timeout",
+          "label": "timeout 5000ms",
+          "guard": "timeout 5000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "wait_arm_home",
+          "to_task": "startup_initializer",
+          "to_step": "check_slide_empty",
+          "label": "when sensor_arm_home == true",
+          "guard": "when sensor_arm_home == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_slide_empty",
+          "to_task": "startup_manual_assist",
+          "to_step": "slide_residue_required",
+          "label": "timeout 5000ms",
+          "guard": "timeout 5000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_slide_empty",
+          "to_task": "startup_initializer",
+          "to_step": "check_orient_empty",
+          "label": "when wafer_on_slide == false",
+          "guard": "when wafer_on_slide == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_orient_empty",
+          "to_task": "startup_manual_assist",
+          "to_step": "orient_residue_required",
+          "label": "timeout 5000ms",
+          "guard": "timeout 5000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_orient_empty",
+          "to_task": "startup_initializer",
+          "to_step": "check_measure_ready",
+          "label": "when wafer_on_orient == false",
+          "guard": "when wafer_on_orient == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_measure_ready",
+          "to_task": "startup_fault",
+          "to_step": "init_pose_timeout",
+          "label": "timeout 5000ms",
+          "guard": "timeout 5000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_measure_ready",
+          "to_task": "startup_initializer",
+          "to_step": "check_arm_vacuum_clear",
+          "label": "when measure_stage_ready == true",
+          "guard": "when measure_stage_ready == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_arm_vacuum_clear",
+          "to_task": "startup_manual_assist",
+          "to_step": "arm_vacuum_clear_required",
+          "label": "timeout 5000ms",
+          "guard": "timeout 5000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_arm_vacuum_clear",
+          "to_task": "startup_initializer",
+          "to_step": "check_orient_vacuum_clear",
+          "label": "when sensor_arm_vac_ok == false",
+          "guard": "when sensor_arm_vac_ok == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_orient_vacuum_clear",
+          "to_task": "startup_manual_assist",
+          "to_step": "orient_vacuum_clear_required",
+          "label": "timeout 5000ms",
+          "guard": "timeout 5000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_orient_vacuum_clear",
+          "to_task": "startup_initializer",
+          "to_step": "check_transfer_vacuum_clear",
+          "label": "when sensor_orient_vac_ok == false",
+          "guard": "when sensor_orient_vac_ok == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_transfer_vacuum_clear",
+          "to_task": "startup_manual_assist",
+          "to_step": "transfer_vacuum_clear_required",
+          "label": "timeout 5000ms",
+          "guard": "timeout 5000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "check_transfer_vacuum_clear",
+          "to_task": "startup_initializer",
+          "to_step": "mark_initialized",
+          "label": "when sensor_transfer_vac_ok == false",
+          "guard": "when sensor_transfer_vac_ok == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "startup_initializer",
+          "from_step": "mark_initialized",
+          "to_task": "supervisor",
+          "to_step": "wait_mode_auto",
+          "label": "compute system_initialized = true; log startup baseline ready",
+          "guard": "always",
+          "actions": [
+            "compute system_initialized = true",
+            "log startup baseline ready"
+          ],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "startup_manual_assist",
+      "steps": [
+        {
+          "task_name": "startup_manual_assist",
+          "step_name": "slide_residue_required",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 19,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "log startup manual assist: slide residue or slide sensor requires human handling",
+            "goto startup_manual_assist.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "startup_manual_assist",
+          "step_name": "orient_residue_required",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 26,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "log startup manual assist: orient stage residue or sensor requires human handling",
+            "goto startup_manual_assist.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "startup_manual_assist",
+          "step_name": "arm_vacuum_clear_required",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 33,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "set vac_arm_valve.coil off",
+            "log startup manual assist: arm vacuum did not clear",
+            "goto startup_manual_assist.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "startup_manual_assist",
+          "step_name": "orient_vacuum_clear_required",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 41,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "set vac_orient_valve.coil off",
+            "log startup manual assist: orient vacuum did not clear",
+            "goto startup_manual_assist.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "startup_manual_assist",
+          "step_name": "transfer_vacuum_clear_required",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 49,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "set vac_transfer_valve.coil off",
+            "log startup manual assist: transfer vacuum did not clear",
+            "goto startup_manual_assist.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "startup_manual_assist",
+          "step_name": "wait_refresh",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 57,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(refresh_button)",
+            "allow_indefinite_wait true"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "startup_manual_assist",
+          "from_step": "slide_residue_required",
+          "to_task": "startup_manual_assist",
+          "to_step": "wait_refresh",
+          "label": "compute auto_cycle_enabled = false; compute system_initialized = false",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "log startup manual assist: slide residue or slide sensor requires human handling"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "startup_manual_assist",
+          "from_step": "orient_residue_required",
+          "to_task": "startup_manual_assist",
+          "to_step": "wait_refresh",
+          "label": "compute auto_cycle_enabled = false; compute system_initialized = false",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "log startup manual assist: orient stage residue or sensor requires human handling"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "startup_manual_assist",
+          "from_step": "arm_vacuum_clear_required",
+          "to_task": "startup_manual_assist",
+          "to_step": "wait_refresh",
+          "label": "compute auto_cycle_enabled = false; compute system_initialized = false",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "set vac_arm_valve.coil Off",
+            "log startup manual assist: arm vacuum did not clear"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "startup_manual_assist",
+          "from_step": "orient_vacuum_clear_required",
+          "to_task": "startup_manual_assist",
+          "to_step": "wait_refresh",
+          "label": "compute auto_cycle_enabled = false; compute system_initialized = false",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "set vac_orient_valve.coil Off",
+            "log startup manual assist: orient vacuum did not clear"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "startup_manual_assist",
+          "from_step": "transfer_vacuum_clear_required",
+          "to_task": "startup_manual_assist",
+          "to_step": "wait_refresh",
+          "label": "compute auto_cycle_enabled = false; compute system_initialized = false",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = false",
+            "compute system_initialized = false",
+            "set vac_transfer_valve.coil Off",
+            "log startup manual assist: transfer vacuum did not clear"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "startup_manual_assist",
+          "from_step": "wait_refresh",
+          "to_task": "startup_initializer",
+          "to_step": "drive_safe_outputs",
+          "label": "Rising_edge(refresh_button)",
+          "guard": "Rising_edge(refresh_button)",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "supervisor",
+      "steps": [
+        {
+          "task_name": "supervisor",
+          "step_name": "wait_mode_auto",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\00_supervisor.plc",
+          "line": 4,
+          "generated": false,
+          "statements": [
+            "wait mode_auto == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "supervisor",
+          "step_name": "wait_start",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\00_supervisor.plc",
+          "line": 9,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(start_button)",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "supervisor",
+          "step_name": "wait_initialized",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\00_supervisor.plc",
+          "line": 14,
+          "generated": false,
+          "statements": [
+            "wait system_initialized == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "supervisor",
+          "step_name": "latch_run",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\00_supervisor.plc",
+          "line": 19,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = true",
+            "compute stop_requested = false",
+            "compute axis_recover_attempts = 0"
+          ]
+        },
+        {
+          "task_name": "supervisor",
+          "step_name": "monitor_stop",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\00_supervisor.plc",
+          "line": 25,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(stop_button)",
+            "timeout 100ms -> supervisor.monitor_mode_lost"
+          ]
+        },
+        {
+          "task_name": "supervisor",
+          "step_name": "monitor_mode_lost",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\00_supervisor.plc",
+          "line": 30,
+          "generated": false,
+          "statements": [
+            "wait mode_auto == false",
+            "timeout 100ms -> supervisor.monitor_stop"
+          ]
+        },
+        {
+          "task_name": "supervisor",
+          "step_name": "request_stop",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\00_supervisor.plc",
+          "line": 35,
+          "generated": false,
+          "statements": [
+            "compute stop_requested = true",
+            "compute auto_cycle_enabled = false",
+            "set vac_feed_valve.coil off",
+            "set vac_arm_valve.coil off",
+            "set vac_orient_valve.coil off",
+            "set vac_transfer_valve.coil off",
+            "retract cyl_feed",
+            "retract cyl_orient_rotate",
+            "retract cyl_swing",
+            "retract cyl_lift",
+            "retract cyl_transfer"
+          ]
+        },
+        {
+          "task_name": "supervisor",
+          "step_name": "clear_stop",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\00_supervisor.plc",
+          "line": 49,
+          "generated": false,
+          "statements": [
+            "compute stop_requested = false"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "supervisor",
+          "from_step": "wait_mode_auto",
+          "to_task": "supervisor",
+          "to_step": "wait_start",
+          "label": "when mode_auto == true",
+          "guard": "when mode_auto == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "supervisor",
+          "from_step": "wait_start",
+          "to_task": "supervisor",
+          "to_step": "wait_initialized",
+          "label": "Rising_edge(start_button)",
+          "guard": "Rising_edge(start_button)",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "supervisor",
+          "from_step": "wait_initialized",
+          "to_task": "supervisor",
+          "to_step": "latch_run",
+          "label": "when system_initialized == true",
+          "guard": "when system_initialized == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "supervisor",
+          "from_step": "latch_run",
+          "to_task": "supervisor",
+          "to_step": "monitor_stop",
+          "label": "compute auto_cycle_enabled = true; compute stop_requested = false",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = true",
+            "compute stop_requested = false",
+            "compute axis_recover_attempts = 0"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "supervisor",
+          "from_step": "monitor_stop",
+          "to_task": "supervisor",
+          "to_step": "monitor_mode_lost",
+          "label": "timeout 100ms",
+          "guard": "timeout 100ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "supervisor",
+          "from_step": "monitor_stop",
+          "to_task": "supervisor",
+          "to_step": "monitor_mode_lost",
+          "label": "Rising_edge(stop_button)",
+          "guard": "Rising_edge(stop_button)",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "supervisor",
+          "from_step": "monitor_mode_lost",
+          "to_task": "supervisor",
+          "to_step": "monitor_stop",
+          "label": "timeout 100ms",
+          "guard": "timeout 100ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "supervisor",
+          "from_step": "monitor_mode_lost",
+          "to_task": "supervisor",
+          "to_step": "request_stop",
+          "label": "when mode_auto == false",
+          "guard": "when mode_auto == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "supervisor",
+          "from_step": "request_stop",
+          "to_task": "supervisor",
+          "to_step": "clear_stop",
+          "label": "compute stop_requested = true; compute auto_cycle_enabled = false",
+          "guard": "always",
+          "actions": [
+            "compute stop_requested = true",
+            "compute auto_cycle_enabled = false",
+            "set vac_feed_valve.coil Off",
+            "set vac_arm_valve.coil Off",
+            "set vac_orient_valve.coil Off",
+            "set vac_transfer_valve.coil Off",
+            "retract cyl_feed",
+            "retract cyl_orient_rotate",
+            "retract cyl_swing",
+            "retract cyl_lift",
+            "retract cyl_transfer"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "supervisor",
+          "from_step": "clear_stop",
+          "to_task": "supervisor",
+          "to_step": "wait_mode_auto",
+          "label": "compute stop_requested = false",
+          "guard": "always",
+          "actions": [
+            "compute stop_requested = false"
+          ],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "transfer_fault",
+      "steps": [
+        {
+          "task_name": "transfer_fault",
+          "step_name": "drop_consecutive_fault",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 263,
+          "generated": false,
+          "statements": [
+            "set vac_transfer_valve.coil off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "retract cyl_transfer",
+            "compute auto_cycle_enabled = false",
+            "log transfer fault: two consecutive wafer drops",
+            "goto transfer_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "transfer_fault",
+          "step_name": "drop_rate_fault",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 273,
+          "generated": false,
+          "statements": [
+            "set vac_transfer_valve.coil off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "retract cyl_transfer",
+            "compute auto_cycle_enabled = false",
+            "log transfer fault: long-term wafer drop rate exceeded 1/1000",
+            "goto transfer_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "transfer_fault",
+          "step_name": "orient_sensor_stuck_after_pick",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 283,
+          "generated": false,
+          "statements": [
+            "set vac_transfer_valve.coil off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "compute auto_cycle_enabled = false",
+            "log transfer fault: orient sensor did not clear after transfer pickup",
+            "goto transfer_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "transfer_fault",
+          "step_name": "measure_receive_timeout",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 292,
+          "generated": false,
+          "statements": [
+            "set vac_transfer_valve.coil off",
+            "retract cyl_transfer",
+            "compute auto_cycle_enabled = false",
+            "log transfer fault: measure stage did not confirm receive readiness",
+            "goto transfer_fault.wait_refresh"
+          ]
+        },
+        {
+          "task_name": "transfer_fault",
+          "step_name": "wait_refresh",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 300,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(refresh_button)",
+            "allow_indefinite_wait true"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "transfer_fault",
+          "from_step": "drop_consecutive_fault",
+          "to_task": "transfer_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_transfer_valve.coil Off; retract cyl_lift",
+          "guard": "always",
+          "actions": [
+            "set vac_transfer_valve.coil Off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "retract cyl_transfer",
+            "compute auto_cycle_enabled = false",
+            "log transfer fault: two consecutive wafer drops"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_fault",
+          "from_step": "drop_rate_fault",
+          "to_task": "transfer_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_transfer_valve.coil Off; retract cyl_lift",
+          "guard": "always",
+          "actions": [
+            "set vac_transfer_valve.coil Off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "retract cyl_transfer",
+            "compute auto_cycle_enabled = false",
+            "log transfer fault: long-term wafer drop rate exceeded 1/1000"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_fault",
+          "from_step": "orient_sensor_stuck_after_pick",
+          "to_task": "transfer_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_transfer_valve.coil Off; retract cyl_lift",
+          "guard": "always",
+          "actions": [
+            "set vac_transfer_valve.coil Off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "compute auto_cycle_enabled = false",
+            "log transfer fault: orient sensor did not clear after transfer pickup"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_fault",
+          "from_step": "measure_receive_timeout",
+          "to_task": "transfer_fault",
+          "to_step": "wait_refresh",
+          "label": "set vac_transfer_valve.coil Off; retract cyl_transfer",
+          "guard": "always",
+          "actions": [
+            "set vac_transfer_valve.coil Off",
+            "retract cyl_transfer",
+            "compute auto_cycle_enabled = false",
+            "log transfer fault: measure stage did not confirm receive readiness"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_fault",
+          "from_step": "wait_refresh",
+          "to_task": "startup_initializer",
+          "to_step": "drive_safe_outputs",
+          "label": "Rising_edge(refresh_button)",
+          "guard": "Rising_edge(refresh_button)",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "transfer_to_measure",
+      "steps": [
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "wait_enabled",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 4,
+          "generated": false,
+          "statements": [
+            "wait auto_cycle_enabled == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "wait_mode",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 9,
+          "generated": false,
+          "statements": [
+            "wait mode_auto == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "wait_stop_clear",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 14,
+          "generated": false,
+          "statements": [
+            "wait stop_button == false",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "wait_orient_transfer_ready",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 19,
+          "generated": false,
+          "statements": [
+            "wait orient_transfer_ready == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "wait_wafer_ready",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 24,
+          "generated": false,
+          "statements": [
+            "wait wafer_on_orient == true",
+            "timeout 1000ms -> orient_fault.orient_stage_not_ready"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "wait_measure_ready",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 29,
+          "generated": false,
+          "statements": [
+            "wait measure_stage_ready == true",
+            "allow_indefinite_wait true"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "count_attempt",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 34,
+          "generated": false,
+          "statements": [
+            "compute transfer_attempt_count = (transfer_attempt_count + 1)"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "swing_down",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 38,
+          "generated": false,
+          "statements": [
+            "extend cyl_swing"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "lift_down",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 43,
+          "generated": false,
+          "statements": [
+            "extend cyl_lift"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "transfer_vacuum_on",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 48,
+          "generated": false,
+          "statements": [
+            "set vac_transfer_valve.coil on"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "wait_transfer_vacuum",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 52,
+          "generated": false,
+          "statements": [
+            "wait sensor_transfer_vac_ok == true",
+            "timeout 1000ms -> transfer_to_measure.record_pick_failure",
+            "acquire transfer_nozzle from orient_inspection_site"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "clear_orient_transfer_ready_after_pick",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 58,
+          "generated": false,
+          "statements": [
+            "compute orient_transfer_ready = false"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "wait_orient_empty_after_pick",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 62,
+          "generated": false,
+          "statements": [
+            "wait wafer_on_orient == false",
+            "timeout 1000ms -> transfer_fault.orient_sensor_stuck_after_pick"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "release_orient",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 67,
+          "generated": false,
+          "statements": [
+            "set vac_orient_valve.coil off"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "lift_up",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 71,
+          "generated": false,
+          "statements": [
+            "retract cyl_lift"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "swing_up",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 76,
+          "generated": false,
+          "statements": [
+            "retract cyl_swing"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "move_front",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 81,
+          "generated": false,
+          "statements": [
+            "extend cyl_transfer"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "check_drop_sensor",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 86,
+          "generated": false,
+          "statements": [
+            "wait wafer_drop_detect == false",
+            "timeout 10ms -> transfer_to_measure.record_drop_after_pick"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "place_wafer",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 91,
+          "generated": false,
+          "statements": [
+            "set vac_transfer_valve.coil off"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "record_measure_receive",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 95,
+          "generated": false,
+          "statements": [
+            "wait measure_stage_ready == true",
+            "timeout 1000ms -> transfer_fault.measure_receive_timeout",
+            "transfer transfer_nozzle -> measure_stage_site"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "finish_handoff",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 101,
+          "generated": false,
+          "statements": [
+            "retract cyl_transfer",
+            "finish measure_stage_site as handed_to_measure"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "clear_drop_streak",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 107,
+          "generated": false,
+          "statements": [
+            "compute consecutive_drop_count = 0"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "finish_success",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 111,
+          "generated": false,
+          "statements": [
+            "goto transfer_to_measure.wait_enabled"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "record_pick_failure",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 115,
+          "generated": false,
+          "statements": [
+            "set vac_transfer_valve.coil off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "retract cyl_transfer",
+            "compute drop_total = (drop_total + 1)",
+            "compute consecutive_drop_count = (consecutive_drop_count + 1)"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "finish_pick_failure",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 124,
+          "generated": false,
+          "statements": [
+            "transfer orient_inspection_site -> reject_bin",
+            "finish reject_bin as rejected",
+            "goto transfer_to_measure.check_drop_streak"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "record_drop_after_pick",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 130,
+          "generated": false,
+          "statements": [
+            "set vac_transfer_valve.coil off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "retract cyl_transfer",
+            "compute drop_total = (drop_total + 1)",
+            "compute consecutive_drop_count = (consecutive_drop_count + 1)"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "finish_drop_after_pick",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 139,
+          "generated": false,
+          "statements": [
+            "transfer transfer_nozzle -> reject_bin",
+            "finish reject_bin as dropped"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "check_drop_streak",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 144,
+          "generated": false,
+          "statements": [
+            "wait consecutive_drop_count < 2",
+            "timeout 10ms -> transfer_fault.drop_consecutive_fault"
+          ]
+        },
+        {
+          "task_name": "transfer_to_measure",
+          "step_name": "check_drop_rate",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\02_process\\30_transfer_to_measure.plc",
+          "line": 149,
+          "generated": false,
+          "statements": [
+            "wait drop_rate_exceeded == false",
+            "timeout 10ms -> transfer_fault.drop_rate_fault"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_enabled",
+          "to_task": "transfer_to_measure",
+          "to_step": "wait_mode",
+          "label": "when auto_cycle_enabled == true",
+          "guard": "when auto_cycle_enabled == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_mode",
+          "to_task": "transfer_to_measure",
+          "to_step": "wait_stop_clear",
+          "label": "when mode_auto == true",
+          "guard": "when mode_auto == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_stop_clear",
+          "to_task": "transfer_to_measure",
+          "to_step": "wait_orient_transfer_ready",
+          "label": "when stop_button == false",
+          "guard": "when stop_button == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_orient_transfer_ready",
+          "to_task": "transfer_to_measure",
+          "to_step": "wait_wafer_ready",
+          "label": "when orient_transfer_ready == true",
+          "guard": "when orient_transfer_ready == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_wafer_ready",
+          "to_task": "orient_fault",
+          "to_step": "orient_stage_not_ready",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_wafer_ready",
+          "to_task": "transfer_to_measure",
+          "to_step": "wait_measure_ready",
+          "label": "when wafer_on_orient == true",
+          "guard": "when wafer_on_orient == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_measure_ready",
+          "to_task": "transfer_to_measure",
+          "to_step": "count_attempt",
+          "label": "when measure_stage_ready == true",
+          "guard": "when measure_stage_ready == true",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "count_attempt",
+          "to_task": "transfer_to_measure",
+          "to_step": "swing_down",
+          "label": "compute transfer_attempt_count = (transfer_attempt_count + 1)",
+          "guard": "always",
+          "actions": [
+            "compute transfer_attempt_count = (transfer_attempt_count + 1)"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "swing_down",
+          "to_task": "transfer_to_measure",
+          "to_step": "lift_down",
+          "label": "extend cyl_swing",
+          "guard": "always",
+          "actions": [
+            "extend cyl_swing"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "lift_down",
+          "to_task": "transfer_to_measure",
+          "to_step": "transfer_vacuum_on",
+          "label": "extend cyl_lift",
+          "guard": "always",
+          "actions": [
+            "extend cyl_lift"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "transfer_vacuum_on",
+          "to_task": "transfer_to_measure",
+          "to_step": "wait_transfer_vacuum",
+          "label": "set vac_transfer_valve.coil On",
+          "guard": "always",
+          "actions": [
+            "set vac_transfer_valve.coil On"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_transfer_vacuum",
+          "to_task": "transfer_to_measure",
+          "to_step": "record_pick_failure",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_transfer_vacuum",
+          "to_task": "transfer_to_measure",
+          "to_step": "clear_orient_transfer_ready_after_pick",
+          "label": "when sensor_transfer_vac_ok == true; acquire transfer_nozzle from orient_inspection_site",
+          "guard": "when sensor_transfer_vac_ok == true",
+          "actions": [],
+          "effects": [
+            "acquire transfer_nozzle from orient_inspection_site"
+          ]
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "clear_orient_transfer_ready_after_pick",
+          "to_task": "transfer_to_measure",
+          "to_step": "wait_orient_empty_after_pick",
+          "label": "compute orient_transfer_ready = false",
+          "guard": "always",
+          "actions": [
+            "compute orient_transfer_ready = false"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_orient_empty_after_pick",
+          "to_task": "transfer_fault",
+          "to_step": "orient_sensor_stuck_after_pick",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "wait_orient_empty_after_pick",
+          "to_task": "transfer_to_measure",
+          "to_step": "release_orient",
+          "label": "when wafer_on_orient == false",
+          "guard": "when wafer_on_orient == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "release_orient",
+          "to_task": "transfer_to_measure",
+          "to_step": "lift_up",
+          "label": "set vac_orient_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_orient_valve.coil Off"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "lift_up",
+          "to_task": "transfer_to_measure",
+          "to_step": "swing_up",
+          "label": "retract cyl_lift",
+          "guard": "always",
+          "actions": [
+            "retract cyl_lift"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "swing_up",
+          "to_task": "transfer_to_measure",
+          "to_step": "move_front",
+          "label": "retract cyl_swing",
+          "guard": "always",
+          "actions": [
+            "retract cyl_swing"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "move_front",
+          "to_task": "transfer_to_measure",
+          "to_step": "check_drop_sensor",
+          "label": "extend cyl_transfer",
+          "guard": "always",
+          "actions": [
+            "extend cyl_transfer"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "check_drop_sensor",
+          "to_task": "transfer_to_measure",
+          "to_step": "record_drop_after_pick",
+          "label": "timeout 10ms",
+          "guard": "timeout 10ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "check_drop_sensor",
+          "to_task": "transfer_to_measure",
+          "to_step": "place_wafer",
+          "label": "when wafer_drop_detect == false",
+          "guard": "when wafer_drop_detect == false",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "place_wafer",
+          "to_task": "transfer_to_measure",
+          "to_step": "record_measure_receive",
+          "label": "set vac_transfer_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "set vac_transfer_valve.coil Off"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "record_measure_receive",
+          "to_task": "transfer_fault",
+          "to_step": "measure_receive_timeout",
+          "label": "timeout 1000ms",
+          "guard": "timeout 1000ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "record_measure_receive",
+          "to_task": "transfer_to_measure",
+          "to_step": "finish_handoff",
+          "label": "when measure_stage_ready == true; transfer transfer_nozzle -> measure_stage_site",
+          "guard": "when measure_stage_ready == true",
+          "actions": [],
+          "effects": [
+            "transfer transfer_nozzle -> measure_stage_site"
+          ]
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "finish_handoff",
+          "to_task": "transfer_to_measure",
+          "to_step": "clear_drop_streak",
+          "label": "retract cyl_transfer; finish measure_stage_site as handed_to_measure",
+          "guard": "always",
+          "actions": [
+            "retract cyl_transfer"
+          ],
+          "effects": [
+            "finish measure_stage_site as handed_to_measure"
+          ]
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "clear_drop_streak",
+          "to_task": "transfer_to_measure",
+          "to_step": "finish_success",
+          "label": "compute consecutive_drop_count = 0",
+          "guard": "always",
+          "actions": [
+            "compute consecutive_drop_count = 0"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "finish_success",
+          "to_task": "transfer_to_measure",
+          "to_step": "wait_enabled",
+          "label": "next",
+          "guard": "always",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "record_pick_failure",
+          "to_task": "transfer_to_measure",
+          "to_step": "finish_pick_failure",
+          "label": "set vac_transfer_valve.coil Off; retract cyl_lift",
+          "guard": "always",
+          "actions": [
+            "set vac_transfer_valve.coil Off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "retract cyl_transfer",
+            "compute drop_total = (drop_total + 1)",
+            "compute consecutive_drop_count = (consecutive_drop_count + 1)"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "finish_pick_failure",
+          "to_task": "transfer_to_measure",
+          "to_step": "check_drop_streak",
+          "label": "transfer orient_inspection_site -> reject_bin; finish reject_bin as rejected",
+          "guard": "always",
+          "actions": [],
+          "effects": [
+            "transfer orient_inspection_site -> reject_bin",
+            "finish reject_bin as rejected"
+          ]
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "record_drop_after_pick",
+          "to_task": "transfer_to_measure",
+          "to_step": "finish_drop_after_pick",
+          "label": "set vac_transfer_valve.coil Off; retract cyl_lift",
+          "guard": "always",
+          "actions": [
+            "set vac_transfer_valve.coil Off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "retract cyl_transfer",
+            "compute drop_total = (drop_total + 1)",
+            "compute consecutive_drop_count = (consecutive_drop_count + 1)"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "finish_drop_after_pick",
+          "to_task": "transfer_to_measure",
+          "to_step": "check_drop_streak",
+          "label": "transfer transfer_nozzle -> reject_bin; finish reject_bin as dropped",
+          "guard": "always",
+          "actions": [],
+          "effects": [
+            "transfer transfer_nozzle -> reject_bin",
+            "finish reject_bin as dropped"
+          ]
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "check_drop_streak",
+          "to_task": "transfer_fault",
+          "to_step": "drop_consecutive_fault",
+          "label": "timeout 10ms",
+          "guard": "timeout 10ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "check_drop_streak",
+          "to_task": "transfer_to_measure",
+          "to_step": "check_drop_rate",
+          "label": "when consecutive_drop_count < 2",
+          "guard": "when consecutive_drop_count < 2",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "check_drop_rate",
+          "to_task": "transfer_fault",
+          "to_step": "drop_rate_fault",
+          "label": "timeout 10ms",
+          "guard": "timeout 10ms",
+          "actions": [],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_to_measure",
+          "from_step": "check_drop_rate",
+          "to_task": "transfer_to_measure",
+          "to_step": "wait_enabled",
+          "label": "when drop_rate_exceeded == false",
+          "guard": "when drop_rate_exceeded == false",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    },
+    {
+      "task_name": "transfer_warning",
+      "steps": [
+        {
+          "task_name": "transfer_warning",
+          "step_name": "transfer_cyl_warn",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 132,
+          "generated": false,
+          "statements": [
+            "compute auto_cycle_enabled = false",
+            "set vac_transfer_valve.coil off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "retract cyl_transfer",
+            "log transfer warning: transfer cylinder position not confirmed"
+          ]
+        },
+        {
+          "task_name": "transfer_warning",
+          "step_name": "wait_refresh",
+          "source": "\\\\?\\E:\\personal_project\\rust_plc\\out\\wafer_loader_standard_project\\04_faults\\fault_handlers.plc",
+          "line": 141,
+          "generated": false,
+          "statements": [
+            "wait Rising_edge(refresh_button)",
+            "allow_indefinite_wait true"
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from_task": "transfer_warning",
+          "from_step": "transfer_cyl_warn",
+          "to_task": "transfer_warning",
+          "to_step": "wait_refresh",
+          "label": "compute auto_cycle_enabled = false; set vac_transfer_valve.coil Off",
+          "guard": "always",
+          "actions": [
+            "compute auto_cycle_enabled = false",
+            "set vac_transfer_valve.coil Off",
+            "retract cyl_lift",
+            "retract cyl_swing",
+            "retract cyl_transfer",
+            "log transfer warning: transfer cylinder position not confirmed"
+          ],
+          "effects": []
+        },
+        {
+          "from_task": "transfer_warning",
+          "from_step": "wait_refresh",
+          "to_task": "startup_initializer",
+          "to_step": "drive_safe_outputs",
+          "label": "Rising_edge(refresh_button)",
+          "guard": "Rising_edge(refresh_button)",
+          "actions": [],
+          "effects": []
+        }
+      ]
+    }
+  ],
+  "topology": {
+    "device_count": 81,
+    "link_count": 58,
+    "devices": [
+      "start_button:Sensor",
+      "refresh_button:Sensor",
+      "stop_button:Sensor",
+      "mode_auto:Sensor",
+      "mode_manual:Sensor",
+      "mode_step:Sensor",
+      "mode_maintenance:Sensor",
+      "feed_cassette_present:Sensor",
+      "measure_stage_ready:Sensor",
+      "wafer_on_slide:Sensor",
+      "wafer_on_orient:Sensor",
+      "wafer_drop_detect:Sensor",
+      "sensor_orient_probe:Sensor",
+      "vac_feed_valve:SolenoidValve",
+      "vac_arm_valve:SolenoidValve",
+      "vac_orient_valve:SolenoidValve",
+      "vac_transfer_valve:SolenoidValve",
+      "sensor_feed_vac_ok:Sensor",
+      "sensor_arm_vac_ok:Sensor",
+      "sensor_orient_vac_ok:Sensor",
+      "sensor_transfer_vac_ok:Sensor",
+      "valve_feed:SolenoidValve",
+      "cyl_feed:Cylinder",
+      "sensor_feed_ext:Sensor",
+      "sensor_feed_ret:Sensor",
+      "axis_arm:StepperMotor",
+      "sensor_arm_home:Sensor",
+      "valve_orient_rotate:SolenoidValve",
+      "cyl_orient_rotate:Cylinder",
+      "sensor_orient_ext:Sensor",
+      "sensor_orient_ret:Sensor",
+      "valve_swing:SolenoidValve",
+      "cyl_swing:Cylinder",
+      "sensor_swing_down:Sensor",
+      "sensor_swing_up:Sensor",
+      "valve_lift:SolenoidValve",
+      "cyl_lift:Cylinder",
+      "sensor_lift_down:Sensor",
+      "sensor_lift_up:Sensor",
+      "valve_transfer:SolenoidValve",
+      "cyl_transfer:Cylinder",
+      "sensor_transfer_front:Sensor",
+      "sensor_transfer_back:Sensor",
+      "X0:DigitalInput",
+      "X1:DigitalInput",
+      "X12:DigitalInput",
+      "X13:DigitalInput",
+      "X14:DigitalInput",
+      "X15:DigitalInput",
+      "X17:DigitalInput",
+      "X18:DigitalInput",
+      "X19:DigitalInput",
+      "X2:DigitalInput",
+      "X20:DigitalInput",
+      "X21:DigitalInput",
+      "X22:DigitalInput",
+      "X23:DigitalInput",
+      "X24:DigitalInput",
+      "X25:DigitalInput",
+      "X26:DigitalInput",
+      "X27:DigitalInput",
+      "X28:DigitalInput",
+      "X29:DigitalInput",
+      "X3:DigitalInput",
+      "X30:DigitalInput",
+      "X31:DigitalInput",
+      "X4:DigitalInput",
+      "X5:DigitalInput",
+      "X6:DigitalInput",
+      "X7:DigitalInput",
+      "X8:DigitalInput",
+      "Y0:DigitalOutput",
+      "Y1:DigitalOutput",
+      "Y2:DigitalOutput",
+      "Y3:DigitalOutput",
+      "Y4:DigitalOutput",
+      "Y5:DigitalOutput",
+      "Y6:DigitalOutput",
+      "Y7:DigitalOutput",
+      "Y8:DigitalOutput",
+      "Y9:DigitalOutput"
+    ],
+    "variables": [
+      "orient_reject_streak:Float=0.0",
+      "transfer_attempt_count:Float=0.0",
+      "drop_total:Float=0.0",
+      "consecutive_drop_count:Float=0.0",
+      "axis_recover_attempts:Float=0.0",
+      "drop_rate_exceeded:Bool=false",
+      "auto_cycle_enabled:Bool=false",
+      "stop_requested:Bool=false",
+      "system_initialized:Bool=false",
+      "orient_transfer_ready:Bool=false"
+    ],
+    "workpiece_sites": [
+      "feed_cassette:WorkpieceLocation:capacity=25",
+      "slide_pick_site:WorkpieceLocation:capacity=1",
+      "orient_inspection_site:WorkpieceLocation:capacity=1",
+      "measure_stage_site:WorkpieceLocation:capacity=1",
+      "reject_bin:WorkpieceLocation:capacity=20"
+    ],
+    "workpiece_holders": [
+      "feed_ejector:capacity=1",
+      "arm_nozzle:capacity=1",
+      "transfer_nozzle:capacity=1"
+    ],
+    "workpiece_types": [
+      "wafer"
+    ],
+    "links": [
+      "Y0 -> valve_feed (Electrical)",
+      "Y1 -> valve_orient_rotate (Electrical)",
+      "Y2 -> valve_swing (Electrical)",
+      "Y3 -> valve_lift (Electrical)",
+      "Y4 -> valve_transfer (Electrical)",
+      "Y5 -> vac_feed_valve (Electrical)",
+      "Y6 -> vac_arm_valve (Electrical)",
+      "Y7 -> vac_orient_valve (Electrical)",
+      "Y8 -> vac_transfer_valve (Electrical)",
+      "Y9 -> axis_arm (Electrical)",
+      "axis_arm -> sensor_arm_home (Logical)",
+      "cyl_feed -> sensor_feed_ext (Logical)",
+      "cyl_feed -> sensor_feed_ret (Logical)",
+      "cyl_lift -> sensor_lift_down (Logical)",
+      "cyl_lift -> sensor_lift_up (Logical)",
+      "cyl_orient_rotate -> sensor_orient_ext (Logical)",
+      "cyl_orient_rotate -> sensor_orient_ret (Logical)",
+      "cyl_swing -> sensor_swing_down (Logical)",
+      "cyl_swing -> sensor_swing_up (Logical)",
+      "cyl_transfer -> sensor_transfer_back (Logical)",
+      "cyl_transfer -> sensor_transfer_front (Logical)",
+      "feed_cassette_present -> X8 (Logical)",
+      "measure_stage_ready -> X12 (Logical)",
+      "mode_auto -> X3 (Logical)",
+      "mode_maintenance -> X6 (Logical)",
+      "mode_manual -> X4 (Logical)",
+      "mode_step -> X5 (Logical)",
+      "refresh_button -> X1 (Logical)",
+      "sensor_arm_home -> X23 (Logical)",
+      "sensor_arm_vac_ok -> X18 (Logical)",
+      "sensor_feed_ext -> X21 (Logical)",
+      "sensor_feed_ret -> X22 (Logical)",
+      "sensor_feed_vac_ok -> X17 (Logical)",
+      "sensor_lift_down -> X28 (Logical)",
+      "sensor_lift_up -> X29 (Logical)",
+      "sensor_orient_ext -> X24 (Logical)",
+      "sensor_orient_probe -> X15 (Logical)",
+      "sensor_orient_ret -> X25 (Logical)",
+      "sensor_orient_vac_ok -> X19 (Logical)",
+      "sensor_swing_down -> X26 (Logical)",
+      "sensor_swing_up -> X27 (Logical)",
+      "sensor_transfer_back -> X31 (Logical)",
+      "sensor_transfer_front -> X30 (Logical)",
+      "sensor_transfer_vac_ok -> X20 (Logical)",
+      "start_button -> X0 (Logical)",
+      "stop_button -> X2 (Logical)",
+      "vac_arm_valve -> sensor_arm_vac_ok (Logical)",
+      "vac_feed_valve -> sensor_feed_vac_ok (Logical)",
+      "vac_orient_valve -> sensor_orient_vac_ok (Logical)",
+      "vac_transfer_valve -> sensor_transfer_vac_ok (Logical)",
+      "valve_feed -> cyl_feed (Pneumatic)",
+      "valve_lift -> cyl_lift (Pneumatic)",
+      "valve_orient_rotate -> cyl_orient_rotate (Pneumatic)",
+      "valve_swing -> cyl_swing (Pneumatic)",
+      "valve_transfer -> cyl_transfer (Pneumatic)",
+      "wafer_drop_detect -> X7 (Logical)",
+      "wafer_on_orient -> X14 (Logical)",
+      "wafer_on_slide -> X13 (Logical)"
+    ]
+  }
+}

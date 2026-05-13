@@ -65,9 +65,10 @@ interface PortResolution {
 
 interface TopologyCanvasProps {
   readOnly?: boolean;
+  showReadOnlyNotice?: boolean;
 }
 
-const TopologyCanvas: React.FC<TopologyCanvasProps> = ({ readOnly = false }) => {
+const TopologyCanvas: React.FC<TopologyCanvasProps> = ({ readOnly = false, showReadOnlyNotice = true }) => {
   const { t } = useTranslation();
   const {
     nodes,
@@ -259,7 +260,9 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({ readOnly = false }) => 
 
         return {
           ...nextEdge,
-          label: getEdgeSignalLabel(sourceHandle, targetHandle, edge.label),
+          label: readEdgeHideLabel(edge.data)
+            ? undefined
+            : getEdgeSignalLabel(sourceHandle, targetHandle, edge.label),
           style,
         };
       }),
@@ -651,7 +654,7 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({ readOnly = false }) => 
           </button>
         </div>
       )}
-      {readOnly && (
+      {readOnly && showReadOnlyNotice && (
         <div
           style={{
             position: 'absolute',
@@ -782,6 +785,13 @@ function readEdgeRelation(data: unknown): string | undefined {
   }
   const trimmed = relation.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readEdgeHideLabel(data: unknown): boolean {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  return (data as Record<string, unknown>).hideLabel === true;
 }
 
 function resolvePortForConnection(

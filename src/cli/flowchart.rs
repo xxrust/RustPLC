@@ -1,4 +1,4 @@
-﻿use crate::cli_support::common::{
+use crate::cli_support::common::{
     CliOutputMode, DispatchResult, display_path_relative_to_cwd, write_json_pretty,
 };
 use crate::cli_support::help::command_usage;
@@ -61,8 +61,16 @@ struct FlowchartArtifact {
     schema_version: u32,
     source_plc: String,
     title: String,
+    system_contract: Option<SystemContractSummary>,
     tasks: Vec<TaskDiagram>,
     topology: TopologySummary,
+}
+
+#[derive(Debug, Serialize)]
+struct SystemContractSummary {
+    path: String,
+    excerpt: String,
+    byte_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,6 +106,7 @@ struct EdgeSummary {
 struct TopologySummary {
     device_count: usize,
     link_count: usize,
+    devices: Vec<String>,
     variables: Vec<String>,
     workpiece_sites: Vec<String>,
     workpiece_holders: Vec<String>,
@@ -358,9 +367,53 @@ fn build_flowchart_artifact(
         schema_version: 1,
         source_plc: loaded.requested_path.display().to_string(),
         title,
+        system_contract: read_system_contract_summary(&loaded.requested_path),
         tasks,
         topology: summarize_topology(program, topology),
     }
+}
+
+fn read_system_contract_summary(source_path: &Path) -> Option<SystemContractSummary> {
+    let mut candidates = Vec::<PathBuf>::new();
+    let source_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
+    candidates.push(source_dir.join("plc").join("main.system.md"));
+    if let Some(stem) = source_path.file_stem().and_then(|value| value.to_str()) {
+        candidates.push(source_dir.join(format!("{stem}.system.md")));
+    }
+    candidates.push(source_dir.join("main.system.md"));
+
+    for candidate in candidates {
+        let Ok(text) = fs::read_to_string(&candidate) else {
+            continue;
+        };
+        let excerpt = summarize_system_contract_text(&text);
+        return Some(SystemContractSummary {
+            path: candidate.display().to_string(),
+            byte_count: text.len(),
+            excerpt,
+        });
+    }
+    None
+}
+
+fn summarize_system_contract_text(text: &str) -> String {
+    let mut lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.starts_with("```"))
+        .take(18)
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        lines.push("(empty system contract)");
+    }
+    let mut excerpt = lines.join("\n");
+    const LIMIT: usize = 2200;
+    if excerpt.len() > LIMIT {
+        excerpt.truncate(LIMIT);
+        excerpt.push_str("\n...");
+    }
+    excerpt
 }
 
 fn build_step_lookup(
@@ -442,6 +495,12 @@ fn summarize_topology(program: &PlcProgram, topology: &TopologyGraph) -> Topolog
     TopologySummary {
         device_count: topology.graph.node_count(),
         link_count: links.len(),
+        devices: program
+            .topology
+            .devices
+            .iter()
+            .map(|device| format!("{}:{:?}", device.name, device.device_type))
+            .collect(),
         variables: program
             .topology
             .variables
@@ -613,12 +672,8 @@ fn render_task_svg(task: &TaskDiagram) -> String {
         let step_h =
             30 + (step_name_lines.len() as i32 * 22) + (source_lines.len() as i32 * 16) + 18;
 
-        let body_lines = flatten_statement_lines(&step_body_lines(&step.statements), 34, 10);
-        let action_h = if body_lines.is_empty() {
-            0
-        } else {
-            18 + (body_lines.len() as i32 * 16) + 16
-        };
+        let body_lines = Vec::new();
+        let action_h = 0;
 
         let outgoing = outgoing_by_source.get(&idx).cloned().unwrap_or_default();
         let has_multiple_outgoing = outgoing.len() > 1;
@@ -1118,20 +1173,6 @@ fn transition_fact_lines(edge: &EdgeSummary, step_statements: &[String]) -> Vec<
     lines
 }
 
-fn step_body_lines(statements: &[String]) -> Vec<String> {
-    statements
-        .iter()
-        .filter(|item| {
-            let normalized = canonicalize_flowchart_text(item);
-            !(normalized.starts_with("wait ")
-                || normalized.starts_with("delay ")
-                || normalized.starts_with("timeout ")
-                || normalized.starts_with("goto "))
-        })
-        .cloned()
-        .collect()
-}
-
 fn canonicalize_flowchart_compare_key(value: &str) -> String {
     canonicalize_flowchart_text(value)
         .replace("some(", "")
@@ -1181,23 +1222,6 @@ fn wrap_text_lines(value: &str, max_chars: usize, max_lines: usize) -> Vec<Strin
         }
     }
     lines
-}
-
-fn flatten_statement_lines(values: &[String], max_chars: usize, max_lines: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    for value in values {
-        let wrapped = wrap_text_lines(value, max_chars, max_lines.saturating_sub(out.len()));
-        for line in wrapped {
-            if out.len() >= max_lines {
-                break;
-            }
-            out.push(line);
-        }
-        if out.len() >= max_lines {
-            break;
-        }
-    }
-    out
 }
 
 fn render_svg_lines(
@@ -1725,11 +1749,20 @@ fn render_html(model: &FlowchartArtifact) -> String {
         service: '#6d28d9',
         fault: '#b45309',
       };
+      const materialPalette = [
+        { fill: '#0f766e', stroke: '#064e3b', text: '#ecfdf5' },
+        { fill: '#c2410c', stroke: '#7c2d12', text: '#fff7ed' },
+        { fill: '#1d4ed8', stroke: '#1e3a8a', text: '#eff6ff' },
+        { fill: '#be123c', stroke: '#881337', text: '#fff1f2' },
+        { fill: '#7c3aed', stroke: '#4c1d95', text: '#f5f3ff' },
+        { fill: '#0891b2', stroke: '#164e63', text: '#ecfeff' },
+      ];
 
       const taskButtons = Array.from(document.querySelectorAll('.task-button'));
       const topologyNodes = buildPhysicalNodes(model);
       const nodeMap = new Map(topologyNodes.map((node, index) => [node.name, { ...node, index }]));
       const journey = buildJourney(model);
+      const pipeline = buildPipelineModel(journey);
       const taskMeta = buildTaskMeta(model);
       const taskMetaMap = new Map(taskMeta.map((task) => [task.task_name, task]));
       const initialSelection = chooseInitialSelection(taskMeta, journey, model.tasks);
@@ -1787,7 +1820,22 @@ fn render_html(model: &FlowchartArtifact) -> String {
         model.topology.workpiece_sites.forEach((entry) => push(entry.split(':')[0], 'site'));
         model.topology.workpiece_holders.forEach((entry) => push(entry.split(':')[0], 'holder'));
 
-        return ordered;
+        return ordered.sort((a, b) => physicalSortKey(a).localeCompare(physicalSortKey(b)));
+      }
+
+      function physicalSortKey(node) {
+        const stageRank = {
+          FEED: '00',
+          SLIDE: '10',
+          ARM: '20',
+          ORIENT: '30',
+          TRANSFER: '40',
+          MEASURE: '50',
+          REJECT: '90',
+          SITE: '80',
+        }[stageName(node.name)] || '80';
+        const kindRank = node.kind === 'site' ? '0' : node.kind === 'holder' ? '1' : '2';
+        return `${stageRank}:${kindRank}:${node.name}`;
       }
 
       function classifyNode(name) {
@@ -1812,7 +1860,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
           return { kind: 'transfer', from: match[1], to: match[2], label: `${match[1]} -> ${match[2]}` };
         }
         if ((match = /^finish (.+) as (.+)$/.exec(effect))) {
-          return { kind: 'finish', from: match[1], to: match[2], label: `${match[1]} -> ${match[2]}` };
+          return { kind: 'finish', from: match[1], to: match[1], terminal_state: match[2], label: `${match[1]} finish:${match[2]}` };
         }
         if ((match = /^mount (.+) at (.+)$/.exec(effect))) {
           return { kind: 'mount', from: match[1], to: match[2], label: `${match[1]} @ ${match[2]}` };
@@ -1845,6 +1893,57 @@ fn render_html(model: &FlowchartArtifact) -> String {
           });
         });
         return events;
+      }
+
+      function buildPipelineModel(events) {
+        const forward = events.filter((event) => isForwardPipelineEvent(event));
+        const checkpoints = [];
+        const seen = new Set();
+        forward.forEach((event) => {
+          [event.from, event.to].forEach((name) => {
+            if (!name || seen.has(name)) return;
+            seen.add(name);
+            checkpoints.push(name);
+          });
+        });
+        const occupied = checkpoints
+          .filter((name) => !isIngressOnly(name))
+          .map((name, index, all) => {
+            const cycle = all.length - index;
+            const color = materialColor(index);
+            return {
+              name,
+              cycle,
+              label: `W${cycle}`,
+              phase: stageName(name),
+              color,
+            };
+          });
+        return {
+          forward,
+          checkpoints,
+          occupied,
+          branchEvents: events.filter((event) => !isForwardPipelineEvent(event)),
+          isPipelineProjection: forward.length >= 3 && occupied.length >= 2,
+        };
+      }
+
+      function isForwardPipelineEvent(event) {
+        if (!event || event.kind === 'finish') return false;
+        const text = `${event.from} ${event.to} ${event.effect}`.toLowerCase();
+        if (text.includes('reject') || text.includes('drop') || text.includes('scrap')) return false;
+        const fromRank = stageOrder(event.from);
+        const toRank = stageOrder(event.to);
+        return toRank >= fromRank && toRank < 90;
+      }
+
+      function isIngressOnly(name) {
+        const lower = String(name).toLowerCase();
+        return lower.includes('cassette') || lower.includes('magazine') || lower.includes('supply');
+      }
+
+      function materialColor(index) {
+        return materialPalette[index % materialPalette.length];
       }
 
       function roleForTask(taskName) {
@@ -1934,8 +2033,12 @@ fn render_html(model: &FlowchartArtifact) -> String {
         const active = journey[state.activeJourneyIndex];
         const selected = taskMetaMap.get(state.selectedTask);
         const chips = [];
+        chips.push(`<span class="caption-chip">atlas mode: ${pipeline.isPipelineProjection ? 'steady-state pipeline projection' : 'static effect projection'}</span>`);
+        if (pipeline.isPipelineProjection) {
+          chips.push(`<span class="caption-chip">tokens shown: ${pipeline.occupied.length} concurrent station occupancies</span>`);
+        }
         if (active) {
-          chips.push(`<span class="caption-chip">active journey: ${escapeHtml(active.label)} via ${escapeHtml(active.task_name)}</span>`);
+          chips.push(`<span class="caption-chip">active effect: ${escapeHtml(active.label)} via ${escapeHtml(active.task_name)}</span>`);
         }
         if (selected) {
           chips.push(`<span class="caption-chip">selected task: ${escapeHtml(selected.task_name)} / ${escapeHtml(roleLabels[selected.role])}</span>`);
@@ -1948,8 +2051,9 @@ fn render_html(model: &FlowchartArtifact) -> String {
         const host = document.getElementById('atlas-canvas');
         const width = Math.max(1540, host.clientWidth || 1540);
         const height = 760;
-        const routeY = 130;
-        const eventY = 235;
+        const routeY = 126;
+        const waveY = 214;
+        const eventY = 280;
         const left = 110;
         const right = width - 110;
         const spacing = topologyNodes.length > 1 ? (right - left) / (topologyNodes.length - 1) : 0;
@@ -1978,22 +2082,20 @@ fn render_html(model: &FlowchartArtifact) -> String {
               .join('')
           : '';
 
-        const routeEdges = [];
-        for (let index = 0; index < topologyNodes.length - 1; index += 1) {
-          const from = positions.get(topologyNodes[index].name);
-          const to = positions.get(topologyNodes[index + 1].name);
-          const isActive =
-            active &&
-            ((active.from === topologyNodes[index].name && active.to === topologyNodes[index + 1].name) ||
-              (active.to === topologyNodes[index].name && active.from === topologyNodes[index + 1].name));
-          routeEdges.push(`
-            <line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"
-              stroke="${isActive ? '#c08a2f' : '#d2c1a0'}"
-              stroke-width="${isActive ? '7' : '4'}"
-              stroke-linecap="round"
-              opacity="${isActive ? '1' : '0.74'}" />
-          `);
-        }
+        const routeSlots = topologyNodes
+          .map((node) => {
+            const pos = positions.get(node.name);
+            const stage = stageName(node.name);
+            return `
+              <g>
+                <line x1="${pos.x}" y1="${routeY - 28}" x2="${pos.x}" y2="${routeY + 30}"
+                  stroke="#d2c1a0" stroke-width="1.4" opacity="0.45" />
+                <text x="${pos.x}" y="${routeY + 48}" text-anchor="middle"
+                  fill="#94a3b8" font-size="8" font-family="Cascadia Code, Consolas, monospace">cap=1</text>
+                <title>${escapeHtml(node.name)} / ${stage} station occupancy slot</title>
+              </g>
+            `;
+          });
 
         const stageMarkup = stages
           .map((stage) => `
@@ -2041,43 +2143,112 @@ fn render_html(model: &FlowchartArtifact) -> String {
           })
           .join('');
 
-        const journeyMarkup = journey
+        const branchMarkup = pipeline.branchEvents
           .map((event, index) => {
             const from = positions.get(event.from);
             const to = positions.get(event.to);
             if (!from || !to) return '';
-            const activeEvent = index === state.activeJourneyIndex;
-            const taskSelected = event.task_name === state.selectedTask;
-            const lift = 38 + (index % 4) * 18;
-            const sweep = from.x <= to.x ? 1 : -1;
+            const lift = 54 + (index % 3) * 16;
             const midX = (from.x + to.x) / 2;
-            const eventLabel = `${stageName(event.from)} -> ${stageName(event.to)}`;
             const path = [
               `M ${from.x} ${routeY + 18}`,
-              `C ${from.x + sweep * 28} ${eventY - lift}, ${to.x - sweep * 28} ${eventY - lift}, ${to.x} ${routeY + 18}`,
+              `C ${from.x + 24} ${eventY - lift}, ${to.x - 24} ${eventY - lift}, ${to.x} ${routeY + 18}`,
             ].join(' ');
             return `
-              <g class="atlas-journey-hit" data-index="${index}" style="cursor:pointer">
-                <title>${escapeHtml(event.task_name)}: ${escapeHtml(event.effect)}</title>
-                <path d="${path}" fill="none" stroke="${activeEvent ? '#c08a2f' : taskSelected ? roleColors.process : '#b8c8d2'}"
-                  stroke-width="${activeEvent ? '4.8' : taskSelected ? '3.1' : '1.5'}"
-                  opacity="${activeEvent ? '0.98' : taskSelected ? '0.74' : '0.36'}"
-                  marker-end="${activeEvent ? 'url(#journeyArrowActive)' : 'url(#journeyArrow)'}" />
-                <circle cx="${midX}" cy="${eventY - lift}" r="${activeEvent ? '13' : '8'}"
-                  fill="${activeEvent ? '#c08a2f' : '#fffdf7'}" stroke="${activeEvent ? '#8b5a10' : '#b8c8d2'}" stroke-width="1.4" />
-                <text x="${midX}" y="${eventY - lift + 4}" text-anchor="middle"
-                  fill="${activeEvent ? '#fffdf7' : '#64748b'}" font-size="${activeEvent ? '10' : '8'}"
-                  font-family="Cascadia Code, Consolas, monospace">${index + 1}</text>
-                ${activeEvent ? `
-                  <rect x="${midX - 58}" y="${eventY - lift + 18}" width="116" height="24" rx="7"
-                    fill="rgba(255,252,246,0.96)" stroke="#c08a2f" stroke-width="1" />
-                  <text x="${midX}" y="${eventY - lift + 34}" text-anchor="middle"
-                    fill="#8b5a10" font-size="10" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(eventLabel)}</text>
-                ` : ''}
+              <g>
+                <title>${escapeHtml(event.task_name)} branch: ${escapeHtml(event.effect)}</title>
+                <path d="${path}" fill="none" stroke="#b45309" stroke-width="1.7"
+                  opacity="0.34" stroke-dasharray="7 7" marker-end="url(#branchArrow)" />
+                <text x="${midX}" y="${eventY - lift - 6}" text-anchor="middle"
+                  fill="#b45309" font-size="9" font-family="Cascadia Code, Consolas, monospace">branch</text>
               </g>
             `;
           })
           .join('');
+
+        const pipelineWaveMarkup = pipeline.isPipelineProjection
+          ? pipeline.occupied
+              .map((token, index) => {
+                const pos = positions.get(token.name);
+                if (!pos) return '';
+                const offset = index % 2 === 0 ? -12 : 14;
+                return `
+                  <g class="pipeline-wave-token material-token-palette" data-material="${escapeHtml(token.label)}">
+                    <title>${escapeHtml(token.label)} at ${escapeHtml(token.name)} / cycle-colored steady-state projection, not a single-wafer trace</title>
+                    <line x1="${pos.x}" y1="${routeY + 24}" x2="${pos.x}" y2="${waveY + offset - 22}"
+                      stroke="${token.color.stroke}" stroke-width="1.4" opacity="0.38" />
+                    <circle cx="${pos.x}" cy="${waveY + offset}" r="23"
+                      fill="${token.color.fill}" opacity="0.14" />
+                    <circle cx="${pos.x}" cy="${waveY + offset}" r="17"
+                      fill="${token.color.fill}" stroke="${token.color.stroke}" stroke-width="1.6" />
+                    <text x="${pos.x}" y="${waveY + offset + 4}" text-anchor="middle"
+                      fill="${token.color.text}" font-size="10" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(token.label)}</text>
+                    <text x="${pos.x}" y="${waveY + offset + 32}" text-anchor="middle"
+                      fill="${token.color.stroke}" font-size="9" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(token.phase)}</text>
+                  </g>
+                `;
+              })
+              .join('')
+          : '';
+
+        const materialLegendMarkup = pipeline.isPipelineProjection
+          ? `
+            <g class="material-cycle-legend">
+              <text x="${right - 390}" y="${waveY - 40}" fill="#64748b" font-size="10" font-family="Cascadia Code, Consolas, monospace">cycle color key</text>
+              ${pipeline.occupied
+                .slice(0, 6)
+                .map((token, index) => {
+                  const x = right - 270 + index * 42;
+                  return `
+                    <g>
+                      <circle cx="${x}" cy="${waveY - 44}" r="8" fill="${token.color.fill}" stroke="${token.color.stroke}" stroke-width="1.2" />
+                      <text x="${x}" y="${waveY - 25}" text-anchor="middle" fill="${token.color.stroke}" font-size="8" font-family="Cascadia Code, Consolas, monospace">${escapeHtml(token.label)}</text>
+                    </g>
+                  `;
+                })
+                .join('')}
+            </g>
+          `
+          : '';
+
+        const pipelinePathMarkup = pipeline.forward
+          .map((event) => {
+            const from = positions.get(event.from);
+            const to = positions.get(event.to);
+            if (!from || !to) return '';
+            return `
+              <line x1="${from.x}" y1="${waveY}" x2="${to.x}" y2="${waveY}"
+                stroke="#0f4c81" stroke-width="2.2" opacity="0.28" stroke-linecap="round" />
+            `;
+          })
+          .join('');
+
+        const journeyMarkup = active && positions.get(active.from) && positions.get(active.to)
+          ? (() => {
+              const from = positions.get(active.from);
+              const to = positions.get(active.to);
+              const tokenColor =
+                pipeline.occupied.find((token) => token.name === active.to || token.name === active.from)?.color ||
+                materialColor(0);
+              const sweep = from.x <= to.x ? 1 : -1;
+              const midX = (from.x + to.x) / 2;
+              const path = [
+                `M ${from.x} ${routeY + 23}`,
+                `C ${from.x + sweep * 34} ${eventY - 38}, ${to.x - sweep * 34} ${eventY - 38}, ${to.x} ${routeY + 23}`,
+              ].join(' ');
+              return `
+                <g class="atlas-journey-hit" data-index="${state.activeJourneyIndex}" style="cursor:pointer">
+                  <title>selected effect only: ${escapeHtml(active.task_name)} / ${escapeHtml(active.effect)}</title>
+                  <path d="${path}" fill="none" stroke="${tokenColor.fill}" stroke-width="3.4"
+                    opacity="0.82" marker-end="url(#journeyArrowActive)" />
+                  <rect x="${midX - 78}" y="${eventY - 30}" width="156" height="24" rx="7"
+                    fill="rgba(255,252,246,0.96)" stroke="${tokenColor.stroke}" stroke-width="1" />
+                  <text x="${midX}" y="${eventY - 14}" text-anchor="middle"
+                    fill="${tokenColor.stroke}" font-size="10" font-family="Cascadia Code, Consolas, monospace">selected effect highlight</text>
+                </g>
+              `;
+            })()
+          : '';
 
         const taskCardMarkup = [];
         bands.forEach((band) => {
@@ -2112,19 +2283,6 @@ fn render_html(model: &FlowchartArtifact) -> String {
           });
         });
 
-        const activePulse = active && positions.get(active.from) && positions.get(active.to)
-          ? (() => {
-              const from = positions.get(active.from);
-              const to = positions.get(active.to);
-              return `
-                <circle cx="${from.x}" cy="${from.y}" r="9" fill="#c08a2f">
-                  <animate attributeName="cx" values="${from.x};${to.x}" dur="2.2s" repeatCount="indefinite" />
-                  <animate attributeName="cy" values="${from.y};${to.y}" dur="2.2s" repeatCount="indefinite" />
-                </circle>
-              `;
-            })()
-          : '';
-
         host.innerHTML = `
           <svg class="atlas-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="system atlas">
             <defs>
@@ -2135,20 +2293,28 @@ fn render_html(model: &FlowchartArtifact) -> String {
                 <path d="M0,0 L8,4 L0,8 z" fill="#b8c8d2" />
               </marker>
               <marker id="journeyArrowActive" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
-                <path d="M0,0 L9,4.5 L0,9 z" fill="#c08a2f" />
+                <path d="M0,0 L9,4.5 L0,9 z" fill="context-stroke" />
+              </marker>
+              <marker id="branchArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <path d="M0,0 L8,4 L0,8 z" fill="#b45309" />
               </marker>
             </defs>
             <rect x="0" y="0" width="${width}" height="${height}" rx="24" fill="rgba(255,255,255,0.32)" pointer-events="none" />
-            <text x="${left}" y="58" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">space axis</text>
-            <text x="${left}" y="${eventY + 28}" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">material journey</text>
+            <text x="${left}" y="58" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">parallel station occupancy map</text>
+            <text class="pipeline-wave" x="${left}" y="${waveY - 34}" fill="#0f4c81" font-size="12" font-family="Cascadia Code, Consolas, monospace">steady-state pipeline wave</text>
+            <text x="${left}" y="${waveY - 16}" fill="#64748b" font-size="10" font-family="Cascadia Code, Consolas, monospace">multi-token station occupancy inferred from forward workpiece effects; not a single-wafer trace</text>
+            <text x="${left}" y="${eventY + 28}" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">selected effect reference</text>
             <text x="${left}" y="305" fill="#6b7280" font-size="12" font-family="Cascadia Code, Consolas, monospace">control projection</text>
             ${selectedBands}
             ${stageMarkup}
-            ${routeEdges.join('')}
+            ${routeSlots.join('')}
             ${nodeMarkup}
+            ${pipelinePathMarkup}
+            ${pipelineWaveMarkup}
+            ${materialLegendMarkup}
+            ${branchMarkup}
             ${journeyMarkup}
             ${taskCardMarkup.join('')}
-            ${activePulse}
           </svg>
         `;
 
@@ -2181,6 +2347,19 @@ fn render_html(model: &FlowchartArtifact) -> String {
         if (lower.includes('measure') || lower.includes('handed')) return 'MEASURE';
         if (lower.includes('reject') || lower.includes('drop')) return 'REJECT';
         return 'SITE';
+      }
+
+      function stageOrder(name) {
+        return {
+          FEED: 0,
+          SLIDE: 10,
+          ARM: 20,
+          ORIENT: 30,
+          TRANSFER: 40,
+          MEASURE: 50,
+          REJECT: 90,
+          SITE: 80,
+        }[stageName(name)] ?? 80;
       }
 
       function buildStageSpans(positions) {
@@ -2256,7 +2435,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
         if (!task) return;
         document.getElementById('detail-title').textContent = task.task_name;
         document.getElementById('detail-summary').textContent =
-          `This theater keeps one control task in focus while the atlas above keeps the global machine skeleton visible.`;
+          `SFC keeps step identity and transitions only. Action/wait/effect detail is shown in the side cards to avoid repeated names and duplicated content.`;
         document.getElementById('detail-meta').innerHTML = `
           <span class="meta-pill ${roleClasses[task.role]}">${escapeHtml(roleLabels[task.role])}</span>
           <span class="meta-pill">${task.steps.length} steps</span>
@@ -2360,7 +2539,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
     let _ = write!(out, "<h1>{}</h1>", html_escape(&model.title));
     let _ = write!(
         out,
-        "<div class=\"hero-summary\"><span>source: <code>{}</code></span><span>tasks: {}</span><span>transitions: {}</span></div>",
+        "<div class=\"hero-summary\"><span>source: <code>{}</code></span><span>tasks: {}</span><span>transitions: {}</span><span>integrated review cockpit</span></div>",
         html_escape(&model.source_plc),
         model.tasks.len(),
         model
@@ -2376,7 +2555,9 @@ fn render_html(model: &FlowchartArtifact) -> String {
     out.push_str(
         "<div class=\"section-jumps\">\
           <button class=\"rail-button\" data-section=\"section-atlas\">System Atlas</button>\
-          <button class=\"rail-button\" data-section=\"section-journey\">Journey Reel</button>\
+          <button class=\"rail-button\" data-section=\"section-review\">Review Cockpit</button>\
+          <button class=\"rail-button\" data-section=\"section-journey\">Effect Reel</button>\
+          <button class=\"rail-button\" data-section=\"section-system\">System Contract</button>\
           <button class=\"rail-button\" data-section=\"section-detail\">Task Theater</button>\
           <button class=\"rail-button\" data-section=\"section-topology\">Topology</button>\
         </div>",
@@ -2390,7 +2571,7 @@ fn render_html(model: &FlowchartArtifact) -> String {
     out.push_str(
         "<section id=\"section-atlas\" class=\"scene-panel\">\
           <div class=\"scene-head\">\
-            <div><h2>System Atlas</h2><p>One global skeleton for stations, holders, control bands, and task-to-material coupling. The moving caption is not decoration: it is the current material handoff extracted from explicit workpiece effects.</p></div>\
+            <div><h2>System Atlas</h2><p>One global skeleton for stations, holders, control bands, and task-to-material coupling. The main wave is a multi-token steady-state projection; the lower effect trace is only a single-wafer reference, not a scheduling proof.</p></div>\
           </div>\
           <div class=\"atlas-frame\">\
             <div id=\"atlas-caption\" class=\"atlas-caption\"></div>\
@@ -2399,13 +2580,29 @@ fn render_html(model: &FlowchartArtifact) -> String {
         </section>"
     );
     out.push_str(
+        "<section id=\"section-review\" class=\"scene-panel\">\
+          <div class=\"scene-head\">\
+            <div><h2>Review Cockpit</h2><p>The TypeScript/Tailwind review surface is folded into this offline page: source intent, counts, task inventory, and workpiece topology stay in one human review entry.</p></div>\
+          </div>",
+    );
+    out.push_str(&render_review_cockpit_html(model));
+    out.push_str("</section>");
+    out.push_str(
         "<section id=\"section-journey\" class=\"scene-panel\">\
           <div class=\"scene-head\">\
-            <div><h2>Journey Reel</h2><p>This strip is the machine narrative in handoff order. Selecting a card drives the atlas highlight and the task theater below.</p></div>\
+            <div><h2>Effect Reel</h2><p>This strip lists extracted workpiece effects in program order. It is useful for review, but it must not be read as the whole line waiting for one wafer to finish before the next wafer enters.</p></div>\
           </div>\
           <div id=\"journey-track\" class=\"journey-strip\"></div>\
         </section>"
     );
+    out.push_str(
+        "<section id=\"section-system\" class=\"scene-panel\">\
+          <div class=\"scene-head\">\
+            <div><h2>System Contract</h2><p>The source-side system contract is part of the review surface. Agent edits should be judged against this intent, not only against generated task names.</p></div>\
+          </div>",
+    );
+    out.push_str(&render_system_contract_html(model.system_contract.as_ref()));
+    out.push_str("</section>");
     out.push_str(
         "<section id=\"section-detail\" class=\"scene-panel\">\
           <div class=\"scene-head\">\
@@ -2526,9 +2723,10 @@ fn render_task_table(task: &TaskDiagram) -> String {
 
 fn render_topology_html(topology: &TopologySummary) -> String {
     format!(
-        "<div class=\"topology-grid\"><div class=\"card\"><h3>Counts</h3><p>devices: <code>{}</code></p><p>links: <code>{}</code></p></div><div class=\"card\"><h3>Variables</h3>{}</div><div class=\"card\"><h3>Workpieces</h3>{}</div><div class=\"card\"><h3>Links</h3>{}</div></div>",
+        "<div class=\"topology-grid\"><div class=\"card\"><h3>Counts</h3><p>devices: <code>{}</code></p><p>links: <code>{}</code></p></div><div class=\"card\"><h3>Devices</h3>{}</div><div class=\"card\"><h3>Variables</h3>{}</div><div class=\"card\"><h3>Workpieces</h3>{}</div><div class=\"card\"><h3>Links</h3>{}</div></div>",
         topology.device_count,
         topology.link_count,
+        render_compact_list(&topology.devices),
         render_compact_list(&topology.variables),
         render_compact_list(
             &topology
@@ -2541,6 +2739,98 @@ fn render_topology_html(topology: &TopologySummary) -> String {
         ),
         render_compact_list(&topology.links)
     )
+}
+
+fn render_review_cockpit_html(model: &FlowchartArtifact) -> String {
+    let transition_count = model
+        .tasks
+        .iter()
+        .map(|task| task.transitions.len())
+        .sum::<usize>();
+    let step_count = model
+        .tasks
+        .iter()
+        .map(|task| task.steps.len())
+        .sum::<usize>();
+    let handoff_count = model
+        .tasks
+        .iter()
+        .flat_map(|task| task.transitions.iter())
+        .map(|edge| edge.effects.len())
+        .sum::<usize>();
+
+    let system_excerpt = model
+        .system_contract
+        .as_ref()
+        .map(|contract| {
+            format!(
+                "<p><code>{}</code> / <code>{}</code> bytes</p><pre style=\"white-space:pre-wrap;line-height:1.5;max-height:280px;overflow:auto;background:rgba(255,252,246,0.78);border:1px solid #eadcc1;border-radius:16px;padding:14px\">{}</pre>",
+                html_escape(&contract.path),
+                contract.byte_count,
+                html_escape(&contract.excerpt)
+            )
+        })
+        .unwrap_or_else(|| {
+            "<p>No source-side system contract found. Add <code>plc/main.system.md</code> next to the bundle so this cockpit can judge generated flow against authored intent.</p>".to_string()
+        });
+
+    let task_inventory = model
+        .tasks
+        .iter()
+        .map(|task| {
+            let handoffs = task
+                .transitions
+                .iter()
+                .map(|edge| edge.effects.len())
+                .sum::<usize>();
+            format!(
+                "<li><span><code>{}</code></span><span>{} steps / {} transitions / {} effects</span></li>",
+                html_escape(&task.task_name),
+                task.steps.len(),
+                task.transitions.len(),
+                handoffs
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    format!(
+        "<div class=\"topology-grid\">\
+          <div class=\"card\"><h3>Review Counts</h3>\
+            <p>tasks: <code>{}</code></p><p>steps: <code>{}</code></p><p>transitions: <code>{}</code></p><p>workpiece effects: <code>{}</code></p>\
+          </div>\
+          <div class=\"card\"><h3>Workpiece Capacity Surface</h3>{}</div>\
+          <div class=\"card\"><h3>System Contract</h3>{}</div>\
+          <div class=\"card\"><h3>Task Inventory</h3><ul class=\"compact task-inventory\">{}</ul></div>\
+        </div>",
+        model.tasks.len(),
+        step_count,
+        transition_count,
+        handoff_count,
+        render_compact_list(
+            &model
+                .topology
+                .workpiece_sites
+                .iter()
+                .chain(model.topology.workpiece_holders.iter())
+                .cloned()
+                .collect::<Vec<_>>()
+        ),
+        system_excerpt,
+        task_inventory
+    )
+}
+
+fn render_system_contract_html(system_contract: Option<&SystemContractSummary>) -> String {
+    match system_contract {
+        Some(contract) => format!(
+            "<div class=\"detail-card\"><h3>{}</h3><p><code>{}</code> bytes</p><pre style=\"white-space:pre-wrap;line-height:1.55;color:#253040;background:rgba(255,252,246,0.78);border:1px solid #eadcc1;border-radius:16px;padding:16px;overflow:auto\">{}</pre></div>",
+            html_escape(&contract.path),
+            contract.byte_count,
+            html_escape(&contract.excerpt)
+        ),
+        None => "<div class=\"detail-card\"><h3>No system contract found</h3><p>Expected a source-side file such as <code>plc/main.system.md</code> next to the bundle. Without it this report can only review compiled task structure, not authored intent.</p></div>".to_string(),
+    }
 }
 
 fn render_compact_list(values: &[String]) -> String {

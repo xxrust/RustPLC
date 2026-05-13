@@ -14,6 +14,7 @@ export const zh = {
     // Tabs
     tabs: {
       topology: '拓扑图',
+      flowchart: '流程审阅',
       replay: 'Tick 回放',
       scenario: '场景',
       run: '运行与门禁',

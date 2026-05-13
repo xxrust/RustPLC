@@ -10,7 +10,7 @@ import { toComponentTopology } from '../utils/topologySerialization';
 interface Tab {
   id: string;
   label: string;
-  view: 'topology' | 'replay' | 'scenario' | 'run' | 'diagnosis' | 'audit';
+  view: 'topology' | 'flowchart' | 'replay' | 'scenario' | 'run' | 'diagnosis' | 'audit';
   dirty?: boolean;
 }
 
@@ -97,6 +97,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
 
   const NEW_TAB_OPTIONS: Array<{ view: Tab['view']; label: string }> = [
     { view: 'topology', label: t('tabs.topology') },
+    { view: 'flowchart', label: t('tabs.flowchart') },
     { view: 'replay', label: t('tabs.replay') },
     { view: 'scenario', label: t('tabs.scenario') },
     { view: 'run', label: t('tabs.run') },
