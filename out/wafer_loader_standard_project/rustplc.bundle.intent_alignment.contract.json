@@ -7,7 +7,7 @@
   },
   "source_digest": {
     "algorithm": "sha256",
-    "value": "94f46bde431a7816c09e0764486d84babed48d8d78e045a2d9af311051089a72"
+    "value": "663136a835f349fadd23b34cef752245ac9ec455d9819b604c972f883f30e8f8"
   },
   "metadata": {
     "contract_id": "wafer-loader-standard-nominal-handoff",
@@ -54,10 +54,10 @@
         }
       },
       {
-        "milestone_id": "orient_stage_secured",
+        "milestone_id": "orient_direction_ready",
         "business_milestone": {
-          "label": "辨相台持片确认",
-          "description": "晶片已从旋臂交付到辨相台，辨相台真空确认持片。"
+          "label": "辨相方向确认",
+          "description": "晶片已在辨相台完成旋转前后探针比较，+X 朝滑轨方向的姿态已确认并发布转运许可。"
         }
       },
       {
@@ -75,10 +75,10 @@
       },
       {
         "predecessor": "slide_pick_closed",
-        "successor": "orient_stage_secured"
+        "successor": "orient_direction_ready"
       },
       {
-        "predecessor": "orient_stage_secured",
+        "predecessor": "orient_direction_ready",
         "successor": "measure_handoff_completed"
       }
     ],
@@ -112,7 +112,7 @@
         {
           "source": "trace_event",
           "key": "transition",
-          "expected": "task=0;from=6;to=7;reason=action"
+          "expected": "task=0;from=13;to=14;reason=action"
         }
       ]
     },
@@ -127,22 +127,22 @@
         {
           "source": "trace_event",
           "key": "transition",
-          "expected": "task=3;from=17;to=18;reason=wait_satisfied"
+          "expected": "task=3;from=29;to=30;reason=wait_satisfied"
         }
       ]
     },
     {
-      "binding_id": "orient_stage_secured_transition",
+      "binding_id": "orient_direction_ready_transition",
       "subject": {
         "kind": "milestone",
-        "milestone_id": "orient_stage_secured"
+        "milestone_id": "orient_direction_ready"
       },
       "combination": "all_of",
       "evidence": [
         {
           "source": "trace_event",
           "key": "transition",
-          "expected": "task=3;from=20;to=50;reason=wait_satisfied"
+          "expected": "task=3;from=38;to=39;reason=action"
         }
       ]
     },
@@ -157,7 +157,7 @@
         {
           "source": "trace_event",
           "key": "transition",
-          "expected": "task=4;from=27;to=8;reason=goto"
+          "expected": "task=4;from=38;to=39;reason=action"
         }
       ]
     },
@@ -172,7 +172,7 @@
         {
           "source": "trace_event",
           "key": "transition",
-          "expected": "task=4;from=27;to=8;reason=goto"
+          "expected": "task=4;from=40;to=18;reason=goto"
         }
       ]
     }

@@ -1,0 +1,81 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "Controller profile for race sorting gate"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor { purpose: "Operator start request", subtype: "push_button", debounce: 20ms }
+device motor_conv: motor { purpose: "Sorting conveyor drive", rated_speed: 20rpm, ramp_time: 50ms }
+device sensor_A: sensor { purpose: "Part arrived at A lane", subtype: "proximity_sensor" }
+device sensor_B: sensor { purpose: "Part arrived at B lane", subtype: "proximity_sensor" }
+device valve_gate: solenoid_valve { purpose: "Sorting gate valve", response_time: 20ms }
+device cyl_gate: cylinder { purpose: "Moves sorting gate between A and B", stroke_time: 300ms, retract_time: 300ms }
+device sensor_gate_A: sensor { purpose: "Gate at A feedback", subtype: "limit_switch" }
+device sensor_gate_B: sensor { purpose: "Gate at B feedback", subtype: "limit_switch" }
+
+relation { from: start_button.out, to: plc_main.X4, via: reports_to }
+relation { from: plc_main.Y0, to: motor_conv.cmd, via: driven_by }
+relation { from: motor_conv.position_A, to: sensor_A.sense, via: detects }
+relation { from: sensor_A.out, to: plc_main.X0, via: reports_to }
+relation { from: motor_conv.position_B, to: sensor_B.sense, via: detects }
+relation { from: sensor_B.out, to: plc_main.X1, via: reports_to }
+relation { from: plc_main.Y1, to: valve_gate.coil, via: driven_by }
+relation { from: valve_gate.out, to: cyl_gate.cmd, via: driven_by }
+relation { from: cyl_gate.retracted, to: sensor_gate_A.sense, via: detects }
+relation { from: sensor_gate_A.out, to: plc_main.X2, via: reports_to }
+relation { from: cyl_gate.extended, to: sensor_gate_B.sense, via: detects }
+relation { from: sensor_gate_B.out, to: plc_main.X3, via: reports_to }
+
+[constraints]
+
+timing: task.search.detect must_complete_within 1200ms
+
+causality: Y0 -> motor_conv -> sensor_A
+causality: Y0 -> motor_conv -> sensor_B
+causality: Y1 -> valve_gate -> cyl_gate -> sensor_gate_B
+
+[tasks]
+
+task ready:
+    step wait_start:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+    on_complete: goto search
+
+task search:
+    step start_conv:
+        action: set motor_conv.run on
+    step detect:
+        race:
+            branch_A:
+                wait: sensor_A == true
+                then: goto process_A.stop_conv
+            branch_B:
+                wait: sensor_B == true
+                then: goto process_B.stop_conv
+        timeout: 1200ms -> goto fault_handler.alarm
+
+task process_A:
+    step stop_conv:
+        action: set motor_conv.run off
+    step gate_to_A:
+        action: retract cyl_gate
+        timeout: 1200ms -> goto fault_handler.alarm
+    on_complete: goto ready
+
+task process_B:
+    step stop_conv:
+        action: set motor_conv.run off
+    step gate_to_B:
+        action: extend cyl_gate
+        timeout: 1200ms -> goto fault_handler.alarm
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_outputs:
+        action: set motor_conv.run off
+        action: set valve_gate.coil off
+    step alarm:
+        action: log "fault: race timeout"
+    on_complete: goto ready

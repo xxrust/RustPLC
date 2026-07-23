@@ -1,0 +1,48 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "Controller profile for repeated glue strokes"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor { purpose: "Operator start request", subtype: "push_button", debounce: 20ms }
+device valve_glue: solenoid_valve { purpose: "Glue cylinder valve", response_time: 20ms }
+device cyl_glue: cylinder { purpose: "Performs repeated glue dispense strokes", stroke_time: 300ms, retract_time: 300ms }
+device sensor_glue_ext: sensor { purpose: "Glue cylinder extended feedback", subtype: "limit_switch" }
+device sensor_glue_ret: sensor { purpose: "Glue cylinder retracted feedback", subtype: "limit_switch" }
+
+relation { from: start_button.out, to: plc_main.X2, via: reports_to }
+relation { from: plc_main.Y0, to: valve_glue.coil, via: driven_by }
+relation { from: valve_glue.out, to: cyl_glue.cmd, via: driven_by }
+relation { from: cyl_glue.extended, to: sensor_glue_ext.sense, via: detects }
+relation { from: sensor_glue_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_glue.retracted, to: sensor_glue_ret.sense, via: detects }
+relation { from: sensor_glue_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+causality: Y0 -> valve_glue -> cyl_glue -> sensor_glue_ext
+
+[tasks]
+
+task ready:
+    step wait_start:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+
+task cycle:
+    step glue_cycle:
+        repeat 4:
+            action: extend cyl_glue
+                timeout: 1200ms -> goto fault_handler.alarm
+            action: retract cyl_glue
+                timeout: 1200ms -> goto fault_handler.alarm
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_outputs:
+        action: set valve_glue.coil off
+    step alarm:
+        action: log "fault: glue stroke did not complete"
+    on_complete: goto ready

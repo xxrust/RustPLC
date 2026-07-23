@@ -1,0 +1,20 @@
+[topology]
+
+device valve_3pos: solenoid_valve {
+    purpose: "三位电磁阀，支持 extend/neutral/retract 三种状态",
+    states: [extend, neutral, retract]
+}
+
+[constraints]
+
+safety: valve_3pos.extend conflicts_with valve_3pos.retract
+    reason: "三位阀不应同时处于 extend 与 retract"
+
+[tasks]
+
+task main:
+    step wait_neutral:
+        wait: valve_3pos == neutral
+        allow_indefinite_wait: true
+    step done:
+        action: log "valve is neutral"

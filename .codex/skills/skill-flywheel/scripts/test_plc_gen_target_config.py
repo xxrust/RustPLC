@@ -39,6 +39,7 @@ class PlcGenTargetConfigTests(unittest.TestCase):
         self.assertIn("optimization-surface.md", config["artifact_paths"])
         self.assertIn("scenario-toolchain-limitations.md", config["artifact_paths"])
         self.assertIn("scenario-friendly-guard-patterns.md", config["artifact_paths"])
+        self.assertIn("fix-obvious-errors.md", config["artifact_paths"])
         self.assertGreaterEqual(config["parallel_runs"], 2)
 
     def test_plc_gen_init_public_surface_exports_day1_artifacts(self) -> None:
@@ -76,6 +77,7 @@ class PlcGenTargetConfigTests(unittest.TestCase):
             self.assertTrue((cycle_dir / "public" / "optimization-surface.md").exists())
             self.assertTrue((cycle_dir / "public" / "scenario-toolchain-limitations.md").exists())
             self.assertTrue((cycle_dir / "public" / "scenario-friendly-guard-patterns.md").exists())
+            self.assertTrue((cycle_dir / "public" / "fix-obvious-errors.md").exists())
 
     def test_plc_gen_public_artifacts_capture_key_contracts(self) -> None:
         public_dir = PLC_GEN_CONFIG / "public"
@@ -92,6 +94,7 @@ class PlcGenTargetConfigTests(unittest.TestCase):
         intent_boundary = (public_dir / "intent-alignment-boundary.md").read_text(encoding="utf-8")
         delivery_status = (public_dir / "delivery-status-contract.md").read_text(encoding="utf-8")
         optimization = (public_dir / "optimization-surface.md").read_text(encoding="utf-8")
+        fix_obvious = (public_dir / "fix-obvious-errors.md").read_text(encoding="utf-8")
         skill_text = (PLC_GEN_ROOT / "SKILL.md").read_text(encoding="utf-8")
         workflow = (PLC_GEN_ROOT / "references" / "workflow.md").read_text(encoding="utf-8")
         output_contract = (PLC_GEN_ROOT / "references" / "output-contract.md").read_text(encoding="utf-8")
@@ -136,20 +139,26 @@ class PlcGenTargetConfigTests(unittest.TestCase):
         self.assertIn("library", optimization)
         self.assertIn("CLI", optimization)
         self.assertIn("subcommand", optimization)
+        self.assertIn("Skill Command", fix_obvious)
+        self.assertIn("Sensor-Proof Rule", fix_obvious)
+        self.assertIn("feed_cassette_has_seed", fix_obvious)
         self.assertIn("workspace root used to launch `project-check`", skill_text)
         self.assertIn("repo-root-relative paths are the safest default", skill_text)
+        self.assertIn("State Must Be Feedback-Proved", skill_text)
         self.assertIn("workspace root used to launch validation", workflow)
         self.assertIn("docs-sidecar copy", output_contract)
         self.assertIn("validated with warnings", output_contract)
         self.assertIn("sibling sidecar exists", output_contract)
+        self.assertIn("State proof rule", generation_rules)
         self.assertIn("timing budget", generation_rules)
         self.assertIn("repeat N", generation_rules)
         self.assertIn("Process-only exception", generation_rules)
-        self.assertIn("analog / PID", generation_rules)
+        self.assertIn("raw AI/AO process-control boundary", generation_rules)
+        self.assertIn("Unproven success state", troubleshooting)
         self.assertIn("invalid_contract", troubleshooting)
         self.assertIn("docs-sidecar", troubleshooting)
         self.assertIn("workpiece required=true", troubleshooting)
-        self.assertIn("AI0/AO0", troubleshooting)
+        self.assertIn("Raw AI/AO process-control boundary", troubleshooting)
 
     def test_plc_gen_valid_fixtures_keep_operator_inputs_semantic(self) -> None:
         fixtures_dir = PLC_GEN_ROOT / "fixtures" / "valid"

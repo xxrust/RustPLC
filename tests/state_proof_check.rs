@@ -80,6 +80,84 @@ task main:
 }
 
 #[test]
+fn state_proof_accepts_flag_published_after_physical_wait_gate() {
+    let base = temp_dir("rust_plc_state_proof_sensor_gated_flag");
+    let plc = base.join("sensor_gated_flag.plc");
+    write(
+        &plc,
+        r#"
+[topology]
+device probe: sensor { purpose: "physical probe" }
+variable orient_transfer_ready: bool = false
+
+[constraints]
+
+[tasks]
+task orient:
+    step wait_probe:
+        wait: probe == true
+        timeout: 100ms -> goto fault.stop
+
+    step publish_ready:
+        action: compute orient_transfer_ready = true
+
+task transfer:
+    step wait_ready:
+        wait: orient_transfer_ready == true
+        timeout: 100ms -> goto fault.stop
+
+task fault:
+    step stop:
+        action: log "fault"
+"#,
+    );
+
+    let output = run_cli(&[
+        "state-proof-check",
+        plc.to_str().expect("utf8 path"),
+        "--output",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "flag assigned after a physical wait gate should be accepted, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn compile_command_rejects_auto_state_proof_failure() {
+    let base = temp_dir("rust_plc_state_proof_compile");
+    let plc = base.join("compile_rejects_seeded_flag.plc");
+    write(
+        &plc,
+        r#"
+[topology]
+variable feed_cassette_has_seed: bool = true
+
+[constraints]
+
+[tasks]
+task main:
+    step wait_seed:
+        wait: feed_cassette_has_seed == true
+"#,
+    );
+
+    let output = run_cli(&[plc.to_str().expect("utf8 path"), "--no-print-ir"]);
+    assert!(
+        !output.status.success(),
+        "compile command should fail when auto state-proof gate fails"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("state-proof:SPF-001"),
+        "compile stderr should include stable state-proof code, got: {stderr}"
+    );
+}
+
+#[test]
 fn state_proof_check_human_output_includes_location_reason_and_fix() {
     let base = temp_dir("rust_plc_state_proof_human");
     let plc = base.join("ingress_stock_flag.plc");

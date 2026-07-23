@@ -21,10 +21,10 @@
 <p align="center">
   <a href="#understand-rustplc-in-30-seconds">30-Second Overview</a> •
   <a href="#why-rustplc">Why RustPLC</a> •
+  <a href="#system-architecture">Architecture</a> •
   <a href="#standard-project-layers">Project Layers</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#core-capabilities">Capabilities</a> •
-  <a href="#ai-for-ai">AI for AI</a> •
   <a href="#documentation">Docs</a>
 </p>
 
@@ -53,6 +53,37 @@ flowchart LR
 **RustPLC**: Engineer describes process → AI generates declarative DSL → compiler mathematically proves safety → all issues caught at compile time
 
 **In one sentence: RustPLC is the "Rust compiler" for industrial control — if it compiles, it's safe.**
+
+---
+
+## System Architecture
+
+For complete architecture diagrams and technical details, see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+### Compilation Pipeline
+
+```
+.plc DSL → Parser → AST → Semantic Analysis → IR
+                                                 ↓
+                    ┌────────────────────────────┼────────────────────────────┐
+                    ↓                            ↓                            ↓
+            Verification (4 Engines)     Runtime Bridge              ST Codegen
+            - Safety (BMC + k-induction) - IR → runtime-core        - IEC 61131-3
+            - Liveness (SCC + reachability) - Port mapping          - RP2040 firmware
+            - Timing (Critical path)     - State validation         - Renode scripts
+            - Causality (Topology BFS)   - Action sequencing
+```
+
+### Core Modules
+
+| Module | Lines of Code | Responsibility |
+|--------|---------------|----------------|
+| Parser | 153K lines | PEG grammar → AST |
+| Semantic | 367K lines | Preprocessing + name resolution + IR lowering |
+| IR | 18K lines | Canonical intermediate representation |
+| Verification | 195K lines | 4-engine parallel verification |
+| Codegen | 49K lines | ST code generation |
+| Runtime Bridge | 8K lines | IR → runtime-core translation |
 
 ---
 
@@ -452,11 +483,21 @@ graph TB
 
 ## Documentation
 
+Complete documentation in three tiers:
+
+### Architecture & Developer Guides
+
+| Document | Purpose |
+|----------|---------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 📐 System architecture overview (recommended first read) |
+| [AGENTS.md](AGENTS.md) | 🛠️ Developer quick start guide |
+| [CODEX.md](CODEX.md) | 📚 Compiler core design document |
+| [Quick Start](QUICKSTART.md) | ⚡ 5-minute tutorial |
+
 ### In-Repo Docs
 
 | Document | Content |
 |----------|---------|
-| [`AGENTS.md`](AGENTS.md) | Project charter, layering principles, code navigation |
 | [`docs/architecture/signal-direction.md`](docs/architecture/signal-direction.md) | Concurrent task / blocking step semantics (frozen) |
 | [`docs/architecture/process-operation-layer.md`](docs/architecture/process-operation-layer.md) | Process-operation scheduling layer between topology and task/step |
 | [`docs/architecture/device-semantics-library.md`](docs/architecture/device-semantics-library.md) | Device family semantic abstraction |

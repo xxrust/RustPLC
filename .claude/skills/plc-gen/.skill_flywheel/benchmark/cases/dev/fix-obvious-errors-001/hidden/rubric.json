@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "rubric_type": "plc-gen-fix",
+  "criteria": [
+    {
+      "name": "uses_fix_command_boundary",
+      "description": "Recognizes fix as a plc-gen workflow and does not invent a rust_plc fix CLI.",
+      "weight": 0.15
+    },
+    {
+      "name": "detects_unproven_success_state",
+      "description": "Finds that feed_cassette_has_seed starts true and gates a production wait without physical proof.",
+      "weight": 0.35
+    },
+    {
+      "name": "applies_sensor_proof_rule",
+      "description": "Requires sensor, operator, upstream, workpiece-token, topology-closed, or explicit no-feedback proof.",
+      "weight": 0.3
+    },
+    {
+      "name": "repair_direction",
+      "description": "Proposes a proof-backed repair or blocker and does not set the flag true again.",
+      "weight": 0.2
+    }
+  ],
+  "pass_conditions": [
+    "primary error class is unproven_success_state",
+    "feed_cassette_has_seed is named",
+    "ingress_sites is not treated as cassette inventory"
+  ],
+  "blocker_conditions": [
+    "reports missing physical proof as a blocker"
+  ],
+  "notes": "This case tests whether plc-gen fix catches a test seed leaked into production logic."
+}

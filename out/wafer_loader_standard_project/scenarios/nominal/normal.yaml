@@ -1,17 +1,14 @@
 tick_ms: 10
-duration_ms: 1500
+duration_ms: 4000
 inputs:
   # 基线输入：自动模式有效，旋臂已在原点，测片台可接收；真空/视觉等非闭合输入由场景驱动。
   - at_ms: 0
     set:
       digital_inputs:
         3: true
+        8: true
         12: true
         15: true
-        17: true
-        18: true
-        19: true
-        20: true
         22: true
         23: true
         25: true
@@ -19,32 +16,62 @@ inputs:
         29: true
         31: true
   # 操作者按下启动按钮，front-door 语义由程序中的 rising_edge(start_button) 消费。
-  - at_ms: 50
+  - at_ms: 160
     set:
       digital_inputs:
         0: true
   # 操作者松开启动按钮，防止后续周期误读为保持输入。
-  - at_ms: 100
+  - at_ms: 210
     set:
       digital_inputs:
         0: false
+  # 出料真空确认窗口：出料动作后由场景提供实际吸附证明。
+  - at_ms: 330
+    set:
+      digital_inputs:
+        17: true
+  # 出料盒单片证明撤销：当前 nominal 只验证一片，不能把有料传感器长保持当无限库存。
+  - at_ms: 360
+    set:
+      digital_inputs:
+        8: false
   # 滑轨有片窗口：只表达外部存在检测，不手写气缸反馈。
-  - at_ms: 130
+  - at_ms: 450
     set:
       digital_inputs:
         13: true
+  # 旋臂真空确认窗口：旋臂取片后由场景提供吸附证明。
+  - at_ms: 650
+    set:
+      digital_inputs:
+        18: true
   # 旋臂取片后滑轨取料位变空，防止同一高电平被重复消费。
-  - at_ms: 260
+  - at_ms: 750
     set:
       digital_inputs:
         13: false
+  # 辨相真空确认窗口：旋臂放片后由场景提供辨相台吸附证明。
+  - at_ms: 850
+    set:
+      digital_inputs:
+        19: true
   # 辨相台有片窗口：辨相合格后允许转运任务接手。
-  - at_ms: 340
+  - at_ms: 950
     set:
       digital_inputs:
         14: true
+  # 辨相探针旋转后变化窗口：旋转前为高，旋转 180 度后变低，证明本片方向可判定。
+  - at_ms: 900
+    set:
+      digital_inputs:
+        15: false
+  # 转运真空确认窗口：转运吸嘴取片后由场景提供吸附证明。
+  - at_ms: 1100
+    set:
+      digital_inputs:
+        20: true
   # 转运吸嘴取片后辨相台变空，防止同一高电平被重复转运。
-  - at_ms: 420
+  - at_ms: 1800
     set:
       digital_inputs:
         14: false

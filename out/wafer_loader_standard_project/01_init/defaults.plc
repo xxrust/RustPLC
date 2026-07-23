@@ -13,10 +13,48 @@ task startup_initializer:
         action: retract cyl_transfer
         action: set axis_arm.enable on
 
+    # 旋臂回零命令步：先发出轴回零运动命令，不能在无命令状态下等待 home 传感器。
+    step command_arm_home:
+        action: axis.move_relative(axis_arm, distance: 5, params: stepper_default_fast, speed: 2)
+            timeout: 3000ms -> startup_fault.init_pose_timeout
+            on_reject -> startup_fault.init_pose_timeout
+            on_motion_fault -> startup_fault.init_pose_timeout
+            on_safety_fault -> startup_fault.init_pose_timeout
+
     # 原点确认步：等待旋臂原点传感器确认，超时进入初始化故障。
     step wait_arm_home:
         wait: sensor_arm_home == true
         timeout: 5000ms -> goto startup_fault.init_pose_timeout
+
+    # 滑轨残片检查步：自动启动前确认滑轨取料位没有残留晶片。
+    step check_slide_empty:
+        wait: wafer_on_slide == false
+        timeout: 5000ms -> goto startup_manual_assist.slide_residue_required
+
+    # 辨相台残片检查步：自动启动前确认辨相台没有残留晶片。
+    step check_orient_empty:
+        wait: wafer_on_orient == false
+        timeout: 5000ms -> goto startup_manual_assist.orient_residue_required
+
+    # 测片台接收检查步：自动启动前确认下游测片台处于可接收状态。
+    step check_measure_ready:
+        wait: measure_stage_ready == true
+        timeout: 5000ms -> goto startup_fault.init_pose_timeout
+
+    # 旋臂吸附残留检查步：自动启动前确认旋臂吸嘴没有保持晶片。
+    step check_arm_vacuum_clear:
+        wait: sensor_arm_vac_ok == false
+        timeout: 5000ms -> goto startup_manual_assist.arm_vacuum_clear_required
+
+    # 辨相吸附残留检查步：自动启动前确认辨相吸附没有保持晶片。
+    step check_orient_vacuum_clear:
+        wait: sensor_orient_vac_ok == false
+        timeout: 5000ms -> goto startup_manual_assist.orient_vacuum_clear_required
+
+    # 转运吸附残留检查步：自动启动前确认转运吸嘴没有保持晶片。
+    step check_transfer_vacuum_clear:
+        wait: sensor_transfer_vac_ok == false
+        timeout: 5000ms -> goto startup_manual_assist.transfer_vacuum_clear_required
 
     # 初始化完成步：锁存架构初始化状态并进入监督等待。
     step mark_initialized:

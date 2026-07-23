@@ -18,8 +18,10 @@ main.system.md -> process_model/process_operation_model.toml -> 00/01/02/03/04 �
 ## 工艺使命
 
 系统负责从出料盒取出单片晶片，经滑轨取料位、小旋臂、辨相台、摆缸转运后交付到测片台。
-辨相台通过数字 1/0 判定方向；若初始方向不合格，则翻转 180 度后再次判定。
-若两次判定都不合格，当前晶片进入 IR/reject 盒；连续 3 片辨相异常时停机告警。
+辨相台通过同一个数字探测信号在旋转前后两次采样来判定方向：晶片放到辨相台并吸附后先记录旋转前探测值，再将辨相台旋转 180 度并记录旋转后探测值。
+两次采样必须发生可判别变化；若两次相同，视为辨相传感器/旋光判定异常，当前晶片进入 IR/reject 盒。
+联调临时约定：`before=true, after=false` 表示旋转前 +X 已朝滑轨方向，应回到原向；`before=false, after=true` 表示旋转后 +X 朝滑轨方向，应保持 180 度翻转状态。该映射需随正式光学标定冻结。
+连续 3 片辨相异常时停机告警。
 
 ## 工艺操作调度模型
 
@@ -42,7 +44,8 @@ process_model/process_operation_model.toml
 
 ## 候选操作
 
-- `feed_to_slide`：从 `feed_cassette` 转移到 `slide_pick_site`。
+- `feed_pick_cassette`：出料真空确认后从 `feed_cassette` 取片到 `feed_ejector`。
+- `feed_release_to_slide`：出料吸嘴释放晶片到 `slide_pick_site`。
 - `arm_pick_slide`：小旋臂吸嘴从 `slide_pick_site` 取片到 `arm_nozzle`。
 - `arm_place_orient`：小旋臂将晶片交给 `orient_inspection_site`。
 - `orient_reject`：辨相失败时从 `orient_inspection_site` 转入 `reject_bin` 并以 `rejected` 关闭。
@@ -73,6 +76,16 @@ process_model/process_operation_model.toml
 上电初始化必须关闭所有真空，收回出料/辨相/摆缸/升降/转运气缸，打开旋臂轴使能并等待原点确认。
 `system_initialized` 是结构状态，应由初始化基线导出；当前实现以启动任务建立该基线。
 
+## 维护自检
+
+维护自检是 operator front-door 触发的独立任务，不属于自动生产节拍。`maintenance_self_check` 必须在维护模式下由操作员触发，先建立安全基线，再依次验证：
+
+- 出料、旋臂、辨相台、转运四路真空的 on/off 反馈闭环。
+- 出料、辨相翻转、摆缸、升降、转运五个气缸的伸出/缩回动作闭环。
+- 旋臂轴小幅运动、回零命令与 home 反馈。
+
+被 task 驱动的执行类设备必须有 maintenance/self-check 覆盖；若某设备不能由 PLC 自检，必须在机器可读配置中以 `self_check_exempt_devices` 写明 reason 与 proof_basis。缺失自检或豁免应由 `state-proof-check` 作为编译/项目检查失败暴露。
+
 ## 异常策略
 
 - 真空取片窗口：1 秒，超时进入对应 fault task。
@@ -91,3 +104,4 @@ process_model/process_operation_model.toml
 - 步进轴自动复位最大重试次数
 - 气缸正式 timeout 标定值
 - 旋臂轴 motion parameter set 最终命名
+- 辨相数字探测值与 +X 方向的正式标定映射

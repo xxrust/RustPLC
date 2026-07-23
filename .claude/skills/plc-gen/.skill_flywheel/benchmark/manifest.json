@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "benchmark_name": "plc-gen-fix-obvious-errors",
+  "benchmark_root": "E:\\personal_project\\rust_plc\\.codex\\skills\\plc-gen\\.skill_flywheel\\benchmark",
+  "created_at_utc": "2026-05-08T02:56:35.217685+00:00",
+  "governance": {
+    "proposer_role": "draft candidate cases only",
+    "curator_role": "freeze, retire, and split cases outside the active optimization round",
+    "judge_role": "read hidden rubric/oracle and write evaluation results",
+    "flywheel_visibility": [
+      "public inputs",
+      "evaluation summaries",
+      "aggregate metrics"
+    ],
+    "hidden_paths": [
+      "cases/*/*/hidden"
+    ],
+    "frozen_case_rule": "active optimization rounds must not rewrite frozen cases"
+  },
+  "splits": {
+    "dev": {
+      "purpose": "daily iteration and hypothesis narrowing"
+    },
+    "holdout": {
+      "purpose": "milestone gate outside the daily optimization loop"
+    },
+    "canary": {
+      "purpose": "fresh incoming regressions and drift detection"
+    }
+  },
+  "artifacts": {
+    "curator_notes": "governance/curator-notes.md",
+    "proposal_log": "governance/proposals.jsonl",
+    "latest_summary_json": "summaries/latest-summary.json",
+    "latest_summary_md": "summaries/latest-summary.md"
+  },
+  "cases": [
+    {
+      "case_id": "fix-obvious-errors-001",
+      "title": "Detect unproven success state in feed cassette prep",
+      "split": "dev",
+      "status": "draft",
+      "skill_family": "plc-gen",
+      "case_type": "blind-runner",
+      "question": "Use the plc-gen fix command on the provided PLC excerpts and identify any obvious semantic error before proposing a repair.",
+      "relative_dir": "cases/dev/fix-obvious-errors-001"
+    }
+  ]
+}

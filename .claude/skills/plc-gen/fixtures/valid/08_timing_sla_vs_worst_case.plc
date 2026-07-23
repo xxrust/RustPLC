@@ -1,0 +1,52 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "Controller profile for timing SLA demo"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor { purpose: "Operator start request", subtype: "push_button", debounce: 20ms }
+device valve_act: solenoid_valve { purpose: "Actuator cylinder valve", response_time: 20ms }
+device cyl_act: cylinder { purpose: "Actuator used by timing demo", stroke_time: 300ms, retract_time: 300ms }
+device sensor_ext: sensor { purpose: "Actuator extended feedback", subtype: "limit_switch" }
+device sensor_ret: sensor { purpose: "Actuator retracted feedback", subtype: "limit_switch" }
+
+relation { from: start_button.out, to: plc_main.X2, via: reports_to }
+relation { from: plc_main.Y0, to: valve_act.coil, via: driven_by }
+relation { from: valve_act.out, to: cyl_act.cmd, via: driven_by }
+relation { from: cyl_act.extended, to: sensor_ext.sense, via: detects }
+relation { from: sensor_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_act.retracted, to: sensor_ret.sense, via: detects }
+relation { from: sensor_ret.out, to: plc_main.X1, via: reports_to }
+
+[constraints]
+
+timing: task.cycle must_complete_within 1200ms
+timing: task.cycle must_complete_within_worst_case 4500ms
+causality: Y0 -> valve_act -> cyl_act -> sensor_ext
+
+[tasks]
+
+task ready:
+    step wait_start:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+
+task cycle:
+    step extend:
+        action: extend cyl_act
+        timeout: 2000ms -> goto fault_handler.alarm
+    step settle:
+        delay: 200ms
+    step retract:
+        action: retract cyl_act
+        timeout: 2000ms -> goto fault_handler.alarm
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_outputs:
+        action: set valve_act.coil off
+    step alarm:
+        action: log "fault: timing or actuator timeout"
+    on_complete: goto ready

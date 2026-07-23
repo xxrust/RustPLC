@@ -1,0 +1,65 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "Controller profile for conveyor indexing"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor { purpose: "Operator start request", subtype: "push_button", debounce: 20ms }
+device motor_conveyor: motor { purpose: "Conveyor drive", rated_speed: 30rpm, ramp_time: 50ms }
+device sensor_index: sensor { purpose: "Independent conveyor index sensor", subtype: "proximity_sensor" }
+device valve_stopper: solenoid_valve { purpose: "Stopper cylinder valve", response_time: 20ms }
+device cyl_stopper: cylinder { purpose: "Stops the part at the index position", stroke_time: 300ms, retract_time: 300ms }
+device sensor_stop_ext: sensor { purpose: "Stopper extended feedback", subtype: "limit_switch" }
+device sensor_stop_ret: sensor { purpose: "Stopper retracted feedback", subtype: "limit_switch" }
+
+relation { from: start_button.out, to: plc_main.X3, via: reports_to }
+relation { from: plc_main.Y0, to: motor_conveyor.cmd, via: driven_by }
+relation { from: motor_conveyor.position_index, to: sensor_index.sense, via: detects }
+relation { from: sensor_index.out, to: plc_main.X0, via: reports_to }
+relation { from: plc_main.Y1, to: valve_stopper.coil, via: driven_by }
+relation { from: valve_stopper.out, to: cyl_stopper.cmd, via: driven_by }
+relation { from: cyl_stopper.extended, to: sensor_stop_ext.sense, via: detects }
+relation { from: sensor_stop_ext.out, to: plc_main.X1, via: reports_to }
+relation { from: cyl_stopper.retracted, to: sensor_stop_ret.sense, via: detects }
+relation { from: sensor_stop_ret.out, to: plc_main.X2, via: reports_to }
+
+[constraints]
+
+safety: cyl_stopper.extended conflicts_with motor_conveyor.run.on
+    reason: "Conveyor must not run while stopper is extended"
+
+causality: Y0 -> motor_conveyor -> sensor_index
+causality: Y1 -> valve_stopper -> cyl_stopper -> sensor_stop_ext
+
+[tasks]
+
+task ready:
+    step wait_start:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+
+task cycle:
+    step start_conveyor:
+        action: set motor_conveyor.run on
+    step wait_index:
+        wait: sensor_index == true
+        timeout: 5000ms -> goto fault_handler.alarm
+    step stop_conveyor:
+        action: set motor_conveyor.run off
+    step extend_stopper:
+        action: extend cyl_stopper
+        timeout: 1200ms -> goto fault_handler.alarm
+    step release_stopper:
+        action: retract cyl_stopper
+        timeout: 1200ms -> goto fault_handler.alarm
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_outputs:
+        action: set motor_conveyor.run off
+        action: set valve_stopper.coil off
+    step alarm:
+        action: log "fault: conveyor index or stopper action failed"
+    on_complete: goto ready

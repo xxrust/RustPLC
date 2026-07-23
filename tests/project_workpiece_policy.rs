@@ -102,7 +102,7 @@ fn standalone_compile_warns_on_container_like_single_capacity_location() {
     let plc_path = project_dir.join("capacity_warning.plc");
     write(
         &plc_path,
-        "[topology]\n\nworkpiece part: workpiece_type {\n    normal_terminal_states: [finished]\n    abnormal_terminal_states: [rejected]\n    ingress_sites: [storage_box]\n    normal_egress_sites: [outfeed]\n    abnormal_egress_sites: [reject_bin]\n}\n\nlocation storage_box: workpiece_location { capacity: 1 }\nlocation outfeed: workpiece_location { capacity: 1 }\nlocation reject_bin: workpiece_location { capacity: 20 }\n\n[constraints]\n\n[tasks]\n\ntask main:\n    step idle:\n",
+        "[topology]\n\ndevice operator_empty_confirm: sensor { purpose: \"operator confirms workpiece baseline is empty\" }\n\nworkpiece part: workpiece_type {\n    normal_terminal_states: [finished]\n    abnormal_terminal_states: [rejected]\n    ingress_sites: [storage_box]\n    normal_egress_sites: [outfeed]\n    abnormal_egress_sites: [reject_bin]\n}\n\nlocation storage_box: workpiece_location { capacity: 1 }\nlocation outfeed: workpiece_location { capacity: 1 }\nlocation reject_bin: workpiece_location { capacity: 20 }\n\n[constraints]\n\n[tasks]\n\ntask startup_init:\n    step confirm_empty_baseline:\n        wait: operator_empty_confirm == true\n        allow_indefinite_wait: true\n\n    on_complete: goto main.idle\n\ntask main:\n    step idle:\n",
     );
 
     let output = run_cli(&[plc_path.to_str().expect("utf8 path"), "--no-print-ir"]);

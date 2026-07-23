@@ -13,6 +13,88 @@ task startup_fault:
 
     on_complete: goto startup_initializer.drive_safe_outputs
 
+# 启动人工协助任务：残片、吸附残留或基线传感器异常时显式进入人工边界。
+task startup_manual_assist:
+    # 滑轨残片人工处理步：滑轨有片或滑轨传感器异常，要求人工清理/确认。
+    step slide_residue_required:
+        action: compute auto_cycle_enabled = false
+        action: compute system_initialized = false
+        action: log "startup manual assist: slide residue or slide sensor requires human handling"
+        goto startup_manual_assist.wait_refresh
+
+    # 辨相台残片人工处理步：辨相台有片或传感器异常，要求人工清理/确认。
+    step orient_residue_required:
+        action: compute auto_cycle_enabled = false
+        action: compute system_initialized = false
+        action: log "startup manual assist: orient stage residue or sensor requires human handling"
+        goto startup_manual_assist.wait_refresh
+
+    # 旋臂吸附清除人工处理步：旋臂吸嘴仍有真空确认，要求人工处理。
+    step arm_vacuum_clear_required:
+        action: compute auto_cycle_enabled = false
+        action: compute system_initialized = false
+        action: set vac_arm_valve.coil off
+        action: log "startup manual assist: arm vacuum did not clear"
+        goto startup_manual_assist.wait_refresh
+
+    # 辨相吸附清除人工处理步：辨相台仍有真空确认，要求人工处理。
+    step orient_vacuum_clear_required:
+        action: compute auto_cycle_enabled = false
+        action: compute system_initialized = false
+        action: set vac_orient_valve.coil off
+        action: log "startup manual assist: orient vacuum did not clear"
+        goto startup_manual_assist.wait_refresh
+
+    # 转运吸附清除人工处理步：转运吸嘴仍有真空确认，要求人工处理。
+    step transfer_vacuum_clear_required:
+        action: compute auto_cycle_enabled = false
+        action: compute system_initialized = false
+        action: set vac_transfer_valve.coil off
+        action: log "startup manual assist: transfer vacuum did not clear"
+        goto startup_manual_assist.wait_refresh
+
+    # 人工处理刷新等待步：等待操作员完成清理/确认后重跑初始化。
+    step wait_refresh:
+        wait: rising_edge(refresh_button)
+        allow_indefinite_wait: true
+
+    on_complete: goto startup_initializer.drive_safe_outputs
+
+# 维护人工协助任务：维护自检失败时保持安全状态并等待操作员处理。
+task maintenance_manual_assist:
+    # 真空自检失败步：关闭全部真空并提示检查维护工装、真空阀或真空传感器。
+    step vacuum_self_check_failed:
+        action: set vac_feed_valve.coil off
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: set vac_transfer_valve.coil off
+        action: log "maintenance self-check failed: vacuum loop"
+        goto maintenance_manual_assist.wait_refresh
+
+    # 气缸自检失败步：收回所有气缸并提示检查气缸、阀或端位反馈。
+    step cylinder_self_check_failed:
+        action: retract cyl_feed
+        action: retract cyl_orient_rotate
+        action: retract cyl_swing
+        action: retract cyl_lift
+        action: retract cyl_transfer
+        action: log "maintenance self-check failed: cylinder loop"
+        goto maintenance_manual_assist.wait_refresh
+
+    # 轴自检失败步：关闭真空并提示检查旋臂轴、驱动器或 home 反馈。
+    step axis_self_check_failed:
+        action: set vac_arm_valve.coil off
+        action: set vac_orient_valve.coil off
+        action: log "maintenance self-check failed: arm axis loop"
+        goto maintenance_manual_assist.wait_refresh
+
+    # 维护处理刷新等待步：等待操作员处理后重新进入维护自检入口。
+    step wait_refresh:
+        wait: rising_edge(refresh_button)
+        allow_indefinite_wait: true
+
+    on_complete: goto maintenance_self_check.wait_maintenance_mode
+
 # 出料警告任务：出料气缸不到位时挂起自动循环并等待刷新。
 task feed_warning:
     # 出料气缸警告步：关闭出料真空、收回气缸并停止自动节拍。
@@ -27,7 +109,7 @@ task feed_warning:
         wait: rising_edge(refresh_button)
         allow_indefinite_wait: true
 
-    on_complete: goto supervisor.wait_mode_auto
+    on_complete: goto startup_initializer.drive_safe_outputs
 
 # 辨相警告任务：辨相翻转气缸不到位时挂起自动循环并等待刷新。
 task orient_warning:
@@ -42,7 +124,7 @@ task orient_warning:
         wait: rising_edge(refresh_button)
         allow_indefinite_wait: true
 
-    on_complete: goto supervisor.wait_mode_auto
+    on_complete: goto startup_initializer.drive_safe_outputs
 
 # 转运警告任务：摆缸、升降或转运气缸不到位时挂起自动循环并等待刷新。
 task transfer_warning:
@@ -60,7 +142,7 @@ task transfer_warning:
         wait: rising_edge(refresh_button)
         allow_indefinite_wait: true
 
-    on_complete: goto supervisor.wait_mode_auto
+    on_complete: goto startup_initializer.drive_safe_outputs
 
 # 出料故障任务：出料真空 1 秒内未确认时停机等待处理。
 task feed_fault:
@@ -70,13 +152,22 @@ task feed_fault:
         action: retract cyl_feed
         action: compute auto_cycle_enabled = false
         action: log "feed fault: wafer was not held within 1 second"
+        goto feed_fault.wait_refresh
+
+    # 滑轨接收超时步：出料释放后滑轨没有证明到片，停机等待检查滑轨或传感器。
+    step slide_receive_timeout:
+        action: set vac_feed_valve.coil off
+        action: retract cyl_feed
+        action: compute auto_cycle_enabled = false
+        action: log "feed fault: slide did not prove wafer receipt"
+        goto feed_fault.wait_refresh
 
     # 出料故障刷新等待步：等待人工处理后返回监督等待。
     step wait_refresh:
         wait: rising_edge(refresh_button)
         allow_indefinite_wait: true
 
-    on_complete: goto supervisor.wait_mode_auto
+    on_complete: goto startup_initializer.drive_safe_outputs
 
 # 辨相故障任务：旋臂取片、辨相吸附、连续异常或轴恢复失败时停机。
 task orient_fault:
@@ -85,6 +176,7 @@ task orient_fault:
         action: set vac_arm_valve.coil off
         action: compute auto_cycle_enabled = false
         action: log "orient fault: arm vacuum did not pick the wafer"
+        goto orient_fault.wait_refresh
 
     # 辨相吸附超时步：关闭旋臂与辨相真空并停止自动节拍。
     step orient_vacuum_timeout:
@@ -92,6 +184,20 @@ task orient_fault:
         action: set vac_orient_valve.coil off
         action: compute auto_cycle_enabled = false
         action: log "orient fault: orient vacuum did not confirm hold"
+        goto orient_fault.wait_refresh
+
+    # 滑轨取空异常步：旋臂取片后滑轨传感器仍未变空，停机等待检查源位传感器或残片。
+    step slide_sensor_stuck_after_pick:
+        action: set vac_arm_valve.coil off
+        action: compute auto_cycle_enabled = false
+        action: log "orient fault: slide sensor did not clear after arm pickup"
+        goto orient_fault.wait_refresh
+
+    # 辨相台未准备步：转运任务等待辨相台持片超时，停机等待检查辨相流程。
+    step orient_stage_not_ready:
+        action: compute auto_cycle_enabled = false
+        action: log "orient fault: orient stage did not present a wafer for transfer"
+        goto orient_fault.wait_refresh
 
     # 连续辨相异常步：连续三片异常时停止自动节拍。
     step orient_reject_streak_fault:
@@ -99,6 +205,7 @@ task orient_fault:
         action: set vac_orient_valve.coil off
         action: compute auto_cycle_enabled = false
         action: log "orient fault: three consecutive wafers rejected to IR"
+        goto orient_fault.wait_refresh
 
     # 轴不可恢复步：轴恢复次数耗尽后停止自动节拍。
     step axis_unrecoverable:
@@ -106,13 +213,14 @@ task orient_fault:
         action: set vac_orient_valve.coil off
         action: compute auto_cycle_enabled = false
         action: log "orient fault: arm axis recovery exhausted"
+        goto orient_fault.wait_refresh
 
     # 辨相故障刷新等待步：等待人工处理后返回监督等待。
     step wait_refresh:
         wait: rising_edge(refresh_button)
         allow_indefinite_wait: true
 
-    on_complete: goto supervisor.wait_mode_auto
+    on_complete: goto startup_initializer.drive_safe_outputs
 
 # 轴故障恢复任务：对旋臂轴 timeout/reject/motion/safety fault 进行有限重试。
 task orient_axis_fault:
@@ -159,6 +267,7 @@ task transfer_fault:
         action: retract cyl_transfer
         action: compute auto_cycle_enabled = false
         action: log "transfer fault: two consecutive wafer drops"
+        goto transfer_fault.wait_refresh
 
     # 长期掉片率故障步：长期掉片率超过 1/1000 时停机。
     step drop_rate_fault:
@@ -168,10 +277,28 @@ task transfer_fault:
         action: retract cyl_transfer
         action: compute auto_cycle_enabled = false
         action: log "transfer fault: long-term wafer drop rate exceeded 1/1000"
+        goto transfer_fault.wait_refresh
+
+    # 辨相台取空异常步：转运取片后辨相台传感器仍未变空，停机等待检查传感器或残片。
+    step orient_sensor_stuck_after_pick:
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_lift
+        action: retract cyl_swing
+        action: compute auto_cycle_enabled = false
+        action: log "transfer fault: orient sensor did not clear after transfer pickup"
+        goto transfer_fault.wait_refresh
+
+    # 测片台接收超时步：释放后下游接收条件丢失，停机等待检查测片台交接。
+    step measure_receive_timeout:
+        action: set vac_transfer_valve.coil off
+        action: retract cyl_transfer
+        action: compute auto_cycle_enabled = false
+        action: log "transfer fault: measure stage did not confirm receive readiness"
+        goto transfer_fault.wait_refresh
 
     # 转运故障刷新等待步：等待人工处理后返回监督等待。
     step wait_refresh:
         wait: rising_edge(refresh_button)
         allow_indefinite_wait: true
 
-    on_complete: goto supervisor.wait_mode_auto
+    on_complete: goto startup_initializer.drive_safe_outputs

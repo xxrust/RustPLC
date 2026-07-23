@@ -11,6 +11,7 @@ location slide_pick_site: workpiece_location { capacity: 1 }
 location orient_inspection_site: workpiece_location { capacity: 1 }
 location measure_stage_site: workpiece_location { capacity: 1 }
 location reject_bin: workpiece_location { capacity: 20 }
+holder feed_ejector: workpiece_holder { capacity: 1 }
 holder arm_nozzle: workpiece_holder { capacity: 1 }
 holder transfer_nozzle: workpiece_holder { capacity: 1 }
 

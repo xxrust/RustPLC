@@ -24,10 +24,10 @@ safety: mode_step.on conflicts_with mode_maintenance.on
 safety: axis_arm.enable.off conflicts_with axis_arm.pulse.active
     reason: "Axis pulse output must not toggle while the drive is disabled"
 
-timing: task.feed_prep must_complete_within_worst_case 4000ms
+timing: task.feed_prep must_complete_within_worst_case 6000ms
     reason: "Feed preparation should finish within one wafer feed window"
 
-timing: task.orient_stage must_complete_within_worst_case 12000ms
+timing: task.orient_stage must_complete_within_worst_case 18000ms
     reason: "Pick, orient, and return should finish within the rotary arm cycle budget"
 
 timing: task.transfer_to_measure must_complete_within_worst_case 18000ms

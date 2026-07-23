@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "case_id": "fix-obvious-errors-001",
+  "split": "dev",
+  "run_label": "weak-blind-fix-command-check",
+  "skill_revision": "local-worktree",
+  "status": "completed",
+  "summary": "Weak-blind agent correctly treated fix as a skill-level repair workflow, flagged feed_cassette_has_seed=true as an unproven success assumption, explained why ingress_sites does not prove inventory, and rejected resetting the flag to true as a repair.",
+  "verdict": "pass",
+  "blocker_classification": "",
+  "metrics": {
+    "obvious_error_detected": true,
+    "sensor_proof_rule_applied": true,
+    "repair_direction_rejected_bad_fix": true
+  },
+  "evidence_paths": [
+    "public/prompt.md",
+    "public/inputs/feed_cassette_excerpt.plc",
+    "public/fix-obvious-errors.md"
+  ],
+  "evaluated_at_utc": "2026-05-08T00:00:00Z"
+}

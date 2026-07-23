@@ -1,0 +1,45 @@
+# Excerpt A: topology variable
+variable feed_cassette_has_seed: bool = true
+
+workpiece wafer: workpiece_type {
+    normal_terminal_states: [handed_to_measure]
+    abnormal_terminal_states: [rejected, dropped]
+    ingress_sites: [feed_cassette]
+    normal_egress_sites: [measure_stage_site]
+    abnormal_egress_sites: [reject_bin]
+}
+
+location feed_cassette: workpiece_location { capacity: 25 }
+location slide_pick_site: workpiece_location { capacity: 1 }
+
+# Excerpt B: feed preparation task
+task feed_prep:
+    step wait_slide_free:
+        wait: wafer_on_slide == false
+        allow_indefinite_wait: true
+
+    step wait_cassette_source:
+        wait: feed_cassette_has_seed == true
+        allow_indefinite_wait: true
+
+    step feed_forward:
+        action: extend cyl_feed
+            timeout: 800ms -> goto feed_warning.feed_cyl_warn
+
+    step feed_vacuum_on:
+        action: set vac_feed_valve.coil on
+
+    step wait_feed_vacuum:
+        wait: sensor_feed_vac_ok == true
+        timeout: 1000ms -> goto feed_fault.feed_vacuum_timeout
+
+    step feed_back:
+        action: retract cyl_feed
+            timeout: 800ms -> goto feed_warning.feed_cyl_warn
+
+    step release_to_slide:
+        action: set vac_feed_valve.coil off
+        action: compute feed_cassette_has_seed = false
+        effect: transfer from feed_cassette to slide_pick_site
+
+    on_complete: goto feed_prep.wait_slide_free

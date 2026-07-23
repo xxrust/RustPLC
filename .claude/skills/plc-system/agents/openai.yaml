@@ -1,0 +1,7 @@
+interface:
+  display_name: "PLC 系统建模器"
+  short_description: "把工艺需求收敛成可供下游生成与验证的 RustPLC system contract。"
+  default_prompt: "Use $plc-system 先帮我把需求收敛成可供 RustPLC 下游消费的 main.system.md，再指出最少的阻塞确认项。"
+
+policy:
+  allow_implicit_invocation: true

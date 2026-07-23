@@ -7,7 +7,7 @@ variable drop_rate_exceeded: bool = false
 variable auto_cycle_enabled: bool = false
 variable stop_requested: bool = false
 variable system_initialized: bool = false
-variable feed_cassette_has_seed: bool = true
+variable orient_transfer_ready: bool = false
 
 device plc_main: plc {
     purpose: "Wafer loader controller"
@@ -23,11 +23,11 @@ controller_io plc_main {
     input mode_step_cmd: X5 { purpose: "Step mode selector" }
     input mode_maintenance_cmd: X6 { purpose: "Maintenance mode selector" }
     input wafer_drop_detected: X7 { purpose: "Wafer drop detection" }
+    input feed_cassette_present_in: X8 { purpose: "Feed cassette has available wafer stock" }
     input measure_stage_ready_in: X12 { purpose: "Measure stage ready" }
     input wafer_on_slide_in: X13 { purpose: "Slide pick site presence" }
     input wafer_on_orient_in: X14 { purpose: "Orient stage presence" }
-    input orient_side_a_ok_in: X15 { purpose: "Initial orientation accepted" }
-    input orient_side_b_ok_in: X16 { purpose: "Flipped orientation accepted" }
+    input orient_probe_in: X15 { purpose: "Orientation optical probe response used before and after 180 degree rotation" }
     input feed_vac_ok_in: X17 { purpose: "Feed vacuum confirmation" }
     input arm_vac_ok_in: X18 { purpose: "Arm vacuum confirmation" }
     input orient_vac_ok_in: X19 { purpose: "Orient vacuum confirmation" }

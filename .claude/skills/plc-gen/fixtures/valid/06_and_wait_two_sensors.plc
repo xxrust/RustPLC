@@ -1,0 +1,44 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "Controller profile for two independent process sensors"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor { purpose: "Operator start request", subtype: "push_button", debounce: 20ms }
+device sensor_part_present: sensor { purpose: "Part present at station", subtype: "proximity_sensor" }
+device sensor_quality_ok: sensor { purpose: "External quality result is OK", subtype: "proximity_sensor" }
+device pass_lamp: solenoid_valve { purpose: "Demo pass output", response_time: 20ms }
+
+relation { from: start_button.out, to: plc_main.X0, via: reports_to }
+relation { from: sensor_part_present.out, to: plc_main.X1, via: reports_to }
+relation { from: sensor_quality_ok.out, to: plc_main.X2, via: reports_to }
+relation { from: plc_main.Y0, to: pass_lamp.coil, via: driven_by }
+
+[constraints]
+
+[tasks]
+
+task ready:
+    step wait_start:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+
+task cycle:
+    step wait_external_checks:
+        wait: sensor_part_present == true AND sensor_quality_ok == true
+        timeout: 1200ms -> goto fault_handler.alarm
+    step pass:
+        action: set pass_lamp.coil on
+        delay: 50ms
+    step clear:
+        action: set pass_lamp.coil off
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_outputs:
+        action: set pass_lamp.coil off
+    step alarm:
+        action: log "fault: external checks missing"
+    on_complete: goto ready

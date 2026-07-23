@@ -1,0 +1,11 @@
+{
+  "artifact_paths": [
+    "system-day1-draft-workflow.md",
+    "system-day1-required-sections.md",
+    "system-day1-concurrency-guardrails.md",
+    "system-day1-handoff-gate.md",
+    "system-day1-checklist.md"
+  ],
+  "parallel_runs": 1,
+  "run_id_prefix": "run"
+}

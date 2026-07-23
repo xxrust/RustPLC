@@ -5,6 +5,10 @@ task orient_stage:
         wait: auto_cycle_enabled == true
         allow_indefinite_wait: true
 
+    # 辨相交接清除步：进入新一轮辨相前撤销上一片可转运许可，避免转运任务消费陈旧完成状态。
+    step clear_orient_transfer_ready:
+        action: compute orient_transfer_ready = false
+
     # 自动模式确认步：自动模式有效才执行辨相流程。
     step wait_mode:
         wait: mode_auto == true
@@ -18,12 +22,17 @@ task orient_stage:
     # 滑轨有片等待步：等出片任务完成滑轨交接并由取料位传感器确认有片。
     step wait_slide_present:
         wait: wafer_on_slide == true
-        allow_indefinite_wait: true
+        timeout: 2000ms -> goto feed_fault.slide_receive_timeout
 
     # 辨相台空闲等待步：辨相台没有待转运晶片时才允许放片。
     step wait_orient_free:
         wait: wafer_on_orient == false
-        allow_indefinite_wait: true
+        timeout: 1500ms -> goto startup_manual_assist.orient_residue_required
+
+    # 辨相台基准复位步：仅在台面已确认无片后回到旋转前基准位，防止上一片 180 度姿态泄漏到下一片的 before/after 采样语义。
+    step reset_orient_pose_before_place:
+        action: retract cyl_orient_rotate
+            timeout: 600ms -> goto orient_warning.orient_cyl_warn
 
     # 轴使能步：确认旋臂轴处于可运动状态。
     step enable_axis:
@@ -51,7 +60,7 @@ task orient_stage:
     # 滑轨取空确认步：源位传感器必须变空，防止同一高电平被下一轮重复消费。
     step wait_slide_empty_after_pick:
         wait: wafer_on_slide == false
-        allow_indefinite_wait: true
+        timeout: 1000ms -> goto orient_fault.slide_sensor_stuck_after_pick
 
     # 旋臂到辨相台步：旋臂进入辨相台区域，动作占用 arm_orient_zone。
     step move_to_orient:
@@ -76,19 +85,30 @@ task orient_stage:
     step release_arm:
         action: set vac_arm_valve.coil off
 
-    # 初始朝向判定步：若初始数字判定合格则走原向路径，否则进入翻转。
-    step decide_first_view:
-        wait: orient_side_a_ok == true
-        timeout: 10ms -> goto orient_stage.flip_orient
+    # 旋转前高电平判定步：若旋转前探测为高电平，则按标定约定要求旋转后变低。
+    step decide_probe_before_high:
+        wait: sensor_orient_probe == true
+        timeout: 10ms -> goto orient_stage.rotate_after_low_probe
 
-    # 保持原向步：确保翻转气缸回原位，完成原向姿态确认。
-    step keep_original:
+    # 高电平路径翻转步：将辨相台旋转 180 度后检查探测值是否变低。
+    step rotate_after_high_probe:
+        action: extend cyl_orient_rotate
+            timeout: 600ms -> goto orient_warning.orient_cyl_warn
+
+    # 高电平路径变化确认步：旋转后必须变低，否则两次采样无变化，判为辨相异常。
+    step expect_low_after_high:
+        wait: sensor_orient_probe == false
+        timeout: 10ms -> goto orient_stage.reject_to_ir
+
+    # 回原向步：标定约定为旋转前高、旋转后低时，回到原向姿态使 +X 朝滑轨。
+    step return_original_pose:
         action: retract cyl_orient_rotate
             timeout: 600ms -> goto orient_warning.orient_cyl_warn
 
     # 原向发布步：清零连续辨相异常计数。
     step publish_oriented_normal:
         action: compute orient_reject_streak = 0.0
+        action: compute orient_transfer_ready = true
 
     # 原向回零步：旋臂回到 home，释放辨相危险区。
     step move_back_home_normal:
@@ -102,19 +122,20 @@ task orient_stage:
     step finish_normal:
         goto orient_stage.wait_enabled
 
-    # 翻转步：初始判定不合格时执行 180 度翻转。
-    step flip_orient:
+    # 低电平路径翻转步：旋转前探测不是高电平时，旋转 180 度后必须变高。
+    step rotate_after_low_probe:
         action: extend cyl_orient_rotate
             timeout: 600ms -> goto orient_warning.orient_cyl_warn
 
-    # 翻转判定步：翻转后判定合格则发布，否则进入 IR/reject。
-    step decide_flip_result:
-        wait: orient_side_b_ok == true
+    # 低电平路径变化确认步：旋转后必须变高，否则两次采样无变化，判为辨相异常。
+    step expect_high_after_low:
+        wait: sensor_orient_probe == true
         timeout: 10ms -> goto orient_stage.reject_to_ir
 
-    # 翻转发布步：清零连续辨相异常计数并保持翻转后位置。
+    # 翻转发布步：旋转后证明 +X 朝滑轨，清零连续辨相异常计数并保持 180 度姿态。
     step keep_flipped:
         action: compute orient_reject_streak = 0.0
+        action: compute orient_transfer_ready = true
 
     # 翻转回零步：旋臂回 home，晶片留在辨相台等待转运。
     step move_back_home_flipped:
@@ -132,6 +153,10 @@ task orient_stage:
     step reject_to_ir:
         action: set vac_orient_valve.coil off
         action: compute orient_reject_streak = orient_reject_streak + 1.0
+        action: compute orient_transfer_ready = false
+
+    # 辨相拒收登记步：传感器判定异常后，将辨相台当前晶片登记到 reject_bin 并关闭异常工件路径。
+    step finish_reject_to_ir:
         effect: transfer from orient_inspection_site to reject_bin
         effect: finish workpiece at reject_bin as rejected
 

@@ -32,6 +32,11 @@ cargo run --release --bin rust_plc -- state-proof-check <source.plc|source.bundl
 - `SPF-020`：项目有 workpiece location / holder / carrier，但初始化层没有残料策略。
 - `SPF-021`：自动流程会消费或移动工件，但 startup 没有检测、清理、回收、拒绝启动或要求人工确认。
 - `SPF-022`：急停/停止恢复路径直接回到自动流程，但没有证明设备内工件状态回到受控基线。
+- `SPF-030`：startup/init task 在发出轴回零或运动命令之前等待 home 传感器。
+- `SPF-031`：`allow_indefinite_wait` 被用于本 task 可控的本地传感器或反馈；无限等待只适用于操作者、上游 task、下游 task 等不受控他者。
+- `SPF-032`：残片/清空/基线检查失败后跳到泛化故障，而没有显式区分自动恢复和人工协助边界。
+- `SPF-033`：真空保持类 holder 在把工件转移到非 holder 位置时提前释放吸附，且没有接收方所有权证明。
+- `SPF-040`：被 task 驱动的执行类设备没有 maintenance/self-check 路径，也没有机器可读豁免。
 
 ## 例外配置
 
@@ -50,6 +55,11 @@ proof_basis = "commissioning procedure verifies hard-stop homing torque limit"
 symbol = "outfeed"
 reason = "Outfeed must be emptied before automatic startup."
 proof_basis = "operator startup checklist item A-03"
+
+[[self_check_exempt_devices]]
+device = "run_lamp"
+reason = "This output lamp has no modeled feedback contact."
+proof_basis = "commissioning procedure verifies the lamp during panel test"
 ```
 
-`no_feedback_steps` 适用于真实没有闭环反馈、但已经有外部工程证明的 step。`trusted_initial_state` 适用于必须人工或制度保证的初始状态，例如某个缓存、夹爪、料道在自动启动前必须为空。两者都应少用；如果可以通过传感器、operator front-door、workpiece token 或初始化清残流程证明，就不要写例外。
+`no_feedback_steps` 适用于真实没有闭环反馈、但已经有外部工程证明的 step。`trusted_initial_state` 适用于必须人工或制度保证的初始状态，例如某个缓存、夹爪、料道在自动启动前必须为空。`self_check_exempt_devices` 只适用于确实不能由 PLC 自检的执行类设备。三者都应少用；如果可以通过传感器、operator front-door、workpiece token、初始化清残流程或 maintenance task 证明，就不要写例外。

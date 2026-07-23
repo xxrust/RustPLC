@@ -7,17 +7,17 @@ device mode_manual: sensor { purpose: "Manual mode selector", subtype: "selector
 device mode_step: sensor { purpose: "Step mode selector", subtype: "selector_switch" }
 device mode_maintenance: sensor { purpose: "Maintenance mode selector", subtype: "selector_switch" }
 
+device feed_cassette_present: sensor { purpose: "Feed cassette stock is proven available before feeding", subtype: "proximity_sensor" }
 device measure_stage_ready: sensor { purpose: "Measurement stage is ready to receive wafer", subtype: "proximity_sensor" }
 device wafer_on_slide: sensor { purpose: "Wafer detected on slide pick position", subtype: "proximity_sensor" }
 device wafer_on_orient: sensor { purpose: "Wafer detected on orient stage", subtype: "proximity_sensor" }
 device wafer_drop_detect: sensor { purpose: "Drop detector during transfer path", subtype: "proximity_sensor" }
-device orient_side_a_ok: sensor { purpose: "First orient inspection result is acceptable", subtype: "proximity_sensor" }
-device orient_side_b_ok: sensor { purpose: "Flipped orient inspection result is acceptable", subtype: "proximity_sensor" }
+device sensor_orient_probe: sensor { purpose: "Optical orientation probe sampled before and after 180-degree rotation", subtype: "proximity_sensor" }
 
-device vac_feed_valve: solenoid_valve { purpose: "Feed vacuum command valve", response_time: 20ms }
-device vac_arm_valve: solenoid_valve { purpose: "Arm vacuum command valve", response_time: 20ms }
-device vac_orient_valve: solenoid_valve { purpose: "Orient stage vacuum command valve", response_time: 20ms }
-device vac_transfer_valve: solenoid_valve { purpose: "Transfer vacuum command valve", response_time: 20ms }
+device vac_feed_valve: solenoid_valve { purpose: "Feed vacuum command valve", response_time: 20ms, ports: [coil:digital:consumer, feedback:logical:producer] }
+device vac_arm_valve: solenoid_valve { purpose: "Arm vacuum command valve", response_time: 20ms, ports: [coil:digital:consumer, feedback:logical:producer] }
+device vac_orient_valve: solenoid_valve { purpose: "Orient stage vacuum command valve", response_time: 20ms, ports: [coil:digital:consumer, feedback:logical:producer] }
+device vac_transfer_valve: solenoid_valve { purpose: "Transfer vacuum command valve", response_time: 20ms, ports: [coil:digital:consumer, feedback:logical:producer] }
 
 device sensor_feed_vac_ok: sensor { purpose: "Feed vacuum confirmation", subtype: "proximity_sensor" }
 device sensor_arm_vac_ok: sensor { purpose: "Arm vacuum confirmation", subtype: "proximity_sensor" }

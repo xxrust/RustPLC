@@ -53,9 +53,10 @@ plc/main.system.md
 
 ## 状态证明配置
 
-`config/state_proof.toml` 支持两类例外：
+`config/state_proof.toml` 支持三类例外：
 
 - `[[no_feedback_steps]]`：声明某个 step 是经过审查的 no-feedback 动作。
 - `[[trusted_initial_state]]`：声明某个初始状态由外部流程保证，例如启动前确认缓存、夹爪或料道为空。
+- `[[self_check_exempt_devices]]`：声明某个被 task 驱动的执行类设备确实不能由 PLC 自检。
 
-每条例外必须有 `reason` 和 `proof_basis`。如果项目有 workpiece flow，`01_init` 或 startup task 应优先用检测、清理、回收、拒绝启动或人工确认建立残料基线；只有这些证明无法进入 PLC 源时，才把例外写入 `state_proof.toml`。
+每条例外必须有 `reason` 和 `proof_basis`。如果项目有 workpiece flow，`01_init` 或 startup task 应优先用检测、清理、回收、拒绝启动或人工确认建立残料基线；如果设备能做自检，应优先放入 maintenance/self-check task。只有这些证明无法进入 PLC 源时，才把例外写入 `state_proof.toml`。

@@ -1,0 +1,72 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "Controller profile for requires/conflicts demo"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor { purpose: "Operator start request", subtype: "push_button", debounce: 20ms }
+device valve_hold: solenoid_valve { purpose: "Hold cylinder valve", response_time: 20ms }
+device valve_work: solenoid_valve { purpose: "Work cylinder valve", response_time: 20ms }
+device cyl_hold: cylinder { purpose: "Holds part before work cylinder moves", stroke_time: 300ms, retract_time: 300ms }
+device cyl_work: cylinder { purpose: "Performs work while hold is active", stroke_time: 300ms, retract_time: 300ms }
+device sensor_hold_ext: sensor { purpose: "Hold extended feedback", subtype: "limit_switch" }
+device sensor_hold_ret: sensor { purpose: "Hold retracted feedback", subtype: "limit_switch" }
+device sensor_work_ext: sensor { purpose: "Work extended feedback", subtype: "limit_switch" }
+device sensor_work_ret: sensor { purpose: "Work retracted feedback", subtype: "limit_switch" }
+
+relation { from: start_button.out, to: plc_main.X4, via: reports_to }
+relation { from: plc_main.Y0, to: valve_hold.coil, via: driven_by }
+relation { from: plc_main.Y1, to: valve_work.coil, via: driven_by }
+relation { from: valve_hold.out, to: cyl_hold.cmd, via: driven_by }
+relation { from: valve_work.out, to: cyl_work.cmd, via: driven_by }
+relation { from: cyl_hold.extended, to: sensor_hold_ext.sense, via: detects }
+relation { from: sensor_hold_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_hold.retracted, to: sensor_hold_ret.sense, via: detects }
+relation { from: sensor_hold_ret.out, to: plc_main.X1, via: reports_to }
+relation { from: cyl_work.extended, to: sensor_work_ext.sense, via: detects }
+relation { from: sensor_work_ext.out, to: plc_main.X2, via: reports_to }
+relation { from: cyl_work.retracted, to: sensor_work_ret.sense, via: detects }
+relation { from: sensor_work_ret.out, to: plc_main.X3, via: reports_to }
+
+[constraints]
+
+safety: cyl_work.extended requires cyl_hold.extended
+    reason: "Work cylinder requires hold cylinder to stay extended"
+
+safety: cyl_work.extended conflicts_with cyl_hold.retracted
+    reason: "Work cylinder must not run while hold cylinder is retracted"
+
+causality: Y0 -> valve_hold -> cyl_hold -> sensor_hold_ext
+causality: Y1 -> valve_work -> cyl_work -> sensor_work_ext
+
+[tasks]
+
+task ready:
+    step wait_start:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+
+task cycle:
+    step hold:
+        action: extend cyl_hold
+        timeout: 1200ms -> goto fault_handler.alarm
+    step work:
+        action: extend cyl_work
+        timeout: 1200ms -> goto fault_handler.alarm
+    step back:
+        action: retract cyl_work
+        timeout: 1200ms -> goto fault_handler.alarm
+    step release:
+        action: retract cyl_hold
+        timeout: 1200ms -> goto fault_handler.alarm
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_outputs:
+        action: set valve_work.coil off
+        action: set valve_hold.coil off
+    step alarm:
+        action: log "fault: interlock or actuator timeout"
+    on_complete: goto ready

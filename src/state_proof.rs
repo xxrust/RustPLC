@@ -1,6 +1,6 @@
 use crate::ast::{
-    ActionStatement, ComparisonOperator, ConditionExpression, DeviceType, Expression, LiteralValue,
-    PlcProgram, StepStatement, TaskDeclaration, TasksSection, WaitCondition,
+    ActionStatement, ComparisonOperator, ConditionExpression, DeviceType, EffectKind, Expression,
+    LiteralValue, PlcProgram, StepStatement, TaskDeclaration, TasksSection, WaitCondition,
 };
 use crate::source_bundle::is_bundle_path;
 use serde::{Deserialize, Serialize};
@@ -70,10 +70,18 @@ pub struct TrustedInitialStateException {
     pub proof_basis: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SelfCheckDeviceException {
+    pub device: String,
+    pub reason: String,
+    pub proof_basis: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StateProofConfig {
     pub no_feedback_steps: Vec<NoFeedbackStepException>,
     pub trusted_initial_state: Vec<TrustedInitialStateException>,
+    pub self_check_exempt_devices: Vec<SelfCheckDeviceException>,
 }
 
 impl StateProofConfig {
@@ -87,6 +95,12 @@ impl StateProofConfig {
         self.trusted_initial_state
             .iter()
             .any(|entry| entry.symbol.eq_ignore_ascii_case(symbol))
+    }
+
+    pub fn exempts_self_check(&self, device: &str) -> bool {
+        self.self_check_exempt_devices
+            .iter()
+            .any(|entry| entry.device.eq_ignore_ascii_case(device))
     }
 }
 
@@ -104,6 +118,8 @@ struct StateProofConfigFile {
     no_feedback_steps: Vec<NoFeedbackStepException>,
     #[serde(default)]
     trusted_initial_state: Vec<TrustedInitialStateException>,
+    #[serde(default)]
+    self_check_exempt_devices: Vec<SelfCheckDeviceException>,
 }
 
 fn default_state_proof_schema_version() -> u32 {
@@ -203,10 +219,17 @@ pub fn analyze_program(program: &PlcProgram, config: &StateProofConfig) -> Vec<S
     let assignments = collect_assignments(program, &variable_names, &physical_symbols, config);
     let ingress_sites = collect_ingress_sites(program);
     let critical_residual_symbols = collect_critical_residual_symbols(program);
+    let action_targets = collect_action_targets(program);
 
     let mut proof_cache = HashMap::<String, bool>::new();
     let mut startup_proof_cache = HashMap::<String, bool>::new();
     let mut issues = Vec::new();
+
+    issues.extend(find_uncommanded_home_waits(program));
+    issues.extend(find_unbounded_local_sensor_waits(program));
+    issues.extend(find_unclosed_residual_manual_routes(program));
+    issues.extend(find_unproven_vacuum_releases(program));
+    issues.extend(find_missing_self_checks(program, config, &action_targets));
 
     for (variable_name, declaration) in &variables {
         let Some(uses) = wait_uses.get(variable_name) else {
@@ -390,11 +413,219 @@ fn parse_state_proof_config(path: &Path) -> Result<StateProofConfig, String> {
             ));
         }
     }
+    for entry in &parsed.self_check_exempt_devices {
+        if entry.device.trim().is_empty()
+            || entry.reason.trim().is_empty()
+            || entry.proof_basis.trim().is_empty()
+        {
+            return Err(format!(
+                "Invalid self_check_exempt_devices entry in {}: device, reason, and proof_basis are all required",
+                path.display()
+            ));
+        }
+    }
 
     Ok(StateProofConfig {
         no_feedback_steps: parsed.no_feedback_steps,
         trusted_initial_state: parsed.trusted_initial_state,
+        self_check_exempt_devices: parsed.self_check_exempt_devices,
     })
+}
+
+fn find_uncommanded_home_waits(program: &PlcProgram) -> Vec<StateProofIssue> {
+    let mut issues = Vec::new();
+
+    for task in &program.tasks.tasks {
+        if !is_init_like(&task.name) {
+            continue;
+        }
+
+        let mut prior_axis_motion = false;
+        for step in &task.steps {
+            if step_waits_on_home_sensor(&step.statements) && !prior_axis_motion {
+                issues.push(StateProofIssue {
+                    code: "SPF-030".to_string(),
+                    severity: StateProofSeverity::Error,
+                    line: step.line.max(task.line).max(1),
+                    source_file: None,
+                    task: Some(task.name.clone()),
+                    step: Some(step.name.clone()),
+                    symbol: None,
+                    message: "startup/init task waits for a home sensor before any axis homing or motion command is issued".to_string(),
+                    fix: "issue a real axis homing/motion command before waiting for home feedback, or document a trusted initial home proof explicitly".to_string(),
+                });
+            }
+            prior_axis_motion |= step_has_axis_motion(&step.statements);
+        }
+    }
+
+    issues
+}
+
+fn find_unbounded_local_sensor_waits(program: &PlcProgram) -> Vec<StateProofIssue> {
+    let mut issues = Vec::new();
+
+    for task in &program.tasks.tasks {
+        for step in &task.steps {
+            if !step_allows_indefinite_wait(&step.statements) {
+                continue;
+            }
+            let Some(symbol) = first_local_controlled_wait_symbol(&step.statements) else {
+                continue;
+            };
+            issues.push(StateProofIssue {
+                code: "SPF-031".to_string(),
+                severity: StateProofSeverity::Error,
+                line: step.line.max(task.line).max(1),
+                source_file: None,
+                task: Some(task.name.clone()),
+                step: Some(step.name.clone()),
+                symbol: Some(symbol.clone()),
+                message: format!(
+                    "step uses allow_indefinite_wait while waiting on local controlled feedback `{symbol}`"
+                ),
+                fix: "only use allow_indefinite_wait for uncontrolled external actors or upstream tasks; local sensors need timeout, recovery, or explicit fault routing".to_string(),
+            });
+        }
+    }
+
+    issues
+}
+
+fn find_unclosed_residual_manual_routes(program: &PlcProgram) -> Vec<StateProofIssue> {
+    let mut issues = Vec::new();
+
+    for task in &program.tasks.tasks {
+        if !is_init_like(&task.name) {
+            continue;
+        }
+
+        for step in &task.steps {
+            if !looks_like_residual_check_step(&step.name, &step.statements) {
+                continue;
+            }
+            if step_has_recovery_action_or_effect(&step.statements) {
+                continue;
+            }
+
+            let Some(target) = first_timeout_target(&step.statements) else {
+                continue;
+            };
+            if route_is_explicit_manual_or_recovery(target) {
+                continue;
+            }
+
+            issues.push(StateProofIssue {
+                code: "SPF-032".to_string(),
+                severity: StateProofSeverity::Error,
+                line: step.line.max(task.line).max(1),
+                source_file: None,
+                task: Some(task.name.clone()),
+                step: Some(step.name.clone()),
+                symbol: None,
+                message: "residual/workpiece baseline check routes failure to a generic fault without explicit manual-assist or automatic recovery semantics".to_string(),
+                fix: "for recoverable residue, add a recovery path; if human handling is required, route to an explicitly named manual/operator-assist task and document the boundary".to_string(),
+            });
+        }
+    }
+
+    issues
+}
+
+fn find_unproven_vacuum_releases(program: &PlcProgram) -> Vec<StateProofIssue> {
+    let holder_names = program
+        .topology
+        .workpiece_holders
+        .iter()
+        .map(|holder| holder.name.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    if holder_names.is_empty() {
+        return Vec::new();
+    }
+
+    let mut device_types = HashMap::<String, DeviceType>::new();
+    let mut device_purposes = HashMap::<String, String>::new();
+    for device in &program.topology.devices {
+        device_types.insert(device.name.to_ascii_lowercase(), device.device_type.clone());
+        device_purposes.insert(
+            device.name.to_ascii_lowercase(),
+            device
+                .attributes
+                .purpose
+                .clone()
+                .unwrap_or_default()
+                .to_ascii_lowercase(),
+        );
+    }
+
+    let mut issues = Vec::new();
+    for task in &program.tasks.tasks {
+        for step in &task.steps {
+            if !step_turns_vacuum_off(&step.statements, &device_types, &device_purposes) {
+                continue;
+            }
+            let Some((from, to)) =
+                first_holder_to_non_holder_transfer(&step.statements, &holder_names)
+            else {
+                continue;
+            };
+            issues.push(StateProofIssue {
+                code: "SPF-033".to_string(),
+                severity: StateProofSeverity::Error,
+                line: step.line.max(task.line).max(1),
+                source_file: None,
+                task: Some(task.name.clone()),
+                step: Some(step.name.clone()),
+                symbol: Some(from.clone()),
+                message: format!(
+                    "vacuum is released while transferring workpiece from holder `{from}` to non-holder `{to}` without receiver ownership proof"
+                ),
+                fix: "keep vacuum until a receiving holder/stage has proven ownership, or model a passive support/receiver proof before releasing the holder".to_string(),
+            });
+        }
+    }
+
+    issues
+}
+
+fn find_missing_self_checks(
+    program: &PlcProgram,
+    config: &StateProofConfig,
+    action_targets: &HashSet<String>,
+) -> Vec<StateProofIssue> {
+    let mut issues = Vec::new();
+
+    for device in &program.topology.devices {
+        if !action_targets.contains(&device.name.to_ascii_lowercase()) {
+            continue;
+        }
+        if !device_requires_self_check(&device.device_type) {
+            continue;
+        }
+        if config.exempts_self_check(&device.name) {
+            continue;
+        }
+        if program_has_self_check_for_device(program, &device.name) {
+            continue;
+        }
+
+        issues.push(StateProofIssue {
+            code: "SPF-040".to_string(),
+            severity: StateProofSeverity::Error,
+            line: device.line.max(1),
+            source_file: None,
+            task: None,
+            step: None,
+            symbol: Some(device.name.clone()),
+            message: format!(
+                "actuated device `{}` is used by tasks but has no maintenance/self-check path",
+                device.name
+            ),
+            fix: "add a maintenance/self-check task that exercises the device and proves feedback, or add self_check_exempt_devices with reason and proof_basis".to_string(),
+        });
+    }
+
+    issues
 }
 
 fn variable_has_any_proof(
@@ -618,9 +849,9 @@ fn collect_assignments(
     let mut assignments = HashMap::<String, Vec<AssignmentEvidence>>::new();
     for task in &program.tasks.tasks {
         let init_like_context = is_init_like(&task.name);
+        let mut task_scan_state = StepScanState::default();
         for step in &task.steps {
-            let state = StepScanState::default();
-            collect_assignments_in_statements(
+            task_scan_state = collect_assignments_in_statements(
                 &step.statements,
                 variable_names,
                 physical_symbols,
@@ -629,7 +860,7 @@ fn collect_assignments(
                 &step.name,
                 step.line.max(task.line).max(1),
                 init_like_context,
-                state,
+                task_scan_state,
                 &mut assignments,
             );
         }
@@ -640,6 +871,7 @@ fn collect_assignments(
 #[derive(Debug, Clone, Copy, Default)]
 struct StepScanState {
     prior_physical_action: bool,
+    prior_physical_wait: bool,
     prior_workpiece_effect: bool,
 }
 
@@ -663,7 +895,7 @@ fn collect_assignments_in_statements(
                         collect_expression_dependencies(expr, variable_names, physical_symbols);
                     let evidence = AssignmentEvidence {
                         var_refs,
-                        direct_physical_ref,
+                        direct_physical_ref: direct_physical_ref || scan_state.prior_physical_wait,
                         prior_workpiece_effect: scan_state.prior_workpiece_effect,
                         no_feedback_override: config.no_feedback_matches(task, step)
                             && scan_state.prior_physical_action,
@@ -683,6 +915,11 @@ fn collect_assignments_in_statements(
             StepStatement::Effect(_) => {
                 scan_state.prior_workpiece_effect = true;
             }
+            StepStatement::Wait(wait) => {
+                if wait_condition_has_physical_operand(&wait.condition, physical_symbols) {
+                    scan_state.prior_physical_wait = true;
+                }
+            }
             StepStatement::Repeat { body, .. } => {
                 let nested_state = collect_assignments_in_statements(
                     body,
@@ -697,6 +934,7 @@ fn collect_assignments_in_statements(
                     assignments,
                 );
                 scan_state.prior_physical_action |= nested_state.prior_physical_action;
+                scan_state.prior_physical_wait |= nested_state.prior_physical_wait;
                 scan_state.prior_workpiece_effect |= nested_state.prior_workpiece_effect;
             }
             StepStatement::Parallel(block) => {
@@ -714,6 +952,7 @@ fn collect_assignments_in_statements(
                         assignments,
                     );
                     scan_state.prior_physical_action |= nested_state.prior_physical_action;
+                    scan_state.prior_physical_wait |= nested_state.prior_physical_wait;
                     scan_state.prior_workpiece_effect |= nested_state.prior_workpiece_effect;
                 }
             }
@@ -732,11 +971,11 @@ fn collect_assignments_in_statements(
                         assignments,
                     );
                     scan_state.prior_physical_action |= nested_state.prior_physical_action;
+                    scan_state.prior_physical_wait |= nested_state.prior_physical_wait;
                     scan_state.prior_workpiece_effect |= nested_state.prior_workpiece_effect;
                 }
             }
-            StepStatement::Wait(_)
-            | StepStatement::IfElse { .. }
+            StepStatement::IfElse { .. }
             | StepStatement::Delay { .. }
             | StepStatement::Timeout(_)
             | StepStatement::Goto(_)
@@ -1284,6 +1523,509 @@ fn is_auto_task_name(task_name: &str) -> bool {
     !is_non_auto_task(task_name)
 }
 
+fn step_waits_on_home_sensor(statements: &[StepStatement]) -> bool {
+    wait_symbols_in_statements(statements)
+        .into_iter()
+        .any(|symbol| symbol.to_ascii_lowercase().contains("home"))
+}
+
+fn step_has_axis_motion(statements: &[StepStatement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        StepStatement::Action(
+            ActionStatement::AxisMoveRelative { .. } | ActionStatement::AxisMoveAbsolute { .. },
+        ) => true,
+        StepStatement::Repeat { body, .. } => step_has_axis_motion(body),
+        StepStatement::Parallel(block) => block
+            .branches
+            .iter()
+            .any(|branch| step_has_axis_motion(&branch.statements)),
+        StepStatement::Race(block) => block
+            .branches
+            .iter()
+            .any(|branch| step_has_axis_motion(&branch.statements)),
+        StepStatement::Action(_)
+        | StepStatement::Effect(_)
+        | StepStatement::Wait(_)
+        | StepStatement::IfElse { .. }
+        | StepStatement::Delay { .. }
+        | StepStatement::Timeout(_)
+        | StepStatement::Goto(_)
+        | StepStatement::AllowIndefiniteWait(_) => false,
+    })
+}
+
+fn step_allows_indefinite_wait(statements: &[StepStatement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        StepStatement::AllowIndefiniteWait(true) => true,
+        StepStatement::Repeat { body, .. } => step_allows_indefinite_wait(body),
+        StepStatement::Parallel(block) => block
+            .branches
+            .iter()
+            .any(|branch| step_allows_indefinite_wait(&branch.statements)),
+        StepStatement::Race(block) => block
+            .branches
+            .iter()
+            .any(|branch| step_allows_indefinite_wait(&branch.statements)),
+        StepStatement::Action(_)
+        | StepStatement::Effect(_)
+        | StepStatement::Wait(_)
+        | StepStatement::IfElse { .. }
+        | StepStatement::Delay { .. }
+        | StepStatement::Timeout(_)
+        | StepStatement::Goto(_)
+        | StepStatement::AllowIndefiniteWait(false) => false,
+    })
+}
+
+fn first_local_controlled_wait_symbol(statements: &[StepStatement]) -> Option<String> {
+    wait_symbols_in_statements(statements)
+        .into_iter()
+        .find(|symbol| is_local_controlled_sensor_symbol(symbol))
+}
+
+fn wait_symbols_in_statements(statements: &[StepStatement]) -> Vec<String> {
+    let mut symbols = Vec::new();
+    for statement in statements {
+        match statement {
+            StepStatement::Wait(wait) => {
+                collect_wait_condition_symbols(&wait.condition, &mut symbols)
+            }
+            StepStatement::Repeat { body, .. } => symbols.extend(wait_symbols_in_statements(body)),
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    symbols.extend(wait_symbols_in_statements(&branch.statements));
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    symbols.extend(wait_symbols_in_statements(&branch.statements));
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Effect(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+    symbols
+}
+
+fn collect_wait_condition_symbols(condition: &WaitCondition, symbols: &mut Vec<String>) {
+    match condition {
+        WaitCondition::Single(expr) => collect_condition_symbols(expr, symbols),
+        WaitCondition::And(items) | WaitCondition::Or(items) => {
+            for expr in items {
+                collect_condition_symbols(expr, symbols);
+            }
+        }
+        WaitCondition::Edge(edge) => symbols.push(edge.operand.clone()),
+    }
+}
+
+fn collect_condition_symbols(condition: &ConditionExpression, symbols: &mut Vec<String>) {
+    if let Some((left, right)) = condition.expression_pair() {
+        collect_expression_symbols(left, symbols);
+        collect_expression_symbols(right, symbols);
+        return;
+    }
+    if !condition.left.trim().is_empty() {
+        symbols.push(condition.left.clone());
+    }
+}
+
+fn collect_expression_symbols(expr: &Expression, symbols: &mut Vec<String>) {
+    match expr {
+        Expression::Variable(name) => symbols.push(name.clone()),
+        Expression::UnaryNeg(inner) | Expression::UnaryNot(inner) => {
+            collect_expression_symbols(inner, symbols)
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            collect_expression_symbols(left, symbols);
+            collect_expression_symbols(right, symbols);
+        }
+        Expression::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_expression_symbols(arg, symbols);
+            }
+        }
+        Expression::Literal(_) | Expression::Boolean(_) => {}
+    }
+}
+
+fn is_local_controlled_sensor_symbol(symbol: &str) -> bool {
+    let lower = symbol.to_ascii_lowercase();
+    if lower.contains("start")
+        || lower.contains("stop")
+        || lower.contains("reset")
+        || lower.contains("ack")
+        || lower.contains("button")
+        || lower.contains("mode")
+        || lower.contains("manual")
+        || lower.contains("operator")
+        || lower.contains("hmi")
+        || lower.contains("upstream")
+        || lower.contains("downstream")
+        || lower.contains("handoff")
+        || lower.contains("request")
+        || lower.contains("allow")
+        || lower.contains("ready")
+    {
+        return false;
+    }
+
+    lower.starts_with("sensor_")
+        || lower.contains("_sensor")
+        || lower.contains("wafer_on")
+        || lower.contains("vac")
+        || lower.contains("home")
+        || lower.contains("drop")
+        || lower.contains("limit")
+        || lower.contains("_empty")
+}
+
+fn looks_like_residual_check_step(step_name: &str, statements: &[StepStatement]) -> bool {
+    let lower = step_name.to_ascii_lowercase();
+    (lower.contains("residual")
+        || lower.contains("empty")
+        || lower.contains("clear")
+        || lower.contains("baseline"))
+        && wait_symbols_in_statements(statements)
+            .into_iter()
+            .any(|symbol| is_local_controlled_sensor_symbol(&symbol))
+}
+
+fn step_has_recovery_action_or_effect(statements: &[StepStatement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        StepStatement::Action(action) => is_physical_action(action),
+        StepStatement::Effect(_) => true,
+        StepStatement::Repeat { body, .. } => step_has_recovery_action_or_effect(body),
+        StepStatement::Parallel(block) => block
+            .branches
+            .iter()
+            .any(|branch| step_has_recovery_action_or_effect(&branch.statements)),
+        StepStatement::Race(block) => block
+            .branches
+            .iter()
+            .any(|branch| step_has_recovery_action_or_effect(&branch.statements)),
+        StepStatement::Wait(_)
+        | StepStatement::IfElse { .. }
+        | StepStatement::Delay { .. }
+        | StepStatement::Timeout(_)
+        | StepStatement::Goto(_)
+        | StepStatement::AllowIndefiniteWait(_) => false,
+    })
+}
+
+fn first_timeout_target(statements: &[StepStatement]) -> Option<&crate::ast::GotoDirective> {
+    for statement in statements {
+        match statement {
+            StepStatement::Timeout(timeout) => return Some(&timeout.target),
+            StepStatement::Action(action) => {
+                if let Some(target) = action_timeout_target(action) {
+                    return Some(target);
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                if let Some(target) = first_timeout_target(body) {
+                    return Some(target);
+                }
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    if let Some(target) = first_timeout_target(&branch.statements) {
+                        return Some(target);
+                    }
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    if let Some(target) = first_timeout_target(&branch.statements) {
+                        return Some(target);
+                    }
+                }
+            }
+            StepStatement::Effect(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+    None
+}
+
+fn action_timeout_target(action: &ActionStatement) -> Option<&crate::ast::GotoDirective> {
+    match action {
+        ActionStatement::Extend { timeout, .. }
+        | ActionStatement::Retract { timeout, .. }
+        | ActionStatement::AxisMoveRelative { timeout, .. }
+        | ActionStatement::AxisMoveAbsolute { timeout, .. } => {
+            timeout.as_ref().map(|timeout| &timeout.target)
+        }
+        ActionStatement::Set { .. }
+        | ActionStatement::SetAnalog { .. }
+        | ActionStatement::SetAnalogExpr { .. }
+        | ActionStatement::Compute { .. }
+        | ActionStatement::Call { .. }
+        | ActionStatement::CamEngage { .. }
+        | ActionStatement::CamDisengage { .. }
+        | ActionStatement::CamSwitch { .. }
+        | ActionStatement::CamPhase { .. }
+        | ActionStatement::DeviceAction { .. }
+        | ActionStatement::Log { .. } => None,
+    }
+}
+
+fn route_is_explicit_manual_or_recovery(target: &crate::ast::GotoDirective) -> bool {
+    let target_text = format!(
+        "{}.{}",
+        target.task.to_ascii_lowercase(),
+        target.step.clone().unwrap_or_default().to_ascii_lowercase()
+    );
+    target_text.contains("manual")
+        || target_text.contains("operator")
+        || target_text.contains("assist")
+        || target_text.contains("ack")
+        || target_text.contains("recover")
+        || target_text.contains("cleanup")
+        || target_text.contains("clear")
+        || target_text.contains("reject")
+        || target_text.contains("rehome")
+}
+
+fn step_turns_vacuum_off(
+    statements: &[StepStatement],
+    device_types: &HashMap<String, DeviceType>,
+    device_purposes: &HashMap<String, String>,
+) -> bool {
+    statements.iter().any(|statement| match statement {
+        StepStatement::Action(ActionStatement::Set { target, value }) => {
+            value.eq_ignore_ascii_case("off")
+                && target.port.eq_ignore_ascii_case("coil")
+                && target_is_vacuum_device(&target.device, device_types, device_purposes)
+        }
+        StepStatement::Repeat { body, .. } => {
+            step_turns_vacuum_off(body, device_types, device_purposes)
+        }
+        StepStatement::Parallel(block) => block
+            .branches
+            .iter()
+            .any(|branch| step_turns_vacuum_off(&branch.statements, device_types, device_purposes)),
+        StepStatement::Race(block) => block
+            .branches
+            .iter()
+            .any(|branch| step_turns_vacuum_off(&branch.statements, device_types, device_purposes)),
+        StepStatement::Action(_)
+        | StepStatement::Effect(_)
+        | StepStatement::Wait(_)
+        | StepStatement::IfElse { .. }
+        | StepStatement::Delay { .. }
+        | StepStatement::Timeout(_)
+        | StepStatement::Goto(_)
+        | StepStatement::AllowIndefiniteWait(_) => false,
+    })
+}
+
+fn target_is_vacuum_device(
+    device: &str,
+    device_types: &HashMap<String, DeviceType>,
+    device_purposes: &HashMap<String, String>,
+) -> bool {
+    let lower = device.to_ascii_lowercase();
+    lower.contains("vac")
+        || lower.contains("vacuum")
+        || (matches!(
+            device_types.get(&lower),
+            Some(DeviceType::SolenoidValve | DeviceType::Pump)
+        ) && device_purposes
+            .get(&lower)
+            .is_some_and(|purpose| purpose.contains("vac")))
+}
+
+fn first_holder_to_non_holder_transfer(
+    statements: &[StepStatement],
+    holder_names: &HashSet<String>,
+) -> Option<(String, String)> {
+    for statement in statements {
+        match statement {
+            StepStatement::Effect(effect) => {
+                if let EffectKind::Transfer { from, to } = &effect.kind {
+                    if holder_names.contains(&from.to_ascii_lowercase())
+                        && !holder_names.contains(&to.to_ascii_lowercase())
+                    {
+                        return Some((from.clone(), to.clone()));
+                    }
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                if let Some(found) = first_holder_to_non_holder_transfer(body, holder_names) {
+                    return Some(found);
+                }
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    if let Some(found) =
+                        first_holder_to_non_holder_transfer(&branch.statements, holder_names)
+                    {
+                        return Some(found);
+                    }
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    if let Some(found) =
+                        first_holder_to_non_holder_transfer(&branch.statements, holder_names)
+                    {
+                        return Some(found);
+                    }
+                }
+            }
+            StepStatement::Action(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+    None
+}
+
+fn collect_action_targets(program: &PlcProgram) -> HashSet<String> {
+    let mut targets = HashSet::new();
+    for task in &program.tasks.tasks {
+        for step in &task.steps {
+            collect_action_targets_in_statements(&step.statements, &mut targets);
+        }
+    }
+    targets
+}
+
+fn collect_action_targets_in_statements(
+    statements: &[StepStatement],
+    targets: &mut HashSet<String>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(action) => {
+                if let Some(device) = action_target_device(action) {
+                    targets.insert(device.to_ascii_lowercase());
+                }
+            }
+            StepStatement::Repeat { body, .. } => {
+                collect_action_targets_in_statements(body, targets)
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    collect_action_targets_in_statements(&branch.statements, targets);
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    collect_action_targets_in_statements(&branch.statements, targets);
+                }
+            }
+            StepStatement::Effect(_)
+            | StepStatement::Wait(_)
+            | StepStatement::IfElse { .. }
+            | StepStatement::Delay { .. }
+            | StepStatement::Timeout(_)
+            | StepStatement::Goto(_)
+            | StepStatement::AllowIndefiniteWait(_) => {}
+        }
+    }
+}
+
+fn action_target_device(action: &ActionStatement) -> Option<&str> {
+    match action {
+        ActionStatement::Extend { target, .. }
+        | ActionStatement::Retract { target, .. }
+        | ActionStatement::Set { target, .. }
+        | ActionStatement::SetAnalog { target, .. }
+        | ActionStatement::SetAnalogExpr { target, .. }
+        | ActionStatement::DeviceAction { target, .. }
+        | ActionStatement::AxisMoveRelative { target, .. }
+        | ActionStatement::AxisMoveAbsolute { target, .. } => Some(target.device.as_str()),
+        ActionStatement::CamEngage { target }
+        | ActionStatement::CamDisengage { target }
+        | ActionStatement::CamSwitch { target, .. }
+        | ActionStatement::CamPhase { target, .. } => Some(target.as_str()),
+        ActionStatement::Compute { .. }
+        | ActionStatement::Call { .. }
+        | ActionStatement::Log { .. } => None,
+    }
+}
+
+fn device_requires_self_check(device_type: &DeviceType) -> bool {
+    matches!(
+        device_type,
+        DeviceType::SolenoidValve
+            | DeviceType::Cylinder
+            | DeviceType::Motor
+            | DeviceType::StepperMotor
+            | DeviceType::Vfd
+            | DeviceType::ServoDrive
+            | DeviceType::CamCoupling
+            | DeviceType::Pid
+            | DeviceType::ProportionalValve
+            | DeviceType::Gripper
+            | DeviceType::Conveyor
+            | DeviceType::Pump
+            | DeviceType::Heater
+            | DeviceType::VisionSensor
+    )
+}
+
+fn program_has_self_check_for_device(program: &PlcProgram, device: &str) -> bool {
+    let needle = device.to_ascii_lowercase();
+    program.tasks.tasks.iter().any(|task| {
+        let task_self_check = looks_like_self_check_context(&task.name);
+        task.steps.iter().any(|step| {
+            (task_self_check || looks_like_self_check_context(&step.name))
+                && step_actions_target_device(&step.statements, &needle)
+        })
+    })
+}
+
+fn looks_like_self_check_context(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("self_check")
+        || lower.contains("selfcheck")
+        || lower.contains("maintenance")
+        || lower.contains("commission")
+        || lower.contains("test")
+        || lower.contains("diagnostic")
+}
+
+fn step_actions_target_device(statements: &[StepStatement], device: &str) -> bool {
+    statements.iter().any(|statement| match statement {
+        StepStatement::Action(action) => {
+            action_target_device(action).is_some_and(|target| target.eq_ignore_ascii_case(device))
+        }
+        StepStatement::Repeat { body, .. } => step_actions_target_device(body, device),
+        StepStatement::Parallel(block) => block
+            .branches
+            .iter()
+            .any(|branch| step_actions_target_device(&branch.statements, device)),
+        StepStatement::Race(block) => block
+            .branches
+            .iter()
+            .any(|branch| step_actions_target_device(&branch.statements, device)),
+        StepStatement::Effect(_)
+        | StepStatement::Wait(_)
+        | StepStatement::IfElse { .. }
+        | StepStatement::Delay { .. }
+        | StepStatement::Timeout(_)
+        | StepStatement::Goto(_)
+        | StepStatement::AllowIndefiniteWait(_) => false,
+    })
+}
+
 fn find_project_root(source_path: &Path) -> Option<PathBuf> {
     let start = if source_path.is_dir() {
         source_path
@@ -1300,7 +2042,9 @@ fn find_project_root(source_path: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{NoFeedbackStepException, StateProofConfig, analyze_program};
+    use super::{
+        NoFeedbackStepException, SelfCheckDeviceException, StateProofConfig, analyze_program,
+    };
     use crate::parser::parse_plc;
     use crate::semantic::preprocess_program;
 
@@ -1384,6 +2128,12 @@ task main:
                     proof_basis: "Reviewed startup checklist".to_string(),
                 }],
                 trusted_initial_state: Vec::new(),
+                self_check_exempt_devices: vec![SelfCheckDeviceException {
+                    device: "lamp".to_string(),
+                    reason: "Minimal no-feedback fixture device".to_string(),
+                    proof_basis: "Unit test only exercises state proof assignment logic"
+                        .to_string(),
+                }],
             },
         );
         assert!(
@@ -1457,6 +2207,169 @@ task main:
                 .iter()
                 .any(|code| code == "SPF-020" || code == "SPF-021"),
             "startup operator confirmation should satisfy the residual strategy, got {codes:?}"
+        );
+    }
+
+    #[test]
+    fn init_home_wait_before_axis_command_is_rejected() {
+        let source = r#"
+[topology]
+device sensor_arm_home: sensor { purpose: "Arm home sensor" }
+
+[constraints]
+
+[tasks]
+task startup_init:
+    step wait_arm_home:
+        wait: sensor_arm_home == true
+        timeout: 5000ms -> goto startup_fault.init_pose_timeout
+
+task startup_fault:
+    step init_pose_timeout:
+        action: log "startup fault"
+"#;
+        let codes = analyze(source, StateProofConfig::default());
+        assert!(
+            codes.iter().any(|code| code == "SPF-030"),
+            "uncommanded home wait should be rejected, got {codes:?}"
+        );
+    }
+
+    #[test]
+    fn allow_indefinite_wait_on_local_sensor_is_rejected() {
+        let source = r#"
+[topology]
+device wafer_on_slide: sensor { purpose: "Slide occupancy sensor" }
+
+[constraints]
+
+[tasks]
+task startup_init:
+    step wait_slide_empty:
+        wait: wafer_on_slide == false
+        allow_indefinite_wait: true
+"#;
+        let codes = analyze(source, StateProofConfig::default());
+        assert!(
+            codes.iter().any(|code| code == "SPF-031"),
+            "local controlled sensor must not use indefinite wait, got {codes:?}"
+        );
+    }
+
+    #[test]
+    fn allow_indefinite_wait_on_uncontrolled_upstream_signal_is_allowed() {
+        let source = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+task station_b:
+    step wait_station_a:
+        wait: upstream_ready == true
+        allow_indefinite_wait: true
+"#;
+        let codes = analyze(source, StateProofConfig::default());
+        assert!(
+            !codes.iter().any(|code| code == "SPF-031"),
+            "upstream/other-task waits may be indefinite from this task boundary, got {codes:?}"
+        );
+    }
+
+    #[test]
+    fn residual_check_to_generic_fault_is_rejected() {
+        let source = r#"
+[topology]
+device wafer_on_slide: sensor { purpose: "Slide occupancy sensor" }
+
+[constraints]
+
+[tasks]
+task startup_init:
+    step check_slide_empty:
+        wait: wafer_on_slide == false
+        timeout: 5000ms -> goto startup_fault.init_pose_timeout
+
+task startup_fault:
+    step init_pose_timeout:
+        action: log "startup fault"
+"#;
+        let codes = analyze(source, StateProofConfig::default());
+        assert!(
+            codes.iter().any(|code| code == "SPF-032"),
+            "residual check must route to explicit recovery/manual semantics, got {codes:?}"
+        );
+    }
+
+    #[test]
+    fn vacuum_release_to_passive_location_is_rejected() {
+        let source = r#"
+[topology]
+device vac_feed_valve: solenoid_valve { purpose: "Feed vacuum valve" }
+workpiece wafer: workpiece_type {
+    normal_terminal_states: [finished]
+    ingress_sites: [feed_ejector]
+    normal_egress_sites: [slide_pick_site]
+}
+holder feed_ejector: workpiece_holder { capacity: 1 }
+location slide_pick_site: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+task feed:
+    step release_to_slide:
+        action: set vac_feed_valve.coil off
+        effect: transfer from feed_ejector to slide_pick_site
+"#;
+        let codes = analyze(source, StateProofConfig::default());
+        assert!(
+            codes.iter().any(|code| code == "SPF-033"),
+            "vacuum release before receiver ownership proof should be rejected, got {codes:?}"
+        );
+    }
+
+    #[test]
+    fn actuated_device_without_self_check_is_rejected() {
+        let source = r#"
+[topology]
+device feed_motor: motor { purpose: "Feed motor" }
+
+[constraints]
+
+[tasks]
+task main:
+    step run_feed:
+        action: set feed_motor.run on
+"#;
+        let codes = analyze(source, StateProofConfig::default());
+        assert!(
+            codes.iter().any(|code| code == "SPF-040"),
+            "actuated devices need self-check or explicit exemption, got {codes:?}"
+        );
+    }
+
+    #[test]
+    fn actuated_device_self_check_task_satisfies_self_check_gate() {
+        let source = r#"
+[topology]
+device feed_motor: motor { purpose: "Feed motor" }
+
+[constraints]
+
+[tasks]
+task maintenance_self_check:
+    step jog_feed_motor:
+        action: set feed_motor.run on
+
+task main:
+    step run_feed:
+        action: set feed_motor.run on
+"#;
+        let codes = analyze(source, StateProofConfig::default());
+        assert!(
+            !codes.iter().any(|code| code == "SPF-040"),
+            "self-check task should satisfy actuated device gate, got {codes:?}"
         );
     }
 }

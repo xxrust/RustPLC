@@ -5,12 +5,12 @@ relation { from: mode_auto.out, to: plc_main.mode_auto_cmd, via: reports_to }
 relation { from: mode_manual.out, to: plc_main.mode_manual_cmd, via: reports_to }
 relation { from: mode_step.out, to: plc_main.mode_step_cmd, via: reports_to }
 relation { from: mode_maintenance.out, to: plc_main.mode_maintenance_cmd, via: reports_to }
+relation { from: feed_cassette_present.out, to: plc_main.feed_cassette_present_in, via: reports_to }
 relation { from: wafer_drop_detect.out, to: plc_main.wafer_drop_detected, via: reports_to }
 relation { from: measure_stage_ready.out, to: plc_main.measure_stage_ready_in, via: reports_to }
 relation { from: wafer_on_slide.out, to: plc_main.wafer_on_slide_in, via: reports_to }
 relation { from: wafer_on_orient.out, to: plc_main.wafer_on_orient_in, via: reports_to }
-relation { from: orient_side_a_ok.out, to: plc_main.orient_side_a_ok_in, via: reports_to }
-relation { from: orient_side_b_ok.out, to: plc_main.orient_side_b_ok_in, via: reports_to }
+relation { from: sensor_orient_probe.out, to: plc_main.orient_probe_in, via: reports_to }
 relation { from: sensor_feed_vac_ok.out, to: plc_main.feed_vac_ok_in, via: reports_to }
 relation { from: sensor_arm_vac_ok.out, to: plc_main.arm_vac_ok_in, via: reports_to }
 relation { from: sensor_orient_vac_ok.out, to: plc_main.orient_vac_ok_in, via: reports_to }
@@ -57,3 +57,8 @@ relation { from: plc_main.arm_vac_cmd, to: vac_arm_valve.coil, via: driven_by }
 relation { from: plc_main.orient_vac_cmd, to: vac_orient_valve.coil, via: driven_by }
 relation { from: plc_main.transfer_vac_cmd, to: vac_transfer_valve.coil, via: driven_by }
 relation { from: plc_main.axis_arm_enable_cmd, to: axis_arm.enable, via: driven_by }
+relation { from: vac_feed_valve.feedback, to: sensor_feed_vac_ok.sense, via: detects }
+relation { from: vac_arm_valve.feedback, to: sensor_arm_vac_ok.sense, via: detects }
+relation { from: vac_orient_valve.feedback, to: sensor_orient_vac_ok.sense, via: detects }
+relation { from: vac_transfer_valve.feedback, to: sensor_transfer_vac_ok.sense, via: detects }
+relation { from: axis_arm.position_ok, to: sensor_arm_home.sense, via: detects }

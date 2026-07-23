@@ -15,6 +15,9 @@
 /*.tmp
 /*.bak
 /*.swp
+/*.py
+/*.sh
+/*.patch
 
 # Root-level local environment files
 /.env
@@ -26,4 +29,6 @@
 # Flywheel experiment artifacts should not live in the main repo.
 /.codex/skills/*/.skill_flywheel/cycles/
 /.codex/skills/*/.skill_flywheel/benchmark/
+/.codex/skills/*/.skill_flywheel/experiments.jsonl
+/.codex/skills/*/.skill_flywheel/public/
 /ubuntu@*

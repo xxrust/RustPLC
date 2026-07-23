@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "case_id": "fix-obvious-errors-001",
+  "title": "Detect unproven success state in feed cassette prep",
+  "split": "dev",
+  "status": "draft",
+  "skill_family": "plc-gen",
+  "case_type": "blind-runner",
+  "question": "Use the plc-gen fix command on the provided PLC excerpts and identify any obvious semantic error before proposing a repair.",
+  "created_at_utc": "2026-05-08T02:56:35.229885+00:00",
+  "paths": {
+    "public_dir": "E:\\personal_project\\rust_plc\\.codex\\skills\\plc-gen\\.skill_flywheel\\benchmark\\cases\\dev\\fix-obvious-errors-001\\public",
+    "hidden_dir": "E:\\personal_project\\rust_plc\\.codex\\skills\\plc-gen\\.skill_flywheel\\benchmark\\cases\\dev\\fix-obvious-errors-001\\hidden",
+    "evaluation_dir": "E:\\personal_project\\rust_plc\\.codex\\skills\\plc-gen\\.skill_flywheel\\benchmark\\cases\\dev\\fix-obvious-errors-001\\evaluation"
+  }
+}

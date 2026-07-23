@@ -1,0 +1,87 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "Controller profile for a push-clamp-press station"
+    model_ref: openplc_softplc
+}
+
+device start_button: sensor { purpose: "Operator start request", subtype: "push_button", debounce: 20ms }
+device valve_push: solenoid_valve { purpose: "Push cylinder valve", response_time: 20ms }
+device valve_clamp: solenoid_valve { purpose: "Clamp cylinder valve", response_time: 20ms }
+device valve_press: solenoid_valve { purpose: "Press cylinder valve", response_time: 20ms }
+device cyl_push: cylinder { purpose: "Pushes the part into station", stroke_time: 300ms, retract_time: 300ms }
+device cyl_clamp: cylinder { purpose: "Clamps the part before press", stroke_time: 300ms, retract_time: 300ms }
+device cyl_press: cylinder { purpose: "Presses the clamped part", stroke_time: 300ms, retract_time: 300ms }
+device sensor_push_ext: sensor { purpose: "Push extended feedback", subtype: "limit_switch" }
+device sensor_push_ret: sensor { purpose: "Push retracted feedback", subtype: "limit_switch" }
+device sensor_clamp_ext: sensor { purpose: "Clamp extended feedback", subtype: "limit_switch" }
+device sensor_clamp_ret: sensor { purpose: "Clamp retracted feedback", subtype: "limit_switch" }
+device sensor_press_ext: sensor { purpose: "Press extended feedback", subtype: "limit_switch" }
+device sensor_press_ret: sensor { purpose: "Press retracted feedback", subtype: "limit_switch" }
+
+relation { from: start_button.out, to: plc_main.X6, via: reports_to }
+relation { from: plc_main.Y0, to: valve_push.coil, via: driven_by }
+relation { from: plc_main.Y1, to: valve_clamp.coil, via: driven_by }
+relation { from: plc_main.Y2, to: valve_press.coil, via: driven_by }
+relation { from: valve_push.out, to: cyl_push.cmd, via: driven_by }
+relation { from: valve_clamp.out, to: cyl_clamp.cmd, via: driven_by }
+relation { from: valve_press.out, to: cyl_press.cmd, via: driven_by }
+relation { from: cyl_push.extended, to: sensor_push_ext.sense, via: detects }
+relation { from: sensor_push_ext.out, to: plc_main.X0, via: reports_to }
+relation { from: cyl_push.retracted, to: sensor_push_ret.sense, via: detects }
+relation { from: sensor_push_ret.out, to: plc_main.X1, via: reports_to }
+relation { from: cyl_clamp.extended, to: sensor_clamp_ext.sense, via: detects }
+relation { from: sensor_clamp_ext.out, to: plc_main.X2, via: reports_to }
+relation { from: cyl_clamp.retracted, to: sensor_clamp_ret.sense, via: detects }
+relation { from: sensor_clamp_ret.out, to: plc_main.X3, via: reports_to }
+relation { from: cyl_press.extended, to: sensor_press_ext.sense, via: detects }
+relation { from: sensor_press_ext.out, to: plc_main.X4, via: reports_to }
+relation { from: cyl_press.retracted, to: sensor_press_ret.sense, via: detects }
+relation { from: sensor_press_ret.out, to: plc_main.X5, via: reports_to }
+
+[constraints]
+
+safety: cyl_press.extended requires cyl_clamp.extended
+    reason: "Press may extend only while clamp is extended"
+
+causality: Y0 -> valve_push -> cyl_push -> sensor_push_ext
+causality: Y1 -> valve_clamp -> cyl_clamp -> sensor_clamp_ext
+causality: Y2 -> valve_press -> cyl_press -> sensor_press_ext
+
+[tasks]
+
+task ready:
+    step wait_start:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+    on_complete: goto cycle
+
+task cycle:
+    step push_out:
+        action: extend cyl_push
+        timeout: 1200ms -> goto fault_handler.alarm
+    step clamp_down:
+        action: extend cyl_clamp
+        timeout: 1200ms -> goto fault_handler.alarm
+    step press_out:
+        action: extend cyl_press
+        timeout: 1200ms -> goto fault_handler.alarm
+    step press_back:
+        action: retract cyl_press
+        timeout: 1200ms -> goto fault_handler.alarm
+    step unclamp:
+        action: retract cyl_clamp
+        timeout: 1200ms -> goto fault_handler.alarm
+    step push_back:
+        action: retract cyl_push
+        timeout: 1200ms -> goto fault_handler.alarm
+    on_complete: goto ready
+
+task fault_handler:
+    step safe_outputs:
+        action: set valve_press.coil off
+        action: set valve_clamp.coil off
+        action: set valve_push.coil off
+    step alarm:
+        action: log "fault: actuator did not reach commanded state"
+    on_complete: goto ready
