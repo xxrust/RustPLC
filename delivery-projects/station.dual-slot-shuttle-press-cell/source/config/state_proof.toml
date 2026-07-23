@@ -1,0 +1,56 @@
+schema_version = 1
+
+[[trusted_initial_state]]
+symbol = "good_outfeed"
+reason = "启动自检要求良品下料容器处于可接收状态；nominal scenario 不把已完成件当作新件。"
+proof_basis = "startup residual-part gate and commissioning clear-out record"
+
+[[trusted_initial_state]]
+symbol = "load_nest"
+reason = "装卸巢必须为空才能接受有限两件批次。"
+proof_basis = "startup residual-part gate"
+
+[[trusted_initial_state]]
+symbol = "press_nest"
+reason = "压装巢必须为空且气缸缩回才能进入 ready。"
+proof_basis = "startup cylinder self-check"
+
+[[trusted_initial_state]]
+symbol = "shuttle_tray"
+reason = "双槽 carrier 启动时必须无残件；残件汇总输入与人工空机确认共同阻止未清残启动。"
+proof_basis = "startup residual_present gate plus operator_empty_confirm; exact token injection remains blocked"
+
+[[trusted_initial_state]]
+symbol = "load_gripper"
+reason = "装载夹具启动时必须为空，避免自动 acquire 与夹具残件形成重复占位。"
+proof_basis = "startup residual-part gate and operator-confirmed gripper clear check"
+
+[[trusted_initial_state]]
+symbol = "raw_infeed"
+reason = "有限两件周期启动前必须确认 slot[0] 与 slot[1] 各有一件原料，其他槽位不参与本周期且不存在未登记残件。"
+proof_basis = "raw_material_available field proof plus reviewed finite-batch loading record"
+
+[[self_check_exempt_devices]]
+device = "ready_lamp"
+reason = "启动 visible_output_test 点亮并关闭 ready lamp，输出测试由操作员观察确认。"
+proof_basis = "startup_self_check.visible_output_test"
+
+[[self_check_exempt_devices]]
+device = "running_lamp"
+reason = "启动 visible_output_test 点亮并关闭 running lamp，输出测试由操作员观察确认。"
+proof_basis = "startup_self_check.visible_output_test"
+
+[[self_check_exempt_devices]]
+device = "fault_lamp"
+reason = "启动 visible_output_test 点亮并关闭 fault lamp，输出测试由操作员观察确认。"
+proof_basis = "startup_self_check.visible_output_test"
+
+[[self_check_exempt_devices]]
+device = "reject_lamp"
+reason = "operator_front_door 的真实拒绝分支点亮 reject lamp；该输出无现场反馈触点。"
+proof_basis = "operator_front_door.reject_*"
+
+[[self_check_exempt_devices]]
+device = "fault_buzzer"
+reason = "启动 visible_output_test 驱动 buzzer，结果由操作员听觉确认。"
+proof_basis = "startup_self_check.visible_output_test"

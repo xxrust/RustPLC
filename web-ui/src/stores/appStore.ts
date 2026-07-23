@@ -43,11 +43,7 @@ export const useAppStore = create<AppState>()(
       runMode: 'no_board',
       setRunMode: (mode) => set({ runMode: mode }),
 
-      currentUser: {
-        id: 'dev-user',
-        name: 'Developer',
-        role: 'engineer',
-      },
+      currentUser: null,
       setCurrentUser: (user) => set({ currentUser: user }),
 
       currentProject: DEFAULT_PROJECT_ID,
@@ -76,6 +72,7 @@ export const useAppStore = create<AppState>()(
 
         return {
           ...merged,
+          currentUser: null,
           currentProject:
             !merged.currentProject || merged.currentProject === LEGACY_DEFAULT_PROJECT_ID
               ? DEFAULT_PROJECT_ID
@@ -84,7 +81,6 @@ export const useAppStore = create<AppState>()(
       },
       partialize: (state) => ({
         runMode: state.runMode,
-        currentUser: state.currentUser,
         currentProject: state.currentProject,
       }),
     }

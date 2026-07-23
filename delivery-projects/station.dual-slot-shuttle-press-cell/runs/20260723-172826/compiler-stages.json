@@ -1,0 +1,251 @@
+{
+    "schema_version":  1,
+    "project_id":  "station.dual_slot_shuttle_press_cell",
+    "run_id":  "20260723-172826",
+    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "stages":  [
+                   {
+                       "stage":  "Parser",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/compile/verification_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "6edb8245edf3dd0855f542cbcf8f07569a3294e9c739e171ffd174215fab09e7",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "AST",
+                       "status":  "derived",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/compile/ir_bundle.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "5a1a097d465aba913a5e4702e88ecc228b4098f81d220d811a86c042f4890222",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Semantic",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/compile/ir_bundle.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "5a1a097d465aba913a5e4702e88ecc228b4098f81d220d811a86c042f4890222",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "IR",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/compile/ir_bundle.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "5a1a097d465aba913a5e4702e88ecc228b4098f81d220d811a86c042f4890222",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Safety",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/compile/verification_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "6edb8245edf3dd0855f542cbcf8f07569a3294e9c739e171ffd174215fab09e7",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Liveness",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/compile/verification_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "6edb8245edf3dd0855f542cbcf8f07569a3294e9c739e171ffd174215fab09e7",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Timing",
+                       "status":  "verified_with_blocker",
+                       "diagnostics":  [
+                                           "GAP-HARDWARE-TIMING-EVIDENCE"
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/result.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "f0829779d1a0294dd580fef80e5958908a38d09c57790f7c7eebbd257abe3fd1",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Causality",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/compile/verification_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "6edb8245edf3dd0855f542cbcf8f07569a3294e9c739e171ffd174215fab09e7",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Runtime Bridge / Simulation",
+                       "status":  "observed_with_blockers",
+                       "diagnostics":  [
+                                           "GAP-SIM-FAULT-INJECTION",
+                                           "GAP-RESIDUAL-TOKEN-INJECTION",
+                                           "GAP-CROSS-CYCLE-EVIDENCE"
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/result.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "f0829779d1a0294dd580fef80e5958908a38d09c57790f7c7eebbd257abe3fd1",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Process Model Check",
+                       "status":  "blocked",
+                       "diagnostics":  [
+                                           "GAP-PROCESS-TRANSFORM-CARRIER",
+                                           "OP-003"
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/project-check/project_check_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "fa77e667f934c130a9d9e8c028b279bcfff48bc4084ccf33c5ca1e506cc18de8",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Intent Alignment",
+                       "status":  "aligned_nominal_restart_blocked",
+                       "diagnostics":  [
+                                           "GAP-EXTERNAL-REINIT-INTENT-SCHEMA"
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/result.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "f0829779d1a0294dd580fef80e5958908a38d09c57790f7c7eebbd257abe3fd1",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Codegen",
+                       "status":  "not_exercised",
+                       "diagnostics":  [
+                                           "No same-run codegen artifact is present."
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/result.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "f0829779d1a0294dd580fef80e5958908a38d09c57790f7c7eebbd257abe3fd1",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Committed project-local evidence for this compiler stage."
+                                                      }
+                                    }
+                   }
+               ]
+}

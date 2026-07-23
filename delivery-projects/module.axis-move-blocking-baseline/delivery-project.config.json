@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "project_id": "module.axis_move_blocking_baseline",
+  "title": "Axis Move Blocking Baseline",
+  "delivery_layer": "module",
+  "source_entry": "source/plc/main.plc",
+  "system_contract": "source/plc/main.system.md",
+  "review_ref": "review/completeness.md",
+  "implementation_completeness_percent": 78,
+  "scenarios": ["source/scenarios/normal.yaml", "source/scenarios/timeout.yaml"],
+  "nominal_scenario": "source/scenarios/normal.yaml",
+  "known_gaps": [
+    { "id": "GAP-AXIS-PHYSICAL-FEEDBACK", "layer": "commissioning", "classification": "evidence-gap", "summary": "The no-board action lifecycle has no attributable physical drive or encoder observation." },
+    { "id": "GAP-HARDWARE-TIMING-EVIDENCE", "layer": "deployment", "classification": "evidence-gap", "summary": "No target-hardware execution-time measurement is available." },
+    { "id": "GAP-PHYSICAL-POINT-CHECK", "layer": "commissioning", "classification": "evidence-gap", "summary": "Axis command, enable, alarm, and feedback points have not been physically point-checked." }
+  ],
+  "anomalies": [
+    { "anomaly_id": "ANOM-001", "classification": "canonical_example_metadata", "status": "corrected", "retry_count": 1, "long_search_or_trial_and_error": false, "summary": "The canonical example omitted the mandatory device purpose field, so scenario-init and compile failed with SEM-107 in the delivery snapshot." },
+    { "anomaly_id": "ANOM-002", "classification": "canonical_example_safety", "status": "corrected", "retry_count": 1, "long_search_or_trial_and_error": false, "summary": "After metadata repair, safety verification found axis_x.enable.off conflicting with an active pulse because the baseline did not enable the axis before motion." }
+  ],
+  "corrections": [
+    { "correction_id": "COR-001", "status": "verified", "anomaly_id": "ANOM-001", "summary": "Added purpose metadata to the project-local axis declaration; compile and scenario-init pass against the snapshot." },
+    { "correction_id": "COR-002", "status": "verified", "anomaly_id": "ANOM-002", "summary": "Added an explicit axis enable step before the blocking move and reran compile/project-check." }
+  ],
+  "wiring_points": [
+    { "point_id": "plc_main.Y0", "alias": "axis_enable", "direction": "output", "device_terminal": "axis_x.enable", "safe_state": "off" }
+  ]
+}

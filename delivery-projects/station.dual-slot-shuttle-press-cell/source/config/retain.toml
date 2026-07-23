@@ -1,0 +1,5 @@
+schema_version = 1
+
+[retain]
+enabled = false
+path = "out/sim/retain_state.json"

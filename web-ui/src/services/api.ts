@@ -15,6 +15,26 @@ import type {
   PlcLanguageSnapshot,
   AlarmEvent,
 } from '../types';
+import type {
+  AgentRun,
+  DeliveryProjectDetail,
+  DeliveryProjectSummary,
+  AuthenticatedUser,
+  EvidenceRecord,
+  EvidenceUpload,
+  HoldProjection,
+  HoldSignature,
+  HoldSignatureContext,
+  PhysicalEvidenceProjection,
+  RecordPointObservationRequest,
+  ReleaseProjection,
+  SignHoldRequest,
+  PointObservation,
+  VerificationStage,
+  WiringPoint,
+  WorkspaceProblem,
+  WorkspaceTest,
+} from '../types/workbench';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || deriveWebSocketBaseUrl(API_BASE_URL);
@@ -46,6 +66,222 @@ export const projectApi = {
 
   getProjectSource: (id: string) =>
     apiClient.get<{ id: string; path: string; content: string }>(`/projects/${id}/source`),
+};
+
+function listFromPayload<T>(payload: unknown, keys: string[]): T[] {
+  if (Array.isArray(payload)) return payload as T[];
+  if (!payload || typeof payload !== 'object') return [];
+  const record = payload as Record<string, unknown>;
+  for (const key of keys) {
+    if (Array.isArray(record[key])) return record[key] as T[];
+  }
+  return [];
+}
+
+function recordOf(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function evidenceState(value: unknown): EvidenceRecord['evidence_state'] {
+  const status = String(value ?? 'derived').toLowerCase();
+  if (status.includes('not_exercised') || status.includes('blocked') || status === 'failed') return 'blocked';
+  if (status.includes('corrected_with')) return 'warning';
+  if (status === 'corrected') return 'verified';
+  if (status.includes('blocker') || status.includes('warning')) return 'warning';
+  if (status.includes('observed')) return 'observed';
+  if (status.includes('verified') || status === 'pass' || status === 'passed') return 'verified';
+  if (status === 'authored') return 'authored';
+  if (status === 'stale') return 'stale';
+  return 'derived';
+}
+
+function normalizeRun(value: unknown): AgentRun {
+  const run = recordOf(value);
+  const documents = recordOf(run.documents);
+  const provenance = recordOf(documents.provenance);
+  const anomalies = listFromPayload<Record<string, unknown>>(documents.anomalies, ['records']);
+  const corrections = listFromPayload<Record<string, unknown>>(documents.corrections, ['records']);
+  const models = Array.isArray(provenance.models) ? provenance.models.map(recordOf) : [];
+  const agents = recordOf(provenance.agents);
+  const inputManifest = recordOf(documents.input_manifest);
+  const digest = recordOf(inputManifest.digest);
+  const statusRecord = recordOf(run.evidence_status);
+  const statusState = evidenceState(statusRecord.state ?? run.reported_status);
+  const startedAt = String(run.started_at ?? provenance.started_at_utc ?? '');
+  const completedAt = String(run.completed_at ?? provenance.completed_at_utc ?? '');
+  const duration = Number(run.elapsed_ms ?? provenance.elapsed_ms ?? 0);
+  const event = startedAt || completedAt ? [{
+    event_id: `${String(run.run_id)}:execution`,
+    timestamp: startedAt || completedAt,
+    task: 'Unattended delivery generation',
+    agent: String(agents.implementation_agent ?? agents.root_agent ?? 'recorded agent team'),
+    tool: 'agent harness',
+    duration_ms: Number.isFinite(duration) ? duration : undefined,
+    result: String(provenance.unattended_reason ?? run.reported_status ?? 'Recorded run'),
+    status: statusState,
+  }] : [];
+  return {
+    run_id: String(run.run_id ?? 'unknown'),
+    status: statusState === 'blocked' ? 'blocked' : statusState === 'verified' ? 'complete' : undefined,
+    started_at: startedAt || undefined,
+    completed_at: completedAt || undefined,
+    source_commit: String(run.source_commit ?? provenance.source_commit ?? '') || undefined,
+    model: String(run.model ?? models[0]?.model ?? '') || undefined,
+    unattended_verdict: String(run.unattended_verdict ?? provenance.unattended_verdict ?? '') || undefined,
+    input_manifest_digest: String(run.input_manifest_digest ?? digest.value ?? inputManifest.sha256 ?? '') || undefined,
+    events: event,
+    anomalies: anomalies.map((item) => ({
+      anomaly_id: String(item.anomaly_id ?? ''),
+      code: String(item.gap_id ?? item.anomaly_id ?? ''),
+      summary: String(item.summary ?? 'Anomaly record'),
+      root_cause: String(item.classification ?? ''),
+      correction: String(item.correction ?? ''),
+      status: evidenceState(item.status),
+      retry_count: Number(item.retry_count ?? 0) || undefined,
+      long_search_or_trial_and_error: Boolean(item.long_search_or_trial_and_error),
+    })),
+    corrections: corrections.map((item) => ({
+      anomaly_id: String(item.correction_id ?? ''),
+      code: String(item.correction_id ?? ''),
+      summary: String(item.summary ?? 'Correction record'),
+      correction: String(item.summary ?? ''),
+      status: evidenceState(item.status),
+    })),
+  };
+}
+
+export const deliveryProjectApi = {
+  listProjects: async (): Promise<DeliveryProjectSummary[]> => {
+    const { data } = await apiClient.get<unknown>('/delivery-projects');
+    return listFromPayload<DeliveryProjectSummary>(data, ['projects', 'items']);
+  },
+  getProject: async (projectId: string): Promise<DeliveryProjectDetail> => {
+    const { data } = await apiClient.get<DeliveryProjectDetail>(
+      `/delivery-projects/${encodeURIComponent(projectId)}`
+    );
+    return data;
+  },
+  listRuns: async (projectId: string): Promise<AgentRun[]> => {
+    const { data } = await apiClient.get<unknown>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/runs`
+    );
+    return listFromPayload<unknown>(data, ['runs', 'items']).map(normalizeRun);
+  },
+  getRun: async (projectId: string, runId: string): Promise<AgentRun> => {
+    const { data } = await apiClient.get<unknown>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`
+    );
+    return normalizeRun(data);
+  },
+  getWiring: async (projectId: string): Promise<WiringPoint[]> => {
+    const { data } = await apiClient.get<unknown>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/wiring`
+    );
+    return listFromPayload<WiringPoint>(data, ['points', 'wiring', 'items']);
+  },
+  getPhysicalEvidence: async (projectId: string): Promise<PhysicalEvidenceProjection> => {
+    const { data } = await apiClient.get<PhysicalEvidenceProjection>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/physical-evidence`
+    );
+    return data;
+  },
+  getHoldProjection: async (projectId: string): Promise<HoldProjection> => {
+    const { data } = await apiClient.get<HoldProjection>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/holds`
+    );
+    return data;
+  },
+  getReleaseProjection: async (projectId: string): Promise<ReleaseProjection> => {
+    const { data } = await apiClient.get<ReleaseProjection>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/release`
+    );
+    return data;
+  },
+  uploadPointPhoto: async (projectId: string, pointId: string, file: File): Promise<EvidenceUpload> => {
+    const { data } = await apiClient.post<EvidenceUpload>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/evidence/uploads/${encodeURIComponent(file.name)}`,
+      file,
+      {
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'x-evidence-kind': 'photo',
+          'x-semantic-object-kind': 'wiring_point',
+          'x-semantic-object-id': pointId,
+        },
+      }
+    );
+    return data;
+  },
+  recordPointObservation: async (projectId: string, pointId: string, request: RecordPointObservationRequest): Promise<PointObservation> => {
+    const { data } = await apiClient.post<PointObservation>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/wiring/points/${encodeURIComponent(pointId)}/observations`,
+      request
+    );
+    return data;
+  },
+  getArtifactText: async (artifactRef: string): Promise<string> => {
+    const normalized = artifactRef.replace(/\\/g, '/').replace(/^\/?artifacts\//, '').replace(/^\//, '');
+    const encodedPath = normalized.split('/').map(encodeURIComponent).join('/');
+    const { data } = await apiClient.get<string>(`/artifacts/${encodedPath}`, {
+      responseType: 'text',
+      transformResponse: [(value) => value],
+    });
+    return data;
+  },
+  getVerification: async (projectId: string): Promise<VerificationStage[]> => {
+    const { data } = await apiClient.get<unknown>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/verification`
+    );
+    return listFromPayload<VerificationStage>(data, ['stages', 'verification', 'items']);
+  },
+  getEvidence: async (projectId: string): Promise<EvidenceRecord[]> => {
+    const { data } = await apiClient.get<unknown>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/evidence`
+    );
+    return listFromPayload<EvidenceRecord>(data, ['evidence', 'items']);
+  },
+  getWorkspaceProblems: async (): Promise<WorkspaceProblem[]> => {
+    const { data } = await apiClient.get<unknown>('/workspace/problems');
+    return listFromPayload<Record<string, unknown>>(data, ['problems', 'items']).map((problem, index) => ({
+      id: String(problem.id ?? problem.code ?? `problem-${index}`),
+      project_id: problem.project_id ? String(problem.project_id) : undefined,
+      severity: String(problem.severity ?? 'info') as WorkspaceProblem['severity'],
+      stage: problem.stage ? String(problem.stage) : undefined,
+      code: problem.code ? String(problem.code) : undefined,
+      message: String(problem.message ?? 'Compiler evidence problem'),
+      source_ref: String(recordOf(problem.artifact).path ?? problem.source_ref ?? '') || undefined,
+      line: Number(problem.line ?? recordOf(problem.location).line ?? 0) || undefined,
+      column: Number(problem.column ?? recordOf(problem.location).column ?? 0) || undefined,
+    }));
+  },
+  getWorkspaceTests: async (): Promise<WorkspaceTest[]> => {
+    const { data } = await apiClient.get<unknown>('/workspace/tests');
+    return listFromPayload<Record<string, unknown>>(data, ['tests', 'items']).map((test, index) => {
+      const state = evidenceState(test.status ?? test.reported_status);
+      return {
+        id: String(test.id ?? `${test.project_id ?? 'workspace'}:${test.name ?? index}`),
+        project_id: test.project_id ? String(test.project_id) : undefined,
+        suite: test.suite ? String(test.suite) : undefined,
+        name: String(test.name ?? 'Unnamed test'),
+        status: state === 'verified' ? 'pass' : state === 'blocked' ? 'blocked' : state === 'warning' ? 'fail' : 'skipped',
+        duration_ms: Number(test.duration_ms ?? test.elapsed_ms ?? 0) || undefined,
+        artifact_ref: String(recordOf(recordOf(test.provenance).artifact).path ?? '') || undefined,
+      } satisfies WorkspaceTest;
+    });
+  },
+  getSignatures: async (projectId: string): Promise<HoldSignatureContext> => {
+    const { data } = await apiClient.get<HoldSignatureContext>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/holds/signatures`
+    );
+    return data;
+  },
+  signHold: async (projectId: string, holdId: string, request: SignHoldRequest): Promise<HoldSignature> => {
+    const { data } = await apiClient.post<HoldSignature>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/holds/${encodeURIComponent(holdId)}/sign`,
+      request
+    );
+    return data;
+  },
 };
 
 export const plcApi = {
@@ -202,13 +438,13 @@ export const simulationApi = {
 // 认证相关 API
 export const authApi = {
   login: (username: string, password: string) =>
-    apiClient.post('/auth/login', { username, password }),
+    apiClient.post<{ token: string; expires_at_ms: number; user: AuthenticatedUser }>('/auth/login', { username, password }),
 
   logout: () =>
     apiClient.post('/auth/logout'),
 
   getCurrentUser: () =>
-    apiClient.get('/auth/me'),
+    apiClient.get<AuthenticatedUser>('/auth/me'),
 };
 
 export default apiClient;

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustplc.local/schemas/delivery-project.schema.json",
+  "title": "RustPLC Delivery Project Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_id",
+    "title",
+    "delivery_layer",
+    "source_commit",
+    "source_entry",
+    "system_contract",
+    "artifact_roots",
+    "evidence_summary",
+    "evidence_bindings",
+    "fixtures"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "project_id": { "type": "string", "pattern": "^(module|station|line)\\.[a-z0-9._-]+$" },
+    "title": { "type": "string", "minLength": 1 },
+    "delivery_layer": { "enum": ["module", "station", "line"] },
+    "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "source_entry": { "type": "string", "minLength": 1 },
+    "system_contract": { "type": "string", "minLength": 1 },
+    "delivery_status": { "enum": ["validated", "validated_with_warnings", "blocked", "failed"] },
+    "artifact_roots": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 },
+      "required": ["agent_runs", "verification", "wiring", "execution", "release"]
+    },
+    "evidence_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["acceptance_pass", "acceptance_blocked", "acceptance_fail", "strict_acceptance_percent", "implementation_completeness_percent"],
+      "properties": {
+        "acceptance_pass": { "type": "integer", "minimum": 0 },
+        "acceptance_blocked": { "type": "integer", "minimum": 0 },
+        "acceptance_fail": { "type": "integer", "minimum": 0 },
+        "strict_acceptance_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "implementation_completeness_percent": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "evidence_bindings": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/artifact_binding" },
+      "required": ["source_entry", "system_contract", "authoritative_result", "reviewed_completeness"]
+    },
+    "fixtures": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/fixture_binding" },
+      "required": ["api_run_result", "provenance", "input_manifest", "anomalies", "corrections", "compiler_stages", "agent_events", "wiring_point_checks", "human_holds"]
+    }
+  },
+  "$defs": {
+    "artifact_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_ref", "digest", "source_commit", "freshness"],
+      "properties": {
+        "artifact_ref": { "type": "string", "minLength": 1 },
+        "digest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["algorithm", "value", "normalization"],
+          "properties": {
+            "algorithm": { "const": "sha256" },
+            "value": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "normalization": { "const": "utf8_lf" }
+          }
+        },
+        "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "freshness": {
+          "type": "object",
+          "required": ["status", "basis"],
+          "properties": {
+            "status": { "enum": ["same_run", "input_snapshot", "reviewed_post_run", "current_for_import"] },
+            "basis": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "fixture_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fixture_ref", "digest"],
+      "properties": {
+        "fixture_ref": { "type": "string", "minLength": 1 },
+        "digest": {
+          "type": "object",
+          "required": ["algorithm", "value", "normalization"],
+          "properties": {
+            "algorithm": { "const": "sha256" },
+            "value": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "normalization": { "const": "utf8_lf" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+    "schema_version":  1,
+    "project_id":  "module.axis_move_blocking_baseline",
+    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "release_status":  "blocked",
+    "holds":  [
+                  {
+                      "hold_id":  "wiring_review",
+                      "required_role":  "electrical_engineer",
+                      "status":  "human_action_required",
+                      "signature":  null,
+                      "reason":  "No attributable wiring review is recorded."
+                  },
+                  {
+                      "hold_id":  "point_check_completion",
+                      "required_role":  "commissioning_engineer",
+                      "status":  "human_action_required",
+                      "signature":  null,
+                      "reason":  "Physical point checks are incomplete."
+                  },
+                  {
+                      "hold_id":  "safety_review",
+                      "required_role":  "safety_reviewer",
+                      "status":  "human_action_required",
+                      "signature":  null,
+                      "reason":  "Compiler verification does not replace human safety review."
+                  },
+                  {
+                      "hold_id":  "hil_review",
+                      "required_role":  "commissioning_engineer",
+                      "status":  "blocked",
+                      "signature":  null,
+                      "reason":  "Target hardware timing and HIL evidence are absent.",
+                      "blocker_ids":  [
+                                          "GAP-HARDWARE-TIMING-EVIDENCE"
+                                      ]
+                  },
+                  {
+                      "hold_id":  "release_approval",
+                      "required_role":  "release_approver",
+                      "status":  "blocked",
+                      "signature":  null,
+                      "reason":  "Prerequisite holds and delivery blockers remain open."
+                  }
+              ]
+}

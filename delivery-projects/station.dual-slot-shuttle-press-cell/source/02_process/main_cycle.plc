@@ -1,0 +1,243 @@
+# 操作员前门任务：持续消费启动上升沿，在同一 task 内完成接受或可见拒绝并返回监听。
+task operator_front_door:
+    # 等待启动沿：这是持续服务的人机边界，可无限等待操作员发出新的启动命令。
+    step wait_start_cycle:
+        wait: rising_edge(start_button)
+        allow_indefinite_wait: true
+
+    # 清除上次拒绝：新命令到达时关闭旧拒绝灯并清除独立的拒绝原因寄存器。
+    step clear_previous_rejection:
+        action: compute illegal_start_rejected = false
+        action: compute start_reject_reason = 0
+        action: set reject_lamp off
+
+    # 故障优先分类：故障锁存时任何 start 都只产生专用拒绝结果。
+    step classify_faulted:
+        if: fault_latched == true goto operator_front_door.reject_faulted else: goto operator_front_door.classify_running
+
+    # 运行状态分类：自动周期活动期间拒绝重复 start，不改变正在执行的周期。
+    step classify_running:
+        if: automatic_cycle_active == true goto operator_front_door.reject_running else: goto operator_front_door.classify_batch_complete
+
+    # 批次完成分类：有限两件任务结束后只允许外部补料与 runtime 重初始化。
+    step classify_batch_complete:
+        if: parts_finished == true goto operator_front_door.reject_batch_complete else: goto operator_front_door.require_startup_ready
+
+    # 自检许可门禁：命令采样时点自检未完成则立即拒绝，不等待状态在窗口内变化。
+    step require_startup_ready:
+        if: startup_ok == true goto operator_front_door.require_safety_healthy else: goto operator_front_door.reject_not_ready
+
+    # 安全许可门禁：命令采样时点安全链不健康则立即拒绝启动。
+    step require_safety_healthy:
+        if: safety_chain == true goto operator_front_door.require_two_parts else: goto operator_front_door.reject_safety
+
+    # 原料许可门禁：命令采样时点必须证明至少两件原料可用。
+    step require_two_parts:
+        if: raw_material_available == true goto operator_front_door.require_good_out_capacity else: goto operator_front_door.reject_material
+
+    # 下料容量门禁：命令采样时点良品容器必须有足够容量。
+    step require_good_out_capacity:
+        if: good_out_capacity == true goto operator_front_door.accept_cycle else: goto operator_front_door.reject_output_full
+
+    # 接受周期：所有前门证据成立后发布业务里程碑 cycle_accepted。
+    step accept_cycle:
+        action: compute cycle_accepted = true
+        action: compute automatic_cycle_active = true
+        action: compute machine_status_code = 20
+        action: compute hmi_fault_code = 0
+
+    # 接受后回收：记录接受结果后返回 rising-edge 等待，继续服务后续命令。
+    step recycle_after_accept:
+        action: log "cycle accepted"
+        goto operator_front_door.wait_start_cycle
+
+    # 故障中拒绝：保留原故障码与机器状态，只记录 start 被故障锁存拒绝。
+    step reject_faulted:
+        action: compute illegal_start_rejected = true
+        action: compute start_reject_reason = 3
+        action: set reject_lamp on
+        goto operator_front_door.recycle_after_reject
+
+    # 运行中拒绝：保持自动周期活动，不启动第二条并发生产链。
+    step reject_running:
+        action: compute illegal_start_rejected = true
+        action: compute start_reject_reason = 2
+        action: set reject_lamp on
+        goto operator_front_door.recycle_after_reject
+
+    # 批次完成拒绝：one-shot specimen 只接受外部补料和 runtime 重初始化。
+    step reject_batch_complete:
+        action: compute illegal_start_rejected = true
+        action: compute start_reject_reason = 7
+        action: set reject_lamp on
+        goto operator_front_door.recycle_after_reject
+
+    # 自检未完成拒绝：发布可审计状态码和专用拒绝原因。
+    step reject_not_ready:
+        action: compute illegal_start_rejected = true
+        action: compute start_reject_reason = 1
+        action: compute machine_status_code = 70
+        action: compute hmi_fault_code = 200
+        action: set reject_lamp on
+        goto operator_front_door.recycle_after_reject
+
+    # 安全链不健康拒绝：不进入生产，并给出独立安全拒绝码。
+    step reject_safety:
+        action: compute illegal_start_rejected = true
+        action: compute start_reject_reason = 4
+        action: compute machine_status_code = 70
+        action: compute hmi_fault_code = 201
+        action: set reject_lamp on
+        goto operator_front_door.recycle_after_reject
+
+    # 原料不足拒绝：不消费任何 token，并给出物料拒绝码。
+    step reject_material:
+        action: compute illegal_start_rejected = true
+        action: compute start_reject_reason = 5
+        action: compute machine_status_code = 70
+        action: compute hmi_fault_code = 202
+        action: set reject_lamp on
+        goto operator_front_door.recycle_after_reject
+
+    # 下料满拒绝：不执行 acquire，并给出目标容量拒绝码。
+    step reject_output_full:
+        action: compute illegal_start_rejected = true
+        action: compute start_reject_reason = 6
+        action: compute machine_status_code = 70
+        action: compute hmi_fault_code = 203
+        action: set reject_lamp on
+        goto operator_front_door.recycle_after_reject
+
+    # 拒绝后回收：拒绝灯保持到下一条 start 到达，再返回持续监听入口。
+    step recycle_after_reject:
+        action: log "start command rejected"
+        goto operator_front_door.wait_start_cycle
+
+# 装卸任务：在 load_station_access 边界内完成两槽装载、回程卸载和有限两件结束。
+task load_unload:
+    # 等待前门放行：由 operator_front_door 拥有的 admission 信号可无限等待。
+    step wait_cycle_acceptance:
+        wait: cycle_accepted == true
+        allow_indefinite_wait: true
+
+    # 获取第一件：从有限原料容器取得唯一 token 到装载夹具。
+    step acquire_slot0:
+        effect: acquire holder load_gripper from raw_infeed.slot[0]
+
+    # 装入第一槽：先把夹具 token 转移到 slot[0]，再把该 free-standing token 标记为 mounted。
+    step mount_slot0:
+        effect: transfer from load_gripper to shuttle_tray.slot[0]
+        effect: mount insert_part on shuttle_tray.slot[0]
+
+    # 获取第二件：第一槽释放装卸巢后，再从同一有限来源取得第二个 token。
+    step acquire_slot1:
+        effect: acquire holder load_gripper from raw_infeed.slot[1]
+
+    # 装入第二槽：先把夹具 token 转移到 slot[1]，再挂载并发布 slots_loaded 里程碑。
+    step mount_slot1:
+        effect: transfer from load_gripper to shuttle_tray.slot[1]
+        effect: mount insert_part on shuttle_tray.slot[1]
+        action: compute slots_loaded = true
+
+    # 等待托盘回到装卸位：由 shuttle_motion 在完成回程轴动作后发布。
+    step wait_returned_load:
+        wait: returned_load == true
+        allow_indefinite_wait: true
+
+    # 卸下第一槽：只从已挂载的 slot[0] 取回精确 token 到装卸巢。
+    step unmount_slot0:
+        effect: unmount insert_part from shuttle_tray.slot[0] to load_nest
+
+    # 转移第一件：将装卸巢 token 送到有容量的良品容器。
+    step transfer_slot0:
+        effect: transfer from load_nest to good_outfeed
+
+    # 第一件结束并交接第二件：先消除 good_outfeed 唯一 token，再把 slot[1] 取回装卸巢。
+    step finish_slot0_and_unmount_slot1:
+        effect: finish workpiece at good_outfeed as finished
+        effect: unmount insert_part from shuttle_tray.slot[1] to load_nest
+
+    # 转移第二件：将第二个装卸巢 token 送到良品容器。
+    step transfer_slot1:
+        effect: transfer from load_nest to good_outfeed
+
+    # 完成有限批次：结束第二个 token 并发布 parts_finished，任务不再获取第三件。
+    step finish_slot1:
+        effect: finish workpiece at good_outfeed as finished
+        action: compute parts_finished = true
+
+    # 批次完成保持：为最终 finish 提供显式后继状态，保留有限两件终止边界。
+    step hold_batch_complete:
+        action: log "two-part batch complete"
+
+# 穿梭运动任务：独占轴动作，在压装完成前后分别执行阻塞往返运动。
+task shuttle_motion:
+    # 等待两槽装满：由 load_unload 完成真实 mount effect 后发布。
+    step wait_slots_loaded:
+        wait: slots_loaded == true
+        allow_indefinite_wait: true
+
+    # 压装位运动：阻塞 move_absolute 完成后才允许发布 arrived_press，四类错误完整分流。
+    step move_to_press:
+        action: axis.move_absolute(axis_shuttle, position: 100, params: stepper_default_fast, speed: 20)
+            timeout: 5000ms -> fault_recovery_timeout.axis_timeout
+            on_reject -> fault_recovery_reject.axis_reject
+            on_motion_fault -> fault_recovery_motion.axis_motion_fault
+            on_safety_fault -> fault_recovery_safety.axis_safety_fault
+            semantic_tag: shuttle_motion
+
+    # 到达压装位：轴动作已完成，后续 step 发布位置业务里程碑。
+    step publish_arrived_press:
+        action: compute arrived_press = true
+
+    # 等待压装完成：由 press_process 完成拓扑闭合压装和 transform 后发布。
+    step wait_press_completed:
+        wait: press_completed == true
+        allow_indefinite_wait: true
+
+    # 返回装卸位：阻塞回程，任何轴异常都进入对应恢复或维护路径。
+    step move_to_load:
+        action: axis.move_absolute(axis_shuttle, position: 0, params: stepper_default_fast, speed: 20)
+            timeout: 5000ms -> fault_recovery_timeout.axis_timeout
+            on_reject -> fault_recovery_reject.axis_reject
+            on_motion_fault -> fault_recovery_motion.axis_motion_fault
+            on_safety_fault -> fault_recovery_safety.axis_safety_fault
+            semantic_tag: shuttle_motion
+
+    # 发布返回完成：回程轴动作完成后才允许装卸任务开始 unmount。
+    step publish_returned_load:
+        action: compute returned_load = true
+
+    # 回程完成保持：提供显式后继状态，确保 returned_load 被其他 task 观察。
+    step hold_returned_load:
+        action: log "shuttle returned to load"
+
+# 压装任务：在压装位使用高层气缸动作处理两槽 mounted token，不手写端点传感器闭环。
+task press_process:
+    # 等待到达压装位：由 shuttle_motion 在阻塞轴动作完成后的独立 step 发布。
+    step wait_arrived_press:
+        wait: arrived_press == true
+        allow_indefinite_wait: true
+
+    # 高层压装伸出：拓扑闭合气缸动作完成即代表正常到位，超时进入安全缩回恢复。
+    step extend_press:
+        action: extend press_cylinder
+            timeout: 1200ms -> goto fault_recovery_cylinder.cylinder_timeout
+
+    # 工艺保压：阻塞保持 300ms，期间穿梭任务仍可被调度但停在 handoff wait。
+    step dwell_press:
+        delay: 300ms
+
+    # 高层压装缩回：拓扑闭合缩回完成后才进入工件状态转换。
+    step retract_press:
+        action: retract press_cylinder
+            timeout: 1200ms -> goto fault_recovery_cylinder.cylinder_timeout
+
+    # 压装状态转换：保持两个 token 的 mounted 关联，并把托盘 frame 标记为 pressed。
+    step mark_carrier_pressed:
+        effect: transform carrier shuttle_tray to frame pressed
+        action: compute press_completed = true
+
+    # 压装完成保持：为 carrier transform 提供显式后继状态，等待其他 task 完成回程与卸载。
+    step hold_press_complete:
+        action: log "press process complete"

@@ -1,0 +1,14 @@
+# 单站所有权边界：所有机构、operator field device 与自动任务属于同一压装 station。
+station dual_slot_press_cell {
+    owns: [
+        start_button, reset_button, safety_chain, raw_material_available, good_out_capacity,
+        residual_present, operator_empty_confirm,
+        axis_shuttle, valve_press, press_cylinder,
+        sensor_press_extended, sensor_press_retracted,
+        ready_lamp, running_lamp, fault_lamp, reject_lamp, fault_buzzer
+    ]
+    tasks: [
+        startup_self_check, operator_front_door, load_unload, shuttle_motion,
+        press_process, fault_recovery, supervision, manual_assist, hmi_feedback
+    ]
+}

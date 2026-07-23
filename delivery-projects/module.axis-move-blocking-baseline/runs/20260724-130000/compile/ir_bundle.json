@@ -1,0 +1,358 @@
+{
+  "topology": {
+    "graph": {
+      "nodes": [
+        {
+          "name": "axis_x",
+          "kind": "stepper_motor"
+        },
+        {
+          "name": "Y0",
+          "kind": "digital_output"
+        }
+      ],
+      "node_holes": [],
+      "edge_property": "directed",
+      "edges": [
+        [
+          1,
+          0,
+          "electrical"
+        ]
+      ]
+    },
+    "links": [
+      {
+        "from": "Y0",
+        "to": "axis_x",
+        "to_port": "enable",
+        "kind": "electrical"
+      }
+    ],
+    "station_protocol": {
+      "controllers": [
+        "plc_main"
+      ]
+    },
+    "axis_profiles": {
+      "axis_x": {
+        "device_type": "stepper_motor",
+        "motor_class_id": "stepper_class_basic",
+        "family_id": "stepper_nema",
+        "orientation": "horizontal",
+        "position_unit": "pulse",
+        "max_speed": 3000.0,
+        "max_acceleration": 10000.0,
+        "model_ref": "stepper_generic",
+        "config_ref": "stepper_default",
+        "motion_param_set": "stepper_default_fast"
+      }
+    }
+  },
+  "state_machine": {
+    "states": [
+      {
+        "task_name": "main",
+        "step_name": "enable_axis"
+      },
+      {
+        "task_name": "main",
+        "step_name": "move_axis"
+      },
+      {
+        "task_name": "main",
+        "step_name": "move_done"
+      },
+      {
+        "task_name": "fault",
+        "step_name": "timeout"
+      },
+      {
+        "task_name": "fault",
+        "step_name": "reject"
+      },
+      {
+        "task_name": "fault",
+        "step_name": "motion_fault"
+      },
+      {
+        "task_name": "fault",
+        "step_name": "safety_fault"
+      }
+    ],
+    "transitions": [
+      {
+        "from": {
+          "task_name": "main",
+          "step_name": "enable_axis"
+        },
+        "to": {
+          "task_name": "main",
+          "step_name": "move_axis"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "set",
+            "target": "axis_x",
+            "port": "enable",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "main",
+          "step_name": "move_axis"
+        },
+        "to": {
+          "task_name": "main",
+          "step_name": "move_done"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "axis_move_relative",
+            "target": "axis_x",
+            "port": "self",
+            "distance_raw": "20",
+            "speed_raw": "2",
+            "acceleration_raw": "3000",
+            "deceleration_raw": "3000",
+            "timeout": {
+              "duration_ms": 400,
+              "target_task": "fault",
+              "target_step": "timeout"
+            },
+            "on_reject": {
+              "target_task": "fault",
+              "target_step": "reject",
+              "kind": {
+                "kind": "reject"
+              },
+              "category": "recoverable"
+            },
+            "on_motion_fault": {
+              "target_task": "fault",
+              "target_step": "motion_fault",
+              "kind": {
+                "kind": "motion"
+              },
+              "category": "non_recoverable"
+            },
+            "on_safety_fault": {
+              "target_task": "fault",
+              "target_step": "safety_fault",
+              "kind": {
+                "kind": "safety"
+              },
+              "category": "safety"
+            }
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault",
+          "step_name": "timeout"
+        },
+        "to": {
+          "task_name": "fault",
+          "step_name": "reject"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "log",
+            "message": "axis move timeout"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault",
+          "step_name": "reject"
+        },
+        "to": {
+          "task_name": "fault",
+          "step_name": "motion_fault"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "log",
+            "message": "axis move reject"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault",
+          "step_name": "motion_fault"
+        },
+        "to": {
+          "task_name": "fault",
+          "step_name": "safety_fault"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "log",
+            "message": "axis move motion fault"
+          }
+        ],
+        "timers": []
+      }
+    ],
+    "initial": {
+      "task_name": "main",
+      "step_name": "enable_axis"
+    },
+    "task_contexts": [
+      {
+        "task_name": "main",
+        "entry_state": {
+          "task_name": "main",
+          "step_name": "enable_axis"
+        },
+        "current_state": {
+          "task_name": "main",
+          "step_name": "enable_axis"
+        },
+        "blocking_state": "ready",
+        "pending_actions": [
+          {
+            "source_state": {
+              "task_name": "main",
+              "step_name": "move_axis"
+            },
+            "action_kind": "axis_move_relative",
+            "target": "axis_x",
+            "active": false
+          }
+        ]
+      },
+      {
+        "task_name": "fault",
+        "entry_state": {
+          "task_name": "fault",
+          "step_name": "timeout"
+        },
+        "current_state": {
+          "task_name": "fault",
+          "step_name": "timeout"
+        },
+        "blocking_state": "ready"
+      }
+    ]
+  },
+  "constraints": {
+    "safety": [
+      {
+        "left": {
+          "kind": "state",
+          "device": "axis_x",
+          "port": "enable",
+          "state": "off"
+        },
+        "relation": "conflicts_with",
+        "right": {
+          "kind": "state",
+          "device": "axis_x",
+          "port": "pulse",
+          "state": "active"
+        },
+        "reason": "使能关闭时不得发送脉冲",
+        "source": "device:stepper_motor"
+      }
+    ],
+    "timing": [],
+    "causality": []
+  },
+  "timing_model": {
+    "intervals": {}
+  },
+  "runtime_budget": {
+    "transition_budget_scope": "per_task_per_tick",
+    "max_transitions_per_tick_cap": 64,
+    "active_task_count": 2,
+    "max_transitions_all_tasks_per_tick_upper_bound": 128,
+    "max_transitions_same_tick_upper_bound": 3,
+    "max_actions_per_transition": 1,
+    "max_actions_per_tick_upper_bound": 128,
+    "max_parallel_branches": 0,
+    "max_race_branches": 0,
+    "has_same_tick_cycle": false,
+    "budget_time_estimate": {
+      "action_cost_us": 8,
+      "transition_cost_us": 5,
+      "parallel_expand_cost_us": 12,
+      "action_component_us": 1024,
+      "transition_component_us": 15,
+      "parallel_component_us": 0,
+      "total_estimate_us": 1039,
+      "max_allowed_us": 2000,
+      "exceeds_budget": false
+    }
+  },
+  "verification": {
+    "safety": {
+      "level": "完备证明",
+      "explored_depth": 3,
+      "warnings": [],
+      "checked_rules": 1,
+      "skipped_rules": 0,
+      "coverage": {
+        "bound_rules": 1,
+        "degraded_rules": 0,
+        "skipped_rules": 0,
+        "total_rules": 1
+      },
+      "rule_statuses": [
+        {
+          "line": 1,
+          "rule": "axis_x.enable.off conflicts_with axis_x.pulse.active",
+          "status": "bound"
+        }
+      ]
+    },
+    "liveness": {
+      "level": "通过",
+      "warnings": [],
+      "checked_rules": 7,
+      "skipped_rules": 0
+    },
+    "timing": {
+      "level": "通过",
+      "warnings": [],
+      "checked_rules": 0,
+      "skipped_rules": 0
+    },
+    "causality": {
+      "level": "通过",
+      "warnings": [],
+      "checked_rules": 0,
+      "skipped_rules": 0
+    },
+    "station_protocol": {
+      "level": "閫氳繃",
+      "warnings": [],
+      "checked_rules": 0,
+      "skipped_rules": 1
+    }
+  }
+}

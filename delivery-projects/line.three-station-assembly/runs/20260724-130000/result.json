@@ -1,0 +1,220 @@
+{
+    "schema_version":  1,
+    "run_id":  "20260724-130000",
+    "harness_execution_id":  "20260724-130000",
+    "project_id":  "line.three_station_assembly",
+    "harness_status":  "pass",
+    "delivery_status":  "fail",
+    "freshness":  "same_run",
+    "error_code":  null,
+    "artifact_root":  "delivery-projects/line.three-station-assembly/runs/20260724-130000",
+    "git_head":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "started_at_utc":  "2026-07-23T18:18:17.0205119Z",
+    "completed_at_utc":  "2026-07-23T18:18:22.0050960Z",
+    "elapsed_ms":  4985,
+    "inputs":  {
+                   "manifest":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/input-manifest.json",
+                   "file_count":  4
+               },
+    "digests":  {
+                    "input_manifest_sha256":  "7e1b325769a160405d7dab33ee632c384aa4082f862ce868243be46575b40637"
+                },
+    "status":  {
+                   "harness_execution":  "pass",
+                   "acceptance":  "failed",
+                   "delivery":  "failed",
+                   "acceptance_pass":  6,
+                   "acceptance_blocked":  3,
+                   "acceptance_fail":  2,
+                   "implementation_completeness_percent":  74
+               },
+    "steps":  [
+                  {
+                      "name":  "compile_verify",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/logs/compile_verify.stdout.log",
+                      "stderr_log":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/logs/compile_verify.stderr.log",
+                      "artifacts":  [
+                                        "delivery-projects/line.three-station-assembly/runs/20260724-130000/compile/verification_report.json",
+                                        "delivery-projects/line.three-station-assembly/runs/20260724-130000/compile/ir_bundle.json"
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_01",
+                      "classification":  "fail",
+                      "exit_code":  1,
+                      "stdout_log":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/logs/scenario_validate_01.stdout.log",
+                      "stderr_log":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/logs/scenario_validate_01.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_02",
+                      "classification":  "fail",
+                      "exit_code":  1,
+                      "stdout_log":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/logs/scenario_validate_02.stdout.log",
+                      "stderr_log":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/logs/scenario_validate_02.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "project_check",
+                      "classification":  "known_gap",
+                      "exit_code":  1,
+                      "stdout_log":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/logs/project_check.stdout.log",
+                      "stderr_log":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/logs/project_check.stderr.log",
+                      "artifacts":  [
+                                        "delivery-projects/line.three-station-assembly/runs/20260724-130000/project-check/project_check_report.json"
+                                    ],
+                      "gap_ids":  [
+                                      "GAP-SCENARIO-SEMANTIC-GUARD-SUPPORT"
+                                  ]
+                  }
+              ],
+    "acceptance":  [
+                       {
+                           "id":  "AC-01",
+                           "status":  "pass",
+                           "basis":  "The project-local source snapshot and digest manifest exist.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-02",
+                           "status":  "pass",
+                           "basis":  "Parser, AST lowering, semantic analysis, and IR emission were invoked.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-03",
+                           "status":  "pass",
+                           "basis":  "Safety verification executed; project-specific coverage limitations remain explicit.",
+                           "blocker_ids":  null
+                       },
+                       {
+                           "id":  "AC-04",
+                           "status":  "pass",
+                           "basis":  "Liveness verification executed.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-05",
+                           "status":  "pass",
+                           "basis":  "Timing verification executed for the no-board model.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-06",
+                           "status":  "pass",
+                           "basis":  "Causality verification executed.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-07",
+                           "status":  "fail",
+                           "basis":  "Declared scenario validation commands must exit successfully; product gaps remain failed execution evidence.",
+                           "blocker_ids":  [
+                                               "GAP-SCENARIO-SEMANTIC-GUARD-SUPPORT"
+                                           ]
+                       },
+                       {
+                           "id":  "AC-08",
+                           "status":  "fail",
+                           "basis":  "The nominal project-check pipeline must exit successfully; product gaps remain failed execution evidence.",
+                           "blocker_ids":  [
+                                               "GAP-SCENARIO-SEMANTIC-GUARD-SUPPORT"
+                                           ]
+                       },
+                       {
+                           "id":  "AC-09",
+                           "status":  "blocked",
+                           "basis":  "Physical point checks require observed commissioning evidence.",
+                           "blocker_ids":  [
+                                               "GAP-PHYSICAL-POINT-CHECK"
+                                           ]
+                       },
+                       {
+                           "id":  "AC-10",
+                           "status":  "blocked",
+                           "basis":  "Required human holds have no attributable signatures.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-11",
+                           "status":  "blocked",
+                           "basis":  "Target-hardware timing evidence is absent.",
+                           "blocker_ids":  [
+                                               "GAP-HARDWARE-TIMING-EVIDENCE"
+                                           ]
+                       }
+                   ],
+    "known_gaps":  [
+                       {
+                           "id":  "GAP-SCENARIO-SEMANTIC-GUARD-SUPPORT",
+                           "layer":  "scenario-runtime",
+                           "classification":  "code-gap",
+                           "summary":  "scenario-doctor and no-board-gate reject semantic sensor guard expressions even though compiler verification accepts them."
+                       },
+                       {
+                           "id":  "GAP-SOURCE-TEXT-ENCODING",
+                           "layer":  "source-quality",
+                           "classification":  "quality-gap",
+                           "summary":  "Legacy comments, purposes, reasons, and log strings contain mojibake even though executable semantics compile."
+                       },
+                       {
+                           "id":  "GAP-FAULT-INJECTION-COVERAGE",
+                           "layer":  "scenario",
+                           "classification":  "evidence-gap",
+                           "summary":  "Generated timeout input does not prove every cylinder and quality-sensor fault route on physical hardware."
+                       },
+                       {
+                           "id":  "GAP-HARDWARE-TIMING-EVIDENCE",
+                           "layer":  "deployment",
+                           "classification":  "evidence-gap",
+                           "summary":  "The 10 second formal constraint has no target-hardware timing measurement."
+                       },
+                       {
+                           "id":  "GAP-PHYSICAL-POINT-CHECK",
+                           "layer":  "commissioning",
+                           "classification":  "evidence-gap",
+                           "summary":  "The declared PLC input and output points have not been physically point-checked."
+                       }
+                   ],
+    "scenario_summary":  {
+                             "declared":  2,
+                             "passed":  0,
+                             "failed":  2,
+                             "records":  [
+                                             {
+                                                 "scenario_ref":  "source/scenarios/normal.yaml",
+                                                 "status":  "fail",
+                                                 "exit_code":  1,
+                                                 "artifact_ref":  null
+                                             },
+                                             {
+                                                 "scenario_ref":  "source/scenarios/timeout.yaml",
+                                                 "status":  "fail",
+                                                 "exit_code":  1,
+                                                 "artifact_ref":  null
+                                             }
+                                         ]
+                         },
+    "attribution":  {
+                        "unattended_verdict":  "not_proven",
+                        "reason":  "Commands were tool-observed in an interactive Codex session; no unattended execution claim is made."
+                    }
+}

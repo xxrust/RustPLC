@@ -1,0 +1,21 @@
+relation { from: start_button.out, to: plc_main.start_cycle_cmd, via: reports_to }
+relation { from: reset_button.out, to: plc_main.reset_fault_cmd, via: reports_to }
+relation { from: safety_chain.out, to: plc_main.safety_healthy_fb, via: reports_to }
+relation { from: raw_material_available.out, to: plc_main.raw_material_available_fb, via: reports_to }
+relation { from: good_out_capacity.out, to: plc_main.good_out_capacity_fb, via: reports_to }
+relation { from: residual_present.out, to: plc_main.residual_present_fb, via: reports_to }
+relation { from: operator_empty_confirm.out, to: plc_main.operator_empty_confirm_cmd, via: reports_to }
+
+relation { from: plc_main.press_cmd, to: valve_press.coil, via: driven_by }
+relation { from: valve_press.out, to: press_cylinder.cmd, via: driven_by }
+relation { from: press_cylinder.extended, to: sensor_press_extended.sense, via: detects }
+relation { from: press_cylinder.retracted, to: sensor_press_retracted.sense, via: detects }
+relation { from: sensor_press_extended.out, to: plc_main.press_extended_fb, via: reports_to }
+relation { from: sensor_press_retracted.out, to: plc_main.press_retracted_fb, via: reports_to }
+
+relation { from: plc_main.ready_lamp_cmd, to: ready_lamp.coil, via: driven_by }
+relation { from: plc_main.running_lamp_cmd, to: running_lamp.coil, via: driven_by }
+relation { from: plc_main.fault_lamp_cmd, to: fault_lamp.coil, via: driven_by }
+relation { from: plc_main.reject_lamp_cmd, to: reject_lamp.coil, via: driven_by }
+relation { from: plc_main.buzzer_cmd, to: fault_buzzer.coil, via: driven_by }
+relation { from: plc_main.axis_enable_cmd, to: axis_shuttle.enable, via: driven_by }

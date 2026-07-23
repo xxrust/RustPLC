@@ -1,0 +1,152 @@
+{
+    "schema_version":  1,
+    "project_id":  "line.three_station_assembly",
+    "title":  "Three-station Assembly Line",
+    "delivery_layer":  "line",
+    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "source_entry":  "source/plc/main.plc",
+    "system_contract":  "source/plc/main.system.md",
+    "delivery_status":  "failed",
+    "artifact_roots":  {
+                           "agent_runs":  "runs",
+                           "verification":  "runs/20260724-130000",
+                           "wiring":  "wiring",
+                           "execution":  "runs/20260724-130000/project-check/no_board_gate/artifacts",
+                           "release":  "release"
+                       },
+    "evidence_summary":  {
+                             "acceptance_pass":  6,
+                             "acceptance_blocked":  3,
+                             "acceptance_fail":  2,
+                             "strict_acceptance_percent":  54.5,
+                             "implementation_completeness_percent":  74
+                         },
+    "evidence_bindings":  {
+                              "source_entry":  {
+                                                   "artifact_ref":  "delivery-projects/line.three-station-assembly/source/plc/main.plc",
+                                                   "digest":  {
+                                                                  "algorithm":  "sha256",
+                                                                  "value":  "ae85388b533f8ba0619e0c3d7d8bbcff11cea72e729d2ebac8c7c0411138b9cd",
+                                                                  "normalization":  "utf8_lf"
+                                                              },
+                                                   "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                   "freshness":  {
+                                                                     "status":  "input_snapshot",
+                                                                     "basis":  "Project-local source entry included in the same-run input manifest."
+                                                                 }
+                                               },
+                              "system_contract":  {
+                                                      "artifact_ref":  "delivery-projects/line.three-station-assembly/source/plc/main.system.md",
+                                                      "digest":  {
+                                                                     "algorithm":  "sha256",
+                                                                     "value":  "5879606c681251e3d02d08caa12169e7436a0071785c1233079cd48b9101a44f",
+                                                                     "normalization":  "utf8_lf"
+                                                                 },
+                                                      "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                      "freshness":  {
+                                                                        "status":  "input_snapshot",
+                                                                        "basis":  "Project-local system contract included in the source snapshot."
+                                                                    }
+                                                  },
+                              "authoritative_result":  {
+                                                           "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/result.json",
+                                                           "digest":  {
+                                                                          "algorithm":  "sha256",
+                                                                          "value":  "77e9451e30635438b630220f3a54a9e2d2bd453034125243bb9266c763c9f195",
+                                                                          "normalization":  "utf8_lf"
+                                                                      },
+                                                           "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                           "freshness":  {
+                                                                             "status":  "same_run",
+                                                                             "basis":  "Current materialization result."
+                                                                         }
+                                                       },
+                              "reviewed_completeness":  {
+                                                            "artifact_ref":  "delivery-projects/line.three-station-assembly/review/completeness.md",
+                                                            "digest":  {
+                                                                           "algorithm":  "sha256",
+                                                                           "value":  "9b8260b9a81f663da2b2b18ab92b18863f7791b71011059fb26ddfd6baaf4e09",
+                                                                           "normalization":  "utf8_lf"
+                                                                       },
+                                                            "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                            "freshness":  {
+                                                                              "status":  "reviewed_post_run",
+                                                                              "basis":  "Committed bounded completeness review."
+                                                                          }
+                                                        }
+                          },
+    "fixtures":  {
+                     "api_run_result":  {
+                                            "fixture_ref":  "runs/20260724-130000/result.json",
+                                            "digest":  {
+                                                           "algorithm":  "sha256",
+                                                           "value":  "77e9451e30635438b630220f3a54a9e2d2bd453034125243bb9266c763c9f195",
+                                                           "normalization":  "utf8_lf"
+                                                       }
+                                        },
+                     "provenance":  {
+                                        "fixture_ref":  "runs/20260724-130000/provenance.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "d1196009ef6b1ba70e8c1ca0135649385ce7d90eb5681570fa6c16715a5c90d4",
+                                                       "normalization":  "utf8_lf"
+                                                   }
+                                    },
+                     "input_manifest":  {
+                                            "fixture_ref":  "runs/20260724-130000/input-manifest.json",
+                                            "digest":  {
+                                                           "algorithm":  "sha256",
+                                                           "value":  "7e1b325769a160405d7dab33ee632c384aa4082f862ce868243be46575b40637",
+                                                           "normalization":  "utf8_lf"
+                                                       }
+                                        },
+                     "anomalies":  {
+                                       "fixture_ref":  "runs/20260724-130000/anomalies.json",
+                                       "digest":  {
+                                                      "algorithm":  "sha256",
+                                                      "value":  "03d02247571da276897328e442f960f622b8f48c2106e0cb201b67c78130ad39",
+                                                      "normalization":  "utf8_lf"
+                                                  }
+                                   },
+                     "corrections":  {
+                                         "fixture_ref":  "runs/20260724-130000/corrections.json",
+                                         "digest":  {
+                                                        "algorithm":  "sha256",
+                                                        "value":  "70ea6dc104ef74949af1de41e61249668ea8f9b163efd43a5fdd0e134128231b",
+                                                        "normalization":  "utf8_lf"
+                                                    }
+                                     },
+                     "compiler_stages":  {
+                                             "fixture_ref":  "runs/20260724-130000/compiler-stages.json",
+                                             "digest":  {
+                                                            "algorithm":  "sha256",
+                                                            "value":  "d56cea2a8f2d732dbcc44983a97467368d47939717e5049b13e110d96b08439f",
+                                                            "normalization":  "utf8_lf"
+                                                        }
+                                         },
+                     "agent_events":  {
+                                          "fixture_ref":  "runs/20260724-130000/agent-events.json",
+                                          "digest":  {
+                                                         "algorithm":  "sha256",
+                                                         "value":  "41c32c53307d62e8e834a9c4c9145c977573e59a0fd221b22fd9459c4aaf762c",
+                                                         "normalization":  "utf8_lf"
+                                                     }
+                                      },
+                     "wiring_point_checks":  {
+                                                 "fixture_ref":  "wiring/point-checks.json",
+                                                 "digest":  {
+                                                                "algorithm":  "sha256",
+                                                                "value":  "dcbb73c69ce7e3cb0816ac76d339cfb7e1c06e7e8e64819878754cfe53f00e87",
+                                                                "normalization":  "utf8_lf"
+                                                            }
+                                             },
+                     "human_holds":  {
+                                         "fixture_ref":  "release/human-holds.json",
+                                         "digest":  {
+                                                        "algorithm":  "sha256",
+                                                        "value":  "55210884913bbf87a5102abbd82e0f793e1137645e06af910d7d9bc98e3f48ab",
+                                                        "normalization":  "utf8_lf"
+                                                    }
+                                     }
+                 }
+}

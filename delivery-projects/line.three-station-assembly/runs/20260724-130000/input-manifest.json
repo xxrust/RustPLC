@@ -1,0 +1,91 @@
+{
+    "schema_version":  1,
+    "project_id":  "line.three_station_assembly",
+    "run_id":  "20260724-130000",
+    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "dirty_worktree":  true,
+    "changed_paths":  [
+                          ".codex/skills/plc-gen/SKILL.md",
+                          ".codex/skills/plc-gen/references/generation-rules.md",
+                          ".codex/skills/plc-gen/references/troubleshooting.md",
+                          ".codex/skills/plc-gen/references/workflow.md",
+                          "Cargo.lock",
+                          "README.md",
+                          "crates/web-server/Cargo.toml",
+                          "crates/web-server/src/main.rs",
+                          "crates/web-server/src/security.rs",
+                          "crates/web-server/src/tests.rs",
+                          "web-ui/src/App.tsx",
+                          "web-ui/src/layouts/IDDELayout.tsx",
+                          "web-ui/src/services/api.ts",
+                          "web-ui/src/stores/appStore.ts",
+                          "web-ui/src/types/index.ts",
+                          "web-ui/src/utils/permissions.ts",
+                          ".codex/skills/plc-gen/.skill_flywheel/OPTIMIZATION_COMPLETE.md",
+                          ".codex/skills/plc-gen/.skill_flywheel/OPTIMIZATION_GUIDE.md",
+                          ".codex/skills/plc-gen/.skill_flywheel/QUICKSTART.md",
+                          ".codex/skills/plc-gen/.skill_flywheel/scripts/",
+                          ".impeccable/",
+                          "PRODUCT.md",
+                          "crates/web-server/src/auth.rs",
+                          "crates/web-server/src/delivery.rs",
+                          "crates/web-server/src/physical_evidence.rs",
+                          "crates/web-server/src/signatures.rs",
+                          "delivery-projects/",
+                          "docs/CLEANUP_SUMMARY.md",
+                          "docs/architecture/generic-device-templates.md",
+                          "docs/architecture/generic-task-templates.md",
+                          "docs/architecture/hal-esp32-gpio-runtime.md",
+                          "docs/architecture/hal-ethercat-process-image.md",
+                          "docs/architecture/hal-modbus-runtime.md",
+                          "docs/architecture/hal-stm32-renode-runtime.md",
+                          "docs/architecture/lsp-server.md",
+                          "docs/architecture/pattern-match-sugar.md",
+                          "docs/architecture/web-ide.md",
+                          "docs/architecture/z3-solver-feature.md",
+                          "docs/reports/",
+                          "editors/",
+                          "scripts/materialize_delivery_project_fixture.ps1",
+                          "scripts/normalize_legacy_station_delivery_fixture.ps1",
+                          "scripts/run_delivery_project_corpus.ps1",
+                          "scripts/validate_delivery_project_fixture.ps1",
+                          "scripts/verify_workbench_browser.mjs",
+                          "tasks/prd-autonomous-plc-delivery-workbench.md",
+                          "web-ui/artifacts/",
+                          "web-ui/src/components/workbench/",
+                          "web-ui/src/pages/workbench/",
+                          "web-ui/src/stores/workbenchStore.ts",
+                          "web-ui/src/types/workbench.ts"
+                      ],
+    "runner_version":  "delivery-fixture-materializer-v1",
+    "compiler_version":  "0.1.0",
+    "file_count":  4,
+    "implementation_file_count":  4,
+    "missing_required":  [
+
+                         ],
+    "path_uniqueness_required":  true,
+    "digest_policy":  "sha256 over UTF-8 text with CRLF and CR normalized to LF",
+    "files":  [
+                  {
+                      "path":  "source/plc/main.plc",
+                      "size_bytes":  9477,
+                      "sha256":  "ae85388b533f8ba0619e0c3d7d8bbcff11cea72e729d2ebac8c7c0411138b9cd"
+                  },
+                  {
+                      "path":  "source/plc/main.system.md",
+                      "size_bytes":  1544,
+                      "sha256":  "5879606c681251e3d02d08caa12169e7436a0071785c1233079cd48b9101a44f"
+                  },
+                  {
+                      "path":  "source/scenarios/normal.yaml",
+                      "size_bytes":  1118,
+                      "sha256":  "bebeaec0066e33e3d8f963cc3fdcc515fe56b927000b2cad193ff35e14d6fd70"
+                  },
+                  {
+                      "path":  "source/scenarios/timeout.yaml",
+                      "size_bytes":  479,
+                      "sha256":  "bf427803a345bd90c91ed5515b845463531eeea4e4965d2ac163bec0ec5546ef"
+                  }
+              ]
+}

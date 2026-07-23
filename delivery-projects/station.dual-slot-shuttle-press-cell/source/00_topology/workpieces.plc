@@ -1,0 +1,12 @@
+workpiece insert_part: workpiece_type {
+    normal_terminal_states: [finished]
+    ingress_sites: [raw_infeed.slot[*]]
+    normal_egress_sites: [good_outfeed]
+}
+
+carrier raw_infeed: workpiece_carrier { slots: 4 }
+location good_outfeed: workpiece_location { capacity: 4 }
+location load_nest: workpiece_location { capacity: 1 }
+holder load_gripper: workpiece_holder { capacity: 1 }
+holder press_nest: workpiece_holder { capacity: 1 }
+carrier shuttle_tray: workpiece_carrier { slots: 2 }

@@ -1,0 +1,24 @@
+device plc_main: plc {
+    purpose: "双槽穿梭压装站主控制器"
+    model_ref: openplc_softplc
+}
+
+controller_io plc_main {
+    input start_cycle_cmd: X0 { purpose: "操作员启动周期按钮" }
+    input reset_fault_cmd: X1 { purpose: "操作员故障复位按钮" }
+    input safety_healthy_fb: X2 { purpose: "安全链健康反馈" }
+    input press_extended_fb: X3 { purpose: "压装气缸伸出端反馈" }
+    input press_retracted_fb: X4 { purpose: "压装气缸缩回端反馈" }
+    input raw_material_available_fb: X5 { purpose: "原料至少两件可用反馈" }
+    input good_out_capacity_fb: X6 { purpose: "良品下料容器有容量反馈" }
+    input residual_present_fb: X7 { purpose: "自动区残件汇总输入" }
+    input operator_empty_confirm_cmd: X8 { purpose: "操作员完成清残后的空机确认按钮" }
+
+    output press_cmd: Y0 { purpose: "压装气缸电磁阀命令", safe_state: off }
+    output ready_lamp_cmd: Y1 { purpose: "设备就绪灯", safe_state: off }
+    output running_lamp_cmd: Y2 { purpose: "设备运行灯", safe_state: off }
+    output fault_lamp_cmd: Y3 { purpose: "设备故障灯", safe_state: off }
+    output reject_lamp_cmd: Y4 { purpose: "启动拒绝指示灯", safe_state: off }
+    output buzzer_cmd: Y5 { purpose: "故障蜂鸣器", safe_state: off }
+    output axis_enable_cmd: Y6 { purpose: "穿梭轴驱动使能", safe_state: off }
+}

@@ -1,8 +1,12 @@
 mod artifact_store;
+mod auth;
 mod collab;
 mod config;
+mod delivery;
+mod physical_evidence;
 mod run_service;
 mod security;
+mod signatures;
 
 use axum::{
     body::Body,
@@ -66,6 +70,9 @@ use security::{authorize_mutations, cors_layer};
 #[derive(Clone)]
 struct AppState {
     workspace_root: PathBuf,
+    auth: auth::AuthService,
+    signatures: signatures::SignatureStore,
+    physical_evidence: physical_evidence::PhysicalEvidenceStore,
     runs: Arc<RwLock<BTreeMap<String, RunRecord>>>,
     collab_rooms: Arc<RwLock<HashMap<String, broadcast::Sender<CollabEvent>>>>,
     collab_comments: Arc<RwLock<HashMap<String, Vec<CollabEvent>>>>,
@@ -506,8 +513,17 @@ async fn main() {
         eprintln!("rustplc-web configuration error: {message}");
         std::process::exit(2);
     });
+    let auth = auth::AuthService::from_env(config.bind_addr.ip().is_loopback()).unwrap_or_else(
+        |message| {
+            eprintln!("rustplc-web authentication configuration error: {message}");
+            std::process::exit(2);
+        },
+    );
     let state = Arc::new(AppState {
         workspace_root: workspace_root.clone(),
+        auth,
+        signatures: signatures::SignatureStore::new(&workspace_root),
+        physical_evidence: physical_evidence::PhysicalEvidenceStore::new(&workspace_root),
         runs: Arc::new(RwLock::new(BTreeMap::new())),
         collab_rooms: Arc::new(RwLock::new(HashMap::new())),
         collab_comments: Arc::new(RwLock::new(HashMap::new())),
@@ -529,6 +545,10 @@ async fn main() {
 
 fn build_app(state: Arc<AppState>) -> Router {
     let api_routes = Router::new()
+        .merge(auth::routes())
+        .merge(delivery::routes())
+        .merge(physical_evidence::routes())
+        .merge(signatures::routes())
         .route("/projects", get(list_projects))
         .route("/project-templates", get(list_project_templates))
         .route("/projects/{id}/source", get(get_project_source))

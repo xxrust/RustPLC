@@ -1,0 +1,195 @@
+{
+    "schema_version":  1,
+    "project_id":  "station.dual_slot_shuttle_press_cell",
+    "run_id":  "20260723-172826",
+    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "records":  [
+                    {
+                        "anomaly_id":  "ANOM-001",
+                        "classification":  "skill_public_surface_gap",
+                        "status":  "corrected_with_open_product_followups",
+                        "retry_count":  7,
+                        "long_search_or_trial_and_error":  true,
+                        "summary":  "The implementation agent needed seven compile-guided syntax attempts because public plc-gen material omitted concrete axis, carrier, phase, and route grammar.",
+                        "evidence_ref_id":  "agent_b_execution",
+                        "event_refs":  [
+                                           "EVT-002",
+                                           "EVT-003",
+                                           "EVT-004",
+                                           "EVT-005",
+                                           "EVT-006",
+                                           "EVT-007",
+                                           "EVT-008"
+                                       ],
+                        "evidence_paths":  [
+                                               "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/review/agent-b-execution.md"
+                                           ]
+                    },
+                    {
+                        "anomaly_id":  "ANOM-002",
+                        "classification":  "harness_portability",
+                        "status":  "corrected",
+                        "summary":  "The harness exposed repeated Windows PowerShell 5 compatibility and path-filtering failures before the final same-run input manifest stabilized.",
+                        "evidence_ref_id":  "corrections_log",
+                        "event_refs":  [
+                                           "EVT-009"
+                                       ],
+                        "evidence_paths":  [
+                                               "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/anomalies.json"
+                                           ]
+                    },
+                    {
+                        "anomaly_id":  "ANOM-003",
+                        "classification":  "code_gap",
+                        "status":  "blocked",
+                        "gap_id":  "GAP-PROCESS-TRANSFORM-CARRIER",
+                        "summary":  "Process-model refinement reports the single remaining OP-003 transform-carrier capability gap.",
+                        "evidence_ref_id":  "authoritative_result",
+                        "event_refs":  [
+                                           "EVT-009"
+                                       ],
+                        "evidence_paths":  [
+                                               "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/anomalies.json"
+                                           ]
+                    },
+                    {
+                        "anomaly_id":  "ANOM-004",
+                        "classification":  "code_gap",
+                        "status":  "blocked",
+                        "gap_id":  "GAP-SIM-FAULT-INJECTION",
+                        "summary":  "Axis timeout, axis safety fault, and cylinder timeout scenarios cannot causally inject project-level runtime faults.",
+                        "evidence_ref_id":  "authoritative_result",
+                        "event_refs":  [
+                                           "EVT-009"
+                                       ],
+                        "evidence_paths":  [
+                                               "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/anomalies.json"
+                                           ]
+                    },
+                    {
+                        "anomaly_id":  "ANOM-005",
+                        "classification":  "code_gap",
+                        "status":  "blocked",
+                        "gap_id":  "GAP-TRACE-DOCTOR-BUNDLE",
+                        "summary":  "trace-doctor treats the bundle manifest as PLC source while intent-doctor accepts it.",
+                        "evidence_ref_id":  "authoritative_result",
+                        "event_refs":  [
+                                           "EVT-009"
+                                       ],
+                        "evidence_paths":  [
+                                               "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/anomalies.json"
+                                           ]
+                    },
+                    {
+                        "anomaly_id":  "ANOM-006",
+                        "classification":  "code_gap",
+                        "status":  "blocked",
+                        "gap_id":  "GAP-RESIDUAL-TOKEN-INJECTION",
+                        "summary":  "Physical residual handling is executable, but runtime cannot seed an exact pre-existing token at an arbitrary site.",
+                        "evidence_ref_id":  "authoritative_result",
+                        "event_refs":  [
+                                           "EVT-009"
+                                       ],
+                        "evidence_paths":  [
+                                               "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/anomalies.json"
+                                           ]
+                    },
+                    {
+                        "anomaly_id":  "ANOM-007",
+                        "classification":  "integration_gap",
+                        "status":  "blocked",
+                        "gap_id":  "GAP-HMI-TRANSPORT-BINDING",
+                        "summary":  "PLC-internal status and fault-code producers are verified, while target HMI register or transport binding is absent.",
+                        "evidence_ref_id":  "authoritative_result",
+                        "event_refs":  [
+                                           "EVT-009"
+                                       ],
+                        "evidence_paths":  [
+                                               "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/anomalies.json"
+                                           ]
+                    },
+                    {
+                        "anomaly_id":  "ANOM-008",
+                        "classification":  "schema_gap",
+                        "status":  "blocked",
+                        "gap_id":  "GAP-EXTERNAL-REINIT-INTENT-SCHEMA",
+                        "summary":  "Intent phase-2.v1 cannot express a finite batch that requires external replenishment and runtime recreation.",
+                        "evidence_ref_id":  "authoritative_result",
+                        "event_refs":  [
+                                           "EVT-009"
+                                       ],
+                        "evidence_paths":  [
+                                               "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/anomalies.json"
+                                           ]
+                    },
+                    {
+                        "anomaly_id":  "ANOM-009",
+                        "classification":  "evidence_gap",
+                        "status":  "blocked",
+                        "gap_id":  "GAP-HARDWARE-TIMING-EVIDENCE",
+                        "summary":  "No-board timing is observed, but target-hardware timing evidence is missing.",
+                        "evidence_ref_id":  "authoritative_result",
+                        "event_refs":  [
+                                           "EVT-009"
+                                       ],
+                        "evidence_paths":  [
+                                               "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/anomalies.json"
+                                           ]
+                    },
+                    {
+                        "anomaly_id":  "ANOM-010",
+                        "classification":  "evidence_gap",
+                        "status":  "blocked",
+                        "gap_id":  "GAP-CROSS-CYCLE-EVIDENCE",
+                        "summary":  "The observed evidence covers one finite batch and does not prove a second in-process cycle.",
+                        "evidence_ref_id":  "authoritative_result",
+                        "event_refs":  [
+                                           "EVT-009"
+                                       ],
+                        "evidence_paths":  [
+                                               "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/anomalies.json"
+                                           ]
+                    }
+                ],
+    "evidence_sources":  {
+                             "agent_b_execution":  {
+                                                       "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/review/agent-b-execution.md",
+                                                       "digest":  {
+                                                                      "algorithm":  "sha256",
+                                                                      "value":  "f7ef2ce362be4d4167622917e9d2816cc2ffdd953ba3a807a853e290ee87e75e",
+                                                                      "normalization":  "utf8_lf"
+                                                                  },
+                                                       "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                       "freshness":  {
+                                                                         "status":  "reviewed_post_run",
+                                                                         "basis":  "Committed original execution log with seven compile-guided attempts."
+                                                                     }
+                                                   },
+                             "corrections_log":  {
+                                                     "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/review/corrections.md",
+                                                     "digest":  {
+                                                                    "algorithm":  "sha256",
+                                                                    "value":  "44738b6e2dcde9df50671b93c5ab774e23874d7cadc750e2fb542628a22dde44",
+                                                                    "normalization":  "utf8_lf"
+                                                                },
+                                                     "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                     "freshness":  {
+                                                                       "status":  "reviewed_post_run",
+                                                                       "basis":  "Committed correction ledger."
+                                                                   }
+                                                 },
+                             "authoritative_result":  {
+                                                          "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/result.json",
+                                                          "digest":  {
+                                                                         "algorithm":  "sha256",
+                                                                         "value":  "f0829779d1a0294dd580fef80e5958908a38d09c57790f7c7eebbd257abe3fd1",
+                                                                         "normalization":  "utf8_lf"
+                                                                     },
+                                                          "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                          "freshness":  {
+                                                                            "status":  "same_run",
+                                                                            "basis":  "Normalized project-local result preserving blocked delivery status."
+                                                                        }
+                                                      }
+                         }
+}

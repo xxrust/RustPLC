@@ -1,0 +1,178 @@
+# 轴超时恢复任务：锁存可恢复故障，等待操作员复位，证明气缸缩回后返回装卸位。
+task fault_recovery_timeout:
+    # 锁存轴超时：停止新 admission 并发布可见故障状态。
+    step axis_timeout:
+        action: compute fault_latched = true
+        action: compute recoverable_fault = true
+        action: compute machine_status_code = 40
+        action: compute hmi_fault_code = 100
+        action: set running_lamp off
+        action: set fault_lamp on
+        action: set fault_buzzer on
+
+    # 等待复位沿：故障复位属于操作员 front-door，可无限等待人工命令。
+    step wait_reset_after_timeout:
+        wait: rising_edge(reset_button)
+        allow_indefinite_wait: true
+
+    # 安全缩回证明：使用拓扑闭合高层动作，超时升级为维护级气缸故障。
+    step prove_retracted_after_timeout:
+        action: retract press_cylinder
+            timeout: 1200ms -> goto fault_recovery_cylinder.cylinder_retract_failed
+
+    # 安全回装卸位：完整轴故障分流继续有效，完成后恢复 ready。
+    step safe_return_after_timeout:
+        action: axis.move_absolute(axis_shuttle, position: 0, params: stepper_default_fast, speed: 20)
+            timeout: 5000ms -> fault_recovery_timeout.axis_timeout
+            on_reject -> fault_recovery_reject.axis_reject
+            on_motion_fault -> fault_recovery_motion.axis_motion_fault
+            on_safety_fault -> fault_recovery_safety.axis_safety_fault
+            semantic_tag: shuttle_motion
+
+    # 清除可恢复锁存：安全返回完成后关闭故障反馈并恢复就绪。
+    step clear_timeout_fault:
+        action: compute recoverable_fault = false
+        action: compute fault_latched = false
+        action: compute machine_status_code = 30
+        action: compute hmi_fault_code = 0
+        action: set fault_lamp off
+        action: set fault_buzzer off
+        action: set ready_lamp off
+        goto fault_recovery_timeout.hold_timeout_recovered
+
+    # 超时恢复保持：安全返回与清锁动作完成后停留，不再穿入其他 fault step。
+    step hold_timeout_recovered:
+        action: log "axis timeout recovered"
+
+# 命令拒绝恢复任务：按可恢复策略等待复位并走与超时相同的安全证明链。
+task fault_recovery_reject:
+    # 锁存命令拒绝：禁止继续生产并发布可见故障。
+    step axis_reject:
+        action: compute fault_latched = true
+        action: compute recoverable_fault = true
+        action: compute machine_status_code = 40
+        action: compute hmi_fault_code = 110
+        action: set running_lamp off
+        action: set fault_lamp on
+
+    # 等待命令拒绝复位：只由操作员 rising edge 解除 admission 锁。
+    step wait_reset_after_reject:
+        wait: rising_edge(reset_button)
+        allow_indefinite_wait: true
+
+    # 拒绝后的安全缩回：拓扑闭合动作成功后才允许回装卸位。
+    step prove_retracted_after_reject:
+        action: retract press_cylinder
+            timeout: 1200ms -> goto fault_recovery_cylinder.cylinder_retract_failed
+
+    # 拒绝后的安全回程：回到装卸位后才清除可恢复故障。
+    step safe_return_after_reject:
+        action: axis.move_absolute(axis_shuttle, position: 0, params: stepper_default_fast, speed: 20)
+            timeout: 5000ms -> fault_recovery_timeout.axis_timeout
+            on_reject -> fault_recovery_reject.axis_reject
+            on_motion_fault -> fault_recovery_motion.axis_motion_fault
+            on_safety_fault -> fault_recovery_safety.axis_safety_fault
+            semantic_tag: shuttle_motion
+
+    # 清除命令拒绝锁存：安全动作完成后恢复 ready feedback。
+    step clear_reject_fault:
+        action: compute recoverable_fault = false
+        action: compute fault_latched = false
+        action: compute machine_status_code = 30
+        action: compute hmi_fault_code = 0
+        action: set fault_lamp off
+        action: set ready_lamp off
+        goto fault_recovery_reject.hold_reject_recovered
+
+    # 拒绝恢复保持：完成复位后停留，避免末端动作因无后继而丢失。
+    step hold_reject_recovered:
+        action: log "axis reject recovered"
+
+# 轴运动故障任务：锁存维护级故障并终止自动复位路径。
+task fault_recovery_motion:
+    # 维护锁存：运动 fault 到达后关闭运行反馈并保持故障灯和蜂鸣器。
+    step axis_motion_fault:
+        action: compute fault_latched = true
+        action: compute maintenance_fault = true
+        action: compute machine_status_code = 60
+        action: compute hmi_fault_code = 120
+        action: set running_lamp off
+        action: set fault_lamp on
+        action: set fault_buzzer on
+        goto fault_recovery_motion.hold_motion_fault
+
+    # 运动故障保持：维护介入前保持锁存状态。
+    step hold_motion_fault:
+        action: log "axis motion fault latched"
+
+# 安全故障任务：启动或运动安全 fault 进入维护锁存，不允许自动清除。
+task fault_recovery_safety:
+    # 运动安全锁存：运动期间 safety fault 立即停止 admission 并保持维护状态。
+    step axis_safety_fault:
+        action: compute fault_latched = true
+        action: compute maintenance_fault = true
+        action: compute machine_status_code = 60
+        action: compute hmi_fault_code = 130
+        action: set running_lamp off
+        action: set fault_lamp on
+        action: set fault_buzzer on
+        goto fault_recovery_safety.hold_safety_fault
+
+    # 启动安全锁存：自检阶段安全链未成立时同样保持维护状态。
+    step startup_safety_fault:
+        action: compute fault_latched = true
+        action: compute maintenance_fault = true
+        action: compute machine_status_code = 60
+        action: compute hmi_fault_code = 130
+        action: set ready_lamp off
+        action: set fault_lamp on
+        goto fault_recovery_safety.hold_safety_fault
+
+    # 安全故障保持：启动与运动安全故障汇合后保持维护锁存。
+    step hold_safety_fault:
+        action: log "safety fault latched"
+
+# 气缸恢复任务：压装动作超时后尝试高层安全缩回，失败则保持维护锁存。
+task fault_recovery_cylinder:
+    # 锁存气缸超时：禁止轴 admission 并发布可恢复故障。
+    step cylinder_timeout:
+        action: compute fault_latched = true
+        action: compute recoverable_fault = true
+        action: compute machine_status_code = 40
+        action: compute hmi_fault_code = 140
+        action: set running_lamp off
+        action: set fault_lamp on
+
+    # 尝试安全缩回：只消费拓扑闭合动作结果，不写端点传感器 wait。
+    step attempt_safe_retract:
+        action: retract press_cylinder
+            timeout: 1200ms -> goto fault_recovery_cylinder.cylinder_retract_failed
+
+    # 等待气缸故障复位：安全缩回成功后等待操作员确认再恢复 ready。
+    step wait_reset_after_cylinder:
+        wait: rising_edge(reset_button)
+        allow_indefinite_wait: true
+
+    # 清除气缸可恢复故障：操作员复位后关闭可见故障输出。
+    step clear_cylinder_fault:
+        action: compute recoverable_fault = false
+        action: compute fault_latched = false
+        action: compute machine_status_code = 30
+        action: compute hmi_fault_code = 0
+        action: set fault_lamp off
+        action: set ready_lamp off
+        goto fault_recovery_cylinder.hold_cylinder_terminal
+
+    # 缩回失败维护锁存：安全位置无法证明时保持故障且禁止自动动作。
+    step cylinder_retract_failed:
+        action: compute maintenance_fault = true
+        action: compute fault_latched = true
+        action: compute machine_status_code = 60
+        action: compute hmi_fault_code = 141
+        action: set fault_lamp on
+        action: set fault_buzzer on
+        goto fault_recovery_cylinder.hold_cylinder_terminal
+
+    # 气缸故障终端：根据此前变量保持 recoverable-cleared 或 maintenance-latched 结果。
+    step hold_cylinder_terminal:
+        action: log "cylinder recovery terminal"

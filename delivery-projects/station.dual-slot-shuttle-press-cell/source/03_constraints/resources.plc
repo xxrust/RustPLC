@@ -1,0 +1,5 @@
+# 危险包络资源：所有带 shuttle_motion 标签的轴动作占用穿梭包络。
+claim: action_tag shuttle_motion occupies shuttle_envelope
+
+# 压装气缸伸出状态占用同一包络，验证轴运动不得与压装危险状态重叠。
+claim: press_cylinder.extended occupies shuttle_envelope

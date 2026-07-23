@@ -1,0 +1,35 @@
+device start_button: sensor { purpose: "操作员启动周期按钮", subtype: "push_button", debounce: 20ms }
+device reset_button: sensor { purpose: "操作员故障复位按钮", subtype: "push_button", debounce: 20ms }
+device safety_chain: sensor { purpose: "安全链健康输入", subtype: "selector_switch", debounce: 10ms }
+device raw_material_available: sensor { purpose: "原料容器至少两件可用证明", subtype: "proximity_sensor", debounce: 20ms }
+device good_out_capacity: sensor { purpose: "良品容器剩余容量证明", subtype: "proximity_sensor", debounce: 20ms }
+device residual_present: sensor { purpose: "自动区任一受控工位存在残件的汇总信号", subtype: "proximity_sensor", debounce: 20ms }
+device operator_empty_confirm: sensor { purpose: "操作员完成清残后的空机确认", subtype: "push_button", debounce: 20ms }
+
+device axis_shuttle: stepper_motor {
+    purpose: "在装卸位与压装位之间移动双槽托盘"
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+device valve_press: solenoid_valve { purpose: "驱动压装气缸伸出与缩回", response_time: 40ms }
+device press_cylinder: cylinder { purpose: "拓扑闭合双端反馈压装气缸", stroke_time: 500ms, retract_time: 500ms }
+device sensor_press_extended: sensor { purpose: "压装气缸伸出端反馈", subtype: "limit_switch", debounce: 10ms }
+device sensor_press_retracted: sensor { purpose: "压装气缸缩回端反馈", subtype: "limit_switch", debounce: 10ms }
+
+device ready_lamp: solenoid_valve { purpose: "操作员可见就绪反馈", response_time: 20ms }
+device running_lamp: solenoid_valve { purpose: "操作员可见运行反馈", response_time: 20ms }
+device fault_lamp: solenoid_valve { purpose: "操作员可见故障反馈", response_time: 20ms }
+device reject_lamp: solenoid_valve { purpose: "操作员可见启动拒绝反馈", response_time: 20ms }
+device fault_buzzer: solenoid_valve { purpose: "操作员可听故障反馈", response_time: 20ms }
+
+resource shuttle_envelope: semantic_resource {
+    mode: exclusive
+    purpose: "穿梭轴运动与压装气缸伸出状态共享的危险包络"
+}
+
+resource load_station_access: semantic_resource {
+    mode: exclusive
+    purpose: "装卸巢与托盘槽位的单操作访问边界"
+}

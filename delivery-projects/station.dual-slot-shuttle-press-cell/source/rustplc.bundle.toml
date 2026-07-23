@@ -1,0 +1,88 @@
+schema_version = 2
+
+# ============================================================================
+# Execution order & agent collaboration
+# ============================================================================
+#
+# Phases execute in STRICT SERIAL order (top to bottom).
+# Each phase assumes the state established by all previous phases.
+#
+#   00_topology     -> declare devices, workpieces, connections, station protocol
+#   process_model   -> author admissible workpiece operations before task/step
+#   01_init         -> establish safe state (all outputs off, defaults set)
+#   02_process      -> automatic production cycle (assumes safe-state entry)
+#   03_constraints  -> safety/timing rules (references devices + steps)
+#   04_faults       -> fault recovery (returns system to safe state)
+#   05_supervision  -> mode arbitration and state publication
+#   06_manual       -> operator reset and residual-part assist
+#   07_hmi          -> visible operator feedback
+#
+# PARALLEL WINDOW (within 02_process/ and 04_faults/):
+#   Multiple station files (st01_*.plc, st02_*.plc) can be written by
+#   separate agents simultaneously, BUT ONLY IF the station protocol in
+#   00_topology/_station_protocol.plc declares:
+#     - Device partition: which station owns which devices
+#     - Handshake signals: how stations communicate
+#     - Transfer points: where workpieces cross station boundaries
+#
+#   Without a station protocol, there is NO compiler-enforced isolation.
+#   Any task can write any device. Parallel authoring is at your own risk.
+#
+# ============================================================================
+
+[phases.00_topology]
+path = "00_topology/"
+section = "topology"
+exports = ["devices", "connections", "workpieces"]
+
+[phases.01_init]
+path = "01_init/"
+section = "tasks"
+depends_on = ["00_topology"]
+exports = ["startup_self_check"]
+# Establishes: all outputs in safe state, device defaults applied.
+# Downstream phases assume this state as their entry condition.
+
+[phases.02_process]
+path = "02_process/"
+section = "tasks"
+depends_on = ["01_init"]
+exports = ["operator_front_door", "load_unload", "shuttle_motion", "press_process"]
+# Entry condition: safe state established by 01_init.
+# Multi-station: add st01_*.plc, st02_*.plc - requires station protocol.
+
+[phases.03_constraints]
+path = "03_constraints/"
+section = "constraints"
+depends_on = ["02_process"]
+exports = ["safety_rules", "timing_rules"]
+# References device names AND step/task names from 02_process.
+
+[phases.04_faults]
+path = "04_faults/"
+section = "tasks"
+depends_on = ["02_process"]
+exports = ["fault_recovery_timeout", "fault_recovery_reject", "fault_recovery_motion", "fault_recovery_safety", "fault_recovery_cylinder"]
+# Handles abnormal states created by 02_process.
+# Returns system to safe state defined by 01_init.
+
+[phases.05_supervision]
+path = "05_supervision/"
+section = "tasks"
+depends_on = ["02_process"]
+exports = ["supervision"]
+# Arbitrates auto/manual/init modes across 02_process tasks.
+
+[phases.06_manual]
+path = "06_manual/"
+section = "tasks"
+depends_on = ["01_init"]
+exports = ["manual_assist"]
+# Manual operations assume safe state, independent of 02_process.
+
+[phases.07_hmi]
+path = "07_hmi/"
+section = "tasks"
+depends_on = ["05_supervision"]
+exports = ["hmi_feedback"]
+# Mirrors supervision state to HMI.

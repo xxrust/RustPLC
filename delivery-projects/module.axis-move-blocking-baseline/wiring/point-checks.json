@@ -1,0 +1,25 @@
+{
+    "schema_version":  1,
+    "project_id":  "module.axis_move_blocking_baseline",
+    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "status":  "human_action_required",
+    "summary":  {
+                    "declared_points":  1,
+                    "verified_points":  0,
+                    "blocked_points":  0,
+                    "human_action_required_points":  1
+                },
+    "points":  [
+                   {
+                       "point_id":  "plc_main.Y0",
+                       "alias":  "axis_enable",
+                       "direction":  "output",
+                       "device_terminal":  "axis_x.enable",
+                       "signal_type":  "analog",
+                       "safe_state":  "off",
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null
+                   }
+               ]
+}

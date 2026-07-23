@@ -1,0 +1,184 @@
+{
+  "contract_version": "phase-2.v1",
+  "source_ref": {
+    "kind": "authored_asset",
+    "path": "delivery-projects/station.dual-slot-shuttle-press-cell/source/plc/main.system.md",
+    "description": "Frozen system contract for the DualSlot Shuttle Press Cell self-test specimen."
+  },
+  "source_digest": {
+    "algorithm": "sha256",
+    "value": "10666b54a02cd58327c95f460a789e91379d3bbdde2898a38d0a818feed959a1"
+  },
+  "metadata": {
+    "contract_id": "dual-slot-shuttle-press-cell-cycle",
+    "title": "DualSlot Shuttle Press Cell nominal cycle intent",
+    "business_owner": "complex-selftest-definition-agent",
+    "authoritative_intent_source": {
+      "kind": "authored_asset",
+      "path": "delivery-projects/station.dual-slot-shuttle-press-cell/source/plc/main.system.md",
+      "description": "Frozen system contract that defines the seven required business milestones."
+    },
+    "review_basis": [
+      {
+        "label": "Frozen public implementation brief",
+        "source": {
+          "kind": "authored_asset",
+          "path": "delivery-projects/station.dual-slot-shuttle-press-cell/source/definition/public-implementation-brief.md",
+          "description": "Public handoff used by the implementation agent."
+        }
+      },
+      {
+        "label": "Frozen process operation intent",
+        "source": {
+          "kind": "authored_asset",
+          "path": "delivery-projects/station.dual-slot-shuttle-press-cell/source/definition/process-operation-intent.md",
+          "description": "Source-side process intent reviewed against the executable task flow."
+        }
+      }
+    ]
+  },
+  "contract_core": {
+    "expected_milestones": [
+      {
+        "milestone_id": "cycle_accepted",
+        "business_milestone": {
+          "label": "Cycle accepted",
+          "description": "The operator start command has passed the front-door admission checks."
+        }
+      },
+      {
+        "milestone_id": "slots_loaded",
+        "business_milestone": {
+          "label": "Both carrier slots loaded",
+          "description": "Exactly two parts are mounted in the two concrete shuttle slots."
+        }
+      },
+      {
+        "milestone_id": "arrived_press",
+        "business_milestone": {
+          "label": "Shuttle arrived at press",
+          "description": "The blocking shuttle move has completed at the press position."
+        }
+      },
+      {
+        "milestone_id": "press_completed",
+        "business_milestone": {
+          "label": "Press operation completed",
+          "description": "The carrier transform has completed after the press sequence."
+        }
+      },
+      {
+        "milestone_id": "returned_load",
+        "business_milestone": {
+          "label": "Shuttle returned to load",
+          "description": "The blocking return move has completed at the load position."
+        }
+      },
+      {
+        "milestone_id": "parts_finished",
+        "business_milestone": {
+          "label": "Both parts finished",
+          "description": "Both processed parts have been unmounted, transferred, and finished."
+        }
+      },
+      {
+        "milestone_id": "ready_next_cycle",
+        "business_milestone": {
+          "label": "Finite batch complete",
+          "description": "The station publishes the end-of-batch handoff; external replenishment and runtime reinitialization precede another run."
+        }
+      }
+    ],
+    "required_edges": [
+      { "predecessor": "cycle_accepted", "successor": "slots_loaded" },
+      { "predecessor": "slots_loaded", "successor": "arrived_press" },
+      { "predecessor": "arrived_press", "successor": "press_completed" },
+      { "predecessor": "press_completed", "successor": "returned_load" },
+      { "predecessor": "returned_load", "successor": "parts_finished" },
+      { "predecessor": "parts_finished", "successor": "ready_next_cycle" }
+    ],
+    "postconditions": [
+      {
+        "postcondition_id": "station_ready_for_next_cycle",
+        "description": "The station has completed the finite two-part cycle and published the external replenishment/reinitialization handoff."
+      }
+    ],
+    "cycle_semantics": {
+      "cycle_start_milestone": "cycle_accepted",
+      "cycle_complete_milestone": "ready_next_cycle",
+      "restart_semantics": {
+        "restartable_milestone": "ready_next_cycle",
+        "next_cycle_start_milestone": "cycle_accepted",
+        "required_postconditions": [
+          "station_ready_for_next_cycle"
+        ]
+      }
+    }
+  },
+  "observation_bindings": [
+    {
+      "binding_id": "cycle_accepted_observed",
+      "subject": { "kind": "milestone", "milestone_id": "cycle_accepted" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=1;from=9;to=10;reason=action" }
+      ]
+    },
+    {
+      "binding_id": "slots_loaded_observed",
+      "subject": { "kind": "milestone", "milestone_id": "slots_loaded" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=2;from=4;to=5;reason=action" }
+      ]
+    },
+    {
+      "binding_id": "arrived_press_observed",
+      "subject": { "kind": "milestone", "milestone_id": "arrived_press" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=3;from=2;to=3;reason=action" }
+      ]
+    },
+    {
+      "binding_id": "press_completed_observed",
+      "subject": { "kind": "milestone", "milestone_id": "press_completed" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=4;from=4;to=5;reason=action" }
+      ]
+    },
+    {
+      "binding_id": "returned_load_observed",
+      "subject": { "kind": "milestone", "milestone_id": "returned_load" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=3;from=5;to=6;reason=action" }
+      ]
+    },
+    {
+      "binding_id": "parts_finished_observed",
+      "subject": { "kind": "milestone", "milestone_id": "parts_finished" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=2;from=10;to=11;reason=action" }
+      ]
+    },
+    {
+      "binding_id": "ready_next_cycle_observed",
+      "subject": { "kind": "milestone", "milestone_id": "ready_next_cycle" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=5;from=5;to=6;reason=action" }
+      ]
+    },
+    {
+      "binding_id": "station_ready_for_next_cycle_observed",
+      "subject": { "kind": "postcondition", "postcondition_id": "station_ready_for_next_cycle" },
+      "combination": "all_of",
+      "evidence": [
+        { "source": "trace_event", "key": "transition", "expected": "task=5;from=5;to=6;reason=action" }
+      ]
+    }
+  ]
+}

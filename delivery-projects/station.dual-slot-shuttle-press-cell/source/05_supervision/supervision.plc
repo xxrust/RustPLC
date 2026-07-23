@@ -1,0 +1,36 @@
+# 监督任务：根据已证明的启动、周期和完成里程碑发布 ready/running 状态。
+task supervision:
+    # 等待启动自检：由 startup_self_check 的真实动作链发布 startup_ok。
+    step wait_startup_ok:
+        wait: startup_ok == true
+        allow_indefinite_wait: true
+
+    # 发布就绪：自检通过后点亮 ready，等待操作员合法启动。
+    step publish_ready:
+        action: set ready_lamp on
+
+    # 等待周期接受：front-door admission 成功前保持 ready 状态。
+    step wait_cycle_accepted:
+        wait: cycle_accepted == true
+        allow_indefinite_wait: true
+
+    # 发布运行：合法周期开始后关闭 ready 并点亮 running。
+    step publish_running:
+        action: set ready_lamp off
+        action: set running_lamp on
+
+    # 等待两件完成：由 load_unload 的第二个 finish effect 后发布。
+    step wait_parts_finished:
+        wait: parts_finished == true
+        allow_indefinite_wait: true
+
+    # 发布批次交接：关闭运行与就绪灯，标记外部补料和 runtime 重初始化要求。
+    step publish_ready_next_cycle:
+        action: set running_lamp off
+        action: set ready_lamp off
+        action: compute automatic_cycle_active = false
+        action: compute machine_status_code = 30
+        action: compute ready_next_cycle = true
+
+    # 外部重初始化交接保持：显式后继保证 one-shot 完成状态写入 runtime。
+    step hold_ready_next_cycle:

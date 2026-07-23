@@ -8,6 +8,7 @@ use axum::{
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
+use crate::auth::bearer_token;
 use crate::{AppState, WebSecurityConfig};
 
 pub(crate) fn cors_layer(security: &WebSecurityConfig) -> CorsLayer {
@@ -30,19 +31,29 @@ pub(crate) async fn authorize_mutations(
         *request.method(),
         Method::GET | Method::HEAD | Method::OPTIONS
     ) || request.uri().path().starts_with("/ws/collab/");
-    let Some(expected) = state.security.auth_token.as_deref() else {
+    if request.uri().path() == "/api/auth/login" {
         return next.run(request).await;
-    };
+    }
     if !requires_auth {
         return next.run(request).await;
     }
 
-    let supplied = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "));
-    if supplied.is_some_and(|value| constant_time_eq(value.as_bytes(), expected.as_bytes())) {
+    let supplied = bearer_token(request.headers());
+    let static_token_matches = state
+        .security
+        .auth_token
+        .as_deref()
+        .is_some_and(|expected| {
+            supplied.is_some_and(|value| constant_time_eq(value.as_bytes(), expected.as_bytes()))
+        });
+    let session_matches = match supplied {
+        Some(token) if state.auth.has_users() => state.auth.authenticate(token).await.is_ok(),
+        _ => false,
+    };
+    if static_token_matches
+        || session_matches
+        || (!state.auth.has_users() && state.security.auth_token.is_none())
+    {
         next.run(request).await
     } else {
         (

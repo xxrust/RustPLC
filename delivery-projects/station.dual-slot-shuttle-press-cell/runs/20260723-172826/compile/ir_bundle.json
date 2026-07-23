@@ -1,0 +1,4629 @@
+{
+  "topology": {
+    "graph": {
+      "nodes": [
+        {
+          "name": "start_button",
+          "kind": "sensor"
+        },
+        {
+          "name": "reset_button",
+          "kind": "sensor"
+        },
+        {
+          "name": "safety_chain",
+          "kind": "sensor"
+        },
+        {
+          "name": "raw_material_available",
+          "kind": "sensor"
+        },
+        {
+          "name": "good_out_capacity",
+          "kind": "sensor"
+        },
+        {
+          "name": "residual_present",
+          "kind": "sensor"
+        },
+        {
+          "name": "operator_empty_confirm",
+          "kind": "sensor"
+        },
+        {
+          "name": "axis_shuttle",
+          "kind": "stepper_motor"
+        },
+        {
+          "name": "valve_press",
+          "kind": "solenoid_valve"
+        },
+        {
+          "name": "press_cylinder",
+          "kind": "cylinder"
+        },
+        {
+          "name": "sensor_press_extended",
+          "kind": "sensor"
+        },
+        {
+          "name": "sensor_press_retracted",
+          "kind": "sensor"
+        },
+        {
+          "name": "ready_lamp",
+          "kind": "solenoid_valve"
+        },
+        {
+          "name": "running_lamp",
+          "kind": "solenoid_valve"
+        },
+        {
+          "name": "fault_lamp",
+          "kind": "solenoid_valve"
+        },
+        {
+          "name": "reject_lamp",
+          "kind": "solenoid_valve"
+        },
+        {
+          "name": "fault_buzzer",
+          "kind": "solenoid_valve"
+        },
+        {
+          "name": "X0",
+          "kind": "digital_input"
+        },
+        {
+          "name": "X1",
+          "kind": "digital_input"
+        },
+        {
+          "name": "X2",
+          "kind": "digital_input"
+        },
+        {
+          "name": "X3",
+          "kind": "digital_input"
+        },
+        {
+          "name": "X4",
+          "kind": "digital_input"
+        },
+        {
+          "name": "X5",
+          "kind": "digital_input"
+        },
+        {
+          "name": "X6",
+          "kind": "digital_input"
+        },
+        {
+          "name": "X7",
+          "kind": "digital_input"
+        },
+        {
+          "name": "X8",
+          "kind": "digital_input"
+        },
+        {
+          "name": "Y0",
+          "kind": "digital_output"
+        },
+        {
+          "name": "Y1",
+          "kind": "digital_output"
+        },
+        {
+          "name": "Y2",
+          "kind": "digital_output"
+        },
+        {
+          "name": "Y3",
+          "kind": "digital_output"
+        },
+        {
+          "name": "Y4",
+          "kind": "digital_output"
+        },
+        {
+          "name": "Y5",
+          "kind": "digital_output"
+        },
+        {
+          "name": "Y6",
+          "kind": "digital_output"
+        }
+      ],
+      "node_holes": [],
+      "edge_property": "directed",
+      "edges": [
+        [
+          0,
+          17,
+          "logical"
+        ],
+        [
+          1,
+          18,
+          "logical"
+        ],
+        [
+          2,
+          19,
+          "logical"
+        ],
+        [
+          3,
+          22,
+          "logical"
+        ],
+        [
+          4,
+          23,
+          "logical"
+        ],
+        [
+          5,
+          24,
+          "logical"
+        ],
+        [
+          6,
+          25,
+          "logical"
+        ],
+        [
+          26,
+          8,
+          "electrical"
+        ],
+        [
+          8,
+          9,
+          "pneumatic"
+        ],
+        [
+          9,
+          10,
+          "logical"
+        ],
+        [
+          9,
+          11,
+          "logical"
+        ],
+        [
+          10,
+          20,
+          "logical"
+        ],
+        [
+          11,
+          21,
+          "logical"
+        ],
+        [
+          27,
+          12,
+          "electrical"
+        ],
+        [
+          28,
+          13,
+          "electrical"
+        ],
+        [
+          29,
+          14,
+          "electrical"
+        ],
+        [
+          30,
+          15,
+          "electrical"
+        ],
+        [
+          31,
+          16,
+          "electrical"
+        ],
+        [
+          32,
+          7,
+          "electrical"
+        ]
+      ]
+    },
+    "links": [
+      {
+        "from": "start_button",
+        "to": "X0",
+        "from_port": "out",
+        "kind": "logical"
+      },
+      {
+        "from": "reset_button",
+        "to": "X1",
+        "from_port": "out",
+        "kind": "logical"
+      },
+      {
+        "from": "safety_chain",
+        "to": "X2",
+        "from_port": "out",
+        "kind": "logical"
+      },
+      {
+        "from": "raw_material_available",
+        "to": "X5",
+        "from_port": "out",
+        "kind": "logical"
+      },
+      {
+        "from": "good_out_capacity",
+        "to": "X6",
+        "from_port": "out",
+        "kind": "logical"
+      },
+      {
+        "from": "residual_present",
+        "to": "X7",
+        "from_port": "out",
+        "kind": "logical"
+      },
+      {
+        "from": "operator_empty_confirm",
+        "to": "X8",
+        "from_port": "out",
+        "kind": "logical"
+      },
+      {
+        "from": "Y0",
+        "to": "valve_press",
+        "to_port": "coil",
+        "kind": "electrical"
+      },
+      {
+        "from": "valve_press",
+        "to": "press_cylinder",
+        "from_port": "out",
+        "to_port": "cmd",
+        "kind": "pneumatic"
+      },
+      {
+        "from": "press_cylinder",
+        "to": "sensor_press_extended",
+        "from_port": "extended",
+        "to_port": "sense",
+        "kind": "logical"
+      },
+      {
+        "from": "press_cylinder",
+        "to": "sensor_press_retracted",
+        "from_port": "retracted",
+        "to_port": "sense",
+        "kind": "logical"
+      },
+      {
+        "from": "sensor_press_extended",
+        "to": "X3",
+        "from_port": "out",
+        "kind": "logical"
+      },
+      {
+        "from": "sensor_press_retracted",
+        "to": "X4",
+        "from_port": "out",
+        "kind": "logical"
+      },
+      {
+        "from": "Y1",
+        "to": "ready_lamp",
+        "to_port": "coil",
+        "kind": "electrical"
+      },
+      {
+        "from": "Y2",
+        "to": "running_lamp",
+        "to_port": "coil",
+        "kind": "electrical"
+      },
+      {
+        "from": "Y3",
+        "to": "fault_lamp",
+        "to_port": "coil",
+        "kind": "electrical"
+      },
+      {
+        "from": "Y4",
+        "to": "reject_lamp",
+        "to_port": "coil",
+        "kind": "electrical"
+      },
+      {
+        "from": "Y5",
+        "to": "fault_buzzer",
+        "to_port": "coil",
+        "kind": "electrical"
+      },
+      {
+        "from": "Y6",
+        "to": "axis_shuttle",
+        "to_port": "enable",
+        "kind": "electrical"
+      }
+    ],
+    "station_protocol": {
+      "controllers": [
+        "plc_main"
+      ]
+    },
+    "variables": [
+      {
+        "name": "startup_ok",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 0
+      },
+      {
+        "name": "cycle_accepted",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 1
+      },
+      {
+        "name": "slots_loaded",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 2
+      },
+      {
+        "name": "arrived_press",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 3
+      },
+      {
+        "name": "press_completed",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 4
+      },
+      {
+        "name": "returned_load",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 5
+      },
+      {
+        "name": "parts_finished",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 6
+      },
+      {
+        "name": "ready_next_cycle",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 7
+      },
+      {
+        "name": "fault_latched",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 8
+      },
+      {
+        "name": "recoverable_fault",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 9
+      },
+      {
+        "name": "maintenance_fault",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 10
+      },
+      {
+        "name": "illegal_start_rejected",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 11
+      },
+      {
+        "name": "automatic_cycle_active",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 12
+      },
+      {
+        "name": "residual_part_detected",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 13
+      },
+      {
+        "name": "manual_acknowledged",
+        "var_type": "bool",
+        "initial_value": 0.0,
+        "index": 14
+      },
+      {
+        "name": "start_reject_reason",
+        "var_type": "float",
+        "initial_value": 0.0,
+        "index": 15
+      },
+      {
+        "name": "machine_status_code",
+        "var_type": "float",
+        "initial_value": 0.0,
+        "index": 16
+      },
+      {
+        "name": "hmi_fault_code",
+        "var_type": "float",
+        "initial_value": 0.0,
+        "index": 17
+      }
+    ],
+    "axis_profiles": {
+      "axis_shuttle": {
+        "device_type": "stepper_motor",
+        "motor_class_id": "stepper_class_basic",
+        "family_id": "stepper_nema",
+        "orientation": "horizontal",
+        "position_unit": "pulse",
+        "max_speed": 3000.0,
+        "max_acceleration": 10000.0,
+        "model_ref": "stepper_generic",
+        "config_ref": "stepper_default",
+        "motion_param_set": "stepper_default_fast"
+      }
+    }
+  },
+  "state_machine": {
+    "states": [
+      {
+        "task_name": "startup_self_check",
+        "step_name": "classify_residual_state"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "wait_manual_ack"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "route_after_manual_ack"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "confirm_empty_baseline"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "recheck_residual_clear"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "prove_safety_chain"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "prove_press_retracted"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "enable_shuttle_axis"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "move_to_check_position"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "return_to_load_position"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "visible_output_test"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "publish_startup_ready"
+      },
+      {
+        "task_name": "startup_self_check",
+        "step_name": "hold_startup_ready"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "wait_start_cycle"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "clear_previous_rejection"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "classify_faulted"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "classify_running"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "classify_batch_complete"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "require_startup_ready"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "require_safety_healthy"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "require_two_parts"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "require_good_out_capacity"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "accept_cycle"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "recycle_after_accept"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "reject_faulted"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "reject_running"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "reject_batch_complete"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "reject_not_ready"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "reject_safety"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "reject_material"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "reject_output_full"
+      },
+      {
+        "task_name": "operator_front_door",
+        "step_name": "recycle_after_reject"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "wait_cycle_acceptance"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "acquire_slot0"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "mount_slot0"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "acquire_slot1"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "mount_slot1"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "wait_returned_load"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "unmount_slot0"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "transfer_slot0"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "finish_slot0_and_unmount_slot1"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "transfer_slot1"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "finish_slot1"
+      },
+      {
+        "task_name": "load_unload",
+        "step_name": "hold_batch_complete"
+      },
+      {
+        "task_name": "shuttle_motion",
+        "step_name": "wait_slots_loaded"
+      },
+      {
+        "task_name": "shuttle_motion",
+        "step_name": "move_to_press"
+      },
+      {
+        "task_name": "shuttle_motion",
+        "step_name": "publish_arrived_press"
+      },
+      {
+        "task_name": "shuttle_motion",
+        "step_name": "wait_press_completed"
+      },
+      {
+        "task_name": "shuttle_motion",
+        "step_name": "move_to_load"
+      },
+      {
+        "task_name": "shuttle_motion",
+        "step_name": "publish_returned_load"
+      },
+      {
+        "task_name": "shuttle_motion",
+        "step_name": "hold_returned_load"
+      },
+      {
+        "task_name": "press_process",
+        "step_name": "wait_arrived_press"
+      },
+      {
+        "task_name": "press_process",
+        "step_name": "extend_press"
+      },
+      {
+        "task_name": "press_process",
+        "step_name": "dwell_press"
+      },
+      {
+        "task_name": "press_process",
+        "step_name": "retract_press"
+      },
+      {
+        "task_name": "press_process",
+        "step_name": "mark_carrier_pressed"
+      },
+      {
+        "task_name": "press_process",
+        "step_name": "hold_press_complete"
+      },
+      {
+        "task_name": "fault_recovery_timeout",
+        "step_name": "axis_timeout"
+      },
+      {
+        "task_name": "fault_recovery_timeout",
+        "step_name": "wait_reset_after_timeout"
+      },
+      {
+        "task_name": "fault_recovery_timeout",
+        "step_name": "prove_retracted_after_timeout"
+      },
+      {
+        "task_name": "fault_recovery_timeout",
+        "step_name": "safe_return_after_timeout"
+      },
+      {
+        "task_name": "fault_recovery_timeout",
+        "step_name": "clear_timeout_fault"
+      },
+      {
+        "task_name": "fault_recovery_timeout",
+        "step_name": "hold_timeout_recovered"
+      },
+      {
+        "task_name": "fault_recovery_reject",
+        "step_name": "axis_reject"
+      },
+      {
+        "task_name": "fault_recovery_reject",
+        "step_name": "wait_reset_after_reject"
+      },
+      {
+        "task_name": "fault_recovery_reject",
+        "step_name": "prove_retracted_after_reject"
+      },
+      {
+        "task_name": "fault_recovery_reject",
+        "step_name": "safe_return_after_reject"
+      },
+      {
+        "task_name": "fault_recovery_reject",
+        "step_name": "clear_reject_fault"
+      },
+      {
+        "task_name": "fault_recovery_reject",
+        "step_name": "hold_reject_recovered"
+      },
+      {
+        "task_name": "fault_recovery_motion",
+        "step_name": "axis_motion_fault"
+      },
+      {
+        "task_name": "fault_recovery_motion",
+        "step_name": "hold_motion_fault"
+      },
+      {
+        "task_name": "fault_recovery_safety",
+        "step_name": "axis_safety_fault"
+      },
+      {
+        "task_name": "fault_recovery_safety",
+        "step_name": "startup_safety_fault"
+      },
+      {
+        "task_name": "fault_recovery_safety",
+        "step_name": "hold_safety_fault"
+      },
+      {
+        "task_name": "fault_recovery_cylinder",
+        "step_name": "cylinder_timeout"
+      },
+      {
+        "task_name": "fault_recovery_cylinder",
+        "step_name": "attempt_safe_retract"
+      },
+      {
+        "task_name": "fault_recovery_cylinder",
+        "step_name": "wait_reset_after_cylinder"
+      },
+      {
+        "task_name": "fault_recovery_cylinder",
+        "step_name": "clear_cylinder_fault"
+      },
+      {
+        "task_name": "fault_recovery_cylinder",
+        "step_name": "cylinder_retract_failed"
+      },
+      {
+        "task_name": "fault_recovery_cylinder",
+        "step_name": "hold_cylinder_terminal"
+      },
+      {
+        "task_name": "supervision",
+        "step_name": "wait_startup_ok"
+      },
+      {
+        "task_name": "supervision",
+        "step_name": "publish_ready"
+      },
+      {
+        "task_name": "supervision",
+        "step_name": "wait_cycle_accepted"
+      },
+      {
+        "task_name": "supervision",
+        "step_name": "publish_running"
+      },
+      {
+        "task_name": "supervision",
+        "step_name": "wait_parts_finished"
+      },
+      {
+        "task_name": "supervision",
+        "step_name": "publish_ready_next_cycle"
+      },
+      {
+        "task_name": "supervision",
+        "step_name": "hold_ready_next_cycle"
+      },
+      {
+        "task_name": "manual_assist",
+        "step_name": "wait_residual_present"
+      },
+      {
+        "task_name": "manual_assist",
+        "step_name": "publish_residual_detected"
+      },
+      {
+        "task_name": "manual_assist",
+        "step_name": "wait_residual_cleared"
+      },
+      {
+        "task_name": "manual_assist",
+        "step_name": "wait_operator_assist"
+      },
+      {
+        "task_name": "manual_assist",
+        "step_name": "publish_manual_ack"
+      },
+      {
+        "task_name": "manual_assist",
+        "step_name": "hold_manual_ack"
+      },
+      {
+        "task_name": "hmi_feedback",
+        "step_name": "wait_fault_latched"
+      },
+      {
+        "task_name": "hmi_feedback",
+        "step_name": "publish_fault_feedback"
+      },
+      {
+        "task_name": "hmi_feedback",
+        "step_name": "hold_fault_feedback"
+      }
+    ],
+    "transitions": [
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "classify_residual_state"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "wait_manual_ack"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "residual_present == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "classify_residual_state"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "confirm_empty_baseline"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "NOT(residual_present == true)"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "wait_manual_ack"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "route_after_manual_ack"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "manual_acknowledged == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "route_after_manual_ack"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "recheck_residual_clear"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "log",
+            "message": "manual residual path authorized"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "confirm_empty_baseline"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "recheck_residual_clear"
+        },
+        "guard": {
+          "kind": "edge",
+          "edge": "rising",
+          "operand": "operator_empty_confirm"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "recheck_residual_clear"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "prove_safety_chain"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "residual_present == false"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "prove_safety_chain"
+        },
+        "to": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "startup_safety_fault"
+        },
+        "guard": {
+          "kind": "timeout",
+          "duration_ms": 1000
+        },
+        "actions": [],
+        "timers": [
+          {
+            "timer_name": "startup_self_check.prove_safety_chain.timeout_1",
+            "operation": "start",
+            "duration_ms": 1000
+          }
+        ]
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "prove_safety_chain"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "prove_press_retracted"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "safety_chain == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "prove_press_retracted"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "enable_shuttle_axis"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "retract",
+            "target": "press_cylinder",
+            "port": "self",
+            "timeout": {
+              "duration_ms": 800,
+              "target_task": "fault_recovery_cylinder",
+              "target_step": "cylinder_timeout"
+            }
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "enable_shuttle_axis"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "move_to_check_position"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "set",
+            "target": "axis_shuttle",
+            "port": "enable",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "move_to_check_position"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "return_to_load_position"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "axis_move_relative",
+            "target": "axis_shuttle",
+            "port": "self",
+            "distance_raw": "10",
+            "speed_raw": "20",
+            "acceleration_raw": "3000",
+            "deceleration_raw": "3000",
+            "timeout": {
+              "duration_ms": 2500,
+              "target_task": "fault_recovery_timeout",
+              "target_step": "axis_timeout"
+            },
+            "on_reject": {
+              "target_task": "fault_recovery_reject",
+              "target_step": "axis_reject",
+              "kind": {
+                "kind": "reject"
+              },
+              "category": "recoverable"
+            },
+            "on_motion_fault": {
+              "target_task": "fault_recovery_motion",
+              "target_step": "axis_motion_fault",
+              "kind": {
+                "kind": "motion"
+              },
+              "category": "non_recoverable"
+            },
+            "on_safety_fault": {
+              "target_task": "fault_recovery_safety",
+              "target_step": "axis_safety_fault",
+              "kind": {
+                "kind": "safety"
+              },
+              "category": "safety"
+            },
+            "semantic_tag": "shuttle_motion"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "return_to_load_position"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "visible_output_test"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "axis_move_absolute",
+            "target": "axis_shuttle",
+            "port": "self",
+            "position_raw": "0",
+            "speed_raw": "20",
+            "acceleration_raw": "3000",
+            "deceleration_raw": "3000",
+            "require_homed": false,
+            "timeout": {
+              "duration_ms": 2500,
+              "target_task": "fault_recovery_timeout",
+              "target_step": "axis_timeout"
+            },
+            "on_reject": {
+              "target_task": "fault_recovery_reject",
+              "target_step": "axis_reject",
+              "kind": {
+                "kind": "reject"
+              },
+              "category": "recoverable"
+            },
+            "on_motion_fault": {
+              "target_task": "fault_recovery_motion",
+              "target_step": "axis_motion_fault",
+              "kind": {
+                "kind": "motion"
+              },
+              "category": "non_recoverable"
+            },
+            "on_safety_fault": {
+              "target_task": "fault_recovery_safety",
+              "target_step": "axis_safety_fault",
+              "kind": {
+                "kind": "safety"
+              },
+              "category": "safety"
+            },
+            "semantic_tag": "shuttle_motion"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "visible_output_test"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "publish_startup_ready"
+        },
+        "guard": {
+          "kind": "delay",
+          "duration_ms": 100
+        },
+        "actions": [],
+        "timers": [
+          {
+            "timer_name": "startup_self_check.visible_output_test.delay_1",
+            "operation": "start",
+            "duration_ms": 100
+          }
+        ]
+      },
+      {
+        "from": {
+          "task_name": "startup_self_check",
+          "step_name": "publish_startup_ready"
+        },
+        "to": {
+          "task_name": "startup_self_check",
+          "step_name": "hold_startup_ready"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "startup_ok",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "residual_part_detected",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "manual_acknowledged",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "10"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "0"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "wait_start_cycle"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "clear_previous_rejection"
+        },
+        "guard": {
+          "kind": "edge",
+          "edge": "rising",
+          "operand": "start_button"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "clear_previous_rejection"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "classify_faulted"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "illegal_start_rejected",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "start_reject_reason",
+            "expr_raw": "0"
+          },
+          {
+            "action": "set",
+            "target": "reject_lamp",
+            "port": "self",
+            "value": "off"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "classify_faulted"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_faulted"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "fault_latched == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "classify_faulted"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "classify_running"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "NOT(fault_latched == true)"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "classify_running"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_running"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "automatic_cycle_active == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "classify_running"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "classify_batch_complete"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "NOT(automatic_cycle_active == true)"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "classify_batch_complete"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_batch_complete"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "parts_finished == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "classify_batch_complete"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "require_startup_ready"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "NOT(parts_finished == true)"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "require_startup_ready"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "require_safety_healthy"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "startup_ok == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "require_startup_ready"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_not_ready"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "NOT(startup_ok == true)"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "require_safety_healthy"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "require_two_parts"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "safety_chain == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "require_safety_healthy"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_safety"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "NOT(safety_chain == true)"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "require_two_parts"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "require_good_out_capacity"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "raw_material_available == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "require_two_parts"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_material"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "NOT(raw_material_available == true)"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "require_good_out_capacity"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "accept_cycle"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "good_out_capacity == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "require_good_out_capacity"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_output_full"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "NOT(good_out_capacity == true)"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "accept_cycle"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "recycle_after_accept"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "cycle_accepted",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "automatic_cycle_active",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "20"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "0"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "recycle_after_accept"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "wait_start_cycle"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "log",
+            "message": "cycle accepted"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_faulted"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "recycle_after_reject"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "illegal_start_rejected",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "start_reject_reason",
+            "expr_raw": "3"
+          },
+          {
+            "action": "set",
+            "target": "reject_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_running"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "recycle_after_reject"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "illegal_start_rejected",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "start_reject_reason",
+            "expr_raw": "2"
+          },
+          {
+            "action": "set",
+            "target": "reject_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_batch_complete"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "recycle_after_reject"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "illegal_start_rejected",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "start_reject_reason",
+            "expr_raw": "7"
+          },
+          {
+            "action": "set",
+            "target": "reject_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_not_ready"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "recycle_after_reject"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "illegal_start_rejected",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "start_reject_reason",
+            "expr_raw": "1"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "70"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "200"
+          },
+          {
+            "action": "set",
+            "target": "reject_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_safety"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "recycle_after_reject"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "illegal_start_rejected",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "start_reject_reason",
+            "expr_raw": "4"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "70"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "201"
+          },
+          {
+            "action": "set",
+            "target": "reject_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_material"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "recycle_after_reject"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "illegal_start_rejected",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "start_reject_reason",
+            "expr_raw": "5"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "70"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "202"
+          },
+          {
+            "action": "set",
+            "target": "reject_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_output_full"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "recycle_after_reject"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "illegal_start_rejected",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "start_reject_reason",
+            "expr_raw": "6"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "70"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "203"
+          },
+          {
+            "action": "set",
+            "target": "reject_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "operator_front_door",
+          "step_name": "recycle_after_reject"
+        },
+        "to": {
+          "task_name": "operator_front_door",
+          "step_name": "wait_start_cycle"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "log",
+            "message": "start command rejected"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "wait_cycle_acceptance"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "acquire_slot0"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "cycle_accepted == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "acquire_slot0"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "mount_slot0"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [],
+        "effects": [
+          {
+            "effect": "acquire",
+            "holder": "load_gripper",
+            "from": "raw_infeed.slot[0]"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "mount_slot0"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "acquire_slot1"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [],
+        "effects": [
+          {
+            "effect": "transfer",
+            "from": "load_gripper",
+            "to": "shuttle_tray.slot[0]"
+          },
+          {
+            "effect": "mount",
+            "workpiece_type": "insert_part",
+            "slot": "shuttle_tray.slot[0]"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "acquire_slot1"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "mount_slot1"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [],
+        "effects": [
+          {
+            "effect": "acquire",
+            "holder": "load_gripper",
+            "from": "raw_infeed.slot[1]"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "mount_slot1"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "wait_returned_load"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "slots_loaded",
+            "expr_raw": "true"
+          }
+        ],
+        "effects": [
+          {
+            "effect": "transfer",
+            "from": "load_gripper",
+            "to": "shuttle_tray.slot[1]"
+          },
+          {
+            "effect": "mount",
+            "workpiece_type": "insert_part",
+            "slot": "shuttle_tray.slot[1]"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "wait_returned_load"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "unmount_slot0"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "returned_load == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "unmount_slot0"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "transfer_slot0"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [],
+        "effects": [
+          {
+            "effect": "unmount",
+            "workpiece_type": "insert_part",
+            "slot": "shuttle_tray.slot[0]",
+            "to": "load_nest"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "transfer_slot0"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "finish_slot0_and_unmount_slot1"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [],
+        "effects": [
+          {
+            "effect": "transfer",
+            "from": "load_nest",
+            "to": "good_outfeed"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "finish_slot0_and_unmount_slot1"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "transfer_slot1"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [],
+        "effects": [
+          {
+            "effect": "finish",
+            "at": "good_outfeed",
+            "terminal_state": "finished"
+          },
+          {
+            "effect": "unmount",
+            "workpiece_type": "insert_part",
+            "slot": "shuttle_tray.slot[1]",
+            "to": "load_nest"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "transfer_slot1"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "finish_slot1"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [],
+        "effects": [
+          {
+            "effect": "transfer",
+            "from": "load_nest",
+            "to": "good_outfeed"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "load_unload",
+          "step_name": "finish_slot1"
+        },
+        "to": {
+          "task_name": "load_unload",
+          "step_name": "hold_batch_complete"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "parts_finished",
+            "expr_raw": "true"
+          }
+        ],
+        "effects": [
+          {
+            "effect": "finish",
+            "at": "good_outfeed",
+            "terminal_state": "finished"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "shuttle_motion",
+          "step_name": "wait_slots_loaded"
+        },
+        "to": {
+          "task_name": "shuttle_motion",
+          "step_name": "move_to_press"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "slots_loaded == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "shuttle_motion",
+          "step_name": "move_to_press"
+        },
+        "to": {
+          "task_name": "shuttle_motion",
+          "step_name": "publish_arrived_press"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "axis_move_absolute",
+            "target": "axis_shuttle",
+            "port": "self",
+            "position_raw": "100",
+            "speed_raw": "20",
+            "acceleration_raw": "3000",
+            "deceleration_raw": "3000",
+            "timeout": {
+              "duration_ms": 5000,
+              "target_task": "fault_recovery_timeout",
+              "target_step": "axis_timeout"
+            },
+            "on_reject": {
+              "target_task": "fault_recovery_reject",
+              "target_step": "axis_reject",
+              "kind": {
+                "kind": "reject"
+              },
+              "category": "recoverable"
+            },
+            "on_motion_fault": {
+              "target_task": "fault_recovery_motion",
+              "target_step": "axis_motion_fault",
+              "kind": {
+                "kind": "motion"
+              },
+              "category": "non_recoverable"
+            },
+            "on_safety_fault": {
+              "target_task": "fault_recovery_safety",
+              "target_step": "axis_safety_fault",
+              "kind": {
+                "kind": "safety"
+              },
+              "category": "safety"
+            },
+            "semantic_tag": "shuttle_motion"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "shuttle_motion",
+          "step_name": "publish_arrived_press"
+        },
+        "to": {
+          "task_name": "shuttle_motion",
+          "step_name": "wait_press_completed"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "arrived_press",
+            "expr_raw": "true"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "shuttle_motion",
+          "step_name": "wait_press_completed"
+        },
+        "to": {
+          "task_name": "shuttle_motion",
+          "step_name": "move_to_load"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "press_completed == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "shuttle_motion",
+          "step_name": "move_to_load"
+        },
+        "to": {
+          "task_name": "shuttle_motion",
+          "step_name": "publish_returned_load"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "axis_move_absolute",
+            "target": "axis_shuttle",
+            "port": "self",
+            "position_raw": "0",
+            "speed_raw": "20",
+            "acceleration_raw": "3000",
+            "deceleration_raw": "3000",
+            "timeout": {
+              "duration_ms": 5000,
+              "target_task": "fault_recovery_timeout",
+              "target_step": "axis_timeout"
+            },
+            "on_reject": {
+              "target_task": "fault_recovery_reject",
+              "target_step": "axis_reject",
+              "kind": {
+                "kind": "reject"
+              },
+              "category": "recoverable"
+            },
+            "on_motion_fault": {
+              "target_task": "fault_recovery_motion",
+              "target_step": "axis_motion_fault",
+              "kind": {
+                "kind": "motion"
+              },
+              "category": "non_recoverable"
+            },
+            "on_safety_fault": {
+              "target_task": "fault_recovery_safety",
+              "target_step": "axis_safety_fault",
+              "kind": {
+                "kind": "safety"
+              },
+              "category": "safety"
+            },
+            "semantic_tag": "shuttle_motion"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "shuttle_motion",
+          "step_name": "publish_returned_load"
+        },
+        "to": {
+          "task_name": "shuttle_motion",
+          "step_name": "hold_returned_load"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "returned_load",
+            "expr_raw": "true"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "press_process",
+          "step_name": "wait_arrived_press"
+        },
+        "to": {
+          "task_name": "press_process",
+          "step_name": "extend_press"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "arrived_press == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "press_process",
+          "step_name": "extend_press"
+        },
+        "to": {
+          "task_name": "press_process",
+          "step_name": "dwell_press"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "extend",
+            "target": "press_cylinder",
+            "port": "self",
+            "timeout": {
+              "duration_ms": 1200,
+              "target_task": "fault_recovery_cylinder",
+              "target_step": "cylinder_timeout"
+            }
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "press_process",
+          "step_name": "dwell_press"
+        },
+        "to": {
+          "task_name": "press_process",
+          "step_name": "retract_press"
+        },
+        "guard": {
+          "kind": "delay",
+          "duration_ms": 300
+        },
+        "actions": [],
+        "timers": [
+          {
+            "timer_name": "press_process.dwell_press.delay_1",
+            "operation": "start",
+            "duration_ms": 300
+          }
+        ]
+      },
+      {
+        "from": {
+          "task_name": "press_process",
+          "step_name": "retract_press"
+        },
+        "to": {
+          "task_name": "press_process",
+          "step_name": "mark_carrier_pressed"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "retract",
+            "target": "press_cylinder",
+            "port": "self",
+            "timeout": {
+              "duration_ms": 1200,
+              "target_task": "fault_recovery_cylinder",
+              "target_step": "cylinder_timeout"
+            }
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "press_process",
+          "step_name": "mark_carrier_pressed"
+        },
+        "to": {
+          "task_name": "press_process",
+          "step_name": "hold_press_complete"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "press_completed",
+            "expr_raw": "true"
+          }
+        ],
+        "effects": [
+          {
+            "effect": "transform_carrier",
+            "carrier": "shuttle_tray",
+            "frame": "pressed"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "axis_timeout"
+        },
+        "to": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "wait_reset_after_timeout"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "fault_latched",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "recoverable_fault",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "40"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "100"
+          },
+          {
+            "action": "set",
+            "target": "running_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "on"
+          },
+          {
+            "action": "set",
+            "target": "fault_buzzer",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "wait_reset_after_timeout"
+        },
+        "to": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "prove_retracted_after_timeout"
+        },
+        "guard": {
+          "kind": "edge",
+          "edge": "rising",
+          "operand": "reset_button"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "prove_retracted_after_timeout"
+        },
+        "to": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "safe_return_after_timeout"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "retract",
+            "target": "press_cylinder",
+            "port": "self",
+            "timeout": {
+              "duration_ms": 1200,
+              "target_task": "fault_recovery_cylinder",
+              "target_step": "cylinder_retract_failed"
+            }
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "safe_return_after_timeout"
+        },
+        "to": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "clear_timeout_fault"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "axis_move_absolute",
+            "target": "axis_shuttle",
+            "port": "self",
+            "position_raw": "0",
+            "speed_raw": "20",
+            "acceleration_raw": "3000",
+            "deceleration_raw": "3000",
+            "timeout": {
+              "duration_ms": 5000,
+              "target_task": "fault_recovery_timeout",
+              "target_step": "axis_timeout"
+            },
+            "on_reject": {
+              "target_task": "fault_recovery_reject",
+              "target_step": "axis_reject",
+              "kind": {
+                "kind": "reject"
+              },
+              "category": "recoverable"
+            },
+            "on_motion_fault": {
+              "target_task": "fault_recovery_motion",
+              "target_step": "axis_motion_fault",
+              "kind": {
+                "kind": "motion"
+              },
+              "category": "non_recoverable"
+            },
+            "on_safety_fault": {
+              "target_task": "fault_recovery_safety",
+              "target_step": "axis_safety_fault",
+              "kind": {
+                "kind": "safety"
+              },
+              "category": "safety"
+            },
+            "semantic_tag": "shuttle_motion"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "clear_timeout_fault"
+        },
+        "to": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "hold_timeout_recovered"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "recoverable_fault",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "fault_latched",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "30"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "0"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "fault_buzzer",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "ready_lamp",
+            "port": "self",
+            "value": "off"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "axis_reject"
+        },
+        "to": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "wait_reset_after_reject"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "fault_latched",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "recoverable_fault",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "40"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "110"
+          },
+          {
+            "action": "set",
+            "target": "running_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "wait_reset_after_reject"
+        },
+        "to": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "prove_retracted_after_reject"
+        },
+        "guard": {
+          "kind": "edge",
+          "edge": "rising",
+          "operand": "reset_button"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "prove_retracted_after_reject"
+        },
+        "to": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "safe_return_after_reject"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "retract",
+            "target": "press_cylinder",
+            "port": "self",
+            "timeout": {
+              "duration_ms": 1200,
+              "target_task": "fault_recovery_cylinder",
+              "target_step": "cylinder_retract_failed"
+            }
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "safe_return_after_reject"
+        },
+        "to": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "clear_reject_fault"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "axis_move_absolute",
+            "target": "axis_shuttle",
+            "port": "self",
+            "position_raw": "0",
+            "speed_raw": "20",
+            "acceleration_raw": "3000",
+            "deceleration_raw": "3000",
+            "timeout": {
+              "duration_ms": 5000,
+              "target_task": "fault_recovery_timeout",
+              "target_step": "axis_timeout"
+            },
+            "on_reject": {
+              "target_task": "fault_recovery_reject",
+              "target_step": "axis_reject",
+              "kind": {
+                "kind": "reject"
+              },
+              "category": "recoverable"
+            },
+            "on_motion_fault": {
+              "target_task": "fault_recovery_motion",
+              "target_step": "axis_motion_fault",
+              "kind": {
+                "kind": "motion"
+              },
+              "category": "non_recoverable"
+            },
+            "on_safety_fault": {
+              "target_task": "fault_recovery_safety",
+              "target_step": "axis_safety_fault",
+              "kind": {
+                "kind": "safety"
+              },
+              "category": "safety"
+            },
+            "semantic_tag": "shuttle_motion"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "clear_reject_fault"
+        },
+        "to": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "hold_reject_recovered"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "recoverable_fault",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "fault_latched",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "30"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "0"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "ready_lamp",
+            "port": "self",
+            "value": "off"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_motion",
+          "step_name": "axis_motion_fault"
+        },
+        "to": {
+          "task_name": "fault_recovery_motion",
+          "step_name": "hold_motion_fault"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "fault_latched",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "maintenance_fault",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "60"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "120"
+          },
+          {
+            "action": "set",
+            "target": "running_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "on"
+          },
+          {
+            "action": "set",
+            "target": "fault_buzzer",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "axis_safety_fault"
+        },
+        "to": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "hold_safety_fault"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "fault_latched",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "maintenance_fault",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "60"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "130"
+          },
+          {
+            "action": "set",
+            "target": "running_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "on"
+          },
+          {
+            "action": "set",
+            "target": "fault_buzzer",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "startup_safety_fault"
+        },
+        "to": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "hold_safety_fault"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "fault_latched",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "maintenance_fault",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "60"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "130"
+          },
+          {
+            "action": "set",
+            "target": "ready_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "cylinder_timeout"
+        },
+        "to": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "attempt_safe_retract"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "fault_latched",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "recoverable_fault",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "40"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "140"
+          },
+          {
+            "action": "set",
+            "target": "running_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "attempt_safe_retract"
+        },
+        "to": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "wait_reset_after_cylinder"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "retract",
+            "target": "press_cylinder",
+            "port": "self",
+            "timeout": {
+              "duration_ms": 1200,
+              "target_task": "fault_recovery_cylinder",
+              "target_step": "cylinder_retract_failed"
+            }
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "wait_reset_after_cylinder"
+        },
+        "to": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "clear_cylinder_fault"
+        },
+        "guard": {
+          "kind": "edge",
+          "edge": "rising",
+          "operand": "reset_button"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "clear_cylinder_fault"
+        },
+        "to": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "hold_cylinder_terminal"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "recoverable_fault",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "fault_latched",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "30"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "0"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "ready_lamp",
+            "port": "self",
+            "value": "off"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "cylinder_retract_failed"
+        },
+        "to": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "hold_cylinder_terminal"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "maintenance_fault",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "fault_latched",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "60"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "141"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "on"
+          },
+          {
+            "action": "set",
+            "target": "fault_buzzer",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "supervision",
+          "step_name": "wait_startup_ok"
+        },
+        "to": {
+          "task_name": "supervision",
+          "step_name": "publish_ready"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "startup_ok == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "supervision",
+          "step_name": "publish_ready"
+        },
+        "to": {
+          "task_name": "supervision",
+          "step_name": "wait_cycle_accepted"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "set",
+            "target": "ready_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "supervision",
+          "step_name": "wait_cycle_accepted"
+        },
+        "to": {
+          "task_name": "supervision",
+          "step_name": "publish_running"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "cycle_accepted == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "supervision",
+          "step_name": "publish_running"
+        },
+        "to": {
+          "task_name": "supervision",
+          "step_name": "wait_parts_finished"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "set",
+            "target": "ready_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "running_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "supervision",
+          "step_name": "wait_parts_finished"
+        },
+        "to": {
+          "task_name": "supervision",
+          "step_name": "publish_ready_next_cycle"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "parts_finished == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "supervision",
+          "step_name": "publish_ready_next_cycle"
+        },
+        "to": {
+          "task_name": "supervision",
+          "step_name": "hold_ready_next_cycle"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "set",
+            "target": "running_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "ready_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "compute",
+            "target": "automatic_cycle_active",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "30"
+          },
+          {
+            "action": "compute",
+            "target": "ready_next_cycle",
+            "expr_raw": "true"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "manual_assist",
+          "step_name": "wait_residual_present"
+        },
+        "to": {
+          "task_name": "manual_assist",
+          "step_name": "publish_residual_detected"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "residual_present == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "manual_assist",
+          "step_name": "publish_residual_detected"
+        },
+        "to": {
+          "task_name": "manual_assist",
+          "step_name": "wait_residual_cleared"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "residual_part_detected",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "machine_status_code",
+            "expr_raw": "50"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "210"
+          },
+          {
+            "action": "set",
+            "target": "ready_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "reject_lamp",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "manual_assist",
+          "step_name": "wait_residual_cleared"
+        },
+        "to": {
+          "task_name": "manual_assist",
+          "step_name": "wait_operator_assist"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "residual_present == false"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "manual_assist",
+          "step_name": "wait_operator_assist"
+        },
+        "to": {
+          "task_name": "manual_assist",
+          "step_name": "publish_manual_ack"
+        },
+        "guard": {
+          "kind": "edge",
+          "edge": "rising",
+          "operand": "operator_empty_confirm"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "manual_assist",
+          "step_name": "publish_manual_ack"
+        },
+        "to": {
+          "task_name": "manual_assist",
+          "step_name": "hold_manual_ack"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "compute",
+            "target": "manual_acknowledged",
+            "expr_raw": "true"
+          },
+          {
+            "action": "compute",
+            "target": "residual_part_detected",
+            "expr_raw": "false"
+          },
+          {
+            "action": "compute",
+            "target": "hmi_fault_code",
+            "expr_raw": "0"
+          },
+          {
+            "action": "set",
+            "target": "reject_lamp",
+            "port": "self",
+            "value": "off"
+          }
+        ],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "hmi_feedback",
+          "step_name": "wait_fault_latched"
+        },
+        "to": {
+          "task_name": "hmi_feedback",
+          "step_name": "publish_fault_feedback"
+        },
+        "guard": {
+          "kind": "condition",
+          "expression": "fault_latched == true"
+        },
+        "actions": [],
+        "timers": []
+      },
+      {
+        "from": {
+          "task_name": "hmi_feedback",
+          "step_name": "publish_fault_feedback"
+        },
+        "to": {
+          "task_name": "hmi_feedback",
+          "step_name": "hold_fault_feedback"
+        },
+        "guard": {
+          "kind": "always"
+        },
+        "actions": [
+          {
+            "action": "set",
+            "target": "ready_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "running_lamp",
+            "port": "self",
+            "value": "off"
+          },
+          {
+            "action": "set",
+            "target": "fault_lamp",
+            "port": "self",
+            "value": "on"
+          },
+          {
+            "action": "set",
+            "target": "fault_buzzer",
+            "port": "self",
+            "value": "on"
+          }
+        ],
+        "timers": []
+      }
+    ],
+    "initial": {
+      "task_name": "startup_self_check",
+      "step_name": "classify_residual_state"
+    },
+    "task_contexts": [
+      {
+        "task_name": "startup_self_check",
+        "entry_state": {
+          "task_name": "startup_self_check",
+          "step_name": "classify_residual_state"
+        },
+        "current_state": {
+          "task_name": "startup_self_check",
+          "step_name": "classify_residual_state"
+        },
+        "blocking_state": "ready",
+        "timers": [
+          {
+            "timer_name": "startup_self_check.prove_safety_chain.timeout_1",
+            "source_state": {
+              "task_name": "startup_self_check",
+              "step_name": "prove_safety_chain"
+            },
+            "duration_ms": 1000,
+            "active": false
+          },
+          {
+            "timer_name": "startup_self_check.visible_output_test.delay_1",
+            "source_state": {
+              "task_name": "startup_self_check",
+              "step_name": "visible_output_test"
+            },
+            "duration_ms": 100,
+            "active": false
+          }
+        ],
+        "pending_actions": [
+          {
+            "source_state": {
+              "task_name": "startup_self_check",
+              "step_name": "move_to_check_position"
+            },
+            "action_kind": "axis_move_relative",
+            "target": "axis_shuttle",
+            "semantic_tag": "shuttle_motion",
+            "active": false
+          },
+          {
+            "source_state": {
+              "task_name": "startup_self_check",
+              "step_name": "return_to_load_position"
+            },
+            "action_kind": "axis_move_absolute",
+            "target": "axis_shuttle",
+            "semantic_tag": "shuttle_motion",
+            "active": false
+          }
+        ]
+      },
+      {
+        "task_name": "operator_front_door",
+        "entry_state": {
+          "task_name": "operator_front_door",
+          "step_name": "wait_start_cycle"
+        },
+        "current_state": {
+          "task_name": "operator_front_door",
+          "step_name": "wait_start_cycle"
+        },
+        "blocking_state": "ready"
+      },
+      {
+        "task_name": "load_unload",
+        "entry_state": {
+          "task_name": "load_unload",
+          "step_name": "wait_cycle_acceptance"
+        },
+        "current_state": {
+          "task_name": "load_unload",
+          "step_name": "wait_cycle_acceptance"
+        },
+        "blocking_state": "ready"
+      },
+      {
+        "task_name": "shuttle_motion",
+        "entry_state": {
+          "task_name": "shuttle_motion",
+          "step_name": "wait_slots_loaded"
+        },
+        "current_state": {
+          "task_name": "shuttle_motion",
+          "step_name": "wait_slots_loaded"
+        },
+        "blocking_state": "ready",
+        "pending_actions": [
+          {
+            "source_state": {
+              "task_name": "shuttle_motion",
+              "step_name": "move_to_press"
+            },
+            "action_kind": "axis_move_absolute",
+            "target": "axis_shuttle",
+            "semantic_tag": "shuttle_motion",
+            "active": false
+          },
+          {
+            "source_state": {
+              "task_name": "shuttle_motion",
+              "step_name": "move_to_load"
+            },
+            "action_kind": "axis_move_absolute",
+            "target": "axis_shuttle",
+            "semantic_tag": "shuttle_motion",
+            "active": false
+          }
+        ]
+      },
+      {
+        "task_name": "press_process",
+        "entry_state": {
+          "task_name": "press_process",
+          "step_name": "wait_arrived_press"
+        },
+        "current_state": {
+          "task_name": "press_process",
+          "step_name": "wait_arrived_press"
+        },
+        "blocking_state": "ready",
+        "timers": [
+          {
+            "timer_name": "press_process.dwell_press.delay_1",
+            "source_state": {
+              "task_name": "press_process",
+              "step_name": "dwell_press"
+            },
+            "duration_ms": 300,
+            "active": false
+          }
+        ]
+      },
+      {
+        "task_name": "fault_recovery_timeout",
+        "entry_state": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "axis_timeout"
+        },
+        "current_state": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "axis_timeout"
+        },
+        "blocking_state": "ready",
+        "pending_actions": [
+          {
+            "source_state": {
+              "task_name": "fault_recovery_timeout",
+              "step_name": "safe_return_after_timeout"
+            },
+            "action_kind": "axis_move_absolute",
+            "target": "axis_shuttle",
+            "semantic_tag": "shuttle_motion",
+            "active": false
+          }
+        ]
+      },
+      {
+        "task_name": "fault_recovery_reject",
+        "entry_state": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "axis_reject"
+        },
+        "current_state": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "axis_reject"
+        },
+        "blocking_state": "ready",
+        "pending_actions": [
+          {
+            "source_state": {
+              "task_name": "fault_recovery_reject",
+              "step_name": "safe_return_after_reject"
+            },
+            "action_kind": "axis_move_absolute",
+            "target": "axis_shuttle",
+            "semantic_tag": "shuttle_motion",
+            "active": false
+          }
+        ]
+      },
+      {
+        "task_name": "fault_recovery_motion",
+        "entry_state": {
+          "task_name": "fault_recovery_motion",
+          "step_name": "axis_motion_fault"
+        },
+        "current_state": {
+          "task_name": "fault_recovery_motion",
+          "step_name": "axis_motion_fault"
+        },
+        "blocking_state": "ready"
+      },
+      {
+        "task_name": "fault_recovery_safety",
+        "entry_state": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "axis_safety_fault"
+        },
+        "current_state": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "axis_safety_fault"
+        },
+        "blocking_state": "ready"
+      },
+      {
+        "task_name": "fault_recovery_cylinder",
+        "entry_state": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "cylinder_timeout"
+        },
+        "current_state": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "cylinder_timeout"
+        },
+        "blocking_state": "ready"
+      },
+      {
+        "task_name": "supervision",
+        "entry_state": {
+          "task_name": "supervision",
+          "step_name": "wait_startup_ok"
+        },
+        "current_state": {
+          "task_name": "supervision",
+          "step_name": "wait_startup_ok"
+        },
+        "blocking_state": "ready"
+      },
+      {
+        "task_name": "manual_assist",
+        "entry_state": {
+          "task_name": "manual_assist",
+          "step_name": "wait_residual_present"
+        },
+        "current_state": {
+          "task_name": "manual_assist",
+          "step_name": "wait_residual_present"
+        },
+        "blocking_state": "ready"
+      },
+      {
+        "task_name": "hmi_feedback",
+        "entry_state": {
+          "task_name": "hmi_feedback",
+          "step_name": "wait_fault_latched"
+        },
+        "current_state": {
+          "task_name": "hmi_feedback",
+          "step_name": "wait_fault_latched"
+        },
+        "blocking_state": "ready"
+      }
+    ]
+  },
+  "constraints": {
+    "safety": [
+      {
+        "left": {
+          "kind": "state",
+          "device": "axis_shuttle",
+          "port": "enable",
+          "state": "off"
+        },
+        "relation": "conflicts_with",
+        "right": {
+          "kind": "state",
+          "device": "axis_shuttle",
+          "port": "pulse",
+          "state": "active"
+        },
+        "reason": "使能关闭时不得发送脉冲",
+        "source": "device:stepper_motor"
+      }
+    ],
+    "workpiece_types": [
+      {
+        "name": "insert_part",
+        "normal_terminal_states": [
+          "finished"
+        ],
+        "ingress_sites": [
+          "raw_infeed.slot[*]"
+        ],
+        "normal_egress_sites": [
+          "good_outfeed"
+        ]
+      }
+    ],
+    "workpiece_sites": [
+      {
+        "name": "good_outfeed",
+        "kind": "workpiece_location",
+        "capacity": 4
+      },
+      {
+        "name": "load_nest",
+        "kind": "workpiece_location",
+        "capacity": 1
+      }
+    ],
+    "workpiece_holders": [
+      {
+        "name": "load_gripper",
+        "capacity": 1
+      },
+      {
+        "name": "press_nest",
+        "capacity": 1
+      }
+    ],
+    "workpiece_carriers": [
+      {
+        "name": "raw_infeed",
+        "layout": {
+          "kind": "slots",
+          "count": 4
+        }
+      },
+      {
+        "name": "shuttle_tray",
+        "layout": {
+          "kind": "slots",
+          "count": 2
+        }
+      }
+    ],
+    "semantic_resources": [
+      {
+        "name": "shuttle_envelope",
+        "mode": "exclusive",
+        "purpose": "穿梭轴运动与压装气缸伸出状态共享的危险包络"
+      },
+      {
+        "name": "load_station_access",
+        "mode": "exclusive",
+        "purpose": "装卸巢与托盘槽位的单操作访问边界"
+      }
+    ],
+    "resource_claims": [
+      {
+        "source": {
+          "kind": "action_tag",
+          "tag": "shuttle_motion"
+        },
+        "resource": "shuttle_envelope"
+      },
+      {
+        "source": {
+          "kind": "state",
+          "device": "press_cylinder",
+          "port": "self",
+          "state": "extended"
+        },
+        "resource": "shuttle_envelope"
+      }
+    ],
+    "timing": [],
+    "causality": []
+  },
+  "timing_model": {
+    "intervals": {
+      "fault_recovery_cylinder.attempt_safe_retract.retract.press_cylinder": {
+        "action": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "attempt_safe_retract",
+          "action_kind": "retract",
+          "target": "press_cylinder"
+        },
+        "interval": {
+          "min_ms": 500,
+          "max_ms": 500
+        }
+      },
+      "fault_recovery_cylinder.clear_cylinder_fault.set.fault_lamp": {
+        "action": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "clear_cylinder_fault",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_cylinder.clear_cylinder_fault.set.ready_lamp": {
+        "action": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "clear_cylinder_fault",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_cylinder.cylinder_retract_failed.set.fault_buzzer": {
+        "action": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "cylinder_retract_failed",
+          "action_kind": "set",
+          "target": "fault_buzzer"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_cylinder.cylinder_retract_failed.set.fault_lamp": {
+        "action": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "cylinder_retract_failed",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_cylinder.cylinder_timeout.set.fault_lamp": {
+        "action": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "cylinder_timeout",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_cylinder.cylinder_timeout.set.running_lamp": {
+        "action": {
+          "task_name": "fault_recovery_cylinder",
+          "step_name": "cylinder_timeout",
+          "action_kind": "set",
+          "target": "running_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_motion.axis_motion_fault.set.fault_buzzer": {
+        "action": {
+          "task_name": "fault_recovery_motion",
+          "step_name": "axis_motion_fault",
+          "action_kind": "set",
+          "target": "fault_buzzer"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_motion.axis_motion_fault.set.fault_lamp": {
+        "action": {
+          "task_name": "fault_recovery_motion",
+          "step_name": "axis_motion_fault",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_motion.axis_motion_fault.set.running_lamp": {
+        "action": {
+          "task_name": "fault_recovery_motion",
+          "step_name": "axis_motion_fault",
+          "action_kind": "set",
+          "target": "running_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_reject.axis_reject.set.fault_lamp": {
+        "action": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "axis_reject",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_reject.axis_reject.set.running_lamp": {
+        "action": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "axis_reject",
+          "action_kind": "set",
+          "target": "running_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_reject.clear_reject_fault.set.fault_lamp": {
+        "action": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "clear_reject_fault",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_reject.clear_reject_fault.set.ready_lamp": {
+        "action": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "clear_reject_fault",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_reject.prove_retracted_after_reject.retract.press_cylinder": {
+        "action": {
+          "task_name": "fault_recovery_reject",
+          "step_name": "prove_retracted_after_reject",
+          "action_kind": "retract",
+          "target": "press_cylinder"
+        },
+        "interval": {
+          "min_ms": 500,
+          "max_ms": 500
+        }
+      },
+      "fault_recovery_safety.axis_safety_fault.set.fault_buzzer": {
+        "action": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "axis_safety_fault",
+          "action_kind": "set",
+          "target": "fault_buzzer"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_safety.axis_safety_fault.set.fault_lamp": {
+        "action": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "axis_safety_fault",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_safety.axis_safety_fault.set.running_lamp": {
+        "action": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "axis_safety_fault",
+          "action_kind": "set",
+          "target": "running_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_safety.startup_safety_fault.set.fault_lamp": {
+        "action": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "startup_safety_fault",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_safety.startup_safety_fault.set.ready_lamp": {
+        "action": {
+          "task_name": "fault_recovery_safety",
+          "step_name": "startup_safety_fault",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_timeout.axis_timeout.set.fault_buzzer": {
+        "action": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "axis_timeout",
+          "action_kind": "set",
+          "target": "fault_buzzer"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_timeout.axis_timeout.set.fault_lamp": {
+        "action": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "axis_timeout",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_timeout.axis_timeout.set.running_lamp": {
+        "action": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "axis_timeout",
+          "action_kind": "set",
+          "target": "running_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_timeout.clear_timeout_fault.set.fault_buzzer": {
+        "action": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "clear_timeout_fault",
+          "action_kind": "set",
+          "target": "fault_buzzer"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_timeout.clear_timeout_fault.set.fault_lamp": {
+        "action": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "clear_timeout_fault",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_timeout.clear_timeout_fault.set.ready_lamp": {
+        "action": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "clear_timeout_fault",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "fault_recovery_timeout.prove_retracted_after_timeout.retract.press_cylinder": {
+        "action": {
+          "task_name": "fault_recovery_timeout",
+          "step_name": "prove_retracted_after_timeout",
+          "action_kind": "retract",
+          "target": "press_cylinder"
+        },
+        "interval": {
+          "min_ms": 500,
+          "max_ms": 500
+        }
+      },
+      "hmi_feedback.publish_fault_feedback.set.fault_buzzer": {
+        "action": {
+          "task_name": "hmi_feedback",
+          "step_name": "publish_fault_feedback",
+          "action_kind": "set",
+          "target": "fault_buzzer"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "hmi_feedback.publish_fault_feedback.set.fault_lamp": {
+        "action": {
+          "task_name": "hmi_feedback",
+          "step_name": "publish_fault_feedback",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "hmi_feedback.publish_fault_feedback.set.ready_lamp": {
+        "action": {
+          "task_name": "hmi_feedback",
+          "step_name": "publish_fault_feedback",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "hmi_feedback.publish_fault_feedback.set.running_lamp": {
+        "action": {
+          "task_name": "hmi_feedback",
+          "step_name": "publish_fault_feedback",
+          "action_kind": "set",
+          "target": "running_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "manual_assist.publish_manual_ack.set.reject_lamp": {
+        "action": {
+          "task_name": "manual_assist",
+          "step_name": "publish_manual_ack",
+          "action_kind": "set",
+          "target": "reject_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "manual_assist.publish_residual_detected.set.ready_lamp": {
+        "action": {
+          "task_name": "manual_assist",
+          "step_name": "publish_residual_detected",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "manual_assist.publish_residual_detected.set.reject_lamp": {
+        "action": {
+          "task_name": "manual_assist",
+          "step_name": "publish_residual_detected",
+          "action_kind": "set",
+          "target": "reject_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "operator_front_door.clear_previous_rejection.set.reject_lamp": {
+        "action": {
+          "task_name": "operator_front_door",
+          "step_name": "clear_previous_rejection",
+          "action_kind": "set",
+          "target": "reject_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "operator_front_door.reject_batch_complete.set.reject_lamp": {
+        "action": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_batch_complete",
+          "action_kind": "set",
+          "target": "reject_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "operator_front_door.reject_faulted.set.reject_lamp": {
+        "action": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_faulted",
+          "action_kind": "set",
+          "target": "reject_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "operator_front_door.reject_material.set.reject_lamp": {
+        "action": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_material",
+          "action_kind": "set",
+          "target": "reject_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "operator_front_door.reject_not_ready.set.reject_lamp": {
+        "action": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_not_ready",
+          "action_kind": "set",
+          "target": "reject_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "operator_front_door.reject_output_full.set.reject_lamp": {
+        "action": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_output_full",
+          "action_kind": "set",
+          "target": "reject_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "operator_front_door.reject_running.set.reject_lamp": {
+        "action": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_running",
+          "action_kind": "set",
+          "target": "reject_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "operator_front_door.reject_safety.set.reject_lamp": {
+        "action": {
+          "task_name": "operator_front_door",
+          "step_name": "reject_safety",
+          "action_kind": "set",
+          "target": "reject_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "press_process.extend_press.extend.press_cylinder": {
+        "action": {
+          "task_name": "press_process",
+          "step_name": "extend_press",
+          "action_kind": "extend",
+          "target": "press_cylinder"
+        },
+        "interval": {
+          "min_ms": 500,
+          "max_ms": 500
+        }
+      },
+      "press_process.retract_press.retract.press_cylinder": {
+        "action": {
+          "task_name": "press_process",
+          "step_name": "retract_press",
+          "action_kind": "retract",
+          "target": "press_cylinder"
+        },
+        "interval": {
+          "min_ms": 500,
+          "max_ms": 500
+        }
+      },
+      "startup_self_check.prove_press_retracted.retract.press_cylinder": {
+        "action": {
+          "task_name": "startup_self_check",
+          "step_name": "prove_press_retracted",
+          "action_kind": "retract",
+          "target": "press_cylinder"
+        },
+        "interval": {
+          "min_ms": 500,
+          "max_ms": 500
+        }
+      },
+      "startup_self_check.visible_output_test.set.fault_buzzer": {
+        "action": {
+          "task_name": "startup_self_check",
+          "step_name": "visible_output_test",
+          "action_kind": "set",
+          "target": "fault_buzzer"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "startup_self_check.visible_output_test.set.fault_buzzer.2": {
+        "action": {
+          "task_name": "startup_self_check",
+          "step_name": "visible_output_test",
+          "action_kind": "set",
+          "target": "fault_buzzer"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "startup_self_check.visible_output_test.set.fault_lamp": {
+        "action": {
+          "task_name": "startup_self_check",
+          "step_name": "visible_output_test",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "startup_self_check.visible_output_test.set.fault_lamp.2": {
+        "action": {
+          "task_name": "startup_self_check",
+          "step_name": "visible_output_test",
+          "action_kind": "set",
+          "target": "fault_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "startup_self_check.visible_output_test.set.ready_lamp": {
+        "action": {
+          "task_name": "startup_self_check",
+          "step_name": "visible_output_test",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "startup_self_check.visible_output_test.set.ready_lamp.2": {
+        "action": {
+          "task_name": "startup_self_check",
+          "step_name": "visible_output_test",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "startup_self_check.visible_output_test.set.running_lamp": {
+        "action": {
+          "task_name": "startup_self_check",
+          "step_name": "visible_output_test",
+          "action_kind": "set",
+          "target": "running_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "startup_self_check.visible_output_test.set.running_lamp.2": {
+        "action": {
+          "task_name": "startup_self_check",
+          "step_name": "visible_output_test",
+          "action_kind": "set",
+          "target": "running_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "supervision.publish_ready.set.ready_lamp": {
+        "action": {
+          "task_name": "supervision",
+          "step_name": "publish_ready",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "supervision.publish_ready_next_cycle.set.ready_lamp": {
+        "action": {
+          "task_name": "supervision",
+          "step_name": "publish_ready_next_cycle",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "supervision.publish_ready_next_cycle.set.running_lamp": {
+        "action": {
+          "task_name": "supervision",
+          "step_name": "publish_ready_next_cycle",
+          "action_kind": "set",
+          "target": "running_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "supervision.publish_running.set.ready_lamp": {
+        "action": {
+          "task_name": "supervision",
+          "step_name": "publish_running",
+          "action_kind": "set",
+          "target": "ready_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      },
+      "supervision.publish_running.set.running_lamp": {
+        "action": {
+          "task_name": "supervision",
+          "step_name": "publish_running",
+          "action_kind": "set",
+          "target": "running_lamp"
+        },
+        "interval": {
+          "min_ms": 20,
+          "max_ms": 20
+        }
+      }
+    }
+  },
+  "runtime_budget": {
+    "transition_budget_scope": "per_task_per_tick",
+    "max_transitions_per_tick_cap": 64,
+    "active_task_count": 13,
+    "max_transitions_all_tasks_per_tick_upper_bound": 832,
+    "max_transitions_same_tick_upper_bound": 64,
+    "max_actions_per_transition": 8,
+    "max_actions_per_tick_upper_bound": 6656,
+    "max_parallel_branches": 0,
+    "max_race_branches": 0,
+    "has_same_tick_cycle": true,
+    "budget_time_estimate": {
+      "action_cost_us": 8,
+      "transition_cost_us": 5,
+      "parallel_expand_cost_us": 12,
+      "action_component_us": 53248,
+      "transition_component_us": 320,
+      "parallel_component_us": 0,
+      "total_estimate_us": 53568,
+      "max_allowed_us": 2000,
+      "exceeds_budget": true
+    }
+  },
+  "verification": {
+    "safety": {
+      "level": "完备证明",
+      "explored_depth": 77,
+      "warnings": [],
+      "checked_rules": 1,
+      "skipped_rules": 0,
+      "coverage": {
+        "bound_rules": 1,
+        "degraded_rules": 0,
+        "skipped_rules": 0,
+        "total_rules": 1
+      },
+      "rule_statuses": [
+        {
+          "line": 1,
+          "rule": "axis_shuttle.enable.off conflicts_with axis_shuttle.pulse.active",
+          "status": "bound"
+        }
+      ]
+    },
+    "liveness": {
+      "level": "通过",
+      "warnings": [],
+      "checked_rules": 96,
+      "skipped_rules": 0
+    },
+    "timing": {
+      "level": "通过",
+      "warnings": [
+        {
+          "level": "warn",
+          "message": "runtime budget: max_actions_per_tick_upper_bound=6656 exceeds threshold 512"
+        },
+        {
+          "level": "warn",
+          "message": "runtime budget: same-tick transition subgraph contains a cycle; runtime-core caps chaining to 64 transitions per task per tick (active_tasks=13)"
+        },
+        {
+          "level": "warn",
+          "message": "runtime budget time estimate: total_estimate_us=53568 exceeds threshold 2000"
+        }
+      ],
+      "checked_rules": 0,
+      "skipped_rules": 0
+    },
+    "causality": {
+      "level": "通过",
+      "warnings": [],
+      "checked_rules": 0,
+      "skipped_rules": 0
+    },
+    "station_protocol": {
+      "level": "閫氳繃",
+      "warnings": [],
+      "checked_rules": 0,
+      "skipped_rules": 1
+    }
+  }
+}

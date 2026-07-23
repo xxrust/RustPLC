@@ -1,4 +1,6 @@
-export type UserRole = 'operator' | 'engineer' | 'auditor' | 'admin';
+import type { UserRole } from '../types';
+
+export type { UserRole };
 
 export const canEditTopology = (role: UserRole): boolean =>
   ['engineer', 'admin'].includes(role);
@@ -13,6 +15,9 @@ export const canManageUsers = (role: UserRole): boolean =>
   role === 'admin';
 
 export const hasRole = (userRole: UserRole, requiredRole: UserRole): boolean => {
-  const hierarchy = ['operator', 'engineer', 'auditor', 'admin'];
-  return hierarchy.indexOf(userRole) >= hierarchy.indexOf(requiredRole);
+  if (userRole === 'admin' || userRole === requiredRole) return true;
+  const hierarchy: UserRole[] = ['operator', 'engineer', 'auditor'];
+  return hierarchy.includes(userRole)
+    && hierarchy.includes(requiredRole)
+    && hierarchy.indexOf(userRole) >= hierarchy.indexOf(requiredRole);
 };

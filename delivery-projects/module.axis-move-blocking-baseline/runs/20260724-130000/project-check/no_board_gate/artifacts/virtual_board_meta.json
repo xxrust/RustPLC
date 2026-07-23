@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "source_plc": "delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc",
+  "scenario_path": "delivery-projects/module.axis-move-blocking-baseline/source/scenarios/normal.yaml",
+  "generated_at": "2026-07-23T18:12:03.2684207Z",
+  "tick_ms": 10,
+  "duration_ticks": 600
+}

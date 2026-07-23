@@ -1,0 +1,81 @@
+# 启动自检任务：先建立无残件人工确认基线，再验证安全链、气缸安全位置和轴往返生命周期。
+task startup_self_check:
+    # 残件入口分类：启动时检测到残件则必须等待 manual_assist 授权，无残件才进入直接空机确认。
+    step classify_residual_state:
+        if: residual_present == true goto startup_self_check.wait_manual_ack else: goto startup_self_check.confirm_empty_baseline
+
+    # 人工协助授权：检测到残件的路径必须消费 manual_assist 发布的确认事实。
+    step wait_manual_ack:
+        wait: manual_acknowledged == true
+        allow_indefinite_wait: true
+
+    # 人工协助路由：ack 已由 manual task 完成现场清零与人工确认，本 step 只汇入物理复查。
+    step route_after_manual_ack:
+        action: log "manual residual path authorized"
+        goto startup_self_check.recheck_residual_clear
+
+    # 无残件空机确认：启动时无残件仍要求操作员确认受控区域已检查。
+    step confirm_empty_baseline:
+        wait: rising_edge(operator_empty_confirm)
+        allow_indefinite_wait: true
+
+    # 残件复查：两条路径汇合后再次要求物理汇总输入清零，防止确认后状态反弹。
+    step recheck_residual_clear:
+        wait: residual_present == false
+        allow_indefinite_wait: true
+
+    # 安全链门禁：等待现场安全输入健康，超时进入维护级安全故障。
+    step prove_safety_chain:
+        wait: safety_chain == true
+        timeout: 1000ms -> goto fault_recovery_safety.startup_safety_fault
+
+    # 气缸安全自检：执行拓扑闭合缩回动作，动作完成即证明唯一缩回结果，超时进入气缸恢复。
+    step prove_press_retracted:
+        action: retract press_cylinder
+            timeout: 800ms -> goto fault_recovery_cylinder.cylinder_timeout
+
+    # 轴使能证明：在任何 pulse 动作前显式开启驱动使能，满足设备库注入的 enable/pulse 安全约束。
+    step enable_shuttle_axis:
+        action: set axis_shuttle.enable on
+
+    # 轴命令自检：先完成受控相对运动建立当前工具链的 homing proof，四类失败完整分流。
+    step move_to_check_position:
+        action: axis.move_relative(axis_shuttle, distance: 10, params: stepper_default_fast, speed: 20)
+            timeout: 2500ms -> fault_recovery_timeout.axis_timeout
+            on_reject -> fault_recovery_reject.axis_reject
+            on_motion_fault -> fault_recovery_motion.axis_motion_fault
+            on_safety_fault -> fault_recovery_safety.axis_safety_fault
+            semantic_tag: shuttle_motion
+
+    # 轴返回自检：阻塞返回装卸位，完成后才允许发布启动自检通过。
+    step return_to_load_position:
+        action: axis.move_absolute(axis_shuttle, position: 0, params: stepper_default_fast, speed: 20)
+            timeout: 2500ms -> fault_recovery_timeout.axis_timeout
+            on_reject -> fault_recovery_reject.axis_reject
+            on_motion_fault -> fault_recovery_motion.axis_motion_fault
+            on_safety_fault -> fault_recovery_safety.axis_safety_fault
+            semantic_tag: shuttle_motion
+
+    # 可见输出自检：短时点亮全部指示输出后关闭，结果由操作员观察而非伪造传感器证明。
+    step visible_output_test:
+        action: set ready_lamp on
+        action: set running_lamp on
+        action: set fault_lamp on
+        action: set fault_buzzer on
+        delay: 100ms
+        action: set ready_lamp off
+        action: set running_lamp off
+        action: set fault_lamp off
+        action: set fault_buzzer off
+
+    # 启动完成：前述真实动作全部完成后写入内部协调状态，供其他并发 task admission 使用。
+    step publish_startup_ready:
+        action: compute startup_ok = true
+        action: compute residual_part_detected = false
+        action: compute manual_acknowledged = false
+        action: compute machine_status_code = 10
+        action: compute hmi_fault_code = 0
+
+    # 启动完成保持：提供显式后继状态，确保 startup_ok 写入 runtime。
+    step hold_startup_ready:
+        action: log "startup self-check complete"

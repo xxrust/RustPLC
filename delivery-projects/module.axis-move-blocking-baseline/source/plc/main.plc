@@ -1,0 +1,41 @@
+[topology]
+
+device plc_main: plc {
+    purpose: "Controller output for the blocking axis baseline"
+    model_ref: openplc_softplc
+}
+
+device axis_x: stepper_motor {
+    purpose: "Blocking relative-move baseline axis"
+    model_ref: stepper_generic
+    config_ref: stepper_default
+    motion_param_set: stepper_default_fast
+}
+
+relation { from: plc_main.Y0, to: axis_x.enable, via: driven_by }
+
+[constraints]
+
+[tasks]
+
+task main:
+    step enable_axis:
+        action: set axis_x.enable on
+    step move_axis:
+        action: axis.move_relative(axis_x, distance: 20, speed: 2)
+            timeout: 400ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+    step move_done:
+        action: log "axis move done"
+
+task fault:
+    step timeout:
+        action: log "axis move timeout"
+    step reject:
+        action: log "axis move reject"
+    step motion_fault:
+        action: log "axis move motion fault"
+    step safety_fault:
+        action: log "axis move safety fault"

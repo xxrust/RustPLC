@@ -1,0 +1,22 @@
+# Source PLC: main.plc
+seed: 2026
+tick_ms: 10
+duration_ms: 1500
+
+inputs:
+  - at_ms: 0
+    set:
+      digital_inputs:
+        sensor_push_ext: false
+        sensor_push_ret: false
+        sensor_press_ext: false
+        sensor_press_ret: false
+        sensor_quality_ok: false
+        sensor_quality_ng: false
+        sensor_eject_ext: false
+        sensor_eject_ret: false
+        sensor_reject_ext: false
+        sensor_reject_ret: false
+        start_button: false
+
+forces: []

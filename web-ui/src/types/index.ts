@@ -2,7 +2,15 @@
 
 export type RunMode = 'no_board' | 'hil_board' | 'runtime_live';
 
-export type UserRole = 'operator' | 'engineer' | 'auditor' | 'admin';
+export type UserRole =
+  | 'operator'
+  | 'engineer'
+  | 'electrical_engineer'
+  | 'commissioning_engineer'
+  | 'safety_reviewer'
+  | 'release_approver'
+  | 'auditor'
+  | 'admin';
 
 export type AlarmSeverity = 'info' | 'warning' | 'critical';
 

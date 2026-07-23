@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "project_id": "line.three_station_assembly",
+  "title": "Three-station Assembly Line",
+  "delivery_layer": "line",
+  "source_entry": "source/plc/main.plc",
+  "system_contract": "source/plc/main.system.md",
+  "review_ref": "review/completeness.md",
+  "implementation_completeness_percent": 74,
+  "allowed_scenario_failure_gap_ids": ["GAP-SCENARIO-SEMANTIC-GUARD-SUPPORT"],
+  "allowed_project_check_failure_gap_ids": ["GAP-SCENARIO-SEMANTIC-GUARD-SUPPORT"],
+  "scenarios": ["source/scenarios/normal.yaml", "source/scenarios/timeout.yaml"],
+  "nominal_scenario": "source/scenarios/normal.yaml",
+  "known_gaps": [
+    { "id": "GAP-SCENARIO-SEMANTIC-GUARD-SUPPORT", "layer": "scenario-runtime", "classification": "code-gap", "summary": "scenario-doctor and no-board-gate reject semantic sensor guard expressions even though compiler verification accepts them." },
+    { "id": "GAP-SOURCE-TEXT-ENCODING", "layer": "source-quality", "classification": "quality-gap", "summary": "Legacy comments, purposes, reasons, and log strings contain mojibake even though executable semantics compile." },
+    { "id": "GAP-FAULT-INJECTION-COVERAGE", "layer": "scenario", "classification": "evidence-gap", "summary": "Generated timeout input does not prove every cylinder and quality-sensor fault route on physical hardware." },
+    { "id": "GAP-HARDWARE-TIMING-EVIDENCE", "layer": "deployment", "classification": "evidence-gap", "summary": "The 10 second formal constraint has no target-hardware timing measurement." },
+    { "id": "GAP-PHYSICAL-POINT-CHECK", "layer": "commissioning", "classification": "evidence-gap", "summary": "The declared PLC input and output points have not been physically point-checked." }
+  ],
+  "anomalies": [
+    { "anomaly_id": "ANOM-001", "classification": "source_encoding", "status": "blocked", "retry_count": 0, "long_search_or_trial_and_error": false, "summary": "The canonical source has pervasive mojibake in human-facing text; executable identifiers were retained and a clean system contract documents the intended sequence." }
+  ],
+  "corrections": [
+    { "correction_id": "COR-001", "status": "verified_with_blocker", "anomaly_id": "ANOM-001", "summary": "Added a clean UTF-8 project-local system contract while preserving GAP-SOURCE-TEXT-ENCODING for the unchanged executable source." }
+  ],
+  "wiring_points": [
+    { "point_id": "plc_main.X0", "alias": "push_extended", "direction": "input", "device_terminal": "sensor_push_ext.out", "safe_state": null },
+    { "point_id": "plc_main.X1", "alias": "push_retracted", "direction": "input", "device_terminal": "sensor_push_ret.out", "safe_state": null },
+    { "point_id": "plc_main.X2", "alias": "press_extended", "direction": "input", "device_terminal": "sensor_press_ext.out", "safe_state": null },
+    { "point_id": "plc_main.X3", "alias": "press_retracted", "direction": "input", "device_terminal": "sensor_press_ret.out", "safe_state": null },
+    { "point_id": "plc_main.X4", "alias": "quality_ok", "direction": "input", "device_terminal": "sensor_quality_ok.out", "safe_state": null },
+    { "point_id": "plc_main.X5", "alias": "quality_ng", "direction": "input", "device_terminal": "sensor_quality_ng.out", "safe_state": null },
+    { "point_id": "plc_main.X6", "alias": "eject_extended", "direction": "input", "device_terminal": "sensor_eject_ext.out", "safe_state": null },
+    { "point_id": "plc_main.X7", "alias": "eject_retracted", "direction": "input", "device_terminal": "sensor_eject_ret.out", "safe_state": null },
+    { "point_id": "plc_main.X8", "alias": "reject_extended", "direction": "input", "device_terminal": "sensor_reject_ext.out", "safe_state": null },
+    { "point_id": "plc_main.X9", "alias": "reject_retracted", "direction": "input", "device_terminal": "sensor_reject_ret.out", "safe_state": null },
+    { "point_id": "plc_main.X11", "alias": "start_command", "direction": "input", "device_terminal": "start_button.out", "safe_state": null },
+    { "point_id": "plc_main.Y0", "alias": "push_valve", "direction": "output", "device_terminal": "valve_push.coil", "safe_state": "off" },
+    { "point_id": "plc_main.Y1", "alias": "press_valve", "direction": "output", "device_terminal": "valve_press.coil", "safe_state": "off" },
+    { "point_id": "plc_main.Y2", "alias": "eject_valve", "direction": "output", "device_terminal": "valve_eject.coil", "safe_state": "off" },
+    { "point_id": "plc_main.Y3", "alias": "reject_valve", "direction": "output", "device_terminal": "valve_reject.coil", "safe_state": "off" }
+  ]
+}

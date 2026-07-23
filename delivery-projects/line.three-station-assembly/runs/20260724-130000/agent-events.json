@@ -1,0 +1,98 @@
+{
+    "schema_version":  1,
+    "project_id":  "line.three_station_assembly",
+    "run_id":  "20260724-130000",
+    "attribution_state":  "interactive_tool_observed",
+    "unattended_verdict":  "not_proven",
+    "records":  [
+                    {
+                        "schema_version":  1,
+                        "event_id":  "EVT-001",
+                        "project_id":  "line.three_station_assembly",
+                        "agent_id":  "root.delivery_fixture_materializer",
+                        "attribution_state":  "tool_observed",
+                        "sequence":  1,
+                        "started_at":  "2026-07-23T18:18:17.1470432Z",
+                        "completed_at":  "2026-07-23T18:18:19.7560251Z",
+                        "duration_ms":  2605,
+                        "phase":  "compile",
+                        "task":  "compile_verify",
+                        "tool":  "target/debug/rust_plc.exe",
+                        "action":  "E:/personal_project/rust_plc/target/debug/rust_plc.exe delivery-projects/line.three-station-assembly/source/plc/main.plc --report delivery-projects/line.three-station-assembly/runs/20260724-130000/compile/verification_report.json --ir-out delivery-projects/line.three-station-assembly/runs/20260724-130000/compile/ir_bundle.json --no-print-ir",
+                        "result":  "pass",
+                        "exit_code":  0,
+                        "retry_index":  0,
+                        "route":  "public_cli",
+                        "artifact_refs":  [
+                                              "delivery-projects/line.three-station-assembly/runs/20260724-130000/compile/verification_report.json",
+                                              "delivery-projects/line.three-station-assembly/runs/20260724-130000/compile/ir_bundle.json"
+                                          ]
+                    },
+                    {
+                        "schema_version":  1,
+                        "event_id":  "EVT-002",
+                        "project_id":  "line.three_station_assembly",
+                        "agent_id":  "root.delivery_fixture_materializer",
+                        "attribution_state":  "tool_observed",
+                        "sequence":  2,
+                        "started_at":  "2026-07-23T18:18:19.8237638Z",
+                        "completed_at":  "2026-07-23T18:18:20.1017167Z",
+                        "duration_ms":  276,
+                        "phase":  "scenario_validation",
+                        "task":  "scenario_validate_01",
+                        "tool":  "target/debug/rust_plc.exe",
+                        "action":  "E:/personal_project/rust_plc/target/debug/rust_plc.exe scenario-validate delivery-projects/line.three-station-assembly/source/plc/main.plc --scenario delivery-projects/line.three-station-assembly/source/scenarios/normal.yaml --output json",
+                        "result":  "fail",
+                        "exit_code":  1,
+                        "retry_index":  0,
+                        "route":  "public_cli",
+                        "artifact_refs":  [
+
+                                          ]
+                    },
+                    {
+                        "schema_version":  1,
+                        "event_id":  "EVT-003",
+                        "project_id":  "line.three_station_assembly",
+                        "agent_id":  "root.delivery_fixture_materializer",
+                        "attribution_state":  "tool_observed",
+                        "sequence":  3,
+                        "started_at":  "2026-07-23T18:18:20.1027737Z",
+                        "completed_at":  "2026-07-23T18:18:20.4165283Z",
+                        "duration_ms":  303,
+                        "phase":  "scenario_validation",
+                        "task":  "scenario_validate_02",
+                        "tool":  "target/debug/rust_plc.exe",
+                        "action":  "E:/personal_project/rust_plc/target/debug/rust_plc.exe scenario-validate delivery-projects/line.three-station-assembly/source/plc/main.plc --scenario delivery-projects/line.three-station-assembly/source/scenarios/timeout.yaml --output json",
+                        "result":  "fail",
+                        "exit_code":  1,
+                        "retry_index":  0,
+                        "route":  "public_cli",
+                        "artifact_refs":  [
+
+                                          ]
+                    },
+                    {
+                        "schema_version":  1,
+                        "event_id":  "EVT-004",
+                        "project_id":  "line.three_station_assembly",
+                        "agent_id":  "root.delivery_fixture_materializer",
+                        "attribution_state":  "tool_observed",
+                        "sequence":  4,
+                        "started_at":  "2026-07-23T18:18:20.4189981Z",
+                        "completed_at":  "2026-07-23T18:18:21.6349623Z",
+                        "duration_ms":  1213,
+                        "phase":  "project_check",
+                        "task":  "project_check",
+                        "tool":  "target/debug/rust_plc.exe",
+                        "action":  "E:/personal_project/rust_plc/target/debug/rust_plc.exe project-check delivery-projects/line.three-station-assembly/source/plc/main.plc --scenario delivery-projects/line.three-station-assembly/source/scenarios/normal.yaml --out-dir delivery-projects/line.three-station-assembly/runs/20260724-130000/project-check --output json",
+                        "result":  "fail",
+                        "exit_code":  1,
+                        "retry_index":  0,
+                        "route":  "public_cli",
+                        "artifact_refs":  [
+                                              "delivery-projects/line.three-station-assembly/runs/20260724-130000/project-check/project_check_report.json"
+                                          ]
+                    }
+                ]
+}

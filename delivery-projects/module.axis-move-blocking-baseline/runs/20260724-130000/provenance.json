@@ -1,0 +1,45 @@
+{
+    "schema_version":  1,
+    "project_id":  "module.axis_move_blocking_baseline",
+    "run_id":  "20260724-130000",
+    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "started_at_utc":  "2026-07-23T18:12:01.6914796Z",
+    "completed_at_utc":  "2026-07-23T18:12:03.4584365Z",
+    "elapsed_ms":  1767,
+    "model":  "Codex interactive tool execution",
+    "unattended_verdict":  "not_proven",
+    "unattended_reason":  "Attribution is limited to the recorded interactive tool events.",
+    "event_stream":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-130000/agent-events.json",
+    "models":  [
+                   {
+                       "role":  "materializer",
+                       "model":  null,
+                       "status":  "not_recorded",
+                       "reason":  "The tool session does not expose a durable model identifier."
+                   }
+               ],
+    "skills":  [
+                   {
+                       "name":  "agent-harness-project-standard",
+                       "version":  null,
+                       "status":  "version_not_recorded"
+                   }
+               ],
+    "tool_versions":  [
+                          {
+                              "name":  "rust_plc",
+                              "version":  "0.1.0",
+                              "status":  "recorded_from_Cargo.toml"
+                          },
+                          {
+                              "name":  "fixture_materializer",
+                              "version":  "delivery-fixture-materializer-v1",
+                              "status":  "recorded"
+                          },
+                          {
+                              "name":  "PowerShell",
+                              "version":  "5.1.26100.7462",
+                              "status":  "recorded"
+                          }
+                      ]
+}

@@ -1,0 +1,10 @@
+{"tick":0,"ts_start_us":0,"ts_end_us":50,"exec_us":50,"slack_us":9950,"overrun":false}
+{"tick":1,"ts_start_us":10000,"ts_end_us":10010,"exec_us":10,"slack_us":9990,"overrun":false}
+{"tick":2,"ts_start_us":20000,"ts_end_us":20010,"exec_us":10,"slack_us":9990,"overrun":false}
+{"tick":3,"ts_start_us":30000,"ts_end_us":30010,"exec_us":10,"slack_us":9990,"overrun":false}
+{"tick":4,"ts_start_us":40000,"ts_end_us":40010,"exec_us":10,"slack_us":9990,"overrun":false}
+{"tick":5,"ts_start_us":50000,"ts_end_us":50010,"exec_us":10,"slack_us":9990,"overrun":false}
+{"tick":6,"ts_start_us":60000,"ts_end_us":60010,"exec_us":10,"slack_us":9990,"overrun":false}
+{"tick":7,"ts_start_us":70000,"ts_end_us":70010,"exec_us":10,"slack_us":9990,"overrun":false}
+{"tick":8,"ts_start_us":80000,"ts_end_us":80010,"exec_us":10,"slack_us":9990,"overrun":false}
+{"tick":9,"ts_start_us":90000,"ts_end_us":90050,"exec_us":50,"slack_us":9950,"overrun":false}

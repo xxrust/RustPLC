@@ -1,0 +1,23 @@
+boot ok
+TICK tick=0 ts_ms=0
+TRACE tick=0 task=0 from=0 to=1 reason=action ts_ms=0
+TIMING tick=0 ts_start_us=0 ts_end_us=50 exec_us=50 slack_us=9950 overrun=false
+TICK tick=1 ts_ms=10
+TIMING tick=1 ts_start_us=10000 ts_end_us=10010 exec_us=10 slack_us=9990 overrun=false
+TICK tick=2 ts_ms=20
+TIMING tick=2 ts_start_us=20000 ts_end_us=20010 exec_us=10 slack_us=9990 overrun=false
+TICK tick=3 ts_ms=30
+TIMING tick=3 ts_start_us=30000 ts_end_us=30010 exec_us=10 slack_us=9990 overrun=false
+TICK tick=4 ts_ms=40
+TIMING tick=4 ts_start_us=40000 ts_end_us=40010 exec_us=10 slack_us=9990 overrun=false
+TICK tick=5 ts_ms=50
+TIMING tick=5 ts_start_us=50000 ts_end_us=50010 exec_us=10 slack_us=9990 overrun=false
+TICK tick=6 ts_ms=60
+TIMING tick=6 ts_start_us=60000 ts_end_us=60010 exec_us=10 slack_us=9990 overrun=false
+TICK tick=7 ts_ms=70
+TIMING tick=7 ts_start_us=70000 ts_end_us=70010 exec_us=10 slack_us=9990 overrun=false
+TICK tick=8 ts_ms=80
+TIMING tick=8 ts_start_us=80000 ts_end_us=80010 exec_us=10 slack_us=9990 overrun=false
+TICK tick=9 ts_ms=90
+TRACE tick=9 task=0 from=1 to=2 reason=action ts_ms=90
+TIMING tick=9 ts_start_us=90000 ts_end_us=90050 exec_us=50 slack_us=9950 overrun=false

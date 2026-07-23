@@ -24,6 +24,7 @@
   <a href="#系统架构">系统架构</a> •
   <a href="#标准项目分层">项目分层</a> •
   <a href="#快速开始">快速开始</a> •
+  <a href="#交付工作台">交付工作台</a> •
   <a href="#核心能力">核心能力</a> •
   <a href="#安全与架构审计">审计报告</a> •
   <a href="#文档">文档</a>
@@ -71,6 +72,34 @@ RustPLC：工程师描述工艺 → AI 生成声明式 DSL → 编译器数学�
 
 - **[HTML 审计报告](docs/audits/rustplc_security_architecture_audit_2026-07-23.html)**
 - **[Markdown 审计总结](docs/audits/rustplc_security_architecture_audit_2026-07-23.md)**
+
+---
+
+## 交付工作台
+
+Autonomous PLC Delivery Workbench 是 RustPLC 的桌面式工程界面。它以交付项目为观察单元，在同一个 Cursor/VS Code 风格工作区中展示 Agent 运行记录、PLC 源码、编译器阶段、四类验证、接线表、点检证据、HIL/trace 证据和人工放行门禁。
+
+编译器进展通过真实交付项目体现。Problems、Tests、Search、状态栏和项目证据视图聚合各项目实际触发的阶段、诊断与 blocker；项目内的编译器证据、物理观察和人工责任始终保持独立状态。
+
+```powershell
+cd web-ui
+npm install
+npm run build
+cd ..
+cargo run -p web-server
+```
+
+打开 `http://127.0.0.1:8080`。Loopback 开发模式提供 `engineer`、`electrical`、`commissioning`、`safety`、`release` 和 `admin` 演示身份，默认密码为 `password`；非 loopback 部署必须显式配置认证与允许来源。
+
+工作台需求、证据模型与验收条件见 [Autonomous PLC Delivery Workbench PRD](tasks/prd-autonomous-plc-delivery-workbench.md)，本次完整自测见 [HTML 报告](docs/reports/autonomous_plc_delivery_workbench_selftest.html)。
+
+三项目全流程自测可由一个命令启动；第二轮通过 `-RepeatOf` 对输入 digest、步骤集合和 verdict 做机械比较：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_delivery_project_corpus.ps1
+```
+
+可复制的异常、修正和执行链同时记录在 [Markdown 报告](docs/reports/autonomous_plc_delivery_workbench_selftest.md)。
 
 ---
 

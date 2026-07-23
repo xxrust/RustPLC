@@ -1,9 +1,10 @@
 use super::{
     build_app, build_collab_event, build_geometry_export_args, build_plc_diagnostics,
-    build_plc_realtime_response, collab_comment_history, dsl_capabilities,
-    generate_plc_from_flowchart, get_geometry, get_keypoints, get_project_source, get_trace,
-    get_trace_range, internal_error, is_safe_collab_room, list_project_templates, new_run_id,
-    normalize_topology_tags_in_place, parse_plc_topology, plc_language_snapshot,
+    build_plc_realtime_response, collab_comment_history,
+    delivery::{current_evidence_digests, resolve_delivery_project_root},
+    dsl_capabilities, generate_plc_from_flowchart, get_geometry, get_keypoints, get_project_source,
+    get_trace, get_trace_range, internal_error, is_safe_collab_room, list_project_templates,
+    new_run_id, normalize_topology_tags_in_place, parse_plc_topology, plc_language_snapshot,
     record_collab_comment, resolve_artifact_reference, resolve_workspace_input, save_scenario,
     save_topology, trigger_no_board, validate_bind_security, validate_scenario_limits, AppState,
     CollabClientEvent, FlowchartEditorStep, FlowchartEditorTransition, FlowchartGeneratePlcRequest,
@@ -20,10 +21,20 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{RwLock, Semaphore};
 use tower::ServiceExt;
+
+use super::auth::UserRole;
+
+async fn response_json(response: axum::response::Response) -> Value {
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
+    serde_json::from_slice(&body).expect("response body should contain JSON")
+}
 
 fn find_component<'a>(payload: &'a Value, id: &str) -> &'a Value {
     payload["components"]
@@ -82,6 +93,9 @@ fn test_state_with_security(
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
     Arc::new(AppState {
+        auth: super::auth::AuthService::disabled(),
+        signatures: super::signatures::SignatureStore::new(&workspace_root),
+        physical_evidence: super::physical_evidence::PhysicalEvidenceStore::new(&workspace_root),
         workspace_root,
         runs: Arc::new(RwLock::new(runs)),
         collab_rooms: Arc::new(RwLock::new(std::collections::HashMap::new())),
@@ -139,6 +153,149 @@ async fn mutating_routes_require_configured_bearer_token() {
         .expect("request should build");
     let response = app.oneshot(request).await.expect("route response");
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn human_hold_signing_requires_session_role_commit_and_current_evidence() {
+    let workspace_root = temp_workspace_root("hold-signing");
+    let project_root = workspace_root
+        .join("delivery-projects")
+        .join("station-demo");
+    fs::create_dir_all(project_root.join("release"))
+        .expect("delivery fixture directory should exist");
+    fs::write(
+        project_root.join("delivery-project.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "project_id": "station.demo",
+            "delivery_layer": "station",
+            "source_commit": "deadbeef",
+            "artifact_roots": { "release": "release" },
+            "fixtures": {
+                "human_holds": { "fixture_ref": "release/human-holds.json" }
+            }
+        }))
+        .expect("manifest should serialize"),
+    )
+    .expect("manifest should be written");
+    fs::write(
+        project_root.join("release/human-holds.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "holds": [{
+                "hold_id": "wiring_review",
+                "required_role": "electrical_engineer",
+                "status": "human_action_required"
+            }]
+        }))
+        .expect("hold contract should serialize"),
+    )
+    .expect("hold contract should be written");
+
+    let mut state = test_state_with_security(
+        workspace_root,
+        std::collections::BTreeMap::new(),
+        Some("automation-token"),
+        2,
+    );
+    Arc::get_mut(&mut state)
+        .expect("test state should be uniquely owned")
+        .auth = super::auth::AuthService::for_test_user(
+        "electrical",
+        "correct",
+        UserRole::ElectricalEngineer,
+    );
+    let app = build_app(state);
+
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "username": "electrical", "password": "correct" }).to_string(),
+                ))
+                .expect("login request should build"),
+        )
+        .await
+        .expect("login route should respond");
+    assert_eq!(login.status(), StatusCode::OK);
+    let login = response_json(login).await;
+    let session = login["token"]
+        .as_str()
+        .expect("login should return a session token");
+
+    let signature_context = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/station.demo/holds/signatures")
+                .body(Body::empty())
+                .expect("signature context request should build"),
+        )
+        .await
+        .expect("signature context route should respond");
+    assert_eq!(signature_context.status(), StatusCode::OK);
+    let signature_context = response_json(signature_context).await;
+    let sign_body = json!({
+        "hold_type": "wiring_review",
+        "source_commit": "deadbeef",
+        "evidence_digests": signature_context["current_evidence_digests"],
+        "decision": "approve",
+        "comment": "wiring plan reviewed"
+    });
+
+    let automation_attempt = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/delivery-projects/station.demo/holds/wiring_review/sign")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer automation-token")
+                .body(Body::from(sign_body.to_string()))
+                .expect("automation signature request should build"),
+        )
+        .await
+        .expect("automation signature route should respond");
+    assert_eq!(automation_attempt.status(), StatusCode::UNAUTHORIZED);
+
+    let signed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/delivery-projects/station.demo/holds/wiring_review/sign")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {session}"))
+                .body(Body::from(sign_body.to_string()))
+                .expect("human signature request should build"),
+        )
+        .await
+        .expect("human signature route should respond");
+    assert_eq!(signed.status(), StatusCode::CREATED);
+    let signed = response_json(signed).await;
+    assert_eq!(signed["user"]["role"], "electrical_engineer");
+    assert_eq!(signed["decision"], "approve");
+
+    fs::write(
+        project_root.join("release/observed-change.txt"),
+        "changed evidence",
+    )
+    .expect("changed evidence should be written");
+    let signatures = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/station.demo/holds/signatures")
+                .body(Body::empty())
+                .expect("signature list request should build"),
+        )
+        .await
+        .expect("signature list route should respond");
+    let signatures = response_json(signatures).await;
+    assert_eq!(signatures["signatures"][0]["stale"], true);
 }
 
 #[tokio::test]
@@ -1614,4 +1771,825 @@ async fn get_keypoints_returns_empty_payload_when_artifact_is_missing() {
         .expect("keypoints endpoint should return fallback payload");
     assert_eq!(payload["tick_ms"], json!(10));
     assert_eq!(payload["keypoints"], json!([]));
+}
+
+fn write_delivery_project_fixture(workspace_root: &std::path::Path) {
+    let project_root = workspace_root.join("delivery-projects/demo-line");
+    fs::create_dir_all(project_root.join("plc")).expect("PLC directory should exist");
+    fs::create_dir_all(project_root.join("out/agent-runs/run-1/compile"))
+        .expect("run compile directory should exist");
+    fs::create_dir_all(project_root.join("out/agent-runs/run-1/project-check"))
+        .expect("project-check directory should exist");
+    fs::create_dir_all(project_root.join("out/wiring")).expect("wiring directory should exist");
+    fs::create_dir_all(project_root.join("release")).expect("release directory should exist");
+
+    fs::write(
+        project_root.join("delivery-project.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "project_id": "line.demo",
+            "delivery_layer": "line",
+            "source_commit": "0123456789abcdef",
+            "source_entry": "plc/main.bundle.toml",
+            "system_contract": "plc/main.system.md",
+            "artifact_roots": {
+                "agent_runs": "out/agent-runs",
+                "wiring": "out/wiring",
+                "release": "release"
+            },
+            "fixtures": {
+                "human_holds": { "fixture_ref": "release/human-holds.json" }
+            }
+        }))
+        .expect("manifest should serialize"),
+    )
+    .expect("manifest should be written");
+    fs::write(
+        project_root.join("plc/main.bundle.toml"),
+        "schema_version = 1\n",
+    )
+    .expect("source entry should be written");
+    fs::write(
+        project_root.join("plc/main.system.md"),
+        "# Demo delivery system\n",
+    )
+    .expect("system contract should be written");
+    fs::write(project_root.join("plc/trace.jsonl"), "{\"tick\":1}\n")
+        .expect("trace fixture should be written");
+    fs::write(
+        project_root.join("out/agent-runs/run-1/input-manifest.json"),
+        "{\"schema_version\":1}\n",
+    )
+    .expect("input manifest should be written");
+    fs::write(
+        project_root.join("out/agent-runs/run-1/result.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "run_id": "run-1",
+            "harness_execution_id": "run-1",
+            "artifact_root": "out/agent-runs/run-1",
+            "git_head": "0123456789abcdef",
+            "status": { "delivery": "pass" },
+            "inputs": { "manifest": "out/agent-runs/run-1/input-manifest.json" },
+            "digests": { "input_manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000" },
+            "steps": [{
+                "name": "compile_verify",
+                "classification": "pass",
+                "exit_code": 0,
+                "elapsed_ms": 12,
+                "artifacts": ["out/agent-runs/run-1/compile/verification_report.json"]
+            }],
+            "known_gaps": [{
+                "id": "GAP-DEMO",
+                "layer": "runtime",
+                "classification": "code-gap",
+                "evidence": "fixture blocker"
+            }]
+        }))
+        .expect("result should serialize"),
+    )
+    .expect("result should be written");
+    fs::write(
+        project_root.join("out/agent-runs/run-1/compile/verification_report.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "verification": {
+                "safety": {
+                    "level": "pass",
+                    "warnings": [{ "level": "warn", "message": "fixture warning" }],
+                    "checked_rules": 1,
+                    "skipped_rules": 0
+                }
+            }
+        }))
+        .expect("verification report should serialize"),
+    )
+    .expect("verification report should be written");
+    fs::write(
+        project_root.join("out/agent-runs/run-1/project-check/project_check_report.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "status": "pass",
+            "steps": [{
+                "name": "intent_alignment",
+                "status": "pass",
+                "exit_code": 0
+            }]
+        }))
+        .expect("project check should serialize"),
+    )
+    .expect("project check should be written");
+    fs::write(
+        project_root.join("out/wiring/wiring.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "rows": [{
+                "point_id": "plc_main.X0",
+                "alias": "start_cycle_cmd",
+                "channel": "X0",
+                "direction": "input",
+                "device_terminal": "start_button.out",
+                "signal_type": "digital",
+                "safe_state": null,
+                "status": "human_action_required"
+            }]
+        }))
+        .expect("wiring should serialize"),
+    )
+    .expect("wiring should be written");
+    fs::write(
+        project_root.join("release/human-holds.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "project_id": "line.demo",
+            "source_commit": "0123456789abcdef",
+            "holds": [
+                { "hold_id": "wiring_review", "required_role": "electrical_engineer", "status": "human_action_required" },
+                { "hold_id": "point_check_completion", "required_role": "commissioning_engineer", "status": "human_action_required" },
+                { "hold_id": "safety_review", "required_role": "safety_reviewer", "status": "human_action_required" },
+                { "hold_id": "hil_review", "required_role": "commissioning_engineer", "status": "human_action_required" },
+                { "hold_id": "release_approval", "required_role": "release_approver", "status": "human_action_required" }
+            ]
+        }))
+        .expect("hold contract should serialize"),
+    )
+    .expect("hold contract should be written");
+}
+
+fn delivery_state_with_user(workspace_root: PathBuf, role: UserRole) -> Arc<AppState> {
+    let mut state = test_state(workspace_root, BTreeMap::new());
+    Arc::get_mut(&mut state)
+        .expect("test state should be uniquely owned")
+        .auth = super::auth::AuthService::for_test_user("reviewer", "correct", role);
+    state
+}
+
+async fn login_delivery_reviewer(app: &axum::Router) -> String {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "username": "reviewer", "password": "correct" }).to_string(),
+                ))
+                .expect("login request should build"),
+        )
+        .await
+        .expect("login route should respond");
+    assert_eq!(response.status(), StatusCode::OK);
+    response_json(response).await["token"]
+        .as_str()
+        .expect("login response should contain a token")
+        .to_string()
+}
+
+async fn sign_delivery_hold(app: &axum::Router, token: &str, hold_id: &str) -> Value {
+    let context = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/holds/signatures")
+                .body(Body::empty())
+                .expect("signature context request should build"),
+        )
+        .await
+        .expect("signature context should respond");
+    assert_eq!(context.status(), StatusCode::OK);
+    let context = response_json(context).await;
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/delivery-projects/line.demo/holds/{hold_id}/sign"
+                ))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "hold_type": hold_id,
+                        "source_commit": "0123456789abcdef",
+                        "evidence_digests": context["current_evidence_digests"],
+                        "decision": "approve",
+                        "comment": format!("approved {hold_id}")
+                    })
+                    .to_string(),
+                ))
+                .expect("signature request should build"),
+        )
+        .await
+        .expect("signature route should respond");
+    assert_eq!(response.status(), StatusCode::CREATED, "hold {hold_id}");
+    response_json(response).await
+}
+
+fn run_git(workspace_root: &std::path::Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(workspace_root)
+        .output()
+        .expect("git should start");
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn find_hold<'a>(payload: &'a Value, hold_id: &str) -> &'a Value {
+    payload["holds"]
+        .as_array()
+        .and_then(|holds| {
+            holds
+                .iter()
+                .find(|hold| hold.get("hold_id").and_then(Value::as_str) == Some(hold_id))
+        })
+        .expect("hold should exist")
+}
+
+#[tokio::test]
+async fn delivery_routes_aggregate_manifest_runs_and_evidence() {
+    let workspace_root = temp_workspace_root("delivery-routes");
+    write_delivery_project_fixture(&workspace_root);
+    let state = test_state(workspace_root.clone(), BTreeMap::new());
+    let app = build_app(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("list response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload["projects"][0]["project_id"], json!("line.demo"));
+    assert_eq!(
+        payload["projects"][0]["evidence_status"]["state"],
+        json!("stale")
+    );
+
+    let endpoints = [
+        "/api/delivery-projects/line.demo",
+        "/api/delivery-projects/line.demo/runs",
+        "/api/delivery-projects/line.demo/runs/run-1",
+        "/api/delivery-projects/line.demo/wiring",
+        "/api/delivery-projects/line.demo/verification",
+        "/api/delivery-projects/line.demo/evidence",
+        "/api/workspace/problems",
+        "/api/workspace/tests",
+    ];
+    for endpoint in endpoints {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(endpoint)
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("delivery route response");
+        assert_eq!(response.status(), StatusCode::OK, "endpoint {endpoint}");
+        let payload = response_json(response).await;
+        assert_eq!(payload["schema_version"], json!(1), "endpoint {endpoint}");
+    }
+
+    let resolved = resolve_delivery_project_root(&workspace_root, "line.demo")
+        .expect("project root should resolve");
+    assert_eq!(
+        resolved,
+        workspace_root
+            .join("delivery-projects/demo-line")
+            .canonicalize()
+            .expect("fixture project root should canonicalize")
+    );
+    let digests = current_evidence_digests(&workspace_root, "line.demo")
+        .expect("current evidence digests should resolve");
+    assert!(digests
+        .keys()
+        .any(|path| path.ends_with("delivery-project.json")));
+    assert!(digests
+        .values()
+        .all(|digest| digest.len() == 64 && digest.chars().all(|ch| ch.is_ascii_hexdigit())));
+}
+
+#[tokio::test]
+async fn physical_evidence_is_attributable_append_only_and_gates_release() {
+    let workspace_root = temp_workspace_root("physical-evidence");
+    write_delivery_project_fixture(&workspace_root);
+
+    let engineer_app = build_app(delivery_state_with_user(
+        workspace_root.clone(),
+        UserRole::Engineer,
+    ));
+    let engineer_token = login_delivery_reviewer(&engineer_app).await;
+    let forbidden = engineer_app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/delivery-projects/line.demo/wiring/points/plc_main.X0/observations")
+                .header(header::AUTHORIZATION, format!("Bearer {engineer_token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "status": "pass", "note": "not authorized" }).to_string(),
+                ))
+                .expect("observation request should build"),
+        )
+        .await
+        .expect("observation route should respond");
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    let app = build_app(delivery_state_with_user(
+        workspace_root.clone(),
+        UserRole::Admin,
+    ));
+    let unauthenticated_upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/delivery-projects/line.demo/evidence/uploads/point.png")
+                .header("x-evidence-kind", "photo")
+                .body(Body::from("image"))
+                .expect("upload request should build"),
+        )
+        .await
+        .expect("upload route should respond");
+    assert_eq!(unauthenticated_upload.status(), StatusCode::UNAUTHORIZED);
+
+    let token = login_delivery_reviewer(&app).await;
+    let upload = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/delivery-projects/line.demo/evidence/uploads/point.png")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "image/png")
+                .header("x-evidence-kind", "photo")
+                .header("x-semantic-object-kind", "wiring_point")
+                .header("x-semantic-object-id", "plc_main.X0")
+                .body(Body::from("binary-photo-content"))
+                .expect("upload request should build"),
+        )
+        .await
+        .expect("upload route should respond");
+    assert_eq!(upload.status(), StatusCode::CREATED);
+    let upload = response_json(upload).await;
+    assert_eq!(upload["size_bytes"], json!(20));
+    assert_eq!(upload["deep_link"]["kind"], "delivery_deep_link");
+    assert_eq!(
+        upload["deep_link"]["source"]["artifact"],
+        upload["artifact_ref"]
+    );
+    assert_eq!(upload["deep_link"]["object"]["id"], "plc_main.X0");
+
+    sign_delivery_hold(&app, &token, "wiring_review").await;
+
+    let unsafe_trace = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/delivery-projects/line.demo/wiring/points/plc_main.X0/observations")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "status": "pass", "trace_ref": "../outside.jsonl" }).to_string(),
+                ))
+                .expect("unsafe trace request should build"),
+        )
+        .await
+        .expect("unsafe trace route should respond");
+    assert_eq!(unsafe_trace.status(), StatusCode::BAD_REQUEST);
+
+    let observation = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/delivery-projects/line.demo/wiring/points/plc_main.X0/observations")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "status": "pass",
+                        "measurement": {
+                            "value": "24.1",
+                            "unit": "VDC",
+                            "instrument_id": "DMM-01"
+                        },
+                        "photo_upload_id": upload["upload_id"],
+                        "trace_ref": "delivery-projects/demo-line/plc/trace.jsonl",
+                        "note": "input toggled and returned to safe state"
+                    })
+                    .to_string(),
+                ))
+                .expect("observation request should build"),
+        )
+        .await
+        .expect("observation route should respond");
+    assert_eq!(observation.status(), StatusCode::CREATED);
+    let observation = response_json(observation).await;
+    assert_eq!(observation["measurement"]["value"], "24.1");
+    assert_eq!(observation["photo_upload_id"], upload["upload_id"]);
+    assert_eq!(observation["user"]["role"], "admin");
+    assert_eq!(observation["trace_sha256"].as_str().map(str::len), Some(64));
+
+    fs::create_dir_all(workspace_root.join("delivery-projects/other"))
+        .expect("other project directory should be created");
+    fs::write(
+        workspace_root.join("delivery-projects/other/trace.jsonl"),
+        "{\"tick\":2}\n",
+    )
+    .expect("other project trace should be written");
+    let cross_project_trace = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/delivery-projects/line.demo/wiring/points/plc_main.X0/observations")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "status": "pass",
+                        "trace_ref": "delivery-projects/other/trace.jsonl"
+                    })
+                    .to_string(),
+                ))
+                .expect("cross-project trace request should build"),
+        )
+        .await
+        .expect("cross-project trace route should respond");
+    assert_eq!(cross_project_trace.status(), StatusCode::BAD_REQUEST);
+
+    let physical = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/physical-evidence")
+                .body(Body::empty())
+                .expect("physical evidence request should build"),
+        )
+        .await
+        .expect("physical evidence route should respond");
+    let physical = response_json(physical).await;
+    assert_eq!(physical["observations"].as_array().map(Vec::len), Some(1));
+    assert_eq!(physical["uploads"].as_array().map(Vec::len), Some(1));
+    assert_eq!(physical["point_checks"]["summary"]["observed_points"], 1);
+    assert_eq!(physical["point_checks"]["points"][0]["status"], "observed");
+
+    let ui_wiring = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/wiring")
+                .body(Body::empty())
+                .expect("UI wiring request should build"),
+        )
+        .await
+        .expect("UI wiring route should respond");
+    let ui_wiring = response_json(ui_wiring).await;
+    assert_eq!(ui_wiring["points"][0]["point_check_status"], "observed");
+    assert_eq!(
+        ui_wiring["points"][0]["deep_link"]["object"]["kind"],
+        "wiring_point"
+    );
+
+    let ui_project = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo")
+                .body(Body::empty())
+                .expect("UI project request should build"),
+        )
+        .await
+        .expect("UI project route should respond");
+    let ui_project = response_json(ui_project).await;
+    let ui_wiring_hold = ui_project["human_holds"]
+        .as_array()
+        .and_then(|holds| holds.iter().find(|hold| hold["hold_id"] == "wiring_review"))
+        .expect("UI wiring hold should exist");
+    assert_eq!(ui_wiring_hold["status"], "stale");
+    assert_eq!(ui_project["release_verdict"], "blocked");
+
+    let holds = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/holds")
+                .body(Body::empty())
+                .expect("holds request should build"),
+        )
+        .await
+        .expect("holds route should respond");
+    let holds = response_json(holds).await;
+    assert_eq!(find_hold(&holds, "wiring_review")["status"], "stale");
+    assert_eq!(
+        find_hold(&holds, "point_check_completion")["point_check_summary"]["remaining_points"],
+        0
+    );
+
+    for hold_id in [
+        "wiring_review",
+        "point_check_completion",
+        "safety_review",
+        "hil_review",
+    ] {
+        sign_delivery_hold(&app, &token, hold_id).await;
+    }
+    let unreleasable_status = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/release")
+                .body(Body::empty())
+                .expect("unreleasable status request should build"),
+        )
+        .await
+        .expect("unreleasable status route should respond");
+    let unreleasable_status = response_json(unreleasable_status).await;
+    assert_eq!(unreleasable_status["status"], "blocked");
+    assert_eq!(
+        unreleasable_status["delivery_status_gate"]["error_code"],
+        "DELIVERY_STATUS_NOT_RELEASABLE"
+    );
+
+    let manifest_path = workspace_root.join("delivery-projects/demo-line/delivery-project.json");
+    let mut manifest: Value = serde_json::from_slice(
+        &fs::read(&manifest_path).expect("delivery manifest should be readable"),
+    )
+    .expect("delivery manifest should parse");
+    manifest["delivery_status"] = json!("fail");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).expect("failed delivery manifest should serialize"),
+    )
+    .expect("failed delivery manifest should update");
+    for hold_id in [
+        "wiring_review",
+        "point_check_completion",
+        "safety_review",
+        "hil_review",
+    ] {
+        sign_delivery_hold(&app, &token, hold_id).await;
+    }
+    let failed_delivery = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/release")
+                .body(Body::empty())
+                .expect("failed delivery request should build"),
+        )
+        .await
+        .expect("failed delivery route should respond");
+    let failed_delivery = response_json(failed_delivery).await;
+    assert_eq!(failed_delivery["status"], "blocked");
+    assert_eq!(failed_delivery["delivery_status"], "fail");
+
+    manifest["delivery_status"] = json!("current");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).expect("delivery manifest should serialize"),
+    )
+    .expect("delivery manifest should update");
+    for hold_id in [
+        "wiring_review",
+        "point_check_completion",
+        "safety_review",
+        "hil_review",
+    ] {
+        sign_delivery_hold(&app, &token, hold_id).await;
+    }
+    let release_ready = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/release")
+                .body(Body::empty())
+                .expect("release request should build"),
+        )
+        .await
+        .expect("release route should respond");
+    let release_ready = response_json(release_ready).await;
+    assert_eq!(release_ready["status"], "human_action_required");
+    assert_eq!(
+        release_ready["blocked_prerequisites"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+
+    sign_delivery_hold(&app, &token, "release_approval").await;
+    let approved = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/release")
+                .body(Body::empty())
+                .expect("approved release request should build"),
+        )
+        .await
+        .expect("approved release route should respond");
+    assert_eq!(response_json(approved).await["status"], "release_approved");
+
+    fs::write(
+        workspace_root.join("delivery-projects/demo-line/plc/trace.jsonl"),
+        "{\"tick\":1,\"changed\":true}\n",
+    )
+    .expect("referenced trace should change");
+
+    let blocked = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/release")
+                .body(Body::empty())
+                .expect("blocked release request should build"),
+        )
+        .await
+        .expect("blocked release route should respond");
+    let blocked = response_json(blocked).await;
+    assert_eq!(blocked["status"], "blocked");
+    assert_eq!(find_hold(&blocked, "release_approval")["status"], "stale");
+
+    let traversal_upload = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/delivery-projects/line.demo/evidence/uploads/%2E%2E%5Cescape.bin")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header("x-evidence-kind", "other")
+                .body(Body::from("escape"))
+                .expect("traversal upload request should build"),
+        )
+        .await
+        .expect("traversal upload route should respond");
+    assert_eq!(traversal_upload.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn workspace_tests_share_local_ci_schema_and_report_git_dirty_state() {
+    let workspace_root = temp_workspace_root("delivery-git-ci");
+    write_delivery_project_fixture(&workspace_root);
+    run_git(&workspace_root, &["init"]);
+    run_git(
+        &workspace_root,
+        &["config", "user.email", "codex@example.invalid"],
+    );
+    run_git(&workspace_root, &["config", "user.name", "Codex Test"]);
+    run_git(&workspace_root, &["add", "."]);
+    run_git(&workspace_root, &["commit", "-m", "fixture"]);
+    fs::write(workspace_root.join("dirty-marker.txt"), "dirty\n")
+        .expect("dirty marker should be written");
+
+    let app = build_app(test_state(workspace_root.clone(), BTreeMap::new()));
+    let projects = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects")
+                .body(Body::empty())
+                .expect("projects request should build"),
+        )
+        .await
+        .expect("projects route should respond");
+    let projects = response_json(projects).await;
+    assert_eq!(
+        projects["projects"][0]["workspace_git"]["status"],
+        "current"
+    );
+    assert_eq!(projects["projects"][0]["workspace_git"]["dirty"], true);
+    assert!(projects["projects"][0]["workspace_git"]["changed_paths"]
+        .as_array()
+        .is_some_and(|paths| paths.iter().any(|path| path == "dirty-marker.txt")));
+
+    let tests = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/workspace/tests")
+                .body(Body::empty())
+                .expect("tests request should build"),
+        )
+        .await
+        .expect("tests route should respond");
+    let tests = response_json(tests).await;
+    assert!(tests["tests"].as_array().is_some_and(|records| {
+        records.iter().any(|record| {
+            record["execution_source"] == "local"
+                && record["deep_link"]["object"]["kind"] == "test"
+                && record["artifact_ref"].as_str().is_some()
+                && record.get("freshness").is_some()
+        })
+    }));
+    let ci_source = tests["sources"]
+        .as_array()
+        .and_then(|sources| {
+            sources.iter().find(|source| {
+                source["project_id"] == "line.demo" && source["execution_source"] == "ci"
+            })
+        })
+        .expect("CI source status should be present");
+    assert_eq!(ci_source["status"], "unavailable");
+    assert_eq!(
+        ci_source["freshness"]["error_code"],
+        "CI_TEST_EVIDENCE_UNAVAILABLE"
+    );
+
+    let problems = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/workspace/problems")
+                .body(Body::empty())
+                .expect("problems request should build"),
+        )
+        .await
+        .expect("problems route should respond");
+    let problems = response_json(problems).await;
+    assert!(problems["problems"].as_array().is_some_and(|records| {
+        records.iter().any(|record| {
+            record["project_id"] == "line.demo"
+                && record["deep_link"]["object"]["kind"] == "problem"
+                && record["source_ref"].as_str().is_some()
+        })
+    }));
+
+    let project_root = workspace_root.join("delivery-projects/demo-line");
+    fs::create_dir_all(project_root.join("out/ci")).expect("CI artifact root should be created");
+    fs::write(
+        project_root.join("out/ci/tests.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "run_id": "ci-1",
+            "source_commit": "0123456789abcdef",
+            "steps": [{
+                "name": "cargo_test_web_server",
+                "classification": "pass",
+                "exit_code": 0,
+                "elapsed_ms": 42,
+                "artifacts": []
+            }]
+        }))
+        .expect("CI test result should serialize"),
+    )
+    .expect("CI test result should be written");
+    let manifest_path = project_root.join("delivery-project.json");
+    let mut manifest: Value =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("manifest should be readable"))
+            .expect("manifest should parse");
+    manifest["artifact_roots"]["ci"] = json!("out/ci");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).expect("manifest should serialize"),
+    )
+    .expect("manifest should update");
+
+    let ci_tests = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/workspace/tests")
+                .body(Body::empty())
+                .expect("CI tests request should build"),
+        )
+        .await
+        .expect("CI tests route should respond");
+    let ci_tests = response_json(ci_tests).await;
+    assert!(ci_tests["tests"].as_array().is_some_and(|records| {
+        records.iter().any(|record| {
+            record["execution_source"] == "ci"
+                && record["name"] == "cargo_test_web_server"
+                && record["freshness"]["state"] == "current"
+                && record["deep_link"]["source"]["artifact"]
+                    == "delivery-projects/demo-line/out/ci/tests.json"
+        })
+    }));
+    assert!(ci_tests["sources"].as_array().is_some_and(|sources| {
+        sources.iter().any(|source| {
+            source["project_id"] == "line.demo"
+                && source["execution_source"] == "ci"
+                && source["status"] == "available"
+        })
+    }));
+}
+
+#[test]
+fn delivery_project_root_rejects_unsafe_ids() {
+    let workspace_root = temp_workspace_root("delivery-id-reject");
+    write_delivery_project_fixture(&workspace_root);
+    assert!(resolve_delivery_project_root(&workspace_root, "../line.demo").is_err());
+    assert!(current_evidence_digests(&workspace_root, "line/demo").is_err());
 }

@@ -1,0 +1,473 @@
+schema_version = 1
+policy = "opportunistic_admission"
+
+# Authored scheduling contract repaired against the frozen process intent.
+# `operation-model` v3 was used only as an audit scaffold to obtain current
+# semantic contract keys after the task flow was corrected. The remaining
+# OP-003 is a declared checker limitation for transform-carrier semantics.
+
+[[operation_classes]]
+key = "finish:good_outfeed:finished"
+operation_ids = ["load_unload.finish_slot1.op27"]
+source_patterns = ["good_outfeed"]
+effect_kinds = ["Finish"]
+
+[[operation_classes]]
+key = "finish:good_outfeed:finished+move:Unmount:shuttle_tray.slot[*]->load_nest"
+operation_ids = ["load_unload.finish_slot0_and_unmount_slot1.op25"]
+source_patterns = [
+    "good_outfeed",
+    "shuttle_tray.slot[*]",
+]
+destination_patterns = ["load_nest"]
+effect_kinds = [
+    "Finish",
+    "Unmount",
+]
+
+[[operation_classes]]
+key = "move:Acquire:raw_infeed.slot[*]->load_gripper"
+operation_ids = [
+    "load_unload.acquire_slot0.op18",
+    "load_unload.acquire_slot1.op20",
+]
+source_patterns = ["raw_infeed.slot[*]"]
+destination_patterns = ["load_gripper"]
+effect_kinds = ["Acquire"]
+
+[[operation_classes]]
+key = "move:Transfer:load_gripper->shuttle_tray.slot[*]+mount:insert_part:shuttle_tray.slot[*]"
+operation_ids = [
+    "load_unload.mount_slot0.op19",
+    "load_unload.mount_slot1.op21",
+]
+source_patterns = ["load_gripper"]
+destination_patterns = ["shuttle_tray.slot[*]"]
+effect_kinds = [
+    "Mount",
+    "Transfer",
+]
+
+[[operation_classes]]
+key = "move:Transfer:load_nest->good_outfeed"
+operation_ids = [
+    "load_unload.transfer_slot0.op24",
+    "load_unload.transfer_slot1.op26",
+]
+source_patterns = ["load_nest"]
+destination_patterns = ["good_outfeed"]
+effect_kinds = ["Transfer"]
+
+[[operation_classes]]
+key = "move:Unmount:shuttle_tray.slot[*]->load_nest"
+operation_ids = ["load_unload.unmount_slot0.op23"]
+source_patterns = ["shuttle_tray.slot[*]"]
+destination_patterns = ["load_nest"]
+effect_kinds = ["Unmount"]
+
+[[operation_classes]]
+key = "transform_carrier:shuttle_tray:pressed"
+operation_ids = ["press_process.mark_carrier_pressed.op37"]
+effect_kinds = ["TransformCarrier"]
+
+[[operations]]
+id = "load_unload.acquire_slot0.op18"
+contract_key = 'effects=[WorkpieceMove { effect: Acquire, from: "raw_infeed.slot[0]", to: "load_gripper" }];admissions=[dest:load_gripper|source:raw_infeed.slot[0]];resources=[]'
+operation_class = "move:Acquire:raw_infeed.slot[*]->load_gripper"
+task_name = "load_unload"
+step_name = "acquire_slot0"
+
+[operations.from_state]
+task_name = "load_unload"
+step_name = "acquire_slot0"
+
+[operations.to_state]
+task_name = "load_unload"
+step_name = "mount_slot0"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "raw_infeed.slot[0]"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "load_gripper"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "acquire"
+from = "raw_infeed.slot[0]"
+to = "load_gripper"
+
+[[operations]]
+id = "load_unload.mount_slot0.op19"
+contract_key = 'effects=[WorkpieceMount { workpiece_type: "insert_part", slot: "shuttle_tray.slot[0]" }|WorkpieceMove { effect: Transfer, from: "load_gripper", to: "shuttle_tray.slot[0]" }];admissions=[dest:shuttle_tray.slot[0]|source:load_gripper];resources=[]'
+operation_class = "move:Transfer:load_gripper->shuttle_tray.slot[*]+mount:insert_part:shuttle_tray.slot[*]"
+task_name = "load_unload"
+step_name = "mount_slot0"
+
+[operations.from_state]
+task_name = "load_unload"
+step_name = "mount_slot0"
+
+[operations.to_state]
+task_name = "load_unload"
+step_name = "acquire_slot1"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "load_gripper"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "shuttle_tray.slot[0]"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "load_gripper"
+to = "shuttle_tray.slot[0]"
+
+[[operations.effects]]
+kind = "workpiece_mount"
+workpiece_type = "insert_part"
+slot = "shuttle_tray.slot[0]"
+
+[[operations.program_predecessors]]
+operation_id = "load_unload.acquire_slot0.op18"
+justified = true
+
+[operations.program_predecessors.reason]
+kind = "shared_endpoint"
+endpoint = "load_gripper"
+
+[[operations]]
+id = "load_unload.acquire_slot1.op20"
+contract_key = 'effects=[WorkpieceMove { effect: Acquire, from: "raw_infeed.slot[1]", to: "load_gripper" }];admissions=[dest:load_gripper|source:raw_infeed.slot[1]];resources=[]'
+operation_class = "move:Acquire:raw_infeed.slot[*]->load_gripper"
+task_name = "load_unload"
+step_name = "acquire_slot1"
+
+[operations.from_state]
+task_name = "load_unload"
+step_name = "acquire_slot1"
+
+[operations.to_state]
+task_name = "load_unload"
+step_name = "mount_slot1"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "raw_infeed.slot[1]"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "load_gripper"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "acquire"
+from = "raw_infeed.slot[1]"
+to = "load_gripper"
+
+[[operations.program_predecessors]]
+operation_id = "load_unload.mount_slot0.op19"
+justified = true
+
+[operations.program_predecessors.reason]
+kind = "shared_endpoint"
+endpoint = "load_gripper"
+
+[[operations]]
+id = "load_unload.mount_slot1.op21"
+contract_key = 'effects=[WorkpieceMount { workpiece_type: "insert_part", slot: "shuttle_tray.slot[1]" }|WorkpieceMove { effect: Transfer, from: "load_gripper", to: "shuttle_tray.slot[1]" }];admissions=[dest:shuttle_tray.slot[1]|source:load_gripper];resources=[]'
+operation_class = "move:Transfer:load_gripper->shuttle_tray.slot[*]+mount:insert_part:shuttle_tray.slot[*]"
+task_name = "load_unload"
+step_name = "mount_slot1"
+
+[operations.from_state]
+task_name = "load_unload"
+step_name = "mount_slot1"
+
+[operations.to_state]
+task_name = "load_unload"
+step_name = "wait_returned_load"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "load_gripper"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "shuttle_tray.slot[1]"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "load_gripper"
+to = "shuttle_tray.slot[1]"
+
+[[operations.effects]]
+kind = "workpiece_mount"
+workpiece_type = "insert_part"
+slot = "shuttle_tray.slot[1]"
+
+[[operations.program_predecessors]]
+operation_id = "load_unload.acquire_slot1.op20"
+justified = true
+
+[operations.program_predecessors.reason]
+kind = "shared_endpoint"
+endpoint = "load_gripper"
+
+[[operations]]
+id = "load_unload.unmount_slot0.op23"
+contract_key = 'effects=[WorkpieceMove { effect: Unmount, from: "shuttle_tray.slot[0]", to: "load_nest" }];admissions=[dest:load_nest|source:shuttle_tray.slot[0]];resources=[]'
+operation_class = "move:Unmount:shuttle_tray.slot[*]->load_nest"
+task_name = "load_unload"
+step_name = "unmount_slot0"
+
+[operations.from_state]
+task_name = "load_unload"
+step_name = "unmount_slot0"
+
+[operations.to_state]
+task_name = "load_unload"
+step_name = "transfer_slot0"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "shuttle_tray.slot[0]"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "load_nest"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "unmount"
+from = "shuttle_tray.slot[0]"
+to = "load_nest"
+
+[[operations]]
+id = "load_unload.transfer_slot0.op24"
+contract_key = 'effects=[WorkpieceMove { effect: Transfer, from: "load_nest", to: "good_outfeed" }];admissions=[dest:good_outfeed|source:load_nest];resources=[]'
+operation_class = "move:Transfer:load_nest->good_outfeed"
+task_name = "load_unload"
+step_name = "transfer_slot0"
+
+[operations.from_state]
+task_name = "load_unload"
+step_name = "transfer_slot0"
+
+[operations.to_state]
+task_name = "load_unload"
+step_name = "finish_slot0_and_unmount_slot1"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "load_nest"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "good_outfeed"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "load_nest"
+to = "good_outfeed"
+
+[[operations.program_predecessors]]
+operation_id = "load_unload.unmount_slot0.op23"
+justified = true
+
+[operations.program_predecessors.reason]
+kind = "shared_endpoint"
+endpoint = "load_nest"
+
+[[operations]]
+id = "load_unload.finish_slot0_and_unmount_slot1.op25"
+contract_key = 'effects=[WorkpieceFinish { at: "good_outfeed", terminal_state: "finished" }|WorkpieceMove { effect: Unmount, from: "shuttle_tray.slot[1]", to: "load_nest" }];admissions=[dest:load_nest|source:good_outfeed|source:shuttle_tray.slot[1]];resources=[]'
+operation_class = "finish:good_outfeed:finished+move:Unmount:shuttle_tray.slot[*]->load_nest"
+task_name = "load_unload"
+step_name = "finish_slot0_and_unmount_slot1"
+
+[operations.from_state]
+task_name = "load_unload"
+step_name = "finish_slot0_and_unmount_slot1"
+
+[operations.to_state]
+task_name = "load_unload"
+step_name = "transfer_slot1"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "good_outfeed"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "shuttle_tray.slot[1]"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "load_nest"
+
+[[operations.effects]]
+kind = "workpiece_finish"
+at = "good_outfeed"
+terminal_state = "finished"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "unmount"
+from = "shuttle_tray.slot[1]"
+to = "load_nest"
+
+[[operations.program_predecessors]]
+operation_id = "load_unload.transfer_slot0.op24"
+justified = true
+
+[operations.program_predecessors.reason]
+kind = "shared_endpoint"
+endpoint = "good_outfeed"
+
+[[operations.program_predecessors]]
+operation_id = "load_unload.transfer_slot0.op24"
+justified = true
+
+[operations.program_predecessors.reason]
+kind = "shared_endpoint"
+endpoint = "load_nest"
+
+[[operations]]
+id = "load_unload.transfer_slot1.op26"
+contract_key = 'effects=[WorkpieceMove { effect: Transfer, from: "load_nest", to: "good_outfeed" }];admissions=[dest:good_outfeed|source:load_nest];resources=[]'
+operation_class = "move:Transfer:load_nest->good_outfeed"
+task_name = "load_unload"
+step_name = "transfer_slot1"
+
+[operations.from_state]
+task_name = "load_unload"
+step_name = "transfer_slot1"
+
+[operations.to_state]
+task_name = "load_unload"
+step_name = "finish_slot1"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "load_nest"
+
+[[operations.admissions]]
+kind = "destination_has_capacity"
+endpoint = "good_outfeed"
+
+[[operations.effects]]
+kind = "workpiece_move"
+effect = "transfer"
+from = "load_nest"
+to = "good_outfeed"
+
+[[operations.program_predecessors]]
+operation_id = "load_unload.finish_slot0_and_unmount_slot1.op25"
+justified = true
+
+[operations.program_predecessors.reason]
+kind = "shared_endpoint"
+endpoint = "good_outfeed"
+
+[[operations.program_predecessors]]
+operation_id = "load_unload.finish_slot0_and_unmount_slot1.op25"
+justified = true
+
+[operations.program_predecessors.reason]
+kind = "shared_endpoint"
+endpoint = "load_nest"
+
+[[operations]]
+id = "load_unload.finish_slot1.op27"
+contract_key = 'effects=[WorkpieceFinish { at: "good_outfeed", terminal_state: "finished" }];admissions=[source:good_outfeed];resources=[]'
+operation_class = "finish:good_outfeed:finished"
+task_name = "load_unload"
+step_name = "finish_slot1"
+
+[operations.from_state]
+task_name = "load_unload"
+step_name = "finish_slot1"
+
+[operations.to_state]
+task_name = "load_unload"
+step_name = "hold_batch_complete"
+
+[operations.guard]
+kind = "always"
+
+[[operations.admissions]]
+kind = "source_available"
+endpoint = "good_outfeed"
+
+[[operations.effects]]
+kind = "workpiece_finish"
+at = "good_outfeed"
+terminal_state = "finished"
+
+[[operations.program_predecessors]]
+operation_id = "load_unload.transfer_slot1.op26"
+justified = true
+
+[operations.program_predecessors.reason]
+kind = "shared_endpoint"
+endpoint = "good_outfeed"
+
+[[operations]]
+id = "press_process.mark_carrier_pressed.op37"
+contract_key = 'effects=[WorkpieceTransformCarrier { carrier: "shuttle_tray", frame: "pressed" }];admissions=[];resources=[]'
+operation_class = "transform_carrier:shuttle_tray:pressed"
+task_name = "press_process"
+step_name = "mark_carrier_pressed"
+
+[operations.from_state]
+task_name = "press_process"
+step_name = "mark_carrier_pressed"
+
+[operations.to_state]
+task_name = "press_process"
+step_name = "hold_press_complete"
+
+[operations.guard]
+kind = "always"
+
+[[operations.effects]]
+kind = "workpiece_transform_carrier"
+carrier = "shuttle_tray"
+frame = "pressed"
+
+[[diagnostics]]
+code = "OP-003"
+operation_id = "press_process.mark_carrier_pressed.op37"
+message = "split/merge/transform-carrier operation is present in process_model but admission/refinement semantics are not fully modeled yet"

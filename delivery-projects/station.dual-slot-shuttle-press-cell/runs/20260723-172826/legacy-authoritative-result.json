@@ -1,0 +1,1083 @@
+{
+    "schema_version":  2,
+    "run_id":  "20260723-113010",
+    "harness_execution_id":  "20260723-172826",
+    "evidence_strength":  "weak-blind",
+    "started_at_utc":  "2026-07-23T09:28:26.1569787Z",
+    "completed_at_utc":  "2026-07-23T09:29:29.1000021Z",
+    "elapsed_ms":  62943,
+    "repository":  "E:/personal_project/rust_plc",
+    "git_head":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "artifact_root":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826",
+    "digests":  {
+                    "acceptance_sha256":  "e89011758062dd6d2b13bf49a9a73e470e962871b1cd6f08585f9c446c913fdc",
+                    "runner_sha256":  "95d10858736919fe58dd6c515813f00843571d83d97c804e4887981506269eff",
+                    "intent_source_sha256":  "10666b54a02cd58327c95f460a789e91379d3bbdde2898a38d0a818feed959a1",
+                    "manifest_sha256":  "f1f3695640b2bd2a97cb5dbe8651bb0a7d15188a16fcb6323cdd65a4f7c296be",
+                    "input_manifest_sha256":  "0f6e6ee20e5ea9bbd0abd72deb677ac6b1e8ba2eba72bc28bf67a3b828f534ca"
+                },
+    "inputs":  {
+                   "manifest":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/input-manifest.json",
+                   "file_count":  49
+               },
+    "specimen":  {
+                     "source":  "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                     "intent_contract":  "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.intent_alignment.contract.json",
+                     "process_model":  "out/complex_selftest/20260723-113010/specimen/implementation/process_model/process_operation_model.toml"
+                 },
+    "status":  {
+                   "harness_execution":  "pass",
+                   "acceptance":  "blocked",
+                   "delivery":  "blocked",
+                   "required_step_failures":  0,
+                   "required_oracle_failures":  0,
+                   "acceptance_failures":  0,
+                   "acceptance_blocked":  5,
+                   "known_gap_observations":  9
+               },
+    "steps":  [
+                  {
+                      "name":  "compile_verify",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--report",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/compile/verification_report.json",
+                                      "--ir-out",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/compile/ir_bundle.json",
+                                      "--no-print-ir"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1337,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/compile_verify/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/compile_verify/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/compile/verification_report.json",
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/compile/ir_bundle.json"
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "state_proof_check",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "state-proof-check",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  785,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/state_proof_check/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/state_proof_check/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "process_model_check",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "process-model-check",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--model",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/process_model/process_operation_model.toml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  1,
+                      "elapsed_ms":  914,
+                      "classification":  "known_gap",
+                      "expectation":  "known product gap: exactly one OP-003 for transform-carrier admission/refinement support",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/process_model_check/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/process_model_check/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  "The authored and derived operation counts both equal 10; checker support for transform-carrier is incomplete."
+                  },
+                  {
+                      "name":  "scenario_validate_startup_self_check",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-validate",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/startup_self_check.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  2192,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_startup_self_check/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_startup_self_check/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_doctor_startup_self_check",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/startup_self_check.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1482,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_startup_self_check/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_startup_self_check/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_validate_nominal_two_part",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-validate",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/nominal_two_part.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  2267,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_nominal_two_part/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_nominal_two_part/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_doctor_nominal_two_part",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/nominal_two_part.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1454,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_nominal_two_part/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_nominal_two_part/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_validate_illegal_start",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-validate",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/illegal_start.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  2114,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_illegal_start/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_illegal_start/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_doctor_illegal_start",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/illegal_start.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1481,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_illegal_start/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_illegal_start/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_validate_start_while_running",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-validate",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/start_while_running.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  2148,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_start_while_running/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_start_while_running/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_doctor_start_while_running",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/start_while_running.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1500,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_start_while_running/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_start_while_running/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_validate_start_while_faulted",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-validate",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/start_while_faulted.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  2339,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_start_while_faulted/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_start_while_faulted/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_doctor_start_while_faulted",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/start_while_faulted.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1760,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_start_while_faulted/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_start_while_faulted/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_validate_residual_manual_assist",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-validate",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/residual_manual_assist.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  2388,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_residual_manual_assist/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_residual_manual_assist/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_doctor_residual_manual_assist",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/residual_manual_assist.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1599,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_residual_manual_assist/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_residual_manual_assist/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_validate_axis_timeout_recovery",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-validate",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/axis_timeout_recovery.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  2378,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_axis_timeout_recovery/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_axis_timeout_recovery/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_doctor_axis_timeout_recovery",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/axis_timeout_recovery.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1659,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_axis_timeout_recovery/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_axis_timeout_recovery/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_validate_axis_safety_fault",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-validate",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/axis_safety_fault.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  2430,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_axis_safety_fault/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_axis_safety_fault/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_doctor_axis_safety_fault",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/axis_safety_fault.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1579,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_axis_safety_fault/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_axis_safety_fault/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_validate_cylinder_timeout",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-validate",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/cylinder_timeout.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  2273,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_cylinder_timeout/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_validate_cylinder_timeout/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "scenario_doctor_cylinder_timeout",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "scenario-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/cylinder_timeout.yaml",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1653,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_cylinder_timeout/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/scenario_doctor_cylinder_timeout/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "sim_startup_self_check",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "sim-plc",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/startup_self_check.yaml",
+                                      "--out",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/startup_self_check.jsonl"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1695,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_startup_self_check/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_startup_self_check/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/startup_self_check.jsonl"
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "sim_nominal_two_part",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "sim-plc",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/nominal_two_part.yaml",
+                                      "--out",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/nominal_two_part.jsonl"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1715,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_nominal_two_part/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_nominal_two_part/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/nominal_two_part.jsonl"
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "sim_illegal_start",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "sim-plc",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/illegal_start.yaml",
+                                      "--out",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/illegal_start.jsonl"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1693,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_illegal_start/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_illegal_start/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/illegal_start.jsonl"
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "sim_start_while_running",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "sim-plc",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/start_while_running.yaml",
+                                      "--out",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/start_while_running.jsonl"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1594,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_start_while_running/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_start_while_running/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/start_while_running.jsonl"
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "sim_start_while_faulted",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "sim-plc",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/start_while_faulted.yaml",
+                                      "--out",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/start_while_faulted.jsonl"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1586,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_start_while_faulted/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_start_while_faulted/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/start_while_faulted.jsonl"
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "sim_residual_manual_assist",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "sim-plc",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/residual_manual_assist.yaml",
+                                      "--out",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/residual_manual_assist.jsonl"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1605,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_residual_manual_assist/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_residual_manual_assist/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/residual_manual_assist.jsonl"
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "sim_axis_timeout_recovery",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "sim-plc",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/axis_timeout_recovery.yaml",
+                                      "--out",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/axis_timeout_recovery.jsonl"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1640,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_axis_timeout_recovery/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_axis_timeout_recovery/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/axis_timeout_recovery.jsonl"
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "sim_axis_safety_fault",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "sim-plc",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/axis_safety_fault.yaml",
+                                      "--out",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/axis_safety_fault.jsonl"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1506,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_axis_safety_fault/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_axis_safety_fault/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/axis_safety_fault.jsonl"
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "sim_cylinder_timeout",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "sim-plc",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/cylinder_timeout.yaml",
+                                      "--out",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/cylinder_timeout.jsonl"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  1718,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_cylinder_timeout/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/sim_cylinder_timeout/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/cylinder_timeout.jsonl"
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "intent_doctor_nominal",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "intent-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--trace",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/nominal_two_part.jsonl",
+                                      "--intent-contract",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.intent_alignment.contract.json",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  0,
+                      "elapsed_ms":  884,
+                      "classification":  "pass",
+                      "expectation":  "exit code 0",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/intent_doctor_nominal/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/intent_doctor_nominal/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  null
+                  },
+                  {
+                      "name":  "trace_doctor_bundle_probe",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "trace-doctor",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/nominal_two_part.yaml",
+                                      "--trace",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/nominal_two_part.jsonl",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  1,
+                      "elapsed_ms":  103,
+                      "classification":  "known_gap",
+                      "expectation":  "known product gap: trace-doctor should accept bundle sources but currently parses the manifest as PLC text",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/trace_doctor_bundle_probe/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/trace_doctor_bundle_probe/stderr.log",
+                      "artifacts":  [
+
+                                    ],
+                      "note":  "Bundle manifest was parsed as PLC source; intent-doctor handles the same bundle correctly."
+                  },
+                  {
+                      "name":  "project_check",
+                      "command":  [
+                                      "E:\\personal_project\\rust_plc\\target\\debug\\rust_plc.exe",
+                                      "project-check",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.toml",
+                                      "--scenario",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/scenarios/nominal_two_part.yaml",
+                                      "--out-dir",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/project-check",
+                                      "--require-process-model",
+                                      "--intent-contract",
+                                      "out/complex_selftest/20260723-113010/specimen/implementation/rustplc.bundle.intent_alignment.contract.json",
+                                      "--intent-evidence",
+                                      "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/traces/nominal_two_part.jsonl",
+                                      "--output",
+                                      "json"
+                                  ],
+                      "exit_code":  1,
+                      "elapsed_ms":  8063,
+                      "classification":  "known_gap",
+                      "expectation":  "tool exit gap: process_model_check fails on OP-003; nominal milestone intent aligns, while external-reinit semantics remain schema-blocked",
+                      "stdout_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/project_check/stdout.log",
+                      "stderr_log":  "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/steps/project_check/stderr.log",
+                      "artifacts":  [
+                                        "out/complex_selftest/20260723-113010/harness-runs/20260723-172826/project-check/project_check_report.json"
+                                    ],
+                      "note":  "Tool exit is isolated to process-model OP-003. The aligned intent verdict covers nominal milestones; external-reinit semantics are separately schema-blocked."
+                  }
+              ],
+    "oracles":  [
+                    {
+                        "name":  "preflight_required_files",
+                        "classification":  "pass",
+                        "evidence":  "rust_plc executable, bundle, intent contract, and process model exist",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "same_run_input_manifest",
+                        "classification":  "pass",
+                        "evidence":  "file_count=49; implementation_file_count=41; missing_required=; path=out/complex_selftest/20260723-113010/harness-runs/20260723-172826/input-manifest.json",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "manifest_acceptance_contract",
+                        "classification":  "pass",
+                        "evidence":  "schema=1; run_id=20260723-113010; acceptance_ids=17; reviewer=complete_blocked_product_gaps; status=blocked",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "intent_source_digest",
+                        "classification":  "pass",
+                        "evidence":  "expected=10666b54a02cd58327c95f460a789e91379d3bbdde2898a38d0a818feed959a1; actual=10666b54a02cd58327c95f460a789e91379d3bbdde2898a38d0a818feed959a1",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "process_model_exact_known_gap",
+                        "classification":  "pass",
+                        "evidence":  "status=fail; expected=10; actual=10; issues=1; code=OP-003",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "nominal_seven_milestones_ordered",
+                        "classification":  "pass",
+                        "evidence":  "cycle_accepted:count=1,tick=600; slots_loaded:count=1,tick=600; arrived_press:count=1,tick=604; press_completed:count=1,tick=642; returned_load:count=1,tick=647; parts_finished:count=1,tick=648; ready_next_cycle:count=1,tick=648",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "blocking_is_task_local",
+                        "classification":  "pass",
+                        "evidence":  "axis_enter_tick=600; supervision_tick=600; axis_complete_tick=604",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "exactly_two_acquires_no_third_cycle",
+                        "classification":  "pass",
+                        "evidence":  "observed acquire transition count=2",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "startup_self_check_publishes_ready",
+                        "classification":  "pass",
+                        "evidence":  "count=1; tick=20",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "front_door_rejects_before_ready_then_accepts_later_edge",
+                        "classification":  "pass",
+                        "evidence":  "reject_count=1; recycle_count=1; reject_tick=2; accept_count=1; accept_tick=100",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "front_door_rejects_start_while_running",
+                        "classification":  "pass",
+                        "evidence":  "running_reject_count=1; batch_complete_reject_count=1; recycle_count=2; accept_count=1; first_acquire_count=1",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "front_door_rejects_start_while_faulted",
+                        "classification":  "pass",
+                        "evidence":  "reject_count=2; recycle_count=2; accept_count=0; acquire_count=0",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "residual_manual_assist_blocks_and_releases_startup",
+                        "classification":  "pass",
+                        "evidence":  "detected_tick=0; cleared_tick=30; manual_ack_tick=40; startup_ack_consume_tick=41; startup_ready_tick=51",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "fault_route_axis_timeout_recovery",
+                        "classification":  "known_gap",
+                        "evidence":  "nominal_sha256=6555417BACFE57B01947C503DA63081EC000C31A2DA1EBE503FF63DF6007E6C6; scenario_sha256=6555417BACFE57B01947C503DA63081EC000C31A2DA1EBE503FF63DF6007E6C6; identical=True. sim-plc has no project-level axis/process-device fault injection channel.",
+                        "gap_id":  "GAP-SIM-FAULT-INJECTION"
+                    },
+                    {
+                        "name":  "fault_route_axis_safety_fault",
+                        "classification":  "known_gap",
+                        "evidence":  "nominal_sha256=6555417BACFE57B01947C503DA63081EC000C31A2DA1EBE503FF63DF6007E6C6; scenario_sha256=6555417BACFE57B01947C503DA63081EC000C31A2DA1EBE503FF63DF6007E6C6; identical=True. sim-plc has no project-level axis/process-device fault injection channel.",
+                        "gap_id":  "GAP-SIM-FAULT-INJECTION"
+                    },
+                    {
+                        "name":  "fault_route_cylinder_timeout",
+                        "classification":  "known_gap",
+                        "evidence":  "nominal_sha256=6555417BACFE57B01947C503DA63081EC000C31A2DA1EBE503FF63DF6007E6C6; scenario_sha256=6555417BACFE57B01947C503DA63081EC000C31A2DA1EBE503FF63DF6007E6C6; identical=True. sim-plc has no project-level axis/process-device fault injection channel.",
+                        "gap_id":  "GAP-SIM-FAULT-INJECTION"
+                    },
+                    {
+                        "name":  "intent_bindings_stable",
+                        "classification":  "pass",
+                        "evidence":  "stable_milestone_bindings=7; cross_cycle_ready=False",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "trace_doctor_bundle_support",
+                        "classification":  "known_gap",
+                        "evidence":  "exit_code=1; schema_version_parse_failure=True",
+                        "gap_id":  "GAP-TRACE-DOCTOR-BUNDLE"
+                    },
+                    {
+                        "name":  "project_check_failure_isolated",
+                        "classification":  "pass",
+                        "evidence":  "conditions=True,True,True,True,True,True; failed_steps=process_model_check; intent_status=pass; intent_verdict=aligned",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "external_reinit_intent_schema_support",
+                        "classification":  "known_gap",
+                        "evidence":  "phase-2.v1 requires restart_semantics; aligned currently proves the seven nominal milestones, not external replenishment and runtime recreation",
+                        "gap_id":  "GAP-EXTERNAL-REINIT-INTENT-SCHEMA"
+                    },
+                    {
+                        "name":  "target_timing_budget_proof",
+                        "classification":  "known_gap",
+                        "evidence":  "static_warning_count=3; static_estimate_us=53568; static_limit_us=2000; no_board_p99_us=10; no_board_overruns=0",
+                        "gap_id":  "GAP-HARDWARE-TIMING-EVIDENCE"
+                    },
+                    {
+                        "name":  "front_door_rejection_actions_in_ir",
+                        "classification":  "pass",
+                        "evidence":  "running/faulted rejection transitions contain reason compute plus reject_lamp on",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "plc_internal_hmi_status_fault_mapping",
+                        "classification":  "pass",
+                        "evidence":  "checked=13; missing=",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "carrier_slots_in_ir",
+                        "classification":  "pass",
+                        "evidence":  "IR contains shuttle_tray.slot[0] and shuttle_tray.slot[1] references",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "shuttle_envelope_claims_in_ir",
+                        "classification":  "pass",
+                        "evidence":  "resource_claim_count=2; action_tag=shuttle_motion; device_state=extended",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "task_step_chinese_comments",
+                        "classification":  "pass",
+                        "evidence":  "audited_files=6; missing=0",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "high_level_cylinder_semantics",
+                        "classification":  "pass",
+                        "evidence":  "high_level_actions=True; endpoint_choreography=False",
+                        "gap_id":  ""
+                    },
+                    {
+                        "name":  "same_run_evidence_paths",
+                        "classification":  "pass",
+                        "evidence":  "checked_paths=79; outside_run=",
+                        "gap_id":  ""
+                    }
+                ],
+    "acceptance":  [
+                       {
+                           "id":  "AC-01",
+                           "status":  "pass",
+                           "evidence":  "compile_verify=pass"
+                       },
+                       {
+                           "id":  "AC-02",
+                           "status":  "pass",
+                           "evidence":  "axis pending from tick 600 to 604 while supervision advances at tick 600"
+                       },
+                       {
+                           "id":  "AC-03",
+                           "status":  "pass",
+                           "evidence":  "IR slot[0]/slot[1] presence check"
+                       },
+                       {
+                           "id":  "AC-04",
+                           "status":  "pass",
+                           "evidence":  "seven ordered nominal milestones from the current run"
+                       },
+                       {
+                           "id":  "AC-05",
+                           "status":  "pass",
+                           "evidence":  "acquire_transition_count=2; sim exit=0"
+                       },
+                       {
+                           "id":  "AC-06",
+                           "status":  "blocked",
+                           "evidence":  "Pending-\u003eDone observed; Fault/Timeout runtime exits require GAP-SIM-FAULT-INJECTION"
+                       },
+                       {
+                           "id":  "AC-07",
+                           "status":  "blocked",
+                           "evidence":  "four axis route targets compile; three fault routes lack executable injection evidence"
+                       },
+                       {
+                           "id":  "AC-08",
+                           "status":  "pass",
+                           "evidence":  "source audit for high-level extend/retract and absence of endpoint choreography"
+                       },
+                       {
+                           "id":  "AC-09",
+                           "status":  "pass",
+                           "evidence":  "before_ready_then_valid=True; running_reject=True; faulted_reject=True; rejection_actions_in_ir=True"
+                       },
+                       {
+                           "id":  "AC-10",
+                           "status":  "pass",
+                           "evidence":  "IR contains 2 shuttle_envelope claims and safety verification is complete"
+                       },
+                       {
+                           "id":  "AC-11",
+                           "status":  "blocked",
+                           "evidence":  "expected=10, actual=10, only OP-003 transform-carrier checker gap remains"
+                       },
+                       {
+                           "id":  "AC-12",
+                           "status":  "blocked",
+                           "evidence":  "project-check tool exit is blocked by OP-003; nominal milestone intent is aligned, while external-reinit intent remains schema-blocked"
+                       },
+                       {
+                           "id":  "AC-13",
+                           "status":  "pass",
+                           "evidence":  "real lowercase SHA-256 and repo-root-resolvable source/review paths"
+                       },
+                       {
+                           "id":  "AC-14",
+                           "status":  "blocked",
+                           "evidence":  "all nine scenario assets validate; three injected-fault behavior traces are identical to nominal"
+                       },
+                       {
+                           "id":  "AC-15",
+                           "status":  "pass",
+                           "evidence":  "same-run evidence root=out/complex_selftest/20260723-113010/harness-runs/20260723-172826/"
+                       },
+                       {
+                           "id":  "AC-16",
+                           "status":  "pass",
+                           "evidence":  "state_proof_check=pass; residual_manual_assist=True; exact pre-existing token injection remains blocked"
+                       },
+                       {
+                           "id":  "AC-17",
+                           "status":  "pass",
+                           "evidence":  "task/step comment audit failures=0"
+                       }
+                   ],
+    "known_gaps":  [
+                       {
+                           "id":  "GAP-PROCESS-TRANSFORM-CARRIER",
+                           "layer":  "process-model-check",
+                           "classification":  "code-gap",
+                           "evidence":  "OP-003 is the only process-model issue; transform-carrier admission/refinement semantics are not fully modeled."
+                       },
+                       {
+                           "id":  "GAP-SIM-FAULT-INJECTION",
+                           "layer":  "sim-plc scenario driver",
+                           "classification":  "code-gap",
+                           "evidence":  "Axis timeout, axis safety fault, and cylinder timeout scenarios produce byte-identical traces to nominal."
+                       },
+                       {
+                           "id":  "GAP-TRACE-DOCTOR-BUNDLE",
+                           "layer":  "trace-doctor source loading",
+                           "classification":  "code-gap",
+                           "evidence":  "trace-doctor parses rustplc.bundle.toml as PLC text and fails at schema_version; intent-doctor accepts the bundle."
+                       },
+                       {
+                           "id":  "GAP-CROSS-CYCLE-EVIDENCE",
+                           "layer":  "intent evidence",
+                           "classification":  "evidence-gap",
+                           "evidence":  "The nominal scenario covers one complete cycle, so cross-cycle stability is not demonstrated."
+                       },
+                       {
+                           "id":  "GAP-HARDWARE-TIMING-EVIDENCE",
+                           "layer":  "runtime budget and deployment timing",
+                           "classification":  "evidence-gap",
+                           "evidence":  "Static runtime-budget warnings remain; no-board measurement passes, but target-hardware timing has not been measured."
+                       },
+                       {
+                           "id":  "GAP-RESIDUAL-TOKEN-INJECTION",
+                           "layer":  "runtime workpiece initialization",
+                           "classification":  "code-gap",
+                           "evidence":  "Physical residual detection and manual clearance execute, but runtime cannot inject and preserve an exact pre-existing token location outside normal ingress seeding."
+                       },
+                       {
+                           "id":  "GAP-HMI-TRANSPORT-BINDING",
+                           "layer":  "deployment operator feedback binding",
+                           "classification":  "integration-gap",
+                           "evidence":  "PLC-internal machine status and fault-code producers are present in IR, but no target HMI register, transport, or consumer binding is validated."
+                       },
+                       {
+                           "id":  "GAP-EXTERNAL-REINIT-INTENT-SCHEMA",
+                           "layer":  "intent contract cycle semantics",
+                           "classification":  "schema-gap",
+                           "evidence":  "phase-2.v1 requires restart_semantics and cannot directly express a one-shot finite batch whose next run requires external replenishment and runtime recreation."
+                       }
+                   ]
+}

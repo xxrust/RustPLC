@@ -1,0 +1,152 @@
+{
+    "schema_version":  1,
+    "project_id":  "station.dual_slot_shuttle_press_cell",
+    "title":  "Dual-slot Shuttle Press Cell Complex Self-test",
+    "delivery_layer":  "station",
+    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "source_entry":  "source/rustplc.bundle.toml",
+    "system_contract":  "source/plc/main.system.md",
+    "delivery_status":  "blocked",
+    "artifact_roots":  {
+                           "agent_runs":  "runs",
+                           "verification":  "runs/20260723-172826",
+                           "wiring":  "wiring",
+                           "execution":  "runs/20260723-172826",
+                           "release":  "release"
+                       },
+    "evidence_summary":  {
+                             "acceptance_pass":  12,
+                             "acceptance_blocked":  5,
+                             "acceptance_fail":  0,
+                             "strict_acceptance_percent":  70.6,
+                             "implementation_completeness_percent":  84
+                         },
+    "evidence_bindings":  {
+                              "source_entry":  {
+                                                   "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+                                                   "digest":  {
+                                                                  "algorithm":  "sha256",
+                                                                  "value":  "00be1df58f2c7861522a9b1cede9c4a928670fa31025f9427cf5fcedc96df056",
+                                                                  "normalization":  "utf8_lf"
+                                                              },
+                                                   "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                   "freshness":  {
+                                                                     "status":  "input_snapshot",
+                                                                     "basis":  "Project-local bundle in the committed source snapshot."
+                                                                 }
+                                               },
+                              "system_contract":  {
+                                                      "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/source/plc/main.system.md",
+                                                      "digest":  {
+                                                                     "algorithm":  "sha256",
+                                                                     "value":  "10666b54a02cd58327c95f460a789e91379d3bbdde2898a38d0a818feed959a1",
+                                                                     "normalization":  "utf8_lf"
+                                                                 },
+                                                      "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                      "freshness":  {
+                                                                        "status":  "input_snapshot",
+                                                                        "basis":  "Project-local system contract."
+                                                                    }
+                                                  },
+                              "authoritative_result":  {
+                                                           "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/result.json",
+                                                           "digest":  {
+                                                                          "algorithm":  "sha256",
+                                                                          "value":  "f0829779d1a0294dd580fef80e5958908a38d09c57790f7c7eebbd257abe3fd1",
+                                                                          "normalization":  "utf8_lf"
+                                                                      },
+                                                           "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                           "freshness":  {
+                                                                             "status":  "same_run",
+                                                                             "basis":  "Normalized committed result for the final corrected harness run."
+                                                                         }
+                                                       },
+                              "reviewed_completeness":  {
+                                                            "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/review/completeness.md",
+                                                            "digest":  {
+                                                                           "algorithm":  "sha256",
+                                                                           "value":  "2dbeb2b2f105c57b336afdd876f110737a59ff96f9b61e1958f898d182f25bb9",
+                                                                           "normalization":  "utf8_lf"
+                                                                       },
+                                                            "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                            "freshness":  {
+                                                                              "status":  "reviewed_post_run",
+                                                                              "basis":  "Committed bounded completeness review."
+                                                                          }
+                                                        }
+                          },
+    "fixtures":  {
+                     "api_run_result":  {
+                                            "fixture_ref":  "runs/20260723-172826/result.json",
+                                            "digest":  {
+                                                           "algorithm":  "sha256",
+                                                           "value":  "f0829779d1a0294dd580fef80e5958908a38d09c57790f7c7eebbd257abe3fd1",
+                                                           "normalization":  "utf8_lf"
+                                                       }
+                                        },
+                     "provenance":  {
+                                        "fixture_ref":  "runs/20260723-172826/provenance.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "d9612d80d28ec9d50c89126d3cb7ed8a8a6f1c92b2af7d9b909ee95ac76c1235",
+                                                       "normalization":  "utf8_lf"
+                                                   }
+                                    },
+                     "input_manifest":  {
+                                            "fixture_ref":  "runs/20260723-172826/input-manifest.json",
+                                            "digest":  {
+                                                           "algorithm":  "sha256",
+                                                           "value":  "129316a6c9b79741bc4f722fad7dde8d791fe31ef4f678318f70133e21bf4fb4",
+                                                           "normalization":  "utf8_lf"
+                                                       }
+                                        },
+                     "anomalies":  {
+                                       "fixture_ref":  "runs/20260723-172826/anomalies.json",
+                                       "digest":  {
+                                                      "algorithm":  "sha256",
+                                                      "value":  "a80a4c097b244556cc4f42816da4c0ec373d01fc3540bbd238f0f85f9eddc50c",
+                                                      "normalization":  "utf8_lf"
+                                                  }
+                                   },
+                     "corrections":  {
+                                         "fixture_ref":  "runs/20260723-172826/corrections.json",
+                                         "digest":  {
+                                                        "algorithm":  "sha256",
+                                                        "value":  "b3d1b33891d75ecd59e5b213ec5bdd891c193456abb0d6008304bc7501221839",
+                                                        "normalization":  "utf8_lf"
+                                                    }
+                                     },
+                     "compiler_stages":  {
+                                             "fixture_ref":  "runs/20260723-172826/compiler-stages.json",
+                                             "digest":  {
+                                                            "algorithm":  "sha256",
+                                                            "value":  "a399aff2b70ac41d3310c646213654a362939f4f6d3e9a0490ce86055db0b735",
+                                                            "normalization":  "utf8_lf"
+                                                        }
+                                         },
+                     "wiring_point_checks":  {
+                                                 "fixture_ref":  "wiring/point-checks.json",
+                                                 "digest":  {
+                                                                "algorithm":  "sha256",
+                                                                "value":  "e87fc66de3403cbf55fbac7dae6397dda40ef604632c6d6d1df7406dced8cc77",
+                                                                "normalization":  "utf8_lf"
+                                                            }
+                                             },
+                     "human_holds":  {
+                                         "fixture_ref":  "release/human-holds.json",
+                                         "digest":  {
+                                                        "algorithm":  "sha256",
+                                                        "value":  "78e5151256ac2cfc589e33fa69859d1e70ee441181b5f0544f4bee75d13290b4",
+                                                        "normalization":  "utf8_lf"
+                                                    }
+                                     },
+                     "agent_events":  {
+                                          "fixture_ref":  "runs/20260723-172826/agent-events.json",
+                                          "digest":  {
+                                                         "algorithm":  "sha256",
+                                                         "value":  "3edef38d1173009334a9d7344ecd17a14ecf79264fceeb70ed546e4cd2fd0eb5",
+                                                         "normalization":  "utf8_lf"
+                                                     }
+                                      }
+                 }
+}

@@ -1,0 +1,35 @@
+# 人工协助任务：由真实残件汇总输入触发，清残现场证明与人工确认均成立后发布 startup 协调事实。
+task manual_assist:
+    # 等待真实残件输入：外部检测链出现残件时进入人工协助，不由内部默认布尔量触发。
+    step wait_residual_present:
+        wait: residual_present == true
+        allow_indefinite_wait: true
+
+    # 发布人工协助状态：锁定残件事实并关闭就绪反馈，禁止生产 admission。
+    step publish_residual_detected:
+        action: compute residual_part_detected = true
+        action: compute machine_status_code = 50
+        action: compute hmi_fault_code = 210
+        action: set ready_lamp off
+        action: set reject_lamp on
+
+    # 等待现场清残证明：汇总残件输入消失后才允许接受操作员空机确认。
+    step wait_residual_cleared:
+        wait: residual_present == false
+        allow_indefinite_wait: true
+
+    # 等待人工确认：独立空机确认上升沿表示操作员已完成现场检查。
+    step wait_operator_assist:
+        wait: rising_edge(operator_empty_confirm)
+        allow_indefinite_wait: true
+
+    # 记录人工确认：清除汇总残件告警并发布 startup 可消费的人工确认事实。
+    step publish_manual_ack:
+        action: compute manual_acknowledged = true
+        action: compute residual_part_detected = false
+        action: compute hmi_fault_code = 0
+        action: set reject_lamp off
+
+    # 人工协助完成保持：精确残件 token 位置仍由产品级 runtime blocker 管理。
+    step hold_manual_ack:
+        action: log "manual residual clearance acknowledged"

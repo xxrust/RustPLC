@@ -1,0 +1,16 @@
+# HMI 反馈任务：故障 producer 已写入 machine_status_code/hmi_fault_code，本任务保持通用可见和可听输出。
+task hmi_feedback:
+    # 等待故障锁存：由任一 fault route 发布，正常周期中可无限等待其他 task。
+    step wait_fault_latched:
+        wait: fault_latched == true
+        allow_indefinite_wait: true
+
+    # 发布故障反馈：关闭 ready/running 并保持 fault lamp 与 buzzer；具体整数码由故障入口写入。
+    step publish_fault_feedback:
+        action: set ready_lamp off
+        action: set running_lamp off
+        action: set fault_lamp on
+        action: set fault_buzzer on
+
+    # 故障反馈保持：显式后继保证可见/可听输出动作被 runtime 执行。
+    step hold_fault_feedback:
